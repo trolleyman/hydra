@@ -1,10 +1,13 @@
 package main
 
 import (
-	tea "github.com/charmbracelet/bubbletea"
+	"context"
+	"fmt"
+	"os"
+	"text/tabwriter"
+
 	"github.com/spf13/cobra"
 	"github.com/trolleyman/hydra/internal/docker"
-	"github.com/trolleyman/hydra/internal/tui"
 )
 
 func init() {
@@ -13,20 +16,39 @@ func init() {
 
 var listCmd = &cobra.Command{
 	Use:   "list",
-	Short: "List all running AI agents (interactive TUI)",
-	RunE:  runTUI,
-}
+	Short: "List all AI agents",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		cli, err := docker.NewClient()
+		if err != nil {
+			return err
+		}
+		defer cli.Close()
 
-func runTUI(_ *cobra.Command, _ []string) error {
-	cli, err := docker.NewClient()
-	if err != nil {
-		return err
-	}
-	defer cli.Close()
+		agents, err := docker.ListAgents(context.Background(), cli)
+		if err != nil {
+			return err
+		}
 
-	m := tui.New(cli)
-	p := tea.NewProgram(m, tea.WithAltScreen())
-	_, err = p.Run()
-	return err
+		if len(agents) == 0 {
+			fmt.Println("No agents running.")
+			return nil
+		}
+
+		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+		fmt.Fprintln(w, "ID\tIMAGE\tBRANCH\tSTATUS\tPROMPT")
+		for _, a := range agents {
+			id := a.ContainerID
+			if len(id) > 12 {
+				id = id[:12]
+			}
+			prompt := a.Meta.Prompt
+			if len(prompt) > 50 {
+				prompt = prompt[:50] + "…"
+			}
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
+				id, a.ImageName, a.Meta.BranchName, a.Status, prompt)
+		}
+		return w.Flush()
+	},
 }
 

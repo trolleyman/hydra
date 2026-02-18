@@ -49,7 +49,7 @@ var spawnCmd = &cobra.Command{
 			return err
 		}
 
-		dockerfilePath, err := config.FindDockerfile(cfg, projectRoot, spawnFlags.dockerfile)
+		dockerfilePath, err := ensureDockerfile(cfg, projectRoot, spawnFlags.dockerfile)
 		if err != nil {
 			return err
 		}
