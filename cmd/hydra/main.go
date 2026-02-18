@@ -6,19 +6,14 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 
 	"github.com/spf13/cobra"
 	"github.com/trolleyman/hydra/internal/common"
 )
 
-var (
-	// Version is set at build time
-	Version = "dev"
-)
-
-func init() {
-	rootCmd.AddCommand(listCmd)
-}
+// Version is set at build time via -ldflags "-X main.Version=x.y.z".
+var Version = "dev"
 
 func main() {
 	setupLogging()
@@ -30,51 +25,39 @@ func main() {
 
 var rootCmd = &cobra.Command{
 	Use:   "hydra",
-	Short: "AI orchestrator",
-	Long: `Hyrda is an AI orchestrator.
-It provides management of AI agents running in background Docker containers.`,
+	Short: "AI agent orchestrator",
+	Long: `Hydra is an AI agent orchestrator.
+It manages AI coding agents running in isolated Docker containers and git worktrees.`,
 	Version: Version,
-	// Silence usage after args validation passes (show usage for arg errors, not runtime errors)
+	// Suppress usage on runtime errors (but show it on arg errors).
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		cmd.SilenceUsage = true
 	},
 }
 
-var listCmd = &cobra.Command{
-	Use:   "list",
-	Short: "List all AI agents",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		fmt.Println("TEST")
-		return nil
-	},
-}
-
 func setupLogging() {
-	var logDir string
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return // Can't find home dir, skip file logging
+		return
 	}
 
-	// Determine log directory based on OS
-	if os.Getenv("OS") == "Windows_NT" {
+	var logDir string
+	if runtime.GOOS == "windows" {
 		localAppData := os.Getenv("LOCALAPPDATA")
 		if localAppData == "" {
 			localAppData = filepath.Join(home, "AppData", "Local")
 		}
-		logDir = filepath.Join(localAppData, "ottoman", "logs")
+		logDir = filepath.Join(localAppData, "hydra", "logs")
 	} else {
-		logDir = filepath.Join(home, ".local", "share", "ottoman", "logs")
+		logDir = filepath.Join(home, ".local", "share", "hydra", "logs")
 	}
 
-	logPath := filepath.Join(logDir, "ottoman.log")
-	rl, err := common.NewRotatingLogger(logPath, 5*1024*1024, 5) // 5MB, 5 backups
+	rl, err := common.NewRotatingLogger(filepath.Join(logDir, "hydra.log"), 5*1024*1024, 5)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to setup file logging: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Warning: could not set up file logging: %v\n", err)
 		return
 	}
 
-	// Log to both stderr and file
 	log.SetOutput(io.MultiWriter(os.Stderr, rl))
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
 }
