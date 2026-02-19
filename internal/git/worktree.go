@@ -10,6 +10,14 @@ import (
 	"github.com/cockroachdb/errors"
 )
 
+func FindProjectRootFromCwd() (string, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", errors.Wrapf(err, "get working directory")
+	}
+	return FindProjectRoot(cwd)
+}
+
 // FindProjectRoot walks up from dir until it finds a .git directory.
 func FindProjectRoot(dir string) (string, error) {
 	current := dir

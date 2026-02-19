@@ -1,249 +1,201 @@
 package config
 
 import (
+	"embed"
 	"fmt"
+	"io"
+	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 
+	"github.com/BurntSushi/toml"
 	"github.com/cockroachdb/errors"
-	"github.com/spf13/viper"
 )
 
-// ---------------------------------------------------------------------------
-// Agent types & Dockerfile templates
-// ---------------------------------------------------------------------------
+//go:embed default/*
+var defaultFS embed.FS
 
-// AgentType identifies which AI agent a Dockerfile is built for.
-type AgentType string
-
-const (
-	AgentClaude AgentType = "claude"
-	AgentGemini AgentType = "gemini"
-)
-
-// AgentTypes is the ordered list of supported agent types.
-var AgentTypes = []AgentType{AgentClaude, AgentGemini}
-
-// DockerfileTemplates maps each AgentType to its Dockerfile template content.
-var DockerfileTemplates = map[AgentType]string{
-	AgentClaude: claudeDockerfile,
-	AgentGemini: geminiDockerfile,
-}
-
-const claudeDockerfile = `# Hydra Agent Dockerfile — Claude Code
-#
-# The full task prompt is passed as an argument to this ENTRYPOINT.
-# See: https://docs.anthropic.com/en/docs/claude-code
-
-FROM ubuntu:24.04
-
-RUN apt-get update && apt-get install -y git curl && rm -rf /var/lib/apt/lists/*
-
-# Install Node.js 22.x
-RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
-    && apt-get install -y nodejs \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install Claude Code
-RUN npm install -g @anthropic-ai/claude-code
-
-WORKDIR /app
-
-ENTRYPOINT ["claude", "--dangerously-skip-permissions", "-p"]
-`
-
-const geminiDockerfile = `# Hydra Agent Dockerfile — Gemini CLI
-#
-# The full task prompt is passed as an argument to this ENTRYPOINT.
-# See: https://github.com/google-gemini/gemini-cli
-
-FROM ubuntu:24.04
-
-RUN apt-get update && apt-get install -y git curl && rm -rf /var/lib/apt/lists/*
-
-# Install Node.js 22.x
-RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
-    && apt-get install -y nodejs \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install Gemini CLI
-RUN npm install -g @google/gemini-cli
-
-WORKDIR /app
-
-ENTRYPOINT ["gemini", "code"]
-`
-
-// ---------------------------------------------------------------------------
-// Default values
-// ---------------------------------------------------------------------------
-
-const defaultPromptPrefix = `You are an AI coding agent running inside the Hydra orchestration system.
-
-You have been given a specific task to complete in this git repository.
-Your working directory is /app, which is an isolated git branch for this task.
-
-Guidelines:
-- Commit your work as you go, making logical commits for each coherent change.
-- Each commit message MUST include "Co-authored-by: Hydra" as a trailer line.
-- Make sure all your changes are committed before you exit.
-  Any uncommitted changes will be automatically committed as "Uncommitted changes".
-- Do not push to the remote.
-
-Task:
-`
-
-// ---------------------------------------------------------------------------
-// Config sources
-// ---------------------------------------------------------------------------
-
-// Source describes a single config file location with a human-readable label.
+// Source describes a directory with a human-readable label.
+// The config should be called config.toml in this directory, and any relative
+// config paths refer to other files in this directory.
 type Source struct {
-	Label string // "system", "global", or "project"
-	Path  string
+	Label     string // "system", "global", "project", or "default"
+	Directory fs.FS
 }
 
 // Sources returns all config file locations in ascending priority order
-// (system < global < project). The project entry is omitted when projectRoot is empty.
+// (system < global < project < default (builtin embedded config)).
+// The project entry is omitted when projectRoot is empty.
 func Sources(projectRoot string) []Source {
 	srcs := []Source{
-		{"system", "/etc/hydra/config.toml"},
+		{"system", os.DirFS("/etc/hydra")},
 	}
 	if home, err := os.UserHomeDir(); err == nil {
 		srcs = append(srcs, Source{
 			"global",
-			filepath.Join(home, ".config", "hydra", "config.toml"),
+			os.DirFS(filepath.Join(home, ".config", "hydra")),
 		})
 	}
 	if projectRoot != "" {
 		srcs = append(srcs, Source{
 			"project",
-			filepath.Join(projectRoot, ".hydra", "config.toml"),
+			os.DirFS(filepath.Join(projectRoot, ".hydra")),
 		})
 	}
+	srcs = append(srcs, Source{
+		"default",
+		defaultFS,
+	})
 	return srcs
 }
 
-// ---------------------------------------------------------------------------
-// Config struct & loading
-// ---------------------------------------------------------------------------
-
-// Config holds the merged Hydra configuration.
-type Config struct {
-	// DockerfilePath is the resolved absolute path to the Dockerfile.
-	// Empty if not set in any config file.
-	DockerfilePath string
-	// PromptPrefix is prepended to every agent prompt.
-	PromptPrefix string
+type ValueSource[T any] struct {
+	Value  T
+	Source *Source
 }
 
-// Load reads all applicable config files (system → global → project) and returns
-// the merged Config. Viper defaults are applied when a key is unset in all files.
-func Load(projectRoot string) (*Config, error) {
-	v := viper.New()
-	v.SetConfigType("toml")
-	v.SetDefault("prompt_prefix", defaultPromptPrefix)
+// rawConfig is the raw toml extracted from a rawConfig.toml file
+type rawConfig struct {
+	Prompt *string `toml:"prompt"`
+	Agent  *string `toml:"agent"`
+	Agents map[string]struct {
+		Dockerfile string `toml:"dockerfile"`
+	} `toml:"agents"`
+}
 
-	// Track which config directory last defined "dockerfile" so we can
-	// resolve a relative path against that directory.
-	var dockerfileConfigDir string
-
-	for _, src := range Sources(projectRoot) {
-		if _, err := os.Stat(src.Path); err != nil {
-			continue
-		}
-		sub := viper.New()
-		sub.SetConfigFile(src.Path)
-		sub.SetConfigType("toml")
-		if err := sub.ReadInConfig(); err != nil {
-			return nil, fmt.Errorf("read %s config (%s): %w", src.Label, src.Path, err)
-		}
-		if err := v.MergeConfigMap(sub.AllSettings()); err != nil {
-			return nil, fmt.Errorf("merge %s config: %w", src.Label, err)
-		}
-		if sub.IsSet("dockerfile") {
-			dockerfileConfigDir = filepath.Dir(src.Path)
+func (config *rawConfig) toConfig(source *Source) (*Config, error) {
+	var prompt *ValueSource[string]
+	prompt = nil
+	if config.Prompt != nil {
+		prompt = &ValueSource[string]{
+			Value:  *config.Prompt,
+			Source: source,
 		}
 	}
-
-	dockerfilePath := v.GetString("dockerfile")
-	// Resolve relative dockerfile paths against the config file that set them.
-	if dockerfilePath != "" && !filepath.IsAbs(dockerfilePath) && dockerfileConfigDir != "" {
-		dockerfilePath = filepath.Join(dockerfileConfigDir, dockerfilePath)
+	var agent *ValueSource[string]
+	agent = nil
+	if config.Agent != nil {
+		agent = &ValueSource[string]{
+			Value:  *config.Agent,
+			Source: source,
+		}
 	}
-
+	agents := make(map[string]ValueSource[Agent])
+	for k, v := range config.Agents {
+		if v.Dockerfile == "" {
+			return nil, errors.Newf("no dockerfile path set in %v source: %v/config.toml", source.Label, source.Directory)
+		}
+		file, err := source.Directory.Open(v.Dockerfile)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to open: %v/%v", source.Directory, v.Dockerfile)
+		}
+		defer file.Close()
+		dockerfileRequiresCopy := false
+		var dockerfile string
+		switch source.Directory.(type) {
+		case embed.FS:
+			dockerfileRequiresCopy = true
+		default:
+			dockerfile = filepath.Join(fmt.Sprintf("%v", source.Directory), v.Dockerfile)
+			_, err := os.Stat(dockerfile)
+			dockerfileRequiresCopy = errors.Is(err, fs.ErrNotExist)
+		}
+		if dockerfileRequiresCopy {
+			// Copy to state dir
+			homedir, err := os.UserHomeDir()
+			if err != nil {
+				return nil, errors.Wrapf(err, "get home directory")
+			}
+			dockerfile = filepath.Join(homedir, ".cache", "hydra", "dockerfiles", v.Dockerfile)
+			err = os.MkdirAll(filepath.Base(dockerfile), 0755)
+			if err != nil {
+				return nil, errors.Wrapf(err, "create dockerfile directory")
+			}
+			newDockerfile, err := os.Create(dockerfile)
+			if err != nil {
+				return nil, errors.Wrapf(err, "create dockerfile")
+			}
+			defer newDockerfile.Close()
+			if _, err := io.Copy(newDockerfile, file); err != nil {
+				return nil, errors.Wrapf(err, "copy dockerfile content")
+			}
+		}
+		agents[k] = ValueSource[Agent]{
+			Value: Agent{
+				Dockerfile: dockerfile,
+			},
+			Source: source,
+		}
+	}
 	return &Config{
-		DockerfilePath: dockerfilePath,
-		PromptPrefix:   v.GetString("prompt_prefix"),
+		Prompt: prompt,
+		Agent:  agent,
+		Agents: agents,
 	}, nil
 }
 
-// ---------------------------------------------------------------------------
-// Dockerfile discovery
-// ---------------------------------------------------------------------------
-
-// ErrNoDockerfile is returned by FindDockerfile when no Dockerfile can be located.
-// Use errors.Is to check for it.
-var ErrNoDockerfile = errors.New("no Dockerfile found")
-
-// FindDockerfile resolves the Dockerfile to use.
-// Priority: CLI override > cfg.DockerfilePath > standard search paths.
-// Returns ErrNoDockerfile if nothing is found — callers should offer to run
-// "hydra config init" in that case.
-func FindDockerfile(cfg *Config, projectRoot, override string) (string, error) {
-	if override != "" {
-		if _, err := os.Stat(override); err != nil {
-			return "", fmt.Errorf("dockerfile %q: %w", override, err)
-		}
-		return override, nil
-	}
-
-	if cfg.DockerfilePath != "" {
-		if _, err := os.Stat(cfg.DockerfilePath); err == nil {
-			return cfg.DockerfilePath, nil
-		}
-		return "", fmt.Errorf("configured dockerfile %q not found", cfg.DockerfilePath)
-	}
-
-	for _, p := range dockerfileSearchPaths(projectRoot) {
-		if _, err := os.Stat(p); err == nil {
-			return p, nil
-		}
-	}
-
-	return "", ErrNoDockerfile
+// Config holds the merged Hydra configuration.
+type Config struct {
+	// Prompt is prepended to every agent prompt.
+	Prompt *ValueSource[string] `toml:"prompt"`
+	// Agent is the agent that is used when spawning a new agent.
+	Agent *ValueSource[string] `toml:"agent"`
+	// Agents contains a list of agents that are defined.
+	Agents map[string]ValueSource[Agent] `toml:"agents"`
 }
 
-func dockerfileSearchPaths(projectRoot string) []string {
-	var paths []string
-	if projectRoot != "" {
-		paths = append(paths, filepath.Join(projectRoot, ".hydra", "Dockerfile"))
-	}
-	if home, err := os.UserHomeDir(); err == nil {
-		paths = append(paths, filepath.Join(home, ".config", "hydra", "Dockerfile"))
-	}
-	paths = append(paths, "/etc/hydra/Dockerfile")
-	return paths
+// Agent contains the config for how to start an agent
+type Agent struct {
+	// Dockerfile for that agent
+	Dockerfile string
 }
 
-// DefaultDockerfilePath returns the conventional project-local Dockerfile location.
-func DefaultDockerfilePath(projectRoot string) string {
-	return filepath.Join(projectRoot, ".hydra", "Dockerfile")
+func (config *Config) MergeIn(otherConfig *Config) {
+	if otherConfig.Prompt != nil {
+		config.Prompt = otherConfig.Prompt
+	}
+	if otherConfig.Agent != nil {
+		config.Agent = otherConfig.Agent
+	}
+	// Override agent config fully
+	maps.Copy(config.Agents, otherConfig.Agents)
 }
 
-// ---------------------------------------------------------------------------
-// Dockerfile writing
-// ---------------------------------------------------------------------------
+// Load reads all applicable config files (system →  global →  project -> builtin) and returns
+// the merged Config. Viper defaults are applied when a key is unset in all files.
+func Load(projectRoot string) (*Config, error) {
+	config := &Config{}
+	for _, src := range Sources(projectRoot) {
+		file, err := src.Directory.Open("config.toml")
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to open: %v/config.toml", src.Directory)
+		}
+		defer file.Close()
 
-// WriteDockerfile writes the template for the given agent to path,
-// creating parent directories as needed.
-func WriteDockerfile(agent AgentType, path string) error {
-	tmpl, ok := DockerfileTemplates[agent]
+		raw_config := rawConfig{}
+		_, err = toml.NewDecoder(file).Decode(&raw_config)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to parse config: %v/config.toml", src.Directory)
+		}
+		otherConfig, err := raw_config.toConfig(&src)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to parse config: %v/config.toml", src.Directory)
+		}
+		config.MergeIn(otherConfig)
+	}
+	if config.Prompt == nil {
+		return nil, errors.New("no prompt set")
+	}
+	if config.Agent == nil {
+		return nil, errors.New("no agent set")
+	}
+	_, ok := config.Agents[config.Agent.Value]
 	if !ok {
-		return fmt.Errorf("unknown agent type %q; valid: claude, gemini", agent)
+		return nil, errors.Newf("agent %q not defined in any config file", config.Agent.Value)
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-		return errors.Wrapf(err, "create directory")
-	}
-	return os.WriteFile(path, []byte(tmpl), 0644)
+	return config, nil
 }

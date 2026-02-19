@@ -45,10 +45,9 @@ var listCmd = &cobra.Command{
 			if len(prompt) > 50 {
 				prompt = prompt[:50] + "…"
 			}
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%q\n",
 				id, a.ImageName, a.Meta.BranchName, a.Status, prompt)
 		}
 		return w.Flush()
 	},
 }
-

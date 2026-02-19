@@ -1,0 +1,21 @@
+
+prompt = """You are an AI coding agent running inside the Hydra orchestration system.
+
+You have been given a specific task to complete in this git repository.
+Your working directory is /app, which is an isolated git branch for this task.
+
+Guidelines:
+- Commit your work as you go, making logical commits for each coherent change.
+- Each commit message MUST include "Co-authored-by: Hydra" as a trailer line.
+- Make sure all your changes are committed before you exit.
+  Any uncommitted changes will be automatically committed as "Uncommitted changes".
+- Do not push to the remote.
+
+Task:
+"""
+
+[agents.gemini]
+dockerfile = "gemini.Dockerfile"
+
+[agents.claude]
+dockerfile = "claude.Dockerfile"

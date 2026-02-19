@@ -21,13 +21,13 @@ var spawnFlags struct {
 }
 
 func init() {
-	spawnCmd.Flags().StringVar(&spawnFlags.dockerfile, "dockerfile", "", "Path to a custom Dockerfile")
+	spawnCmd.Flags().StringVar(&spawnFlags.dockerfile, "agent", "", "Custom agent name to override default")
 	spawnCmd.Flags().StringVar(&spawnFlags.baseBranch, "base-branch", "", "Base branch (default: current branch)")
 	rootCmd.AddCommand(spawnCmd)
 }
 
 var spawnCmd = &cobra.Command{
-	Use:   "spawn <prompt>",
+	Use:   "spawn [--agent <agent>] [--base-branch <base-branch>] <prompt>",
 	Short: "Spawn a new AI agent for the given prompt",
 	Args:  cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -36,7 +36,7 @@ var spawnCmd = &cobra.Command{
 
 		cwd, err := os.Getwd()
 		if err != nil {
-			return errors.Errorf("get working directory: %w", err)
+			return errors.Wrapf(err, "get working directory")
 		}
 
 		projectRoot, err := git.FindProjectRoot(cwd)
@@ -49,7 +49,7 @@ var spawnCmd = &cobra.Command{
 			return err
 		}
 
-		dockerfilePath, err := ensureDockerfile(cfg, projectRoot, spawnFlags.dockerfile)
+		dockerfilePath, err := ensureDockerfile(cfg, spawnFlags.dockerfile)
 		if err != nil {
 			return err
 		}
@@ -107,7 +107,7 @@ var spawnCmd = &cobra.Command{
 			BranchName:     branchName,
 			BaseBranch:     baseBranch,
 			DockerfilePath: dockerfilePath,
-			PromptPrefix:   cfg.PromptPrefix,
+			PromptPrefix:   cfg.Prompt.Value,
 			GitAuthorName:  gitAuthorName,
 			GitAuthorEmail: gitAuthorEmail,
 			GitConfigPath:  gitConfigPath,
@@ -131,4 +131,11 @@ func readGitConfig(projectRoot, key string) string {
 		return ""
 	}
 	return strings.TrimSpace(string(out))
+}
+
+func ensureDockerfile(cfg *config.Config, dockerfile string) (string, error) {
+	if dockerfile != "" {
+		return dockerfile, nil
+	}
+	return cfg.Agents[cfg.Agent.Value].Value.Dockerfile, nil
 }
