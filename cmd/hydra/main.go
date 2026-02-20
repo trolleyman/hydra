@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 
 	"braces.dev/errtrace"
@@ -95,31 +96,49 @@ func prettyPrintErrTrace(w io.Writer, originalErr error) {
 		}
 	}
 
-	fmt.Fprintln(w, "\033[36mTraceback (most recent call last):\033[0m")
-	cwd, _ := os.Getwd()
+	if len(frames) > 0 {
+		fmt.Fprintln(w, "\033[36mTraceback:\033[0m")
+		slices.Reverse(frames)
+		cwd, _ := os.Getwd()
 
-	for _, f := range frames {
-		// Omit standard library boilerplate and Cobra's internal routing
-		if strings.HasPrefix(f.Function, "runtime.") || strings.HasPrefix(f.Function, "github.com/spf13/cobra.") {
-			continue
-		}
+		hiddenCount := 0
 
-		displayPath := f.File
-		if cwd != "" {
-			if relPath, err := filepath.Rel(cwd, f.File); err == nil && !strings.HasPrefix(relPath, "..") {
-				displayPath = relPath
+		for _, f := range frames {
+			// Increment counter for boilerplate frames
+			if strings.HasPrefix(f.Function, "runtime.") {
+				hiddenCount++
+				continue
+			}
+
+			// Print and reset the counter before showing the next visible frame
+			if hiddenCount > 0 {
+				fmt.Fprintf(w, "  \033[90m<... %d hidden frames ...>\033[0m\n", hiddenCount)
+				hiddenCount = 0
+			}
+
+			displayPath := f.File
+			if cwd != "" {
+				if relPath, err := filepath.Rel(cwd, f.File); err == nil && !strings.HasPrefix(relPath, "..") {
+					displayPath = relPath
+				}
+			}
+
+			fmt.Fprintf(w, "  File \033[33m%s\033[0m, line \033[32m%d\033[0m, in \033[35m%s\033[0m\n", displayPath, f.Line, f.Function)
+
+			code := getSourceLine(f.File, f.Line)
+			if code != "" {
+				fmt.Fprintf(w, "    \033[2m%s\033[0m\n", strings.TrimSpace(code))
 			}
 		}
 
-		fmt.Fprintf(w, "  File \033[33m%s\033[0m, line \033[32m%d\033[0m, in \033[35m%s\033[0m\n", displayPath, f.Line, f.Function)
-
-		code := getSourceLine(f.File, f.Line)
-		if code != "" {
-			fmt.Fprintf(w, "    \033[2m%s\033[0m\n", strings.TrimSpace(code))
+		// Catch any trailing hidden frames at the very bottom of the trace
+		if hiddenCount > 0 {
+			fmt.Fprintf(w, "  \033[90m<... %d hidden frames ...>\033[0m\n", hiddenCount)
 		}
+		fmt.Fprintf(w, "\n")
 	}
 
-	fmt.Fprintf(w, "\n\033[1;31mError:\033[0m %s\n", originalErr.Error())
+	fmt.Fprintf(w, "\033[1;31mError:\033[0m %s\n", originalErr.Error())
 }
 
 // getSourceLine opens the file using its original absolute path to extract the specific line of code.

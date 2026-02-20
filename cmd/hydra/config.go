@@ -34,18 +34,19 @@ var configShowCmd = &cobra.Command{
 		if err != nil {
 			return errtrace.Wrap(err)
 		}
-		config, err := config.Load(projectRoot)
+		loadedConfig, err := config.Load(projectRoot)
 		if err != nil {
 			return errtrace.Wrap(err)
 		}
-		printConfig("Prompt", config.Prompt)
-		printConfig("Agent", config.Agent)
+		printConfig("Prompt", loadedConfig.Prompt)
+		printConfig("Agent", loadedConfig.Agent)
 		fmt.Printf("Agents:\n")
-		if len(config.Agents) == 0 {
+		if len(loadedConfig.Agents) == 0 {
 			fmt.Println("  <none>")
 		} else {
-			for name, agent := range config.Agents {
-				printConfig(fmt.Sprintf("  %q", name), &agent)
+			for name, agent := range loadedConfig.Agents {
+				value := config.NewValueSource(agent.Value.Dockerfile, agent.Source)
+				printConfig(fmt.Sprintf("  %q", name), &value)
 			}
 		}
 		return nil

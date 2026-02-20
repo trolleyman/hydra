@@ -12,10 +12,8 @@ import (
 	"braces.dev/errtrace"
 	"github.com/BurntSushi/toml"
 	"github.com/cockroachdb/errors"
+	"github.com/trolleyman/hydra/internal/config/defaultfs"
 )
-
-//go:embed default/*
-var defaultFS embed.FS
 
 // Source describes a directory with a human-readable label.
 // The config should be called config.toml in this directory, and any relative
@@ -46,7 +44,7 @@ func Sources(projectRoot string) []Source {
 	}
 	srcs = append(srcs, Source{
 		"default",
-		defaultFS,
+		defaultfs.DefaultFS,
 	})
 	return srcs
 }
@@ -54,6 +52,13 @@ func Sources(projectRoot string) []Source {
 type ValueSource[T any] struct {
 	Value  T
 	Source *Source
+}
+
+func NewValueSource[T any](value T, source *Source) ValueSource[T] {
+	return ValueSource[T]{
+		Value:  value,
+		Source: source,
+	}
 }
 
 // rawConfig is the raw toml extracted from a rawConfig.toml file
@@ -109,7 +114,7 @@ func (config *rawConfig) toConfig(source *Source) (*Config, error) {
 				return nil, errtrace.Wrap(fmt.Errorf("get home directory: %w", err))
 			}
 			dockerfile = filepath.Join(homedir, ".cache", "hydra", "dockerfiles", v.Dockerfile)
-			err = os.MkdirAll(filepath.Base(dockerfile), 0755)
+			err = os.MkdirAll(filepath.Dir(dockerfile), 0755)
 			if err != nil {
 				return nil, errtrace.Wrap(fmt.Errorf("create dockerfile directory: %w", err))
 			}
@@ -160,7 +165,12 @@ func (config *Config) MergeIn(otherConfig *Config) {
 		config.Agent = otherConfig.Agent
 	}
 	// Override agent config fully
-	maps.Copy(config.Agents, otherConfig.Agents)
+	if otherConfig.Agents != nil {
+		if config.Agents == nil {
+			config.Agents = make(map[string]ValueSource[Agent])
+		}
+		maps.Copy(config.Agents, otherConfig.Agents)
+	}
 }
 
 // Load reads all applicable config files (system →  global →  project -> builtin) and returns
@@ -191,12 +201,11 @@ func Load(projectRoot string) (*Config, error) {
 	if config.Prompt == nil {
 		return nil, errtrace.New("no prompt set")
 	}
-	if config.Agent == nil {
-		return nil, errtrace.New("no agent set")
-	}
-	_, ok := config.Agents[config.Agent.Value]
-	if !ok {
-		return nil, errtrace.Errorf("agent %q not defined in any config file", config.Agent.Value)
+	if config.Agent != nil {
+		_, ok := config.Agents[config.Agent.Value]
+		if !ok {
+			return nil, errtrace.Errorf("agent %q not defined in any config file", config.Agent.Value)
+		}
 	}
 	return config, nil
 }
