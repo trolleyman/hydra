@@ -1,11 +1,11 @@
 package docker
 
 import (
+	"braces.dev/errtrace"
 	"encoding/json"
+	"fmt"
 	"net/url"
 	"time"
-
-	"github.com/cockroachdb/errors"
 )
 
 // LabelKey is the Docker label used to identify Hydra-managed containers.
@@ -24,7 +24,7 @@ type AgentMetadata struct {
 func EncodeLabel(meta *AgentMetadata) (string, error) {
 	data, err := json.Marshal(meta)
 	if err != nil {
-		return "", errors.Wrapf(err, "marshal label")
+		return "", errtrace.Wrap(fmt.Errorf("marshal label: %w", err))
 	}
 	return url.QueryEscape(string(data)), nil
 }
@@ -33,11 +33,11 @@ func EncodeLabel(meta *AgentMetadata) (string, error) {
 func DecodeLabel(value string) (*AgentMetadata, error) {
 	decoded, err := url.QueryUnescape(value)
 	if err != nil {
-		return nil, errors.Wrapf(err, "unescape label")
+		return nil, errtrace.Wrap(fmt.Errorf("unescape label: %w", err))
 	}
 	var meta AgentMetadata
 	if err := json.Unmarshal([]byte(decoded), &meta); err != nil {
-		return nil, errors.Wrapf(err, "unmarshal label")
+		return nil, errtrace.Wrap(fmt.Errorf("unmarshal label: %w", err))
 	}
 	return &meta, nil
 }

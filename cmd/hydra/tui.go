@@ -1,6 +1,7 @@
 package main
 
 import (
+	"braces.dev/errtrace"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 	"github.com/trolleyman/hydra/internal/docker"
@@ -20,12 +21,12 @@ var tuiCmd = &cobra.Command{
 func runTUI(_ *cobra.Command, _ []string) error {
 	cli, err := docker.NewClient()
 	if err != nil {
-		return err
+		return errtrace.Wrap(err)
 	}
 	defer cli.Close()
 
 	m := tui.New(cli)
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	_, err = p.Run()
-	return err
+	return errtrace.Wrap(err)
 }

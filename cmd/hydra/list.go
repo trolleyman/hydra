@@ -6,6 +6,7 @@ import (
 	"os"
 	"text/tabwriter"
 
+	"braces.dev/errtrace"
 	"github.com/spf13/cobra"
 	"github.com/trolleyman/hydra/internal/docker"
 )
@@ -20,13 +21,13 @@ var listCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cli, err := docker.NewClient()
 		if err != nil {
-			return err
+			return errtrace.Wrap(err)
 		}
 		defer cli.Close()
 
 		agents, err := docker.ListAgents(context.Background(), cli)
 		if err != nil {
-			return err
+			return errtrace.Wrap(err)
 		}
 
 		if len(agents) == 0 {
@@ -48,6 +49,6 @@ var listCmd = &cobra.Command{
 			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%q\n",
 				id, a.ImageName, a.Meta.BranchName, a.Status, prompt)
 		}
-		return w.Flush()
+		return errtrace.Wrap(w.Flush())
 	},
 }

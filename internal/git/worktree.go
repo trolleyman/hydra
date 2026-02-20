@@ -1,21 +1,23 @@
 package git
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
 
+	"braces.dev/errtrace"
 	"github.com/cockroachdb/errors"
 )
 
 func FindProjectRootFromCwd() (string, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
-		return "", errors.Wrapf(err, "get working directory")
+		return "", errtrace.Wrap(fmt.Errorf("get working directory: %w", err))
 	}
-	return FindProjectRoot(cwd)
+	return errtrace.Wrap2(FindProjectRoot(cwd))
 }
 
 // FindProjectRoot walks up from dir until it finds a .git directory.
@@ -27,7 +29,7 @@ func FindProjectRoot(dir string) (string, error) {
 		}
 		parent := filepath.Dir(current)
 		if parent == current {
-			return "", errors.Errorf("not inside a git repository")
+			return "", errtrace.Wrap(errors.Errorf("not inside a git repository"))
 		}
 		current = parent
 	}
@@ -51,7 +53,7 @@ func SlugFromPrompt(prompt string) string {
 func GetCurrentBranch(projectRoot string) (string, error) {
 	out, err := exec.Command("git", "-C", projectRoot, "rev-parse", "--abbrev-ref", "HEAD").Output()
 	if err != nil {
-		return "", errors.Wrapf(err, "git rev-parse")
+		return "", errtrace.Wrap(fmt.Errorf("git rev-parse: %w", err))
 	}
 	return strings.TrimSpace(string(out)), nil
 }
@@ -59,14 +61,14 @@ func GetCurrentBranch(projectRoot string) (string, error) {
 // CreateWorktree runs `git worktree add -b <branchName> <path> <baseBranch>`.
 func CreateWorktree(projectRoot, worktreePath, branchName, baseBranch string) error {
 	if err := os.MkdirAll(filepath.Dir(worktreePath), 0755); err != nil {
-		return errors.Wrapf(err, "create worktree parent")
+		return errtrace.Wrap(fmt.Errorf("create worktree parent: %w", err))
 	}
 	cmd := exec.Command("git", "-C", projectRoot,
 		"worktree", "add", "-b", branchName, worktreePath, baseBranch)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		return errors.Wrapf(err, "git worktree add")
+		return errtrace.Wrap(fmt.Errorf("git worktree add: %w", err))
 	}
 	return nil
 }
@@ -78,7 +80,7 @@ func RemoveWorktree(projectRoot, worktreePath string) error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		return errors.Wrapf(err, "git worktree remove")
+		return errtrace.Wrap(fmt.Errorf("git worktree remove: %w", err))
 	}
 	return nil
 }

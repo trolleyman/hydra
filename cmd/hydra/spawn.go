@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/cockroachdb/errors"
+	"braces.dev/errtrace"
 	"github.com/spf13/cobra"
 	"github.com/trolleyman/hydra/internal/config"
 	"github.com/trolleyman/hydra/internal/docker"
@@ -36,29 +36,29 @@ var spawnCmd = &cobra.Command{
 
 		cwd, err := os.Getwd()
 		if err != nil {
-			return errors.Wrapf(err, "get working directory")
+			return errtrace.Wrap(fmt.Errorf("get working directory: %w", err))
 		}
 
 		projectRoot, err := git.FindProjectRoot(cwd)
 		if err != nil {
-			return err
+			return errtrace.Wrap(err)
 		}
 
 		cfg, err := config.Load(projectRoot)
 		if err != nil {
-			return err
+			return errtrace.Wrap(err)
 		}
 
 		dockerfilePath, err := ensureDockerfile(cfg, spawnFlags.dockerfile)
 		if err != nil {
-			return err
+			return errtrace.Wrap(err)
 		}
 
 		baseBranch := spawnFlags.baseBranch
 		if baseBranch == "" {
 			baseBranch, err = git.GetCurrentBranch(projectRoot)
 			if err != nil {
-				return errors.Wrapf(err, "detect current branch")
+				return errtrace.Wrap(fmt.Errorf("detect current branch: %w", err))
 			}
 		}
 
@@ -68,7 +68,7 @@ var spawnCmd = &cobra.Command{
 
 		fmt.Printf("Creating worktree on branch %q...\n", branchName)
 		if err := git.CreateWorktree(projectRoot, worktreePath, branchName, baseBranch); err != nil {
-			return err
+			return errtrace.Wrap(err)
 		}
 
 		// Resolve git identity: env vars take priority, then git config
@@ -97,7 +97,7 @@ var spawnCmd = &cobra.Command{
 
 		cli, err := docker.NewClient()
 		if err != nil {
-			return err
+			return errtrace.Wrap(err)
 		}
 		defer cli.Close()
 
@@ -114,7 +114,7 @@ var spawnCmd = &cobra.Command{
 		})
 		if err != nil {
 			_ = git.RemoveWorktree(projectRoot, worktreePath)
-			return errors.Wrapf(err, "spawn agent")
+			return errtrace.Wrap(fmt.Errorf("spawn agent: %w", err))
 		}
 
 		fmt.Printf("Agent started on branch %s (container %s)\n", branchName, containerID[:12])

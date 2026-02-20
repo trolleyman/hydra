@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"braces.dev/errtrace"
 	"github.com/BurntSushi/toml"
 	"github.com/cockroachdb/errors"
 )
@@ -84,11 +85,11 @@ func (config *rawConfig) toConfig(source *Source) (*Config, error) {
 	agents := make(map[string]ValueSource[Agent])
 	for k, v := range config.Agents {
 		if v.Dockerfile == "" {
-			return nil, errors.Newf("no dockerfile path set in %v source: %v/config.toml", source.Label, source.Directory)
+			return nil, errtrace.Wrap(errors.Newf("no dockerfile path set in %v source: %v/config.toml", source.Label, source.Directory))
 		}
 		file, err := source.Directory.Open(v.Dockerfile)
 		if err != nil {
-			return nil, errors.Wrapf(err, "failed to open: %v/%v", source.Directory, v.Dockerfile)
+			return nil, errtrace.Wrap(fmt.Errorf("failed to open: %v/%v: %w", source.Directory, v.Dockerfile, err))
 		}
 		defer file.Close()
 		dockerfileRequiresCopy := false
@@ -105,20 +106,20 @@ func (config *rawConfig) toConfig(source *Source) (*Config, error) {
 			// Copy to state dir
 			homedir, err := os.UserHomeDir()
 			if err != nil {
-				return nil, errors.Wrapf(err, "get home directory")
+				return nil, errtrace.Wrap(fmt.Errorf("get home directory: %w", err))
 			}
 			dockerfile = filepath.Join(homedir, ".cache", "hydra", "dockerfiles", v.Dockerfile)
 			err = os.MkdirAll(filepath.Base(dockerfile), 0755)
 			if err != nil {
-				return nil, errors.Wrapf(err, "create dockerfile directory")
+				return nil, errtrace.Wrap(fmt.Errorf("create dockerfile directory: %w", err))
 			}
 			newDockerfile, err := os.Create(dockerfile)
 			if err != nil {
-				return nil, errors.Wrapf(err, "create dockerfile")
+				return nil, errtrace.Wrap(fmt.Errorf("create dockerfile: %w", err))
 			}
 			defer newDockerfile.Close()
 			if _, err := io.Copy(newDockerfile, file); err != nil {
-				return nil, errors.Wrapf(err, "copy dockerfile content")
+				return nil, errtrace.Wrap(fmt.Errorf("copy dockerfile content: %w", err))
 			}
 		}
 		agents[k] = ValueSource[Agent]{
@@ -172,30 +173,30 @@ func Load(projectRoot string) (*Config, error) {
 			continue
 		}
 		if err != nil {
-			return nil, errors.Wrapf(err, "failed to open: %v/config.toml", src.Directory)
+			return nil, errtrace.Wrap(fmt.Errorf("failed to open: %v/config.toml: %w", src.Directory, err))
 		}
 		defer file.Close()
 
 		raw_config := rawConfig{}
 		_, err = toml.NewDecoder(file).Decode(&raw_config)
 		if err != nil {
-			return nil, errors.Wrapf(err, "failed to parse config: %v/config.toml", src.Directory)
+			return nil, errtrace.Wrap(fmt.Errorf("failed to parse config: %v/config.toml: %w", src.Directory, err))
 		}
 		otherConfig, err := raw_config.toConfig(&src)
 		if err != nil {
-			return nil, errors.Wrapf(err, "failed to parse config: %v/config.toml", src.Directory)
+			return nil, errtrace.Wrap(fmt.Errorf("failed to parse config: %v/config.toml: %w", src.Directory, err))
 		}
 		config.MergeIn(otherConfig)
 	}
 	if config.Prompt == nil {
-		return nil, errors.New("no prompt set")
+		return nil, errtrace.New("no prompt set")
 	}
 	if config.Agent == nil {
-		return nil, errors.New("no agent set")
+		return nil, errtrace.New("no agent set")
 	}
 	_, ok := config.Agents[config.Agent.Value]
 	if !ok {
-		return nil, errors.Newf("agent %q not defined in any config file", config.Agent.Value)
+		return nil, errtrace.Errorf("agent %q not defined in any config file", config.Agent.Value)
 	}
 	return config, nil
 }

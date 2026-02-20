@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 
+	"braces.dev/errtrace"
 	"github.com/cockroachdb/errors"
 	"github.com/spf13/cobra"
 	"github.com/trolleyman/hydra/internal/docker"
@@ -22,13 +23,13 @@ var attachCmd = &cobra.Command{
 
 		cli, err := docker.NewClient()
 		if err != nil {
-			return err
+			return errtrace.Wrap(err)
 		}
 		defer cli.Close()
 
 		agents, err := docker.ListAgents(context.Background(), cli)
 		if err != nil {
-			return err
+			return errtrace.Wrap(err)
 		}
 
 		var matches []docker.Agent
@@ -40,11 +41,11 @@ var attachCmd = &cobra.Command{
 
 		switch len(matches) {
 		case 0:
-			return errors.Errorf("no agent found matching %q", prefix)
+			return errtrace.Wrap(errors.Errorf("no agent found matching %q", prefix))
 		case 1:
-			return docker.AttachAgent(matches[0].ContainerID)
+			return errtrace.Wrap(docker.AttachAgent(matches[0].ContainerID))
 		default:
-			return errors.Errorf("ambiguous ID %q matches %d agents; use a longer prefix", prefix, len(matches))
+			return errtrace.Wrap(errors.Errorf("ambiguous ID %q matches %d agents; use a longer prefix", prefix, len(matches)))
 		}
 	},
 }

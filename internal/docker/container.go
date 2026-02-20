@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cockroachdb/errors"
+	"braces.dev/errtrace"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/image"
@@ -35,7 +35,7 @@ func NewClient() (*dockerclient.Client, error) {
 		dockerclient.WithAPIVersionNegotiation(),
 	)
 	if err != nil {
-		return nil, errors.Wrapf(err, "create docker client")
+		return nil, errtrace.Wrap(fmt.Errorf("create docker client: %w", err))
 	}
 	return cli, nil
 }
@@ -48,7 +48,7 @@ func ListAgents(ctx context.Context, cli *dockerclient.Client) ([]Agent, error) 
 		Filters: args,
 	})
 	if err != nil {
-		return nil, errors.Wrapf(err, "list containers")
+		return nil, errtrace.Wrap(fmt.Errorf("list containers: %w", err))
 	}
 
 	var agents []Agent
@@ -90,7 +90,7 @@ type SpawnOptions struct {
 func SpawnAgent(ctx context.Context, cli *dockerclient.Client, opts SpawnOptions) (string, error) {
 	imageTag, err := ensureImage(ctx, cli, opts.DockerfilePath)
 	if err != nil {
-		return "", errors.Wrapf(err, "ensure image")
+		return "", errtrace.Wrap(fmt.Errorf("ensure image: %w", err))
 	}
 
 	fullPrompt := strings.TrimRight(opts.PromptPrefix, "\n") + "\n" + opts.Prompt
@@ -104,7 +104,7 @@ func SpawnAgent(ctx context.Context, cli *dockerclient.Client, opts SpawnOptions
 	}
 	labelVal, err := EncodeLabel(meta)
 	if err != nil {
-		return "", errors.Wrapf(err, "encode label")
+		return "", errtrace.Wrap(fmt.Errorf("encode label: %w", err))
 	}
 
 	env := []string{}
@@ -151,12 +151,12 @@ func SpawnAgent(ctx context.Context, cli *dockerclient.Client, opts SpawnOptions
 		containerName,
 	)
 	if err != nil {
-		return "", errors.Wrapf(err, "create container")
+		return "", errtrace.Wrap(fmt.Errorf("create container: %w", err))
 	}
 
 	if err := cli.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
 		_ = cli.ContainerRemove(ctx, resp.ID, container.RemoveOptions{Force: true})
-		return "", errors.Wrapf(err, "start container")
+		return "", errtrace.Wrap(fmt.Errorf("start container: %w", err))
 	}
 
 	return resp.ID, nil
@@ -169,7 +169,7 @@ func KillAgent(ctx context.Context, cli *dockerclient.Client, containerID string
 		log.Printf("warn: stop container %s: %v", containerID[:12], err)
 	}
 	if err := cli.ContainerRemove(ctx, containerID, container.RemoveOptions{Force: true}); err != nil {
-		return errors.Wrapf(err, "remove container")
+		return errtrace.Wrap(fmt.Errorf("remove container: %w", err))
 	}
 	return nil
 }
@@ -180,7 +180,7 @@ func AttachAgent(containerID string) error {
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	return errtrace.Wrap(cmd.Run())
 }
 
 // ViewLogs runs `docker logs -f <id>`, streaming output to the terminal.
@@ -188,14 +188,14 @@ func ViewLogs(containerID string) error {
 	cmd := exec.Command("docker", "logs", "-f", containerID)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	return errtrace.Wrap(cmd.Run())
 }
 
 // ensureImage builds the Docker image if an image with the same Dockerfile hash doesn't exist.
 func ensureImage(ctx context.Context, cli *dockerclient.Client, dockerfilePath string) (string, error) {
 	data, err := os.ReadFile(dockerfilePath)
 	if err != nil {
-		return "", errors.Wrapf(err, "read dockerfile")
+		return "", errtrace.Wrap(fmt.Errorf("read dockerfile: %w", err))
 	}
 	hash := fmt.Sprintf("%x", sha256.Sum256(data))[:8]
 	tag := "hydra-agent:" + hash
@@ -204,7 +204,7 @@ func ensureImage(ctx context.Context, cli *dockerclient.Client, dockerfilePath s
 		Filters: filters.NewArgs(filters.Arg("reference", tag)),
 	})
 	if err != nil {
-		return "", errors.Wrapf(err, "list images")
+		return "", errtrace.Wrap(fmt.Errorf("list images: %w", err))
 	}
 	if len(images) > 0 {
 		return tag, nil
@@ -220,7 +220,7 @@ func ensureImage(ctx context.Context, cli *dockerclient.Client, dockerfilePath s
 	buildCmd.Stdout = os.Stdout
 	buildCmd.Stderr = os.Stderr
 	if err := buildCmd.Run(); err != nil {
-		return "", errors.Wrapf(err, "build image")
+		return "", errtrace.Wrap(fmt.Errorf("build image: %w", err))
 	}
 	return tag, nil
 }

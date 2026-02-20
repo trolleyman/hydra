@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"braces.dev/errtrace"
 	"github.com/spf13/cobra"
 	"github.com/trolleyman/hydra/internal/config"
 	"github.com/trolleyman/hydra/internal/git"
@@ -31,11 +32,11 @@ var configShowCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		projectRoot, err := git.FindProjectRootFromCwd()
 		if err != nil {
-			return err
+			return errtrace.Wrap(err)
 		}
 		config, err := config.Load(projectRoot)
 		if err != nil {
-			return err
+			return errtrace.Wrap(err)
 		}
 		printConfig("Prompt", config.Prompt)
 		printConfig("Agent", config.Agent)

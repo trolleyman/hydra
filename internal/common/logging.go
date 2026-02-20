@@ -1,6 +1,7 @@
 package common
 
 import (
+	"braces.dev/errtrace"
 	"bufio"
 	"fmt"
 	"log"
@@ -36,7 +37,7 @@ func (w *logResponseWriter) WriteHeader(code int) {
 
 // Hijack implements http.Hijacker so WebSocket upgrades work through the logging middleware.
 func (w *logResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
-	return w.ResponseWriter.(http.Hijacker).Hijack()
+	return errtrace.Wrap3(w.ResponseWriter.(http.Hijacker).Hijack())
 }
 
 // RotatingLogger is a simple size-based rotating logger.
@@ -52,11 +53,11 @@ type RotatingLogger struct {
 func NewRotatingLogger(path string, maxSize int64, maxBackups int) (*RotatingLogger, error) {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0755); err != nil {
-		return nil, err
+		return nil, errtrace.Wrap(err)
 	}
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 	if err != nil {
-		return nil, err
+		return nil, errtrace.Wrap(err)
 	}
 	return &RotatingLogger{path: path, maxSize: maxSize, maxBackups: maxBackups, file: f}, nil
 }
@@ -67,14 +68,14 @@ func (r *RotatingLogger) Write(p []byte) (n int, err error) {
 
 	fi, err := r.file.Stat()
 	if err != nil {
-		return 0, err
+		return 0, errtrace.Wrap(err)
 	}
 	if fi.Size()+int64(len(p)) > r.maxSize {
 		if err := r.rotate(); err != nil {
-			return 0, err
+			return 0, errtrace.Wrap(err)
 		}
 	}
-	return r.file.Write(p)
+	return errtrace.Wrap2(r.file.Write(p))
 }
 
 func (r *RotatingLogger) rotate() error {
@@ -88,19 +89,19 @@ func (r *RotatingLogger) rotate() error {
 	if err := os.Rename(r.path, newName); err != nil {
 		// If rename fails because file doesn't exist, ignore
 		if !os.IsNotExist(err) {
-			return err
+			return errtrace.Wrap(err)
 		}
 	}
 	// Recreate current log file
 	f, err := os.OpenFile(r.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 	if err != nil {
-		return err
+		return errtrace.Wrap(err)
 	}
 	r.file = f
 
 	// Enforce backups limit
 	if err := r.enforceBackups(); err != nil {
-		return err
+		return errtrace.Wrap(err)
 	}
 	return nil
 }
@@ -110,7 +111,7 @@ func (r *RotatingLogger) enforceBackups() error {
 	base := filepath.Base(r.path)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return err
+		return errtrace.Wrap(err)
 	}
 	// collect rotated files matching base.
 	var candidates []os.DirEntry
