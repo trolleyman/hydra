@@ -20,7 +20,7 @@
             "args": [
                 "--debug",
                 "spawn",
-                "Generate GEMINI.md and CLAUDE.md file summarizing the repo"
+                "Make a new file called 'hello.txt' with a nice speech in it"
             ]
         },
     ]

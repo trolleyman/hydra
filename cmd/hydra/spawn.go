@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"text/tabwriter"
 
 	"braces.dev/errtrace"
 	"github.com/spf13/cobra"
@@ -118,8 +119,9 @@ var spawnCmd = &cobra.Command{
 		}
 
 		fmt.Printf("Agent started on branch %s (container %s)\n", branchName, containerID[:12])
-		fmt.Printf("  hydra attach %s   — attach to the session\n", containerID[:12])
-		fmt.Printf("  hydra list        — view all running agents\n")
+		w := tabwriter.NewWriter(os.Stdout, 0, 0, 1, ' ', 0)
+		fmt.Fprintf(w, "  hydra attach %s\t- attach to the session\n", containerID[:12])
+		fmt.Fprintf(w, "  hydra list\t- view all running agents\n")
 		return nil
 	},
 }
