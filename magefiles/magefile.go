@@ -245,8 +245,12 @@ func Tidy() error {
 	return nil
 }
 
+func addGoBuildDeps() {
+	mg.Deps(Build.TypeScript, Generate.Go)
+}
+
 func Run() error {
-	mg.Deps(Build.TypeScript)
+	addGoBuildDeps()
 	return runV("go", "run", "./")
 }
 
@@ -257,6 +261,7 @@ func (Build) All() {
 }
 
 func (Build) Go() error {
+	addGoBuildDeps()
 	return runV("go", "build", "./...")
 }
 
@@ -266,10 +271,6 @@ func (Build) TypeScript() error {
 
 type Generate mg.Namespace
 
-func (Generate) All() {
-	mg.Deps(Generate.Go, Generate.TypeScript)
-}
-
 func (Generate) Go() error {
 	// Ensure internal/api exists
 	if err := os.MkdirAll("internal/api", 0755); err != nil {
@@ -277,18 +278,4 @@ func (Generate) Go() error {
 	}
 
 	return runV("go", "generate", "./...")
-}
-
-func (Generate) TypeScript() error {
-	// Ensure web/src/api exists
-	if err := os.MkdirAll("web/src/api", 0755); err != nil {
-		return err
-	}
-
-	return runV("bun", "x", "openapi-typescript-codegen",
-		"--input", "api/openapi.yaml",
-		"--output", "web/src/api",
-		"--client", "fetch",
-		"--name", "Hydra",
-	)
 }
