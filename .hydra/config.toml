@@ -1,5 +1,0 @@
-
-agent = "gemini"
-
-[agents.gemini]
-dockerfile = "gemini.Dockerfile"

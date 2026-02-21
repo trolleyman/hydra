@@ -31,7 +31,6 @@ func Tidy() {
 	run("go", "run", "braces.dev/errtrace/cmd/errtrace@latest", "-w", "./...")
 }
 
-func Run(args ...string) {
-	cmdArgs := append([]string{"run", "./cmd/hydra"}, args...)
-	run("go", cmdArgs...)
+func Run() {
+	run("go", "run", "./cmd/hydra")
 }
