@@ -14,13 +14,13 @@ func WriteJSON(w http.ResponseWriter, status int, data interface{}) {
 	json.NewEncoder(w).Encode(data)
 }
 
-// WriteError writes an error response
-// func WriteError(w http.ResponseWriter, status int, message string) {
-// 	WriteJSON(w, status, api.ErrorResponse{
-// 		Code:  status,
-// 		Error: message,
-// 	})
-// }
+// WriteError writes a JSON error response.
+func WriteError(w http.ResponseWriter, status int, message string) {
+	WriteJSON(w, status, ErrorResponse{
+		Code:  status,
+		Error: message,
+	})
+}
 
 // ReadJSON reads JSON from a request body
 func ReadJSON(r *http.Request, v interface{}) error {

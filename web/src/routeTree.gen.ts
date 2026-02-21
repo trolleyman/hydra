@@ -9,12 +9,17 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as AboutRouteImport } from './routes/about'
+import { Route as NewProjectRouteImport } from './routes/new-project'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as ProjectIdIndexRouteImport } from './routes/$projectId/index'
+import { Route as ProjectIdRepositoryIndexRouteImport } from './routes/$projectId/repository/index'
+import { Route as ProjectIdAgentsIndexRouteImport } from './routes/$projectId/agents/index'
+import { Route as ProjectIdAgentsAgentIdRouteImport } from './routes/$projectId/agents/$agentId'
+import { Route as ProjectIdRepositoryBlobBranchPathRouteImport } from './routes/$projectId/repository/blob.$branch.$path'
 
-const AboutRoute = AboutRouteImport.update({
-  id: '/about',
-  path: '/about',
+const NewProjectRoute = NewProjectRouteImport.update({
+  id: '/new-project',
+  path: '/new-project',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IndexRoute = IndexRouteImport.update({
@@ -22,40 +27,109 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ProjectIdIndexRoute = ProjectIdIndexRouteImport.update({
+  id: '/$projectId/',
+  path: '/$projectId/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ProjectIdRepositoryIndexRoute =
+  ProjectIdRepositoryIndexRouteImport.update({
+    id: '/$projectId/repository/',
+    path: '/$projectId/repository/',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ProjectIdAgentsIndexRoute = ProjectIdAgentsIndexRouteImport.update({
+  id: '/$projectId/agents/',
+  path: '/$projectId/agents/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ProjectIdAgentsAgentIdRoute = ProjectIdAgentsAgentIdRouteImport.update({
+  id: '/$projectId/agents/$agentId',
+  path: '/$projectId/agents/$agentId',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ProjectIdRepositoryBlobBranchPathRoute =
+  ProjectIdRepositoryBlobBranchPathRouteImport.update({
+    id: '/$projectId/repository/blob/$branch/$path',
+    path: '/$projectId/repository/blob/$branch/$path',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/about': typeof AboutRoute
+  '/new-project': typeof NewProjectRoute
+  '/$projectId/': typeof ProjectIdIndexRoute
+  '/$projectId/agents/$agentId': typeof ProjectIdAgentsAgentIdRoute
+  '/$projectId/agents/': typeof ProjectIdAgentsIndexRoute
+  '/$projectId/repository/': typeof ProjectIdRepositoryIndexRoute
+  '/$projectId/repository/blob/$branch/$path': typeof ProjectIdRepositoryBlobBranchPathRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/about': typeof AboutRoute
+  '/new-project': typeof NewProjectRoute
+  '/$projectId': typeof ProjectIdIndexRoute
+  '/$projectId/agents/$agentId': typeof ProjectIdAgentsAgentIdRoute
+  '/$projectId/agents': typeof ProjectIdAgentsIndexRoute
+  '/$projectId/repository': typeof ProjectIdRepositoryIndexRoute
+  '/$projectId/repository/blob/$branch/$path': typeof ProjectIdRepositoryBlobBranchPathRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/about': typeof AboutRoute
+  '/new-project': typeof NewProjectRoute
+  '/$projectId/': typeof ProjectIdIndexRoute
+  '/$projectId/agents/$agentId': typeof ProjectIdAgentsAgentIdRoute
+  '/$projectId/agents/': typeof ProjectIdAgentsIndexRoute
+  '/$projectId/repository/': typeof ProjectIdRepositoryIndexRoute
+  '/$projectId/repository/blob/$branch/$path': typeof ProjectIdRepositoryBlobBranchPathRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/about'
+  fullPaths:
+    | '/'
+    | '/new-project'
+    | '/$projectId/'
+    | '/$projectId/agents/$agentId'
+    | '/$projectId/agents/'
+    | '/$projectId/repository/'
+    | '/$projectId/repository/blob/$branch/$path'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/about'
-  id: '__root__' | '/' | '/about'
+  to:
+    | '/'
+    | '/new-project'
+    | '/$projectId'
+    | '/$projectId/agents/$agentId'
+    | '/$projectId/agents'
+    | '/$projectId/repository'
+    | '/$projectId/repository/blob/$branch/$path'
+  id:
+    | '__root__'
+    | '/'
+    | '/new-project'
+    | '/$projectId/'
+    | '/$projectId/agents/$agentId'
+    | '/$projectId/agents/'
+    | '/$projectId/repository/'
+    | '/$projectId/repository/blob/$branch/$path'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  AboutRoute: typeof AboutRoute
+  NewProjectRoute: typeof NewProjectRoute
+  ProjectIdIndexRoute: typeof ProjectIdIndexRoute
+  ProjectIdAgentsAgentIdRoute: typeof ProjectIdAgentsAgentIdRoute
+  ProjectIdAgentsIndexRoute: typeof ProjectIdAgentsIndexRoute
+  ProjectIdRepositoryIndexRoute: typeof ProjectIdRepositoryIndexRoute
+  ProjectIdRepositoryBlobBranchPathRoute: typeof ProjectIdRepositoryBlobBranchPathRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/about': {
-      id: '/about'
-      path: '/about'
-      fullPath: '/about'
-      preLoaderRoute: typeof AboutRouteImport
+    '/new-project': {
+      id: '/new-project'
+      path: '/new-project'
+      fullPath: '/new-project'
+      preLoaderRoute: typeof NewProjectRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/': {
@@ -65,12 +139,53 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/$projectId/': {
+      id: '/$projectId/'
+      path: '/$projectId'
+      fullPath: '/$projectId/'
+      preLoaderRoute: typeof ProjectIdIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/$projectId/repository/': {
+      id: '/$projectId/repository/'
+      path: '/$projectId/repository'
+      fullPath: '/$projectId/repository/'
+      preLoaderRoute: typeof ProjectIdRepositoryIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/$projectId/agents/': {
+      id: '/$projectId/agents/'
+      path: '/$projectId/agents'
+      fullPath: '/$projectId/agents/'
+      preLoaderRoute: typeof ProjectIdAgentsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/$projectId/agents/$agentId': {
+      id: '/$projectId/agents/$agentId'
+      path: '/$projectId/agents/$agentId'
+      fullPath: '/$projectId/agents/$agentId'
+      preLoaderRoute: typeof ProjectIdAgentsAgentIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/$projectId/repository/blob/$branch/$path': {
+      id: '/$projectId/repository/blob/$branch/$path'
+      path: '/$projectId/repository/blob/$branch/$path'
+      fullPath: '/$projectId/repository/blob/$branch/$path'
+      preLoaderRoute: typeof ProjectIdRepositoryBlobBranchPathRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  AboutRoute: AboutRoute,
+  NewProjectRoute: NewProjectRoute,
+  ProjectIdIndexRoute: ProjectIdIndexRoute,
+  ProjectIdAgentsAgentIdRoute: ProjectIdAgentsAgentIdRoute,
+  ProjectIdAgentsIndexRoute: ProjectIdAgentsIndexRoute,
+  ProjectIdRepositoryIndexRoute: ProjectIdRepositoryIndexRoute,
+  ProjectIdRepositoryBlobBranchPathRoute:
+    ProjectIdRepositoryBlobBranchPathRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

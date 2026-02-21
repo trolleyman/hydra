@@ -2,6 +2,7 @@ openapi: 3.0.3
 info:
   title: Hydra API
   version: 1.0.0
+
 paths:
   /health:
     get:
@@ -34,6 +35,497 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /api/agent-types:
+    get:
+      summary: List built-in agent types
+      operationId: listAgentTypes
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AgentType'
+
+  /api/pick-folder:
+    post:
+      summary: Open a native OS folder picker dialog
+      operationId: pickFolder
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PickFolderResponse'
+        '403':
+          description: Forbidden - only available on localhost
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/projects:
+    get:
+      summary: List all known projects
+      operationId: listProjects
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Project'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    post:
+      summary: Create a new project
+      operationId: createProject
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateProjectRequest'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/projects/{projectId}:
+    get:
+      summary: Get a single project
+      operationId: getProject
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    delete:
+      summary: Remove a project (does not delete files)
+      operationId: deleteProject
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: No Content
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/projects/{projectId}/agents:
+    get:
+      summary: List agents for a project
+      operationId: listAgents
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Agent'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    post:
+      summary: Create and start an agent
+      operationId: createAgent
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAgentRequest'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Agent'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/projects/{projectId}/agents/{agentId}:
+    get:
+      summary: Get agent detail and status
+      operationId: getAgent
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Agent'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    delete:
+      summary: Stop and delete agent and worktree
+      operationId: deleteAgent
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: No Content
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/projects/{projectId}/agents/{agentId}/merge:
+    post:
+      summary: Merge agent branch and clean up worktree
+      operationId: mergeAgent
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Agent'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/projects/{projectId}/agents/{agentId}/logs:
+    get:
+      summary: Stream agent logs via SSE
+      operationId: streamAgentLogs
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: SSE stream of log lines
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/projects/{projectId}/repository/directory/{path}:
+    get:
+      summary: Get info about a directory in the repository
+      operationId: getRepositoryDirectory
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: path
+          in: path
+          required: true
+          schema:
+            type: string
+          style: simple
+          explode: false
+        - name: branch
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DirectoryInfo'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/projects/{projectId}/repository/filemeta/{path}:
+    get:
+      summary: Get metadata about a file in the repository
+      operationId: getRepositoryFileMeta
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: path
+          in: path
+          required: true
+          schema:
+            type: string
+          style: simple
+          explode: false
+        - name: branch
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileMeta'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/projects/{projectId}/repository/file/{path}:
+    get:
+      summary: Get file contents as byte stream
+      operationId: getRepositoryFile
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: path
+          in: path
+          required: true
+          schema:
+            type: string
+          style: simple
+          explode: false
+        - name: branch
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: File contents
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
 components:
   schemas:
     ErrorResponse:
@@ -53,3 +545,159 @@ components:
         version:
           type: string
           example: "1.0.0"
+
+    AgentType:
+      type: object
+      required: [id, name, description]
+      properties:
+        id:
+          type: string
+          example: "claude"
+        name:
+          type: string
+          example: "Claude Code"
+        description:
+          type: string
+          example: "Anthropic's Claude Code AI coding agent"
+        sandboxTemplate:
+          type: string
+          example: "docker/sandbox-templates:claude-code"
+
+    PickFolderResponse:
+      type: object
+      required: [path]
+      properties:
+        path:
+          type: string
+
+    Project:
+      type: object
+      required: [id, name, path, createdAt]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        path:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        lastOpened:
+          type: string
+          format: date-time
+          nullable: true
+
+    CreateProjectRequest:
+      type: object
+      required: [path]
+      properties:
+        path:
+          type: string
+
+    Agent:
+      type: object
+      required: [id, projectId, name, prompt, status, branch, worktreePath, aiProvider, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+        projectId:
+          type: string
+        name:
+          type: string
+        prompt:
+          type: string
+        status:
+          type: string
+          enum: [pending, starting, running, committing, done, failed, deleted]
+        branch:
+          type: string
+        worktreePath:
+          type: string
+        sandboxId:
+          type: string
+          nullable: true
+        sandboxTemplate:
+          type: string
+          nullable: true
+        aiProvider:
+          type: string
+          enum: [claude, codex, copilot, gemini, cagent, kiro, opencode, other]
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        finishedAt:
+          type: string
+          format: date-time
+          nullable: true
+        logTail:
+          type: string
+          nullable: true
+
+    CreateAgentRequest:
+      type: object
+      required: [prompt, aiProvider]
+      properties:
+        prompt:
+          type: string
+        aiProvider:
+          type: string
+          enum: [claude, codex, copilot, gemini, cagent, kiro, opencode, other]
+        sandboxTemplate:
+          type: string
+          nullable: true
+
+    DirectoryEntry:
+      type: object
+      required: [name, type]
+      properties:
+        name:
+          type: string
+        type:
+          type: string
+          enum: [file, directory, symlink]
+        size:
+          type: integer
+          format: int64
+          nullable: true
+
+    DirectoryInfo:
+      type: object
+      required: [path, entries]
+      properties:
+        path:
+          type: string
+        branch:
+          type: string
+          nullable: true
+        entries:
+          type: array
+          items:
+            $ref: '#/components/schemas/DirectoryEntry'
+        readme:
+          type: string
+          nullable: true
+          description: Contents of README.md or README.txt if present
+
+    FileMeta:
+      type: object
+      required: [path, name, size]
+      properties:
+        path:
+          type: string
+        name:
+          type: string
+        size:
+          type: integer
+          format: int64
+        mimeType:
+          type: string
+          nullable: true
+        branch:
+          type: string
+          nullable: true
+        isBinary:
+          type: boolean

@@ -1,32 +1,97 @@
 package main
 
 import (
+	"flag"
 	"io/fs"
 	"log"
 	"net/http"
-	"strings"
 
+	hydra "github.com/trolleyman/hydra/internal"
+	"github.com/trolleyman/hydra/internal/agent"
+	"github.com/trolleyman/hydra/internal/api"
+	"github.com/trolleyman/hydra/internal/db"
 	"github.com/trolleyman/hydra/web"
 )
+
+func main() {
+	var dbPath string
+	flag.StringVar(&dbPath, "db", "", "Path to SQLite database (default: platform data dir)")
+	flag.Parse()
+
+	// Resolve data directory paths
+	if dbPath == "" {
+		var err error
+		dbPath, err = hydra.DBPath()
+		if err != nil {
+			log.Fatalf("Resolve db path: %v", err)
+		}
+	}
+
+	worktreesDir, err := hydra.WorktreesDir()
+	if err != nil {
+		log.Fatalf("Resolve worktrees dir: %v", err)
+	}
+
+	log.Printf("Database: %s", dbPath)
+	log.Printf("Worktrees: %s", worktreesDir)
+
+	// Open database (runs migrations automatically)
+	sqlDB, err := db.Open(dbPath)
+	if err != nil {
+		log.Fatalf("Open database: %v", err)
+	}
+	defer sqlDB.Close()
+
+	// Create agent manager
+	mgr := agent.NewManager(sqlDB, worktreesDir)
+
+	// Create API server
+	server := &api.Server{
+		DB:           sqlDB,
+		Manager:      mgr,
+		WorktreesDir: worktreesDir,
+	}
+
+	// Build the main mux
+	mux := http.NewServeMux()
+
+	// Register API routes
+	apiHandler := api.NewHandler(server)
+	mux.Handle("/api/", apiHandler)
+	mux.Handle("/health", apiHandler)
+
+	// Serve the static React SPA
+	distFS, err := fs.Sub(web.FrontendAssets, "dist")
+	if err != nil {
+		log.Fatal(err)
+	}
+	mux.Handle("/", spaHandler(distFS))
+
+	addr := "localhost:8080"
+	log.Printf("Server starting on http://%s", addr)
+	if err := http.ListenAndServe(addr, mux); err != nil {
+		log.Fatalf("ListenAndServe: %v", err)
+	}
+}
 
 func spaHandler(fsys fs.FS) http.HandlerFunc {
 	fileServer := http.FileServer(http.FS(fsys))
 
 	return func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
-		cleanPath := strings.TrimPrefix(path, "/")
+		cleanPath := trimSlash(path)
 		if cleanPath == "" {
 			cleanPath = "index.html"
 		}
 
-		// Serve file if it exists
+		// Serve file if it exists in dist/
 		_, err := fs.Stat(fsys, cleanPath)
 		if err == nil {
 			fileServer.ServeHTTP(w, r)
 			return
 		}
 
-		// File does not exist - send index.html unconditionally
+		// File does not exist - return index.html for client-side routing
 		indexContent, err := fs.ReadFile(fsys, "index.html")
 		if err != nil {
 			log.Printf("Error reading index.html: %v", err)
@@ -36,12 +101,9 @@ func spaHandler(fsys fs.FS) http.HandlerFunc {
 
 		w.Header().Set("Content-Type", "text/html")
 
-		if web.RoutesRegex.MatchString(cleanPath) {
-			// Return 200 if it's a valid React page
+		if web.RoutesRegex.MatchString(path) {
 			w.WriteHeader(http.StatusOK)
 		} else {
-			// Return a true 404 HTTP status code, but still send index.html
-			// so React can render the <NotFound /> component.
 			w.WriteHeader(http.StatusNotFound)
 		}
 
@@ -49,19 +111,9 @@ func spaHandler(fsys fs.FS) http.HandlerFunc {
 	}
 }
 
-func main() {
-	// Extract the "dist" subdirectory from the embedded filesystem
-	distFS, err := fs.Sub(web.FrontendAssets, "dist")
-	if err != nil {
-		log.Fatal(err)
+func trimSlash(s string) string {
+	if len(s) > 0 && s[0] == '/' {
+		return s[1:]
 	}
-
-	// Serve the static React files at the root
-	http.Handle("/", spaHandler(distFS))
-
-	// TODO: API routes here
-	// http.HandleFunc("/api/todo", getTodoHandler)
-
-	log.Println("Server starting on http://localhost:8080")
-	http.ListenAndServe("localhost:8080", nil)
+	return s
 }

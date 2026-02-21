@@ -7,10 +7,10 @@
     "dev": "vite",
     "generate-tanstack-router": "tsr generate",
     "generate-openapi": "npx openapi-typescript-codegen --input ../api/openapi.yaml --output src/api --client fetch --name Hydra",
-    "generate-routes-regex": "npx tsx scripts/generate-routes-regex.ts",
-    "prebuild": "npm run generate-tanstack-router && npm run generate-openapi",
+    "generate-routes-regex": "bun scripts/generate-routes-regex.ts",
+    "prebuild": "bun run generate-tanstack-router",
     "build": "tsc -b && vite build",
-    "postbuild": "npm run generate-routes-regex",
+    "postbuild": "bun run generate-routes-regex",
     "lint": "eslint .",
     "preview": "vite preview"
   },
