@@ -1,0 +1,55 @@
+openapi: 3.0.3
+info:
+  title: Hydra API
+  version: 1.0.0
+paths:
+  /health:
+    get:
+      summary: Health check
+      operationId: checkHealth
+      responses:
+        '200':
+          description: OK
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "OK"
+
+  /api/status:
+    get:
+      summary: Get system status
+      operationId: getStatus
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  schemas:
+    ErrorResponse:
+      type: object
+      required: [error, code]
+      properties:
+        error: { type: string }
+        code: { type: integer }
+        details: { type: string }
+
+    StatusResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: "OK"
+        version:
+          type: string
+          example: "1.0.0"

@@ -1,3 +1,4 @@
 [tools]
 go = "latest"
 "go:github.com/magefile/mage" = "latest"
+bun = "latest"
