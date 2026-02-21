@@ -42,7 +42,7 @@ export function FolderPicker({ value, onChange, placeholder }: Props) {
           type="button"
           onClick={handleBrowse}
           disabled={picking}
-          className="px-3 py-2 rounded-md border border-gray-300 bg-white text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+          className="px-3 py-2 rounded-md border border-gray-300 bg-white text-sm text-gray-700 hover:bg-gray-50 cursor-pointer disabled:cursor-progress disabled:opacity-50"
         >
           {picking ? '…' : 'Browse…'}
         </button>

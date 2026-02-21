@@ -2,7 +2,6 @@
 package agent
 
 import (
-	"bytes"
 	"context"
 	"database/sql"
 	"fmt"
@@ -13,6 +12,9 @@ import (
 	"strings"
 	"time"
 
+	gogit "github.com/go-git/go-git/v6"
+	"github.com/go-git/go-git/v6/plumbing"
+	"github.com/go-git/go-git/v6/plumbing/object"
 	"github.com/trolleyman/hydra/internal/db"
 )
 
@@ -107,9 +109,12 @@ func createWorktree(projectPath, worktreePath, branch string) error {
 		return fmt.Errorf("mkdir: %w", err)
 	}
 
-	// Check if branch already exists
-	checkCmd := exec.Command("git", "-C", projectPath, "rev-parse", "--verify", branch)
-	branchExists := checkCmd.Run() == nil
+	// Check if branch already exists using go-git
+	branchExists := false
+	if repo, err := gogit.PlainOpen(projectPath); err == nil {
+		_, err = repo.Reference(plumbing.NewBranchReferenceName(branch), true)
+		branchExists = err == nil
+	}
 
 	var cmd *exec.Cmd
 	if branchExists {
@@ -131,6 +136,7 @@ func createSandbox(ctx context.Context, sandboxID, sandboxType, template, worktr
 		args = append(args, "-t", template)
 	}
 	args = append(args, sandboxType)
+	args = append(args, worktreePath)
 
 	cmd := exec.CommandContext(ctx, "docker", args...)
 	cmd.Env = append(os.Environ(),
@@ -144,10 +150,7 @@ func createSandbox(ctx context.Context, sandboxID, sandboxType, template, worktr
 	}
 
 	// Start the sandbox - mount the worktree
-	startArgs := []string{"sandbox", "start",
-		"--mount", worktreePath + ":/workspace",
-		sandboxID,
-	}
+	startArgs := []string{"sandbox", "run", sandboxID}
 	startCmd := exec.CommandContext(ctx, "docker", startArgs...)
 	startOut, err := startCmd.CombinedOutput()
 	if err != nil {
@@ -211,23 +214,39 @@ func (m *Manager) handleSandboxExit(ctx context.Context, agentID, sandboxID stri
 }
 
 func autoCommit(worktreePath string) {
-	// Stage all changes
-	addCmd := exec.Command("git", "-C", worktreePath, "add", "-A")
-	if out, err := addCmd.CombinedOutput(); err != nil {
-		log.Printf("git add: %v: %s", err, out)
+	repo, err := gogit.PlainOpen(worktreePath)
+	if err != nil {
+		log.Printf("autoCommit: open repo %s: %v", worktreePath, err)
 		return
 	}
-
-	// Check if there's anything to commit
-	statusCmd := exec.Command("git", "-C", worktreePath, "status", "--porcelain")
-	statusOut, _ := statusCmd.Output()
-	if len(bytes.TrimSpace(statusOut)) == 0 {
-		return // nothing to commit
+	wt, err := repo.Worktree()
+	if err != nil {
+		log.Printf("autoCommit: worktree: %v", err)
+		return
 	}
-
-	commitCmd := exec.Command("git", "-C", worktreePath, "commit", "-m", "chore: auto-commit agent changes")
-	if out, err := commitCmd.CombinedOutput(); err != nil {
-		log.Printf("git commit: %v: %s", err, out)
+	status, err := wt.Status()
+	if err != nil {
+		log.Printf("autoCommit: status: %v", err)
+		return
+	}
+	if status.IsClean() {
+		return
+	}
+	// Stage all changed files
+	for path := range status {
+		if _, addErr := wt.Add(path); addErr != nil {
+			log.Printf("autoCommit: add %s: %v", path, addErr)
+		}
+	}
+	_, err = wt.Commit("chore: auto-commit agent changes", &gogit.CommitOptions{
+		Author: &object.Signature{
+			Name:  "Hydra",
+			Email: "hydra@localhost",
+			When:  time.Now(),
+		},
+	})
+	if err != nil {
+		log.Printf("autoCommit: commit: %v", err)
 	}
 }
 
@@ -243,17 +262,22 @@ func Stop(ctx context.Context, sandboxID string) error {
 
 // RemoveWorktree removes a git worktree and deletes the branch.
 func RemoveWorktree(ctx context.Context, projectPath, worktreePath, branch string) error {
-	// Remove worktree
+	// Remove worktree (requires CLI - go-git does not support linked worktrees)
 	rmCmd := exec.CommandContext(ctx, "git", "-C", projectPath, "worktree", "remove", "--force", worktreePath)
 	if out, err := rmCmd.CombinedOutput(); err != nil {
 		// Non-fatal: worktree might already be gone
 		log.Printf("git worktree remove: %v: %s", err, out)
 	}
 
-	// Delete the branch
-	branchCmd := exec.CommandContext(ctx, "git", "-C", projectPath, "branch", "-D", branch)
-	if out, err := branchCmd.CombinedOutput(); err != nil {
-		log.Printf("git branch -D: %v: %s", err, out)
+	// Delete the branch using go-git
+	repo, err := gogit.PlainOpen(projectPath)
+	if err != nil {
+		log.Printf("RemoveWorktree: open repo: %v", err)
+		return nil
+	}
+	branchRef := plumbing.NewBranchReferenceName(branch)
+	if err := repo.Storer.RemoveReference(branchRef); err != nil {
+		log.Printf("RemoveWorktree: delete branch %s: %v", branch, err)
 	}
 
 	return nil
@@ -272,25 +296,30 @@ func MergeWorktree(ctx context.Context, projectPath, branch string) error {
 
 // GetDefaultBranch returns the default branch name for a repository.
 func GetDefaultBranch(projectPath string) string {
-	cmd := exec.Command("git", "-C", projectPath, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
-	out, err := cmd.Output()
+	repo, err := gogit.PlainOpen(projectPath)
 	if err == nil {
-		branch := strings.TrimPrefix(strings.TrimSpace(string(out)), "origin/")
-		if branch != "" {
-			return branch
+		// Try to read origin/HEAD symbolic ref
+		ref, err := repo.Reference(plumbing.NewRemoteReferenceName("origin", "HEAD"), true)
+		if err == nil {
+			// Target is like "refs/remotes/origin/main" - extract just the branch name
+			target := ref.Target().Short()
+			branch := strings.TrimPrefix(target, "origin/")
+			if branch != "" && branch != target {
+				return branch
+			}
 		}
-	}
-	// Fall back to main, then master
-	for _, b := range []string{"main", "master"} {
-		check := exec.Command("git", "-C", projectPath, "rev-parse", "--verify", b)
-		if check.Run() == nil {
-			return b
+		// Fall back to checking for main or master
+		for _, b := range []string{"main", "master"} {
+			_, err := repo.Reference(plumbing.NewBranchReferenceName(b), true)
+			if err == nil {
+				return b
+			}
 		}
 	}
 	return "main"
 }
 
-// LogStream returns a channel that receives log lines from a sandbox.
+// LogStream returns a channel that receives log chunks from a sandbox.
 // The channel is closed when the sandbox exits or ctx is cancelled.
 func LogStream(ctx context.Context, sandboxID string) <-chan string {
 	ch := make(chan string, 100)

@@ -163,6 +163,11 @@ type StatusResponse struct {
 	Version *string `json:"version,omitempty"`
 }
 
+// GetRootRepositoryDirectoryParams defines parameters for GetRootRepositoryDirectory.
+type GetRootRepositoryDirectoryParams struct {
+	Branch *string `form:"branch,omitempty" json:"branch,omitempty"`
+}
+
 // GetRepositoryDirectoryParams defines parameters for GetRepositoryDirectory.
 type GetRepositoryDirectoryParams struct {
 	Branch *string `form:"branch,omitempty" json:"branch,omitempty"`
@@ -222,6 +227,9 @@ type ServerInterface interface {
 	// Merge agent branch and clean up worktree
 	// (POST /api/projects/{projectId}/agents/{agentId}/merge)
 	MergeAgent(w http.ResponseWriter, r *http.Request, projectId string, agentId string)
+	// Get info about the root directory in the repository
+	// (GET /api/projects/{projectId}/repository/directory/)
+	GetRootRepositoryDirectory(w http.ResponseWriter, r *http.Request, projectId string, params GetRootRepositoryDirectoryParams)
 	// Get info about a directory in the repository
 	// (GET /api/projects/{projectId}/repository/directory/{path})
 	GetRepositoryDirectory(w http.ResponseWriter, r *http.Request, projectId string, path string, params GetRepositoryDirectoryParams)
@@ -540,6 +548,42 @@ func (siw *ServerInterfaceWrapper) MergeAgent(w http.ResponseWriter, r *http.Req
 	handler.ServeHTTP(w, r)
 }
 
+// GetRootRepositoryDirectory operation middleware
+func (siw *ServerInterfaceWrapper) GetRootRepositoryDirectory(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "projectId" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectId", r.PathValue("projectId"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "projectId", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetRootRepositoryDirectoryParams
+
+	// ------------- Optional query parameter "branch" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "branch", r.URL.Query(), &params.Branch)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "branch", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetRootRepositoryDirectory(w, r, projectId, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetRepositoryDirectory operation middleware
 func (siw *ServerInterfaceWrapper) GetRepositoryDirectory(w http.ResponseWriter, r *http.Request) {
 
@@ -835,6 +879,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{projectId}/agents/{agentId}", wrapper.GetAgent)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{projectId}/agents/{agentId}/logs", wrapper.StreamAgentLogs)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{projectId}/agents/{agentId}/merge", wrapper.MergeAgent)
+	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{projectId}/repository/directory/", wrapper.GetRootRepositoryDirectory)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{projectId}/repository/directory/{path}", wrapper.GetRepositoryDirectory)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{projectId}/repository/file/{path}", wrapper.GetRepositoryFile)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{projectId}/repository/filemeta/{path}", wrapper.GetRepositoryFileMeta)
@@ -1256,6 +1301,51 @@ func (response MergeAgent500JSONResponse) VisitMergeAgentResponse(w http.Respons
 	return json.NewEncoder(w).Encode(response)
 }
 
+type GetRootRepositoryDirectoryRequestObject struct {
+	ProjectId string `json:"projectId"`
+	Params    GetRootRepositoryDirectoryParams
+}
+
+type GetRootRepositoryDirectoryResponseObject interface {
+	VisitGetRootRepositoryDirectoryResponse(w http.ResponseWriter) error
+}
+
+type GetRootRepositoryDirectory200JSONResponse DirectoryInfo
+
+func (response GetRootRepositoryDirectory200JSONResponse) VisitGetRootRepositoryDirectoryResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetRootRepositoryDirectory400JSONResponse ErrorResponse
+
+func (response GetRootRepositoryDirectory400JSONResponse) VisitGetRootRepositoryDirectoryResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetRootRepositoryDirectory404JSONResponse ErrorResponse
+
+func (response GetRootRepositoryDirectory404JSONResponse) VisitGetRootRepositoryDirectoryResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetRootRepositoryDirectory500JSONResponse ErrorResponse
+
+func (response GetRootRepositoryDirectory500JSONResponse) VisitGetRootRepositoryDirectoryResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 type GetRepositoryDirectoryRequestObject struct {
 	ProjectId string `json:"projectId"`
 	Path      string `json:"path"`
@@ -1484,6 +1574,9 @@ type StrictServerInterface interface {
 	// Merge agent branch and clean up worktree
 	// (POST /api/projects/{projectId}/agents/{agentId}/merge)
 	MergeAgent(ctx context.Context, request MergeAgentRequestObject) (MergeAgentResponseObject, error)
+	// Get info about the root directory in the repository
+	// (GET /api/projects/{projectId}/repository/directory/)
+	GetRootRepositoryDirectory(ctx context.Context, request GetRootRepositoryDirectoryRequestObject) (GetRootRepositoryDirectoryResponseObject, error)
 	// Get info about a directory in the repository
 	// (GET /api/projects/{projectId}/repository/directory/{path})
 	GetRepositoryDirectory(ctx context.Context, request GetRepositoryDirectoryRequestObject) (GetRepositoryDirectoryResponseObject, error)
@@ -1845,6 +1938,33 @@ func (sh *strictHandler) MergeAgent(w http.ResponseWriter, r *http.Request, proj
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(MergeAgentResponseObject); ok {
 		if err := validResponse.VisitMergeAgentResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetRootRepositoryDirectory operation middleware
+func (sh *strictHandler) GetRootRepositoryDirectory(w http.ResponseWriter, r *http.Request, projectId string, params GetRootRepositoryDirectoryParams) {
+	var request GetRootRepositoryDirectoryRequestObject
+
+	request.ProjectId = projectId
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetRootRepositoryDirectory(ctx, request.(GetRootRepositoryDirectoryRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetRootRepositoryDirectory")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetRootRepositoryDirectoryResponseObject); ok {
+		if err := validResponse.VisitGetRootRepositoryDirectoryResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

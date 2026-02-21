@@ -165,13 +165,13 @@ function RepoBlobPage() {
                 <a
                   href={`/api/projects/${projectId}/repository/file/${path}?branch=${branch}`}
                   download={fileMeta.name}
-                  className="text-xs px-2 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-50"
+                  className="text-xs px-2 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-50 cursor-pointer"
                 >
                   Download
                 </a>
                 <button
                   onClick={() => navigator.clipboard.writeText(fileContent)}
-                  className="text-xs px-2 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-50"
+                  className="text-xs px-2 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-50 cursor-pointer"
                 >
                   Copy
                 </button>
@@ -179,7 +179,7 @@ function RepoBlobPage() {
             </div>
             {fileMeta.isBinary ? (
               <div className="px-4 py-8 text-center text-gray-400 text-sm">
-                Binary file — use Download to view
+                Binary file - use Download to view
               </div>
             ) : (
               <pre className="p-4 text-sm font-mono text-gray-800 overflow-x-auto whitespace-pre leading-relaxed">

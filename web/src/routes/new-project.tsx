@@ -67,7 +67,7 @@ function NewProjectPage() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-2.5 px-4 rounded-lg bg-blue-600 text-white font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors"
+            className="w-full py-2.5 px-4 rounded-lg bg-blue-600 text-white font-medium hover:bg-blue-700 disabled:opacity-50 transition-color cursor-pointer disabled:cursor-progress"
           >
             {loading ? 'Adding project…' : 'Add Project'}
           </button>

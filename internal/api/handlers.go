@@ -304,6 +304,33 @@ func (s *Server) streamLogsSSE(w http.ResponseWriter, r *http.Request, projectId
 	}
 }
 
+func (s *Server) GetRootRepositoryDirectory(_ context.Context, request GetRootRepositoryDirectoryRequestObject) (GetRootRepositoryDirectoryResponseObject, error) {
+	project, err := db.GetProject(s.DB, request.ProjectId)
+	if errors.Is(err, db.ErrNotFound) {
+		return GetRootRepositoryDirectory404JSONResponse(ErrorResponse{Code: 404, Error: "project not found"}), nil
+	}
+	if err != nil {
+		return GetRootRepositoryDirectory500JSONResponse(ErrorResponse{Code: 500, Error: err.Error()}), nil
+	}
+
+	branch := ""
+	if request.Params.Branch != nil {
+		branch = *request.Params.Branch
+	}
+
+	absPath, err := resolveRepoPath(project.Path, "", branch)
+	if err != nil {
+		return GetRootRepositoryDirectory404JSONResponse(ErrorResponse{Code: 404, Error: "path not found"}), nil
+	}
+
+	info, err := readDirectory(absPath, "", branch)
+	if err != nil {
+		return GetRootRepositoryDirectory500JSONResponse(ErrorResponse{Code: 500, Error: err.Error()}), nil
+	}
+
+	return GetRootRepositoryDirectory200JSONResponse(info), nil
+}
+
 func (s *Server) GetRepositoryDirectory(_ context.Context, request GetRepositoryDirectoryRequestObject) (GetRepositoryDirectoryResponseObject, error) {
 	project, err := db.GetProject(s.DB, request.ProjectId)
 	if errors.Is(err, db.ErrNotFound) {

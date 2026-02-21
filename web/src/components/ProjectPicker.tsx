@@ -43,7 +43,7 @@ export function ProjectPicker({ currentProjectId }: Props) {
     <div className="relative" ref={ref}>
       <button
         onClick={() => setOpen(!open)}
-        className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-100 max-w-48 truncate"
+        className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-100 max-w-48 truncate cursor-pointer"
       >
         <span className="truncate">
           {currentProject?.name ?? 'Select project'}
@@ -60,7 +60,7 @@ export function ProjectPicker({ currentProjectId }: Props) {
               <button
                 key={project.id}
                 onClick={() => handleSelect(project)}
-                className={`w-full text-left px-4 py-2 text-sm hover:bg-gray-50 ${
+                className={`w-full text-left px-4 py-2 text-sm hover:bg-gray-50 cursor-pointer ${
                   project.id === currentProjectId ? 'font-medium text-blue-600' : 'text-gray-700'
                 }`}
               >
@@ -72,7 +72,7 @@ export function ProjectPicker({ currentProjectId }: Props) {
           <div className="border-t border-gray-100 py-1">
             <button
               onClick={handleNewProject}
-              className="w-full text-left px-4 py-2 text-sm text-blue-600 hover:bg-blue-50 font-medium"
+              className="w-full text-left px-4 py-2 text-sm text-blue-600 hover:bg-blue-50 font-medium cursor-pointer"
             >
               + New project…
             </button>

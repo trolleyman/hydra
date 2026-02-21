@@ -197,7 +197,7 @@ func CreateAgent(db *sql.DB, params CreateAgentParams) (Agent, error) {
 	name := strings.ToUpper(slug[:1]) + slug[1:]
 	name = strings.ReplaceAll(name, "-", " ")
 
-	worktreePath := fmt.Sprintf("%s/%s", params.WorktreesDir, id)
+	worktreePath := fmt.Sprintf("%s/%s", params.WorktreesDir, branch)
 
 	now := time.Now().UTC()
 	_, err = db.Exec(`

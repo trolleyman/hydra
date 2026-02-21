@@ -41,7 +41,7 @@ export function AgentCard({ agent, onDelete, onMerge }: Props) {
           {canMerge && onMerge && (
             <button
               onClick={() => onMerge(agent.id)}
-              className="text-xs px-2 py-1 rounded bg-emerald-50 text-emerald-700 hover:bg-emerald-100 font-medium"
+              className="text-xs px-2 py-1 rounded bg-emerald-50 text-emerald-700 hover:bg-emerald-100 font-medium cursor-pointer"
             >
               Merge
             </button>
@@ -49,7 +49,7 @@ export function AgentCard({ agent, onDelete, onMerge }: Props) {
           {canDelete && onDelete && (
             <button
               onClick={() => onDelete(agent.id)}
-              className="text-xs px-2 py-1 rounded bg-red-50 text-red-600 hover:bg-red-100 font-medium"
+              className="text-xs px-2 py-1 rounded bg-red-50 text-red-600 hover:bg-red-100 font-medium cursor-pointer"
             >
               Delete
             </button>

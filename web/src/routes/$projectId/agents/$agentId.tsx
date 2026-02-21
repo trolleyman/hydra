@@ -88,7 +88,7 @@ function AgentDetailPage() {
             {canMerge && (
               <button
                 onClick={() => setMergeOpen(true)}
-                className="px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700"
+                className="px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 cursor-pointer"
               >
                 Merge
               </button>
@@ -96,7 +96,7 @@ function AgentDetailPage() {
             {canDelete && (
               <button
                 onClick={() => setDeleteOpen(true)}
-                className="px-4 py-2 rounded-lg border border-red-300 text-red-600 text-sm font-medium hover:bg-red-50"
+                className="px-4 py-2 rounded-lg border border-red-300 text-red-600 text-sm font-medium hover:bg-red-50 cursor-pointer"
               >
                 Delete
               </button>

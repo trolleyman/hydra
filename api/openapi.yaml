@@ -381,6 +381,48 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /api/projects/{projectId}/repository/directory/:
+    get:
+      summary: Get info about the root directory in the repository
+      operationId: getRootRepositoryDirectory
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: branch
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DirectoryInfo'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+
   /api/projects/{projectId}/repository/directory/{path}:
     get:
       summary: Get info about a directory in the repository
@@ -394,6 +436,7 @@ paths:
         - name: path
           in: path
           required: true
+          allowReserved: true
           schema:
             type: string
           style: simple

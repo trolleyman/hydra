@@ -202,7 +202,7 @@ Backend:
 1. Generates an agent ID and branch name (`hydra/<prompt slug>`). (see CREATE TABLE above for details)
 2. Creates a git worktree at `~/.hydra/worktrees/<prompt slug>` on the new branch.
 3. Writes the agent row to SQLite with `status = 'pending'`. The sandbox ID can be the agent ID for now.
-4. Creates the Docker sandbox (see below) asynchronously, and starts it. (`docker sandbox create --name <sandbox ID> [-t <template> if set] <ai_provider ("shell" if it is "other")>`)
+4. Creates the Docker sandbox (see below) asynchronously, and starts it. (`docker sandbox create --name <sandbox ID> [-t <template> if set] <ai_provider ("shell" if it is "other")> <workspace>`)
 5. Updates `status = 'starting'` after creating, and `status = 'running'` after starting.
 
 ### 2. Running

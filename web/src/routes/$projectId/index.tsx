@@ -84,7 +84,7 @@ function ProjectOverviewPage() {
           <p className="text-sm font-medium text-gray-700 mb-3">Start a new agent</p>
           <button
             onClick={() => setCreateOpen(true)}
-            className="w-full text-left px-4 py-3 rounded-md border border-dashed border-gray-300 text-gray-400 hover:border-blue-400 hover:text-blue-500 transition-colors text-sm"
+            className="w-full text-left px-4 py-3 rounded-md border border-dashed border-gray-300 text-gray-400 hover:border-blue-400 hover:text-blue-500 transition-colors text-sm cursor-pointer"
           >
             Describe what you want the agent to do…
           </button>

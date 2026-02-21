@@ -109,14 +109,14 @@ export function CreateAgentDialog({ open, onClose, onSubmit }: Props) {
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 text-sm rounded-md border border-gray-300 text-gray-700 hover:bg-gray-50"
+              className="px-4 py-2 text-sm rounded-md border border-gray-300 text-gray-700 hover:bg-gray-50 cursor-pointer"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={submitting}
-              className="px-4 py-2 text-sm rounded-md bg-blue-600 text-white hover:bg-blue-700 font-medium disabled:opacity-50"
+              className="px-4 py-2 text-sm rounded-md bg-blue-600 text-white hover:bg-blue-700 font-medium cursor-pointer disabled:opacity-50 disabled:cursor-progress"
             >
               {submitting ? 'Starting…' : 'Start Agent'}
             </button>

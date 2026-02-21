@@ -52,7 +52,7 @@ function AgentsListPage() {
           <h1 className="text-2xl font-bold text-gray-900">Agents</h1>
           <button
             onClick={() => setCreateOpen(true)}
-            className="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700"
+            className="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 cursor-pointer"
           >
             New Agent
           </button>
