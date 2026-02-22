@@ -69,7 +69,7 @@ func main() {
 
 	addr := "localhost:8080"
 	log.Printf("Server starting on http://%s", addr)
-	if err := http.ListenAndServe(addr, mux); err != nil {
+	if err := http.ListenAndServe(addr, api.LoggingMiddleware(mux)); err != nil {
 		log.Fatalf("ListenAndServe: %v", err)
 	}
 }
