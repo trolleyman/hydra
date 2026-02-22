@@ -17,4 +17,4 @@ RUN npm install -g @google/gemini-cli
 
 WORKDIR /app
 
-ENTRYPOINT ["gemini", "code"]
+ENTRYPOINT ["gemini", "-i"]

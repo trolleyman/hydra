@@ -17,4 +17,4 @@ RUN npm install -g @anthropic-ai/claude-code
 
 WORKDIR /app
 
-ENTRYPOINT ["claude", "--dangerously-skip-permissions", "-p"]
+ENTRYPOINT ["claude", "--dangerously-skip-permissions", "--"]
