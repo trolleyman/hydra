@@ -266,7 +266,7 @@ func (Build) All() {
 
 func (Build) Go() error {
 	addGoBuildDeps()
-	err := runV("go", "mod", "vendor")
+	err := runV("go", "mod", "download")
 	if err != nil {
 		return err
 	}
