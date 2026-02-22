@@ -266,10 +266,18 @@ func (Build) All() {
 
 func (Build) Go() error {
 	addGoBuildDeps()
+	err := runV("go", "mod", "vendor")
+	if err != nil {
+		return err
+	}
 	return runV("go", "build", "./...")
 }
 
 func (Build) TypeScript() error {
+	err := runInDirV("web", "bun", "install")
+	if err != nil {
+		return err
+	}
 	return runInDirV("web", "bun", "run", "build")
 }
 
