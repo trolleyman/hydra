@@ -5,11 +5,25 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Run: hydra",
+            "name": "Run: hydra tui",
             "type": "go",
             "request": "launch",
             "mode": "auto",
-            "program": "${workspaceFolder}/cmd/hydra"
+            "program": "${workspaceFolder}/cmd/hydra",
+            "args": [
+                "tui",
+            ],
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Run: hydra server",
+            "type": "go",
+            "request": "launch",
+            "mode": "auto",
+            "program": "${workspaceFolder}/cmd/hydra",
+            "args": [
+                "server"
+            ]
         },
         {
             "name": "Run: hydra --debug spawn",
