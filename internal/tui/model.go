@@ -200,7 +200,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) View() string {
-	title := titleStyle.Render("Hydra  AI Agent Orchestrator")
+	title := titleStyle.Render("Hydra AI Agent Orchestrator")
 
 	var body string
 	if len(m.agents) == 0 {

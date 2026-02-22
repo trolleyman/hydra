@@ -5,49 +5,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
 
 	"braces.dev/errtrace"
-	"github.com/cockroachdb/errors"
 )
-
-func FindProjectRootFromCwd() (string, error) {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return "", errtrace.Wrap(fmt.Errorf("get working directory: %w", err))
-	}
-	return errtrace.Wrap2(FindProjectRoot(cwd))
-}
-
-// FindProjectRoot walks up from dir until it finds a .git directory.
-func FindProjectRoot(dir string) (string, error) {
-	current := dir
-	for {
-		if _, err := os.Stat(filepath.Join(current, ".git")); err == nil {
-			return current, nil
-		}
-		parent := filepath.Dir(current)
-		if parent == current {
-			return "", errtrace.Wrap(errors.Errorf("not inside a git repository"))
-		}
-		current = parent
-	}
-}
-
-// SlugFromPrompt converts a prompt string into a git-branch-safe slug.
-// The result is prefixed with "agent/".
-func SlugFromPrompt(prompt string) string {
-	slug := strings.ToLower(prompt)
-	re := regexp.MustCompile(`[^a-z0-9]+`)
-	slug = re.ReplaceAllString(slug, "-")
-	slug = strings.Trim(slug, "-")
-	if len(slug) > 50 {
-		slug = slug[:50]
-		slug = strings.TrimRight(slug, "-")
-	}
-	return "agent/" + slug
-}
 
 // GetCurrentBranch returns the name of the currently checked-out branch.
 func GetCurrentBranch(projectRoot string) (string, error) {
@@ -83,10 +44,4 @@ func RemoveWorktree(projectRoot, worktreePath string) error {
 		return errtrace.Wrap(fmt.Errorf("git worktree remove: %w", err))
 	}
 	return nil
-}
-
-// InferProjectRoot derives the project root from a worktree path created by Hydra.
-// Convention: <projectRoot>/.hydra/worktrees/<slug>
-func InferProjectRoot(worktreePath string) string {
-	return filepath.Dir(filepath.Dir(filepath.Dir(worktreePath)))
 }

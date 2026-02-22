@@ -8,8 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
-	"time"
+	"slices"
 
 	"braces.dev/errtrace"
 	"github.com/docker/docker/api/types/container"
@@ -74,15 +73,16 @@ func ListAgents(ctx context.Context, cli *dockerclient.Client) ([]Agent, error) 
 
 // SpawnOptions holds all configuration for launching a new agent container.
 type SpawnOptions struct {
+	Id             string
+	Args           string
 	Prompt         string
+	ProjectPath    string
 	WorktreePath   string
 	BranchName     string
 	BaseBranch     string
 	DockerfilePath string
-	PromptPrefix   string
 	GitAuthorName  string
 	GitAuthorEmail string
-	GitConfigPath  string
 }
 
 // SpawnAgent builds the Docker image if necessary, then creates and starts the container.
@@ -93,12 +93,9 @@ func SpawnAgent(ctx context.Context, cli *dockerclient.Client, opts SpawnOptions
 		return "", errtrace.Wrap(fmt.Errorf("ensure image: %w", err))
 	}
 
-	fullPrompt := strings.TrimRight(opts.PromptPrefix, "\n") + "\n" + opts.Prompt
-
 	meta := &AgentMetadata{
-		Prompt:           opts.Prompt,
+		ProjectPath:      opts.ProjectPath,
 		HostWorktreePath: opts.WorktreePath,
-		CreatedAt:        time.Now().UTC(),
 		BranchName:       opts.BranchName,
 		BaseBranch:       opts.BaseBranch,
 	}
@@ -122,22 +119,17 @@ func SpawnAgent(ctx context.Context, cli *dockerclient.Client, opts SpawnOptions
 	}
 
 	binds := []string{opts.WorktreePath + ":/app:rw"}
-	if opts.GitConfigPath != "" {
-		if _, err := os.Stat(opts.GitConfigPath); err == nil {
-			binds = append(binds, opts.GitConfigPath+":/root/.gitconfig:ro")
-		}
-	}
 
-	slug := strings.TrimPrefix(opts.BranchName, "agent/")
-	containerName := "hydra-" + strings.ReplaceAll(slug, "/", "-")
+	// TODO: Add binds depending on AI agent type (auth, config, etc.)
 
 	var netCfg *network.NetworkingConfig
 	var platform *ocispec.Platform
 
+	log.Printf("Creating container for agent %s...", opts.Id)
 	resp, err := cli.ContainerCreate(ctx,
 		&container.Config{
 			Image:      imageTag,
-			Cmd:        []string{fullPrompt},
+			Cmd:        []string{opts.Prompt},
 			Labels:     map[string]string{LabelKey: labelVal},
 			Tty:        true,
 			Env:        env,
@@ -148,7 +140,7 @@ func SpawnAgent(ctx context.Context, cli *dockerclient.Client, opts SpawnOptions
 		},
 		netCfg,
 		platform,
-		containerName,
+		"",
 	)
 	if err != nil {
 		return "", errtrace.Wrap(fmt.Errorf("create container: %w", err))
@@ -197,7 +189,7 @@ func ensureImage(ctx context.Context, cli *dockerclient.Client, dockerfilePath s
 	if err != nil {
 		return "", errtrace.Wrap(fmt.Errorf("read dockerfile: %w", err))
 	}
-	hash := fmt.Sprintf("%x", sha256.Sum256(data))[:8]
+	hash := fmt.Sprintf("%x", sha256.Sum256(slices.Concat([]byte(dockerfilePath), data)))[:8]
 	tag := "hydra-agent:" + hash
 
 	images, err := cli.ImageList(ctx, image.ListOptions{

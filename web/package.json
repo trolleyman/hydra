@@ -1,0 +1,44 @@
+{
+  "name": "hydra",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "generate-tanstack-router": "tsr generate",
+    "generate-openapi": "npx openapi-typescript-codegen --input ../api/openapi.yaml --output src/api --client fetch --name Hydra",
+    "generate-routes-regex": "bun scripts/generate-routes-regex.ts",
+    "prebuild": "bun run generate-openapi && bun run generate-tanstack-router",
+    "build": "tsc -b && vite build",
+    "postbuild": "bun run generate-routes-regex",
+    "lint": "eslint .",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@tailwindcss/vite": "^4.2.0",
+    "@tanstack/react-router": "^1.161.4",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "tailwindcss": "^4.2.0",
+    "zustand": "^5.0.11"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.1",
+    "@tanstack/router-cli": "^1.161.4",
+    "@tanstack/router-plugin": "^1.161.4",
+    "@types/node": "^25.3.0",
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react-swc": "^4.2.2",
+    "eslint": "^9.39.1",
+    "eslint-plugin-react-hooks": "^7.0.1",
+    "eslint-plugin-react-refresh": "^0.4.24",
+    "globals": "^16.5.0",
+    "typescript": "~5.9.3",
+    "typescript-eslint": "^8.48.0",
+    "vite": "^8.0.0-beta.13"
+  },
+  "overrides": {
+    "vite": "^8.0.0-beta.13"
+  }
+}

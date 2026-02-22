@@ -1,0 +1,98 @@
+package main
+
+import (
+	"io/fs"
+	"log"
+	"net/http"
+
+	"github.com/spf13/cobra"
+	hydra "github.com/trolleyman/hydra/internal"
+	"github.com/trolleyman/hydra/internal/api"
+	"github.com/trolleyman/hydra/web"
+)
+
+func init() {
+	rootCmd.AddCommand(serverCmd)
+}
+
+var serverCmd = &cobra.Command{
+	Use:   "server",
+	Short: "Run a web server",
+	RunE:  runServer,
+}
+
+func runServer(_ *cobra.Command, _ []string) error {
+	worktreesDir, err := hydra.WorktreesDir()
+	if err != nil {
+		log.Fatalf("Resolve worktrees dir: %v", err)
+	}
+
+	log.Printf("Worktrees: %s", worktreesDir)
+
+	server := &api.Server{
+		WorktreesDir: worktreesDir,
+	}
+
+	// Build the main mux
+	mux := http.NewServeMux()
+
+	// Register API routes
+	apiHandler := api.NewHandler(server)
+	mux.Handle("/api/", apiHandler)
+	mux.Handle("/health", apiHandler)
+
+	// Serve the static React SPA
+	distFS, err := fs.Sub(web.FrontendAssets, "dist")
+	if err != nil {
+		log.Fatal(err)
+	}
+	mux.Handle("/", spaHandler(distFS))
+
+	addr := "localhost:8080"
+	log.Printf("Server starting on http://%s", addr)
+	return http.ListenAndServe(addr, api.LoggingMiddleware(mux))
+}
+
+func spaHandler(fsys fs.FS) http.HandlerFunc {
+	fileServer := http.FileServer(http.FS(fsys))
+
+	return func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+		cleanPath := trimSlash(path)
+		if cleanPath == "" {
+			cleanPath = "index.html"
+		}
+
+		// Serve file if it exists in dist/
+		_, err := fs.Stat(fsys, cleanPath)
+		if err == nil {
+			fileServer.ServeHTTP(w, r)
+			return
+		}
+
+		// File does not exist - return index.html for client-side routing
+		indexContent, err := fs.ReadFile(fsys, "index.html")
+		if err != nil {
+			log.Printf("Error reading index.html: %v", err)
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "text/html")
+
+		if web.RoutesRegex.MatchString(path) {
+			w.WriteHeader(http.StatusOK)
+		} else {
+			w.WriteHeader(http.StatusNotFound)
+		}
+
+		w.Write(indexContent)
+	}
+}
+
+func trimSlash(s string) string {
+	if len(s) > 0 && s[0] == '/' {
+		return s[1:]
+	}
+	return s
+}

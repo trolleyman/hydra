@@ -16,7 +16,7 @@ func init() {
 
 var attachCmd = &cobra.Command{
 	Use:   "attach <id>",
-	Short: "Attach to a running agent session",
+	Short: "Attach to a running agent with the branch or container ID given",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		prefix := args[0]
@@ -35,6 +35,8 @@ var attachCmd = &cobra.Command{
 		var matches []docker.Agent
 		for _, a := range agents {
 			if strings.HasPrefix(a.ContainerID, prefix) {
+				matches = append(matches, a)
+			} else if strings.HasPrefix(a.Meta.BranchName, prefix) {
 				matches = append(matches, a)
 			}
 		}

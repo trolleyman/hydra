@@ -1,11 +1,11 @@
 package docker
 
 import (
-	"braces.dev/errtrace"
 	"encoding/json"
 	"fmt"
 	"net/url"
-	"time"
+
+	"braces.dev/errtrace"
 )
 
 // LabelKey is the Docker label used to identify Hydra-managed containers.
@@ -13,11 +13,11 @@ const LabelKey = "org.trolleyman.hydra"
 
 // AgentMetadata is the structured data stored in the Hydra Docker label.
 type AgentMetadata struct {
-	Prompt           string    `json:"prompt"`
-	HostWorktreePath string    `json:"host_worktree_path"`
-	CreatedAt        time.Time `json:"created_at"`
-	BranchName       string    `json:"branch_name"`
-	BaseBranch       string    `json:"base_branch"`
+	Id               string `json:"id"`
+	ProjectPath      string `json:"project_path"`
+	HostWorktreePath string `json:"host_worktree_path"`
+	BranchName       string `json:"branch_name"`
+	BaseBranch       string `json:"base_branch"`
 }
 
 // EncodeLabel serialises metadata to a URL-encoded JSON string for use as a Docker label value.
