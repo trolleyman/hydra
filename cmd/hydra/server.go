@@ -6,7 +6,6 @@ import (
 	"net/http"
 
 	"github.com/spf13/cobra"
-	hydra "github.com/trolleyman/hydra/internal"
 	"github.com/trolleyman/hydra/internal/api"
 	"github.com/trolleyman/hydra/web"
 )
@@ -22,10 +21,11 @@ var serverCmd = &cobra.Command{
 }
 
 func runServer(_ *cobra.Command, _ []string) error {
-	worktreesDir, err := hydra.WorktreesDir()
+	projectDir, err := paths.GetProjectDirFromCwd()
 	if err != nil {
-		log.Fatalf("Resolve worktrees dir: %v", err)
+		log.Fatalf("Resolve project dir: %v", err)
 	}
+	worktreesDir := paths.GetWorktreeDirFromProjectRoot(projectRoot)
 
 	log.Printf("Worktrees: %s", worktreesDir)
 

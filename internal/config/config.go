@@ -9,6 +9,11 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
+//go:embed claude.Dockerfile
+var DefaultDockerfileClaude string
+//go:embed gemini.Dockerfile
+var DefaultDockerfileGemini string
+
 type Config struct {
 	// Agent is the selected agent
 	Agent *string `toml:"agent"`
