@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { createFileRoute } from '@tanstack/react-router'
 import { Sidebar } from '../../components/Sidebar'
-import { CreateAgentDialog } from '../../components/CreateAgentDialog'
+import { PromptTextBox } from '../../components/PromptTextBox'
 import { AgentCard } from '../../components/AgentCard'
 import { ConfirmDialog } from '../../components/ConfirmDialog'
 import { useProjectStore } from '../../stores/projectStore'
@@ -17,7 +17,6 @@ export const Route = createFileRoute('/$projectId/')({
 function ProjectOverviewPage() {
   const { projectId } = Route.useParams()
   const [project, setProject] = useState<Project | null>(null)
-  const [createOpen, setCreateOpen] = useState(false)
   const [deleteId, setDeleteId] = useState<string | null>(null)
   const { setLastProjectId } = useProjectStore()
   const { agents, fetchAgents, createAgent, deleteAgent, mergeAgent } = useAgentStore()
@@ -80,15 +79,7 @@ function ProjectOverviewPage() {
         </div>
 
         {/* New agent prompt */}
-        <div className="bg-white rounded-lg border border-gray-200 p-4 mb-6">
-          <p className="text-sm font-medium text-gray-700 mb-3">Start a new agent</p>
-          <button
-            onClick={() => setCreateOpen(true)}
-            className="w-full text-left px-4 py-3 rounded-md border border-dashed border-gray-300 text-gray-400 hover:border-blue-400 hover:text-blue-500 transition-colors text-sm cursor-pointer"
-          >
-            Describe what you want the agent to do…
-          </button>
-        </div>
+        <PromptTextBox className="mb-6" onSubmit={handleCreateAgent} />
 
         {/* Recent agents */}
         {projectAgents.length > 0 && (
@@ -107,12 +98,6 @@ function ProjectOverviewPage() {
           </div>
         )}
       </main>
-
-      <CreateAgentDialog
-        open={createOpen}
-        onClose={() => setCreateOpen(false)}
-        onSubmit={handleCreateAgent}
-      />
 
       <ConfirmDialog
         open={!!deleteId}
