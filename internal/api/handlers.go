@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 
 	agentpkg "github.com/trolleyman/hydra/internal/agent"
@@ -555,6 +556,16 @@ func readDirectory(absPath, relPath, branch string) (DirectoryInfo, error) {
 		}
 		dirEntries = append(dirEntries, entry)
 	}
+
+	// Sort directories before files, alphabetically within each group
+	sort.SliceStable(dirEntries, func(i, j int) bool {
+		iIsDir := dirEntries[i].Type == "directory"
+		jIsDir := dirEntries[j].Type == "directory"
+		if iIsDir != jIsDir {
+			return iIsDir
+		}
+		return strings.ToLower(dirEntries[i].Name) < strings.ToLower(dirEntries[j].Name)
+	})
 
 	info := DirectoryInfo{
 		Path:    relPath,
