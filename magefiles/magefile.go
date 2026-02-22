@@ -29,23 +29,27 @@ func getVersion() string {
 
 // ANSI color codes for pretty-printing.
 const (
-	colorReset         = "\u001b[0m"
-	colorBlack         = "\u001b[0;30m"
-	colorRed           = "\u001b[0;31m"
-	colorGreen         = "\u001b[0;32m"
-	colorYellow        = "\u001b[0;33m"
-	colorBlue          = "\u001b[0;34m"
-	colorMagenta       = "\u001b[0;35m"
-	colorCyan          = "\u001b[0;36m"
-	colorWhite         = "\u001b[0;37m"
-	colorBrightBlack   = "\u001b[1;30m"
-	colorBrightRed     = "\u001b[1;31m"
-	colorBrightGreen   = "\u001b[1;32m"
-	colorBrightYellow  = "\u001b[1;33m"
-	colorBrightBlue    = "\u001b[1;34m"
-	colorBrightMagenta = "\u001b[1;35m"
-	colorBrightCyan    = "\u001b[1;36m"
-	colorBrightWhite   = "\u001b[1;37m"
+	colorReset   = "\u001b[0m"
+	colorDim     = "\u001b[2m"
+	colorBold    = "\u001b[1m"
+	colorBlack   = "\u001b[30m"
+	colorRed     = "\u001b[31m"
+	colorGreen   = "\u001b[32m"
+	colorYellow  = "\u001b[33m"
+	colorBlue    = "\u001b[34m"
+	colorMagenta = "\u001b[35m"
+	colorCyan    = "\u001b[36m"
+	colorWhite   = "\u001b[37m"
+)
+
+func style(codes ...string) string {
+	return strings.Join(codes, "")
+}
+
+var (
+	// Matching bun
+	colorCommandDollar = style(colorReset, colorDim, colorMagenta)
+	colorCommandLine   = style(colorReset, colorDim, colorBold)
 )
 
 // Quotes a string for display as a shell argument.
@@ -143,15 +147,15 @@ func formatPathPair(src, dst string) string {
 }
 
 func printCmd(cmd string, args ...string) {
-	fmt.Printf("%s$ %s%s%s\n", colorBrightMagenta, colorBlack, formatCmd(cmd, args...), colorReset)
+	fmt.Printf("%s$ %s%s%s\n", colorCommandDollar, colorCommandLine, formatCmd(cmd, args...), colorReset)
 }
 
 func printCmdBackground(cmd string, args ...string) {
-	fmt.Printf("%s$ %s%s%s &%s\n", colorBrightMagenta, colorBlack, formatCmd(cmd, args...), colorCyan, colorReset)
+	fmt.Printf("%s$ %s%s%s &%s\n", colorCommandDollar, colorCommandLine, formatCmd(cmd, args...), colorCyan, colorReset)
 }
 
 func printCmdLine(cmdLine []string) {
-	fmt.Printf("%s$ %s%s%s\n", colorBrightMagenta, colorBlack, strings.Join(cmdLine, " "), colorReset)
+	fmt.Printf("%s$ %s%s%s\n", colorCommandDollar, colorCommandLine, strings.Join(cmdLine, " "), colorReset)
 }
 
 // run runs a command silently (no stdout/stderr forwarding)
