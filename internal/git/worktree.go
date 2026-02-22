@@ -10,6 +10,15 @@ import (
 	"braces.dev/errtrace"
 )
 
+// FindProjectRoot returns the root of the git repository containing dir.
+func FindProjectRoot(dir string) (string, error) {
+	out, err := exec.Command("git", "-C", dir, "rev-parse", "--show-toplevel").Output()
+	if err != nil {
+		return "", errtrace.Wrap(fmt.Errorf("git rev-parse --show-toplevel: %w", err))
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
 // GetCurrentBranch returns the name of the currently checked-out branch.
 func GetCurrentBranch(projectRoot string) (string, error) {
 	out, err := exec.Command("git", "-C", projectRoot, "rev-parse", "--abbrev-ref", "HEAD").Output()
@@ -17,6 +26,22 @@ func GetCurrentBranch(projectRoot string) (string, error) {
 		return "", errtrace.Wrap(fmt.Errorf("git rev-parse: %w", err))
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+// ListHydraBranches returns all branches matching hydra/*.
+func ListHydraBranches(projectRoot string) ([]string, error) {
+	out, err := exec.Command("git", "-C", projectRoot, "branch", "--list", "hydra/*", "--format=%(refname:short)").Output()
+	if err != nil {
+		return nil, errtrace.Wrap(fmt.Errorf("git branch --list: %w", err))
+	}
+	var branches []string
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			branches = append(branches, line)
+		}
+	}
+	return branches, nil
 }
 
 // CreateWorktree runs `git worktree add -b <branchName> <path> <baseBranch>`.
@@ -42,6 +67,17 @@ func RemoveWorktree(projectRoot, worktreePath string) error {
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
 		return errtrace.Wrap(fmt.Errorf("git worktree remove: %w", err))
+	}
+	return nil
+}
+
+// DeleteBranch runs `git branch -D <branchName>`.
+func DeleteBranch(projectRoot, branchName string) error {
+	cmd := exec.Command("git", "-C", projectRoot, "branch", "-D", branchName)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return errtrace.Wrap(fmt.Errorf("git branch -D: %w", err))
 	}
 	return nil
 }

@@ -7,6 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/trolleyman/hydra/internal/api"
+	"github.com/trolleyman/hydra/internal/paths"
 	"github.com/trolleyman/hydra/web"
 )
 
@@ -21,9 +22,9 @@ var serverCmd = &cobra.Command{
 }
 
 func runServer(_ *cobra.Command, _ []string) error {
-	projectDir, err := paths.GetProjectDirFromCwd()
+	projectRoot, err := paths.GetProjectRootFromCwd()
 	if err != nil {
-		log.Fatalf("Resolve project dir: %v", err)
+		log.Fatalf("Resolve project root: %v", err)
 	}
 	worktreesDir := paths.GetWorktreeDirFromProjectRoot(projectRoot)
 

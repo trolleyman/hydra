@@ -11,13 +11,23 @@ import (
 // LabelKey is the Docker label used to identify Hydra-managed containers.
 const LabelKey = "org.trolleyman.hydra"
 
+// AgentType identifies which AI agent is running in the container.
+type AgentType string
+
+const (
+	AgentTypeClaude AgentType = "claude"
+	AgentTypeGemini AgentType = "gemini"
+)
+
 // AgentMetadata is the structured data stored in the Hydra Docker label.
 type AgentMetadata struct {
-	Id               string `json:"id"`
-	ProjectPath      string `json:"project_path"`
-	HostWorktreePath string `json:"host_worktree_path"`
-	BranchName       string `json:"branch_name"`
-	BaseBranch       string `json:"base_branch"`
+	Id               string    `json:"id"`
+	AgentType        AgentType `json:"agent_type"`
+	Prompt           string    `json:"prompt"`
+	ProjectPath      string    `json:"project_path"`
+	HostWorktreePath string    `json:"host_worktree_path"`
+	BranchName       string    `json:"branch_name"`
+	BaseBranch       string    `json:"base_branch"`
 }
 
 // EncodeLabel serialises metadata to a URL-encoded JSON string for use as a Docker label value.

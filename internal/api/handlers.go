@@ -2,16 +2,7 @@ package api
 
 import (
 	"context"
-	"database/sql"
-	"errors"
-	"fmt"
 	"net/http"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"runtime"
-	"sort"
-	"strings"
 )
 
 const version = "0.1.0"
@@ -21,11 +12,10 @@ type Server struct {
 	WorktreesDir string
 }
 
-// newServer creates a handler with the strict wrapper and SSE override.
+// NewHandler creates a handler with routing matching the OpenAPI spec.
 func NewHandler(s *Server) http.Handler {
 	strict := NewStrictHandler(s, nil)
-	wrapper := &sseOverride{ServerInterface: strict, server: s}
-	return HandlerFromMux(wrapper, http.NewServeMux())
+	return HandlerFromMux(strict, http.NewServeMux())
 }
 
 // --- StrictServerInterface implementations ---

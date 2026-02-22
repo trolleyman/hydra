@@ -9,6 +9,8 @@ import (
 	"braces.dev/errtrace"
 	"github.com/spf13/cobra"
 	"github.com/trolleyman/hydra/internal/docker"
+	"github.com/trolleyman/hydra/internal/git"
+	"github.com/trolleyman/hydra/internal/heads"
 )
 
 func init() {
@@ -17,37 +19,65 @@ func init() {
 
 var listCmd = &cobra.Command{
 	Use:   "list",
-	Short: "List all AI agents",
+	Short: "List all Hydra agents",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return errtrace.Wrap(fmt.Errorf("get working directory: %w", err))
+		}
+		projectRoot, err := git.FindProjectRoot(cwd)
+		if err != nil {
+			return errtrace.Wrap(err)
+		}
+
 		cli, err := docker.NewClient()
 		if err != nil {
 			return errtrace.Wrap(err)
 		}
 		defer cli.Close()
 
-		agents, err := docker.ListAgents(context.Background(), cli)
+		hs, err := heads.ListHeads(context.Background(), cli, projectRoot)
 		if err != nil {
 			return errtrace.Wrap(err)
 		}
 
-		if len(agents) == 0 {
-			fmt.Println("No agents running.")
+		if len(hs) == 0 {
+			fmt.Println("No agents found.")
 			return nil
 		}
 
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "ID\tIMAGE\tBRANCH\tSTATUS\tPROMPT")
-		for _, a := range agents {
-			id := a.ContainerID
-			if len(id) > 12 {
-				id = id[:12]
+		fmt.Fprintln(w, "ID\tAGENT\tBRANCH\tWORKTREE\tCONTAINER\tSTATUS\tPROMPT")
+		for _, h := range hs {
+			branch := h.BranchName
+			if !h.HasBranch {
+				branch = "(no branch)"
 			}
-			prompt := a.Meta.Prompt
-			if len(prompt) > 50 {
-				prompt = prompt[:50] + "…"
+
+			worktree := "yes"
+			if !h.HasWorktree {
+				worktree = "no"
 			}
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%q\n",
-				id, a.ImageName, a.Meta.BranchName, a.Status, prompt)
+
+			container := ""
+			if h.ContainerID != "" {
+				container = h.ContainerID[:12]
+			} else {
+				container = "(no container)"
+			}
+
+			status := h.ContainerStatus
+			if status == "" {
+				status = "-"
+			}
+
+			prompt := h.Prompt
+			if len(prompt) > 40 {
+				prompt = prompt[:40] + "…"
+			}
+
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%q\n",
+				h.ID, h.AgentType, branch, worktree, container, status, prompt)
 		}
 		return errtrace.Wrap(w.Flush())
 	},

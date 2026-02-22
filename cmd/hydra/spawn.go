@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"fmt"
 	"os"
 	"os/exec"
@@ -11,24 +12,25 @@ import (
 
 	"braces.dev/errtrace"
 	"github.com/spf13/cobra"
-	"github.com/trolleyman/hydra/internal/config"
 	"github.com/trolleyman/hydra/internal/docker"
 	"github.com/trolleyman/hydra/internal/git"
 )
 
 var spawnFlags struct {
-	dockerfile string
+	id         string
+	agentType  string
 	baseBranch string
 }
 
 func init() {
-	spawnCmd.Flags().StringVar(&spawnFlags.dockerfile, "agent", "", "Custom agent name to override default")
+	spawnCmd.Flags().StringVar(&spawnFlags.id, "id", "", "Agent ID (default: random 8-char hex)")
+	spawnCmd.Flags().StringVar(&spawnFlags.agentType, "agent", string(docker.AgentTypeClaude), "Agent type (claude, gemini)")
 	spawnCmd.Flags().StringVar(&spawnFlags.baseBranch, "base-branch", "", "Base branch (default: current branch)")
 	rootCmd.AddCommand(spawnCmd)
 }
 
 var spawnCmd = &cobra.Command{
-	Use:   "spawn [--agent <agent>] [--base-branch <base-branch>] <prompt>",
+	Use:   "spawn [--id <id>] [--agent <agent>] [--base-branch <base-branch>] <prompt>",
 	Short: "Spawn a new AI agent for the given prompt",
 	Args:  cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -45,14 +47,21 @@ var spawnCmd = &cobra.Command{
 			return errtrace.Wrap(err)
 		}
 
-		cfg, err := config.Load(projectRoot)
-		if err != nil {
-			return errtrace.Wrap(err)
+		// Resolve agent ID
+		id := spawnFlags.id
+		if id == "" {
+			id, err = randomID()
+			if err != nil {
+				return errtrace.Wrap(fmt.Errorf("generate agent ID: %w", err))
+			}
 		}
 
-		dockerfilePath, err := ensureDockerfile(cfg, spawnFlags.dockerfile)
-		if err != nil {
-			return errtrace.Wrap(err)
+		agentType := docker.AgentType(spawnFlags.agentType)
+		switch agentType {
+		case docker.AgentTypeClaude, docker.AgentTypeGemini:
+			// valid
+		default:
+			return fmt.Errorf("unknown agent type %q; supported: claude, gemini", spawnFlags.agentType)
 		}
 
 		baseBranch := spawnFlags.baseBranch
@@ -63,9 +72,8 @@ var spawnCmd = &cobra.Command{
 			}
 		}
 
-		branchName := git.SlugFromPrompt(prompt)
-		slug := strings.TrimPrefix(branchName, "agent/")
-		worktreePath := filepath.Join(projectRoot, ".hydra", "worktrees", slug)
+		branchName := "hydra/" + id
+		worktreePath := filepath.Join(projectRoot, ".hydra", "worktrees", id)
 
 		fmt.Printf("Creating worktree on branch %q...\n", branchName)
 		if err := git.CreateWorktree(projectRoot, worktreePath, branchName, baseBranch); err != nil {
@@ -82,20 +90,6 @@ var spawnCmd = &cobra.Command{
 			gitAuthorEmail = readGitConfig(projectRoot, "user.email")
 		}
 
-		// Find the user's gitconfig file to mount read-only
-		gitConfigPath := ""
-		if home, err := os.UserHomeDir(); err == nil {
-			for _, p := range []string{
-				filepath.Join(home, ".gitconfig"),
-				filepath.Join(home, ".config", "git", "config"),
-			} {
-				if _, err := os.Stat(p); err == nil {
-					gitConfigPath = p
-					break
-				}
-			}
-		}
-
 		cli, err := docker.NewClient()
 		if err != nil {
 			return errtrace.Wrap(err)
@@ -103,25 +97,27 @@ var spawnCmd = &cobra.Command{
 		defer cli.Close()
 
 		containerID, err := docker.SpawnAgent(context.Background(), cli, docker.SpawnOptions{
+			Id:             id,
+			AgentType:      agentType,
 			Prompt:         prompt,
+			ProjectPath:    projectRoot,
 			WorktreePath:   worktreePath,
 			BranchName:     branchName,
 			BaseBranch:     baseBranch,
-			DockerfilePath: dockerfilePath,
-			PromptPrefix:   cfg.Prompt.Value,
 			GitAuthorName:  gitAuthorName,
 			GitAuthorEmail: gitAuthorEmail,
-			GitConfigPath:  gitConfigPath,
 		})
 		if err != nil {
 			_ = git.RemoveWorktree(projectRoot, worktreePath)
+			_ = git.DeleteBranch(projectRoot, branchName)
 			return errtrace.Wrap(fmt.Errorf("spawn agent: %w", err))
 		}
 
-		fmt.Printf("Agent started on branch %s (container %s)\n", branchName, containerID[:12])
+		fmt.Printf("Agent %s started on branch %s (container %s)\n", id, branchName, containerID[:12])
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 1, ' ', 0)
-		fmt.Fprintf(w, "  hydra attach %s\t- attach to the session\n", containerID[:12])
+		fmt.Fprintf(w, "  hydra attach %s\t- attach to the session\n", id)
 		fmt.Fprintf(w, "  hydra list\t- view all running agents\n")
+		w.Flush()
 		return nil
 	},
 }
@@ -135,9 +131,11 @@ func readGitConfig(projectRoot, key string) string {
 	return strings.TrimSpace(string(out))
 }
 
-func ensureDockerfile(cfg *config.Config, dockerfile string) (string, error) {
-	if dockerfile != "" {
-		return dockerfile, nil
+// randomID generates a random 8-character hex string.
+func randomID() (string, error) {
+	b := make([]byte, 4)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
 	}
-	return cfg.Agents[cfg.Agent.Value].Value.Dockerfile, nil
+	return fmt.Sprintf("%x", b), nil
 }

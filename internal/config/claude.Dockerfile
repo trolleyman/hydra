@@ -1,4 +1,4 @@
-# Hydra Agent Dockerfile — Claude Code
+# Hydra Agent Dockerfile - Claude Code
 #
 # The full task prompt is passed as an argument to this ENTRYPOINT.
 # See: https://docs.anthropic.com/en/docs/claude-code

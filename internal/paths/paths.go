@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"braces.dev/errtrace"
 )
@@ -34,7 +35,7 @@ func GetProjectRoot(dir string) (string, error) {
 	if err != nil {
 		return "", errtrace.Wrap(fmt.Errorf("git rev-parse -C %q --git-dir: %w", dir, err))
 	}
-	return filepath.Join(dir, string(output)), nil
+	return filepath.Join(dir, strings.TrimSpace(string(output))), nil
 }
 
 func GetHydraDirFromProjectRoot(projectRoot string) string {

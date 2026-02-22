@@ -1,4 +1,4 @@
-# Hydra Agent Dockerfile — Gemini CLI
+# Hydra Agent Dockerfile - Gemini CLI
 #
 # The full task prompt is passed as an argument to this ENTRYPOINT.
 # See: https://github.com/google-gemini/gemini-cli

@@ -2,34 +2,72 @@ package tui
 
 import (
 	"context"
+	"crypto/rand"
 	"fmt"
 	"log"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/table"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	dockerclient "github.com/docker/docker/client"
 	"github.com/trolleyman/hydra/internal/docker"
 	"github.com/trolleyman/hydra/internal/git"
+	"github.com/trolleyman/hydra/internal/heads"
 )
 
 // Model is the Bubble Tea model for the Hydra agent list.
 type Model struct {
-	table     table.Model
-	client    *dockerclient.Client
-	agents    []docker.Agent
-	width     int
-	height    int
-	statusMsg string
-	err       error
+	table       table.Model
+	client      *dockerclient.Client
+	projectRoot string
+	heads       []heads.Head
+	width       int
+	height      int
+	statusMsg   string
+	err         error
+
+	// spawn form state
+	spawning    bool
+	spawnForm   spawnForm
+}
+
+type spawnForm struct {
+	focusIdx  int // 0=id, 1=agentType, 2=prompt
+	idInput   textinput.Model
+	typeIdx   int // index into agentTypes
+	prompt    textinput.Model
+}
+
+var agentTypes = []docker.AgentType{docker.AgentTypeClaude, docker.AgentTypeGemini}
+
+func newSpawnForm() spawnForm {
+	id := textinput.New()
+	id.Placeholder = "random"
+	id.CharLimit = 64
+	id.Focus()
+
+	prompt := textinput.New()
+	prompt.Placeholder = "describe the task..."
+	prompt.CharLimit = 256
+
+	return spawnForm{
+		focusIdx: 0,
+		idInput:  id,
+		typeIdx:  0,
+		prompt:   prompt,
+	}
 }
 
 type (
-	refreshMsg  []docker.Agent
+	refreshMsg  []heads.Head
 	killDoneMsg string
+	spawnDoneMsg string
 	errMsg      struct{ err error }
 )
 
@@ -52,16 +90,25 @@ var (
 	borderStyle = lipgloss.NewStyle().
 			BorderStyle(lipgloss.NormalBorder()).
 			BorderForeground(lipgloss.Color("240"))
+
+	formStyle = lipgloss.NewStyle().
+			BorderStyle(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("62")).
+			Padding(1, 2)
+
+	focusedLabel   = lipgloss.NewStyle().Foreground(lipgloss.Color("62")).Bold(true)
+	unfocusedLabel = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
 )
 
-// New creates a new TUI model connected to the given Docker client.
-func New(cli *dockerclient.Client) Model {
+// New creates a new TUI model connected to the given Docker client and project root.
+func New(cli *dockerclient.Client, projectRoot string) Model {
 	cols := []table.Column{
 		{Title: "ID", Width: 12},
-		{Title: "Image", Width: 18},
-		{Title: "Branch", Width: 32},
-		{Title: "Status", Width: 12},
-		{Title: "Prompt", Width: 40},
+		{Title: "AGENT", Width: 8},
+		{Title: "BRANCH", Width: 28},
+		{Title: "WKTREE", Width: 6},
+		{Title: "STATUS", Width: 12},
+		{Title: "PROMPT", Width: 36},
 	}
 
 	t := table.New(
@@ -83,8 +130,9 @@ func New(cli *dockerclient.Client) Model {
 	t.SetStyles(s)
 
 	return Model{
-		table:  t,
-		client: cli,
+		table:       t,
+		client:      cli,
+		projectRoot: projectRoot,
 	}
 }
 
@@ -98,22 +146,26 @@ func tickCmd() tea.Cmd {
 
 func (m Model) doRefresh() tea.Cmd {
 	return func() tea.Msg {
-		agents, err := docker.ListAgents(context.Background(), m.client)
+		hs, err := heads.ListHeads(context.Background(), m.client, m.projectRoot)
 		if err != nil {
 			return errMsg{err}
 		}
-		return refreshMsg(agents)
+		return refreshMsg(hs)
 	}
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 
+	// Spawn form intercepts all input when active
+	if m.spawning {
+		return m.updateSpawnForm(msg)
+	}
+
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		// Resize table height to fill available space (leave room for title + help)
 		tableHeight := msg.Height - 6
 		if tableHeight < 3 {
 			tableHeight = 3
@@ -125,11 +177,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "q", "ctrl+c":
 			return m, tea.Quit
 
+		case "n":
+			m.spawning = true
+			m.spawnForm = newSpawnForm()
+			return m, textinput.Blink
+
 		case "enter":
 			if row := m.table.SelectedRow(); row != nil {
-				if agent := m.agentByShortID(row[0]); agent != nil {
+				if h := m.headByID(row[0]); h != nil && h.ContainerID != "" {
 					return m, tea.ExecProcess(
-						exec.Command("docker", "attach", agent.ContainerID),
+						exec.Command("docker", "attach", h.ContainerID),
 						func(err error) tea.Msg {
 							if err != nil {
 								log.Printf("attach exited: %v", err)
@@ -142,9 +199,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "l":
 			if row := m.table.SelectedRow(); row != nil {
-				if agent := m.agentByShortID(row[0]); agent != nil {
+				if h := m.headByID(row[0]); h != nil && h.ContainerID != "" {
 					return m, tea.ExecProcess(
-						exec.Command("docker", "logs", "-f", agent.ContainerID),
+						exec.Command("docker", "logs", "-f", h.ContainerID),
 						func(err error) tea.Msg { return refreshMsg(nil) },
 					)
 				}
@@ -152,19 +209,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "x":
 			if row := m.table.SelectedRow(); row != nil {
-				if agent := m.agentByShortID(row[0]); agent != nil {
-					id := agent.ContainerID
-					worktreePath := agent.Meta.HostWorktreePath
+				if h := m.headByID(row[0]); h != nil {
+					head := *h
 					return m, func() tea.Msg {
-						ctx := context.Background()
-						if err := docker.KillAgent(ctx, m.client, id); err != nil {
+						if err := heads.KillHead(context.Background(), m.client, head); err != nil {
 							return errMsg{err}
 						}
-						projectRoot := git.InferProjectRoot(worktreePath)
-						if err := git.RemoveWorktree(projectRoot, worktreePath); err != nil {
-							log.Printf("warn: remove worktree %s: %v", worktreePath, err)
-						}
-						return killDoneMsg(id[:12])
+						return killDoneMsg(head.ID)
 					}
 				}
 			}
@@ -179,7 +230,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case refreshMsg:
 		if msg != nil {
-			m.agents = []docker.Agent(msg)
+			m.heads = []heads.Head(msg)
 		}
 		m.err = nil
 		m.updateTable()
@@ -188,6 +239,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case killDoneMsg:
 		m.statusMsg = fmt.Sprintf("Killed agent %s", string(msg))
+		return m, m.doRefresh()
+
+	case spawnDoneMsg:
+		m.statusMsg = fmt.Sprintf("Spawned agent %s", string(msg))
 		return m, m.doRefresh()
 
 	case errMsg:
@@ -199,15 +254,94 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+func (m Model) updateSpawnForm(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "esc":
+			m.spawning = false
+			return m, nil
+
+		case "tab", "shift+tab":
+			if msg.String() == "tab" {
+				m.spawnForm.focusIdx = (m.spawnForm.focusIdx + 1) % 3
+			} else {
+				m.spawnForm.focusIdx = (m.spawnForm.focusIdx + 2) % 3
+			}
+			if m.spawnForm.focusIdx == 0 {
+				m.spawnForm.idInput.Focus()
+				m.spawnForm.prompt.Blur()
+			} else if m.spawnForm.focusIdx == 1 {
+				m.spawnForm.idInput.Blur()
+				m.spawnForm.prompt.Blur()
+			} else {
+				m.spawnForm.idInput.Blur()
+				m.spawnForm.prompt.Focus()
+			}
+			return m, textinput.Blink
+
+		case "left", "right":
+			if m.spawnForm.focusIdx == 1 {
+				if msg.String() == "left" {
+					m.spawnForm.typeIdx = (m.spawnForm.typeIdx + len(agentTypes) - 1) % len(agentTypes)
+				} else {
+					m.spawnForm.typeIdx = (m.spawnForm.typeIdx + 1) % len(agentTypes)
+				}
+			}
+			return m, nil
+
+		case "enter":
+			promptText := strings.TrimSpace(m.spawnForm.prompt.Value())
+			if promptText == "" {
+				m.err = fmt.Errorf("prompt is required")
+				return m, nil
+			}
+			id := strings.TrimSpace(m.spawnForm.idInput.Value())
+			if id == "" {
+				var err error
+				id, err = randomTUIID()
+				if err != nil {
+					m.err = err
+					return m, nil
+				}
+			}
+			agentType := agentTypes[m.spawnForm.typeIdx]
+			projectRoot := m.projectRoot
+			m.spawning = false
+			m.statusMsg = fmt.Sprintf("Spawning agent %s...", id)
+
+			return m, func() tea.Msg {
+				if err := spawnHead(projectRoot, id, agentType, promptText, m.client); err != nil {
+					return errMsg{err}
+				}
+				return spawnDoneMsg(id)
+			}
+		}
+	}
+
+	// Forward input to focused field
+	var cmd tea.Cmd
+	if m.spawnForm.focusIdx == 0 {
+		m.spawnForm.idInput, cmd = m.spawnForm.idInput.Update(msg)
+	} else if m.spawnForm.focusIdx == 2 {
+		m.spawnForm.prompt, cmd = m.spawnForm.prompt.Update(msg)
+	}
+	return m, cmd
+}
+
 func (m Model) View() string {
+	if m.spawning {
+		return m.viewSpawnForm()
+	}
+
 	title := titleStyle.Render("Hydra AI Agent Orchestrator")
 
 	var body string
-	if len(m.agents) == 0 {
+	if len(m.heads) == 0 {
 		empty := lipgloss.NewStyle().
 			Foreground(lipgloss.Color("241")).
 			Padding(1, 2).
-			Render("No agents running. Use `hydra spawn <prompt>` to start one.")
+			Render("No agents running. Press [n] to spawn one.")
 		body = borderStyle.Render(empty)
 	} else {
 		body = borderStyle.Render(m.table.View())
@@ -220,7 +354,7 @@ func (m Model) View() string {
 		status = statusStyle.Render(m.statusMsg)
 	}
 
-	help := helpStyle.Render("[↑/↓] navigate  [enter] attach  [l] logs  [x] kill  [r] refresh  [q] quit")
+	help := helpStyle.Render("[↑/↓] navigate  [enter] attach  [l] logs  [x] kill  [n] spawn  [r] refresh  [q] quit")
 
 	parts := []string{title, body}
 	if status != "" {
@@ -230,33 +364,134 @@ func (m Model) View() string {
 	return strings.Join(parts, "\n")
 }
 
+func (m Model) viewSpawnForm() string {
+	f := m.spawnForm
+
+	labelID := unfocusedLabel.Render("ID (leave blank for random):")
+	if f.focusIdx == 0 {
+		labelID = focusedLabel.Render("ID (leave blank for random):")
+	}
+
+	labelType := unfocusedLabel.Render("Agent type [←/->]:")
+	if f.focusIdx == 1 {
+		labelType = focusedLabel.Render("Agent type [←/->]:")
+	}
+
+	labelPrompt := unfocusedLabel.Render("Prompt:")
+	if f.focusIdx == 2 {
+		labelPrompt = focusedLabel.Render("Prompt:")
+	}
+
+	// Render agent type selector
+	var typeOptions []string
+	for i, t := range agentTypes {
+		s := string(t)
+		if i == f.typeIdx {
+			s = focusedLabel.Render("[ " + s + " ]")
+		} else {
+			s = unfocusedLabel.Render("  " + s + "  ")
+		}
+		typeOptions = append(typeOptions, s)
+	}
+	typeRow := strings.Join(typeOptions, " ")
+
+	form := formStyle.Render(strings.Join([]string{
+		titleStyle.Render("Spawn New Agent"),
+		"",
+		labelID,
+		f.idInput.View(),
+		"",
+		labelType,
+		typeRow,
+		"",
+		labelPrompt,
+		f.prompt.View(),
+		"",
+		helpStyle.Render("[Tab] next field  [←/->] change type  [Enter] spawn  [Esc] cancel"),
+	}, "\n"))
+
+	return form
+}
+
 func (m *Model) updateTable() {
-	rows := make([]table.Row, len(m.agents))
-	for i, a := range m.agents {
-		shortID := a.ContainerID
-		if len(shortID) > 12 {
-			shortID = shortID[:12]
+	rows := make([]table.Row, len(m.heads))
+	for i, h := range m.heads {
+		worktree := "yes"
+		if !h.HasWorktree {
+			worktree = "no"
 		}
-		prompt := a.Meta.Prompt
-		if len(prompt) > 37 {
-			prompt = prompt[:37] + "…"
+
+		status := h.ContainerStatus
+		if status == "" {
+			status = "-"
 		}
+
+		prompt := h.Prompt
+		if len(prompt) > 33 {
+			prompt = prompt[:33] + "…"
+		}
+
 		rows[i] = table.Row{
-			shortID,
-			a.ImageName,
-			a.Meta.BranchName,
-			a.Status,
+			h.ID,
+			string(h.AgentType),
+			h.BranchName,
+			worktree,
+			status,
 			prompt,
 		}
 	}
 	m.table.SetRows(rows)
 }
 
-func (m *Model) agentByShortID(shortID string) *docker.Agent {
-	for i := range m.agents {
-		if strings.HasPrefix(m.agents[i].ContainerID, shortID) {
-			return &m.agents[i]
+func (m *Model) headByID(id string) *heads.Head {
+	for i := range m.heads {
+		if m.heads[i].ID == id || strings.HasPrefix(m.heads[i].ContainerID, id) {
+			return &m.heads[i]
 		}
 	}
 	return nil
+}
+
+// spawnHead creates a worktree, builds the image, and starts the container.
+func spawnHead(projectRoot, id string, agentType docker.AgentType, prompt string, cli *dockerclient.Client) error {
+	baseBranch, err := git.GetCurrentBranch(projectRoot)
+	if err != nil {
+		return fmt.Errorf("get current branch: %w", err)
+	}
+
+	branchName := "hydra/" + id
+	worktreePath := filepath.Join(projectRoot, ".hydra", "worktrees", id)
+
+	if err := git.CreateWorktree(projectRoot, worktreePath, branchName, baseBranch); err != nil {
+		return fmt.Errorf("create worktree: %w", err)
+	}
+
+	gitAuthorName := os.Getenv("GIT_AUTHOR_NAME")
+	gitAuthorEmail := os.Getenv("GIT_AUTHOR_EMAIL")
+
+	_, err = docker.SpawnAgent(context.Background(), cli, docker.SpawnOptions{
+		Id:             id,
+		AgentType:      agentType,
+		Prompt:         prompt,
+		ProjectPath:    projectRoot,
+		WorktreePath:   worktreePath,
+		BranchName:     branchName,
+		BaseBranch:     baseBranch,
+		GitAuthorName:  gitAuthorName,
+		GitAuthorEmail: gitAuthorEmail,
+	})
+	if err != nil {
+		_ = git.RemoveWorktree(projectRoot, worktreePath)
+		_ = git.DeleteBranch(projectRoot, branchName)
+		return fmt.Errorf("spawn agent: %w", err)
+	}
+	return nil
+}
+
+func randomTUIID() (string, error) {
+	b := make([]byte, 4)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%x", b), nil
 }

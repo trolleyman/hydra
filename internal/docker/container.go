@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
 
 	"braces.dev/errtrace"
 	"github.com/docker/docker/api/types/container"
@@ -17,14 +16,16 @@ import (
 	"github.com/docker/docker/api/types/network"
 	dockerclient "github.com/docker/docker/client"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
+	"github.com/trolleyman/hydra/internal/config"
 )
 
 // Agent represents a running or stopped Hydra-managed container.
 type Agent struct {
-	ContainerID string
-	Status      string
-	ImageName   string
-	Meta        *AgentMetadata
+	ContainerID   string
+	ContainerName string
+	Status        string
+	ImageName     string
+	Meta          *AgentMetadata
 }
 
 // NewClient creates a Docker client from the environment (DOCKER_HOST, etc.).
@@ -61,11 +62,16 @@ func ListAgents(ctx context.Context, cli *dockerclient.Client) ([]Agent, error) 
 			log.Printf("warn: decode label for %s: %v", c.ID[:12], err)
 			continue
 		}
+		name := ""
+		if len(c.Names) > 0 {
+			name = c.Names[0]
+		}
 		agents = append(agents, Agent{
-			ContainerID: c.ID,
-			Status:      c.Status,
-			ImageName:   c.Image,
-			Meta:        meta,
+			ContainerID:   c.ID,
+			ContainerName: name,
+			Status:        c.Status,
+			ImageName:     c.Image,
+			Meta:          meta,
 		})
 	}
 	return agents, nil
@@ -74,13 +80,12 @@ func ListAgents(ctx context.Context, cli *dockerclient.Client) ([]Agent, error) 
 // SpawnOptions holds all configuration for launching a new agent container.
 type SpawnOptions struct {
 	Id             string
-	Args           string
+	AgentType      AgentType
 	Prompt         string
 	ProjectPath    string
 	WorktreePath   string
 	BranchName     string
 	BaseBranch     string
-	DockerfilePath string
 	GitAuthorName  string
 	GitAuthorEmail string
 }
@@ -88,12 +93,20 @@ type SpawnOptions struct {
 // SpawnAgent builds the Docker image if necessary, then creates and starts the container.
 // Returns the container ID.
 func SpawnAgent(ctx context.Context, cli *dockerclient.Client, opts SpawnOptions) (string, error) {
-	imageTag, err := ensureImage(ctx, cli, opts.DockerfilePath)
+	dockerfileContent, err := dockerfileForAgent(opts.AgentType)
+	if err != nil {
+		return "", errtrace.Wrap(err)
+	}
+
+	imageTag, err := ensureImage(ctx, cli, opts.AgentType, dockerfileContent)
 	if err != nil {
 		return "", errtrace.Wrap(fmt.Errorf("ensure image: %w", err))
 	}
 
 	meta := &AgentMetadata{
+		Id:               opts.Id,
+		AgentType:        opts.AgentType,
+		Prompt:           opts.Prompt,
 		ProjectPath:      opts.ProjectPath,
 		HostWorktreePath: opts.WorktreePath,
 		BranchName:       opts.BranchName,
@@ -119,13 +132,13 @@ func SpawnAgent(ctx context.Context, cli *dockerclient.Client, opts SpawnOptions
 	}
 
 	binds := []string{opts.WorktreePath + ":/app:rw"}
-
-	// TODO: Add binds depending on AI agent type (auth, config, etc.)
+	binds = append(binds, agentBinds(opts.AgentType)...)
 
 	var netCfg *network.NetworkingConfig
 	var platform *ocispec.Platform
 
-	log.Printf("Creating container for agent %s...", opts.Id)
+	containerName := "hydra-" + opts.Id
+	log.Printf("Creating container %s for agent %s...", containerName, opts.Id)
 	resp, err := cli.ContainerCreate(ctx,
 		&container.Config{
 			Image:      imageTag,
@@ -140,7 +153,7 @@ func SpawnAgent(ctx context.Context, cli *dockerclient.Client, opts SpawnOptions
 		},
 		netCfg,
 		platform,
-		"",
+		containerName,
 	)
 	if err != nil {
 		return "", errtrace.Wrap(fmt.Errorf("create container: %w", err))
@@ -183,14 +196,54 @@ func ViewLogs(containerID string) error {
 	return errtrace.Wrap(cmd.Run())
 }
 
-// ensureImage builds the Docker image if an image with the same Dockerfile hash doesn't exist.
-func ensureImage(ctx context.Context, cli *dockerclient.Client, dockerfilePath string) (string, error) {
-	data, err := os.ReadFile(dockerfilePath)
-	if err != nil {
-		return "", errtrace.Wrap(fmt.Errorf("read dockerfile: %w", err))
+// dockerfileForAgent returns the embedded Dockerfile content for the given agent type.
+func dockerfileForAgent(agentType AgentType) (string, error) {
+	switch agentType {
+	case AgentTypeClaude:
+		return config.DefaultDockerfileClaude, nil
+	case AgentTypeGemini:
+		return config.DefaultDockerfileGemini, nil
+	default:
+		return "", fmt.Errorf("unknown agent type: %q", agentType)
 	}
-	hash := fmt.Sprintf("%x", sha256.Sum256(slices.Concat([]byte(dockerfilePath), data)))[:8]
-	tag := "hydra-agent:" + hash
+}
+
+// agentBinds returns host:container bind mounts for agent-specific config files.
+func agentBinds(agentType AgentType) []string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+
+	var binds []string
+	switch agentType {
+	case AgentTypeClaude:
+		for _, pair := range []struct{ host, container string }{
+			{filepath.Join(home, ".claude", "settings.json"), "/root/.claude/settings.json"},
+			{filepath.Join(home, ".claude", ".credentials.json"), "/root/.claude/.credentials.json"},
+		} {
+			if _, err := os.Stat(pair.host); err == nil {
+				binds = append(binds, pair.host+":"+pair.container+":ro")
+			}
+		}
+	case AgentTypeGemini:
+		for _, pair := range []struct{ host, container string }{
+			{filepath.Join(home, ".gemini", "oauth_creds.json"), "/root/.gemini/oauth_creds.json"},
+			{filepath.Join(home, ".gemini", "google_accounts.json"), "/root/.gemini/google_accounts.json"},
+			{filepath.Join(home, ".gemini", "settings.json"), "/root/.gemini/settings.json"},
+		} {
+			if _, err := os.Stat(pair.host); err == nil {
+				binds = append(binds, pair.host+":"+pair.container+":ro")
+			}
+		}
+	}
+	return binds
+}
+
+// ensureImage builds the Docker image from content if an image with the same hash doesn't exist.
+func ensureImage(ctx context.Context, cli *dockerclient.Client, agentType AgentType, content string) (string, error) {
+	hash := fmt.Sprintf("%x", sha256.Sum256([]byte(content)))[:8]
+	tag := "hydra-agent-" + string(agentType) + ":" + hash
 
 	images, err := cli.ImageList(ctx, image.ListOptions{
 		Filters: filters.NewArgs(filters.Arg("reference", tag)),
@@ -202,12 +255,25 @@ func ensureImage(ctx context.Context, cli *dockerclient.Client, dockerfilePath s
 		return tag, nil
 	}
 
-	fmt.Printf("Building Docker image %s from %s...\n", tag, dockerfilePath)
+	// Write Dockerfile to a temp file for the build
+	tmpFile, err := os.CreateTemp("", "hydra-*.Dockerfile")
+	if err != nil {
+		return "", errtrace.Wrap(fmt.Errorf("create temp dockerfile: %w", err))
+	}
+	defer os.Remove(tmpFile.Name())
+
+	if _, err := tmpFile.WriteString(content); err != nil {
+		tmpFile.Close()
+		return "", errtrace.Wrap(fmt.Errorf("write temp dockerfile: %w", err))
+	}
+	tmpFile.Close()
+
+	fmt.Printf("Building Docker image %s...\n", tag)
 	buildCmd := exec.Command(
 		"docker", "build",
 		"-t", tag,
-		"-f", dockerfilePath,
-		filepath.Dir(dockerfilePath),
+		"-f", tmpFile.Name(),
+		filepath.Dir(tmpFile.Name()),
 	)
 	buildCmd.Stdout = os.Stdout
 	buildCmd.Stderr = os.Stderr
