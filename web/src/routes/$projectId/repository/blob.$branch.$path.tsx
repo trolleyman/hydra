@@ -42,9 +42,8 @@ function RepoBlobPage() {
             setFileMeta(meta)
             if (!meta.isBinary) {
               return api.default.getRepositoryFile(projectId, path, branch)
-                .then((blob) => blob.text())
-                .then((text) => {
-                  setFileContent(text)
+                .then((content) => {
+                  setFileContent(content as string)
                   setMode('file')
                 })
             }
