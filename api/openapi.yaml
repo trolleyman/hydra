@@ -35,6 +35,26 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /api/agents:
+    get:
+      summary: List all Hydra agents (heads)
+      operationId: listAgents
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AgentResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
 components:
   schemas:
     ErrorResponse:
@@ -54,3 +74,30 @@ components:
         version:
           type: string
           example: "1.0.0"
+
+    AgentResponse:
+      type: object
+      required: [id, branch_name, has_branch, worktree_path, has_worktree, project_path, container_id, container_status, agent_type, prompt, base_branch]
+      properties:
+        id:
+          type: string
+        branch_name:
+          type: string
+        has_branch:
+          type: boolean
+        worktree_path:
+          type: string
+        has_worktree:
+          type: boolean
+        project_path:
+          type: string
+        container_id:
+          type: string
+        container_status:
+          type: string
+        agent_type:
+          type: string
+        prompt:
+          type: string
+        base_branch:
+          type: string

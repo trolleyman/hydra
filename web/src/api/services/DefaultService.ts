@@ -2,6 +2,7 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
+import type { AgentResponse } from '../models/AgentResponse';
 import type { StatusResponse } from '../models/StatusResponse';
 import type { CancelablePromise } from '../core/CancelablePromise';
 import type { BaseHttpRequest } from '../core/BaseHttpRequest';
@@ -27,6 +28,20 @@ export class DefaultService {
         return this.httpRequest.request({
             method: 'GET',
             url: '/api/status',
+            errors: {
+                500: `Internal Server Error`,
+            },
+        });
+    }
+    /**
+     * List all Hydra agents (heads)
+     * @returns AgentResponse OK
+     * @throws ApiError
+     */
+    public listAgents(): CancelablePromise<Array<AgentResponse>> {
+        return this.httpRequest.request({
+            method: 'GET',
+            url: '/api/agents',
             errors: {
                 500: `Internal Server Error`,
             },
