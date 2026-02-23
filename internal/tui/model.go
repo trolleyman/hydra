@@ -67,15 +67,13 @@ type Model struct {
 // spawnForm holds state for the new-agent dialog.
 // Fields:
 //
-//	0 = ID input
-//	1 = agent type selector (<-/->)
-//	2 = dockerfile path input (optional)
-//	3 = prompt input
-const spawnFieldCount = 4
+//	0 = agent type selector (<-/->)
+//	1 = dockerfile path input (optional)
+//	2 = prompt input
+const spawnFieldCount = 3
 
 type spawnForm struct {
 	focusIdx        int
-	idInput         textinput.Model
 	typeIdx         int // index into agentTypes
 	dockerfileInput textinput.Model
 	promptInput     textinput.Model
@@ -84,11 +82,6 @@ type spawnForm struct {
 var agentTypes = []docker.AgentType{docker.AgentTypeClaude, docker.AgentTypeGemini}
 
 func newSpawnForm() spawnForm {
-	id := textinput.New()
-	id.Placeholder = "auto-generated slug"
-	id.CharLimit = 64
-	id.Focus()
-
 	dockerfile := textinput.New()
 	dockerfile.Placeholder = "optional path to Dockerfile"
 	dockerfile.CharLimit = 256
@@ -99,7 +92,6 @@ func newSpawnForm() spawnForm {
 
 	return spawnForm{
 		focusIdx:        0,
-		idInput:         id,
 		typeIdx:         0,
 		dockerfileInput: dockerfile,
 		promptInput:     prompt,
@@ -112,7 +104,6 @@ func (f *spawnForm) setWidth(termWidth int) {
 		formOverhead = 6
 	)
 	w := max(min(termWidth-formOverhead, formMaxWidth-formOverhead), 20)
-	f.idInput.Width = w
 	f.dockerfileInput.Width = w
 	f.promptInput.Width = w
 }
@@ -422,58 +413,55 @@ func (m Model) updateSpawnForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.spawning = false
 			return m, nil
 
-		case "tab", "shift+tab":
-			if msg.String() == "tab" {
-				m.spawnForm.focusIdx = (m.spawnForm.focusIdx + 1) % spawnFieldCount
-			} else {
-				m.spawnForm.focusIdx = (m.spawnForm.focusIdx + spawnFieldCount - 1) % spawnFieldCount
-			}
-			m.spawnForm.idInput.Blur()
-			m.spawnForm.dockerfileInput.Blur()
-			m.spawnForm.promptInput.Blur()
-			switch m.spawnForm.focusIdx {
-			case 0:
-				m.spawnForm.idInput.Focus()
-			case 2:
-				m.spawnForm.dockerfileInput.Focus()
-			case 3:
-				m.spawnForm.promptInput.Focus()
-			}
-			return m, textinput.Blink
-
-		case "left", "right":
-			if m.spawnForm.focusIdx == 1 {
-				if msg.String() == "left" {
-					m.spawnForm.typeIdx = (m.spawnForm.typeIdx + len(agentTypes) - 1) % len(agentTypes)
-				} else {
-					m.spawnForm.typeIdx = (m.spawnForm.typeIdx + 1) % len(agentTypes)
-				}
-				return m, nil
-			}
-
-		case "enter":
-			promptText := strings.TrimSpace(m.spawnForm.promptInput.Value())
-			if promptText == "" {
-				m.err = fmt.Errorf("prompt is required")
-				return m, nil
-			}
-			id := strings.TrimSpace(m.spawnForm.idInput.Value())
-			if id == "" {
-				words := strings.Fields(promptText)
-				if len(words) > 8 {
-					words = words[:8]
-				}
-				id = common.Slugify(strings.Join(words, " "), 40)
-				if id == "" {
-					var err error
-					id, err = randomTUIID()
-					if err != nil {
-						m.err = err
+				case "tab", "shift+tab":
+					if msg.String() == "tab" {
+						m.spawnForm.focusIdx = (m.spawnForm.focusIdx + 1) % spawnFieldCount
+					} else {
+						m.spawnForm.focusIdx = (m.spawnForm.focusIdx + spawnFieldCount - 1) % spawnFieldCount
+					}
+					m.spawnForm.dockerfileInput.Blur()
+					m.spawnForm.promptInput.Blur()
+					switch m.spawnForm.focusIdx {
+					case 1:
+						m.spawnForm.dockerfileInput.Focus()
+					case 2:
+						m.spawnForm.promptInput.Focus()
+					}
+					return m, textinput.Blink
+		
+				case "left", "right":
+					if m.spawnForm.focusIdx == 0 {
+						if msg.String() == "left" {
+							m.spawnForm.typeIdx = (m.spawnForm.typeIdx + len(agentTypes) - 1) % len(agentTypes)
+						} else {
+							m.spawnForm.typeIdx = (m.spawnForm.typeIdx + 1) % len(agentTypes)
+						}
 						return m, nil
 					}
-				}
-			}
-			dockerfilePath := strings.TrimSpace(m.spawnForm.dockerfileInput.Value())
+		
+				case "enter":
+					promptText := strings.TrimSpace(m.spawnForm.promptInput.Value())
+					if promptText == "" {
+						m.err = fmt.Errorf("prompt is required")
+						return m, nil
+					}
+					// ID is now always derived from prompt
+					words := strings.Fields(promptText)
+					if len(words) > 8 {
+						words = words[:8]
+					}
+					id := common.Slugify(strings.Join(words, " "), 40)
+					if id == "" {
+						var err error
+						id, err = randomTUIID()
+						if err != nil {
+							m.err = err
+							return m, nil
+						}
+					}
+		
+					dockerfilePath := strings.TrimSpace(m.spawnForm.dockerfileInput.Value())
+		
 			agentType := agentTypes[m.spawnForm.typeIdx]
 
 			projectRoot := m.projectRoot
@@ -491,11 +479,9 @@ func (m Model) updateSpawnForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	var cmd tea.Cmd
 	switch m.spawnForm.focusIdx {
-	case 0:
-		m.spawnForm.idInput, cmd = m.spawnForm.idInput.Update(msg)
-	case 2:
+	case 1:
 		m.spawnForm.dockerfileInput, cmd = m.spawnForm.dockerfileInput.Update(msg)
-	case 3:
+	case 2:
 		m.spawnForm.promptInput, cmd = m.spawnForm.promptInput.Update(msg)
 	}
 	return m, cmd
@@ -713,20 +699,29 @@ func (m Model) viewSpawnForm() string {
 		errLine = "\n" + errStyle.Render("Error: "+m.err.Error())
 	}
 
+	promptText := f.promptInput.Value()
+	derivedID := "auto-generated slug"
+	if strings.TrimSpace(promptText) != "" {
+		words := strings.Fields(promptText)
+		if len(words) > 8 {
+			words = words[:8]
+		}
+		derivedID = common.Slugify(strings.Join(words, " "), 40)
+	}
+
 	form := formStyle.MaxWidth(maxFormW).Render(strings.Join([]string{
 		titleStyle.Render("Spawn New Agent"),
 		"",
-		label("ID (leave blank for random):", f.focusIdx == 0),
-		f.idInput.View(),
-		"",
-		label("Agent type [←/→]:", f.focusIdx == 1),
+		label("Agent type [←/→]:", f.focusIdx == 0),
 		typeRow,
 		"",
-		label("Dockerfile (optional, overrides config and built-in default):", f.focusIdx == 2),
+		label("Dockerfile (optional, overrides config and built-in default):", f.focusIdx == 1),
 		f.dockerfileInput.View(),
 		"",
-		label("Prompt:", f.focusIdx == 3),
+		label("Prompt:", f.focusIdx == 2),
 		f.promptInput.View(),
+		"",
+		dimStyle.Render("ID: ") + helpStyle.Render(derivedID),
 		"",
 		helpStyle.Render("[Tab] next field  [←/→] change type  [Enter] spawn  [Esc] cancel") + errLine,
 	}, "\n"))
