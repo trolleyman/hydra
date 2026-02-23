@@ -24,6 +24,6 @@ process.stdin.on('end', () => {
     obj.reason = String(input.reason);
   }
   const dir = process.env.HOME || '.';
-  try { fs.writeFileSync(dir + '/.hydra-status.json', JSON.stringify(obj)); } catch(e) {}
+  try { fs.writeFileSync(dir + '.hydra/status.json', JSON.stringify(obj)); } catch(e) {}
 });" 2>/dev/null
 exit 0
