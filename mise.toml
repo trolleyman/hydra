@@ -1,2 +1,5 @@
 [tools]
 go = "latest"
+
+[shell_alias]
+hydra = "go run ./"
