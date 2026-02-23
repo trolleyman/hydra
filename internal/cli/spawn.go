@@ -13,6 +13,7 @@ import (
 
 	"braces.dev/errtrace"
 	"github.com/spf13/cobra"
+	"github.com/trolleyman/hydra/internal/config"
 	"github.com/trolleyman/hydra/internal/docker"
 	"github.com/trolleyman/hydra/internal/git"
 	"github.com/trolleyman/hydra/internal/heads"
@@ -46,6 +47,18 @@ var spawnCmd = &cobra.Command{
 		projectRoot, err := paths.GetProjectRootFromCwd()
 		if err != nil {
 			return errtrace.Wrap(err)
+		}
+
+		cfg, err := config.Load(projectRoot)
+		if err != nil {
+			return errtrace.Wrap(err)
+		}
+		prePrompt := config.DefaultPrePrompt
+		if cfg.PrePrompt != nil {
+			prePrompt = *cfg.PrePrompt
+		}
+		if prePrompt != "" {
+			prompt = prePrompt + "\n\n" + prompt
 		}
 
 		cli, err := docker.NewClient()

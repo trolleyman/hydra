@@ -16,9 +16,16 @@ var DefaultDockerfileClaude string
 //go:embed gemini.Dockerfile
 var DefaultDockerfileGemini string
 
+// DefaultPrePrompt is the pre-prompt used when none is configured.
+const DefaultPrePrompt = `You have unrestricted access to the file system. You are running inside a Docker container.
+
+As you work, use git commit to save your progress at logical points. Once you have finished the task, make a final git commit with all remaining changes.`
+
 type Config struct {
 	// Agent is the default selected agent
 	Agent *string `toml:"agent"`
+	// PrePrompt is prepended to every agent prompt. If not set, DefaultPrePrompt is used.
+	PrePrompt *string `toml:"pre_prompt"`
 }
 
 func GetConfigPath(projectRoot string) string {
