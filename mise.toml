@@ -2,4 +2,4 @@
 go = "latest"
 
 [shell_alias]
-hydra = "go run ./"
+hydra = "mage build:all && go run ./"
