@@ -15,21 +15,6 @@ import (
 	strictnethttp "github.com/oapi-codegen/runtime/strictmiddleware/nethttp"
 )
 
-// SpawnAgentRequest defines model for SpawnAgentRequest.
-type SpawnAgentRequest struct {
-	// AgentType Agent type: claude or gemini
-	AgentType *string `json:"agent_type,omitempty"`
-
-	// BaseBranch Base branch to create the worktree from (defaults to current branch)
-	BaseBranch *string `json:"base_branch,omitempty"`
-
-	// Id Unique identifier for the agent (auto-generated if not provided)
-	Id *string `json:"id,omitempty"`
-
-	// Prompt The prompt to give to the agent
-	Prompt string `json:"prompt"`
-}
-
 // AgentResponse defines model for AgentResponse.
 type AgentResponse struct {
 	AgentType       string `json:"agent_type"`
@@ -53,6 +38,21 @@ type ErrorResponse struct {
 	Error   string  `json:"error"`
 }
 
+// SpawnAgentRequest defines model for SpawnAgentRequest.
+type SpawnAgentRequest struct {
+	// AgentType Agent type: claude or gemini
+	AgentType *string `json:"agent_type,omitempty"`
+
+	// BaseBranch Base branch to create the worktree from (defaults to current branch)
+	BaseBranch *string `json:"base_branch,omitempty"`
+
+	// Id Unique identifier for the agent (auto-generated if not provided)
+	Id *string `json:"id,omitempty"`
+
+	// Prompt The prompt to give to the agent
+	Prompt string `json:"prompt"`
+}
+
 // StatusResponse defines model for StatusResponse.
 type StatusResponse struct {
 	// ProjectRoot Absolute path to the project root
@@ -63,6 +63,9 @@ type StatusResponse struct {
 	UptimeSeconds *float32 `json:"uptime_seconds,omitempty"`
 	Version       *string  `json:"version,omitempty"`
 }
+
+// SpawnAgentJSONRequestBody defines body for SpawnAgent for application/json ContentType.
+type SpawnAgentJSONRequestBody = SpawnAgentRequest
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
@@ -363,7 +366,7 @@ func (response ListAgents500JSONResponse) VisitListAgentsResponse(w http.Respons
 }
 
 type SpawnAgentRequestObject struct {
-	Body *SpawnAgentRequest
+	Body *SpawnAgentJSONRequestBody
 }
 
 type SpawnAgentResponseObject interface {
@@ -541,7 +544,7 @@ func (sh *strictHandler) ListAgents(w http.ResponseWriter, r *http.Request) {
 func (sh *strictHandler) SpawnAgent(w http.ResponseWriter, r *http.Request) {
 	var request SpawnAgentRequestObject
 
-	var body SpawnAgentRequest
+	var body SpawnAgentJSONRequestBody
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
 		return
