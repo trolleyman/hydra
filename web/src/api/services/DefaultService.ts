@@ -89,4 +89,25 @@ export class DefaultService {
             },
         });
     }
+    /**
+     * Kill a Hydra agent by ID
+     * @param id
+     * @returns void
+     * @throws ApiError
+     */
+    public killAgent(
+        id: string,
+    ): CancelablePromise<void> {
+        return this.httpRequest.request({
+            method: 'DELETE',
+            url: '/api/agent/{id}',
+            path: {
+                'id': id,
+            },
+            errors: {
+                404: `Not Found`,
+                500: `Internal Server Error`,
+            },
+        });
+    }
 }

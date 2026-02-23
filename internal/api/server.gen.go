@@ -86,6 +86,9 @@ type SpawnAgentJSONRequestBody = SpawnAgentRequest
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
+	// Kill a Hydra agent by ID
+	// (DELETE /api/agent/{id})
+	KillAgent(w http.ResponseWriter, r *http.Request, id string)
 	// Get a specific Hydra agent by ID
 	// (GET /api/agent/{id})
 	GetAgent(w http.ResponseWriter, r *http.Request, id string)
@@ -111,6 +114,31 @@ type ServerInterfaceWrapper struct {
 }
 
 type MiddlewareFunc func(http.Handler) http.Handler
+
+// KillAgent operation middleware
+func (siw *ServerInterfaceWrapper) KillAgent(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.KillAgent(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
 
 // GetAgent operation middleware
 func (siw *ServerInterfaceWrapper) GetAgent(w http.ResponseWriter, r *http.Request) {
@@ -313,6 +341,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 		ErrorHandlerFunc:   options.ErrorHandlerFunc,
 	}
 
+	m.HandleFunc("DELETE "+options.BaseURL+"/api/agent/{id}", wrapper.KillAgent)
 	m.HandleFunc("GET "+options.BaseURL+"/api/agent/{id}", wrapper.GetAgent)
 	m.HandleFunc("GET "+options.BaseURL+"/api/agents", wrapper.ListAgents)
 	m.HandleFunc("POST "+options.BaseURL+"/api/agents", wrapper.SpawnAgent)
@@ -320,6 +349,40 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("GET "+options.BaseURL+"/health", wrapper.CheckHealth)
 
 	return m
+}
+
+type KillAgentRequestObject struct {
+	Id string `json:"id"`
+}
+
+type KillAgentResponseObject interface {
+	VisitKillAgentResponse(w http.ResponseWriter) error
+}
+
+type KillAgent204Response struct {
+}
+
+func (response KillAgent204Response) VisitKillAgentResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type KillAgent404JSONResponse ErrorResponse
+
+func (response KillAgent404JSONResponse) VisitKillAgentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type KillAgent500JSONResponse ErrorResponse
+
+func (response KillAgent500JSONResponse) VisitKillAgentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
 }
 
 type GetAgentRequestObject struct {
@@ -461,6 +524,9 @@ func (response CheckHealth200TextResponse) VisitCheckHealthResponse(w http.Respo
 
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
+	// Kill a Hydra agent by ID
+	// (DELETE /api/agent/{id})
+	KillAgent(ctx context.Context, request KillAgentRequestObject) (KillAgentResponseObject, error)
 	// Get a specific Hydra agent by ID
 	// (GET /api/agent/{id})
 	GetAgent(ctx context.Context, request GetAgentRequestObject) (GetAgentResponseObject, error)
@@ -505,6 +571,32 @@ type strictHandler struct {
 	ssi         StrictServerInterface
 	middlewares []StrictMiddlewareFunc
 	options     StrictHTTPServerOptions
+}
+
+// KillAgent operation middleware
+func (sh *strictHandler) KillAgent(w http.ResponseWriter, r *http.Request, id string) {
+	var request KillAgentRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.KillAgent(ctx, request.(KillAgentRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "KillAgent")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(KillAgentResponseObject); ok {
+		if err := validResponse.VisitKillAgentResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
 }
 
 // GetAgent operation middleware
