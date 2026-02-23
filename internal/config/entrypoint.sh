@@ -14,4 +14,9 @@ useradd -u "$AGENT_UID" -g "$AGENT_GID" -m -d "$AGENT_HOME" -s /bin/bash "$AGENT
 
 chown "$AGENT_UID:$AGENT_GID" "$AGENT_HOME"
 
+# Add the user to the sudo group and allow passwordless sudo.
+usermod -aG sudo "$AGENT_USER"
+echo "$AGENT_USER ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/"$AGENT_USER"
+chmod 0440 /etc/sudoers.d/"$AGENT_USER"
+
 exec gosu "$AGENT_USER" "$@"

@@ -14,6 +14,8 @@ RUN apt-get update && apt-get install -y \
         jq \
         fd-find \
         tree \
+        sudo \
+        build-essential \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Node.js 22.x
@@ -24,9 +26,7 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
 ENV DEVCONTAINER=true
 
 # Install Gemini CLI.
-# The cache mount keeps the npm download cache across image rebuilds.
-RUN --mount=type=cache,target=/root/.npm \
-    npm install -g @google/gemini-cli
+RUN npm install -g @google/gemini-cli
 
 # Entrypoint: creates a matching host user at runtime, then exec's the command as that user.
 # AGENT_UID, AGENT_GID, AGENT_USER, AGENT_GROUP, AGENT_HOME are passed as container env vars.
