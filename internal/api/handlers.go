@@ -102,9 +102,6 @@ func (s *Server) SpawnAgent(ctx context.Context, request SpawnAgentRequestObject
 		prePrompt = *cfg.PrePrompt
 	}
 	prompt := strings.TrimSpace(request.Body.Prompt)
-	if prePrompt != "" {
-		prompt = prePrompt + "\n\n" + prompt
-	}
 
 	var id string
 	if request.Body.Id != nil {
@@ -117,6 +114,7 @@ func (s *Server) SpawnAgent(ctx context.Context, request SpawnAgentRequestObject
 
 	head, err := heads.SpawnHead(ctx, s.DockerClient, s.ProjectRoot, heads.SpawnHeadOptions{
 		ID:         id,
+		PrePrompt:  prePrompt,
 		Prompt:     prompt,
 		AgentType:  agentType,
 		BaseBranch: baseBranch,
