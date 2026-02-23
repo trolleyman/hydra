@@ -173,8 +173,8 @@ func SpawnAgent(ctx context.Context, cli *dockerclient.Client, opts SpawnOptions
 	} else {
 		switch opts.AgentType {
 		case AgentTypeClaude:
-			// cmd = []string{"claude", "--dangerously-skip-permissions", "--", opts.Prompt}
-			cmd = []string{"bash"}
+			cmd = []string{"claude", "--dangerously-skip-permissions", "--", opts.Prompt}
+			// cmd = []string{"bash"}
 		case AgentTypeGemini:
 			cmd = []string{"gemini", "--approval-mode=yolo", "-i", opts.Prompt}
 		default:
