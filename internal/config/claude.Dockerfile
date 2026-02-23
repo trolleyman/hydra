@@ -1,6 +1,5 @@
 # Hydra Agent Dockerfile - Claude Code
 #
-# The full task prompt is passed as an argument to this ENTRYPOINT.
 # See: https://docs.anthropic.com/en/docs/claude-code
 
 FROM ubuntu:24.04
@@ -17,4 +16,4 @@ RUN npm install -g @anthropic-ai/claude-code
 
 WORKDIR /app
 
-ENTRYPOINT ["claude", "--dangerously-skip-permissions", "--"]
+ENTRYPOINT ["claude"]

@@ -1,6 +1,5 @@
 # Hydra Agent Dockerfile - Gemini CLI
 #
-# The full task prompt is passed as an argument to this ENTRYPOINT.
 # See: https://github.com/google-gemini/gemini-cli
 
 FROM ubuntu:24.04
@@ -17,4 +16,4 @@ RUN npm install -g @google/gemini-cli
 
 WORKDIR /app
 
-ENTRYPOINT ["gemini", "--approval-mode=yolo", "-i"]
+ENTRYPOINT ["gemini"]

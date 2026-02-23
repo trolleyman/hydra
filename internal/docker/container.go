@@ -137,10 +137,20 @@ func SpawnAgent(ctx context.Context, cli *dockerclient.Client, opts SpawnOptions
 
 	containerName := "hydra-" + opts.Id
 	log.Printf("Creating container %s...", containerName)
+	cmd := []string{opts.Prompt}
+	switch opts.AgentType {
+	case AgentTypeClaude:
+		cmd = []string{"--approval-mode=yolo", "-i", opts.Prompt}
+	case AgentTypeGemini:
+		cmd = []string{"--dangerously-skip-permissions", "--", opts.Prompt}
+	default:
+		return "", fmt.Errorf("unknown agent type: %q", opts.AgentType)
+	}
+
 	resp, err := cli.ContainerCreate(ctx,
 		&container.Config{
 			Image:      imageTag,
-			Cmd:        []string{opts.Prompt},
+			Cmd:        cmd,
 			Labels:     map[string]string{LabelKey: labelVal},
 			Tty:        true,
 			Env:        env,
