@@ -166,7 +166,7 @@ func SpawnAgent(ctx context.Context, cli *dockerclient.Client, opts SpawnOptions
 		gitDir + ":" + gitDir + ":rw",
 		opts.WorktreePath + ":" + opts.WorktreePath + ":rw",
 	}
-	agentBinds, err := getAgentBinds(opts.AgentType, opts.ProjectPath, containerHome)
+	agentBinds, err := getAgentBinds(opts.AgentType, opts.ProjectPath, opts.Id, containerHome)
 	if err != nil {
 		return "", errtrace.Wrap(err)
 	}
@@ -337,7 +337,7 @@ func defaultDockerfileContent(agentType AgentType) (string, error) {
 
 // getAgentBinds returns host:container bind mounts for agent-specific config files.
 // containerHome is the home directory of the agent user inside the container (e.g. /home/callum).
-func getAgentBinds(agentType AgentType, projectRoot string, containerHome string) ([]string, error) {
+func getAgentBinds(agentType AgentType, projectRoot, id, containerHome string) ([]string, error) {
 	// home, err := os.UserHomeDir()
 	// if err != nil {
 	// 	return nil, errtrace.Wrap(err)
@@ -349,13 +349,24 @@ func getAgentBinds(agentType AgentType, projectRoot string, containerHome string
 		return nil, errtrace.Wrap(err)
 	}
 
-	// Shared npm cache: binds <project>/.hydra/cache/.npm to ~/.npm inside the container.
-	// Agents that run npm install during their work will share this cache across sessions.
-	npmCacheDir := filepath.Join(cacheDir, ".npm")
-	if err := os.MkdirAll(npmCacheDir, 0755); err != nil {
-		return nil, errtrace.Wrap(fmt.Errorf("create npm cache dir: %w", err))
+	// // Shared npm cache: binds <project>/.hydra/cache/.npm to ~/.npm inside the container.
+	// // Agents that run npm install during their work will share this cache across sessions.
+	// npmCacheDir := filepath.Join(cacheDir, ".npm")
+	// if err := os.MkdirAll(npmCacheDir, 0755); err != nil {
+	// 	return nil, errtrace.Wrap(fmt.Errorf("create npm cache dir: %w", err))
+	// }
+	// binds := []string{npmCacheDir + ":" + containerHome + "/.npm"}
+
+	// Create and share status JSON
+	statusJsonHost := paths.GetStatusJsonFromProjectRoot(projectRoot, id)
+	if err := git.CreateGitignoreAllInDir(filepath.Dir(statusJsonHost)); err != nil {
+		return nil, errtrace.Wrap(err)
 	}
-	binds := []string{npmCacheDir + ":" + containerHome + "/.npm"}
+	if err := os.WriteFile(statusJsonHost, []byte("{}"), 0644); err != nil {
+		return nil, errtrace.Wrap(fmt.Errorf("write %s: %w", statusJsonHost, err))
+	}
+	statusJsonContainer := filepath.Join(containerHome, ".hydra", "status.json")
+	binds := []string{statusJsonHost + ":" + statusJsonContainer}
 
 	switch agentType {
 	case AgentTypeClaude:

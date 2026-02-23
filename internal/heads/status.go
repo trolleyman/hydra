@@ -3,12 +3,13 @@ package heads
 import (
 	"encoding/json"
 	"os"
-	"path/filepath"
+
+	"github.com/trolleyman/hydra/internal/paths"
 )
 
 // ClaudeStatus represents the hook-reported status of a Claude agent session.
-// It is written to .hydra-status.json inside the agent's worktree by the
-// hydra-status.sh hook script (triggered on SessionStart, Stop, and SessionEnd).
+// It is written to ~/.hydra-status.json inside the agent by the  hydra-status.sh
+// hook script (triggered on SessionStart, Stop, and SessionEnd).
 type ClaudeStatus struct {
 	// Status is one of: "starting", "waiting", "ended", or "unknown".
 	Status string `json:"status"`
@@ -23,13 +24,11 @@ type ClaudeStatus struct {
 	Reason string `json:"reason,omitempty"`
 }
 
-// readClaudeStatus reads the Claude hook status from the worktree's
-// .hydra-status.json file. Returns nil if the file doesn't exist or is invalid.
-func readClaudeStatus(worktreePath string) *ClaudeStatus {
-	if worktreePath == "" {
-		return nil
-	}
-	data, err := os.ReadFile(filepath.Join(worktreePath, ".hydra-status.json"))
+// readClaudeStatus reads the Claude hook status from the <projectId>/.hydra/status/<id>.json
+// file. Returns nil if the file doesn't exist or is invalid.
+func readClaudeStatus(projectDir, id string) *ClaudeStatus {
+	path := paths.GetStatusJsonFromProjectRoot(projectDir, id)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil
 	}

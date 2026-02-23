@@ -50,3 +50,7 @@ func GetWorktreesDirFromProjectRoot(projectRoot string) string {
 func GetWorktreeDirFromProjectRoot(projectRoot, id string) string {
 	return filepath.Join(GetWorktreesDirFromProjectRoot(projectRoot), id)
 }
+
+func GetStatusJsonFromProjectRoot(projectRoot, id string) string {
+	return filepath.Join(GetHydraDirFromProjectRoot(projectRoot), "status", id+".json")
+}

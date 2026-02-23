@@ -33,7 +33,7 @@ type Head struct {
 	PrePrompt       string
 	Prompt          string
 	BaseBranch      string
-	// ClaudeStatus is read from .hydra-status.json in the worktree (nil if absent).
+	// ClaudeStatus is read from <projectDir>/.hydra/status/<id>.json (nil if absent).
 	ClaudeStatus *ClaudeStatus
 }
 
@@ -61,7 +61,7 @@ func ListHeads(ctx context.Context, cli *dockerclient.Client, projectRoot string
 			WorktreePath: worktreePath,
 			HasWorktree:  statErr == nil,
 			ProjectPath:  projectRoot,
-			ClaudeStatus: readClaudeStatus(worktreePath),
+			ClaudeStatus: readClaudeStatus(projectRoot, id),
 		}
 		byID[id] = head
 	}
@@ -102,7 +102,7 @@ func ListHeads(ctx context.Context, cli *dockerclient.Client, projectRoot string
 				PrePrompt:       a.Meta.PrePrompt,
 				Prompt:          a.Meta.Prompt,
 				BaseBranch:      a.Meta.BaseBranch,
-				ClaudeStatus:    readClaudeStatus(worktreePath),
+				ClaudeStatus:    readClaudeStatus(a.Meta.ProjectPath, id),
 			}
 		}
 	}
@@ -255,6 +255,13 @@ func KillHead(ctx context.Context, cli *dockerclient.Client, head Head) error {
 	if head.HasBranch && head.ProjectPath != "" {
 		if err := git.DeleteBranch(head.ProjectPath, head.BranchName); err != nil {
 			log.Printf("warn: delete branch %s: %v", head.BranchName, err)
+		}
+	}
+
+	statusJson := paths.GetStatusJsonFromProjectRoot(head.ProjectPath, head.ID)
+	if _, err := os.Stat(statusJson); err == nil {
+		if err := os.Remove(statusJson); err != nil {
+			log.Printf("warn: remove status json %s: %v", statusJson, err)
 		}
 	}
 
