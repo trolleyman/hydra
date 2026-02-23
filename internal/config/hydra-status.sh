@@ -1,6 +1,6 @@
 #!/bin/bash
 # hydra-status.sh
-# Updates ~/.hydra-status.json with current Claude session status.
+# Updates ~/.hydra/status.json with current Claude session status.
 # Called by Claude Code hooks: SessionStart, Stop, SessionEnd.
 node -e "
 const fs = require('fs');
@@ -24,6 +24,6 @@ process.stdin.on('end', () => {
     obj.reason = String(input.reason);
   }
   const dir = process.env.HOME || '.';
-  try { fs.writeFileSync(dir + '.hydra/status.json', JSON.stringify(obj)); } catch(e) {}
+  try { fs.writeFileSync(dir + '/.hydra/status.json', JSON.stringify(obj)); } catch(e) {}
 });" 2>/dev/null
 exit 0
