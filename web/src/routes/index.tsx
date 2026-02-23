@@ -54,7 +54,7 @@ function AgentSidebarItem({
   return (
     <button
       onClick={onClick}
-      className={`w-full text-left px-3 py-2.5 rounded-lg transition-colors ${
+      className={`w-full text-left px-3 py-2.5 rounded-lg transition-colors cursor-pointer ${
         selected
           ? 'bg-blue-50 border border-blue-200 dark:bg-blue-900/30 dark:border-blue-800'
           : 'hover:bg-gray-100 dark:hover:bg-gray-700 border border-transparent'
@@ -174,7 +174,7 @@ function EmptyDetail({ onSpawn }: { onSpawn?: () => void }) {
         {onSpawn && (
           <button
             onClick={onSpawn}
-            className="mt-2 text-xs text-blue-500 hover:text-blue-700 transition-colors"
+            className="mt-2 text-xs text-blue-500 hover:text-blue-700 transition-colors cursor-pointer"
           >
             or spawn a new one
           </button>
@@ -289,7 +289,7 @@ function SpawnForm({
                     key={t}
                     type="button"
                     onClick={() => setAgentType(t)}
-                    className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium transition-colors shrink-0 ${
+                    className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium transition-colors shrink-0 cursor-pointer ${
                       agentType === t
                         ? t === 'claude'
                           ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300'
@@ -311,7 +311,7 @@ function SpawnForm({
               <button
                 type="submit"
                 disabled={!prompt.trim() || loading}
-                className="relative overflow-hidden text-[10px] font-semibold px-2.5 py-1 rounded-lg text-white bg-gradient-to-r from-blue-600 to-purple-600 animate-gradient shadow-sm disabled:opacity-40 disabled:cursor-not-allowed transition-opacity hover:opacity-90 shrink-0"
+                className="relative overflow-hidden text-[10px] font-semibold px-2.5 py-1 rounded-lg text-white bg-gradient-to-r from-blue-600 to-purple-600 animate-gradient shadow-sm cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed transition-opacity hover:opacity-90 shrink-0"
               >
                 {loading ? '…' : 'Spawn'}
               </button>
@@ -367,7 +367,7 @@ function SpawnForm({
                         key={t}
                         type="button"
                         onClick={() => setAgentType(t)}
-                        className={`text-xs px-3 py-1 rounded-full font-medium transition-all ${
+                        className={`text-xs px-3 py-1 rounded-full font-medium transition-all cursor-pointer ${
                           agentType === t
                             ? t === 'claude'
                               ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300 shadow-sm'
@@ -398,7 +398,7 @@ function SpawnForm({
                   <button
                     type="submit"
                     disabled={!prompt.trim() || loading}
-                    className="relative overflow-hidden flex items-center gap-2 px-5 py-2 rounded-xl text-sm font-semibold text-white bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 animate-gradient shadow-md shadow-blue-500/30 disabled:opacity-40 disabled:cursor-not-allowed transition-all hover:shadow-lg hover:shadow-blue-500/40 hover:scale-[1.02] active:scale-[0.98]"
+                    className="relative overflow-hidden flex items-center gap-2 px-5 py-2 rounded-xl text-sm font-semibold text-white bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 animate-gradient shadow-md shadow-blue-500/30 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed transition-all hover:shadow-lg hover:shadow-blue-500/40 hover:scale-[1.02] active:scale-[0.98]"
                   >
                     {loading ? (
                       <>
