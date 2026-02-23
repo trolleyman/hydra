@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 
@@ -96,6 +98,18 @@ var spawnCmd = &cobra.Command{
 		}
 		defer cli.Close()
 
+		// Resolve the current user's identity for container user creation.
+		currentUser, err := user.Current()
+		if err != nil {
+			return errtrace.Wrap(fmt.Errorf("get current user: %w", err))
+		}
+		uid, _ := strconv.Atoi(currentUser.Uid)
+		gid, _ := strconv.Atoi(currentUser.Gid)
+		groupName := currentUser.Username
+		if grp, err := user.LookupGroupId(currentUser.Gid); err == nil {
+			groupName = grp.Name
+		}
+
 		containerID, err := docker.SpawnAgent(context.Background(), cli, docker.SpawnOptions{
 			Id:             id,
 			AgentType:      agentType,
@@ -106,6 +120,10 @@ var spawnCmd = &cobra.Command{
 			BaseBranch:     baseBranch,
 			GitAuthorName:  gitAuthorName,
 			GitAuthorEmail: gitAuthorEmail,
+			UID:            uid,
+			GID:            gid,
+			Username:       currentUser.Username,
+			GroupName:      groupName,
 		})
 		if err != nil {
 			_ = git.RemoveWorktree(projectRoot, worktreePath)
