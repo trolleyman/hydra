@@ -190,6 +190,8 @@ function EmptyDetail({ onSpawn }: { onSpawn?: () => void }) {
 
 type AgentTypeOption = 'claude' | 'gemini'
 
+const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/i.test(navigator.platform)
+
 function slugify(text: string, maxLength = 40): string {
   return text
     .toLowerCase()
@@ -227,9 +229,6 @@ function SpawnForm({
 
   function handlePromptChange(value: string) {
     setPrompt(value)
-    if (!idManuallyEdited) {
-      setAgentId(generateId(value))
-    }
   }
 
   function handleIdChange(value: string) {
@@ -246,7 +245,7 @@ function SpawnForm({
       const req: SpawnAgentRequest = {
         prompt: prompt.trim(),
         agent_type: agentType,
-        id: agentId || generateId(prompt.trim()),
+        id: idManuallyEdited ? agentId : generateId(prompt.trim()),
       }
       const agent = await api.default.spawnAgent(req)
       setPrompt('')
@@ -267,11 +266,14 @@ function SpawnForm({
     }
   }
 
+  const derivedIdPlaceholder = generateId(prompt) || 'auto-generated…'
+  const submitHint = isMac ? '⌘↵ to spawn' : 'Ctrl+Enter to spawn'
+
   if (compact) {
     return (
-      <form onSubmit={handleSubmit} className="px-3 py-3 border-b border-gray-100">
+      <form onSubmit={handleSubmit} className="px-3 py-3 border-b border-gray-100 dark:border-gray-700">
         <div className="relative rounded-xl p-[1.5px] bg-gradient-to-br from-blue-500 via-indigo-500 to-purple-600 animate-gradient shadow-lg shadow-blue-500/20">
-          <div className="rounded-[10px] bg-white overflow-hidden">
+          <div className="rounded-[10px] bg-white dark:bg-gray-800 overflow-hidden">
             <textarea
               ref={textareaRef}
               value={prompt}
@@ -280,7 +282,7 @@ function SpawnForm({
               placeholder="Describe a task…"
               rows={2}
               disabled={loading}
-              className="w-full px-3 pt-2.5 pb-1 text-xs text-gray-800 placeholder-gray-400 bg-transparent resize-none focus:outline-none leading-relaxed disabled:opacity-50"
+              className="w-full px-3 pt-2.5 pb-1 text-xs text-gray-800 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 bg-transparent resize-none focus:outline-none leading-relaxed disabled:opacity-50"
             />
             <div className="flex items-center justify-between px-2 pb-2 gap-2">
               <div className="flex items-center gap-1 min-w-0 flex-1">
@@ -292,9 +294,9 @@ function SpawnForm({
                     className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium transition-colors shrink-0 ${
                       agentType === t
                         ? t === 'claude'
-                          ? 'bg-purple-100 text-purple-700'
-                          : 'bg-teal-100 text-teal-700'
-                        : 'text-gray-400 hover:text-gray-600'
+                          ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300'
+                          : 'bg-teal-100 text-teal-700 dark:bg-teal-900/40 dark:text-teal-300'
+                        : 'text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300'
                     }`}
                   >
                     {t}
@@ -302,10 +304,10 @@ function SpawnForm({
                 ))}
                 <input
                   type="text"
-                  value={agentId}
+                  value={idManuallyEdited ? agentId : ''}
                   onChange={(e) => handleIdChange(e.target.value)}
-                  placeholder="id…"
-                  className="min-w-0 flex-1 text-[10px] text-gray-500 bg-transparent font-mono focus:outline-none placeholder-gray-300 truncate ml-1"
+                  placeholder={derivedIdPlaceholder}
+                  className="min-w-0 flex-1 text-[10px] text-gray-500 dark:text-gray-400 bg-transparent font-mono focus:outline-none placeholder-gray-300 dark:placeholder-gray-600 truncate ml-1"
                 />
               </div>
               <button
@@ -338,13 +340,13 @@ function SpawnForm({
           <h2 className="text-2xl font-bold bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 bg-clip-text text-transparent animate-gradient">
             Spawn an Agent
           </h2>
-          <p className="text-sm text-gray-500 mt-1">Describe what you need — an AI agent will get it done.</p>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Describe what you need — an AI agent will get it done.</p>
         </div>
 
         <form onSubmit={handleSubmit}>
           {/* Gradient border card */}
           <div className="relative rounded-2xl p-[1.5px] bg-gradient-to-br from-blue-500 via-indigo-500 to-purple-600 animate-gradient shadow-2xl shadow-blue-500/20">
-            <div className="rounded-[14px] bg-white">
+            <div className="rounded-[14px] bg-white dark:bg-gray-800">
               {/* Prompt textarea */}
               <textarea
                 ref={textareaRef}
@@ -354,11 +356,11 @@ function SpawnForm({
                 placeholder="e.g. Add a dark mode toggle to the settings page…"
                 rows={6}
                 disabled={loading}
-                className="w-full px-4 pt-4 pb-2 text-sm text-gray-800 placeholder-gray-400 bg-transparent resize-y focus:outline-none leading-relaxed disabled:opacity-50 min-h-[120px]"
+                className="w-full px-4 pt-4 pb-2 text-sm text-gray-800 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 bg-transparent resize-y focus:outline-none leading-relaxed disabled:opacity-50 min-h-[120px]"
               />
 
               {/* Footer bar */}
-              <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100 gap-4">
+              <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100 dark:border-gray-700 gap-4">
                 <div className="flex items-center gap-2 min-w-0 flex-1">
                   {/* Agent type pills */}
                   <div className="flex gap-1.5 shrink-0">
@@ -370,9 +372,9 @@ function SpawnForm({
                         className={`text-xs px-3 py-1 rounded-full font-medium transition-all ${
                           agentType === t
                             ? t === 'claude'
-                              ? 'bg-purple-100 text-purple-700 shadow-sm'
-                              : 'bg-teal-100 text-teal-700 shadow-sm'
-                            : 'text-gray-400 hover:text-gray-600 hover:bg-gray-50'
+                              ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300 shadow-sm'
+                              : 'bg-teal-100 text-teal-700 dark:bg-teal-900/40 dark:text-teal-300 shadow-sm'
+                            : 'text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
                         }`}
                       >
                         {t}
@@ -380,21 +382,21 @@ function SpawnForm({
                     ))}
                   </div>
                   {/* Divider */}
-                  <span className="text-gray-200 text-sm shrink-0">|</span>
+                  <span className="text-gray-200 dark:text-gray-600 text-sm shrink-0">|</span>
                   {/* ID field */}
                   <div className="flex items-center gap-1.5 min-w-0 flex-1">
-                    <span className="text-xs text-gray-400 shrink-0">id:</span>
+                    <span className="text-xs text-gray-400 dark:text-gray-500 shrink-0">id:</span>
                     <input
                       type="text"
-                      value={agentId}
+                      value={idManuallyEdited ? agentId : ''}
                       onChange={(e) => handleIdChange(e.target.value)}
-                      placeholder="auto-generated…"
-                      className="flex-1 min-w-0 text-xs text-gray-600 font-mono bg-gray-50 border border-gray-200 rounded-md px-2 py-0.5 focus:outline-none focus:border-blue-300 focus:bg-white transition-colors placeholder-gray-300"
+                      placeholder={derivedIdPlaceholder}
+                      className="flex-1 min-w-0 text-xs text-gray-600 dark:text-gray-300 font-mono bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-md px-2 py-0.5 focus:outline-none focus:border-blue-300 dark:focus:border-blue-500 focus:bg-white dark:focus:bg-gray-600 transition-colors placeholder-gray-300 dark:placeholder-gray-500"
                     />
                   </div>
                 </div>
                 <div className="flex items-center gap-3 shrink-0">
-                  <span className="text-xs text-gray-400">⌘↵ to spawn</span>
+                  <span className="text-xs text-gray-400 dark:text-gray-500">{submitHint}</span>
                   <button
                     type="submit"
                     disabled={!prompt.trim() || loading}
@@ -423,8 +425,8 @@ function SpawnForm({
           </div>
 
           {error && (
-            <div className="mt-3 px-4 py-2.5 bg-red-50 border border-red-200 rounded-xl">
-              <p className="text-xs text-red-600">{error}</p>
+            <div className="mt-3 px-4 py-2.5 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl">
+              <p className="text-xs text-red-600 dark:text-red-400">{error}</p>
             </div>
           )}
         </form>
