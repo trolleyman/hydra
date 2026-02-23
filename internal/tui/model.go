@@ -41,17 +41,17 @@ type Model struct {
 // Fields:
 //
 //	0 = ID input
-//	1 = agent type selector (←/→)
+//	1 = agent type selector (<-/->)
 //	2 = dockerfile path input (optional)
 //	3 = prompt input
 const spawnFieldCount = 4
 
 type spawnForm struct {
-	focusIdx       int
-	idInput        textinput.Model
-	typeIdx        int // index into agentTypes
+	focusIdx        int
+	idInput         textinput.Model
+	typeIdx         int // index into agentTypes
 	dockerfileInput textinput.Model
-	promptInput    textinput.Model
+	promptInput     textinput.Model
 }
 
 var agentTypes = []docker.AgentType{docker.AgentTypeClaude, docker.AgentTypeGemini}
@@ -87,13 +87,7 @@ func (f *spawnForm) setWidth(termWidth int) {
 		// rounded border (1 each side) + padding (2 each side)
 		formOverhead = 6
 	)
-	w := termWidth - formOverhead
-	if w > formMaxWidth-formOverhead {
-		w = formMaxWidth - formOverhead
-	}
-	if w < 20 {
-		w = 20
-	}
+	w := max(min(termWidth-formOverhead, formMaxWidth-formOverhead), 20)
 	f.idInput.Width = w
 	f.dockerfileInput.Width = w
 	f.promptInput.Width = w
@@ -200,18 +194,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		tableHeight := msg.Height - 6
-		if tableHeight < 3 {
-			tableHeight = 3
-		}
+		tableHeight := max(msg.Height-6, 3)
 		m.table.SetHeight(tableHeight)
 
 	case tea.KeyMsg:
 		switch msg.String() {
-		case "q", "ctrl+c":
+		case "esc", "q", "ctrl+c":
 			return m, tea.Quit
 
-		case "n":
+		case "s":
 			m.spawning = true
 			m.spawnForm = newSpawnForm()
 			m.spawnForm.setWidth(m.width)
@@ -398,7 +389,7 @@ func (m Model) View() string {
 		empty := lipgloss.NewStyle().
 			Foreground(lipgloss.Color("241")).
 			Padding(1, 2).
-			Render("No agents running. Press [n] to spawn one.")
+			Render("No agents running. Press [s] to spawn one.")
 		body = borderStyle.Render(empty)
 	} else {
 		body = borderStyle.Render(m.table.View())
@@ -411,7 +402,7 @@ func (m Model) View() string {
 		status = statusStyle.Render(m.statusMsg)
 	}
 
-	help := helpStyle.Render("[↑/↓] navigate  [enter] attach  [l] logs  [x] kill  [n] spawn  [r] refresh  [q] quit")
+	help := helpStyle.Render("[↑/↓] navigate  [enter] attach  [l] logs  [x] kill  [s] spawn  [r] refresh  [Esc/q] quit")
 
 	parts := []string{title, body}
 	if status != "" {
@@ -454,7 +445,7 @@ func (m Model) viewSpawnForm() string {
 		label("ID (leave blank for random):", f.focusIdx == 0),
 		f.idInput.View(),
 		"",
-		label("Agent type [←/→]:", f.focusIdx == 1),
+		label("Agent type [<-/->]:", f.focusIdx == 1),
 		typeRow,
 		"",
 		label("Dockerfile (optional, type inferred from ENTRYPOINT):", f.focusIdx == 2),
@@ -463,7 +454,7 @@ func (m Model) viewSpawnForm() string {
 		label("Prompt:", f.focusIdx == 3),
 		f.promptInput.View(),
 		"",
-		helpStyle.Render("[Tab] next field  [←/→] change type  [Enter] spawn  [Esc] cancel"),
+		helpStyle.Render("[Tab] next field  [<-/->] change type  [Enter] spawn  [Esc] cancel"),
 	}, "\n"))
 
 	return form
@@ -484,7 +475,7 @@ func (m *Model) updateTable() {
 
 		prompt := h.Prompt
 		if len(prompt) > 33 {
-			prompt = prompt[:33] + "…"
+			prompt = prompt[:33] + "..."
 		}
 
 		rows[i] = table.Row{

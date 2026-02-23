@@ -73,7 +73,7 @@ var listCmd = &cobra.Command{
 
 			prompt := h.Prompt
 			if len(prompt) > 40 {
-				prompt = prompt[:40] + "…"
+				prompt = prompt[:37] + "..."
 			}
 
 			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%q\n",
