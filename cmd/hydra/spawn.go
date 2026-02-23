@@ -13,12 +13,13 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/trolleyman/hydra/internal/docker"
 	"github.com/trolleyman/hydra/internal/git"
+	"github.com/trolleyman/hydra/internal/paths"
 )
 
 var spawnFlags struct {
-	agentType      string
-	dockerfile     string
-	baseBranch     string
+	agentType  string
+	dockerfile string
+	baseBranch string
 }
 
 func init() {
@@ -76,7 +77,8 @@ var spawnCmd = &cobra.Command{
 		}
 
 		branchName := "hydra/" + id
-		worktreePath := filepath.Join(projectRoot, ".hydra", "worktrees", id)
+		worktreesDir := paths.GetWorktreeDirFromProjectRoot(projectRoot)
+		worktreePath := filepath.Join(worktreesDir, id)
 
 		if err := git.CreateWorktree(projectRoot, worktreePath, branchName, baseBranch); err != nil {
 			return errtrace.Wrap(err)

@@ -11,6 +11,7 @@ import (
 	dockerclient "github.com/docker/docker/client"
 	"github.com/trolleyman/hydra/internal/docker"
 	"github.com/trolleyman/hydra/internal/git"
+	"github.com/trolleyman/hydra/internal/paths"
 )
 
 // Head represents a Hydra agent unit: an ID with optional branch, worktree, and container.
@@ -42,7 +43,8 @@ func ListHeads(ctx context.Context, cli *dockerclient.Client, projectRoot string
 	}
 	for _, branch := range branches {
 		id := strings.TrimPrefix(branch, "hydra/")
-		worktreePath := filepath.Join(projectRoot, ".hydra", "worktrees", id)
+		worktreesDir := paths.GetWorktreeDirFromProjectRoot(projectRoot)
+		worktreePath := filepath.Join(worktreesDir, id)
 		_, statErr := os.Stat(worktreePath)
 		head := &Head{
 			ID:           id,
@@ -74,7 +76,8 @@ func ListHeads(ctx context.Context, cli *dockerclient.Client, projectRoot string
 			}
 		} else {
 			// Container without a matching branch (orphaned)
-			worktreePath := filepath.Join(a.Meta.ProjectPath, ".hydra", "worktrees", id)
+			worktreesDir := paths.GetWorktreeDirFromProjectRoot(a.Meta.ProjectPath)
+			worktreePath := filepath.Join(worktreesDir, id)
 			_, statErr := os.Stat(worktreePath)
 			byID[id] = &Head{
 				ID:              id,

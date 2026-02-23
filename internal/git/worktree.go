@@ -47,9 +47,18 @@ func ListHydraBranches(projectRoot string) ([]string, error) {
 
 // CreateWorktree runs `git worktree add -b <branchName> <path> <baseBranch>`.
 func CreateWorktree(projectRoot, worktreePath, branchName, baseBranch string) error {
-	if err := os.MkdirAll(filepath.Dir(worktreePath), 0755); err != nil {
+	worktreesDir := filepath.Dir(worktreePath)
+	if err := os.MkdirAll(worktreesDir, 0755); err != nil {
 		return errtrace.Wrap(fmt.Errorf("create worktree parent: %w", err))
 	}
+
+	gitignorePath := filepath.Join(worktreePath, ".gitignore")
+	if _, err := os.Stat(gitignorePath); os.IsNotExist(err) {
+		if err := os.WriteFile(gitignorePath, []byte("*\n"), 0644); err != nil {
+			return errtrace.Wrap(fmt.Errorf("create .gitignore: %w", err))
+		}
+	}
+
 	cmd := exec.Command("git", "-C", projectRoot,
 		"worktree", "add", "-b", branchName, worktreePath, baseBranch)
 	common.PrintExecCmd(cmd)
