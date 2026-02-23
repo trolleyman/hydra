@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"os/user"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -35,6 +36,7 @@ type Head struct {
 	BaseBranch      string
 	// ClaudeStatus is read from <projectDir>/.hydra/status/<id>.json (nil if absent).
 	ClaudeStatus *ClaudeStatus
+	CreatedAt    int64 // Unix timestamp from container creation; 0 if no container
 }
 
 // ListHeads returns all Hydra heads found via git branches and/or Docker containers.
@@ -81,6 +83,7 @@ func ListHeads(ctx context.Context, cli *dockerclient.Client, projectRoot string
 			head.PrePrompt = a.Meta.PrePrompt
 			head.Prompt = a.Meta.Prompt
 			head.BaseBranch = a.Meta.BaseBranch
+			head.CreatedAt = a.Created
 			if head.ProjectPath == "" {
 				head.ProjectPath = a.Meta.ProjectPath
 			}
@@ -103,22 +106,25 @@ func ListHeads(ctx context.Context, cli *dockerclient.Client, projectRoot string
 				Prompt:          a.Meta.Prompt,
 				BaseBranch:      a.Meta.BaseBranch,
 				ClaudeStatus:    readClaudeStatus(a.Meta.ProjectPath, id),
+				CreatedAt:       a.Created,
 			}
 		}
 	}
 
-	// Collect into a slice; branch-backed heads first, then orphaned containers
-	var result []Head
+	// Collect all heads into a slice.
+	result := make([]Head, 0, len(byID))
 	for _, h := range byID {
-		if h.HasBranch {
-			result = append(result, *h)
-		}
+		result = append(result, *h)
 	}
-	for _, h := range byID {
-		if !h.HasBranch {
-			result = append(result, *h)
+
+	// Sort deterministically: newest first (oldest last), with ID as tiebreaker.
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].CreatedAt != result[j].CreatedAt {
+			return result[i].CreatedAt > result[j].CreatedAt
 		}
-	}
+		return result[i].ID < result[j].ID
+	})
+
 	return result, nil
 }
 
