@@ -92,13 +92,30 @@ function InfoRow({ label, value, mono = false }: { label: string; value: string 
   )
 }
 
-function AgentDetail({ agent }: { agent: AgentResponse }) {
+function AgentDetail({ agent, onKilled }: { agent: AgentResponse; onKilled: (id: string) => void }) {
+  const [killing, setKilling] = useState(false)
+
   const agentTypeClass =
     agent.agent_type === 'claude'
       ? 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300'
       : agent.agent_type === 'gemini'
-      ? 'bg-teal-100 text-teal-800 dark:bg-teal-900/30 dark:text-teal-300'
+      ? 'bg-teal-100 text-teal-800 dark:bg-teal-900/40 dark:text-teal-300'
       : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'
+
+  async function handleKill() {
+    if (!window.confirm(`Are you sure you want to kill agent "${agent.id}"?\n\nThis will permanently stop the container, remove the git worktree, and delete the branch.`)) {
+      return
+    }
+    setKilling(true)
+    try {
+      await api.default.killAgent(agent.id)
+      onKilled(agent.id)
+    } catch (err) {
+      alert(`Failed to kill agent: ${err}`)
+    } finally {
+      setKilling(false)
+    }
+  }
 
   return (
     <div className="flex-1 overflow-auto p-6">
@@ -122,6 +139,29 @@ function AgentDetail({ agent }: { agent: AgentResponse }) {
               </span>
             )
           })()}
+
+          <button
+            onClick={handleKill}
+            disabled={killing}
+            className="ml-auto text-xs px-3 py-1.5 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 dark:border-red-900/30 dark:text-red-400 dark:hover:bg-red-900/20 transition-all font-medium cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+          >
+            {killing ? (
+              <>
+                <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                </svg>
+                Killing…
+              </>
+            ) : (
+              <>
+                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
+                Kill Agent
+              </>
+            )}
+          </button>
         </div>
 
         {/* Prompt */}
@@ -516,6 +556,13 @@ function HomePage() {
     setShowSpawn(false)
   }
 
+  function handleKilled(id: string) {
+    setAgents((prev) => prev.filter((a) => a.id !== id))
+    if (selectedId === id) {
+      setSelectedId(null)
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex-1 flex items-center justify-center text-gray-400 dark:text-gray-500">
@@ -581,7 +628,7 @@ function HomePage() {
       {showSpawn ? (
         <SpawnForm onSpawned={handleSpawned} />
       ) : selectedAgent ? (
-        <AgentDetail agent={selectedAgent} />
+        <AgentDetail agent={selectedAgent} onKilled={handleKilled} />
       ) : (
         <EmptyDetail onSpawn={() => setShowSpawn(true)} />
       )}
