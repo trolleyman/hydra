@@ -19,17 +19,15 @@ import (
 type AgentResponse struct {
 	AgentType       string            `json:"agent_type"`
 	BaseBranch      string            `json:"base_branch"`
-	BranchName      string            `json:"branch_name"`
+	BranchName      *string           `json:"branch_name,omitempty"`
 	ClaudeStatus    *ClaudeStatusInfo `json:"claude_status,omitempty"`
 	ContainerId     string            `json:"container_id"`
 	ContainerStatus string            `json:"container_status"`
-	HasBranch       bool              `json:"has_branch"`
-	HasWorktree     bool              `json:"has_worktree"`
 	Id              string            `json:"id"`
 	PrePrompt       string            `json:"pre_prompt"`
 	ProjectPath     string            `json:"project_path"`
 	Prompt          string            `json:"prompt"`
-	WorktreePath    string            `json:"worktree_path"`
+	WorktreePath    *string           `json:"worktree_path,omitempty"`
 }
 
 // ClaudeStatusInfo defines model for ClaudeStatusInfo.

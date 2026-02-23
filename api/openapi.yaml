@@ -179,18 +179,16 @@ components:
 
     AgentResponse:
       type: object
-      required: [id, branch_name, has_branch, worktree_path, has_worktree, project_path, container_id, container_status, agent_type, pre_prompt, prompt, base_branch]
+      required: [id, project_path, container_id, container_status, agent_type, pre_prompt, prompt, base_branch]
       properties:
         id:
           type: string
         branch_name:
           type: string
-        has_branch:
-          type: boolean
+          nullable: true
         worktree_path:
           type: string
-        has_worktree:
-          type: boolean
+          nullable: true
         project_path:
           type: string
         container_id:

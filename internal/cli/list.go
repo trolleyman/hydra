@@ -45,14 +45,14 @@ var listCmd = &cobra.Command{
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 		fmt.Fprintln(w, "ID\tAGENT\tBRANCH\tWORKTREE\tCONTAINER\tSTATUS\tCLAUDE\tPROMPT")
 		for _, h := range hs {
-			branch := h.BranchName
-			if !h.HasBranch {
-				branch = "(no branch)"
+			branch := "(no branch)"
+			if h.Branch != nil {
+				branch = *h.Branch
 			}
 
-			worktree := "yes"
-			if !h.HasWorktree {
-				worktree = "no"
+			worktree := "no"
+			if h.Worktree != nil {
+				worktree = "yes"
 			}
 
 			container := ""

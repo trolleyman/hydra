@@ -50,7 +50,10 @@ var mergeCmd = &cobra.Command{
 			return errtrace.Errorf("no head found with ID: %s", id)
 		}
 
-		branchName := head.BranchName
+		if head.Branch == nil {
+			return errtrace.Errorf("head %s has no git branch to merge", id)
+		}
+		branchName := *head.Branch
 
 		if mergeFlags.preview {
 			diffCmd := exec.CommandContext(ctx, "git", "-C", projectRoot, "diff", "HEAD..."+branchName)

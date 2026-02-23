@@ -363,6 +363,14 @@ func (m Model) resumeSelected() (tea.Model, tea.Cmd) {
 	headCopy := *head
 	client := m.client
 
+	var headBranch, headWorktree string
+	if headCopy.Branch != nil {
+		headBranch = *headCopy.Branch
+	}
+	if headCopy.Worktree != nil {
+		headWorktree = *headCopy.Worktree
+	}
+
 	return m, func() tea.Msg {
 		ctx := context.Background()
 
@@ -380,8 +388,8 @@ func (m Model) resumeSelected() (tea.Model, tea.Cmd) {
 			PrePrompt:      headCopy.PrePrompt,
 			Prompt:         headCopy.Prompt,
 			ProjectPath:    headCopy.ProjectPath,
-			WorktreePath:   headCopy.WorktreePath,
-			BranchName:     headCopy.BranchName,
+			WorktreePath:   headWorktree,
+			BranchName:     headBranch,
 			BaseBranch:     headCopy.BaseBranch,
 			GitAuthorName:  os.Getenv("GIT_AUTHOR_NAME"),
 			GitAuthorEmail: os.Getenv("GIT_AUTHOR_EMAIL"),
@@ -603,12 +611,17 @@ func (m Model) viewInfo(w int) string {
 		prompt = prompt[:maxPromptW-3] + "..."
 	}
 
+	branchDisplay := "(none)"
+	if head.Branch != nil {
+		branchDisplay = *head.Branch
+	}
+
 	fields := []struct{ k, v string }{
 		{" ID:    ", head.ID},
 		{" Agent: ", string(head.AgentType)},
 		{" Status:", status},
 		{" Claude:", claudeStatus},
-		{" Branch:", head.BranchName},
+		{" Branch:", branchDisplay},
 		{" Base:  ", head.BaseBranch},
 		{" Prompt:", prompt},
 	}

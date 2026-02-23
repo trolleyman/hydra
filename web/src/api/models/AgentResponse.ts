@@ -5,10 +5,8 @@
 import type { ClaudeStatusInfo } from './ClaudeStatusInfo';
 export type AgentResponse = {
     id: string;
-    branch_name: string;
-    has_branch: boolean;
-    worktree_path: string;
-    has_worktree: boolean;
+    branch_name?: string | null;
+    worktree_path?: string | null;
     project_path: string;
     container_id: string;
     container_status: string;
