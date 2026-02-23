@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"os/user"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"text/tabwriter"
@@ -78,18 +79,26 @@ var spawnCmd = &cobra.Command{
 			}
 		}
 
-		// If a custom Dockerfile is provided, try to infer the agent type from it.
-		if spawnFlags.dockerfile != "" {
-			_, readErr := os.ReadFile(spawnFlags.dockerfile)
-			if readErr != nil {
-				return errtrace.Wrap(fmt.Errorf("read dockerfile: %w", readErr))
-			}
-			if spawnFlags.agentType == "" {
-				return errtrace.Errorf("specify agent type when custom dockerfile is specified")
+		agentType := docker.AgentType(spawnFlags.agentType)
+
+		// If no --dockerfile flag, check project config for a per-agent Dockerfile.
+		dockerfilePath := spawnFlags.dockerfile
+		if dockerfilePath == "" {
+			if agentCfg, ok := cfg.Agents[string(agentType)]; ok && agentCfg.Dockerfile != nil {
+				rel := *agentCfg.Dockerfile
+				if filepath.IsAbs(rel) {
+					dockerfilePath = rel
+				} else {
+					dockerfilePath = filepath.Join(projectRoot, rel)
+				}
+				log.Printf("Using config Dockerfile for %s: %s", agentType, dockerfilePath)
 			}
 		}
-
-		agentType := docker.AgentType(spawnFlags.agentType)
+		if dockerfilePath != "" {
+			if _, readErr := os.ReadFile(dockerfilePath); readErr != nil {
+				return errtrace.Wrap(fmt.Errorf("read dockerfile: %w", readErr))
+			}
+		}
 
 		switch agentType {
 		case docker.AgentTypeClaude, docker.AgentTypeGemini:
@@ -137,7 +146,7 @@ var spawnCmd = &cobra.Command{
 		containerID, err := docker.SpawnAgent(context.Background(), cli, docker.SpawnOptions{
 			Id:             id,
 			AgentType:      agentType,
-			DockerfilePath: spawnFlags.dockerfile,
+			DockerfilePath: dockerfilePath,
 			PrePrompt:      prePrompt,
 			Prompt:         prompt,
 			ProjectPath:    projectRoot,
