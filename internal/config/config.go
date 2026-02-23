@@ -95,3 +95,22 @@ func Save(projectRoot string, cfg Config) error {
 	}
 	return nil
 }
+
+// GetDockerfileForAgent returns the path to the custom Dockerfile for the given agent type,
+// or an empty string if the default built-in Dockerfile should be used.
+func (c Config) GetDockerfileForAgent(projectRoot, agentType string) string {
+	// 1. Check if config.toml has a custom path
+	if c.Agents != nil {
+		if agentCfg, ok := c.Agents[agentType]; ok && agentCfg.Dockerfile != nil {
+			return *agentCfg.Dockerfile
+		}
+	}
+
+	// 2. Check if .hydra/config/<agentType>/Dockerfile exists
+	customPath := filepath.Join(".hydra", "config", agentType, "Dockerfile")
+	if _, err := os.Stat(filepath.Join(projectRoot, customPath)); err == nil {
+		return customPath
+	}
+
+	return ""
+}

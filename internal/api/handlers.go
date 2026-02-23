@@ -3,6 +3,8 @@ package api
 import (
 	"context"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -121,6 +123,24 @@ func (s *Server) SpawnAgent(ctx context.Context, request SpawnAgentRequestObject
 	}
 	prompt := strings.TrimSpace(request.Body.Prompt)
 
+	// Resolve Dockerfile path
+	dockerfilePath := ""
+	rel := cfg.GetDockerfileForAgent(s.ProjectRoot, string(agentType))
+	if rel != "" {
+		if filepath.IsAbs(rel) {
+			dockerfilePath = rel
+		} else {
+			dockerfilePath = filepath.Join(s.ProjectRoot, rel)
+		}
+	}
+	if dockerfilePath != "" {
+		if _, readErr := os.ReadFile(dockerfilePath); readErr != nil {
+			code := 500
+			msg := "read dockerfile: " + readErr.Error()
+			return SpawnAgent500JSONResponse{Code: code, Error: msg}, nil
+		}
+	}
+
 	id := strings.TrimSpace(request.Body.Id)
 	var baseBranch string
 	if request.Body.BaseBranch != nil {
@@ -128,11 +148,12 @@ func (s *Server) SpawnAgent(ctx context.Context, request SpawnAgentRequestObject
 	}
 
 	head, err := heads.SpawnHead(ctx, s.DockerClient, s.ProjectRoot, heads.SpawnHeadOptions{
-		ID:         id,
-		PrePrompt:  prePrompt,
-		Prompt:     prompt,
-		AgentType:  agentType,
-		BaseBranch: baseBranch,
+		ID:             id,
+		PrePrompt:      prePrompt,
+		Prompt:         prompt,
+		AgentType:      agentType,
+		BaseBranch:     baseBranch,
+		DockerfilePath: dockerfilePath,
 	})
 	if err != nil {
 		code := 500

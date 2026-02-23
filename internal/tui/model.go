@@ -887,8 +887,8 @@ func spawnHead(projectRoot, id string, agentType docker.AgentType, dockerfilePat
 	// If no dockerfile provided via the form, fall back to project config.
 	if dockerfilePath == "" {
 		if cfg, cfgErr := config.Load(projectRoot); cfgErr == nil {
-			if agentCfg, ok := cfg.Agents[string(agentType)]; ok && agentCfg.Dockerfile != nil {
-				rel := *agentCfg.Dockerfile
+			rel := cfg.GetDockerfileForAgent(projectRoot, string(agentType))
+			if rel != "" {
 				if filepath.IsAbs(rel) {
 					dockerfilePath = rel
 				} else {

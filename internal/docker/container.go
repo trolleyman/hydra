@@ -118,7 +118,7 @@ func CombinePrompt(prePrompt, prompt string) string {
 // SpawnAgent builds the Docker image if necessary, then creates and starts the container.
 // Returns the container ID.
 func SpawnAgent(ctx context.Context, cli *dockerclient.Client, opts SpawnOptions) (string, error) {
-	imageTag, err := ensureImage(ctx, cli, opts.AgentType, opts.DockerfilePath)
+	imageTag, err := ensureImage(ctx, cli, opts.AgentType, opts.DockerfilePath, opts.ProjectPath)
 	if err != nil {
 		return "", errtrace.Wrap(fmt.Errorf("ensure image: %w", err))
 	}
@@ -478,13 +478,28 @@ func buildClaudeSettings() ([]byte, error) {
 // Dockerfile exists, building it if necessary. Returns the image tag.
 //
 // Default images (customDockerfile == ""):
-//   - Copies the embedded Dockerfile to ~/.hydra/default_dockerfiles/<type>/Dockerfile
+//   - Fallback to project-level custom Dockerfile if it exists: .hydra/config/<type>/Dockerfile
+//   - Otherwise copies the embedded Dockerfile to ~/.hydra/default_dockerfiles/<type>/Dockerfile
 //   - Tag: hydra-agent-<type>
 //
 // Custom images (customDockerfile != ""):
 //   - Uses the provided Dockerfile; build context is its parent directory
 //   - Tag: hydra-agent-<type>-<sha256(absPath)[:8]>
-func ensureImage(ctx context.Context, cli *dockerclient.Client, agentType AgentType, customDockerfile string) (string, error) {
+func ensureImage(ctx context.Context, cli *dockerclient.Client, agentType AgentType, customDockerfile string, projectRoot string) (string, error) {
+	if customDockerfile == "" && projectRoot != "" {
+		cfg, err := config.Load(projectRoot)
+		if err == nil {
+			rel := cfg.GetDockerfileForAgent(projectRoot, string(agentType))
+			if rel != "" {
+				if filepath.IsAbs(rel) {
+					customDockerfile = rel
+				} else {
+					customDockerfile = filepath.Join(projectRoot, rel)
+				}
+			}
+		}
+	}
+
 	if customDockerfile == "" {
 		return ensureDefaultImage(ctx, cli, agentType)
 	}
