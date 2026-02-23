@@ -22,6 +22,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	dockercontainer "github.com/docker/docker/api/types/container"
 	dockerclient "github.com/docker/docker/client"
+	"github.com/trolleyman/hydra/internal/common"
 	"github.com/trolleyman/hydra/internal/config"
 	"github.com/trolleyman/hydra/internal/docker"
 	"github.com/trolleyman/hydra/internal/git"
@@ -84,7 +85,7 @@ var agentTypes = []docker.AgentType{docker.AgentTypeClaude, docker.AgentTypeGemi
 
 func newSpawnForm() spawnForm {
 	id := textinput.New()
-	id.Placeholder = "random"
+	id.Placeholder = "auto-generated slug"
 	id.CharLimit = 64
 	id.Focus()
 
@@ -458,11 +459,18 @@ func (m Model) updateSpawnForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			id := strings.TrimSpace(m.spawnForm.idInput.Value())
 			if id == "" {
-				var err error
-				id, err = randomTUIID()
-				if err != nil {
-					m.err = err
-					return m, nil
+				words := strings.Fields(promptText)
+				if len(words) > 8 {
+					words = words[:8]
+				}
+				id = common.Slugify(strings.Join(words, " "), 40)
+				if id == "" {
+					var err error
+					id, err = randomTUIID()
+					if err != nil {
+						m.err = err
+						return m, nil
+					}
 				}
 			}
 			dockerfilePath := strings.TrimSpace(m.spawnForm.dockerfileInput.Value())

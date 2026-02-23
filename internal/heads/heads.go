@@ -15,6 +15,7 @@ import (
 
 	"braces.dev/errtrace"
 	dockerclient "github.com/docker/docker/client"
+	"github.com/trolleyman/hydra/internal/common"
 	"github.com/trolleyman/hydra/internal/docker"
 	"github.com/trolleyman/hydra/internal/git"
 	"github.com/trolleyman/hydra/internal/paths"
@@ -161,11 +162,18 @@ func SpawnHead(ctx context.Context, cli *dockerclient.Client, projectRoot string
 		opts.AgentType = docker.AgentTypeClaude
 	}
 	if opts.ID == "" {
-		b := make([]byte, 4)
-		if _, err := rand.Read(b); err != nil {
-			return nil, errtrace.Wrap(fmt.Errorf("generate id: %w", err))
+		words := strings.Fields(opts.Prompt)
+		if len(words) > 8 {
+			words = words[:8]
 		}
-		opts.ID = hex.EncodeToString(b)
+		opts.ID = common.Slugify(strings.Join(words, " "), 40)
+		if opts.ID == "" {
+			b := make([]byte, 4)
+			if _, err := rand.Read(b); err != nil {
+				return nil, errtrace.Wrap(fmt.Errorf("generate id: %w", err))
+			}
+			opts.ID = hex.EncodeToString(b)
+		}
 	}
 
 	baseBranch := opts.BaseBranch
