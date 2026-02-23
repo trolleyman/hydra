@@ -3,6 +3,7 @@
 /* tslint:disable */
 /* eslint-disable */
 import type { AgentResponse } from '../models/AgentResponse';
+import type { SpawnAgentRequest } from '../models/SpawnAgentRequest';
 import type { StatusResponse } from '../models/StatusResponse';
 import type { CancelablePromise } from '../core/CancelablePromise';
 import type { BaseHttpRequest } from '../core/BaseHttpRequest';
@@ -43,6 +44,26 @@ export class DefaultService {
             method: 'GET',
             url: '/api/agents',
             errors: {
+                500: `Internal Server Error`,
+            },
+        });
+    }
+    /**
+     * Spawn a new Hydra agent
+     * @param requestBody
+     * @returns AgentResponse Created
+     * @throws ApiError
+     */
+    public spawnAgent(
+        requestBody: SpawnAgentRequest,
+    ): CancelablePromise<AgentResponse> {
+        return this.httpRequest.request({
+            method: 'POST',
+            url: '/api/agents',
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                400: `Bad Request`,
                 500: `Internal Server Error`,
             },
         });

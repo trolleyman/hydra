@@ -2,8 +2,14 @@ package heads
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"fmt"
 	"log"
 	"os"
+	"os/exec"
+	"os/user"
+	"strconv"
 	"strings"
 
 	"braces.dev/errtrace"
@@ -121,6 +127,104 @@ func GetHeadByID(ctx context.Context, cli *dockerclient.Client, projectRoot, id 
 		}
 	}
 	return nil, nil
+}
+
+// SpawnHeadOptions holds parameters for spawning a new agent head.
+type SpawnHeadOptions struct {
+	ID         string           // empty = auto-generated
+	Prompt     string           // the full prompt (including any pre-prompt)
+	AgentType  docker.AgentType // empty = "claude"
+	BaseBranch string           // empty = current HEAD branch
+}
+
+// SpawnHead creates a new git worktree, branch, and Docker container for an agent.
+// Returns the newly created Head.
+func SpawnHead(ctx context.Context, cli *dockerclient.Client, projectRoot string, opts SpawnHeadOptions) (*Head, error) {
+	if opts.AgentType == "" {
+		opts.AgentType = docker.AgentTypeClaude
+	}
+	if opts.ID == "" {
+		b := make([]byte, 4)
+		if _, err := rand.Read(b); err != nil {
+			return nil, errtrace.Wrap(fmt.Errorf("generate id: %w", err))
+		}
+		opts.ID = hex.EncodeToString(b)
+	}
+
+	baseBranch := opts.BaseBranch
+	if baseBranch == "" {
+		var err error
+		baseBranch, err = git.GetCurrentBranch(projectRoot)
+		if err != nil {
+			return nil, errtrace.Wrap(fmt.Errorf("detect current branch: %w", err))
+		}
+	}
+
+	branchName := "hydra/" + opts.ID
+	worktreePath := paths.GetWorktreeDirFromProjectRoot(projectRoot, opts.ID)
+	if err := git.CreateWorktree(projectRoot, worktreePath, branchName, baseBranch); err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+
+	currentUser, err := user.Current()
+	if err != nil {
+		_ = git.RemoveWorktree(projectRoot, worktreePath)
+		_ = git.DeleteBranch(projectRoot, branchName)
+		return nil, errtrace.Wrap(fmt.Errorf("get current user: %w", err))
+	}
+	uid, _ := strconv.Atoi(currentUser.Uid)
+	gid, _ := strconv.Atoi(currentUser.Gid)
+	groupName := currentUser.Username
+	if grp, err := user.LookupGroupId(currentUser.Gid); err == nil {
+		groupName = grp.Name
+	}
+
+	gitAuthorName := readGitConfigVal(projectRoot, "user.name")
+	gitAuthorEmail := readGitConfigVal(projectRoot, "user.email")
+
+	containerID, err := docker.SpawnAgent(ctx, cli, docker.SpawnOptions{
+		Id:             opts.ID,
+		AgentType:      opts.AgentType,
+		Prompt:         opts.Prompt,
+		ProjectPath:    projectRoot,
+		WorktreePath:   worktreePath,
+		BranchName:     branchName,
+		BaseBranch:     baseBranch,
+		GitAuthorName:  gitAuthorName,
+		GitAuthorEmail: gitAuthorEmail,
+		UID:            uid,
+		GID:            gid,
+		Username:       currentUser.Username,
+		GroupName:      groupName,
+	})
+	if err != nil {
+		_ = git.RemoveWorktree(projectRoot, worktreePath)
+		_ = git.DeleteBranch(projectRoot, branchName)
+		return nil, errtrace.Wrap(fmt.Errorf("spawn agent: %w", err))
+	}
+
+	return &Head{
+		ID:              opts.ID,
+		BranchName:      branchName,
+		HasBranch:       true,
+		WorktreePath:    worktreePath,
+		HasWorktree:     true,
+		ProjectPath:     projectRoot,
+		ContainerID:     containerID,
+		ContainerStatus: "created",
+		AgentType:       opts.AgentType,
+		Prompt:          opts.Prompt,
+		BaseBranch:      baseBranch,
+	}, nil
+}
+
+// readGitConfigVal reads a single git config value.
+func readGitConfigVal(projectRoot, key string) string {
+	out, err := exec.Command("git", "-C", projectRoot, "config", key).Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }
 
 // KillHead removes a Hydra head in safe order: container -> worktree -> branch.

@@ -15,6 +15,21 @@ import (
 	strictnethttp "github.com/oapi-codegen/runtime/strictmiddleware/nethttp"
 )
 
+// SpawnAgentRequest defines model for SpawnAgentRequest.
+type SpawnAgentRequest struct {
+	// AgentType Agent type: claude or gemini
+	AgentType *string `json:"agent_type,omitempty"`
+
+	// BaseBranch Base branch to create the worktree from (defaults to current branch)
+	BaseBranch *string `json:"base_branch,omitempty"`
+
+	// Id Unique identifier for the agent (auto-generated if not provided)
+	Id *string `json:"id,omitempty"`
+
+	// Prompt The prompt to give to the agent
+	Prompt string `json:"prompt"`
+}
+
 // AgentResponse defines model for AgentResponse.
 type AgentResponse struct {
 	AgentType       string `json:"agent_type"`
@@ -56,6 +71,9 @@ type ServerInterface interface {
 	// List all Hydra agents (heads)
 	// (GET /api/agents)
 	ListAgents(w http.ResponseWriter, r *http.Request)
+	// Spawn a new Hydra agent
+	// (POST /api/agents)
+	SpawnAgent(w http.ResponseWriter, r *http.Request)
 	// Get system status
 	// (GET /api/status)
 	GetStatus(w http.ResponseWriter, r *http.Request)
@@ -103,6 +121,20 @@ func (siw *ServerInterfaceWrapper) ListAgents(w http.ResponseWriter, r *http.Req
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListAgents(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SpawnAgent operation middleware
+func (siw *ServerInterfaceWrapper) SpawnAgent(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SpawnAgent(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -262,6 +294,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 
 	m.HandleFunc("GET "+options.BaseURL+"/api/agent/{id}", wrapper.GetAgent)
 	m.HandleFunc("GET "+options.BaseURL+"/api/agents", wrapper.ListAgents)
+	m.HandleFunc("POST "+options.BaseURL+"/api/agents", wrapper.SpawnAgent)
 	m.HandleFunc("GET "+options.BaseURL+"/api/status", wrapper.GetStatus)
 	m.HandleFunc("GET "+options.BaseURL+"/health", wrapper.CheckHealth)
 
@@ -328,6 +361,41 @@ func (response ListAgents500JSONResponse) VisitListAgentsResponse(w http.Respons
 	return json.NewEncoder(w).Encode(response)
 }
 
+type SpawnAgentRequestObject struct {
+	Body *SpawnAgentRequest
+}
+
+type SpawnAgentResponseObject interface {
+	VisitSpawnAgentResponse(w http.ResponseWriter) error
+}
+
+type SpawnAgent201JSONResponse AgentResponse
+
+func (response SpawnAgent201JSONResponse) VisitSpawnAgentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type SpawnAgent400JSONResponse ErrorResponse
+
+func (response SpawnAgent400JSONResponse) VisitSpawnAgentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type SpawnAgent500JSONResponse ErrorResponse
+
+func (response SpawnAgent500JSONResponse) VisitSpawnAgentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 type GetStatusRequestObject struct {
 }
 
@@ -378,6 +446,9 @@ type StrictServerInterface interface {
 	// List all Hydra agents (heads)
 	// (GET /api/agents)
 	ListAgents(ctx context.Context, request ListAgentsRequestObject) (ListAgentsResponseObject, error)
+	// Spawn a new Hydra agent
+	// (POST /api/agents)
+	SpawnAgent(ctx context.Context, request SpawnAgentRequestObject) (SpawnAgentResponseObject, error)
 	// Get system status
 	// (GET /api/status)
 	GetStatus(ctx context.Context, request GetStatusRequestObject) (GetStatusResponseObject, error)
@@ -458,6 +529,37 @@ func (sh *strictHandler) ListAgents(w http.ResponseWriter, r *http.Request) {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ListAgentsResponseObject); ok {
 		if err := validResponse.VisitListAgentsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SpawnAgent operation middleware
+func (sh *strictHandler) SpawnAgent(w http.ResponseWriter, r *http.Request) {
+	var request SpawnAgentRequestObject
+
+	var body SpawnAgentRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SpawnAgent(ctx, request.(SpawnAgentRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SpawnAgent")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SpawnAgentResponseObject); ok {
+		if err := validResponse.VisitSpawnAgentResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

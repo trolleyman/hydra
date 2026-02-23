@@ -12,6 +12,7 @@ export type { OpenAPIConfig } from './core/OpenAPI';
 
 export type { AgentResponse } from './models/AgentResponse';
 export type { ErrorResponse } from './models/ErrorResponse';
+export type { SpawnAgentRequest } from './models/SpawnAgentRequest';
 export type { StatusResponse } from './models/StatusResponse';
 
 export { DefaultService } from './services/DefaultService';
