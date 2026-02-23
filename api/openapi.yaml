@@ -54,6 +54,34 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+    post:
+      summary: Spawn a new Hydra agent
+      operationId: spawnAgent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SpawnAgentRequest'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentResponse'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 
   /api/agent/{id}:
     get:
@@ -111,6 +139,23 @@ components:
         project_root:
           type: string
           description: Absolute path to the project root
+
+    SpawnAgentRequest:
+      type: object
+      required: [prompt]
+      properties:
+        prompt:
+          type: string
+          description: The prompt to give to the agent
+        id:
+          type: string
+          description: Unique identifier for the agent (auto-generated if not provided)
+        agent_type:
+          type: string
+          description: "Agent type: claude or gemini"
+        base_branch:
+          type: string
+          description: Base branch to create the worktree from (defaults to current branch)
 
     AgentResponse:
       type: object

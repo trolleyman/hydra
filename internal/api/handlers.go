@@ -3,9 +3,12 @@ package api
 import (
 	"context"
 	"net/http"
+	"strings"
 	"time"
 
 	dockerclient "github.com/docker/docker/client"
+	"github.com/trolleyman/hydra/internal/config"
+	"github.com/trolleyman/hydra/internal/docker"
 	"github.com/trolleyman/hydra/internal/heads"
 )
 
@@ -68,6 +71,73 @@ func (s *Server) GetStatus(_ context.Context, _ GetStatusRequestObject) (GetStat
 		Version:       &v,
 		UptimeSeconds: &uptime,
 		ProjectRoot:   &projectRoot,
+	}), nil
+}
+
+func (s *Server) SpawnAgent(ctx context.Context, request SpawnAgentRequestObject) (SpawnAgentResponseObject, error) {
+	if request.Body == nil || strings.TrimSpace(request.Body.Prompt) == "" {
+		code := 400
+		msg := "prompt is required"
+		return SpawnAgent400JSONResponse{Code: code, Error: msg}, nil
+	}
+
+	agentType := docker.AgentTypeClaude
+	if request.Body.AgentType != nil && *request.Body.AgentType != "" {
+		agentType = docker.AgentType(*request.Body.AgentType)
+	}
+	if agentType != docker.AgentTypeClaude && agentType != docker.AgentTypeGemini {
+		code := 400
+		msg := "unknown agent_type; supported: claude, gemini"
+		return SpawnAgent400JSONResponse{Code: code, Error: msg}, nil
+	}
+
+	cfg, err := config.Load(s.ProjectRoot)
+	if err != nil {
+		code := 500
+		msg := err.Error()
+		return SpawnAgent500JSONResponse{Code: code, Error: msg}, nil
+	}
+	prePrompt := config.DefaultPrePrompt
+	if cfg.PrePrompt != nil {
+		prePrompt = *cfg.PrePrompt
+	}
+	prompt := strings.TrimSpace(request.Body.Prompt)
+	if prePrompt != "" {
+		prompt = prePrompt + "\n\n" + prompt
+	}
+
+	var id string
+	if request.Body.Id != nil {
+		id = strings.TrimSpace(*request.Body.Id)
+	}
+	var baseBranch string
+	if request.Body.BaseBranch != nil {
+		baseBranch = strings.TrimSpace(*request.Body.BaseBranch)
+	}
+
+	head, err := heads.SpawnHead(ctx, s.DockerClient, s.ProjectRoot, heads.SpawnHeadOptions{
+		ID:         id,
+		Prompt:     prompt,
+		AgentType:  agentType,
+		BaseBranch: baseBranch,
+	})
+	if err != nil {
+		code := 500
+		msg := err.Error()
+		return SpawnAgent500JSONResponse{Code: code, Error: msg}, nil
+	}
+	return SpawnAgent201JSONResponse(AgentResponse{
+		Id:              head.ID,
+		BranchName:      head.BranchName,
+		HasBranch:       head.HasBranch,
+		WorktreePath:    head.WorktreePath,
+		HasWorktree:     head.HasWorktree,
+		ProjectPath:     head.ProjectPath,
+		ContainerId:     head.ContainerID,
+		ContainerStatus: head.ContainerStatus,
+		AgentType:       string(head.AgentType),
+		Prompt:          head.Prompt,
+		BaseBranch:      head.BaseBranch,
 	}), nil
 }
 
