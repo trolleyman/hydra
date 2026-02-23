@@ -4,6 +4,7 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/trolleyman/hydra/internal/api"
@@ -40,6 +41,7 @@ func runServer(_ *cobra.Command, _ []string) error {
 		WorktreesDir: worktreesDir,
 		ProjectRoot:  projectRoot,
 		DockerClient: dockerClient,
+		StartTime:    time.Now(),
 	}
 
 	// Build the main mux

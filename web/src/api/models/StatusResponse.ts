@@ -5,5 +5,7 @@
 export type StatusResponse = {
     status?: string;
     version?: string;
+    uptime_seconds?: number;
+    project_root?: string;
 };
 

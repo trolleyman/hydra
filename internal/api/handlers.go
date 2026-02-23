@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"net/http"
+	"time"
 
 	dockerclient "github.com/docker/docker/client"
 	"github.com/trolleyman/hydra/internal/heads"
@@ -15,6 +16,7 @@ type Server struct {
 	WorktreesDir string
 	ProjectRoot  string
 	DockerClient *dockerclient.Client
+	StartTime    time.Time
 }
 
 // NewHandler creates a handler with routing matching the OpenAPI spec.
@@ -58,5 +60,39 @@ func (s *Server) ListAgents(ctx context.Context, _ ListAgentsRequestObject) (Lis
 func (s *Server) GetStatus(_ context.Context, _ GetStatusRequestObject) (GetStatusResponseObject, error) {
 	status := "OK"
 	v := version
-	return GetStatus200JSONResponse(StatusResponse{Status: &status, Version: &v}), nil
+	uptime := float32(time.Since(s.StartTime).Seconds())
+	projectRoot := s.ProjectRoot
+	return GetStatus200JSONResponse(StatusResponse{
+		Status:        &status,
+		Version:       &v,
+		UptimeSeconds: &uptime,
+		ProjectRoot:   &projectRoot,
+	}), nil
+}
+
+func (s *Server) GetAgent(ctx context.Context, request GetAgentRequestObject) (GetAgentResponseObject, error) {
+	head, err := heads.GetHeadByID(ctx, s.DockerClient, s.ProjectRoot, request.Id)
+	if err != nil {
+		code := 500
+		msg := err.Error()
+		return GetAgent500JSONResponse{Code: code, Error: msg}, nil
+	}
+	if head == nil {
+		code := 404
+		msg := "agent not found"
+		return GetAgent404JSONResponse{Code: code, Error: msg}, nil
+	}
+	return GetAgent200JSONResponse(AgentResponse{
+		Id:              head.ID,
+		BranchName:      head.BranchName,
+		HasBranch:       head.HasBranch,
+		WorktreePath:    head.WorktreePath,
+		HasWorktree:     head.HasWorktree,
+		ProjectPath:     head.ProjectPath,
+		ContainerId:     head.ContainerID,
+		ContainerStatus: head.ContainerStatus,
+		AgentType:       string(head.AgentType),
+		Prompt:          head.Prompt,
+		BaseBranch:      head.BaseBranch,
+	}), nil
 }

@@ -47,4 +47,23 @@ export class DefaultService {
             },
         });
     }
+    /**
+     * Get a specific Hydra agent by ID
+     * @param id
+     * @returns AgentResponse OK
+     * @throws ApiError
+     */
+    public getAgent(id: string): CancelablePromise<AgentResponse> {
+        return this.httpRequest.request({
+            method: 'GET',
+            url: '/api/agent/{id}',
+            path: {
+                'id': id,
+            },
+            errors: {
+                404: `Not Found`,
+                500: `Internal Server Error`,
+            },
+        });
+    }
 }
