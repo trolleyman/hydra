@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"braces.dev/errtrace"
+	"github.com/trolleyman/hydra/internal/common"
 )
 
 // FindProjectRoot returns the root of the git repository containing dir.
@@ -51,6 +52,7 @@ func CreateWorktree(projectRoot, worktreePath, branchName, baseBranch string) er
 	}
 	cmd := exec.Command("git", "-C", projectRoot,
 		"worktree", "add", "-b", branchName, worktreePath, baseBranch)
+	common.PrintExecCmd(cmd)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
@@ -63,6 +65,7 @@ func CreateWorktree(projectRoot, worktreePath, branchName, baseBranch string) er
 func RemoveWorktree(projectRoot, worktreePath string) error {
 	cmd := exec.Command("git", "-C", projectRoot,
 		"worktree", "remove", "--force", worktreePath)
+	common.PrintExecCmd(cmd)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
@@ -74,6 +77,7 @@ func RemoveWorktree(projectRoot, worktreePath string) error {
 // DeleteBranch runs `git branch -D <branchName>`.
 func DeleteBranch(projectRoot, branchName string) error {
 	cmd := exec.Command("git", "-C", projectRoot, "branch", "-D", branchName)
+	common.PrintExecCmd(cmd)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {

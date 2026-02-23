@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
 	"fmt"
 	"os"
 	"os/exec"
@@ -17,25 +16,26 @@ import (
 )
 
 var spawnFlags struct {
-	id         string
-	agentType  string
-	baseBranch string
+	agentType      string
+	dockerfile     string
+	baseBranch     string
 }
 
 func init() {
-	spawnCmd.Flags().StringVar(&spawnFlags.id, "id", "", "Agent ID (default: random 8-char hex)")
 	spawnCmd.Flags().StringVar(&spawnFlags.agentType, "agent", string(docker.AgentTypeClaude), "Agent type (claude, gemini)")
+	spawnCmd.Flags().StringVar(&spawnFlags.dockerfile, "dockerfile", "", "Custom Dockerfile path (agent type inferred from ENTRYPOINT if possible)")
 	spawnCmd.Flags().StringVar(&spawnFlags.baseBranch, "base-branch", "", "Base branch (default: current branch)")
 	rootCmd.AddCommand(spawnCmd)
 }
 
 var spawnCmd = &cobra.Command{
-	Use:   "spawn [--id <id>] [--agent <agent>] [--base-branch <base-branch>] <prompt>",
+	Use:   "spawn [--agent <agent>] [--dockerfile <path>] [--base-branch <base-branch>] <id> <prompt>",
 	Short: "Spawn a new AI agent for the given prompt",
-	Args:  cobra.MinimumNArgs(1),
+	Args:  cobra.MinimumNArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		id := args[0]
 		// Allow multi-word prompts without requiring quotes
-		prompt := strings.Join(args, " ")
+		prompt := strings.Join(args[1:], " ")
 
 		cwd, err := os.Getwd()
 		if err != nil {
@@ -47,21 +47,24 @@ var spawnCmd = &cobra.Command{
 			return errtrace.Wrap(err)
 		}
 
-		// Resolve agent ID
-		id := spawnFlags.id
-		if id == "" {
-			id, err = randomID()
-			if err != nil {
-				return errtrace.Wrap(fmt.Errorf("generate agent ID: %w", err))
+		agentType := docker.AgentType(spawnFlags.agentType)
+
+		// If a custom Dockerfile is provided, try to infer the agent type from it.
+		if spawnFlags.dockerfile != "" {
+			content, readErr := os.ReadFile(spawnFlags.dockerfile)
+			if readErr != nil {
+				return errtrace.Wrap(fmt.Errorf("read dockerfile: %w", readErr))
+			}
+			if inferred, ok := docker.InferAgentType(string(content)); ok {
+				agentType = inferred
 			}
 		}
 
-		agentType := docker.AgentType(spawnFlags.agentType)
 		switch agentType {
 		case docker.AgentTypeClaude, docker.AgentTypeGemini:
 			// valid
 		default:
-			return fmt.Errorf("unknown agent type %q; supported: claude, gemini", spawnFlags.agentType)
+			return fmt.Errorf("unknown agent type %q; supported: claude, gemini", agentType)
 		}
 
 		baseBranch := spawnFlags.baseBranch
@@ -75,7 +78,6 @@ var spawnCmd = &cobra.Command{
 		branchName := "hydra/" + id
 		worktreePath := filepath.Join(projectRoot, ".hydra", "worktrees", id)
 
-		fmt.Printf("Creating worktree on branch %q...\n", branchName)
 		if err := git.CreateWorktree(projectRoot, worktreePath, branchName, baseBranch); err != nil {
 			return errtrace.Wrap(err)
 		}
@@ -99,6 +101,7 @@ var spawnCmd = &cobra.Command{
 		containerID, err := docker.SpawnAgent(context.Background(), cli, docker.SpawnOptions{
 			Id:             id,
 			AgentType:      agentType,
+			DockerfilePath: spawnFlags.dockerfile,
 			Prompt:         prompt,
 			ProjectPath:    projectRoot,
 			WorktreePath:   worktreePath,
@@ -129,13 +132,4 @@ func readGitConfig(projectRoot, key string) string {
 		return ""
 	}
 	return strings.TrimSpace(string(out))
-}
-
-// randomID generates a random 8-character hex string.
-func randomID() (string, error) {
-	b := make([]byte, 4)
-	if _, err := rand.Read(b); err != nil {
-		return "", err
-	}
-	return fmt.Sprintf("%x", b), nil
 }

@@ -33,15 +33,25 @@ type Model struct {
 	err         error
 
 	// spawn form state
-	spawning    bool
-	spawnForm   spawnForm
+	spawning  bool
+	spawnForm spawnForm
 }
 
+// spawnForm holds state for the new-agent dialog.
+// Fields:
+//
+//	0 = ID input
+//	1 = agent type selector (←/→)
+//	2 = dockerfile path input (optional)
+//	3 = prompt input
+const spawnFieldCount = 4
+
 type spawnForm struct {
-	focusIdx  int // 0=id, 1=agentType, 2=prompt
-	idInput   textinput.Model
-	typeIdx   int // index into agentTypes
-	prompt    textinput.Model
+	focusIdx       int
+	idInput        textinput.Model
+	typeIdx        int // index into agentTypes
+	dockerfileInput textinput.Model
+	promptInput    textinput.Model
 }
 
 var agentTypes = []docker.AgentType{docker.AgentTypeClaude, docker.AgentTypeGemini}
@@ -52,23 +62,28 @@ func newSpawnForm() spawnForm {
 	id.CharLimit = 64
 	id.Focus()
 
+	dockerfile := textinput.New()
+	dockerfile.Placeholder = "optional path to Dockerfile"
+	dockerfile.CharLimit = 256
+
 	prompt := textinput.New()
 	prompt.Placeholder = "describe the task..."
 	prompt.CharLimit = 256
 
 	return spawnForm{
-		focusIdx: 0,
-		idInput:  id,
-		typeIdx:  0,
-		prompt:   prompt,
+		focusIdx:       0,
+		idInput:        id,
+		typeIdx:        0,
+		dockerfileInput: dockerfile,
+		promptInput:    prompt,
 	}
 }
 
 type (
-	refreshMsg  []heads.Head
-	killDoneMsg string
+	refreshMsg   []heads.Head
+	killDoneMsg  string
 	spawnDoneMsg string
-	errMsg      struct{ err error }
+	errMsg       struct{ err error }
 )
 
 func (e errMsg) Error() string { return e.err.Error() }
@@ -157,7 +172,6 @@ func (m Model) doRefresh() tea.Cmd {
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 
-	// Spawn form intercepts all input when active
 	if m.spawning {
 		return m.updateSpawnForm(msg)
 	}
@@ -264,19 +278,20 @@ func (m Model) updateSpawnForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "tab", "shift+tab":
 			if msg.String() == "tab" {
-				m.spawnForm.focusIdx = (m.spawnForm.focusIdx + 1) % 3
+				m.spawnForm.focusIdx = (m.spawnForm.focusIdx + 1) % spawnFieldCount
 			} else {
-				m.spawnForm.focusIdx = (m.spawnForm.focusIdx + 2) % 3
+				m.spawnForm.focusIdx = (m.spawnForm.focusIdx + spawnFieldCount - 1) % spawnFieldCount
 			}
-			if m.spawnForm.focusIdx == 0 {
+			m.spawnForm.idInput.Blur()
+			m.spawnForm.dockerfileInput.Blur()
+			m.spawnForm.promptInput.Blur()
+			switch m.spawnForm.focusIdx {
+			case 0:
 				m.spawnForm.idInput.Focus()
-				m.spawnForm.prompt.Blur()
-			} else if m.spawnForm.focusIdx == 1 {
-				m.spawnForm.idInput.Blur()
-				m.spawnForm.prompt.Blur()
-			} else {
-				m.spawnForm.idInput.Blur()
-				m.spawnForm.prompt.Focus()
+			case 2:
+				m.spawnForm.dockerfileInput.Focus()
+			case 3:
+				m.spawnForm.promptInput.Focus()
 			}
 			return m, textinput.Blink
 
@@ -291,7 +306,7 @@ func (m Model) updateSpawnForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case "enter":
-			promptText := strings.TrimSpace(m.spawnForm.prompt.Value())
+			promptText := strings.TrimSpace(m.spawnForm.promptInput.Value())
 			if promptText == "" {
 				m.err = fmt.Errorf("prompt is required")
 				return m, nil
@@ -305,13 +320,24 @@ func (m Model) updateSpawnForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, nil
 				}
 			}
+			dockerfilePath := strings.TrimSpace(m.spawnForm.dockerfileInput.Value())
 			agentType := agentTypes[m.spawnForm.typeIdx]
+
+			// If a dockerfile was given, try to infer the agent type from it.
+			if dockerfilePath != "" {
+				if content, err := os.ReadFile(dockerfilePath); err == nil {
+					if inferred, ok := docker.InferAgentType(string(content)); ok {
+						agentType = inferred
+					}
+				}
+			}
+
 			projectRoot := m.projectRoot
 			m.spawning = false
 			m.statusMsg = fmt.Sprintf("Spawning agent %s...", id)
 
 			return m, func() tea.Msg {
-				if err := spawnHead(projectRoot, id, agentType, promptText, m.client); err != nil {
+				if err := spawnHead(projectRoot, id, agentType, dockerfilePath, promptText, m.client); err != nil {
 					return errMsg{err}
 				}
 				return spawnDoneMsg(id)
@@ -319,12 +345,15 @@ func (m Model) updateSpawnForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	// Forward input to focused field
+	// Forward input to the focused text field.
 	var cmd tea.Cmd
-	if m.spawnForm.focusIdx == 0 {
+	switch m.spawnForm.focusIdx {
+	case 0:
 		m.spawnForm.idInput, cmd = m.spawnForm.idInput.Update(msg)
-	} else if m.spawnForm.focusIdx == 2 {
-		m.spawnForm.prompt, cmd = m.spawnForm.prompt.Update(msg)
+	case 2:
+		m.spawnForm.dockerfileInput, cmd = m.spawnForm.dockerfileInput.Update(msg)
+	case 3:
+		m.spawnForm.promptInput, cmd = m.spawnForm.promptInput.Update(msg)
 	}
 	return m, cmd
 }
@@ -367,22 +396,14 @@ func (m Model) View() string {
 func (m Model) viewSpawnForm() string {
 	f := m.spawnForm
 
-	labelID := unfocusedLabel.Render("ID (leave blank for random):")
-	if f.focusIdx == 0 {
-		labelID = focusedLabel.Render("ID (leave blank for random):")
+	label := func(text string, focused bool) string {
+		if focused {
+			return focusedLabel.Render(text)
+		}
+		return unfocusedLabel.Render(text)
 	}
 
-	labelType := unfocusedLabel.Render("Agent type [←/->]:")
-	if f.focusIdx == 1 {
-		labelType = focusedLabel.Render("Agent type [←/->]:")
-	}
-
-	labelPrompt := unfocusedLabel.Render("Prompt:")
-	if f.focusIdx == 2 {
-		labelPrompt = focusedLabel.Render("Prompt:")
-	}
-
-	// Render agent type selector
+	// Agent type selector row
 	var typeOptions []string
 	for i, t := range agentTypes {
 		s := string(t)
@@ -398,16 +419,19 @@ func (m Model) viewSpawnForm() string {
 	form := formStyle.Render(strings.Join([]string{
 		titleStyle.Render("Spawn New Agent"),
 		"",
-		labelID,
+		label("ID (leave blank for random):", f.focusIdx == 0),
 		f.idInput.View(),
 		"",
-		labelType,
+		label("Agent type [←/→]:", f.focusIdx == 1),
 		typeRow,
 		"",
-		labelPrompt,
-		f.prompt.View(),
+		label("Dockerfile (optional, type inferred from ENTRYPOINT):", f.focusIdx == 2),
+		f.dockerfileInput.View(),
 		"",
-		helpStyle.Render("[Tab] next field  [←/->] change type  [Enter] spawn  [Esc] cancel"),
+		label("Prompt:", f.focusIdx == 3),
+		f.promptInput.View(),
+		"",
+		helpStyle.Render("[Tab] next field  [←/→] change type  [Enter] spawn  [Esc] cancel"),
 	}, "\n"))
 
 	return form
@@ -453,7 +477,7 @@ func (m *Model) headByID(id string) *heads.Head {
 }
 
 // spawnHead creates a worktree, builds the image, and starts the container.
-func spawnHead(projectRoot, id string, agentType docker.AgentType, prompt string, cli *dockerclient.Client) error {
+func spawnHead(projectRoot, id string, agentType docker.AgentType, dockerfilePath, prompt string, cli *dockerclient.Client) error {
 	baseBranch, err := git.GetCurrentBranch(projectRoot)
 	if err != nil {
 		return fmt.Errorf("get current branch: %w", err)
@@ -472,6 +496,7 @@ func spawnHead(projectRoot, id string, agentType docker.AgentType, prompt string
 	_, err = docker.SpawnAgent(context.Background(), cli, docker.SpawnOptions{
 		Id:             id,
 		AgentType:      agentType,
+		DockerfilePath: dockerfilePath,
 		Prompt:         prompt,
 		ProjectPath:    projectRoot,
 		WorktreePath:   worktreePath,
