@@ -1,24 +1,30 @@
 package docker
 
 import (
+	"archive/tar"
 	"context"
 	"crypto/sha256"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
-	"strings"
+	"syscall"
 
 	"braces.dev/errtrace"
+	"github.com/charmbracelet/x/term"
+	"github.com/docker/docker/api/types/build"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
-	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/api/types/network"
 	dockerclient "github.com/docker/docker/client"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/trolleyman/hydra/internal/common"
 	"github.com/trolleyman/hydra/internal/config"
+	"github.com/trolleyman/hydra/internal/git"
+	"github.com/trolleyman/hydra/internal/paths"
 )
 
 // Agent represents a running or stopped Hydra-managed container.
@@ -95,6 +101,7 @@ type SpawnOptions struct {
 	GID            int
 	Username       string
 	GroupName      string
+	Resume         bool // if true, run agent with --resume instead of a fresh prompt
 }
 
 // SpawnAgent builds the Docker image if necessary, then creates and starts the container.
@@ -149,21 +156,30 @@ func SpawnAgent(ctx context.Context, cli *dockerclient.Client, opts SpawnOptions
 		gitDir + ":" + gitDir + ":rw",
 		opts.WorktreePath + ":" + opts.WorktreePath + ":rw",
 	}
-	binds = append(binds, agentBinds(opts.AgentType, containerHome)...)
+	agentBinds, err := getAgentBinds(opts.AgentType, opts.ProjectPath, containerHome)
+	if err != nil {
+		return "", errtrace.Wrap(err)
+	}
+	binds = append(binds, agentBinds...)
 
 	var netCfg *network.NetworkingConfig
 	var platform *ocispec.Platform
 
 	containerName := "hydra-" + opts.Id
 	log.Printf("Creating container %s...", containerName)
-	cmd := []string{opts.Prompt}
-	switch opts.AgentType {
-	case AgentTypeClaude:
-		cmd = []string{"--approval-mode=yolo", "-i", opts.Prompt}
-	case AgentTypeGemini:
-		cmd = []string{"--dangerously-skip-permissions", "--", opts.Prompt}
-	default:
-		return "", fmt.Errorf("unknown agent type: %q", opts.AgentType)
+	var cmd []string
+	if opts.Resume {
+		cmd = []string{"--resume"}
+	} else {
+		switch opts.AgentType {
+		case AgentTypeClaude:
+			// cmd = []string{"claude", "--dangerously-skip-permissions", "--", opts.Prompt}
+			cmd = []string{"bash"}
+		case AgentTypeGemini:
+			cmd = []string{"gemini", "--approval-mode=yolo", "-i", opts.Prompt}
+		default:
+			return "", fmt.Errorf("unknown agent type: %q", opts.AgentType)
+		}
 	}
 
 	resp, err := cli.ContainerCreate(ctx,
@@ -172,6 +188,7 @@ func SpawnAgent(ctx context.Context, cli *dockerclient.Client, opts SpawnOptions
 			Cmd:        cmd,
 			Labels:     map[string]string{LabelKey: labelVal},
 			Tty:        true,
+			OpenStdin:  true,
 			Env:        env,
 			WorkingDir: opts.WorktreePath,
 		},
@@ -197,23 +214,91 @@ func SpawnAgent(ctx context.Context, cli *dockerclient.Client, opts SpawnOptions
 // KillAgent stops and removes a container.
 func KillAgent(ctx context.Context, cli *dockerclient.Client, containerID string) error {
 	timeout := 10
+	log.Printf("Stopping container %s...", containerID[:12])
 	if err := cli.ContainerStop(ctx, containerID, container.StopOptions{Timeout: &timeout}); err != nil {
 		log.Printf("warn: stop container %s: %v", containerID[:12], err)
 	}
+	log.Printf("Removing container %s...", containerID[:12])
 	if err := cli.ContainerRemove(ctx, containerID, container.RemoveOptions{Force: true}); err != nil {
 		return errtrace.Wrap(fmt.Errorf("remove container: %w", err))
 	}
 	return nil
 }
 
-// AttachAgent runs `docker attach <id>`, handing over the terminal.
-func AttachAgent(containerID string) error {
-	cmd := exec.Command("docker", "attach", containerID)
-	common.PrintExecCmd(cmd)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return errtrace.Wrap(cmd.Run())
+// AttachAgent runs attaches to a container, handing over the terminal.
+func AttachAgent(ctx context.Context, cli *dockerclient.Client, containerID string) error {
+	oldState, err := term.MakeRaw(os.Stdin.Fd())
+	if err != nil {
+		return errtrace.Wrap(fmt.Errorf("set raw mode: %w", err))
+	}
+	defer term.Restore(os.Stdin.Fd(), oldState)
+
+	resp, err := cli.ContainerAttach(ctx, containerID, container.AttachOptions{
+		Stream: true,
+		Stdin:  true,
+		Stdout: true,
+		Stderr: true,
+	})
+	if err != nil {
+		return errtrace.Wrap(fmt.Errorf("attach to container: %w", err))
+	}
+	defer resp.Close()
+
+	// Send the initial terminal size so the container TUI knows how to render.
+	syncTerminalSize(ctx, cli, containerID)
+
+	// Inject a Ctrl+L byte (\x0c) into the container's stdin to force a TUI redraw.
+	// We ignore the error here as a failed redraw signal shouldn't crash the attachment.
+	_, _ = resp.Conn.Write([]byte{'\x0c'})
+
+	// Listen for window resize events from the host OS and forward them to the container.
+	// syscall.SIGWINCH is Unix-specific. If compiling for Windows, this signal won't fire,
+	// but the initial sync above will at least give the container a starting size.
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGWINCH)
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-sigChan:
+				syncTerminalSize(ctx, cli, containerID)
+			}
+		}
+	}()
+
+	errCh := make(chan error, 2)
+
+	go func() {
+		_, err := io.Copy(resp.Conn, os.Stdin)
+		resp.CloseWrite()
+		errCh <- err
+	}()
+
+	go func() {
+		_, err := io.Copy(os.Stdout, resp.Reader)
+		errCh <- err
+	}()
+
+	err = <-errCh
+	if err != nil && err != io.EOF {
+		return errtrace.Wrap(fmt.Errorf("stream copy: %w", err))
+	}
+
+	return nil
+}
+
+func syncTerminalSize(ctx context.Context, cli *dockerclient.Client, containerID string) {
+	width, height, err := term.GetSize(os.Stdout.Fd())
+	if err != nil {
+		return
+	}
+
+	// Tell the Docker daemon the new dimensions of the TTY.
+	_ = cli.ContainerResize(ctx, containerID, container.ResizeOptions{
+		Height: uint(height),
+		Width:  uint(width),
+	})
 }
 
 // ViewLogs runs `docker logs -f <id>`, streaming output to the terminal.
@@ -223,45 +308,6 @@ func ViewLogs(containerID string) error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return errtrace.Wrap(cmd.Run())
-}
-
-// InferAgentType parses Dockerfile content and returns the agent type inferred
-// from the ENTRYPOINT command name (e.g. "claude" or "gemini").
-func InferAgentType(content string) (AgentType, bool) {
-	for line := range strings.SplitSeq(content, "\n") {
-		line = strings.TrimSpace(line)
-		if !strings.HasPrefix(strings.ToUpper(line), "ENTRYPOINT") {
-			continue
-		}
-		rest := strings.TrimSpace(line[len("ENTRYPOINT"):])
-		var cmdName string
-		if rest, ok := strings.CutPrefix(rest, "["); ok {
-			// JSON array form: ENTRYPOINT ["cmd", ...]
-			rest = strings.TrimSpace(rest)
-			if len(rest) > 0 && (rest[0] == '"' || rest[0] == '\'') {
-				q := rest[0]
-				end := strings.IndexByte(rest[1:], q)
-				if end >= 0 {
-					cmdName = rest[1 : 1+end]
-				}
-			}
-		} else {
-			// Shell form: ENTRYPOINT cmd args...
-			parts := strings.Fields(rest)
-			if len(parts) > 0 {
-				cmdName = strings.Trim(parts[0], `"'`)
-			}
-		}
-		if cmdName == "" {
-			continue
-		}
-		// Use basename so paths like /usr/bin/claude still match.
-		switch AgentType(filepath.Base(cmdName)) {
-		case AgentTypeClaude, AgentTypeGemini:
-			return AgentType(filepath.Base(cmdName)), true
-		}
-	}
-	return "", false
 }
 
 // defaultDockerfileContent returns the embedded Dockerfile content for the given agent type.
@@ -276,37 +322,54 @@ func defaultDockerfileContent(agentType AgentType) (string, error) {
 	}
 }
 
-// agentBinds returns host:container bind mounts for agent-specific config files.
+// getAgentBinds returns host:container bind mounts for agent-specific config files.
 // containerHome is the home directory of the agent user inside the container (e.g. /home/callum).
-func agentBinds(agentType AgentType, containerHome string) []string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return nil
+func getAgentBinds(agentType AgentType, projectRoot string, containerHome string) ([]string, error) {
+	// home, err := os.UserHomeDir()
+	// if err != nil {
+	// 	return nil, errtrace.Wrap(err)
+	// }
+
+	hydraDir := paths.GetHydraDirFromProjectRoot(projectRoot)
+	claudeSettingsDir := filepath.Join(hydraDir, ".claude")
+	if err := git.CreateGitignoreAllInDir(claudeSettingsDir); err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	claudeSettingsJson := filepath.Join(claudeSettingsDir, "settings.json")
+	if _, err := os.Stat(claudeSettingsJson); os.IsNotExist(err) {
+		if err = os.WriteFile(claudeSettingsJson, []byte("{\"skipDangerousModePermissionPrompt\": true}"), 0644); err != nil {
+			return nil, errtrace.Wrap(err)
+		}
+	}
+	geminiSettingsDir := filepath.Join(hydraDir, ".gemini")
+	if err := git.CreateGitignoreAllInDir(geminiSettingsDir); err != nil {
+		return nil, errtrace.Wrap(err)
 	}
 
 	var binds []string
 	switch agentType {
 	case AgentTypeClaude:
 		for _, pair := range []struct{ host, container string }{
-			{filepath.Join(home, ".claude", "settings.json"), containerHome + "/.claude/settings.json"},
-			{filepath.Join(home, ".claude", ".credentials.json"), containerHome + "/.claude/.credentials.json"},
+			// {filepath.Join(home, ".claude", "settings.json"), containerHome + "/.claude/settings.json"},
+			// {filepath.Join(home, ".claude", ".credentials.json"), containerHome + "/.claude/.credentials.json"},
+			{claudeSettingsDir, containerHome + "/.claude"},
 		} {
 			if _, err := os.Stat(pair.host); err == nil {
-				binds = append(binds, pair.host+":"+pair.container+":ro")
+				binds = append(binds, pair.host+":"+pair.container)
 			}
 		}
 	case AgentTypeGemini:
 		for _, pair := range []struct{ host, container string }{
-			{filepath.Join(home, ".gemini", "oauth_creds.json"), containerHome + "/.gemini/oauth_creds.json"},
-			{filepath.Join(home, ".gemini", "google_accounts.json"), containerHome + "/.gemini/google_accounts.json"},
-			{filepath.Join(home, ".gemini", "settings.json"), containerHome + "/.gemini/settings.json"},
+			// {filepath.Join(home, ".gemini", "oauth_creds.json"), containerHome + "/.gemini/oauth_creds.json"},
+			// {filepath.Join(home, ".gemini", "google_accounts.json"), containerHome + "/.gemini/google_accounts.json"},
+			{geminiSettingsDir, containerHome + "/.gemini"},
 		} {
 			if _, err := os.Stat(pair.host); err == nil {
-				binds = append(binds, pair.host+":"+pair.container+":ro")
+				binds = append(binds, pair.host+":"+pair.container)
 			}
 		}
 	}
-	return binds
+	return binds, nil
 }
 
 // ensureImage ensures the Docker image for the given agent and optional custom
@@ -327,17 +390,7 @@ func ensureImage(ctx context.Context, cli *dockerclient.Client, agentType AgentT
 }
 
 func ensureDefaultImage(ctx context.Context, cli *dockerclient.Client, agentType AgentType) (string, error) {
-	tag := "hydra-agent-" + string(agentType)
-
-	images, err := cli.ImageList(ctx, image.ListOptions{
-		Filters: filters.NewArgs(filters.Arg("reference", tag)),
-	})
-	if err != nil {
-		return "", errtrace.Wrap(fmt.Errorf("list images: %w", err))
-	}
-	if len(images) > 0 {
-		return tag, nil
-	}
+	tag := "hydra-agent-" + string(agentType) + ":default"
 
 	// Copy the embedded Dockerfile to a stable per-user directory.
 	ctxDir, err := prepareDefaultDockerfileDir(agentType)
@@ -345,19 +398,89 @@ func ensureDefaultImage(ctx context.Context, cli *dockerclient.Client, agentType
 		return "", errtrace.Wrap(err)
 	}
 
-	buildCmd := exec.Command(
-		"docker", "build",
-		"-t", tag,
-		"-f", filepath.Join(ctxDir, "Dockerfile"),
-		ctxDir,
-	)
-	common.PrintExecCmd(buildCmd)
-	buildCmd.Stdout = os.Stdout
-	buildCmd.Stderr = os.Stderr
-	if err := buildCmd.Run(); err != nil {
-		return "", errtrace.Wrap(fmt.Errorf("build image: %w", err))
+	err = buildDockerImage(ctx, cli, tag, filepath.Join(ctxDir, "Dockerfile"), ctxDir)
+	if err != nil {
+		return "", errtrace.Wrap(err)
 	}
 	return tag, nil
+}
+
+func buildDockerImage(ctx context.Context, cli *dockerclient.Client, tag, dockerfilePath, buildContext string) error {
+	log.Printf("Building Docker image: %s (from %s in %s)", tag, dockerfilePath, buildContext)
+
+	// Docker expects the Dockerfile path to be relative to the build context root.
+	relDockerfile, err := filepath.Rel(buildContext, dockerfilePath)
+	if err != nil {
+		return errtrace.Wrap(fmt.Errorf("resolve relative dockerfile path: %w", err))
+	}
+	// Ensure the path uses forward slashes, as required by the Docker daemon.
+	relDockerfile = filepath.ToSlash(relDockerfile)
+
+	pr, pw := io.Pipe()
+	errChan := make(chan error, 1)
+
+	go func() {
+		tw := tar.NewWriter(pw)
+		var walkErr error
+
+		defer func() {
+			tw.Close()
+			pw.CloseWithError(walkErr)
+			errChan <- walkErr
+		}()
+
+		walkErr = filepath.Walk(buildContext, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
+
+			header, err := tar.FileInfoHeader(info, info.Name())
+			if err != nil {
+				return err
+			}
+
+			rel, err := filepath.Rel(buildContext, path)
+			if err != nil {
+				return err
+			}
+
+			// Docker expects forward slashes in tar headers regardless of the host OS
+			header.Name = filepath.ToSlash(rel)
+
+			if err := tw.WriteHeader(header); err != nil {
+				return err
+			}
+			if !info.Mode().IsRegular() {
+				return nil
+			}
+			f, err := os.Open(path)
+			if err != nil {
+				return err
+			}
+			defer f.Close()
+			_, err = io.Copy(tw, f)
+			return err
+		})
+	}()
+
+	resp, err := cli.ImageBuild(ctx, pr, build.ImageBuildOptions{
+		Tags:       []string{tag},
+		Dockerfile: relDockerfile, // Use the relative, slash-converted path here
+	})
+	if err != nil {
+		return errtrace.Wrap(fmt.Errorf("build image: %w", err))
+	}
+	defer resp.Body.Close()
+
+	if _, err := io.Copy(io.Discard, resp.Body); err != nil {
+		return errtrace.Wrap(fmt.Errorf("read build output: %w", err))
+	}
+
+	if err := <-errChan; err != nil {
+		return errtrace.Wrap(fmt.Errorf("create build context archive: %w", err))
+	}
+
+	return nil
 }
 
 func ensureCustomImage(ctx context.Context, cli *dockerclient.Client, agentType AgentType, dockerfilePath string) (string, error) {
@@ -367,29 +490,11 @@ func ensureCustomImage(ctx context.Context, cli *dockerclient.Client, agentType 
 	}
 
 	hash := fmt.Sprintf("%x", sha256.Sum256([]byte(abs)))[:8]
-	tag := "hydra-agent-" + string(agentType) + "-" + hash
+	tag := "hydra-agent-" + string(agentType) + ":" + hash
 
-	images, err := cli.ImageList(ctx, image.ListOptions{
-		Filters: filters.NewArgs(filters.Arg("reference", tag)),
-	})
+	err = buildDockerImage(ctx, cli, tag, dockerfilePath, filepath.Dir(abs))
 	if err != nil {
-		return "", errtrace.Wrap(fmt.Errorf("list images: %w", err))
-	}
-	if len(images) > 0 {
-		return tag, nil
-	}
-
-	buildCmd := exec.Command(
-		"docker", "build",
-		"-t", tag,
-		"-f", abs,
-		filepath.Dir(abs),
-	)
-	common.PrintExecCmd(buildCmd)
-	buildCmd.Stdout = os.Stdout
-	buildCmd.Stderr = os.Stderr
-	if err := buildCmd.Run(); err != nil {
-		return "", errtrace.Wrap(fmt.Errorf("build image: %w", err))
+		return "", errtrace.Wrap(err)
 	}
 	return tag, nil
 }

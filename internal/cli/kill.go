@@ -1,10 +1,7 @@
 package cli
 
 import (
-	"context"
-
 	"braces.dev/errtrace"
-	"github.com/cockroachdb/errors"
 	"github.com/spf13/cobra"
 	"github.com/trolleyman/hydra/internal/docker"
 	"github.com/trolleyman/hydra/internal/heads"
@@ -12,12 +9,12 @@ import (
 )
 
 func init() {
-	rootCmd.AddCommand(attachCmd)
+	rootCmd.AddCommand(killCmd)
 }
 
-var attachCmd = &cobra.Command{
-	Use:   "attach <id>",
-	Short: "Attach to a running agent with the ID given",
+var killCmd = &cobra.Command{
+	Use:   "kill <id>",
+	Short: "Kill the head with the selected ID",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		id := args[0]
@@ -33,14 +30,21 @@ var attachCmd = &cobra.Command{
 		}
 		defer cli.Close()
 
-		head, err := heads.GetHeadByID(context.Background(), cli, projectRoot, id)
+		head, err := heads.GetHeadByID(cmd.Context(), cli, projectRoot, id)
 		if err != nil {
 			return errtrace.Wrap(err)
 		}
+
 		if head == nil {
-			return errtrace.Wrap(errors.Errorf("no head found with ID: %s", id))
+			return errtrace.Errorf("no head found with ID: %s", id)
 		}
 
-		return errtrace.Wrap(docker.AttachAgent(cmd.Context(), cli, head.ContainerID))
+		// log.Printf("head found with ID: %s: %v: %s", id, head.HasWorktree, head.WorktreePath)
+		err = heads.KillHead(cmd.Context(), cli, *head)
+		if err != nil {
+			return errtrace.Wrap(err)
+		}
+
+		return nil
 	},
 }

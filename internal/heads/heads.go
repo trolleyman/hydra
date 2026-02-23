@@ -4,7 +4,6 @@ import (
 	"context"
 	"log"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"braces.dev/errtrace"
@@ -43,8 +42,8 @@ func ListHeads(ctx context.Context, cli *dockerclient.Client, projectRoot string
 	}
 	for _, branch := range branches {
 		id := strings.TrimPrefix(branch, "hydra/")
-		worktreesDir := paths.GetWorktreeDirFromProjectRoot(projectRoot)
-		worktreePath := filepath.Join(worktreesDir, id)
+		worktreePath := paths.GetWorktreeDirFromProjectRoot(projectRoot, id)
+		// fmt.Printf("%s: worktreeDir: %s, projectRoot: %s\n", id, worktreePath, projectRoot)
 		_, statErr := os.Stat(worktreePath)
 		head := &Head{
 			ID:           id,
@@ -76,8 +75,8 @@ func ListHeads(ctx context.Context, cli *dockerclient.Client, projectRoot string
 			}
 		} else {
 			// Container without a matching branch (orphaned)
-			worktreesDir := paths.GetWorktreeDirFromProjectRoot(a.Meta.ProjectPath)
-			worktreePath := filepath.Join(worktreesDir, id)
+			worktreePath := paths.GetWorktreeDirFromProjectRoot(a.Meta.ProjectPath, id)
+			// fmt.Printf("%s: worktreeDir: %s, projectPath: %s\n", id, worktreePath, a.Meta.ProjectPath)
 			_, statErr := os.Stat(worktreePath)
 			byID[id] = &Head{
 				ID:              id,
@@ -110,9 +109,24 @@ func ListHeads(ctx context.Context, cli *dockerclient.Client, projectRoot string
 	return result, nil
 }
 
+// GetHeadByID returns the head with the given ID.
+func GetHeadByID(ctx context.Context, cli *dockerclient.Client, projectRoot, id string) (*Head, error) {
+	hs, err := ListHeads(ctx, cli, projectRoot)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	for _, h := range hs {
+		if h.ID == id {
+			return &h, nil
+		}
+	}
+	return nil, nil
+}
+
 // KillHead removes a Hydra head in safe order: container -> worktree -> branch.
 func KillHead(ctx context.Context, cli *dockerclient.Client, head Head) error {
 	if head.ContainerID != "" {
+		log.Printf("Killing head: %s in container %s", head.ID, head.ContainerID[:12])
 		if err := docker.KillAgent(ctx, cli, head.ContainerID); err != nil {
 			return errtrace.Wrap(err)
 		}

@@ -25,23 +25,28 @@ func GetProjectRootFromCwd() (string, error) {
 	if err != nil {
 		return "", errtrace.Wrap(err)
 	}
+	// fmt.Printf("GetProjectRootFromCwd: %s\n", projectRoot)
 	cwdProjectRoot = &projectRoot
 	return projectRoot, nil
 }
 
-// GetProjectRoot gets the git directory from a directory
+// GetProjectRoot returns the root of the git repository containing dir.
 func GetProjectRoot(dir string) (string, error) {
-	output, err := exec.Command("git", "-C", dir, "rev-parse", "--git-dir").Output()
+	out, err := exec.Command("git", "-C", dir, "rev-parse", "--show-toplevel").Output()
 	if err != nil {
-		return "", errtrace.Wrap(fmt.Errorf("git rev-parse -C %q --git-dir: %w", dir, err))
+		return "", errtrace.Wrap(fmt.Errorf("git rev-parse --show-toplevel: %w", err))
 	}
-	return filepath.Join(dir, strings.TrimSpace(string(output))), nil
+	return strings.TrimSpace(string(out)), nil
 }
 
 func GetHydraDirFromProjectRoot(projectRoot string) string {
 	return filepath.Join(projectRoot, ".hydra")
 }
 
-func GetWorktreeDirFromProjectRoot(projectRoot string) string {
+func GetWorktreesDirFromProjectRoot(projectRoot string) string {
 	return filepath.Join(GetHydraDirFromProjectRoot(projectRoot), "worktrees")
+}
+
+func GetWorktreeDirFromProjectRoot(projectRoot, id string) string {
+	return filepath.Join(GetWorktreesDirFromProjectRoot(projectRoot), id)
 }

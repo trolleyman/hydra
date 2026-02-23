@@ -3,10 +3,10 @@ package cli
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"os/user"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"text/tabwriter"
@@ -15,6 +15,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/trolleyman/hydra/internal/docker"
 	"github.com/trolleyman/hydra/internal/git"
+	"github.com/trolleyman/hydra/internal/heads"
 	"github.com/trolleyman/hydra/internal/paths"
 )
 
@@ -22,17 +23,19 @@ var spawnFlags struct {
 	agentType  string
 	dockerfile string
 	baseBranch string
+	force      bool
 }
 
 func init() {
 	spawnCmd.Flags().StringVar(&spawnFlags.agentType, "agent", string(docker.AgentTypeClaude), "Agent type (claude, gemini)")
 	spawnCmd.Flags().StringVar(&spawnFlags.dockerfile, "dockerfile", "", "Custom Dockerfile path (agent type inferred from ENTRYPOINT if possible)")
 	spawnCmd.Flags().StringVar(&spawnFlags.baseBranch, "base-branch", "", "Base branch (default: current branch)")
+	spawnCmd.Flags().BoolVarP(&spawnFlags.force, "force", "f", false, "Force delete existing worktree and branch if they exist")
 	rootCmd.AddCommand(spawnCmd)
 }
 
 var spawnCmd = &cobra.Command{
-	Use:   "spawn [--agent <agent>] [--dockerfile <path>] [--base-branch <base-branch>] <id> <prompt>",
+	Use:   "spawn [--agent <agent>] [--dockerfile <path>] [--base-branch <base-branch>] [--force|-f] <id> <prompt>",
 	Short: "Spawn a new AI agent for the given prompt",
 	Args:  cobra.MinimumNArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -40,28 +43,43 @@ var spawnCmd = &cobra.Command{
 		// Allow multi-word prompts without requiring quotes
 		prompt := strings.Join(args[1:], " ")
 
-		cwd, err := os.Getwd()
-		if err != nil {
-			return errtrace.Wrap(fmt.Errorf("get working directory: %w", err))
-		}
-
-		projectRoot, err := git.FindProjectRoot(cwd)
+		projectRoot, err := paths.GetProjectRootFromCwd()
 		if err != nil {
 			return errtrace.Wrap(err)
 		}
 
-		agentType := docker.AgentType(spawnFlags.agentType)
+		cli, err := docker.NewClient()
+		if err != nil {
+			return errtrace.Wrap(err)
+		}
+		defer cli.Close()
+
+		// If forced, and head already exists, kill it
+		existingHead, err := heads.GetHeadByID(cmd.Context(), cli, projectRoot, id)
+		if err != nil {
+			return errtrace.Wrap(err)
+		}
+		if existingHead != nil {
+			if !spawnFlags.force {
+				return errtrace.Errorf("existing head running: %s in container %s: --force to kill", id, existingHead.ContainerID)
+			}
+			if err := heads.KillHead(cmd.Context(), cli, *existingHead); err != nil {
+				return errtrace.Wrap(err)
+			}
+		}
 
 		// If a custom Dockerfile is provided, try to infer the agent type from it.
 		if spawnFlags.dockerfile != "" {
-			content, readErr := os.ReadFile(spawnFlags.dockerfile)
+			_, readErr := os.ReadFile(spawnFlags.dockerfile)
 			if readErr != nil {
 				return errtrace.Wrap(fmt.Errorf("read dockerfile: %w", readErr))
 			}
-			if inferred, ok := docker.InferAgentType(string(content)); ok {
-				agentType = inferred
+			if spawnFlags.agentType == "" {
+				return errtrace.Errorf("specify agent type when custom dockerfile is specified")
 			}
 		}
+
+		agentType := docker.AgentType(spawnFlags.agentType)
 
 		switch agentType {
 		case docker.AgentTypeClaude, docker.AgentTypeGemini:
@@ -79,9 +97,7 @@ var spawnCmd = &cobra.Command{
 		}
 
 		branchName := "hydra/" + id
-		worktreesDir := paths.GetWorktreeDirFromProjectRoot(projectRoot)
-		worktreePath := filepath.Join(worktreesDir, id)
-
+		worktreePath := paths.GetWorktreeDirFromProjectRoot(projectRoot, id)
 		if err := git.CreateWorktree(projectRoot, worktreePath, branchName, baseBranch); err != nil {
 			return errtrace.Wrap(err)
 		}
@@ -95,12 +111,6 @@ var spawnCmd = &cobra.Command{
 		if gitAuthorEmail == "" {
 			gitAuthorEmail = readGitConfig(projectRoot, "user.email")
 		}
-
-		cli, err := docker.NewClient()
-		if err != nil {
-			return errtrace.Wrap(err)
-		}
-		defer cli.Close()
 
 		// Resolve the current user's identity for container user creation.
 		currentUser, err := user.Current()
@@ -136,8 +146,8 @@ var spawnCmd = &cobra.Command{
 			return errtrace.Wrap(fmt.Errorf("spawn agent: %w", err))
 		}
 
-		fmt.Printf("Agent %s started on branch %s (container %s)\n", id, branchName, containerID[:12])
-		w := tabwriter.NewWriter(os.Stdout, 0, 0, 1, ' ', 0)
+		log.Printf("Agent %s started on branch %s (container %s)\n", id, branchName, containerID[:12])
+		w := tabwriter.NewWriter(log.Writer(), 0, 0, 1, ' ', 0)
 		fmt.Fprintf(w, "  hydra attach %s\t- attach to the session\n", id)
 		fmt.Fprintf(w, "  hydra list\t- view all running agents\n")
 		w.Flush()

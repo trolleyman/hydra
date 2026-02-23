@@ -1,7 +1,7 @@
 package common
 
 import (
-	"fmt"
+	"log"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -29,7 +29,7 @@ func PrintCmd(cmd string, args ...string) {
 	for _, a := range args {
 		parts = append(parts, ShellQuote(a))
 	}
-	fmt.Printf("%s$ %s%s%s\n", colorCmdDollar, colorCmdLine, strings.Join(parts, " "), colorReset)
+	log.Printf("%s$ %s%s%s\n", colorCmdDollar, colorCmdLine, strings.Join(parts, " "), colorReset)
 }
 
 // PrintExecCmd prints an *exec.Cmd in the bun style.

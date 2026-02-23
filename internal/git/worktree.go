@@ -11,15 +11,6 @@ import (
 	"github.com/trolleyman/hydra/internal/common"
 )
 
-// FindProjectRoot returns the root of the git repository containing dir.
-func FindProjectRoot(dir string) (string, error) {
-	out, err := exec.Command("git", "-C", dir, "rev-parse", "--show-toplevel").Output()
-	if err != nil {
-		return "", errtrace.Wrap(fmt.Errorf("git rev-parse --show-toplevel: %w", err))
-	}
-	return strings.TrimSpace(string(out)), nil
-}
-
 // GetCurrentBranch returns the name of the currently checked-out branch.
 func GetCurrentBranch(projectRoot string) (string, error) {
 	out, err := exec.Command("git", "-C", projectRoot, "rev-parse", "--abbrev-ref", "HEAD").Output()
@@ -48,15 +39,8 @@ func ListHydraBranches(projectRoot string) ([]string, error) {
 // CreateWorktree runs `git worktree add -b <branchName> <path> <baseBranch>`.
 func CreateWorktree(projectRoot, worktreePath, branchName, baseBranch string) error {
 	worktreesDir := filepath.Dir(worktreePath)
-	if err := os.MkdirAll(worktreesDir, 0755); err != nil {
-		return errtrace.Wrap(fmt.Errorf("create worktree parent: %w", err))
-	}
-
-	gitignorePath := filepath.Join(worktreePath, ".gitignore")
-	if _, err := os.Stat(gitignorePath); os.IsNotExist(err) {
-		if err := os.WriteFile(gitignorePath, []byte("*\n"), 0644); err != nil {
-			return errtrace.Wrap(fmt.Errorf("create .gitignore: %w", err))
-		}
+	if err := CreateGitignoreAllInDir(worktreesDir); err != nil {
+		return errtrace.Wrap(err)
 	}
 
 	cmd := exec.Command("git", "-C", projectRoot,
@@ -66,6 +50,21 @@ func CreateWorktree(projectRoot, worktreePath, branchName, baseBranch string) er
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
 		return errtrace.Wrap(fmt.Errorf("git worktree add: %w", err))
+	}
+	return nil
+}
+
+// CreateGitignoreAllInDir adds a .gitignore in the specified directory that ignores all files in that directory
+func CreateGitignoreAllInDir(dir string) error {
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return errtrace.Wrap(fmt.Errorf("create dir: %w: %s", err, dir))
+	}
+
+	gitignorePath := filepath.Join(dir, ".gitignore")
+	if _, err := os.Stat(gitignorePath); os.IsNotExist(err) {
+		if err := os.WriteFile(gitignorePath, []byte("*\n"), 0644); err != nil {
+			return errtrace.Wrap(fmt.Errorf("create .gitignore: %w: %s", err, gitignorePath))
+		}
 	}
 	return nil
 }

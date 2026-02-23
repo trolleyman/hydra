@@ -9,8 +9,8 @@ import (
 	"braces.dev/errtrace"
 	"github.com/spf13/cobra"
 	"github.com/trolleyman/hydra/internal/docker"
-	"github.com/trolleyman/hydra/internal/git"
 	"github.com/trolleyman/hydra/internal/heads"
+	"github.com/trolleyman/hydra/internal/paths"
 )
 
 func init() {
@@ -21,11 +21,7 @@ var listCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all Hydra agents",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cwd, err := os.Getwd()
-		if err != nil {
-			return errtrace.Wrap(fmt.Errorf("get working directory: %w", err))
-		}
-		projectRoot, err := git.FindProjectRoot(cwd)
+		projectRoot, err := paths.GetProjectRootFromCwd()
 		if err != nil {
 			return errtrace.Wrap(err)
 		}

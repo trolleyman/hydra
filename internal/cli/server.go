@@ -26,7 +26,7 @@ func runServer(_ *cobra.Command, _ []string) error {
 	if err != nil {
 		log.Fatalf("Resolve project root: %v", err)
 	}
-	worktreesDir := paths.GetWorktreeDirFromProjectRoot(projectRoot)
+	worktreesDir := paths.GetWorktreesDirFromProjectRoot(projectRoot)
 
 	log.Printf("Worktrees: %s", worktreesDir)
 
