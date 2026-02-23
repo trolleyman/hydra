@@ -230,15 +230,16 @@ type AgentTypeOption = 'claude' | 'gemini'
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/i.test(navigator.platform)
 
-function slugify(text: string, maxLength = 40): string {
-  return text
+function slugify(text: string, maxLength = 40, allowTrailingHyphen = false): string {
+  const slug = text
     .toLowerCase()
     .trim()
     .replace(/[^a-z0-9\s-]/g, '')
     .replace(/\s+/g, '-')
     .replace(/-+/g, '-')
     .slice(0, maxLength)
-    .replace(/-$/, '')
+  
+  return allowTrailingHyphen ? slug : slug.replace(/-$/, '')
 }
 
 function generateId(prompt: string): string {
@@ -270,7 +271,7 @@ function SpawnForm({
   }
 
   function handleIdChange(value: string) {
-    setAgentId(slugify(value, 40))
+    setAgentId(slugify(value, 40, true))
     setIdManuallyEdited(true)
   }
 
@@ -283,7 +284,7 @@ function SpawnForm({
       const req: SpawnAgentRequest = {
         prompt: prompt.trim(),
         agent_type: agentType,
-        id: idManuallyEdited ? agentId : generateId(prompt.trim()),
+        id: idManuallyEdited ? slugify(agentId) : generateId(prompt.trim()),
       }
       const agent = await api.default.spawnAgent(req)
       setPrompt('')
