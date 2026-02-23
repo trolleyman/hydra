@@ -91,6 +91,10 @@ type SpawnOptions struct {
 	BaseBranch     string
 	GitAuthorName  string
 	GitAuthorEmail string
+	UID            int
+	GID            int
+	Username       string
+	GroupName      string
 }
 
 // SpawnAgent builds the Docker image if necessary, then creates and starts the container.
@@ -115,7 +119,16 @@ func SpawnAgent(ctx context.Context, cli *dockerclient.Client, opts SpawnOptions
 		return "", errtrace.Wrap(fmt.Errorf("encode label: %w", err))
 	}
 
-	env := []string{}
+	// The entrypoint script creates a user in the container matching the host user's UID/GID/name,
+	// then exec's into the agent as that user. This ensures file permissions round-trip correctly.
+	containerHome := "/home/" + opts.Username
+	env := []string{
+		fmt.Sprintf("AGENT_UID=%d", opts.UID),
+		fmt.Sprintf("AGENT_GID=%d", opts.GID),
+		"AGENT_USER=" + opts.Username,
+		"AGENT_GROUP=" + opts.GroupName,
+		"AGENT_HOME=" + containerHome,
+	}
 	if opts.GitAuthorName != "" {
 		env = append(env,
 			"GIT_AUTHOR_NAME="+opts.GitAuthorName,
@@ -129,8 +142,14 @@ func SpawnAgent(ctx context.Context, cli *dockerclient.Client, opts SpawnOptions
 		)
 	}
 
-	binds := []string{opts.WorktreePath + ":/app:rw"}
-	binds = append(binds, agentBinds(opts.AgentType)...)
+	// Mount the main .git directory and the worktree at the same absolute paths as on the host.
+	// This is required because git worktree .git files contain absolute paths back to the main .git dir.
+	gitDir := opts.ProjectPath + "/.git"
+	binds := []string{
+		gitDir + ":" + gitDir + ":rw",
+		opts.WorktreePath + ":" + opts.WorktreePath + ":rw",
+	}
+	binds = append(binds, agentBinds(opts.AgentType, containerHome)...)
 
 	var netCfg *network.NetworkingConfig
 	var platform *ocispec.Platform
@@ -154,7 +173,7 @@ func SpawnAgent(ctx context.Context, cli *dockerclient.Client, opts SpawnOptions
 			Labels:     map[string]string{LabelKey: labelVal},
 			Tty:        true,
 			Env:        env,
-			WorkingDir: "/app",
+			WorkingDir: opts.WorktreePath,
 		},
 		&container.HostConfig{
 			Binds: binds,
@@ -258,7 +277,8 @@ func defaultDockerfileContent(agentType AgentType) (string, error) {
 }
 
 // agentBinds returns host:container bind mounts for agent-specific config files.
-func agentBinds(agentType AgentType) []string {
+// containerHome is the home directory of the agent user inside the container (e.g. /home/callum).
+func agentBinds(agentType AgentType, containerHome string) []string {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil
@@ -268,8 +288,8 @@ func agentBinds(agentType AgentType) []string {
 	switch agentType {
 	case AgentTypeClaude:
 		for _, pair := range []struct{ host, container string }{
-			{filepath.Join(home, ".claude", "settings.json"), "/root/.claude/settings.json"},
-			{filepath.Join(home, ".claude", ".credentials.json"), "/root/.claude/.credentials.json"},
+			{filepath.Join(home, ".claude", "settings.json"), containerHome + "/.claude/settings.json"},
+			{filepath.Join(home, ".claude", ".credentials.json"), containerHome + "/.claude/.credentials.json"},
 		} {
 			if _, err := os.Stat(pair.host); err == nil {
 				binds = append(binds, pair.host+":"+pair.container+":ro")
@@ -277,9 +297,9 @@ func agentBinds(agentType AgentType) []string {
 		}
 	case AgentTypeGemini:
 		for _, pair := range []struct{ host, container string }{
-			{filepath.Join(home, ".gemini", "oauth_creds.json"), "/root/.gemini/oauth_creds.json"},
-			{filepath.Join(home, ".gemini", "google_accounts.json"), "/root/.gemini/google_accounts.json"},
-			{filepath.Join(home, ".gemini", "settings.json"), "/root/.gemini/settings.json"},
+			{filepath.Join(home, ".gemini", "oauth_creds.json"), containerHome + "/.gemini/oauth_creds.json"},
+			{filepath.Join(home, ".gemini", "google_accounts.json"), containerHome + "/.gemini/google_accounts.json"},
+			{filepath.Join(home, ".gemini", "settings.json"), containerHome + "/.gemini/settings.json"},
 		} {
 			if _, err := os.Stat(pair.host); err == nil {
 				binds = append(binds, pair.host+":"+pair.container+":ro")
