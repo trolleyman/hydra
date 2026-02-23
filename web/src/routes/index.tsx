@@ -1,5 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import { api } from '../stores/apiClient'
 import type { AgentResponse, SpawnAgentRequest } from '../api'
 
@@ -280,7 +280,7 @@ function SpawnForm({
               placeholder="Describe a task…"
               rows={2}
               disabled={loading}
-              className="w-full px-3 pt-2.5 pb-1 text-xs text-gray-800 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 bg-transparent resize-none focus:outline-none leading-relaxed disabled:opacity-50"
+              className="w-full px-3 pt-2.5 pb-1 text-xs text-gray-800 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 bg-transparent resize-y focus:outline-none leading-relaxed disabled:opacity-50 min-h-[48px]"
             />
             <div className="flex items-center justify-between px-2 pb-2 gap-2">
               <div className="flex items-center gap-1 min-w-0 flex-1">
@@ -435,12 +435,48 @@ function SpawnForm({
 
 // ── Home page ─────────────────────────────────────────────────────────────────
 
+const SIDEBAR_MIN = 160
+const SIDEBAR_MAX = 600
+const SIDEBAR_DEFAULT = 224 // w-56
+
 function HomePage() {
   const [agents, setAgents] = useState<AgentResponse[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [showSpawn, setShowSpawn] = useState(false)
+  const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem('hydra-sidebar-width')
+      if (saved) return Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, parseInt(saved, 10)))
+    } catch { /* ignore */ }
+    return SIDEBAR_DEFAULT
+  })
+  const sidebarWidthRef = useRef(sidebarWidth)
+
+  const handleSidebarResizeStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    const startX = e.clientX
+    const startWidth = sidebarWidthRef.current
+
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+
+    function onMove(ev: MouseEvent) {
+      const newWidth = Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, startWidth + ev.clientX - startX))
+      sidebarWidthRef.current = newWidth
+      setSidebarWidth(newWidth)
+    }
+    function onUp() {
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+      try { localStorage.setItem('hydra-sidebar-width', String(sidebarWidthRef.current)) } catch { /* ignore */ }
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+    }
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -508,7 +544,10 @@ function HomePage() {
   return (
     <div className="flex flex-1 overflow-hidden">
       {/* Sidebar */}
-      <aside className="w-56 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex flex-col shrink-0">
+      <aside
+        style={{ width: sidebarWidth }}
+        className="relative bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex flex-col shrink-0"
+      >
         {/* Spawn form (compact) */}
         <SpawnForm compact onSpawned={handleSpawned} />
 
@@ -527,6 +566,14 @@ function HomePage() {
               onClick={() => { setShowSpawn(false); setSelectedId(agent.id) }}
             />
           ))}
+        </div>
+
+        {/* Resize handle — wider hit target, thin visual indicator */}
+        <div
+          onMouseDown={handleSidebarResizeStart}
+          className="absolute right-0 top-0 bottom-0 w-3 -mr-1 cursor-col-resize z-10 group flex items-stretch justify-center"
+        >
+          <div className="w-px group-hover:bg-blue-400/60 group-active:bg-blue-500 transition-colors" />
         </div>
       </aside>
 
