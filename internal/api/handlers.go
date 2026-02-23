@@ -179,3 +179,25 @@ func (s *Server) GetAgent(ctx context.Context, request GetAgentRequestObject) (G
 		ClaudeStatus:    toAPIClaudeStatus(head.ClaudeStatus),
 	}), nil
 }
+
+func (s *Server) KillAgent(ctx context.Context, request KillAgentRequestObject) (KillAgentResponseObject, error) {
+	head, err := heads.GetHeadByID(ctx, s.DockerClient, s.ProjectRoot, request.Id)
+	if err != nil {
+		code := 500
+		msg := err.Error()
+		return KillAgent500JSONResponse{Code: code, Error: msg}, nil
+	}
+	if head == nil {
+		code := 404
+		msg := "agent not found"
+		return KillAgent404JSONResponse{Code: code, Error: msg}, nil
+	}
+
+	if err := heads.KillHead(ctx, s.DockerClient, *head); err != nil {
+		code := 500
+		msg := err.Error()
+		return KillAgent500JSONResponse{Code: code, Error: msg}, nil
+	}
+
+	return KillAgent204Response{}, nil
+}
