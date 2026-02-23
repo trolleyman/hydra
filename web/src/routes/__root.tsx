@@ -14,15 +14,17 @@ export const Route = createRootRoute({
   ),
 })
 
-function formatUptime(seconds: number): string {
-  const s = Math.floor(seconds)
-  if (s < 60) return `${s}s`
-  const m = Math.floor(s / 60)
-  const rs = s % 60
-  if (m < 60) return `${m}m ${rs}s`
-  const h = Math.floor(m / 60)
-  const rm = m % 60
-  return `${h}h ${rm}m`
+function formatSpawnedAgo(ms: number): string {
+  const seconds = Math.floor(ms / 1000)
+  if (seconds < 5) return 'Spawned just now'
+  if (seconds < 60) return `Spawned ${seconds} seconds ago`
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `Spawned ${minutes} ${minutes === 1 ? 'minute' : 'minutes'} ago`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `Spawned ${hours} ${hours === 1 ? 'hour' : 'hours'} ago`
+  const days = Math.floor(hours / 24)
+  if (days === 1) return 'Spawned yesterday'
+  return `Spawned ${days} days ago`
 }
 
 function SunIcon() {
@@ -44,9 +46,8 @@ function MoonIcon() {
 
 function RootLayout() {
   const [projectRoot, setProjectRoot] = useState<string | null>(null)
-  const [uptimeSeconds, setUptimeSeconds] = useState<number | null>(null)
-  const uptimeFetchedAt = useRef<number>(0)
-  const uptimeAtFetch = useRef<number>(0)
+  const spawnedAt = useRef<number | null>(null)
+  const [, setTick] = useState(0)
   const [dark, setDark] = useState<boolean>(() => {
     const stored = localStorage.getItem('hydra-dark-mode')
     if (stored !== null) return stored === 'true'
@@ -67,14 +68,13 @@ function RootLayout() {
         if (cancelled) return
         if (status.project_root != null) setProjectRoot(status.project_root)
         if (status.uptime_seconds != null) {
-          uptimeAtFetch.current = status.uptime_seconds
-          uptimeFetchedAt.current = Date.now()
-          setUptimeSeconds(status.uptime_seconds)
+          // Compute absolute spawn time from uptime; only set once to avoid jitter
+          if (spawnedAt.current === null) {
+            spawnedAt.current = Date.now() - status.uptime_seconds * 1000
+            setTick((n) => n + 1) // trigger initial render to show badge
+          }
           if (ticker === null) {
-            ticker = setInterval(() => {
-              const elapsed = (Date.now() - uptimeFetchedAt.current) / 1000
-              setUptimeSeconds(uptimeAtFetch.current + elapsed)
-            }, 1000)
+            ticker = setInterval(() => setTick((n) => n + 1), 1000)
           }
         }
       } catch {
@@ -106,9 +106,12 @@ function RootLayout() {
           </span>
         )}
         <div className="ml-auto flex items-center gap-3 shrink-0">
-          {uptimeSeconds !== null && (
-            <span className="text-xs text-gray-400 dark:text-gray-500">
-              up {formatUptime(uptimeSeconds)}
+          {spawnedAt.current !== null && (
+            <span
+              className="text-xs text-gray-400 dark:text-gray-500 cursor-default"
+              title={`Spawned at ${new Date(spawnedAt.current).toUTCString()}`}
+            >
+              {formatSpawnedAgo(Date.now() - spawnedAt.current)}
             </span>
           )}
           <button
