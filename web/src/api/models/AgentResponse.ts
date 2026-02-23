@@ -12,6 +12,7 @@ export type AgentResponse = {
     container_id: string;
     container_status: string;
     agent_type: string;
+    pre_prompt: string;
     prompt: string;
     base_branch: string;
 };

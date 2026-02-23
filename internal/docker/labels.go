@@ -23,6 +23,7 @@ const (
 type AgentMetadata struct {
 	Id               string    `json:"id"`
 	AgentType        AgentType `json:"agent_type"`
+	PrePrompt        string    `json:"pre_prompt"`
 	Prompt           string    `json:"prompt"`
 	ProjectPath      string    `json:"project_path"`
 	HostWorktreePath string    `json:"host_worktree_path"`

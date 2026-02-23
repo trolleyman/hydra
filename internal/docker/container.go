@@ -90,6 +90,7 @@ type SpawnOptions struct {
 	Id             string
 	AgentType      AgentType
 	DockerfilePath string // optional; empty = use embedded default for AgentType
+	PrePrompt      string
 	Prompt         string
 	ProjectPath    string
 	WorktreePath   string
@@ -104,6 +105,13 @@ type SpawnOptions struct {
 	Resume         bool // if true, run agent with --resume instead of a fresh prompt
 }
 
+func CombinePrompt(prePrompt, prompt string) string {
+	if prePrompt == "" {
+		return prompt
+	}
+	return prePrompt + "\n" + prompt
+}
+
 // SpawnAgent builds the Docker image if necessary, then creates and starts the container.
 // Returns the container ID.
 func SpawnAgent(ctx context.Context, cli *dockerclient.Client, opts SpawnOptions) (string, error) {
@@ -115,6 +123,7 @@ func SpawnAgent(ctx context.Context, cli *dockerclient.Client, opts SpawnOptions
 	meta := &AgentMetadata{
 		Id:               opts.Id,
 		AgentType:        opts.AgentType,
+		PrePrompt:        opts.PrePrompt,
 		Prompt:           opts.Prompt,
 		ProjectPath:      opts.ProjectPath,
 		HostWorktreePath: opts.WorktreePath,
@@ -168,18 +177,21 @@ func SpawnAgent(ctx context.Context, cli *dockerclient.Client, opts SpawnOptions
 	containerName := "hydra-" + opts.Id
 	log.Printf("Creating container %s...", containerName)
 	var cmd []string
-	if opts.Resume {
-		cmd = []string{"--resume"}
-	} else {
-		switch opts.AgentType {
-		case AgentTypeClaude:
-			cmd = []string{"claude", "--dangerously-skip-permissions", "--", opts.Prompt}
-			// cmd = []string{"bash"}
-		case AgentTypeGemini:
-			cmd = []string{"gemini", "--approval-mode=yolo", "-i", opts.Prompt}
-		default:
-			return "", fmt.Errorf("unknown agent type: %q", opts.AgentType)
+	switch opts.AgentType {
+	case AgentTypeClaude:
+		if opts.Resume {
+			cmd = []string{"claude", "--resume"}
+		} else {
+			cmd = []string{"claude", "--dangerously-skip-permissions", "--", CombinePrompt(opts.PrePrompt, opts.Prompt)}
 		}
+	case AgentTypeGemini:
+		if opts.Resume {
+			cmd = []string{"gemini", "--resume"}
+		} else {
+			cmd = []string{"gemini", "--approval-mode=yolo", "-i", CombinePrompt(opts.PrePrompt, opts.Prompt)}
+		}
+	default:
+		return "", fmt.Errorf("unknown agent type: %q", opts.AgentType)
 	}
 
 	resp, err := cli.ContainerCreate(ctx,

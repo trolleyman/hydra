@@ -57,9 +57,6 @@ var spawnCmd = &cobra.Command{
 		if cfg.PrePrompt != nil {
 			prePrompt = *cfg.PrePrompt
 		}
-		if prePrompt != "" {
-			prompt = prePrompt + "\n\n" + prompt
-		}
 
 		cli, err := docker.NewClient()
 		if err != nil {
@@ -141,6 +138,7 @@ var spawnCmd = &cobra.Command{
 			Id:             id,
 			AgentType:      agentType,
 			DockerfilePath: spawnFlags.dockerfile,
+			PrePrompt:      prePrompt,
 			Prompt:         prompt,
 			ProjectPath:    projectRoot,
 			WorktreePath:   worktreePath,

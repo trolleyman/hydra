@@ -50,6 +50,7 @@ func (s *Server) ListAgents(ctx context.Context, _ ListAgentsRequestObject) (Lis
 			ContainerId:     h.ContainerID,
 			ContainerStatus: h.ContainerStatus,
 			AgentType:       string(h.AgentType),
+			PrePrompt:       h.PrePrompt,
 			Prompt:          h.Prompt,
 			BaseBranch:      h.BaseBranch,
 		}
@@ -92,6 +93,7 @@ func (s *Server) GetAgent(ctx context.Context, request GetAgentRequestObject) (G
 		ContainerId:     head.ContainerID,
 		ContainerStatus: head.ContainerStatus,
 		AgentType:       string(head.AgentType),
+		PrePrompt:       head.PrePrompt,
 		Prompt:          head.Prompt,
 		BaseBranch:      head.BaseBranch,
 	}), nil

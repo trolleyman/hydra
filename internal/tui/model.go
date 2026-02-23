@@ -376,6 +376,7 @@ func (m Model) resumeSelected() (tea.Model, tea.Cmd) {
 		_, err := docker.SpawnAgent(ctx, client, docker.SpawnOptions{
 			Id:             headCopy.ID,
 			AgentType:      headCopy.AgentType,
+			PrePrompt:      headCopy.PrePrompt,
 			Prompt:         headCopy.Prompt,
 			ProjectPath:    headCopy.ProjectPath,
 			WorktreePath:   headCopy.WorktreePath,

@@ -114,7 +114,7 @@ components:
 
     AgentResponse:
       type: object
-      required: [id, branch_name, has_branch, worktree_path, has_worktree, project_path, container_id, container_status, agent_type, prompt, base_branch]
+      required: [id, branch_name, has_branch, worktree_path, has_worktree, project_path, container_id, container_status, agent_type, pre_prompt, prompt, base_branch]
       properties:
         id:
           type: string
@@ -133,6 +133,8 @@ components:
         container_status:
           type: string
         agent_type:
+          type: string
+        pre_prompt:
           type: string
         prompt:
           type: string

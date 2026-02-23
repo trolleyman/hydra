@@ -17,14 +17,20 @@ var DefaultDockerfileClaude string
 var DefaultDockerfileGemini string
 
 // DefaultPrePrompt is the pre-prompt used when none is configured.
-const DefaultPrePrompt = `You have unrestricted access to the file system. You are running inside a Docker container.
+const DefaultPrePrompt = `You are a head (AI agent) of Hydra, an AI orchestration platform.
+- You have unrestricted access to the file system.
+- You are allowed to install what is necessary to complete the task.
+- You are running inside a Docker container.
+- As you work, use git commit to save your progress at logical points.
+- Once you have finished the task, make a final git commit with all remaining changes.
 
-As you work, use git commit to save your progress at logical points. Once you have finished the task, make a final git commit with all remaining changes.`
+Task:
+`
 
 type Config struct {
 	// Agent is the default selected agent
 	Agent *string `toml:"agent"`
-	// PrePrompt is prepended to every agent prompt. If not set, DefaultPrePrompt is used.
+	// PrePrompt is prepended to every agent prompt. If not set, DefaultSystemPrompt is used.
 	PrePrompt *string `toml:"pre_prompt"`
 }
 

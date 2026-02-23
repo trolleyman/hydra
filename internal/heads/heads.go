@@ -24,6 +24,7 @@ type Head struct {
 	ContainerID     string
 	ContainerStatus string
 	AgentType       docker.AgentType
+	PrePrompt       string
 	Prompt          string
 	BaseBranch      string
 }
@@ -68,6 +69,7 @@ func ListHeads(ctx context.Context, cli *dockerclient.Client, projectRoot string
 			head.ContainerID = a.ContainerID
 			head.ContainerStatus = a.Status
 			head.AgentType = a.Meta.AgentType
+			head.PrePrompt = a.Meta.PrePrompt
 			head.Prompt = a.Meta.Prompt
 			head.BaseBranch = a.Meta.BaseBranch
 			if head.ProjectPath == "" {
@@ -88,6 +90,7 @@ func ListHeads(ctx context.Context, cli *dockerclient.Client, projectRoot string
 				ContainerID:     a.ContainerID,
 				ContainerStatus: a.Status,
 				AgentType:       a.Meta.AgentType,
+				PrePrompt:       a.Meta.PrePrompt,
 				Prompt:          a.Meta.Prompt,
 				BaseBranch:      a.Meta.BaseBranch,
 			}

@@ -25,6 +25,7 @@ type AgentResponse struct {
 	HasBranch       bool   `json:"has_branch"`
 	HasWorktree     bool   `json:"has_worktree"`
 	Id              string `json:"id"`
+	PrePrompt       string `json:"pre_prompt"`
 	ProjectPath     string `json:"project_path"`
 	Prompt          string `json:"prompt"`
 	WorktreePath    string `json:"worktree_path"`
