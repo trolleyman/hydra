@@ -19,6 +19,9 @@ var DefaultDockerfileGemini string
 //go:embed hydra-status.sh
 var HydraStatusHookScript string
 
+//go:embed entrypoint.sh
+var DefaultEntrypointScript string
+
 // DefaultPrePrompt is the pre-prompt used when none is configured.
 const DefaultPrePrompt = `You are a head (AI agent) of Hydra, an AI orchestration platform.
 - You have unrestricted access to the file system.
@@ -26,15 +29,26 @@ const DefaultPrePrompt = `You are a head (AI agent) of Hydra, an AI orchestratio
 - You are running inside a Docker container.
 - As you work, use git commit to save your progress at logical points.
 - Once you have finished the task, make a final git commit with all remaining changes.
+- Do *not* use git push.
 
 Task:
 `
+
+// AgentConfig holds per-agent-type configuration.
+type AgentConfig struct {
+	// Dockerfile is a path to a custom Dockerfile for this agent type.
+	// Relative paths are resolved from the project root.
+	// If unset, the built-in default Dockerfile is used.
+	Dockerfile *string `toml:"dockerfile"`
+}
 
 type Config struct {
 	// Agent is the default selected agent
 	Agent *string `toml:"agent"`
 	// PrePrompt is prepended to every agent prompt. If not set, DefaultSystemPrompt is used.
 	PrePrompt *string `toml:"pre_prompt"`
+	// Agents holds per-agent-type overrides (e.g. custom Dockerfiles).
+	Agents map[string]AgentConfig `toml:"agents"`
 }
 
 func GetConfigPath(projectRoot string) string {

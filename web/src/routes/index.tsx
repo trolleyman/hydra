@@ -9,10 +9,10 @@ export const Route = createFileRoute('/')({
 
 function statusBadgeClass(status: string): string {
   switch (status) {
-    case 'running': return 'bg-green-100 text-green-700'
-    case 'exited': return 'bg-red-100 text-red-700'
-    case 'created': return 'bg-blue-100 text-blue-700'
-    default: return 'bg-gray-100 text-gray-500'
+    case 'running': return 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+    case 'exited': return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+    case 'created': return 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'
+    default: return 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400'
   }
 }
 
@@ -21,16 +21,16 @@ function statusDotClass(status: string): string {
     case 'running': return 'bg-green-500'
     case 'exited': return 'bg-red-400'
     case 'created': return 'bg-blue-400'
-    default: return 'bg-gray-300'
+    default: return 'bg-gray-300 dark:bg-gray-600'
   }
 }
 
 function agentTypeColor(agentType: string): string {
   return agentType === 'claude'
-    ? 'text-purple-600'
+    ? 'text-purple-600 dark:text-purple-400'
     : agentType === 'gemini'
-    ? 'text-teal-600'
-    : 'text-gray-500'
+    ? 'text-teal-600 dark:text-teal-400'
+    : 'text-gray-500 dark:text-gray-400'
 }
 
 function claudeStatusBadge(status: string | undefined): { label: string; className: string } {
@@ -56,15 +56,15 @@ function AgentSidebarItem({
       onClick={onClick}
       className={`w-full text-left px-3 py-2.5 rounded-lg transition-colors ${
         selected
-          ? 'bg-blue-50 border border-blue-200'
-          : 'hover:bg-gray-100 border border-transparent'
+          ? 'bg-blue-50 border border-blue-200 dark:bg-blue-900/30 dark:border-blue-800'
+          : 'hover:bg-gray-100 dark:hover:bg-gray-700 border border-transparent'
       }`}
     >
       <div className="flex items-center gap-2 min-w-0">
         <span
           className={`w-2 h-2 rounded-full shrink-0 ${statusDotClass(agent.container_status)}`}
         />
-        <span className="font-medium text-sm text-gray-900 truncate">{agent.id}</span>
+        <span className="font-medium text-sm text-gray-900 dark:text-gray-100 truncate">{agent.id}</span>
       </div>
       <div className="flex items-center gap-1.5 mt-0.5 ml-4">
         <span className={`text-xs ${agentTypeColor(agent.agent_type)}`}>
@@ -83,10 +83,10 @@ function AgentSidebarItem({
 function InfoRow({ label, value, mono = false }: { label: string; value: string | boolean; mono?: boolean }) {
   const display = typeof value === 'boolean' ? (value ? 'yes' : 'no') : value
   return (
-    <div className="flex gap-3 py-2 border-b border-gray-100 last:border-0">
-      <span className="text-xs text-gray-400 w-32 shrink-0 pt-0.5">{label}</span>
-      <span className={`text-sm text-gray-800 break-all ${mono ? 'font-mono text-xs' : ''}`}>
-        {display || <span className="text-gray-300 italic text-xs">—</span>}
+    <div className="flex gap-3 py-2 border-b border-gray-100 dark:border-gray-700 last:border-0">
+      <span className="text-xs text-gray-400 dark:text-gray-500 w-32 shrink-0 pt-0.5">{label}</span>
+      <span className={`text-sm text-gray-800 dark:text-gray-200 break-all ${mono ? 'font-mono text-xs' : ''}`}>
+        {display || <span className="text-gray-300 dark:text-gray-600 italic text-xs">—</span>}
       </span>
     </div>
   )
@@ -95,17 +95,17 @@ function InfoRow({ label, value, mono = false }: { label: string; value: string 
 function AgentDetail({ agent }: { agent: AgentResponse }) {
   const agentTypeClass =
     agent.agent_type === 'claude'
-      ? 'bg-purple-100 text-purple-800'
+      ? 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300'
       : agent.agent_type === 'gemini'
-      ? 'bg-teal-100 text-teal-800'
-      : 'bg-gray-100 text-gray-600'
+      ? 'bg-teal-100 text-teal-800 dark:bg-teal-900/30 dark:text-teal-300'
+      : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'
 
   return (
     <div className="flex-1 overflow-auto p-6">
       <div className="max-w-2xl">
         {/* Header */}
         <div className="flex items-center gap-3 mb-6 flex-wrap">
-          <h1 className="text-2xl font-bold text-gray-900">{agent.id}</h1>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">{agent.id}</h1>
           <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${agentTypeClass}`}>
             {agent.agent_type || 'unknown'}
           </span>
@@ -126,16 +126,16 @@ function AgentDetail({ agent }: { agent: AgentResponse }) {
 
         {/* Prompt */}
         {agent.prompt && (
-          <div className="mb-6 p-4 bg-gray-50 rounded-lg border border-gray-200">
-            <p className="text-xs text-gray-400 mb-1 uppercase tracking-wide font-medium">Prompt</p>
-            <p className="text-sm text-gray-800 whitespace-pre-wrap">{agent.prompt}</p>
+          <div className="mb-6 p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg border border-gray-200 dark:border-gray-600">
+            <p className="text-xs text-gray-400 dark:text-gray-500 mb-1 uppercase tracking-wide font-medium">Prompt</p>
+            <p className="text-sm text-gray-800 dark:text-gray-200 whitespace-pre-wrap">{agent.prompt}</p>
           </div>
         )}
 
         {/* Info */}
-        <div className="bg-white rounded-lg border border-gray-200 mb-6">
-          <div className="px-4 py-3 border-b border-gray-100">
-            <h2 className="text-sm font-semibold text-gray-700">Details</h2>
+        <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 mb-6">
+          <div className="px-4 py-3 border-b border-gray-100 dark:border-gray-700">
+            <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Details</h2>
           </div>
           <div className="px-4">
             <InfoRow label="Branch" value={agent.branch_name} mono />
@@ -158,7 +158,7 @@ function AgentDetail({ agent }: { agent: AgentResponse }) {
         </div>
 
         {/* PTY placeholder */}
-        <div className="bg-gray-900 rounded-lg border border-gray-700 p-4 min-h-48 flex items-center justify-center">
+        <div className="bg-gray-900 dark:bg-gray-950 rounded-lg border border-gray-700 dark:border-gray-600 p-4 min-h-48 flex items-center justify-center">
           <p className="text-gray-500 text-sm font-mono">
             Terminal (PTY) — coming soon
           </p>
@@ -423,7 +423,7 @@ function HomePage() {
 
   if (loading) {
     return (
-      <div className="flex-1 flex items-center justify-center text-gray-400">
+      <div className="flex-1 flex items-center justify-center text-gray-400 dark:text-gray-500">
         Loading agents...
       </div>
     )
@@ -432,9 +432,9 @@ function HomePage() {
   if (error) {
     return (
       <div className="flex-1 flex items-center justify-center">
-        <div className="text-center text-red-600">
+        <div className="text-center text-red-600 dark:text-red-400">
           <p className="font-medium">Failed to load agents</p>
-          <p className="text-sm mt-1 text-gray-500">{error}</p>
+          <p className="text-sm mt-1 text-gray-500 dark:text-gray-400">{error}</p>
         </div>
       </div>
     )
@@ -449,15 +449,15 @@ function HomePage() {
   return (
     <div className="flex flex-1 overflow-hidden">
       {/* Sidebar */}
-      <aside className="w-56 bg-white border-r border-gray-200 flex flex-col shrink-0">
+      <aside className="w-56 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex flex-col shrink-0">
         {/* Spawn form (compact) */}
         <SpawnForm compact onSpawned={handleSpawned} />
 
-        <div className="px-3 py-3 border-b border-gray-100">
-          <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+        <div className="px-3 py-3 border-b border-gray-100 dark:border-gray-700">
+          <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">
             Agents
           </span>
-          <span className="ml-2 text-xs text-gray-400">({agents.length})</span>
+          <span className="ml-2 text-xs text-gray-400 dark:text-gray-500">({agents.length})</span>
         </div>
         <div className="flex-1 overflow-y-auto p-2 space-y-0.5">
           {agents.map((agent) => (
