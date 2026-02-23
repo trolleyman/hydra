@@ -68,15 +68,35 @@ func newSpawnForm() spawnForm {
 
 	prompt := textinput.New()
 	prompt.Placeholder = "describe the task..."
-	prompt.CharLimit = 256
+	prompt.CharLimit = 1024
 
 	return spawnForm{
-		focusIdx:       0,
-		idInput:        id,
-		typeIdx:        0,
+		focusIdx:        0,
+		idInput:         id,
+		typeIdx:         0,
 		dockerfileInput: dockerfile,
-		promptInput:    prompt,
+		promptInput:     prompt,
 	}
+}
+
+// setWidth fixes the display width of all text inputs based on the terminal width,
+// capping the form at a maximum width so it never grows beyond that.
+func (f *spawnForm) setWidth(termWidth int) {
+	const (
+		formMaxWidth = 80
+		// rounded border (1 each side) + padding (2 each side)
+		formOverhead = 6
+	)
+	w := termWidth - formOverhead
+	if w > formMaxWidth-formOverhead {
+		w = formMaxWidth - formOverhead
+	}
+	if w < 20 {
+		w = 20
+	}
+	f.idInput.Width = w
+	f.dockerfileInput.Width = w
+	f.promptInput.Width = w
 }
 
 type (
@@ -194,6 +214,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "n":
 			m.spawning = true
 			m.spawnForm = newSpawnForm()
+			m.spawnForm.setWidth(m.width)
 			return m, textinput.Blink
 
 		case "enter":
@@ -270,6 +291,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Model) updateSpawnForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+		m.spawnForm.setWidth(msg.Width)
+		return m, nil
+
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "esc":
@@ -302,8 +329,9 @@ func (m Model) updateSpawnForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 				} else {
 					m.spawnForm.typeIdx = (m.spawnForm.typeIdx + 1) % len(agentTypes)
 				}
+				return m, nil
 			}
-			return m, nil
+			// for text-input fields, fall through to the textinput update below
 
 		case "enter":
 			promptText := strings.TrimSpace(m.spawnForm.promptInput.Value())
@@ -416,7 +444,11 @@ func (m Model) viewSpawnForm() string {
 	}
 	typeRow := strings.Join(typeOptions, " ")
 
-	form := formStyle.Render(strings.Join([]string{
+	maxFormW := 80
+	if m.width > 0 && m.width < maxFormW {
+		maxFormW = m.width
+	}
+	form := formStyle.MaxWidth(maxFormW).Render(strings.Join([]string{
 		titleStyle.Render("Spawn New Agent"),
 		"",
 		label("ID (leave blank for random):", f.focusIdx == 0),
