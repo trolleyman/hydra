@@ -31,6 +31,7 @@ import (
 type Agent struct {
 	ContainerID   string
 	ContainerName string
+	Created       int64 // Unix timestamp
 	Status        string
 	ImageName     string
 	Meta          *AgentMetadata
@@ -77,6 +78,7 @@ func ListAgents(ctx context.Context, cli *dockerclient.Client) ([]Agent, error) 
 		agents = append(agents, Agent{
 			ContainerID:   c.ID,
 			ContainerName: name,
+			Created:       c.Created,
 			Status:        c.Status,
 			ImageName:     c.Image,
 			Meta:          meta,
