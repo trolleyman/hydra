@@ -28,21 +28,21 @@ func NewHandler(s *Server) http.Handler {
 	return HandlerFromMux(strict, http.NewServeMux())
 }
 
-// toAPIClaudeStatus converts a heads.ClaudeStatus to its API representation.
-func toAPIClaudeStatus(s *heads.ClaudeStatus) *ClaudeStatusInfo {
+// toAPIAgentStatus converts a heads.AgentStatusInfo to its API representation.
+func toAPIAgentStatus(s *heads.AgentStatusInfo) *AgentStatusInfo {
 	if s == nil {
 		return nil
 	}
-	info := &ClaudeStatusInfo{
-		Status:    s.Status,
+	info := &AgentStatusInfo{
+		Status:    AgentStatus(s.Status),
 		Event:     s.Event,
 		Timestamp: s.Timestamp,
 	}
-	if s.LastMessage != "" {
-		info.LastMessage = &s.LastMessage
+	if s.LastMessage != nil {
+		info.LastMessage = s.LastMessage
 	}
-	if s.Reason != "" {
-		info.Reason = &s.Reason
+	if s.Reason != nil {
+		info.Reason = s.Reason
 	}
 	return info
 }
@@ -73,7 +73,7 @@ func (s *Server) ListAgents(ctx context.Context, _ ListAgentsRequestObject) (Lis
 			PrePrompt:       h.PrePrompt,
 			Prompt:          h.Prompt,
 			BaseBranch:      h.BaseBranch,
-			ClaudeStatus:    toAPIClaudeStatus(h.ClaudeStatus),
+			AgentStatus:     toAPIAgentStatus(h.AgentStatus),
 		}
 	}
 	return resp, nil
@@ -149,7 +149,7 @@ func (s *Server) SpawnAgent(ctx context.Context, request SpawnAgentRequestObject
 		AgentType:       string(head.AgentType),
 		Prompt:          head.Prompt,
 		BaseBranch:      head.BaseBranch,
-		ClaudeStatus:    toAPIClaudeStatus(head.ClaudeStatus),
+		AgentStatus:     toAPIAgentStatus(head.AgentStatus),
 	}), nil
 }
 
@@ -176,7 +176,7 @@ func (s *Server) GetAgent(ctx context.Context, request GetAgentRequestObject) (G
 		PrePrompt:       head.PrePrompt,
 		Prompt:          head.Prompt,
 		BaseBranch:      head.BaseBranch,
-		ClaudeStatus:    toAPIClaudeStatus(head.ClaudeStatus),
+		AgentStatus:     toAPIAgentStatus(head.AgentStatus),
 	}), nil
 }
 

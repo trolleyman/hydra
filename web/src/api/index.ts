@@ -11,7 +11,8 @@ export { OpenAPI } from './core/OpenAPI';
 export type { OpenAPIConfig } from './core/OpenAPI';
 
 export type { AgentResponse } from './models/AgentResponse';
-export type { ClaudeStatusInfo } from './models/ClaudeStatusInfo';
+export { AgentStatus } from './models/AgentStatus';
+export type { AgentStatusInfo } from './models/AgentStatusInfo';
 export type { ErrorResponse } from './models/ErrorResponse';
 export type { SpawnAgentRequest } from './models/SpawnAgentRequest';
 export type { StatusResponse } from './models/StatusResponse';

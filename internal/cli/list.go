@@ -43,7 +43,7 @@ var listCmd = &cobra.Command{
 		}
 
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "ID\tAGENT\tBRANCH\tWORKTREE\tCONTAINER\tSTATUS\tCLAUDE\tPROMPT")
+		fmt.Fprintln(w, "ID\tAGENT\tBRANCH\tWORKTREE\tCONTAINER\tSTATUS\tAGENT STATUS\tPROMPT")
 		for _, h := range hs {
 			branch := "(no branch)"
 			if h.Branch != nil {
@@ -67,9 +67,9 @@ var listCmd = &cobra.Command{
 				status = "-"
 			}
 
-			claudeStatus := "-"
-			if h.ClaudeStatus != nil {
-				claudeStatus = h.ClaudeStatus.Status
+			agentStatus := "-"
+			if h.AgentStatus != nil {
+				agentStatus = string(h.AgentStatus.Status)
 			}
 
 			prompt := h.Prompt
@@ -78,7 +78,7 @@ var listCmd = &cobra.Command{
 			}
 
 			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%q\n",
-				h.ID, h.AgentType, branch, worktree, container, status, claudeStatus, prompt)
+				h.ID, h.AgentType, branch, worktree, container, status, agentStatus, prompt)
 		}
 		return errtrace.Wrap(w.Flush())
 	},

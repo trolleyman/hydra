@@ -15,25 +15,38 @@ import (
 	strictnethttp "github.com/oapi-codegen/runtime/strictmiddleware/nethttp"
 )
 
+// Defines values for AgentStatus.
+const (
+	Ended    AgentStatus = "ended"
+	Exited   AgentStatus = "exited"
+	Pending  AgentStatus = "pending"
+	Starting AgentStatus = "starting"
+	Unknown  AgentStatus = "unknown"
+	Waiting  AgentStatus = "waiting"
+)
+
 // AgentResponse defines model for AgentResponse.
 type AgentResponse struct {
-	AgentType       string            `json:"agent_type"`
-	BaseBranch      string            `json:"base_branch"`
-	BranchName      *string           `json:"branch_name"`
-	ClaudeStatus    *ClaudeStatusInfo `json:"claude_status,omitempty"`
-	ContainerId     string            `json:"container_id"`
-	ContainerStatus string            `json:"container_status"`
-	Id              string            `json:"id"`
-	PrePrompt       string            `json:"pre_prompt"`
-	ProjectPath     string            `json:"project_path"`
-	Prompt          string            `json:"prompt"`
-	WorktreePath    *string           `json:"worktree_path"`
+	AgentStatus     *AgentStatusInfo `json:"agent_status,omitempty"`
+	AgentType       string           `json:"agent_type"`
+	BaseBranch      string           `json:"base_branch"`
+	BranchName      *string          `json:"branch_name"`
+	ContainerId     string           `json:"container_id"`
+	ContainerStatus string           `json:"container_status"`
+	Id              string           `json:"id"`
+	PrePrompt       string           `json:"pre_prompt"`
+	ProjectPath     string           `json:"project_path"`
+	Prompt          string           `json:"prompt"`
+	WorktreePath    *string          `json:"worktree_path"`
 }
 
-// ClaudeStatusInfo defines model for ClaudeStatusInfo.
-type ClaudeStatusInfo struct {
-	// Event The hook event that triggered this status (SessionStart, Stop, or SessionEnd)
-	Event string `json:"event"`
+// AgentStatus The hook-reported status of the agent session
+type AgentStatus string
+
+// AgentStatusInfo defines model for AgentStatusInfo.
+type AgentStatusInfo struct {
+	// Event The hook event that triggered this status (SessionStart, Stop, SessionEnd, or polling)
+	Event *string `json:"event,omitempty"`
 
 	// LastMessage Last assistant message (only present on Stop events)
 	LastMessage *string `json:"last_message,omitempty"`
@@ -41,8 +54,8 @@ type ClaudeStatusInfo struct {
 	// Reason Session end reason (only present on SessionEnd events)
 	Reason *string `json:"reason,omitempty"`
 
-	// Status Current status: starting, waiting, or ended
-	Status string `json:"status"`
+	// Status The hook-reported status of the agent session
+	Status AgentStatus `json:"status"`
 
 	// Timestamp ISO 8601 timestamp of when the status was set
 	Timestamp string `json:"timestamp"`

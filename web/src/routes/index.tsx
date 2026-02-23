@@ -33,12 +33,14 @@ function agentTypeColor(agentType: string): string {
     : 'text-gray-500 dark:text-gray-400'
 }
 
-function claudeStatusBadge(status: string | undefined): { label: string; className: string } {
+function agentStatusBadge(status: string | undefined): { label: string; className: string } {
   switch (status) {
-    case 'starting': return { label: 'starting', className: 'bg-blue-100 text-blue-700' }
-    case 'waiting':  return { label: 'waiting',  className: 'bg-yellow-100 text-yellow-700' }
-    case 'ended':    return { label: 'ended',    className: 'bg-gray-100 text-gray-500' }
-    default:         return { label: status ?? '', className: 'bg-gray-50 text-gray-400' }
+    case 'pending':  return { label: 'pending',  className: 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400' }
+    case 'starting': return { label: 'starting', className: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' }
+    case 'waiting':  return { label: 'waiting',  className: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400' }
+    case 'ended':    return { label: 'ended',    className: 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400' }
+    case 'exited':   return { label: 'exited',   className: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' }
+    default:         return { label: status ?? '', className: 'bg-gray-50 text-gray-400 dark:bg-gray-800 dark:text-gray-500' }
   }
 }
 
@@ -70,9 +72,9 @@ function AgentSidebarItem({
         <span className={`text-xs ${agentTypeColor(agent.agent_type)}`}>
           {agent.agent_type || 'unknown'}
         </span>
-        {agent.claude_status && (
-          <span className={`text-[10px] px-1 py-0.5 rounded font-medium ${claudeStatusBadge(agent.claude_status.status).className}`}>
-            {claudeStatusBadge(agent.claude_status.status).label}
+        {agent.agent_status && (
+          <span className={`text-[10px] px-1 py-0.5 rounded font-medium ${agentStatusBadge(agent.agent_status.status).className}`}>
+            {agentStatusBadge(agent.agent_status.status).label}
           </span>
         )}
       </div>
@@ -131,11 +133,11 @@ function AgentDetail({ agent, onKilled }: { agent: AgentResponse; onKilled: (id:
               {agent.container_status}
             </span>
           )}
-          {agent.claude_status && (() => {
-            const badge = claudeStatusBadge(agent.claude_status.status)
+          {agent.agent_status && (() => {
+            const badge = agentStatusBadge(agent.agent_status.status)
             return (
               <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${badge.className}`}>
-                claude: {badge.label}
+                agent: {badge.label}
               </span>
             )
           })()}
@@ -183,12 +185,12 @@ function AgentDetail({ agent, onKilled }: { agent: AgentResponse; onKilled: (id:
             {agent.worktree_path && <InfoRow label="Worktree" value={agent.worktree_path} mono />}
             <InfoRow label="Project path" value={agent.project_path} mono />
             <InfoRow label="Container ID" value={agent.container_id ? agent.container_id.slice(0, 12) : ''} mono />
-            {agent.claude_status && (
+            {agent.agent_status && (
               <>
-                <InfoRow label="Claude status" value={agent.claude_status.status} />
-                <InfoRow label="Status since" value={agent.claude_status.timestamp} mono />
-                {agent.claude_status.last_message && (
-                  <InfoRow label="Last message" value={agent.claude_status.last_message} />
+                <InfoRow label="Agent status" value={agent.agent_status.status} />
+                <InfoRow label="Status since" value={agent.agent_status.timestamp} mono />
+                {agent.agent_status.last_message && (
+                  <InfoRow label="Last message" value={agent.agent_status.last_message} />
                 )}
               </>
             )}
