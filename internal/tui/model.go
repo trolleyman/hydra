@@ -22,6 +22,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	dockercontainer "github.com/docker/docker/api/types/container"
 	dockerclient "github.com/docker/docker/client"
+	"github.com/trolleyman/hydra/internal/config"
 	"github.com/trolleyman/hydra/internal/docker"
 	"github.com/trolleyman/hydra/internal/git"
 	"github.com/trolleyman/hydra/internal/heads"
@@ -691,7 +692,7 @@ func (m Model) viewSpawnForm() string {
 		label("Agent type [←/→]:", f.focusIdx == 1),
 		typeRow,
 		"",
-		label("Dockerfile (optional, type inferred from ENTRYPOINT):", f.focusIdx == 2),
+		label("Dockerfile (optional, overrides config and built-in default):", f.focusIdx == 2),
 		f.dockerfileInput.View(),
 		"",
 		label("Prompt:", f.focusIdx == 3),
@@ -859,6 +860,20 @@ func spawnHead(projectRoot, id string, agentType docker.AgentType, dockerfilePat
 
 	if err := git.CreateWorktree(projectRoot, worktreePath, branchName, baseBranch); err != nil {
 		return fmt.Errorf("create worktree: %w", err)
+	}
+
+	// If no dockerfile provided via the form, fall back to project config.
+	if dockerfilePath == "" {
+		if cfg, cfgErr := config.Load(projectRoot); cfgErr == nil {
+			if agentCfg, ok := cfg.Agents[string(agentType)]; ok && agentCfg.Dockerfile != nil {
+				rel := *agentCfg.Dockerfile
+				if filepath.IsAbs(rel) {
+					dockerfilePath = rel
+				} else {
+					dockerfilePath = filepath.Join(projectRoot, rel)
+				}
+			}
+		}
 	}
 
 	gitAuthorName := os.Getenv("GIT_AUTHOR_NAME")

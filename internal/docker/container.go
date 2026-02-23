@@ -348,7 +348,14 @@ func getAgentBinds(agentType AgentType, projectRoot string, containerHome string
 		return nil, errtrace.Wrap(err)
 	}
 
-	var binds []string
+	// Shared npm cache: binds <project>/.hydra/cache/.npm to ~/.npm inside the container.
+	// Agents that run npm install during their work will share this cache across sessions.
+	npmCacheDir := filepath.Join(cacheDir, ".npm")
+	if err := os.MkdirAll(npmCacheDir, 0755); err != nil {
+		return nil, errtrace.Wrap(fmt.Errorf("create npm cache dir: %w", err))
+	}
+	binds := []string{npmCacheDir + ":" + containerHome + "/.npm"}
+
 	switch agentType {
 	case AgentTypeClaude:
 		claudeSettingsDir := filepath.Join(cacheDir, ".claude")
@@ -521,7 +528,7 @@ func ensureCustomImage(ctx context.Context, cli *dockerclient.Client, agentType 
 }
 
 // prepareDefaultDockerfileDir ensures ~/.hydra/default_dockerfiles/<type>/Dockerfile
-// exists with the current embedded content and returns the directory path.
+// and entrypoint.sh exist with the current embedded content, then returns the directory.
 func prepareDefaultDockerfileDir(agentType AgentType) (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -532,16 +539,25 @@ func prepareDefaultDockerfileDir(agentType AgentType) (string, error) {
 		return "", errtrace.Wrap(fmt.Errorf("create dockerfile dir: %w", err))
 	}
 
-	content, err := defaultDockerfileContent(agentType)
+	dockerfileContent, err := defaultDockerfileContent(agentType)
 	if err != nil {
 		return "", errtrace.Wrap(err)
 	}
 
-	dockerfilePath := filepath.Join(dir, "Dockerfile")
-	existing, readErr := os.ReadFile(dockerfilePath)
-	if readErr != nil || string(existing) != content {
-		if err := os.WriteFile(dockerfilePath, []byte(content), 0644); err != nil {
-			return "", errtrace.Wrap(fmt.Errorf("write default dockerfile: %w", err))
+	for _, f := range []struct {
+		name    string
+		content string
+		perm    os.FileMode
+	}{
+		{"Dockerfile", dockerfileContent, 0644},
+		{"entrypoint.sh", config.DefaultEntrypointScript, 0755},
+	} {
+		path := filepath.Join(dir, f.name)
+		existing, readErr := os.ReadFile(path)
+		if readErr != nil || string(existing) != f.content {
+			if err := os.WriteFile(path, []byte(f.content), f.perm); err != nil {
+				return "", errtrace.Wrap(fmt.Errorf("write %s: %w", f.name, err))
+			}
 		}
 	}
 	return dir, nil
