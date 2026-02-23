@@ -64,10 +64,8 @@ func (s *Server) ListAgents(ctx context.Context, _ ListAgentsRequestObject) (Lis
 	for i, h := range headList {
 		resp[i] = AgentResponse{
 			Id:              h.ID,
-			BranchName:      h.BranchName,
-			HasBranch:       h.HasBranch,
-			WorktreePath:    h.WorktreePath,
-			HasWorktree:     h.HasWorktree,
+			BranchName:      h.Branch,
+			WorktreePath:    h.Worktree,
 			ProjectPath:     h.ProjectPath,
 			ContainerId:     h.ContainerID,
 			ContainerStatus: h.ContainerStatus,
@@ -143,10 +141,8 @@ func (s *Server) SpawnAgent(ctx context.Context, request SpawnAgentRequestObject
 	}
 	return SpawnAgent201JSONResponse(AgentResponse{
 		Id:              head.ID,
-		BranchName:      head.BranchName,
-		HasBranch:       head.HasBranch,
-		WorktreePath:    head.WorktreePath,
-		HasWorktree:     head.HasWorktree,
+		BranchName:      head.Branch,
+		WorktreePath:    head.Worktree,
 		ProjectPath:     head.ProjectPath,
 		ContainerId:     head.ContainerID,
 		ContainerStatus: head.ContainerStatus,
@@ -171,10 +167,8 @@ func (s *Server) GetAgent(ctx context.Context, request GetAgentRequestObject) (G
 	}
 	return GetAgent200JSONResponse(AgentResponse{
 		Id:              head.ID,
-		BranchName:      head.BranchName,
-		HasBranch:       head.HasBranch,
-		WorktreePath:    head.WorktreePath,
-		HasWorktree:     head.HasWorktree,
+		BranchName:      head.Branch,
+		WorktreePath:    head.Worktree,
 		ProjectPath:     head.ProjectPath,
 		ContainerId:     head.ContainerID,
 		ContainerStatus: head.ContainerStatus,

@@ -138,13 +138,11 @@ function AgentDetail({ agent }: { agent: AgentResponse }) {
             <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Details</h2>
           </div>
           <div className="px-4">
-            <InfoRow label="Branch" value={agent.branch_name} mono />
+            {agent.branch_name && <InfoRow label="Branch" value={agent.branch_name} mono />}
             <InfoRow label="Base branch" value={agent.base_branch} mono />
-            <InfoRow label="Worktree" value={agent.worktree_path} mono />
+            {agent.worktree_path && <InfoRow label="Worktree" value={agent.worktree_path} mono />}
             <InfoRow label="Project path" value={agent.project_path} mono />
             <InfoRow label="Container ID" value={agent.container_id ? agent.container_id.slice(0, 12) : ''} mono />
-            <InfoRow label="Has branch" value={agent.has_branch} />
-            <InfoRow label="Has worktree" value={agent.has_worktree} />
             {agent.claude_status && (
               <>
                 <InfoRow label="Claude status" value={agent.claude_status.status} />

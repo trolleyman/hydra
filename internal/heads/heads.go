@@ -23,10 +23,8 @@ import (
 // Head represents a Hydra agent unit: an ID with optional branch, worktree, and container.
 type Head struct {
 	ID              string
-	BranchName      string // "hydra/<id>"
-	HasBranch       bool
-	WorktreePath    string
-	HasWorktree     bool
+	Branch          *string // "hydra/<id>", nil if the git branch does not exist
+	Worktree        *string // path to the worktree directory, nil if it does not exist
 	ProjectPath     string
 	ContainerID     string
 	ContainerStatus string
@@ -56,12 +54,15 @@ func ListHeads(ctx context.Context, cli *dockerclient.Client, projectRoot string
 		worktreePath := paths.GetWorktreeDirFromProjectRoot(projectRoot, id)
 		// fmt.Printf("%s: worktreeDir: %s, projectRoot: %s\n", id, worktreePath, projectRoot)
 		_, statErr := os.Stat(worktreePath)
+		var worktree *string
+		if statErr == nil {
+			worktree = &worktreePath
+		}
+		branchCopy := branch
 		head := &Head{
 			ID:           id,
-			BranchName:   branch,
-			HasBranch:    true,
-			WorktreePath: worktreePath,
-			HasWorktree:  statErr == nil,
+			Branch:       &branchCopy,
+			Worktree:     worktree,
 			ProjectPath:  projectRoot,
 			ClaudeStatus: readClaudeStatus(projectRoot, id),
 		}
@@ -92,12 +93,14 @@ func ListHeads(ctx context.Context, cli *dockerclient.Client, projectRoot string
 			worktreePath := paths.GetWorktreeDirFromProjectRoot(a.Meta.ProjectPath, id)
 			// fmt.Printf("%s: worktreeDir: %s, projectPath: %s\n", id, worktreePath, a.Meta.ProjectPath)
 			_, statErr := os.Stat(worktreePath)
+			var worktree *string
+			if statErr == nil {
+				worktree = &worktreePath
+			}
 			byID[id] = &Head{
 				ID:              id,
-				BranchName:      "hydra/" + id,
-				HasBranch:       false,
-				WorktreePath:    worktreePath,
-				HasWorktree:     statErr == nil,
+				Branch:          nil, // no git branch for orphaned containers
+				Worktree:        worktree,
 				ProjectPath:     a.Meta.ProjectPath,
 				ContainerID:     a.ContainerID,
 				ContainerStatus: a.Status,
@@ -220,10 +223,8 @@ func SpawnHead(ctx context.Context, cli *dockerclient.Client, projectRoot string
 
 	return &Head{
 		ID:              opts.ID,
-		BranchName:      branchName,
-		HasBranch:       true,
-		WorktreePath:    worktreePath,
-		HasWorktree:     true,
+		Branch:          &branchName,
+		Worktree:        &worktreePath,
 		ProjectPath:     projectRoot,
 		ContainerID:     containerID,
 		ContainerStatus: "created",
@@ -252,15 +253,15 @@ func KillHead(ctx context.Context, cli *dockerclient.Client, head Head) error {
 		}
 	}
 
-	if head.HasWorktree && head.ProjectPath != "" {
-		if err := git.RemoveWorktree(head.ProjectPath, head.WorktreePath); err != nil {
-			log.Printf("warn: remove worktree %s: %v", head.WorktreePath, err)
+	if head.Worktree != nil && head.ProjectPath != "" {
+		if err := git.RemoveWorktree(head.ProjectPath, *head.Worktree); err != nil {
+			log.Printf("warn: remove worktree %s: %v", *head.Worktree, err)
 		}
 	}
 
-	if head.HasBranch && head.ProjectPath != "" {
-		if err := git.DeleteBranch(head.ProjectPath, head.BranchName); err != nil {
-			log.Printf("warn: delete branch %s: %v", head.BranchName, err)
+	if head.Branch != nil && head.ProjectPath != "" {
+		if err := git.DeleteBranch(head.ProjectPath, *head.Branch); err != nil {
+			log.Printf("warn: delete branch %s: %v", *head.Branch, err)
 		}
 	}
 
