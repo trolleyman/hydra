@@ -5,7 +5,13 @@
 export type StatusResponse = {
     status?: string;
     version?: string;
+    /**
+     * Seconds since the server started
+     */
     uptime_seconds?: number;
+    /**
+     * Absolute path to the project root
+     */
     project_root?: string;
 };
 

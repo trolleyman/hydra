@@ -53,7 +53,9 @@ export class DefaultService {
      * @returns AgentResponse OK
      * @throws ApiError
      */
-    public getAgent(id: string): CancelablePromise<AgentResponse> {
+    public getAgent(
+        id: string,
+    ): CancelablePromise<AgentResponse> {
         return this.httpRequest.request({
             method: 'GET',
             url: '/api/agent/{id}',
