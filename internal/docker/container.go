@@ -576,14 +576,31 @@ func buildDockerImage(ctx context.Context, cli *dockerclient.Client, tag, docker
 	}
 	defer resp.Body.Close()
 
-	if _, err := io.Copy(io.Discard, resp.Body); err != nil {
-		return errtrace.Wrap(fmt.Errorf("read build output: %w", err))
+	decoder := json.NewDecoder(resp.Body)
+	for {
+		var line struct {
+			Stream string `json:"stream"`
+			Error  string `json:"error"`
+		}
+		if err := decoder.Decode(&line); err != nil {
+			if err == io.EOF {
+				break
+			}
+			return errtrace.Wrap(fmt.Errorf("decode build output: %w", err))
+		}
+		if line.Error != "" {
+			return errtrace.Wrap(fmt.Errorf("build error: %s", line.Error))
+		}
+		if line.Stream != "" {
+			log.Printf("%s", line.Stream)
+		}
 	}
 
 	if err := <-errChan; err != nil {
 		return errtrace.Wrap(fmt.Errorf("create build context archive: %w", err))
 	}
 
+	log.Printf("Built Docker image: %s (from %s in %s)", tag, dockerfilePath, buildContext)
 	return nil
 }
 
