@@ -340,6 +340,9 @@ func getAgentBinds(agentType AgentType, projectRoot string, containerHome string
 	switch agentType {
 	case AgentTypeClaude:
 		claudeSettingsDir := filepath.Join(cacheDir, ".claude")
+		if err := os.MkdirAll(claudeSettingsDir, 0755); err != nil {
+			return nil, errtrace.Wrap(err)
+		}
 		claudeSettingsJson := filepath.Join(claudeSettingsDir, "settings.json")
 		if _, err := os.Stat(claudeSettingsJson); os.IsNotExist(err) {
 			if err = os.WriteFile(claudeSettingsJson, []byte("{\"skipDangerousModePermissionPrompt\": true}"), 0644); err != nil {
@@ -363,6 +366,9 @@ func getAgentBinds(agentType AgentType, projectRoot string, containerHome string
 		}
 	case AgentTypeGemini:
 		geminiSettingsDir := filepath.Join(cacheDir, ".gemini")
+		if err := os.MkdirAll(geminiSettingsDir, 0755); err != nil {
+			return nil, errtrace.Wrap(err)
+		}
 
 		for _, pair := range []struct{ host, container string }{
 			{geminiSettingsDir, containerHome + "/.gemini"},
