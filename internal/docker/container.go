@@ -218,11 +218,13 @@ func SpawnAgent(ctx context.Context, cli *dockerclient.Client, opts SpawnOptions
 		return "", errtrace.Wrap(fmt.Errorf("create container: %w", err))
 	}
 
+	log.Printf("Starting container %s (%s)...", containerName, resp.ID)
 	if err := cli.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
 		_ = cli.ContainerRemove(ctx, resp.ID, container.RemoveOptions{Force: true})
 		return "", errtrace.Wrap(fmt.Errorf("start container: %w", err))
 	}
 
+	log.Printf("Started container %s (%s)", containerName, resp.ID)
 	return resp.ID, nil
 }
 
