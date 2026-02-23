@@ -135,7 +135,7 @@ const maxLogLines = 2000
 const (
 	sidebarMinW = 18
 	sidebarMaxW = 26
-	infoH       = 7 // lines reserved for the head info panel
+	infoH       = 8 // lines reserved for the head info panel
 )
 
 // Styles
@@ -585,6 +585,14 @@ func (m Model) viewInfo(w int) string {
 		status = "no container"
 	}
 
+	claudeStatus := "-"
+	if head.ClaudeStatus != nil {
+		claudeStatus = head.ClaudeStatus.Status
+		if head.ClaudeStatus.Timestamp != "" {
+			claudeStatus += " (" + head.ClaudeStatus.Timestamp[:min(len(head.ClaudeStatus.Timestamp), 19)] + ")"
+		}
+	}
+
 	prompt := head.Prompt
 	maxPromptW := w - 10
 	if maxPromptW < 3 {
@@ -598,6 +606,7 @@ func (m Model) viewInfo(w int) string {
 		{" ID:    ", head.ID},
 		{" Agent: ", string(head.AgentType)},
 		{" Status:", status},
+		{" Claude:", claudeStatus},
 		{" Branch:", head.BranchName},
 		{" Base:  ", head.BaseBranch},
 		{" Prompt:", prompt},

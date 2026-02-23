@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -355,12 +356,27 @@ func getAgentBinds(agentType AgentType, projectRoot string, containerHome string
 		if err := os.MkdirAll(claudeSettingsDir, 0755); err != nil {
 			return nil, errtrace.Wrap(err)
 		}
-		claudeSettingsJson := filepath.Join(claudeSettingsDir, "settings.json")
-		if _, err := os.Stat(claudeSettingsJson); os.IsNotExist(err) {
-			if err = os.WriteFile(claudeSettingsJson, []byte("{\"skipDangerousModePermissionPrompt\": true}"), 0644); err != nil {
-				return nil, errtrace.Wrap(err)
-			}
+
+		// Write the hooks directory and hydra-status.sh hook script.
+		hooksDir := filepath.Join(claudeSettingsDir, "hooks")
+		if err := os.MkdirAll(hooksDir, 0755); err != nil {
+			return nil, errtrace.Wrap(err)
 		}
+		hookScript := filepath.Join(hooksDir, "hydra-status.sh")
+		if err := os.WriteFile(hookScript, []byte(config.HydraStatusHookScript), 0755); err != nil {
+			return nil, errtrace.Wrap(err)
+		}
+
+		// Always write settings.json with hooks configuration.
+		claudeSettingsJson := filepath.Join(claudeSettingsDir, "settings.json")
+		settingsData, err := buildClaudeSettings()
+		if err != nil {
+			return nil, errtrace.Wrap(err)
+		}
+		if err = os.WriteFile(claudeSettingsJson, settingsData, 0644); err != nil {
+			return nil, errtrace.Wrap(err)
+		}
+
 		claudeJson := filepath.Join(cacheDir, ".claude.json")
 		if _, err := os.Stat(claudeJson); os.IsNotExist(err) {
 			if err = os.WriteFile(claudeJson, []byte("{}"), 0644); err != nil {
@@ -391,6 +407,51 @@ func getAgentBinds(agentType AgentType, projectRoot string, containerHome string
 		}
 	}
 	return binds, nil
+}
+
+// claudeHookHandler is a single hook handler entry in settings.json.
+type claudeHookHandler struct {
+	Type    string `json:"type"`
+	Command string `json:"command"`
+}
+
+// claudeMatcherGroup is a matcher group (with optional matcher) in settings.json.
+type claudeMatcherGroup struct {
+	Hooks []claudeHookHandler `json:"hooks"`
+}
+
+// claudeHooksConfig holds the hooks section of settings.json.
+type claudeHooksConfig struct {
+	SessionStart []claudeMatcherGroup `json:"SessionStart"`
+	Stop         []claudeMatcherGroup `json:"Stop"`
+	SessionEnd   []claudeMatcherGroup `json:"SessionEnd"`
+}
+
+// claudeSettings is the full settings.json structure.
+type claudeSettings struct {
+	SkipDangerousModePermissionPrompt bool              `json:"skipDangerousModePermissionPrompt"`
+	Hooks                             claudeHooksConfig `json:"hooks"`
+}
+
+// buildClaudeSettings generates the settings.json content with hook configuration.
+func buildClaudeSettings() ([]byte, error) {
+	hookCmd := "$HOME/.claude/hooks/hydra-status.sh"
+	hookGroup := []claudeMatcherGroup{
+		{Hooks: []claudeHookHandler{{Type: "command", Command: hookCmd}}},
+	}
+	settings := claudeSettings{
+		SkipDangerousModePermissionPrompt: true,
+		Hooks: claudeHooksConfig{
+			SessionStart: hookGroup,
+			Stop:         hookGroup,
+			SessionEnd:   hookGroup,
+		},
+	}
+	data, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		return nil, errtrace.Wrap(fmt.Errorf("marshal claude settings: %w", err))
+	}
+	return data, nil
 }
 
 // ensureImage ensures the Docker image for the given agent and optional custom

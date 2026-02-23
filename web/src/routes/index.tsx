@@ -33,6 +33,15 @@ function agentTypeColor(agentType: string): string {
     : 'text-gray-500'
 }
 
+function claudeStatusBadge(status: string | undefined): { label: string; className: string } {
+  switch (status) {
+    case 'starting': return { label: 'starting', className: 'bg-blue-100 text-blue-700' }
+    case 'waiting':  return { label: 'waiting',  className: 'bg-yellow-100 text-yellow-700' }
+    case 'ended':    return { label: 'ended',    className: 'bg-gray-100 text-gray-500' }
+    default:         return { label: status ?? '', className: 'bg-gray-50 text-gray-400' }
+  }
+}
+
 function AgentSidebarItem({
   agent,
   selected,
@@ -57,8 +66,15 @@ function AgentSidebarItem({
         />
         <span className="font-medium text-sm text-gray-900 truncate">{agent.id}</span>
       </div>
-      <div className={`text-xs mt-0.5 ml-4 ${agentTypeColor(agent.agent_type)}`}>
-        {agent.agent_type || 'unknown'}
+      <div className="flex items-center gap-1.5 mt-0.5 ml-4">
+        <span className={`text-xs ${agentTypeColor(agent.agent_type)}`}>
+          {agent.agent_type || 'unknown'}
+        </span>
+        {agent.claude_status && (
+          <span className={`text-[10px] px-1 py-0.5 rounded font-medium ${claudeStatusBadge(agent.claude_status.status).className}`}>
+            {claudeStatusBadge(agent.claude_status.status).label}
+          </span>
+        )}
       </div>
     </button>
   )
@@ -88,7 +104,7 @@ function AgentDetail({ agent }: { agent: AgentResponse }) {
     <div className="flex-1 overflow-auto p-6">
       <div className="max-w-2xl">
         {/* Header */}
-        <div className="flex items-center gap-3 mb-6">
+        <div className="flex items-center gap-3 mb-6 flex-wrap">
           <h1 className="text-2xl font-bold text-gray-900">{agent.id}</h1>
           <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${agentTypeClass}`}>
             {agent.agent_type || 'unknown'}
@@ -98,6 +114,14 @@ function AgentDetail({ agent }: { agent: AgentResponse }) {
               {agent.container_status}
             </span>
           )}
+          {agent.claude_status && (() => {
+            const badge = claudeStatusBadge(agent.claude_status.status)
+            return (
+              <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${badge.className}`}>
+                claude: {badge.label}
+              </span>
+            )
+          })()}
         </div>
 
         {/* Prompt */}
@@ -121,6 +145,15 @@ function AgentDetail({ agent }: { agent: AgentResponse }) {
             <InfoRow label="Container ID" value={agent.container_id ? agent.container_id.slice(0, 12) : ''} mono />
             <InfoRow label="Has branch" value={agent.has_branch} />
             <InfoRow label="Has worktree" value={agent.has_worktree} />
+            {agent.claude_status && (
+              <>
+                <InfoRow label="Claude status" value={agent.claude_status.status} />
+                <InfoRow label="Status since" value={agent.claude_status.timestamp} mono />
+                {agent.claude_status.last_message && (
+                  <InfoRow label="Last message" value={agent.claude_status.last_message} />
+                )}
+              </>
+            )}
           </div>
         </div>
 

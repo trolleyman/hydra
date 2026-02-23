@@ -16,6 +16,9 @@ var DefaultDockerfileClaude string
 //go:embed gemini.Dockerfile
 var DefaultDockerfileGemini string
 
+//go:embed hydra-status.sh
+var HydraStatusHookScript string
+
 // DefaultPrePrompt is the pre-prompt used when none is configured.
 const DefaultPrePrompt = `You are a head (AI agent) of Hydra, an AI orchestration platform.
 - You have unrestricted access to the file system.

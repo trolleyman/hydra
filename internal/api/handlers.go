@@ -28,6 +28,25 @@ func NewHandler(s *Server) http.Handler {
 	return HandlerFromMux(strict, http.NewServeMux())
 }
 
+// toAPIClaudeStatus converts a heads.ClaudeStatus to its API representation.
+func toAPIClaudeStatus(s *heads.ClaudeStatus) *ClaudeStatusInfo {
+	if s == nil {
+		return nil
+	}
+	info := &ClaudeStatusInfo{
+		Status:    s.Status,
+		Event:     s.Event,
+		Timestamp: s.Timestamp,
+	}
+	if s.LastMessage != "" {
+		info.LastMessage = &s.LastMessage
+	}
+	if s.Reason != "" {
+		info.Reason = &s.Reason
+	}
+	return info
+}
+
 // --- StrictServerInterface implementations ---
 
 func (s *Server) CheckHealth(_ context.Context, _ CheckHealthRequestObject) (CheckHealthResponseObject, error) {
@@ -56,6 +75,7 @@ func (s *Server) ListAgents(ctx context.Context, _ ListAgentsRequestObject) (Lis
 			PrePrompt:       h.PrePrompt,
 			Prompt:          h.Prompt,
 			BaseBranch:      h.BaseBranch,
+			ClaudeStatus:    toAPIClaudeStatus(h.ClaudeStatus),
 		}
 	}
 	return resp, nil
@@ -138,6 +158,7 @@ func (s *Server) SpawnAgent(ctx context.Context, request SpawnAgentRequestObject
 		AgentType:       string(head.AgentType),
 		Prompt:          head.Prompt,
 		BaseBranch:      head.BaseBranch,
+		ClaudeStatus:    toAPIClaudeStatus(head.ClaudeStatus),
 	}), nil
 }
 
@@ -166,5 +187,6 @@ func (s *Server) GetAgent(ctx context.Context, request GetAgentRequestObject) (G
 		PrePrompt:       head.PrePrompt,
 		Prompt:          head.Prompt,
 		BaseBranch:      head.BaseBranch,
+		ClaudeStatus:    toAPIClaudeStatus(head.ClaudeStatus),
 	}), nil
 }

@@ -15,6 +15,48 @@ import (
 	strictnethttp "github.com/oapi-codegen/runtime/strictmiddleware/nethttp"
 )
 
+// AgentResponse defines model for AgentResponse.
+type AgentResponse struct {
+	AgentType       string            `json:"agent_type"`
+	BaseBranch      string            `json:"base_branch"`
+	BranchName      string            `json:"branch_name"`
+	ClaudeStatus    *ClaudeStatusInfo `json:"claude_status,omitempty"`
+	ContainerId     string            `json:"container_id"`
+	ContainerStatus string            `json:"container_status"`
+	HasBranch       bool              `json:"has_branch"`
+	HasWorktree     bool              `json:"has_worktree"`
+	Id              string            `json:"id"`
+	PrePrompt       string            `json:"pre_prompt"`
+	ProjectPath     string            `json:"project_path"`
+	Prompt          string            `json:"prompt"`
+	WorktreePath    string            `json:"worktree_path"`
+}
+
+// ClaudeStatusInfo defines model for ClaudeStatusInfo.
+type ClaudeStatusInfo struct {
+	// Event The hook event that triggered this status (SessionStart, Stop, or SessionEnd)
+	Event string `json:"event"`
+
+	// LastMessage Last assistant message (only present on Stop events)
+	LastMessage *string `json:"last_message,omitempty"`
+
+	// Reason Session end reason (only present on SessionEnd events)
+	Reason *string `json:"reason,omitempty"`
+
+	// Status Current status: starting, waiting, or ended
+	Status string `json:"status"`
+
+	// Timestamp ISO 8601 timestamp of when the status was set
+	Timestamp string `json:"timestamp"`
+}
+
+// ErrorResponse defines model for ErrorResponse.
+type ErrorResponse struct {
+	Code    int     `json:"code"`
+	Details *string `json:"details,omitempty"`
+	Error   string  `json:"error"`
+}
+
 // SpawnAgentRequest defines model for SpawnAgentRequest.
 type SpawnAgentRequest struct {
 	// AgentType Agent type: claude or gemini
@@ -30,29 +72,6 @@ type SpawnAgentRequest struct {
 	Prompt string `json:"prompt"`
 }
 
-// AgentResponse defines model for AgentResponse.
-type AgentResponse struct {
-	AgentType       string `json:"agent_type"`
-	BaseBranch      string `json:"base_branch"`
-	BranchName      string `json:"branch_name"`
-	ContainerId     string `json:"container_id"`
-	ContainerStatus string `json:"container_status"`
-	HasBranch       bool   `json:"has_branch"`
-	HasWorktree     bool   `json:"has_worktree"`
-	Id              string `json:"id"`
-	PrePrompt       string `json:"pre_prompt"`
-	ProjectPath     string `json:"project_path"`
-	Prompt          string `json:"prompt"`
-	WorktreePath    string `json:"worktree_path"`
-}
-
-// ErrorResponse defines model for ErrorResponse.
-type ErrorResponse struct {
-	Code    int     `json:"code"`
-	Details *string `json:"details,omitempty"`
-	Error   string  `json:"error"`
-}
-
 // StatusResponse defines model for StatusResponse.
 type StatusResponse struct {
 	// ProjectRoot Absolute path to the project root
@@ -63,6 +82,9 @@ type StatusResponse struct {
 	UptimeSeconds *float32 `json:"uptime_seconds,omitempty"`
 	Version       *string  `json:"version,omitempty"`
 }
+
+// SpawnAgentJSONRequestBody defines body for SpawnAgent for application/json ContentType.
+type SpawnAgentJSONRequestBody = SpawnAgentRequest
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
@@ -363,7 +385,7 @@ func (response ListAgents500JSONResponse) VisitListAgentsResponse(w http.Respons
 }
 
 type SpawnAgentRequestObject struct {
-	Body *SpawnAgentRequest
+	Body *SpawnAgentJSONRequestBody
 }
 
 type SpawnAgentResponseObject interface {
@@ -541,7 +563,7 @@ func (sh *strictHandler) ListAgents(w http.ResponseWriter, r *http.Request) {
 func (sh *strictHandler) SpawnAgent(w http.ResponseWriter, r *http.Request) {
 	var request SpawnAgentRequestObject
 
-	var body SpawnAgentRequest
+	var body SpawnAgentJSONRequestBody
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
 		return

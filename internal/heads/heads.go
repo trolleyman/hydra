@@ -33,6 +33,8 @@ type Head struct {
 	PrePrompt       string
 	Prompt          string
 	BaseBranch      string
+	// ClaudeStatus is read from .hydra-status.json in the worktree (nil if absent).
+	ClaudeStatus *ClaudeStatus
 }
 
 // ListHeads returns all Hydra heads found via git branches and/or Docker containers.
@@ -59,6 +61,7 @@ func ListHeads(ctx context.Context, cli *dockerclient.Client, projectRoot string
 			WorktreePath: worktreePath,
 			HasWorktree:  statErr == nil,
 			ProjectPath:  projectRoot,
+			ClaudeStatus: readClaudeStatus(worktreePath),
 		}
 		byID[id] = head
 	}
@@ -99,6 +102,7 @@ func ListHeads(ctx context.Context, cli *dockerclient.Client, projectRoot string
 				PrePrompt:       a.Meta.PrePrompt,
 				Prompt:          a.Meta.Prompt,
 				BaseBranch:      a.Meta.BaseBranch,
+				ClaudeStatus:    readClaudeStatus(worktreePath),
 			}
 		}
 	}
