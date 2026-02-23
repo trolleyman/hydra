@@ -7,6 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/trolleyman/hydra/internal/api"
+	"github.com/trolleyman/hydra/internal/docker"
 	"github.com/trolleyman/hydra/internal/paths"
 	"github.com/trolleyman/hydra/web"
 )
@@ -30,8 +31,15 @@ func runServer(_ *cobra.Command, _ []string) error {
 
 	log.Printf("Worktrees: %s", worktreesDir)
 
+	dockerClient, err := docker.NewClient()
+	if err != nil {
+		log.Fatalf("Create docker client: %v", err)
+	}
+
 	server := &api.Server{
 		WorktreesDir: worktreesDir,
+		ProjectRoot:  projectRoot,
+		DockerClient: dockerClient,
 	}
 
 	// Build the main mux

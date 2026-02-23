@@ -10,6 +10,7 @@ export { CancelablePromise, CancelError } from './core/CancelablePromise';
 export { OpenAPI } from './core/OpenAPI';
 export type { OpenAPIConfig } from './core/OpenAPI';
 
+export type { AgentResponse } from './models/AgentResponse';
 export type { ErrorResponse } from './models/ErrorResponse';
 export type { StatusResponse } from './models/StatusResponse';
 
