@@ -1,4 +1,4 @@
-package main
+package cli
 
 import (
 	"bufio"
@@ -35,7 +35,7 @@ It manages AI coding agents running in isolated Docker containers and git worktr
 	SilenceErrors: true, // Handle errors ourselves
 }
 
-func main() {
+func Run() {
 	rootCmd.PersistentFlags().BoolVar(&debugMode, "debug", false, "Print full stack traces on error")
 
 	setupLogging()
