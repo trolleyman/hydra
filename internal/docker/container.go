@@ -331,37 +331,40 @@ func getAgentBinds(agentType AgentType, projectRoot string, containerHome string
 	// }
 
 	hydraDir := paths.GetHydraDirFromProjectRoot(projectRoot)
-	claudeSettingsDir := filepath.Join(hydraDir, ".claude")
-	if err := git.CreateGitignoreAllInDir(claudeSettingsDir); err != nil {
-		return nil, errtrace.Wrap(err)
-	}
-	claudeSettingsJson := filepath.Join(claudeSettingsDir, "settings.json")
-	if _, err := os.Stat(claudeSettingsJson); os.IsNotExist(err) {
-		if err = os.WriteFile(claudeSettingsJson, []byte("{\"skipDangerousModePermissionPrompt\": true}"), 0644); err != nil {
-			return nil, errtrace.Wrap(err)
-		}
-	}
-	geminiSettingsDir := filepath.Join(hydraDir, ".gemini")
-	if err := git.CreateGitignoreAllInDir(geminiSettingsDir); err != nil {
+	cacheDir := filepath.Join(hydraDir, "cache")
+	if err := git.CreateGitignoreAllInDir(cacheDir); err != nil {
 		return nil, errtrace.Wrap(err)
 	}
 
 	var binds []string
 	switch agentType {
 	case AgentTypeClaude:
+		claudeSettingsDir := filepath.Join(cacheDir, ".claude")
+		claudeSettingsJson := filepath.Join(claudeSettingsDir, "settings.json")
+		if _, err := os.Stat(claudeSettingsJson); os.IsNotExist(err) {
+			if err = os.WriteFile(claudeSettingsJson, []byte("{\"skipDangerousModePermissionPrompt\": true}"), 0644); err != nil {
+				return nil, errtrace.Wrap(err)
+			}
+		}
+		claudeJson := filepath.Join(cacheDir, ".claude.json")
+		if _, err := os.Stat(claudeJson); os.IsNotExist(err) {
+			if err = os.WriteFile(claudeJson, []byte("{}"), 0644); err != nil {
+				return nil, errtrace.Wrap(err)
+			}
+		}
+
 		for _, pair := range []struct{ host, container string }{
-			// {filepath.Join(home, ".claude", "settings.json"), containerHome + "/.claude/settings.json"},
-			// {filepath.Join(home, ".claude", ".credentials.json"), containerHome + "/.claude/.credentials.json"},
 			{claudeSettingsDir, containerHome + "/.claude"},
+			{claudeJson, containerHome + "/.claude.json"},
 		} {
 			if _, err := os.Stat(pair.host); err == nil {
 				binds = append(binds, pair.host+":"+pair.container)
 			}
 		}
 	case AgentTypeGemini:
+		geminiSettingsDir := filepath.Join(cacheDir, ".gemini")
+
 		for _, pair := range []struct{ host, container string }{
-			// {filepath.Join(home, ".gemini", "oauth_creds.json"), containerHome + "/.gemini/oauth_creds.json"},
-			// {filepath.Join(home, ".gemini", "google_accounts.json"), containerHome + "/.gemini/google_accounts.json"},
 			{geminiSettingsDir, containerHome + "/.gemini"},
 		} {
 			if _, err := os.Stat(pair.host); err == nil {
