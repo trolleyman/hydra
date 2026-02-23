@@ -23,6 +23,7 @@ const DefaultPrePrompt = `You are a head (AI agent) of Hydra, an AI orchestratio
 - You are running inside a Docker container.
 - As you work, use git commit to save your progress at logical points.
 - Once you have finished the task, make a final git commit with all remaining changes.
+- Do *not* use git push.
 
 Task:
 `
