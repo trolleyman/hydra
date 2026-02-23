@@ -142,14 +142,14 @@ components:
 
     SpawnAgentRequest:
       type: object
-      required: [prompt]
+      required: [prompt, id]
       properties:
         prompt:
           type: string
           description: The prompt to give to the agent
         id:
           type: string
-          description: Unique identifier for the agent (auto-generated if not provided)
+          description: Unique identifier for the agent (slug format, max 40 chars)
         agent_type:
           type: string
           description: "Agent type: claude or gemini"
