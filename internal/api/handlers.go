@@ -123,10 +123,7 @@ func (s *Server) SpawnAgent(ctx context.Context, request SpawnAgentRequestObject
 	}
 	prompt := strings.TrimSpace(request.Body.Prompt)
 
-	var id string
-	if request.Body.Id != nil {
-		id = strings.TrimSpace(*request.Body.Id)
-	}
+	id := strings.TrimSpace(request.Body.Id)
 	var baseBranch string
 	if request.Body.BaseBranch != nil {
 		baseBranch = strings.TrimSpace(*request.Body.BaseBranch)

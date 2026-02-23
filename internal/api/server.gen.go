@@ -65,8 +65,8 @@ type SpawnAgentRequest struct {
 	// BaseBranch Base branch to create the worktree from (defaults to current branch)
 	BaseBranch *string `json:"base_branch,omitempty"`
 
-	// Id Unique identifier for the agent (auto-generated if not provided)
-	Id *string `json:"id,omitempty"`
+	// Id Unique identifier for the agent (slug format, max 40 chars)
+	Id string `json:"id"`
 
 	// Prompt The prompt to give to the agent
 	Prompt string `json:"prompt"`

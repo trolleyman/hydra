@@ -8,9 +8,9 @@ export type SpawnAgentRequest = {
      */
     prompt: string;
     /**
-     * Unique identifier for the agent (auto-generated if not provided)
+     * Unique identifier for the agent (slug format, max 40 chars)
      */
-    id?: string;
+    id: string;
     /**
      * Agent type: claude or gemini
      */
