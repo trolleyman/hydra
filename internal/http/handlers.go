@@ -1,9 +1,12 @@
 package http
 
 import (
+	"bytes"
 	"context"
+	"fmt"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -261,6 +264,45 @@ func (s *Server) GetAgent(ctx context.Context, request api.GetAgentRequestObject
 		CreatedAt:       getCreatedAt,
 		AgentStatus:     head.AgentStatus,
 	}), nil
+}
+
+func (s *Server) MergeAgent(ctx context.Context, request api.MergeAgentRequestObject) (api.MergeAgentResponseObject, error) {
+	projectRoot := s.resolveProjectRoot(request.Params.ProjectId)
+	head, err := heads.GetHeadByID(ctx, s.DockerClient, projectRoot, request.Id)
+	if err != nil {
+		code := 500
+		msg := err.Error()
+		return api.MergeAgent500JSONResponse{Code: code, Error: msg}, nil
+	}
+	if head == nil {
+		code := 404
+		msg := "agent not found"
+		return api.MergeAgent404JSONResponse{Code: code, Error: msg}, nil
+	}
+
+	if head.Branch == nil {
+		code := 400
+		msg := "agent has no git branch to merge"
+		return api.MergeAgent400JSONResponse{Code: code, Error: msg}, nil
+	}
+	branchName := *head.Branch
+
+	var stderr bytes.Buffer
+	gitMergeCmd := exec.CommandContext(ctx, "git", "-C", projectRoot, "merge", branchName)
+	gitMergeCmd.Stderr = &stderr
+	if err := gitMergeCmd.Run(); err != nil {
+		code := 500
+		msg := fmt.Sprintf("git merge failed: %s", strings.TrimSpace(stderr.String()))
+		return api.MergeAgent500JSONResponse{Code: code, Error: msg}, nil
+	}
+
+	if err := heads.KillHead(ctx, s.DockerClient, *head); err != nil {
+		code := 500
+		msg := err.Error()
+		return api.MergeAgent500JSONResponse{Code: code, Error: msg}, nil
+	}
+
+	return api.MergeAgent204Response{}, nil
 }
 
 func (s *Server) KillAgent(ctx context.Context, request api.KillAgentRequestObject) (api.KillAgentResponseObject, error) {
