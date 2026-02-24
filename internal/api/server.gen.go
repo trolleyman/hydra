@@ -124,6 +124,12 @@ type KillAgentParams struct {
 	ProjectId *string `form:"project_id,omitempty" json:"project_id,omitempty"`
 }
 
+// MergeAgentParams defines parameters for MergeAgent.
+type MergeAgentParams struct {
+	// ProjectId Project ID to scope the lookup (defaults to server CWD project)
+	ProjectId *string `form:"project_id,omitempty" json:"project_id,omitempty"`
+}
+
 // GetAgentParams defines parameters for GetAgent.
 type GetAgentParams struct {
 	// ProjectId Project ID to scope the lookup (defaults to server CWD project)
@@ -156,6 +162,9 @@ type ServerInterface interface {
 	// Get a specific Hydra agent by ID
 	// (GET /api/agent/{id})
 	GetAgent(w http.ResponseWriter, r *http.Request, id string, params GetAgentParams)
+	// Merge a Hydra agent's branch and kill it
+	// (POST /api/agent/{id}/merge)
+	MergeAgent(w http.ResponseWriter, r *http.Request, id string, params MergeAgentParams)
 	// List all Hydra agents (heads)
 	// (GET /api/agents)
 	ListAgents(w http.ResponseWriter, r *http.Request, params ListAgentsParams)
@@ -212,6 +221,42 @@ func (siw *ServerInterfaceWrapper) KillAgent(w http.ResponseWriter, r *http.Requ
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.KillAgent(w, r, id, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// MergeAgent operation middleware
+func (siw *ServerInterfaceWrapper) MergeAgent(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params MergeAgentParams
+
+	// ------------- Optional query parameter "project_id" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "project_id", r.URL.Query(), &params.ProjectId)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.MergeAgent(w, r, id, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -489,6 +534,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 
 	m.HandleFunc("DELETE "+options.BaseURL+"/api/agent/{id}", wrapper.KillAgent)
 	m.HandleFunc("GET "+options.BaseURL+"/api/agent/{id}", wrapper.GetAgent)
+	m.HandleFunc("POST "+options.BaseURL+"/api/agent/{id}/merge", wrapper.MergeAgent)
 	m.HandleFunc("GET "+options.BaseURL+"/api/agents", wrapper.ListAgents)
 	m.HandleFunc("POST "+options.BaseURL+"/api/agents", wrapper.SpawnAgent)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects", wrapper.ListProjects)
@@ -528,6 +574,50 @@ func (response KillAgent404JSONResponse) VisitKillAgentResponse(w http.ResponseW
 type KillAgent500JSONResponse ErrorResponse
 
 func (response KillAgent500JSONResponse) VisitKillAgentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type MergeAgentRequestObject struct {
+	Id     string `json:"id"`
+	Params MergeAgentParams
+}
+
+type MergeAgentResponseObject interface {
+	VisitMergeAgentResponse(w http.ResponseWriter) error
+}
+
+type MergeAgent204Response struct {
+}
+
+func (response MergeAgent204Response) VisitMergeAgentResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type MergeAgent400JSONResponse ErrorResponse
+
+func (response MergeAgent400JSONResponse) VisitMergeAgentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type MergeAgent404JSONResponse ErrorResponse
+
+func (response MergeAgent404JSONResponse) VisitMergeAgentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type MergeAgent500JSONResponse ErrorResponse
+
+func (response MergeAgent500JSONResponse) VisitMergeAgentResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(500)
 
@@ -742,6 +832,9 @@ type StrictServerInterface interface {
 	// Get a specific Hydra agent by ID
 	// (GET /api/agent/{id})
 	GetAgent(ctx context.Context, request GetAgentRequestObject) (GetAgentResponseObject, error)
+	// Merge a Hydra agent's branch and kill it
+	// (POST /api/agent/{id}/merge)
+	MergeAgent(ctx context.Context, request MergeAgentRequestObject) (MergeAgentResponseObject, error)
 	// List all Hydra agents (heads)
 	// (GET /api/agents)
 	ListAgents(ctx context.Context, request ListAgentsRequestObject) (ListAgentsResponseObject, error)
@@ -811,6 +904,33 @@ func (sh *strictHandler) KillAgent(w http.ResponseWriter, r *http.Request, id st
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(KillAgentResponseObject); ok {
 		if err := validResponse.VisitKillAgentResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// MergeAgent operation middleware
+func (sh *strictHandler) MergeAgent(w http.ResponseWriter, r *http.Request, id string, params MergeAgentParams) {
+	var request MergeAgentRequestObject
+
+	request.Id = id
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.MergeAgent(ctx, request.(MergeAgentRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "MergeAgent")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(MergeAgentResponseObject); ok {
+		if err := validResponse.VisitMergeAgentResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

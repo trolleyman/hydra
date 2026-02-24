@@ -145,6 +145,44 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /api/agent/{id}/merge:
+    post:
+      summary: Merge a Hydra agent's branch into its base branch and kill it
+      operationId: mergeAgent
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: project_id
+          required: false
+          schema:
+            type: string
+          description: Project ID to scope the lookup (defaults to server CWD project)
+      responses:
+        '204':
+          description: No Content (Agent merged and killed)
+        '400':
+          description: Bad Request (e.g. no branch to merge)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /api/agent/{id}:
     get:
       summary: Get a specific Hydra agent by ID

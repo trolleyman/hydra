@@ -115,6 +115,7 @@ function AgentDetail({
   onKilled: (id: string) => void
 }) {
   const [killing, setKilling] = useState(false)
+  const [merging, setMerging] = useState(false)
   const [, setTick] = useState(0)
 
   useEffect(() => {
@@ -145,6 +146,21 @@ function AgentDetail({
     }
   }
 
+  async function handleMerge() {
+    if (!window.confirm(`Are you sure you want to merge agent "${agent.id}"?\n\nThis will merge the agent's branch into the base branch, then stop the container and clean up.`)) {
+      return
+    }
+    setMerging(true)
+    try {
+      await api.default.mergeAgent(agent.id, projectId ?? undefined)
+      onKilled(agent.id)
+    } catch (err) {
+      alert(`Failed to merge agent: ${err}`)
+    } finally {
+      setMerging(false)
+    }
+  }
+
   return (
     <div className="flex-1 overflow-auto p-6">
       <div className="max-w-5xl">
@@ -154,9 +170,26 @@ function AgentDetail({
           <div className="flex items-center gap-2 mb-2">
             <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">{agent.id}</h1>
             <button
+              onClick={handleMerge}
+              disabled={merging || killing}
+              className="ml-2 w-6 h-6 flex items-center justify-center rounded-md border border-green-200 text-green-600 hover:bg-green-50 dark:border-green-900/30 dark:text-green-400 dark:hover:bg-green-900/20 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+              title="Merge agent"
+            >
+              {merging ? (
+                <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                </svg>
+              ) : (
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7v10m0 0l3-3m-3 3L5 14m11-7a4 4 0 010 8h-3" />
+                </svg>
+              )}
+            </button>
+            <button
               onClick={handleKill}
-              disabled={killing}
-              className="ml-2 w-6 h-6 flex items-center justify-center rounded-md border border-red-200 text-red-500 hover:bg-red-50 dark:border-red-900/30 dark:text-red-400 dark:hover:bg-red-900/20 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+              disabled={killing || merging}
+              className="w-6 h-6 flex items-center justify-center rounded-md border border-red-200 text-red-500 hover:bg-red-50 dark:border-red-900/30 dark:text-red-400 dark:hover:bg-red-900/20 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
               title="Kill agent"
             >
               {killing ? (
