@@ -4,6 +4,8 @@
 /* eslint-disable */
 import type { AddProjectRequest } from '../models/AddProjectRequest';
 import type { AgentResponse } from '../models/AgentResponse';
+import type { CommitInfo } from '../models/CommitInfo';
+import type { DiffResponse } from '../models/DiffResponse';
 import type { ProjectInfo } from '../models/ProjectInfo';
 import type { SpawnAgentRequest } from '../models/SpawnAgentRequest';
 import type { StatusResponse } from '../models/StatusResponse';
@@ -111,6 +113,67 @@ export class DefaultService {
             mediaType: 'application/json',
             errors: {
                 400: `Bad Request`,
+                500: `Internal Server Error`,
+            },
+        });
+    }
+    /**
+     * List commits on an agent's branch (between base branch and agent branch)
+     * @param id
+     * @param projectId Project ID to scope the lookup (defaults to server CWD project)
+     * @returns CommitInfo OK
+     * @throws ApiError
+     */
+    public getAgentCommits(
+        id: string,
+        projectId?: string,
+    ): CancelablePromise<Array<CommitInfo>> {
+        return this.httpRequest.request({
+            method: 'GET',
+            url: '/api/agent/{id}/commits',
+            path: {
+                'id': id,
+            },
+            query: {
+                'project_id': projectId,
+            },
+            errors: {
+                404: `Not Found`,
+                500: `Internal Server Error`,
+            },
+        });
+    }
+    /**
+     * Get the diff for an agent's branch
+     * @param id
+     * @param projectId Project ID to scope the lookup (defaults to server CWD project)
+     * @param baseRef Base commit SHA or ref. Defaults to the agent's base branch.
+     * @param headRef Head commit SHA or ref. Defaults to the agent's branch.
+     * @param ignoreWhitespace Ignore whitespace changes in the diff
+     * @returns DiffResponse OK
+     * @throws ApiError
+     */
+    public getAgentDiff(
+        id: string,
+        projectId?: string,
+        baseRef?: string,
+        headRef?: string,
+        ignoreWhitespace?: boolean,
+    ): CancelablePromise<DiffResponse> {
+        return this.httpRequest.request({
+            method: 'GET',
+            url: '/api/agent/{id}/diff',
+            path: {
+                'id': id,
+            },
+            query: {
+                'project_id': projectId,
+                'base_ref': baseRef,
+                'head_ref': headRef,
+                'ignore_whitespace': ignoreWhitespace,
+            },
+            errors: {
+                404: `Not Found`,
                 500: `Internal Server Error`,
             },
         });

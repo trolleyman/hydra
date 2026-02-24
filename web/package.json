@@ -17,6 +17,7 @@
   "dependencies": {
     "@tailwindcss/vite": "^4.2.0",
     "@tanstack/react-router": "^1.161.4",
+    "highlight.js": "^11.11.1",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "tailwindcss": "^4.2.0",

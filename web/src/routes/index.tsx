@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { api } from '../stores/apiClient'
 import { useProjectStore } from '../stores/projectStore'
 import type { AgentResponse, SpawnAgentRequest } from '../api'
+import { DiffViewer } from '../DiffViewer'
 
 export const Route = createFileRoute('/')({
   component: HomePage,
@@ -220,11 +221,14 @@ function AgentDetail({
         )}
 
         {/* PTY placeholder */}
-        <div className="bg-gray-900 dark:bg-gray-950 rounded-lg border border-gray-700 dark:border-gray-600 p-4 min-h-48 flex items-center justify-center">
+        <div className="bg-gray-900 dark:bg-gray-950 rounded-lg border border-gray-700 dark:border-gray-600 p-4 min-h-48 flex items-center justify-center mb-4">
           <p className="text-gray-500 text-sm font-mono">
             Terminal (PTY) — coming soon
           </p>
         </div>
+
+        {/* Diff viewer */}
+        <DiffViewer agent={agent} projectId={projectId} />
       </div>
     </div>
   )
