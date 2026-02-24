@@ -2,7 +2,9 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
+import type { AddProjectRequest } from '../models/AddProjectRequest';
 import type { AgentResponse } from '../models/AgentResponse';
+import type { ProjectInfo } from '../models/ProjectInfo';
 import type { SpawnAgentRequest } from '../models/SpawnAgentRequest';
 import type { StatusResponse } from '../models/StatusResponse';
 import type { CancelablePromise } from '../core/CancelablePromise';
@@ -35,14 +37,54 @@ export class DefaultService {
         });
     }
     /**
+     * List all known projects
+     * @returns ProjectInfo OK
+     * @throws ApiError
+     */
+    public listProjects(): CancelablePromise<Array<ProjectInfo>> {
+        return this.httpRequest.request({
+            method: 'GET',
+            url: '/api/projects',
+            errors: {
+                500: `Internal Server Error`,
+            },
+        });
+    }
+    /**
+     * Add a new project by folder path
+     * @param requestBody
+     * @returns ProjectInfo Created
+     * @throws ApiError
+     */
+    public addProject(
+        requestBody: AddProjectRequest,
+    ): CancelablePromise<ProjectInfo> {
+        return this.httpRequest.request({
+            method: 'POST',
+            url: '/api/projects',
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                400: `Bad Request`,
+                500: `Internal Server Error`,
+            },
+        });
+    }
+    /**
      * List all Hydra agents (heads)
+     * @param projectId Project ID to scope the agent list (defaults to server CWD project)
      * @returns AgentResponse OK
      * @throws ApiError
      */
-    public listAgents(): CancelablePromise<Array<AgentResponse>> {
+    public listAgents(
+        projectId?: string,
+    ): CancelablePromise<Array<AgentResponse>> {
         return this.httpRequest.request({
             method: 'GET',
             url: '/api/agents',
+            query: {
+                'project_id': projectId,
+            },
             errors: {
                 500: `Internal Server Error`,
             },
@@ -51,15 +93,20 @@ export class DefaultService {
     /**
      * Spawn a new Hydra agent
      * @param requestBody
+     * @param projectId Project ID to spawn the agent in (defaults to server CWD project)
      * @returns AgentResponse Created
      * @throws ApiError
      */
     public spawnAgent(
         requestBody: SpawnAgentRequest,
+        projectId?: string,
     ): CancelablePromise<AgentResponse> {
         return this.httpRequest.request({
             method: 'POST',
             url: '/api/agents',
+            query: {
+                'project_id': projectId,
+            },
             body: requestBody,
             mediaType: 'application/json',
             errors: {
@@ -71,17 +118,22 @@ export class DefaultService {
     /**
      * Get a specific Hydra agent by ID
      * @param id
+     * @param projectId Project ID to scope the lookup (defaults to server CWD project)
      * @returns AgentResponse OK
      * @throws ApiError
      */
     public getAgent(
         id: string,
+        projectId?: string,
     ): CancelablePromise<AgentResponse> {
         return this.httpRequest.request({
             method: 'GET',
             url: '/api/agent/{id}',
             path: {
                 'id': id,
+            },
+            query: {
+                'project_id': projectId,
             },
             errors: {
                 404: `Not Found`,
@@ -92,17 +144,22 @@ export class DefaultService {
     /**
      * Kill a Hydra agent by ID
      * @param id
+     * @param projectId Project ID to scope the lookup (defaults to server CWD project)
      * @returns void
      * @throws ApiError
      */
     public killAgent(
         id: string,
+        projectId?: string,
     ): CancelablePromise<void> {
         return this.httpRequest.request({
             method: 'DELETE',
             url: '/api/agent/{id}',
             path: {
                 'id': id,
+            },
+            query: {
+                'project_id': projectId,
             },
             errors: {
                 404: `Not Found`,

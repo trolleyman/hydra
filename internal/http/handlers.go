@@ -13,16 +13,20 @@ import (
 	"github.com/trolleyman/hydra/internal/config"
 	"github.com/trolleyman/hydra/internal/docker"
 	"github.com/trolleyman/hydra/internal/heads"
+	"github.com/trolleyman/hydra/internal/paths"
+	"github.com/trolleyman/hydra/internal/projects"
 )
 
 const version = "0.1.0"
 
 // Server implements StrictServerInterface.
 type Server struct {
-	WorktreesDir string
-	ProjectRoot  string
-	DockerClient *dockerclient.Client
-	StartTime    time.Time
+	WorktreesDir    string
+	ProjectRoot     string
+	DefaultProject  projects.ProjectInfo
+	ProjectsManager *projects.Manager
+	DockerClient    *dockerclient.Client
+	StartTime       time.Time
 }
 
 // NewHandler creates a handler with routing matching the OpenAPI spec.
@@ -31,14 +35,70 @@ func NewHandler(s *Server) http.Handler {
 	return api.HandlerFromMux(strict, http.NewServeMux())
 }
 
+// resolveProjectRoot returns the project root for the given project_id query param.
+// Falls back to the server's default project root when project_id is absent or unknown.
+func (s *Server) resolveProjectRoot(projectID *string) string {
+	if projectID == nil || *projectID == "" {
+		return s.ProjectRoot
+	}
+	p := s.ProjectsManager.GetByID(*projectID)
+	if p == nil {
+		return s.ProjectRoot
+	}
+	return p.Path
+}
+
 // --- StrictServerInterface implementations ---
 
 func (s *Server) CheckHealth(_ context.Context, _ api.CheckHealthRequestObject) (api.CheckHealthResponseObject, error) {
 	return api.CheckHealth200TextResponse("OK"), nil
 }
 
-func (s *Server) ListAgents(ctx context.Context, _ api.ListAgentsRequestObject) (api.ListAgentsResponseObject, error) {
-	headList, err := heads.ListHeads(ctx, s.DockerClient, s.ProjectRoot)
+func (s *Server) ListProjects(_ context.Context, _ api.ListProjectsRequestObject) (api.ListProjectsResponseObject, error) {
+	ps := s.ProjectsManager.ListProjects()
+	resp := make(api.ListProjects200JSONResponse, len(ps))
+	for i, p := range ps {
+		resp[i] = api.ProjectInfo{
+			Id:   p.ID,
+			Path: p.Path,
+			Name: p.Name,
+		}
+	}
+	return resp, nil
+}
+
+func (s *Server) AddProject(_ context.Context, request api.AddProjectRequestObject) (api.AddProjectResponseObject, error) {
+	if request.Body == nil || strings.TrimSpace(request.Body.Path) == "" {
+		code := 400
+		msg := "path is required"
+		return api.AddProject400JSONResponse{Code: code, Error: msg}, nil
+	}
+
+	projectPath := strings.TrimSpace(request.Body.Path)
+
+	// Validate it's a git repository.
+	if _, err := paths.GetProjectRoot(projectPath); err != nil {
+		code := 400
+		msg := "path is not a git repository: " + err.Error()
+		return api.AddProject400JSONResponse{Code: code, Error: msg}, nil
+	}
+
+	p, err := s.ProjectsManager.AddProject(projectPath)
+	if err != nil {
+		code := 500
+		msg := err.Error()
+		return api.AddProject500JSONResponse{Code: code, Error: msg}, nil
+	}
+	return api.AddProject201JSONResponse(api.ProjectInfo{
+		Id:   p.ID,
+		Path: p.Path,
+		Name: p.Name,
+	}), nil
+}
+
+func (s *Server) ListAgents(ctx context.Context, request api.ListAgentsRequestObject) (api.ListAgentsResponseObject, error) {
+	projectRoot := s.resolveProjectRoot(request.Params.ProjectId)
+	headList, err := heads.ListHeads(ctx, s.DockerClient, projectRoot)
 	if err != nil {
 		code := 500
 		msg := err.Error()
@@ -73,11 +133,13 @@ func (s *Server) GetStatus(_ context.Context, _ api.GetStatusRequestObject) (api
 	v := version
 	uptime := float32(time.Since(s.StartTime).Seconds())
 	projectRoot := s.ProjectRoot
+	defaultProjectID := s.DefaultProject.ID
 	return api.GetStatus200JSONResponse(api.StatusResponse{
-		Status:        &status,
-		Version:       &v,
-		UptimeSeconds: &uptime,
-		ProjectRoot:   &projectRoot,
+		Status:           &status,
+		Version:          &v,
+		UptimeSeconds:    &uptime,
+		ProjectRoot:      &projectRoot,
+		DefaultProjectId: &defaultProjectID,
 	}), nil
 }
 
@@ -87,6 +149,8 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 		msg := "prompt is required"
 		return api.SpawnAgent400JSONResponse{Code: code, Error: msg}, nil
 	}
+
+	projectRoot := s.resolveProjectRoot(request.Params.ProjectId)
 
 	agentType := docker.AgentTypeClaude
 	if request.Body.AgentType != nil && *request.Body.AgentType != "" {
@@ -98,7 +162,7 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 		return api.SpawnAgent400JSONResponse{Code: code, Error: msg}, nil
 	}
 
-	cfg, err := config.Load(s.ProjectRoot)
+	cfg, err := config.Load(projectRoot)
 	if err != nil {
 		code := 500
 		msg := err.Error()
@@ -112,12 +176,12 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 
 	// Resolve Dockerfile path
 	dockerfilePath := ""
-	rel := cfg.GetDockerfileForAgent(s.ProjectRoot, string(agentType))
+	rel := cfg.GetDockerfileForAgent(projectRoot, string(agentType))
 	if rel != "" {
 		if filepath.IsAbs(rel) {
 			dockerfilePath = rel
 		} else {
-			dockerfilePath = filepath.Join(s.ProjectRoot, rel)
+			dockerfilePath = filepath.Join(projectRoot, rel)
 		}
 	}
 	if dockerfilePath != "" {
@@ -134,7 +198,7 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 		baseBranch = strings.TrimSpace(*request.Body.BaseBranch)
 	}
 
-	head, err := heads.SpawnHead(ctx, s.DockerClient, s.ProjectRoot, heads.SpawnHeadOptions{
+	head, err := heads.SpawnHead(ctx, s.DockerClient, projectRoot, heads.SpawnHeadOptions{
 		ID:             id,
 		PrePrompt:      prePrompt,
 		Prompt:         prompt,
@@ -167,7 +231,8 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 }
 
 func (s *Server) GetAgent(ctx context.Context, request api.GetAgentRequestObject) (api.GetAgentResponseObject, error) {
-	head, err := heads.GetHeadByID(ctx, s.DockerClient, s.ProjectRoot, request.Id)
+	projectRoot := s.resolveProjectRoot(request.Params.ProjectId)
+	head, err := heads.GetHeadByID(ctx, s.DockerClient, projectRoot, request.Id)
 	if err != nil {
 		code := 500
 		msg := err.Error()
@@ -199,7 +264,8 @@ func (s *Server) GetAgent(ctx context.Context, request api.GetAgentRequestObject
 }
 
 func (s *Server) KillAgent(ctx context.Context, request api.KillAgentRequestObject) (api.KillAgentResponseObject, error) {
-	head, err := heads.GetHeadByID(ctx, s.DockerClient, s.ProjectRoot, request.Id)
+	projectRoot := s.resolveProjectRoot(request.Params.ProjectId)
+	head, err := heads.GetHeadByID(ctx, s.DockerClient, projectRoot, request.Id)
 	if err != nil {
 		code := 500
 		msg := err.Error()

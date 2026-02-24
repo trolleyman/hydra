@@ -10,6 +10,7 @@ import (
 	"github.com/trolleyman/hydra/internal/docker"
 	httppkg "github.com/trolleyman/hydra/internal/http"
 	"github.com/trolleyman/hydra/internal/paths"
+	"github.com/trolleyman/hydra/internal/projects"
 	"github.com/trolleyman/hydra/web"
 )
 
@@ -37,11 +38,25 @@ func runServer(_ *cobra.Command, _ []string) error {
 		log.Fatalf("Create docker client: %v", err)
 	}
 
+	pm, err := projects.NewManager()
+	if err != nil {
+		log.Fatalf("Create projects manager: %v", err)
+	}
+
+	// Register the CWD project so it appears in the dropdown.
+	defaultProject, err := pm.AddProject(projectRoot)
+	if err != nil {
+		log.Fatalf("Register default project: %v", err)
+	}
+	log.Printf("Default project: %s (%s)", defaultProject.Name, defaultProject.ID)
+
 	server := &httppkg.Server{
-		WorktreesDir: worktreesDir,
-		ProjectRoot:  projectRoot,
-		DockerClient: dockerClient,
-		StartTime:    time.Now(),
+		WorktreesDir:    worktreesDir,
+		ProjectRoot:     projectRoot,
+		DefaultProject:  defaultProject,
+		ProjectsManager: pm,
+		DockerClient:    dockerClient,
+		StartTime:       time.Now(),
 	}
 
 	// Build the main mux
