@@ -36,15 +36,15 @@ function statusDotClass(status: string): string {
 
 function formatStartedAgo(createdAt: number): string {
   const seconds = Math.floor((Date.now() - createdAt * 1000) / 1000)
-  if (seconds < 5) return 'Started just now'
-  if (seconds < 60) return `Started ${seconds} seconds ago`
+  if (seconds < 5) return 'just now'
+  if (seconds < 60) return `${seconds}s ago`
   const minutes = Math.floor(seconds / 60)
-  if (minutes < 60) return `Started ${minutes} ${minutes === 1 ? 'minute' : 'minutes'} ago`
+  if (minutes < 60) return `${minutes}m ago`
   const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `Started ${hours} ${hours === 1 ? 'hour' : 'hours'} ago`
-  if (hours < 48) return 'Started yesterday'
+  if (hours < 24) return `${hours}h ago`
+  if (hours < 48) return 'yesterday'
   const days = Math.floor(hours / 24)
-  return `Started ${days} days ago`
+  return `${days}d ago`
 }
 
 function agentTypeColor(agentType: string): string {
@@ -176,27 +176,6 @@ function AgentDetail({
             <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${agentTypeClass}`}>
               {agent.agent_type || 'unknown'}
             </span>
-            {agent.container_id && (
-              <span
-                className="text-xs font-mono text-gray-400 dark:text-gray-500 cursor-default"
-                title={agent.container_id}
-              >
-                Container: {agent.container_id.slice(0, 12)}
-              </span>
-            )}
-            {agent.container_status && (
-              <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusBadgeClass(agent.container_status)}`}>
-                {normalizeContainerState(agent.container_status)}
-              </span>
-            )}
-            {agent.created_at != null && (
-              <span
-                className="text-xs text-gray-400 dark:text-gray-500 cursor-default"
-                title={`Started at ${new Date(agent.created_at * 1000).toUTCString()}`}
-              >
-                {formatStartedAgo(agent.created_at)}
-              </span>
-            )}
             {agent.agent_status && (() => {
               const badge = agentStatusBadge(agent.agent_status.status)
               return (
@@ -208,6 +187,22 @@ function AgentDetail({
                 </span>
               )
             })()}
+            {agent.container_id && (
+              <span
+                className="text-xs px-2 py-0.5 rounded-full font-medium font-mono bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300 cursor-default"
+                title={agent.container_id}
+              >
+                {agent.container_id.slice(0, 12)}
+              </span>
+            )}
+            {agent.created_at != null && (
+              <span
+                className="text-xs px-2 py-0.5 rounded-full font-medium bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400 cursor-default"
+                title={`Started at ${new Date(agent.created_at * 1000).toUTCString()}`}
+              >
+                {formatStartedAgo(agent.created_at)}
+              </span>
+            )}
           </div>
         </div>
 
