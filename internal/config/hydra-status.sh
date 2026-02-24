@@ -13,11 +13,11 @@ process.stdin.on('end', () => {
   const ts = new Date().toISOString();
   let status;
   if (event === 'SessionStart') status = 'starting';
-  else if (event === 'Stop') status = 'waiting';
+  else if (event === 'Stop' || event === 'AfterAgent') status = 'waiting';
   else if (event === 'SessionEnd') status = 'ended';
   else status = 'unknown';
   const obj = { status, event, timestamp: ts };
-  if (event === 'Stop' && input.last_assistant_message) {
+  if ((event === 'Stop' || event === 'AfterAgent') && input.last_assistant_message) {
     obj.last_message = String(input.last_assistant_message).slice(0, 300);
   }
   if (event === 'SessionEnd' && input.reason) {

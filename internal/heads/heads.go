@@ -12,9 +12,11 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"braces.dev/errtrace"
 	dockerclient "github.com/docker/docker/client"
+	"github.com/trolleyman/hydra/internal/apitypes"
 	"github.com/trolleyman/hydra/internal/docker"
 	"github.com/trolleyman/hydra/internal/git"
 	"github.com/trolleyman/hydra/internal/paths"
@@ -32,9 +34,9 @@ type Head struct {
 	PrePrompt       string
 	Prompt          string
 	BaseBranch      string
-	// ClaudeStatus is read from <projectDir>/.hydra/status/<id>.json (nil if absent).
-	ClaudeStatus *ClaudeStatus
-	CreatedAt    int64 // Unix timestamp from container creation; 0 if no container
+	// AgentStatus is read from <projectDir>/.hydra/status/<id>.json (nil if absent).
+	AgentStatus *AgentStatusInfo
+	CreatedAt   int64 // Unix timestamp from container creation; 0 if no container
 }
 
 // ListHeads returns all Hydra heads found via git branches and/or Docker containers.
@@ -60,11 +62,11 @@ func ListHeads(ctx context.Context, cli *dockerclient.Client, projectRoot string
 		}
 		branchCopy := branch
 		head := &Head{
-			ID:           id,
-			Branch:       &branchCopy,
-			Worktree:     worktree,
-			ProjectPath:  projectRoot,
-			ClaudeStatus: readClaudeStatus(projectRoot, id),
+			ID:          id,
+			Branch:      &branchCopy,
+			Worktree:    worktree,
+			ProjectPath: projectRoot,
+			AgentStatus: readAgentStatus(projectRoot, id),
 		}
 		byID[id] = head
 	}
@@ -108,15 +110,39 @@ func ListHeads(ctx context.Context, cli *dockerclient.Client, projectRoot string
 				PrePrompt:       a.Meta.PrePrompt,
 				Prompt:          a.Meta.Prompt,
 				BaseBranch:      a.Meta.BaseBranch,
-				ClaudeStatus:    readClaudeStatus(a.Meta.ProjectPath, id),
+				AgentStatus:     readAgentStatus(a.Meta.ProjectPath, id),
 				CreatedAt:       a.Created,
 			}
 		}
 	}
 
-	// Collect all heads into a slice.
+	// Collect all heads into a slice and finalize statuses.
 	result := make([]Head, 0, len(byID))
 	for _, h := range byID {
+		// Finalize agent status:
+		// 1. If we have a hook-reported status, use it.
+		// 2. If the container is exited, force status to "exited".
+		// 3. If we have no status but a container, set to "pending".
+		if h.ContainerStatus == "exited" {
+			if h.AgentStatus == nil {
+				h.AgentStatus = &AgentStatusInfo{}
+			}
+			h.AgentStatus.Status = apitypes.Exited
+			if h.AgentStatus.Event == nil {
+				e := "polling"
+				h.AgentStatus.Event = &e
+			}
+			if h.AgentStatus.Timestamp == "" {
+				h.AgentStatus.Timestamp = time.Now().Format(time.RFC3339)
+			}
+		} else if h.AgentStatus == nil && h.ContainerID != "" {
+			h.AgentStatus = &AgentStatusInfo{}
+			h.AgentStatus.Status = apitypes.Pending
+			e := "polling"
+			h.AgentStatus.Event = &e
+			h.AgentStatus.Timestamp = time.Now().Format(time.RFC3339)
+		}
+
 		result = append(result, *h)
 	}
 
@@ -221,6 +247,7 @@ func SpawnHead(ctx context.Context, cli *dockerclient.Client, projectRoot string
 		return nil, errtrace.Wrap(fmt.Errorf("spawn agent: %w", err))
 	}
 
+	e := "polling"
 	return &Head{
 		ID:              opts.ID,
 		Branch:          &branchName,
@@ -232,6 +259,13 @@ func SpawnHead(ctx context.Context, cli *dockerclient.Client, projectRoot string
 		PrePrompt:       opts.PrePrompt,
 		Prompt:          opts.Prompt,
 		BaseBranch:      baseBranch,
+		AgentStatus: &AgentStatusInfo{
+			apitypes.AgentStatusInfo{
+				Status:    apitypes.Pending,
+				Event:     &e,
+				Timestamp: time.Now().Format(time.RFC3339),
+			},
+		},
 	}, nil
 }
 

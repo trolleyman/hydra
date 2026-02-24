@@ -2,15 +2,13 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
-export type ClaudeStatusInfo = {
+import type { AgentStatus } from './AgentStatus';
+export type AgentStatusInfo = {
+    status: AgentStatus;
     /**
-     * Current status: starting, waiting, or ended
+     * The hook event that triggered this status (SessionStart, Stop, SessionEnd, or polling)
      */
-    status: string;
-    /**
-     * The hook event that triggered this status (SessionStart, Stop, or SessionEnd)
-     */
-    event: string;
+    event?: string;
     /**
      * ISO 8601 timestamp of when the status was set
      */

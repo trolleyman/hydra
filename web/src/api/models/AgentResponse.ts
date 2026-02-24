@@ -2,7 +2,7 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
-import type { ClaudeStatusInfo } from './ClaudeStatusInfo';
+import type { AgentStatusInfo } from './AgentStatusInfo';
 export type AgentResponse = {
     id: string;
     branch_name?: string | null;
@@ -14,6 +14,6 @@ export type AgentResponse = {
     pre_prompt: string;
     prompt: string;
     base_branch: string;
-    claude_status?: ClaudeStatusInfo;
+    agent_status?: AgentStatusInfo;
 };
 

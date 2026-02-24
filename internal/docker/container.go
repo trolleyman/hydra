@@ -420,6 +420,26 @@ func getAgentBinds(agentType AgentType, projectRoot, id, containerHome string) (
 			return nil, errtrace.Wrap(err)
 		}
 
+		// Write the hooks directory and hydra-status.sh hook script.
+		hooksDir := filepath.Join(geminiSettingsDir, "hooks")
+		if err := os.MkdirAll(hooksDir, 0755); err != nil {
+			return nil, errtrace.Wrap(err)
+		}
+		hookScript := filepath.Join(hooksDir, "hydra-status.sh")
+		if err := os.WriteFile(hookScript, []byte(config.HydraStatusHookScript), 0755); err != nil {
+			return nil, errtrace.Wrap(err)
+		}
+
+		// Always write settings.json with hooks configuration.
+		geminiSettingsJson := filepath.Join(geminiSettingsDir, "settings.json")
+		settingsData, err := buildGeminiSettings()
+		if err != nil {
+			return nil, errtrace.Wrap(err)
+		}
+		if err = os.WriteFile(geminiSettingsJson, settingsData, 0644); err != nil {
+			return nil, errtrace.Wrap(err)
+		}
+
 		for _, pair := range []struct{ host, container string }{
 			{geminiSettingsDir, containerHome + "/.gemini"},
 		} {
@@ -429,6 +449,27 @@ func getAgentBinds(agentType AgentType, projectRoot, id, containerHome string) (
 		}
 	}
 	return binds, nil
+}
+
+// buildGeminiSettings generates the settings.json content with hook configuration for Gemini.
+func buildGeminiSettings() ([]byte, error) {
+	hookCmd := "$HOME/.gemini/hooks/hydra-status.sh"
+	hookGroup := []claudeMatcherGroup{
+		{Hooks: []claudeHookHandler{{Type: "command", Command: hookCmd}}},
+	}
+	// Note: Gemini uses AfterAgent instead of Stop.
+	settings := map[string]interface{}{
+		"hooks": map[string]interface{}{
+			"SessionStart": hookGroup,
+			"AfterAgent":   hookGroup,
+			"SessionEnd":   hookGroup,
+		},
+	}
+	data, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		return nil, errtrace.Wrap(fmt.Errorf("marshal gemini settings: %w", err))
+	}
+	return data, nil
 }
 
 // claudeHookHandler is a single hook handler entry in settings.json.
