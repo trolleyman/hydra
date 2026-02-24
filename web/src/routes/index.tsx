@@ -213,28 +213,6 @@ function AgentDetail({ agent, onKilled }: { agent: AgentResponse; onKilled: (id:
           </div>
         )}
 
-        {/* Info */}
-        <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 mb-6">
-          <div className="px-4 py-3 border-b border-gray-100 dark:border-gray-700">
-            <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Details</h2>
-          </div>
-          <div className="px-4">
-            {agent.branch_name && <InfoRow label="Branch" value={agent.branch_name} mono />}
-            <InfoRow label="Base branch" value={agent.base_branch} mono />
-            {agent.worktree_path && <InfoRow label="Worktree" value={agent.worktree_path} mono />}
-            <InfoRow label="Project path" value={agent.project_path} mono />
-            <InfoRow label="Container ID" value={agent.container_id ? agent.container_id.slice(0, 12) : ''} mono />
-            {agent.agent_status && (
-              <>
-                <InfoRow label="Agent status" value={agent.agent_status.status} />
-                <InfoRow label="Status since" value={agent.agent_status.timestamp} mono />
-                {agent.agent_status.last_message && (
-                  <InfoRow label="Last message" value={agent.agent_status.last_message} />
-                )}
-              </>
-            )}
-          </div>
-        </div>
 
         {/* PTY placeholder */}
         <div className="bg-gray-900 dark:bg-gray-950 rounded-lg border border-gray-700 dark:border-gray-600 p-4 min-h-48 flex items-center justify-center">
