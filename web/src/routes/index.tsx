@@ -103,17 +103,6 @@ function AgentSidebarItem({
   )
 }
 
-function InfoRow({ label, value, mono = false }: { label: string; value: string | boolean; mono?: boolean }) {
-  const display = typeof value === 'boolean' ? (value ? 'yes' : 'no') : value
-  return (
-    <div className="flex gap-3 py-2 border-b border-gray-100 dark:border-gray-700 last:border-0">
-      <span className="text-xs text-gray-400 dark:text-gray-500 w-32 shrink-0 pt-0.5">{label}</span>
-      <span className={`text-sm text-gray-800 dark:text-gray-200 break-all ${mono ? 'font-mono text-xs' : ''}`}>
-        {display || <span className="text-gray-300 dark:text-gray-600 italic text-xs">—</span>}
-      </span>
-    </div>
-  )
-}
 
 function AgentDetail({ agent, onKilled }: { agent: AgentResponse; onKilled: (id: string) => void }) {
   const [killing, setKilling] = useState(false)
@@ -220,7 +209,6 @@ function AgentDetail({ agent, onKilled }: { agent: AgentResponse; onKilled: (id:
             <p className="text-sm text-gray-800 dark:text-gray-200 whitespace-pre-wrap">{agent.prompt}</p>
           </div>
         )}
-
 
         {/* PTY placeholder */}
         <div className="bg-gray-900 dark:bg-gray-950 rounded-lg border border-gray-700 dark:border-gray-600 p-4 min-h-48 flex items-center justify-center">
