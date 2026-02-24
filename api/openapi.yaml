@@ -237,5 +237,9 @@ components:
           type: string
         base_branch:
           type: string
+        created_at:
+          type: integer
+          format: int64
+          description: Unix timestamp (seconds) when the container was created/started; 0 if no container
         agent_status:
           $ref: '#/components/schemas/AgentStatusInfo'

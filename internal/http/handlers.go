@@ -46,6 +46,10 @@ func (s *Server) ListAgents(ctx context.Context, _ api.ListAgentsRequestObject) 
 	}
 	resp := make(api.ListAgents200JSONResponse, len(headList))
 	for i, h := range headList {
+		var createdAt *int64
+		if h.CreatedAt != 0 {
+			createdAt = &h.CreatedAt
+		}
 		resp[i] = api.AgentResponse{
 			Id:              h.ID,
 			BranchName:      h.Branch,
@@ -57,6 +61,7 @@ func (s *Server) ListAgents(ctx context.Context, _ api.ListAgentsRequestObject) 
 			PrePrompt:       h.PrePrompt,
 			Prompt:          h.Prompt,
 			BaseBranch:      h.BaseBranch,
+			CreatedAt:       createdAt,
 			AgentStatus:     h.AgentStatus,
 		}
 	}
@@ -142,6 +147,10 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 		msg := err.Error()
 		return api.SpawnAgent500JSONResponse{Code: code, Error: msg}, nil
 	}
+	var spawnCreatedAt *int64
+	if head.CreatedAt != 0 {
+		spawnCreatedAt = &head.CreatedAt
+	}
 	return api.SpawnAgent201JSONResponse(api.AgentResponse{
 		Id:              head.ID,
 		BranchName:      head.Branch,
@@ -152,6 +161,7 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 		AgentType:       string(head.AgentType),
 		Prompt:          head.Prompt,
 		BaseBranch:      head.BaseBranch,
+		CreatedAt:       spawnCreatedAt,
 		AgentStatus:     head.AgentStatus,
 	}), nil
 }
@@ -168,6 +178,10 @@ func (s *Server) GetAgent(ctx context.Context, request api.GetAgentRequestObject
 		msg := "agent not found"
 		return api.GetAgent404JSONResponse{Code: code, Error: msg}, nil
 	}
+	var getCreatedAt *int64
+	if head.CreatedAt != 0 {
+		getCreatedAt = &head.CreatedAt
+	}
 	return api.GetAgent200JSONResponse(api.AgentResponse{
 		Id:              head.ID,
 		BranchName:      head.Branch,
@@ -179,6 +193,7 @@ func (s *Server) GetAgent(ctx context.Context, request api.GetAgentRequestObject
 		PrePrompt:       head.PrePrompt,
 		Prompt:          head.Prompt,
 		BaseBranch:      head.BaseBranch,
+		CreatedAt:       getCreatedAt,
 		AgentStatus:     head.AgentStatus,
 	}), nil
 }

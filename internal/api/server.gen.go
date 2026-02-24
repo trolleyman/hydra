@@ -33,11 +33,14 @@ type AgentResponse struct {
 	BranchName      *string          `json:"branch_name"`
 	ContainerId     string           `json:"container_id"`
 	ContainerStatus string           `json:"container_status"`
-	Id              string           `json:"id"`
-	PrePrompt       string           `json:"pre_prompt"`
-	ProjectPath     string           `json:"project_path"`
-	Prompt          string           `json:"prompt"`
-	WorktreePath    *string          `json:"worktree_path"`
+
+	// CreatedAt Unix timestamp (seconds) when the container was created/started; absent if no container
+	CreatedAt    *int64  `json:"created_at,omitempty"`
+	Id           string  `json:"id"`
+	PrePrompt    string  `json:"pre_prompt"`
+	ProjectPath  string  `json:"project_path"`
+	Prompt       string  `json:"prompt"`
+	WorktreePath *string `json:"worktree_path"`
 }
 
 // AgentStatus The hook-reported status of the agent session

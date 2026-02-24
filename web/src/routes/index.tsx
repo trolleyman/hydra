@@ -7,8 +7,16 @@ export const Route = createFileRoute('/')({
   component: HomePage,
 })
 
+function normalizeContainerState(status: string): string {
+  const s = status.toLowerCase()
+  if (s === 'running' || s.startsWith('up')) return 'running'
+  if (s === 'exited' || s.startsWith('exited')) return 'exited'
+  if (s === 'created') return 'created'
+  return s
+}
+
 function statusBadgeClass(status: string): string {
-  switch (status) {
+  switch (normalizeContainerState(status)) {
     case 'running': return 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
     case 'exited': return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
     case 'created': return 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'
@@ -17,12 +25,25 @@ function statusBadgeClass(status: string): string {
 }
 
 function statusDotClass(status: string): string {
-  switch (status) {
+  switch (normalizeContainerState(status)) {
     case 'running': return 'bg-green-500'
     case 'exited': return 'bg-red-400'
     case 'created': return 'bg-blue-400'
     default: return 'bg-gray-300 dark:bg-gray-600'
   }
+}
+
+function formatStartedAgo(createdAt: number): string {
+  const seconds = Math.floor((Date.now() - createdAt * 1000) / 1000)
+  if (seconds < 5) return 'Started just now'
+  if (seconds < 60) return `Started ${seconds} seconds ago`
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `Started ${minutes} ${minutes === 1 ? 'minute' : 'minutes'} ago`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `Started ${hours} ${hours === 1 ? 'hour' : 'hours'} ago`
+  if (hours < 48) return 'Started yesterday'
+  const days = Math.floor(hours / 24)
+  return `Started ${days} days ago`
 }
 
 function agentTypeColor(agentType: string): string {
@@ -96,6 +117,13 @@ function InfoRow({ label, value, mono = false }: { label: string; value: string 
 
 function AgentDetail({ agent, onKilled }: { agent: AgentResponse; onKilled: (id: string) => void }) {
   const [killing, setKilling] = useState(false)
+  const [, setTick] = useState(0)
+
+  useEffect(() => {
+    if (agent.created_at == null) return
+    const id = setInterval(() => setTick((n) => n + 1), 1000)
+    return () => clearInterval(id)
+  }, [agent.created_at])
 
   const agentTypeClass =
     agent.agent_type === 'claude'
@@ -130,7 +158,15 @@ function AgentDetail({ agent, onKilled }: { agent: AgentResponse; onKilled: (id:
           </span>
           {agent.container_status && (
             <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusBadgeClass(agent.container_status)}`}>
-              {agent.container_status}
+              {normalizeContainerState(agent.container_status)}
+            </span>
+          )}
+          {agent.created_at != null && (
+            <span
+              className="text-xs text-gray-400 dark:text-gray-500 cursor-default"
+              title={`Started at ${new Date(agent.created_at * 1000).toUTCString()}`}
+            >
+              {formatStartedAgo(agent.created_at)}
             </span>
           )}
           {agent.agent_status && (() => {
