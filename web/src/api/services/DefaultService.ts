@@ -116,6 +116,33 @@ export class DefaultService {
         });
     }
     /**
+     * Merge a Hydra agent's branch into its base branch and kill it
+     * @param id
+     * @param projectId Project ID to scope the lookup (defaults to server CWD project)
+     * @returns void
+     * @throws ApiError
+     */
+    public mergeAgent(
+        id: string,
+        projectId?: string,
+    ): CancelablePromise<void> {
+        return this.httpRequest.request({
+            method: 'POST',
+            url: '/api/agent/{id}/merge',
+            path: {
+                'id': id,
+            },
+            query: {
+                'project_id': projectId,
+            },
+            errors: {
+                400: `Bad Request (e.g. no branch to merge)`,
+                404: `Not Found`,
+                500: `Internal Server Error`,
+            },
+        });
+    }
+    /**
      * Get a specific Hydra agent by ID
      * @param id
      * @param projectId Project ID to scope the lookup (defaults to server CWD project)
@@ -162,33 +189,6 @@ export class DefaultService {
                 'project_id': projectId,
             },
             errors: {
-                404: `Not Found`,
-                500: `Internal Server Error`,
-            },
-        });
-    }
-    /**
-     * Merge a Hydra agent's branch into its base branch and kill it
-     * @param id
-     * @param projectId Project ID to scope the lookup (defaults to server CWD project)
-     * @returns void
-     * @throws ApiError
-     */
-    public mergeAgent(
-        id: string,
-        projectId?: string,
-    ): CancelablePromise<void> {
-        return this.httpRequest.request({
-            method: 'POST',
-            url: '/api/agent/{id}/merge',
-            path: {
-                'id': id,
-            },
-            query: {
-                'project_id': projectId,
-            },
-            errors: {
-                400: `Bad Request`,
                 404: `Not Found`,
                 500: `Internal Server Error`,
             },
