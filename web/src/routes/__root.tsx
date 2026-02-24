@@ -102,7 +102,7 @@ function RootLayout() {
               src="icon.png"
               alt="Hydra icon" />
           </div>
-          <span className="text-2xl font-bold font-serif tracking-[-0.075em] dark:text-gray-100">Hydra</span>
+          <span className="text-2xl font-bold font-serif tracking-[-0.05em] dark:text-gray-100">Hydra</span>
         </div>
         {projectRoot && (
           <span className="text-xs font-mono text-gray-500 dark:text-gray-400 truncate min-w-0">
