@@ -453,8 +453,140 @@ func GenerateGo() error {
 	return os.WriteFile(stamp, nil, 0644)
 }
 
-// Dev runs the server and reloads it when tracked files change.
+// getGoSourceModTime returns the most recent modification time across Go source
+// files and the OpenAPI spec, used to detect when the server needs rebuilding.
+func getGoSourceModTime() (time.Time, error) {
+	var latest time.Time
+
+	check := func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return err
+		}
+		if info.IsDir() {
+			return nil
+		}
+		if info.ModTime().After(latest) {
+			latest = info.ModTime()
+		}
+		return nil
+	}
+
+	dirs := []string{"internal", "api"}
+	for _, dir := range dirs {
+		if err := filepath.Walk(dir, check); err != nil {
+			if !os.IsNotExist(err) {
+				return latest, err
+			}
+		}
+	}
+
+	files := []string{"go.mod", "go.sum", "main.go"}
+	for _, file := range files {
+		info, err := os.Stat(file)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return latest, err
+		}
+		if info.ModTime().After(latest) {
+			latest = info.ModTime()
+		}
+	}
+
+	return latest, nil
+}
+
+// Dev runs the Go API server (restarting on Go source changes) and the Vite
+// frontend dev server in parallel for fast UI iteration with hot module replacement.
+// Access the frontend at http://localhost:5173; API calls are proxied to http://localhost:8080.
 func Dev() error {
+	// Ensure generated Go code is up to date.
+	if err := GenerateGo(); err != nil {
+		return err
+	}
+	// Build the frontend once to ensure web/dist/ exists for Go compilation.
+	// Subsequent frontend changes are handled by the Vite dev server with HMR.
+	if err := BuildWeb(); err != nil {
+		return err
+	}
+
+	// Start the Vite dev server (frontend with HMR on http://localhost:5173).
+	printCmdBackground("bun", "run", "dev")
+	viteCmd := exec.Command("bun", "run", "dev")
+	viteCmd.Dir = "web"
+	viteCmd.Stdout = os.Stdout
+	viteCmd.Stderr = os.Stderr
+	if err := viteCmd.Start(); err != nil {
+		return fmt.Errorf("failed to start Vite dev server: %w", err)
+	}
+	defer func() {
+		if viteCmd.Process != nil {
+			viteCmd.Process.Kill()
+			viteCmd.Wait()
+		}
+	}()
+
+	// Watch Go source files and restart the API server on changes.
+	var serverCmd *exec.Cmd
+	defer func() {
+		if serverCmd != nil && serverCmd.Process != nil {
+			serverCmd.Process.Kill()
+			serverCmd.Wait()
+		}
+	}()
+
+	var lastBuild time.Time
+	for {
+		latest, err := getGoSourceModTime()
+		if err != nil {
+			return err
+		}
+
+		if latest.After(lastBuild) {
+			lastBuild = time.Now()
+
+			if err := GenerateGo(); err != nil {
+				fmt.Printf("GenerateGo error: %v\n", err)
+				time.Sleep(2 * time.Second)
+				continue
+			}
+
+			if serverCmd != nil && serverCmd.Process != nil {
+				printCmd("restarting server")
+				serverCmd.Process.Kill()
+				serverCmd.Wait()
+			}
+
+			printCmd("go", "build", "-o", ".mage/server", "./")
+			buildCmd := exec.Command("go", "build", "-o", ".mage/server", "./")
+			buildCmd.Stdout = os.Stdout
+			buildCmd.Stderr = os.Stderr
+			if err := buildCmd.Run(); err != nil {
+				fmt.Printf("build error: %v\n", err)
+				time.Sleep(2 * time.Second)
+				continue
+			}
+
+			printCmd("./.mage/server", "server")
+			serverCmd = exec.Command("./.mage/server", "server")
+			serverCmd.Stdout = os.Stdout
+			serverCmd.Stderr = os.Stderr
+			if err := serverCmd.Start(); err != nil {
+				fmt.Printf("start error: %v\n", err)
+			}
+		}
+
+		time.Sleep(1 * time.Second)
+	}
+}
+
+// Preview builds the full project and runs the server, reloading it when any
+// tracked file changes (Go source, frontend, or API spec).
+func Preview() error {
 	var cmd *exec.Cmd
 
 	defer func() {
