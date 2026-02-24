@@ -10,8 +10,12 @@ export type StatusResponse = {
      */
     uptime_seconds?: number;
     /**
-     * Absolute path to the project root
+     * Absolute path to the default project root (server CWD)
      */
     project_root?: string;
+    /**
+     * Project ID of the default (CWD) project
+     */
+    default_project_id?: string;
 };
 

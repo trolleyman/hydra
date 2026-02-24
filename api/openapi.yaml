@@ -35,10 +35,65 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /api/projects:
+    get:
+      summary: List all known projects
+      operationId: listProjects
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ProjectInfo'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    post:
+      summary: Add a new project by folder path
+      operationId: addProject
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddProjectRequest'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectInfo'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /api/agents:
     get:
       summary: List all Hydra agents (heads)
       operationId: listAgents
+      parameters:
+        - in: query
+          name: project_id
+          required: false
+          schema:
+            type: string
+          description: Project ID to scope the agent list (defaults to server CWD project)
       responses:
         '200':
           description: OK
@@ -57,6 +112,13 @@ paths:
     post:
       summary: Spawn a new Hydra agent
       operationId: spawnAgent
+      parameters:
+        - in: query
+          name: project_id
+          required: false
+          schema:
+            type: string
+          description: Project ID to spawn the agent in (defaults to server CWD project)
       requestBody:
         required: true
         content:
@@ -93,6 +155,12 @@ paths:
           required: true
           schema:
             type: string
+        - in: query
+          name: project_id
+          required: false
+          schema:
+            type: string
+          description: Project ID to scope the lookup (defaults to server CWD project)
       responses:
         '200':
           description: OK
@@ -121,6 +189,12 @@ paths:
           required: true
           schema:
             type: string
+        - in: query
+          name: project_id
+          required: false
+          schema:
+            type: string
+          description: Project ID to scope the lookup (defaults to server CWD project)
       responses:
         '204':
           description: No Content (Agent killed)
@@ -162,7 +236,32 @@ components:
           description: Seconds since the server started
         project_root:
           type: string
-          description: Absolute path to the project root
+          description: Absolute path to the default project root (server CWD)
+        default_project_id:
+          type: string
+          description: Project ID of the default (CWD) project
+
+    ProjectInfo:
+      type: object
+      required: [id, path, name]
+      properties:
+        id:
+          type: string
+          description: Unique project identifier (derived from folder name)
+        path:
+          type: string
+          description: Absolute filesystem path to the project root
+        name:
+          type: string
+          description: Human-readable project name (last path component)
+
+    AddProjectRequest:
+      type: object
+      required: [path]
+      properties:
+        path:
+          type: string
+          description: Absolute filesystem path to the project root (must be a git repository)
 
     SpawnAgentRequest:
       type: object

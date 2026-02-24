@@ -25,6 +25,12 @@ const (
 	Waiting  AgentStatus = "waiting"
 )
 
+// AddProjectRequest defines model for AddProjectRequest.
+type AddProjectRequest struct {
+	// Path Absolute filesystem path to the project root (must be a git repository)
+	Path string `json:"path"`
+}
+
 // AgentResponse defines model for AgentResponse.
 type AgentResponse struct {
 	AgentStatus     *AgentStatusInfo `json:"agent_status,omitempty"`
@@ -68,6 +74,18 @@ type ErrorResponse struct {
 	Error   string  `json:"error"`
 }
 
+// ProjectInfo defines model for ProjectInfo.
+type ProjectInfo struct {
+	// Id Unique project identifier (derived from folder name)
+	Id string `json:"id"`
+
+	// Name Human-readable project name (last path component)
+	Name string `json:"name"`
+
+	// Path Absolute filesystem path to the project root
+	Path string `json:"path"`
+}
+
 // SpawnAgentRequest defines model for SpawnAgentRequest.
 type SpawnAgentRequest struct {
 	// AgentType Agent type: claude or gemini
@@ -85,7 +103,10 @@ type SpawnAgentRequest struct {
 
 // StatusResponse defines model for StatusResponse.
 type StatusResponse struct {
-	// ProjectRoot Absolute path to the project root
+	// DefaultProjectId Project ID of the default (CWD) project
+	DefaultProjectId *string `json:"default_project_id,omitempty"`
+
+	// ProjectRoot Absolute path to the default project root (server CWD)
 	ProjectRoot *string `json:"project_root,omitempty"`
 	Status      *string `json:"status,omitempty"`
 
@@ -94,23 +115,56 @@ type StatusResponse struct {
 	Version       *string  `json:"version,omitempty"`
 }
 
+// KillAgentParams defines parameters for KillAgent.
+type KillAgentParams struct {
+	// ProjectId Project ID to scope the lookup (defaults to server CWD project)
+	ProjectId *string `form:"project_id,omitempty" json:"project_id,omitempty"`
+}
+
+// GetAgentParams defines parameters for GetAgent.
+type GetAgentParams struct {
+	// ProjectId Project ID to scope the lookup (defaults to server CWD project)
+	ProjectId *string `form:"project_id,omitempty" json:"project_id,omitempty"`
+}
+
+// ListAgentsParams defines parameters for ListAgents.
+type ListAgentsParams struct {
+	// ProjectId Project ID to scope the agent list (defaults to server CWD project)
+	ProjectId *string `form:"project_id,omitempty" json:"project_id,omitempty"`
+}
+
+// SpawnAgentParams defines parameters for SpawnAgent.
+type SpawnAgentParams struct {
+	// ProjectId Project ID to spawn the agent in (defaults to server CWD project)
+	ProjectId *string `form:"project_id,omitempty" json:"project_id,omitempty"`
+}
+
 // SpawnAgentJSONRequestBody defines body for SpawnAgent for application/json ContentType.
 type SpawnAgentJSONRequestBody = SpawnAgentRequest
+
+// AddProjectJSONRequestBody defines body for AddProject for application/json ContentType.
+type AddProjectJSONRequestBody = AddProjectRequest
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
 	// Kill a Hydra agent by ID
 	// (DELETE /api/agent/{id})
-	KillAgent(w http.ResponseWriter, r *http.Request, id string)
+	KillAgent(w http.ResponseWriter, r *http.Request, id string, params KillAgentParams)
 	// Get a specific Hydra agent by ID
 	// (GET /api/agent/{id})
-	GetAgent(w http.ResponseWriter, r *http.Request, id string)
+	GetAgent(w http.ResponseWriter, r *http.Request, id string, params GetAgentParams)
 	// List all Hydra agents (heads)
 	// (GET /api/agents)
-	ListAgents(w http.ResponseWriter, r *http.Request)
+	ListAgents(w http.ResponseWriter, r *http.Request, params ListAgentsParams)
 	// Spawn a new Hydra agent
 	// (POST /api/agents)
-	SpawnAgent(w http.ResponseWriter, r *http.Request)
+	SpawnAgent(w http.ResponseWriter, r *http.Request, params SpawnAgentParams)
+	// List all known projects
+	// (GET /api/projects)
+	ListProjects(w http.ResponseWriter, r *http.Request)
+	// Add a new project by folder path
+	// (POST /api/projects)
+	AddProject(w http.ResponseWriter, r *http.Request)
 	// Get system status
 	// (GET /api/status)
 	GetStatus(w http.ResponseWriter, r *http.Request)
@@ -142,8 +196,19 @@ func (siw *ServerInterfaceWrapper) KillAgent(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params KillAgentParams
+
+	// ------------- Optional query parameter "project_id" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "project_id", r.URL.Query(), &params.ProjectId)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.KillAgent(w, r, id)
+		siw.Handler.KillAgent(w, r, id, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -167,8 +232,19 @@ func (siw *ServerInterfaceWrapper) GetAgent(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetAgentParams
+
+	// ------------- Optional query parameter "project_id" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "project_id", r.URL.Query(), &params.ProjectId)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetAgent(w, r, id)
+		siw.Handler.GetAgent(w, r, id, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -181,8 +257,21 @@ func (siw *ServerInterfaceWrapper) GetAgent(w http.ResponseWriter, r *http.Reque
 // ListAgents operation middleware
 func (siw *ServerInterfaceWrapper) ListAgents(w http.ResponseWriter, r *http.Request) {
 
+	var err error
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListAgentsParams
+
+	// ------------- Optional query parameter "project_id" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "project_id", r.URL.Query(), &params.ProjectId)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.ListAgents(w, r)
+		siw.Handler.ListAgents(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -195,8 +284,49 @@ func (siw *ServerInterfaceWrapper) ListAgents(w http.ResponseWriter, r *http.Req
 // SpawnAgent operation middleware
 func (siw *ServerInterfaceWrapper) SpawnAgent(w http.ResponseWriter, r *http.Request) {
 
+	var err error
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params SpawnAgentParams
+
+	// ------------- Optional query parameter "project_id" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "project_id", r.URL.Query(), &params.ProjectId)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.SpawnAgent(w, r)
+		siw.Handler.SpawnAgent(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListProjects operation middleware
+func (siw *ServerInterfaceWrapper) ListProjects(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListProjects(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AddProject operation middleware
+func (siw *ServerInterfaceWrapper) AddProject(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AddProject(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -358,6 +488,8 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("GET "+options.BaseURL+"/api/agent/{id}", wrapper.GetAgent)
 	m.HandleFunc("GET "+options.BaseURL+"/api/agents", wrapper.ListAgents)
 	m.HandleFunc("POST "+options.BaseURL+"/api/agents", wrapper.SpawnAgent)
+	m.HandleFunc("GET "+options.BaseURL+"/api/projects", wrapper.ListProjects)
+	m.HandleFunc("POST "+options.BaseURL+"/api/projects", wrapper.AddProject)
 	m.HandleFunc("GET "+options.BaseURL+"/api/status", wrapper.GetStatus)
 	m.HandleFunc("GET "+options.BaseURL+"/health", wrapper.CheckHealth)
 
@@ -365,7 +497,8 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 }
 
 type KillAgentRequestObject struct {
-	Id string `json:"id"`
+	Id     string `json:"id"`
+	Params KillAgentParams
 }
 
 type KillAgentResponseObject interface {
@@ -399,7 +532,8 @@ func (response KillAgent500JSONResponse) VisitKillAgentResponse(w http.ResponseW
 }
 
 type GetAgentRequestObject struct {
-	Id string `json:"id"`
+	Id     string `json:"id"`
+	Params GetAgentParams
 }
 
 type GetAgentResponseObject interface {
@@ -434,6 +568,7 @@ func (response GetAgent500JSONResponse) VisitGetAgentResponse(w http.ResponseWri
 }
 
 type ListAgentsRequestObject struct {
+	Params ListAgentsParams
 }
 
 type ListAgentsResponseObject interface {
@@ -459,7 +594,8 @@ func (response ListAgents500JSONResponse) VisitListAgentsResponse(w http.Respons
 }
 
 type SpawnAgentRequestObject struct {
-	Body *SpawnAgentJSONRequestBody
+	Params SpawnAgentParams
+	Body   *SpawnAgentJSONRequestBody
 }
 
 type SpawnAgentResponseObject interface {
@@ -487,6 +623,66 @@ func (response SpawnAgent400JSONResponse) VisitSpawnAgentResponse(w http.Respons
 type SpawnAgent500JSONResponse ErrorResponse
 
 func (response SpawnAgent500JSONResponse) VisitSpawnAgentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ListProjectsRequestObject struct {
+}
+
+type ListProjectsResponseObject interface {
+	VisitListProjectsResponse(w http.ResponseWriter) error
+}
+
+type ListProjects200JSONResponse []ProjectInfo
+
+func (response ListProjects200JSONResponse) VisitListProjectsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ListProjects500JSONResponse ErrorResponse
+
+func (response ListProjects500JSONResponse) VisitListProjectsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type AddProjectRequestObject struct {
+	Body *AddProjectJSONRequestBody
+}
+
+type AddProjectResponseObject interface {
+	VisitAddProjectResponse(w http.ResponseWriter) error
+}
+
+type AddProject201JSONResponse ProjectInfo
+
+func (response AddProject201JSONResponse) VisitAddProjectResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type AddProject400JSONResponse ErrorResponse
+
+func (response AddProject400JSONResponse) VisitAddProjectResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type AddProject500JSONResponse ErrorResponse
+
+func (response AddProject500JSONResponse) VisitAddProjectResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(500)
 
@@ -549,6 +745,12 @@ type StrictServerInterface interface {
 	// Spawn a new Hydra agent
 	// (POST /api/agents)
 	SpawnAgent(ctx context.Context, request SpawnAgentRequestObject) (SpawnAgentResponseObject, error)
+	// List all known projects
+	// (GET /api/projects)
+	ListProjects(ctx context.Context, request ListProjectsRequestObject) (ListProjectsResponseObject, error)
+	// Add a new project by folder path
+	// (POST /api/projects)
+	AddProject(ctx context.Context, request AddProjectRequestObject) (AddProjectResponseObject, error)
 	// Get system status
 	// (GET /api/status)
 	GetStatus(ctx context.Context, request GetStatusRequestObject) (GetStatusResponseObject, error)
@@ -587,10 +789,11 @@ type strictHandler struct {
 }
 
 // KillAgent operation middleware
-func (sh *strictHandler) KillAgent(w http.ResponseWriter, r *http.Request, id string) {
+func (sh *strictHandler) KillAgent(w http.ResponseWriter, r *http.Request, id string, params KillAgentParams) {
 	var request KillAgentRequestObject
 
 	request.Id = id
+	request.Params = params
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.KillAgent(ctx, request.(KillAgentRequestObject))
@@ -613,10 +816,11 @@ func (sh *strictHandler) KillAgent(w http.ResponseWriter, r *http.Request, id st
 }
 
 // GetAgent operation middleware
-func (sh *strictHandler) GetAgent(w http.ResponseWriter, r *http.Request, id string) {
+func (sh *strictHandler) GetAgent(w http.ResponseWriter, r *http.Request, id string, params GetAgentParams) {
 	var request GetAgentRequestObject
 
 	request.Id = id
+	request.Params = params
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.GetAgent(ctx, request.(GetAgentRequestObject))
@@ -639,8 +843,10 @@ func (sh *strictHandler) GetAgent(w http.ResponseWriter, r *http.Request, id str
 }
 
 // ListAgents operation middleware
-func (sh *strictHandler) ListAgents(w http.ResponseWriter, r *http.Request) {
+func (sh *strictHandler) ListAgents(w http.ResponseWriter, r *http.Request, params ListAgentsParams) {
 	var request ListAgentsRequestObject
+
+	request.Params = params
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.ListAgents(ctx, request.(ListAgentsRequestObject))
@@ -663,8 +869,10 @@ func (sh *strictHandler) ListAgents(w http.ResponseWriter, r *http.Request) {
 }
 
 // SpawnAgent operation middleware
-func (sh *strictHandler) SpawnAgent(w http.ResponseWriter, r *http.Request) {
+func (sh *strictHandler) SpawnAgent(w http.ResponseWriter, r *http.Request, params SpawnAgentParams) {
 	var request SpawnAgentRequestObject
+
+	request.Params = params
 
 	var body SpawnAgentJSONRequestBody
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -686,6 +894,61 @@ func (sh *strictHandler) SpawnAgent(w http.ResponseWriter, r *http.Request) {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(SpawnAgentResponseObject); ok {
 		if err := validResponse.VisitSpawnAgentResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListProjects operation middleware
+func (sh *strictHandler) ListProjects(w http.ResponseWriter, r *http.Request) {
+	var request ListProjectsRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListProjects(ctx, request.(ListProjectsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListProjects")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListProjectsResponseObject); ok {
+		if err := validResponse.VisitListProjectsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// AddProject operation middleware
+func (sh *strictHandler) AddProject(w http.ResponseWriter, r *http.Request) {
+	var request AddProjectRequestObject
+
+	var body AddProjectJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.AddProject(ctx, request.(AddProjectRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "AddProject")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(AddProjectResponseObject); ok {
+		if err := validResponse.VisitAddProjectResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

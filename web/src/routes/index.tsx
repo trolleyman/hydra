@@ -1,6 +1,7 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { api } from '../stores/apiClient'
+import { useProjectStore } from '../stores/projectStore'
 import type { AgentResponse, SpawnAgentRequest } from '../api'
 
 export const Route = createFileRoute('/')({
@@ -94,7 +95,15 @@ function InfoRow({ label, value, mono = false }: { label: string; value: string 
   )
 }
 
-function AgentDetail({ agent, onKilled }: { agent: AgentResponse; onKilled: (id: string) => void }) {
+function AgentDetail({
+  agent,
+  projectId,
+  onKilled,
+}: {
+  agent: AgentResponse
+  projectId: string | null
+  onKilled: (id: string) => void
+}) {
   const [killing, setKilling] = useState(false)
 
   const agentTypeClass =
@@ -110,7 +119,7 @@ function AgentDetail({ agent, onKilled }: { agent: AgentResponse; onKilled: (id:
     }
     setKilling(true)
     try {
-      await api.default.killAgent(agent.id)
+      await api.default.killAgent(agent.id, projectId ?? undefined)
       onKilled(agent.id)
     } catch (err) {
       alert(`Failed to kill agent: ${err}`)
@@ -240,7 +249,7 @@ function slugify(text: string, maxLength = 40, allowTrailingHyphen = false): str
     .replace(/\s+/g, '-')
     .replace(/-+/g, '-')
     .slice(0, maxLength)
-  
+
   return allowTrailingHyphen ? slug : slug.replace(/-$/, '')
 }
 
@@ -250,9 +259,11 @@ function generateId(prompt: string): string {
 }
 
 function SpawnForm({
+  projectId,
   onSpawned,
   compact = false,
 }: {
+  projectId: string | null
   onSpawned?: (agent: AgentResponse) => void
   compact?: boolean
 }) {
@@ -289,7 +300,7 @@ function SpawnForm({
         agent_type: agentType,
         id: finalId || generateId(prompt.trim()),
       }
-      const agent = await api.default.spawnAgent(req)
+      const agent = await api.default.spawnAgent(req, projectId ?? undefined)
       setPrompt('')
       setAgentId('')
       setIdManuallyEdited(false)
@@ -484,6 +495,7 @@ const SIDEBAR_MAX = 600
 const SIDEBAR_DEFAULT = 224 // w-56
 
 function HomePage() {
+  const { selectedProjectId } = useProjectStore()
   const [agents, setAgents] = useState<AgentResponse[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -522,12 +534,20 @@ function HomePage() {
     document.addEventListener('mouseup', onUp)
   }, [])
 
+  // Reset agent selection when project changes.
+  useEffect(() => {
+    setAgents([])
+    setSelectedId(null)
+    setLoading(true)
+    setError(null)
+  }, [selectedProjectId])
+
   useEffect(() => {
     let cancelled = false
 
     async function fetchAgents() {
       try {
-        const result = await api.default.listAgents()
+        const result = await api.default.listAgents(selectedProjectId ?? undefined)
         if (cancelled) return
         setAgents(result)
         setError(null)
@@ -549,7 +569,7 @@ function HomePage() {
       cancelled = true
       clearInterval(interval)
     }
-  }, [])
+  }, [selectedProjectId])
 
   function handleSpawned(agent: AgentResponse) {
     setAgents((prev) => {
@@ -587,7 +607,7 @@ function HomePage() {
   }
 
   if (agents.length === 0 && !showSpawn) {
-    return <SpawnForm onSpawned={handleSpawned} />
+    return <SpawnForm projectId={selectedProjectId} onSpawned={handleSpawned} />
   }
 
   const selectedAgent = agents.find((a) => a.id === selectedId) ?? null
@@ -600,7 +620,7 @@ function HomePage() {
         className="relative bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex flex-col shrink-0"
       >
         {/* Spawn form (compact) */}
-        <SpawnForm compact onSpawned={handleSpawned} />
+        <SpawnForm compact projectId={selectedProjectId} onSpawned={handleSpawned} />
 
         <div className="px-3 py-3 border-b border-gray-100 dark:border-gray-700">
           <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">
@@ -630,9 +650,9 @@ function HomePage() {
 
       {/* Main content */}
       {showSpawn ? (
-        <SpawnForm onSpawned={handleSpawned} />
+        <SpawnForm projectId={selectedProjectId} onSpawned={handleSpawned} />
       ) : selectedAgent ? (
-        <AgentDetail agent={selectedAgent} onKilled={handleKilled} />
+        <AgentDetail agent={selectedAgent} projectId={selectedProjectId} onKilled={handleKilled} />
       ) : (
         <EmptyDetail onSpawn={() => setShowSpawn(true)} />
       )}
