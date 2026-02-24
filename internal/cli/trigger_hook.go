@@ -1,0 +1,114 @@
+package cli
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"time"
+
+	"github.com/spf13/cobra"
+	"github.com/trolleyman/hydra/internal/api"
+)
+
+func init() {
+	rootCmd.AddCommand(triggerHookCmd)
+}
+
+// triggerHookCmd is an internal command run inside agent containers via Claude Code / Gemini hooks.
+// It reads a JSON hook payload from stdin and writes the current agent status to ~/.hydra/status.json.
+//
+// Usage (internal only):
+//
+//	hydra trigger-hook <agentType>
+//
+// The agentType argument (e.g. "claude", "gemini") is accepted for future use; the hook event
+// name in the payload drives the resulting status value.
+var triggerHookCmd = &cobra.Command{
+	Use:    "trigger-hook <agentType>",
+	Short:  "Internal: process a hook event and write ~/.hydra/status.json",
+	Long:   `Internal command used by hook scripts inside agent containers to update the agent status file. Not intended for direct use.`,
+	Hidden: true,
+	Args:   cobra.ExactArgs(1),
+	// Always exit 0 so we never block the agent session.
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := runTriggerHook(args[0]); err != nil {
+			// Log to stderr but don't propagate – hooks must not fail the agent.
+			fmt.Fprintf(os.Stderr, "hydra trigger-hook: %v\n", err)
+		}
+		return nil
+	},
+}
+
+func runTriggerHook(agentType string) error {
+	raw, err := io.ReadAll(os.Stdin)
+	if err != nil {
+		return fmt.Errorf("read stdin: %w", err)
+	}
+
+	var input map[string]interface{}
+	_ = json.Unmarshal(raw, &input) // ignore parse errors; input stays empty map
+
+	event := ""
+	if v, ok := input["hook_event_name"].(string); ok {
+		event = v
+	}
+
+	var status api.AgentStatus
+	switch event {
+	case "SessionStart":
+		status = api.Starting
+	case "Stop", "AfterAgent":
+		status = api.Waiting
+	case "SessionEnd":
+		status = api.Ended
+	default:
+		status = api.Unknown
+	}
+
+	_ = agentType // available for future per-agent logic
+
+	eventCopy := event
+	info := api.AgentStatusInfo{
+		Status:    status,
+		Event:     &eventCopy,
+		Timestamp: time.Now().Format(time.RFC3339),
+	}
+
+	if event == "Stop" || event == "AfterAgent" {
+		if msg, ok := input["last_assistant_message"].(string); ok && msg != "" {
+			if len(msg) > 300 {
+				msg = msg[:300]
+			}
+			info.LastMessage = &msg
+		}
+	}
+
+	if event == "SessionEnd" {
+		if reason, ok := input["reason"].(string); ok && reason != "" {
+			info.Reason = &reason
+		}
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("get home dir: %w", err)
+	}
+
+	statusPath := filepath.Join(home, ".hydra", "status.json")
+	if err := os.MkdirAll(filepath.Dir(statusPath), 0755); err != nil {
+		return fmt.Errorf("create status dir: %w", err)
+	}
+
+	data, err := json.Marshal(info)
+	if err != nil {
+		return fmt.Errorf("marshal status: %w", err)
+	}
+
+	if err := os.WriteFile(statusPath, data, 0644); err != nil {
+		return fmt.Errorf("write status: %w", err)
+	}
+
+	return nil
+}

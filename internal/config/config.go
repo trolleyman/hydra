@@ -16,9 +16,6 @@ var DefaultDockerfileClaude string
 //go:embed gemini.Dockerfile
 var DefaultDockerfileGemini string
 
-//go:embed hydra-status.sh
-var HydraStatusHookScript string
-
 //go:embed entrypoint.sh
 var DefaultEntrypointScript string
 

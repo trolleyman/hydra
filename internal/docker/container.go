@@ -342,24 +342,11 @@ func defaultDockerfileContent(agentType AgentType) (string, error) {
 // getAgentBinds returns host:container bind mounts for agent-specific config files.
 // containerHome is the home directory of the agent user inside the container (e.g. /home/callum).
 func getAgentBinds(agentType AgentType, projectRoot, id, containerHome string) ([]string, error) {
-	// home, err := os.UserHomeDir()
-	// if err != nil {
-	// 	return nil, errtrace.Wrap(err)
-	// }
-
 	hydraDir := paths.GetHydraDirFromProjectRoot(projectRoot)
 	cacheDir := filepath.Join(hydraDir, "cache")
 	if err := git.CreateGitignoreAllInDir(cacheDir); err != nil {
 		return nil, errtrace.Wrap(err)
 	}
-
-	// // Shared npm cache: binds <project>/.hydra/cache/.npm to ~/.npm inside the container.
-	// // Agents that run npm install during their work will share this cache across sessions.
-	// npmCacheDir := filepath.Join(cacheDir, ".npm")
-	// if err := os.MkdirAll(npmCacheDir, 0755); err != nil {
-	// 	return nil, errtrace.Wrap(fmt.Errorf("create npm cache dir: %w", err))
-	// }
-	// binds := []string{npmCacheDir + ":" + containerHome + "/.npm"}
 
 	// Create and share status JSON
 	statusJsonHost := paths.GetStatusJsonFromProjectRoot(projectRoot, id)
@@ -372,20 +359,18 @@ func getAgentBinds(agentType AgentType, projectRoot, id, containerHome string) (
 	statusJsonContainer := filepath.Join(containerHome, ".hydra", "status.json")
 	binds := []string{statusJsonHost + ":" + statusJsonContainer}
 
+	// Mount the hydra binary itself (read-only) so hook commands can call it directly.
+	hydraBin, err := os.Executable()
+	if err != nil {
+		return nil, errtrace.Wrap(fmt.Errorf("resolve hydra executable: %w", err))
+	}
+	hydraBinContainer := filepath.Join(containerHome, ".hydra", "hydra")
+	binds = append(binds, hydraBin+":"+hydraBinContainer+":ro")
+
 	switch agentType {
 	case AgentTypeClaude:
 		claudeSettingsDir := filepath.Join(cacheDir, ".claude")
 		if err := os.MkdirAll(claudeSettingsDir, 0755); err != nil {
-			return nil, errtrace.Wrap(err)
-		}
-
-		// Write the hooks directory and hydra-status.sh hook script.
-		hooksDir := filepath.Join(claudeSettingsDir, "hooks")
-		if err := os.MkdirAll(hooksDir, 0755); err != nil {
-			return nil, errtrace.Wrap(err)
-		}
-		hookScript := filepath.Join(hooksDir, "hydra-status.sh")
-		if err := os.WriteFile(hookScript, []byte(config.HydraStatusHookScript), 0755); err != nil {
 			return nil, errtrace.Wrap(err)
 		}
 
@@ -420,16 +405,6 @@ func getAgentBinds(agentType AgentType, projectRoot, id, containerHome string) (
 			return nil, errtrace.Wrap(err)
 		}
 
-		// Write the hooks directory and hydra-status.sh hook script.
-		hooksDir := filepath.Join(geminiSettingsDir, "hooks")
-		if err := os.MkdirAll(hooksDir, 0755); err != nil {
-			return nil, errtrace.Wrap(err)
-		}
-		hookScript := filepath.Join(hooksDir, "hydra-status.sh")
-		if err := os.WriteFile(hookScript, []byte(config.HydraStatusHookScript), 0755); err != nil {
-			return nil, errtrace.Wrap(err)
-		}
-
 		// Always write settings.json with hooks configuration.
 		geminiSettingsJson := filepath.Join(geminiSettingsDir, "settings.json")
 		settingsData, err := buildGeminiSettings()
@@ -453,7 +428,7 @@ func getAgentBinds(agentType AgentType, projectRoot, id, containerHome string) (
 
 // buildGeminiSettings generates the settings.json content with hook configuration for Gemini.
 func buildGeminiSettings() ([]byte, error) {
-	hookCmd := "$HOME/.gemini/hooks/hydra-status.sh"
+	hookCmd := "$HOME/.hydra/hydra trigger-hook gemini"
 	hookGroup := []claudeMatcherGroup{
 		{Hooks: []claudeHookHandler{{Type: "command", Command: hookCmd}}},
 	}
@@ -498,7 +473,7 @@ type claudeSettings struct {
 
 // buildClaudeSettings generates the settings.json content with hook configuration.
 func buildClaudeSettings() ([]byte, error) {
-	hookCmd := "$HOME/.claude/hooks/hydra-status.sh"
+	hookCmd := "$HOME/.hydra/hydra trigger-hook claude"
 	hookGroup := []claudeMatcherGroup{
 		{Hooks: []claudeHookHandler{{Type: "command", Command: hookCmd}}},
 	}
