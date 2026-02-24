@@ -67,6 +67,9 @@ func runServer(_ *cobra.Command, _ []string) error {
 	mux.Handle("/api/", apiHandler)
 	mux.Handle("/health", apiHandler)
 
+	// WebSocket terminal endpoint
+	mux.HandleFunc("/ws/agent/", server.HandleTerminalWS)
+
 	// Serve the static React SPA
 	distFS, err := fs.Sub(web.FrontendAssets, "dist")
 	if err != nil {
