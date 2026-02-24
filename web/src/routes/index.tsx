@@ -151,55 +151,55 @@ function AgentDetail({ agent, onKilled }: { agent: AgentResponse; onKilled: (id:
     <div className="flex-1 overflow-auto p-6">
       <div className="max-w-2xl">
         {/* Header */}
-        <div className="flex items-center gap-3 mb-6 flex-wrap">
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">{agent.id}</h1>
-          <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${agentTypeClass}`}>
-            {agent.agent_type || 'unknown'}
-          </span>
-          {agent.container_status && (
-            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusBadgeClass(agent.container_status)}`}>
-              {normalizeContainerState(agent.container_status)}
-            </span>
-          )}
-          {agent.created_at != null && (
-            <span
-              className="text-xs text-gray-400 dark:text-gray-500 cursor-default"
-              title={`Started at ${new Date(agent.created_at * 1000).toUTCString()}`}
+        <div className="mb-6">
+          {/* Title row */}
+          <div className="flex items-center gap-2 mb-2">
+            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">{agent.id}</h1>
+            <button
+              onClick={handleKill}
+              disabled={killing}
+              className="ml-2 w-6 h-6 flex items-center justify-center rounded-md border border-red-200 text-red-500 hover:bg-red-50 dark:border-red-900/30 dark:text-red-400 dark:hover:bg-red-900/20 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+              title="Kill agent"
             >
-              {formatStartedAgo(agent.created_at)}
-            </span>
-          )}
-          {agent.agent_status && (() => {
-            const badge = agentStatusBadge(agent.agent_status.status)
-            return (
-              <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${badge.className}`}>
-                agent: {badge.label}
-              </span>
-            )
-          })()}
-
-          <button
-            onClick={handleKill}
-            disabled={killing}
-            className="ml-auto text-xs px-3 py-1.5 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 dark:border-red-900/30 dark:text-red-400 dark:hover:bg-red-900/20 transition-all font-medium cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-          >
-            {killing ? (
-              <>
+              {killing ? (
                 <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
                 </svg>
-                Killing…
-              </>
-            ) : (
-              <>
-                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              ) : (
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
                 </svg>
-                Kill Agent
-              </>
+              )}
+            </button>
+          </div>
+          {/* Labels row */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${agentTypeClass}`}>
+              {agent.agent_type || 'unknown'}
+            </span>
+            {agent.container_status && (
+              <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusBadgeClass(agent.container_status)}`}>
+                {normalizeContainerState(agent.container_status)}
+              </span>
             )}
-          </button>
+            {agent.created_at != null && (
+              <span
+                className="text-xs text-gray-400 dark:text-gray-500 cursor-default"
+                title={`Started at ${new Date(agent.created_at * 1000).toUTCString()}`}
+              >
+                {formatStartedAgo(agent.created_at)}
+              </span>
+            )}
+            {agent.agent_status && (() => {
+              const badge = agentStatusBadge(agent.agent_status.status)
+              return (
+                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${badge.className}`}>
+                  agent: {badge.label}
+                </span>
+              )
+            })()}
+          </div>
         </div>
 
         {/* Prompt */}
