@@ -194,8 +194,11 @@ function AgentDetail({ agent, onKilled }: { agent: AgentResponse; onKilled: (id:
             {agent.agent_status && (() => {
               const badge = agentStatusBadge(agent.agent_status.status)
               return (
-                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${badge.className}`}>
-                  agent: {badge.label}
+                <span
+                  className={`text-xs px-2 py-0.5 rounded-full font-medium ${badge.className}`}
+                  title={`Since ${agent.agent_status.timestamp}`}
+                >
+                  {badge.label}
                 </span>
               )
             })()}
