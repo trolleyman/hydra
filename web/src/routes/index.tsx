@@ -149,7 +149,7 @@ function AgentDetail({ agent, onKilled }: { agent: AgentResponse; onKilled: (id:
 
   return (
     <div className="flex-1 overflow-auto p-6">
-      <div className="max-w-2xl">
+      <div className="max-w-5xl">
         {/* Header */}
         <div className="mb-6">
           {/* Title row */}
