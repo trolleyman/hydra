@@ -16,15 +16,6 @@ function normalizeContainerState(status: string): string {
   return s
 }
 
-function statusBadgeClass(status: string): string {
-  switch (normalizeContainerState(status)) {
-    case 'running': return 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
-    case 'exited': return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
-    case 'created': return 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'
-    default: return 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400'
-  }
-}
-
 function statusDotClass(status: string): string {
   switch (normalizeContainerState(status)) {
     case 'running': return 'bg-green-500'
