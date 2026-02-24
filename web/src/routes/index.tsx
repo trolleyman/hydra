@@ -178,6 +178,14 @@ function AgentDetail({ agent, onKilled }: { agent: AgentResponse; onKilled: (id:
             <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${agentTypeClass}`}>
               {agent.agent_type || 'unknown'}
             </span>
+            {agent.container_id && (
+              <span
+                className="text-xs font-mono text-gray-400 dark:text-gray-500 cursor-default"
+                title={agent.container_id}
+              >
+                Container: {agent.container_id.slice(0, 12)}
+              </span>
+            )}
             {agent.container_status && (
               <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusBadgeClass(agent.container_status)}`}>
                 {normalizeContainerState(agent.container_status)}
