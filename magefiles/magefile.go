@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/magefile/mage/mg"
 	"github.com/magefile/mage/sh"
@@ -278,6 +279,56 @@ func dirChangedIgnores(dst string, srcDir string, ignores map[string]struct{}) (
 	return false, err
 }
 
+// getProjectModTime scans the target files and directories for the most recent modification time.
+func getProjectModTime() (time.Time, error) {
+	var latest time.Time
+
+	check := func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return err
+		}
+		if info.IsDir() {
+			base := filepath.Base(path)
+			if base == "dist" || base == "node_modules" || base == ".git" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if info.ModTime().After(latest) {
+			latest = info.ModTime()
+		}
+		return nil
+	}
+
+	dirs := []string{"internal", "api", "web"}
+	for _, dir := range dirs {
+		if err := filepath.Walk(dir, check); err != nil {
+			if !os.IsNotExist(err) {
+				return latest, err
+			}
+		}
+	}
+
+	files := []string{"go.mod", "go.sum", "main.go"}
+	for _, file := range files {
+		info, err := os.Stat(file)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return latest, err
+		}
+		if info.ModTime().After(latest) {
+			latest = info.ModTime()
+		}
+	}
+
+	return latest, nil
+}
+
 func Tidy() error {
 	err := runV("go", "mod", "tidy")
 	if err != nil {
@@ -381,12 +432,12 @@ func GenerateGo() error {
 		return err
 	}
 
-	internalApiChanged, err := target.Dir(stamp, "internal/api")
+	filesChanged, err := target.Path(stamp, "main.go", "go.mod", "go.sum", "internal/api/config.yaml", "internal/api/server.go")
 	if err != nil {
 		return err
 	}
 
-	if !apiChanged && !internalApiChanged {
+	if !apiChanged && !filesChanged {
 		return nil
 	}
 
@@ -400,4 +451,83 @@ func GenerateGo() error {
 
 	os.MkdirAll(filepath.Dir(stamp), 0755)
 	return os.WriteFile(stamp, nil, 0644)
+}
+
+// Dev runs the server and reloads it when tracked files change.
+func Dev() error {
+	var cmd *exec.Cmd
+
+	defer func() {
+		if cmd != nil && cmd.Process != nil {
+			cmd.Process.Kill()
+		}
+	}()
+
+	var lastRun time.Time
+
+	for {
+		latest, err := getProjectModTime()
+		if err != nil {
+			return err
+		}
+
+		if latest.After(lastRun) {
+			lastRun = time.Now()
+
+			if err := GenerateGo(); err != nil {
+				fmt.Printf("GenerateGo error: %v\n", err)
+				time.Sleep(2 * time.Second)
+				continue
+			}
+			if err := BuildWeb(); err != nil {
+				fmt.Printf("BuildWeb error: %v\n", err)
+				time.Sleep(2 * time.Second)
+				continue
+			}
+
+			if cmd != nil && cmd.Process != nil {
+				printCmd("restarting server")
+				cmd.Process.Kill()
+				cmd.Wait()
+			}
+
+			buildCmd := exec.Command("go", "build", "-o", ".mage/server", "./")
+			buildCmd.Stdout = os.Stdout
+			buildCmd.Stderr = os.Stderr
+			if err := buildCmd.Run(); err != nil {
+				fmt.Printf("build error: %v\n", err)
+				time.Sleep(2 * time.Second)
+				continue
+			}
+
+			cmd = exec.Command("./.mage/server", "server")
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+			if err := cmd.Start(); err != nil {
+				fmt.Printf("start error: %v\n", err)
+			}
+		}
+
+		time.Sleep(1 * time.Second)
+	}
+}
+
+// Clean removes the build cache and build files
+func Clean() error {
+	if err := os.RemoveAll(".mage"); err != nil {
+		return fmt.Errorf("failed to remove .mage directory: %w", err)
+	}
+
+	if err := os.RemoveAll("web/dist"); err != nil {
+		return fmt.Errorf("failed to remove web/dist directory: %w", err)
+	}
+
+	if err := os.RemoveAll("web/node_modules"); err != nil {
+		return fmt.Errorf("failed to remove web/node_modules directory: %w", err)
+	}
+
+	// TODO: Remove .hydra cached files?
+
+	fmt.Println("Clean complete.")
+	return nil
 }
