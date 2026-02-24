@@ -1,4 +1,4 @@
-import { createRootRoute, Outlet } from '@tanstack/react-router'
+import { createRootRoute, Link, Outlet } from '@tanstack/react-router'
 import { useEffect, useRef, useState } from 'react'
 import { api } from '../stores/apiClient'
 import { useProjectStore } from '../stores/projectStore'
@@ -302,7 +302,7 @@ function RootLayout() {
     <div className={`min-h-screen bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 flex flex-col${dark ? ' dark' : ''}`}>
       <header className="h-12 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex items-center px-4 gap-3 shrink-0">
         {/* Logo */}
-        <div className="flex items-center gap-2 shrink-0">
+        <Link to="/" className="flex items-center gap-2 shrink-0">
           <div className="w-6 h-6 flex items-center justify-center overflow-hidden rounded-sm">
             <img
               className='w-full h-full object-cover object-center'
@@ -311,7 +311,7 @@ function RootLayout() {
               alt="Hydra icon" />
           </div>
           <span className="text-2xl font-bold font-serif tracking-[-0.05em] dark:text-gray-100">Hydra</span>
-        </div>
+        </Link>
 
         {/* Project selector dropdown */}
         <ProjectDropdown
