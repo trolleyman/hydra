@@ -119,7 +119,7 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 		if _, readErr := os.ReadFile(dockerfilePath); readErr != nil {
 			code := 500
 			msg := "read dockerfile: " + readErr.Error()
-			return SpawnAgent500JSONResponse{Code: code, Error: msg}, nil
+			return api.SpawnAgent500JSONResponse{Code: code, Error: msg}, nil
 		}
 	}
 
