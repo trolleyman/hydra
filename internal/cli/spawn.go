@@ -6,9 +6,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
-	"os/user"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"text/tabwriter"
 
@@ -115,58 +113,20 @@ var spawnCmd = &cobra.Command{
 			}
 		}
 
-		branchName := "hydra/" + id
-		worktreePath := paths.GetWorktreeDirFromProjectRoot(projectRoot, id)
-		if err := git.CreateWorktree(projectRoot, worktreePath, branchName, baseBranch); err != nil {
+		head, err := heads.SpawnHead(cmd.Context(), cli, projectRoot, heads.SpawnHeadOptions{
+			ID:             id,
+			PrePrompt:      prePrompt,
+			Prompt:         prompt,
+			AgentType:      agentType,
+			BaseBranch:     baseBranch,
+			DockerfilePath: dockerfilePath,
+		})
+		if err != nil {
 			return errtrace.Wrap(err)
 		}
 
-		// Resolve git identity: env vars take priority, then git config
-		gitAuthorName := os.Getenv("GIT_AUTHOR_NAME")
-		if gitAuthorName == "" {
-			gitAuthorName = readGitConfig(projectRoot, "user.name")
-		}
-		gitAuthorEmail := os.Getenv("GIT_AUTHOR_EMAIL")
-		if gitAuthorEmail == "" {
-			gitAuthorEmail = readGitConfig(projectRoot, "user.email")
-		}
-
-		// Resolve the current user's identity for container user creation.
-		currentUser, err := user.Current()
-		if err != nil {
-			return errtrace.Wrap(fmt.Errorf("get current user: %w", err))
-		}
-		uid, _ := strconv.Atoi(currentUser.Uid)
-		gid, _ := strconv.Atoi(currentUser.Gid)
-		groupName := currentUser.Username
-		if grp, err := user.LookupGroupId(currentUser.Gid); err == nil {
-			groupName = grp.Name
-		}
-
-		containerID, err := docker.SpawnAgent(context.Background(), cli, docker.SpawnOptions{
-			Id:             id,
-			AgentType:      agentType,
-			DockerfilePath: dockerfilePath,
-			PrePrompt:      prePrompt,
-			Prompt:         prompt,
-			ProjectPath:    projectRoot,
-			WorktreePath:   worktreePath,
-			BranchName:     branchName,
-			BaseBranch:     baseBranch,
-			GitAuthorName:  gitAuthorName,
-			GitAuthorEmail: gitAuthorEmail,
-			UID:            uid,
-			GID:            gid,
-			Username:       currentUser.Username,
-			GroupName:      groupName,
-		})
-		if err != nil {
-			_ = git.RemoveWorktree(projectRoot, worktreePath)
-			_ = git.DeleteBranch(projectRoot, branchName)
-			return errtrace.Wrap(fmt.Errorf("spawn agent: %w", err))
-		}
-
-		log.Printf("Agent %s started on branch %s (container %s)\n", id, branchName, containerID[:12])
+		branchName := "hydra/" + head.ID
+		log.Printf("Agent %s started on branch %s\n", head.ID, branchName)
 		w := tabwriter.NewWriter(log.Writer(), 0, 0, 1, ' ', 0)
 		fmt.Fprintf(w, "  hydra attach %s\t- attach to the session\n", id)
 		fmt.Fprintf(w, "  hydra list\t- view all running agents\n")

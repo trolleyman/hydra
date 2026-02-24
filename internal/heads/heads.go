@@ -68,7 +68,7 @@ func ListHeads(ctx context.Context, cli *dockerclient.Client, projectRoot string
 			Branch:      &branchCopy,
 			Worktree:    worktree,
 			ProjectPath: projectRoot,
-			AgentStatus: readAgentStatus(projectRoot, id),
+			AgentStatus: ReadAgentStatus(projectRoot, id),
 		}
 		byID[id] = head
 	}
@@ -112,7 +112,7 @@ func ListHeads(ctx context.Context, cli *dockerclient.Client, projectRoot string
 				PrePrompt:       a.Meta.PrePrompt,
 				Prompt:          a.Meta.Prompt,
 				BaseBranch:      a.Meta.BaseBranch,
-				AgentStatus:     readAgentStatus(a.Meta.ProjectPath, id),
+				AgentStatus:     ReadAgentStatus(a.Meta.ProjectPath, id),
 				CreatedAt:       a.Created,
 			}
 		}
@@ -242,46 +242,71 @@ func SpawnHead(ctx context.Context, cli *dockerclient.Client, projectRoot string
 		}
 	}
 
-	containerID, err := docker.SpawnAgent(ctx, cli, docker.SpawnOptions{
-		Id:             opts.ID,
-		AgentType:      opts.AgentType,
-		DockerfilePath: opts.DockerfilePath,
-		PrePrompt:      opts.PrePrompt,
-		Prompt:         opts.Prompt,
-		ProjectPath:    projectRoot,
-		WorktreePath:   worktreePath,
-		BranchName:     branchName,
-		BaseBranch:     baseBranch,
-		GitAuthorName:  gitAuthorName,
-		GitAuthorEmail: gitAuthorEmail,
-		UID:            uid,
-		GID:            gid,
-		Username:       currentUser.Username,
-		GroupName:      groupName,
-	})
-	if err != nil {
-		_ = git.RemoveWorktree(projectRoot, worktreePath)
-		_ = git.DeleteBranch(projectRoot, branchName)
-		return nil, errtrace.Wrap(fmt.Errorf("spawn agent: %w", err))
+	// Write initial status: pending
+	e := "polling"
+	initialStatus := &api.AgentStatusInfo{
+		Status:    api.Pending,
+		Event:     &e,
+		Timestamp: time.Now().Format(time.RFC3339),
+	}
+	if err := WriteAgentStatus(projectRoot, opts.ID, initialStatus); err != nil {
+		log.Printf("warn: write initial agent status: %v", err)
 	}
 
-	e := "polling"
+	// Launch background spawn
+	go func() {
+		// Use a fresh context for the background spawn
+		bgCtx := context.Background()
+		_, err := docker.SpawnAgent(bgCtx, cli, docker.SpawnOptions{
+			Id:             opts.ID,
+			AgentType:      opts.AgentType,
+			DockerfilePath: opts.DockerfilePath,
+			PrePrompt:      opts.PrePrompt,
+			Prompt:         opts.Prompt,
+			ProjectPath:    projectRoot,
+			WorktreePath:   worktreePath,
+			BranchName:     branchName,
+			BaseBranch:     baseBranch,
+			GitAuthorName:  gitAuthorName,
+			GitAuthorEmail: gitAuthorEmail,
+			UID:            uid,
+			GID:            gid,
+			Username:       currentUser.Username,
+			GroupName:      groupName,
+			OnStatus: func(status api.AgentStatus) {
+				s := initialStatus
+				s.Status = status
+				s.Timestamp = time.Now().Format(time.RFC3339)
+				if err := WriteAgentStatus(projectRoot, opts.ID, s); err != nil {
+					log.Printf("warn: update agent status to %s: %v", status, err)
+				}
+			},
+		})
+		if err != nil {
+			log.Printf("error: background spawn agent %s: %v", opts.ID, err)
+			// Optional: update status to error/exited?
+			// The task didn't specify error handling, but it's good practice.
+			s := initialStatus
+			s.Status = api.Exited
+			e := "error"
+			s.Event = &e
+			s.Timestamp = time.Now().Format(time.RFC3339)
+			_ = WriteAgentStatus(projectRoot, opts.ID, s)
+		}
+	}()
+
 	return &Head{
 		ID:              opts.ID,
 		Branch:          &branchName,
 		Worktree:        &worktreePath,
 		ProjectPath:     projectRoot,
-		ContainerID:     containerID,
-		ContainerStatus: "created",
+		ContainerID:     "", // Will be filled once container is created
+		ContainerStatus: "pending",
 		AgentType:       opts.AgentType,
 		PrePrompt:       opts.PrePrompt,
 		Prompt:          opts.Prompt,
 		BaseBranch:      baseBranch,
-		AgentStatus: &api.AgentStatusInfo{
-			Status:    api.Pending,
-			Event:     &e,
-			Timestamp: time.Now().Format(time.RFC3339),
-		},
+		AgentStatus:     initialStatus,
 	}, nil
 }
 

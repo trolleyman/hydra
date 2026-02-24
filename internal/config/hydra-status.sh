@@ -12,7 +12,7 @@ process.stdin.on('end', () => {
   const event = input.hook_event_name || '';
   const ts = new Date().toISOString();
   let status;
-  if (event === 'SessionStart') status = 'starting';
+  if (event === 'SessionStart') status = 'running';
   else if (event === 'Stop' || event === 'AfterAgent') status = 'waiting';
   else if (event === 'SessionEnd') status = 'ended';
   else status = 'unknown';

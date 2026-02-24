@@ -398,6 +398,18 @@ func (m Model) resumeSelected() (tea.Model, tea.Cmd) {
 			Username:       username,
 			GroupName:      groupName,
 			Resume:         true,
+			OnStatus: func(status api.AgentStatus) {
+				s := heads.readAgentStatus(headCopy.ProjectPath, headCopy.ID)
+				if s == nil {
+					e := "polling"
+					s = &api.AgentStatusInfo{
+						Event: &e,
+					}
+				}
+				s.Status = status
+				s.Timestamp = time.Now().Format(time.RFC3339)
+				_ = heads.WriteAgentStatus(headCopy.ProjectPath, headCopy.ID, s)
+			},
 		})
 		if err != nil {
 			return errMsg{err}
@@ -872,58 +884,13 @@ func isContainerRunning(status string) bool {
 }
 
 func spawnHead(projectRoot, id string, agentType docker.AgentType, dockerfilePath, prompt string, cli *dockerclient.Client) error {
-	baseBranch, err := git.GetCurrentBranch(projectRoot)
-	if err != nil {
-		return fmt.Errorf("get current branch: %w", err)
-	}
-
-	branchName := "hydra/" + id
-	worktreePath := filepath.Join(projectRoot, ".hydra", "worktrees", id)
-
-	if err := git.CreateWorktree(projectRoot, worktreePath, branchName, baseBranch); err != nil {
-		return fmt.Errorf("create worktree: %w", err)
-	}
-
-	// If no dockerfile provided via the form, fall back to project config.
-	if dockerfilePath == "" {
-		if cfg, cfgErr := config.Load(projectRoot); cfgErr == nil {
-			rel := cfg.GetDockerfileForAgent(projectRoot, string(agentType))
-			if rel != "" {
-				if filepath.IsAbs(rel) {
-					dockerfilePath = rel
-				} else {
-					dockerfilePath = filepath.Join(projectRoot, rel)
-				}
-			}
-		}
-	}
-
-	gitAuthorName := os.Getenv("GIT_AUTHOR_NAME")
-	gitAuthorEmail := os.Getenv("GIT_AUTHOR_EMAIL")
-	uid, gid, username, groupName := currentUserInfo()
-
-	_, err = docker.SpawnAgent(context.Background(), cli, docker.SpawnOptions{
-		Id:             id,
+	_, err := heads.SpawnHead(context.Background(), cli, projectRoot, heads.SpawnHeadOptions{
+		ID:             id,
 		AgentType:      agentType,
 		DockerfilePath: dockerfilePath,
 		Prompt:         prompt,
-		ProjectPath:    projectRoot,
-		WorktreePath:   worktreePath,
-		BranchName:     branchName,
-		BaseBranch:     baseBranch,
-		GitAuthorName:  gitAuthorName,
-		GitAuthorEmail: gitAuthorEmail,
-		UID:            uid,
-		GID:            gid,
-		Username:       username,
-		GroupName:      groupName,
 	})
-	if err != nil {
-		_ = git.RemoveWorktree(projectRoot, worktreePath)
-		_ = git.DeleteBranch(projectRoot, branchName)
-		return fmt.Errorf("spawn agent: %w", err)
-	}
-	return nil
+	return err
 }
 
 // currentUserInfo returns the current OS user's UID, GID, username, and primary group name.

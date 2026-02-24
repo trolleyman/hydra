@@ -22,6 +22,7 @@ import (
 	"github.com/docker/docker/api/types/network"
 	dockerclient "github.com/docker/docker/client"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
+	"github.com/trolleyman/hydra/internal/api"
 	"github.com/trolleyman/hydra/internal/common"
 	"github.com/trolleyman/hydra/internal/config"
 	"github.com/trolleyman/hydra/internal/git"
@@ -106,6 +107,7 @@ type SpawnOptions struct {
 	Username       string
 	GroupName      string
 	Resume         bool // if true, run agent with --resume instead of a fresh prompt
+	OnStatus       func(api.AgentStatus)
 }
 
 func CombinePrompt(prePrompt, prompt string) string {
@@ -118,11 +120,17 @@ func CombinePrompt(prePrompt, prompt string) string {
 // SpawnAgent builds the Docker image if necessary, then creates and starts the container.
 // Returns the container ID.
 func SpawnAgent(ctx context.Context, cli *dockerclient.Client, opts SpawnOptions) (string, error) {
+	if opts.OnStatus != nil {
+		opts.OnStatus(api.Building)
+	}
 	imageTag, err := ensureImage(ctx, cli, opts.AgentType, opts.DockerfilePath, opts.ProjectPath)
 	if err != nil {
 		return "", errtrace.Wrap(fmt.Errorf("ensure image: %w", err))
 	}
 
+	if opts.OnStatus != nil {
+		opts.OnStatus(api.Deploying)
+	}
 	meta := &AgentMetadata{
 		Id:               opts.Id,
 		AgentType:        opts.AgentType,
