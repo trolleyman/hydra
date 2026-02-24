@@ -16,7 +16,7 @@ import (
 
 	"braces.dev/errtrace"
 	dockerclient "github.com/docker/docker/client"
-	"github.com/trolleyman/hydra/internal/apitypes"
+	"github.com/trolleyman/hydra/internal/api"
 	"github.com/trolleyman/hydra/internal/docker"
 	"github.com/trolleyman/hydra/internal/git"
 	"github.com/trolleyman/hydra/internal/paths"
@@ -35,7 +35,7 @@ type Head struct {
 	Prompt          string
 	BaseBranch      string
 	// AgentStatus is read from <projectDir>/.hydra/status/<id>.json (nil if absent).
-	AgentStatus *AgentStatusInfo
+	AgentStatus *api.AgentStatusInfo
 	CreatedAt   int64 // Unix timestamp from container creation; 0 if no container
 }
 
@@ -125,9 +125,9 @@ func ListHeads(ctx context.Context, cli *dockerclient.Client, projectRoot string
 		// 3. If we have no status but a container, set to "pending".
 		if h.ContainerStatus == "exited" {
 			if h.AgentStatus == nil {
-				h.AgentStatus = &AgentStatusInfo{}
+				h.AgentStatus = &api.AgentStatusInfo{}
 			}
-			h.AgentStatus.Status = apitypes.Exited
+			h.AgentStatus.Status = api.Exited
 			if h.AgentStatus.Event == nil {
 				e := "polling"
 				h.AgentStatus.Event = &e
@@ -136,8 +136,8 @@ func ListHeads(ctx context.Context, cli *dockerclient.Client, projectRoot string
 				h.AgentStatus.Timestamp = time.Now().Format(time.RFC3339)
 			}
 		} else if h.AgentStatus == nil && h.ContainerID != "" {
-			h.AgentStatus = &AgentStatusInfo{}
-			h.AgentStatus.Status = apitypes.Pending
+			h.AgentStatus = &api.AgentStatusInfo{}
+			h.AgentStatus.Status = api.Pending
 			e := "polling"
 			h.AgentStatus.Event = &e
 			h.AgentStatus.Timestamp = time.Now().Format(time.RFC3339)
@@ -259,12 +259,10 @@ func SpawnHead(ctx context.Context, cli *dockerclient.Client, projectRoot string
 		PrePrompt:       opts.PrePrompt,
 		Prompt:          opts.Prompt,
 		BaseBranch:      baseBranch,
-		AgentStatus: &AgentStatusInfo{
-			apitypes.AgentStatusInfo{
-				Status:    apitypes.Pending,
-				Event:     &e,
-				Timestamp: time.Now().Format(time.RFC3339),
-			},
+		AgentStatus: &api.AgentStatusInfo{
+			Status:    api.Pending,
+			Event:     &e,
+			Timestamp: time.Now().Format(time.RFC3339),
 		},
 	}, nil
 }

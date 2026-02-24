@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/trolleyman/hydra/internal/api"
 	"github.com/trolleyman/hydra/internal/docker"
+	httppkg "github.com/trolleyman/hydra/internal/http"
 	"github.com/trolleyman/hydra/internal/paths"
 	"github.com/trolleyman/hydra/web"
 )
@@ -37,7 +37,7 @@ func runServer(_ *cobra.Command, _ []string) error {
 		log.Fatalf("Create docker client: %v", err)
 	}
 
-	server := &api.Server{
+	server := &httppkg.Server{
 		WorktreesDir: worktreesDir,
 		ProjectRoot:  projectRoot,
 		DockerClient: dockerClient,
@@ -48,7 +48,7 @@ func runServer(_ *cobra.Command, _ []string) error {
 	mux := http.NewServeMux()
 
 	// Register API routes
-	apiHandler := api.NewHandler(server)
+	apiHandler := httppkg.NewHandler(server)
 	mux.Handle("/api/", apiHandler)
 	mux.Handle("/health", apiHandler)
 
@@ -61,7 +61,7 @@ func runServer(_ *cobra.Command, _ []string) error {
 
 	addr := "localhost:8080"
 	log.Printf("Server starting on http://%s", addr)
-	return http.ListenAndServe(addr, api.LoggingMiddleware(mux))
+	return http.ListenAndServe(addr, httppkg.LoggingMiddleware(mux))
 }
 
 func spaHandler(fsys fs.FS) http.HandlerFunc {

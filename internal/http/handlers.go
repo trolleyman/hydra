@@ -1,4 +1,4 @@
-package api
+package http
 
 import (
 	"context"
@@ -7,6 +7,7 @@ import (
 	"time"
 
 	dockerclient "github.com/docker/docker/client"
+	"github.com/trolleyman/hydra/internal/api"
 	"github.com/trolleyman/hydra/internal/config"
 	"github.com/trolleyman/hydra/internal/docker"
 	"github.com/trolleyman/hydra/internal/heads"
@@ -24,45 +25,26 @@ type Server struct {
 
 // NewHandler creates a handler with routing matching the OpenAPI spec.
 func NewHandler(s *Server) http.Handler {
-	strict := NewStrictHandler(s, nil)
-	return HandlerFromMux(strict, http.NewServeMux())
-}
-
-// toAPIAgentStatus converts a heads.AgentStatusInfo to its API representation.
-func toAPIAgentStatus(s *heads.AgentStatusInfo) *AgentStatusInfo {
-	if s == nil {
-		return nil
-	}
-	info := &AgentStatusInfo{
-		Status:    AgentStatus(s.Status),
-		Event:     s.Event,
-		Timestamp: s.Timestamp,
-	}
-	if s.LastMessage != nil {
-		info.LastMessage = s.LastMessage
-	}
-	if s.Reason != nil {
-		info.Reason = s.Reason
-	}
-	return info
+	strict := api.NewStrictHandler(s, nil)
+	return api.HandlerFromMux(strict, http.NewServeMux())
 }
 
 // --- StrictServerInterface implementations ---
 
-func (s *Server) CheckHealth(_ context.Context, _ CheckHealthRequestObject) (CheckHealthResponseObject, error) {
-	return CheckHealth200TextResponse("OK"), nil
+func (s *Server) CheckHealth(_ context.Context, _ api.CheckHealthRequestObject) (api.CheckHealthResponseObject, error) {
+	return api.CheckHealth200TextResponse("OK"), nil
 }
 
-func (s *Server) ListAgents(ctx context.Context, _ ListAgentsRequestObject) (ListAgentsResponseObject, error) {
+func (s *Server) ListAgents(ctx context.Context, _ api.ListAgentsRequestObject) (api.ListAgentsResponseObject, error) {
 	headList, err := heads.ListHeads(ctx, s.DockerClient, s.ProjectRoot)
 	if err != nil {
 		code := 500
 		msg := err.Error()
-		return ListAgents500JSONResponse{Code: code, Error: msg}, nil
+		return api.ListAgents500JSONResponse{Code: code, Error: msg}, nil
 	}
-	resp := make(ListAgents200JSONResponse, len(headList))
+	resp := make(api.ListAgents200JSONResponse, len(headList))
 	for i, h := range headList {
-		resp[i] = AgentResponse{
+		resp[i] = api.AgentResponse{
 			Id:              h.ID,
 			BranchName:      h.Branch,
 			WorktreePath:    h.Worktree,
@@ -73,18 +55,18 @@ func (s *Server) ListAgents(ctx context.Context, _ ListAgentsRequestObject) (Lis
 			PrePrompt:       h.PrePrompt,
 			Prompt:          h.Prompt,
 			BaseBranch:      h.BaseBranch,
-			AgentStatus:     toAPIAgentStatus(h.AgentStatus),
+			AgentStatus:     h.AgentStatus,
 		}
 	}
 	return resp, nil
 }
 
-func (s *Server) GetStatus(_ context.Context, _ GetStatusRequestObject) (GetStatusResponseObject, error) {
+func (s *Server) GetStatus(_ context.Context, _ api.GetStatusRequestObject) (api.GetStatusResponseObject, error) {
 	status := "OK"
 	v := version
 	uptime := float32(time.Since(s.StartTime).Seconds())
 	projectRoot := s.ProjectRoot
-	return GetStatus200JSONResponse(StatusResponse{
+	return api.GetStatus200JSONResponse(api.StatusResponse{
 		Status:        &status,
 		Version:       &v,
 		UptimeSeconds: &uptime,
@@ -92,11 +74,11 @@ func (s *Server) GetStatus(_ context.Context, _ GetStatusRequestObject) (GetStat
 	}), nil
 }
 
-func (s *Server) SpawnAgent(ctx context.Context, request SpawnAgentRequestObject) (SpawnAgentResponseObject, error) {
+func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestObject) (api.SpawnAgentResponseObject, error) {
 	if request.Body == nil || strings.TrimSpace(request.Body.Prompt) == "" {
 		code := 400
 		msg := "prompt is required"
-		return SpawnAgent400JSONResponse{Code: code, Error: msg}, nil
+		return api.SpawnAgent400JSONResponse{Code: code, Error: msg}, nil
 	}
 
 	agentType := docker.AgentTypeClaude
@@ -106,14 +88,14 @@ func (s *Server) SpawnAgent(ctx context.Context, request SpawnAgentRequestObject
 	if agentType != docker.AgentTypeClaude && agentType != docker.AgentTypeGemini {
 		code := 400
 		msg := "unknown agent_type; supported: claude, gemini"
-		return SpawnAgent400JSONResponse{Code: code, Error: msg}, nil
+		return api.SpawnAgent400JSONResponse{Code: code, Error: msg}, nil
 	}
 
 	cfg, err := config.Load(s.ProjectRoot)
 	if err != nil {
 		code := 500
 		msg := err.Error()
-		return SpawnAgent500JSONResponse{Code: code, Error: msg}, nil
+		return api.SpawnAgent500JSONResponse{Code: code, Error: msg}, nil
 	}
 	prePrompt := config.DefaultPrePrompt
 	if cfg.PrePrompt != nil {
@@ -137,9 +119,9 @@ func (s *Server) SpawnAgent(ctx context.Context, request SpawnAgentRequestObject
 	if err != nil {
 		code := 500
 		msg := err.Error()
-		return SpawnAgent500JSONResponse{Code: code, Error: msg}, nil
+		return api.SpawnAgent500JSONResponse{Code: code, Error: msg}, nil
 	}
-	return SpawnAgent201JSONResponse(AgentResponse{
+	return api.SpawnAgent201JSONResponse(api.AgentResponse{
 		Id:              head.ID,
 		BranchName:      head.Branch,
 		WorktreePath:    head.Worktree,
@@ -149,23 +131,23 @@ func (s *Server) SpawnAgent(ctx context.Context, request SpawnAgentRequestObject
 		AgentType:       string(head.AgentType),
 		Prompt:          head.Prompt,
 		BaseBranch:      head.BaseBranch,
-		AgentStatus:     toAPIAgentStatus(head.AgentStatus),
+		AgentStatus:     head.AgentStatus,
 	}), nil
 }
 
-func (s *Server) GetAgent(ctx context.Context, request GetAgentRequestObject) (GetAgentResponseObject, error) {
+func (s *Server) GetAgent(ctx context.Context, request api.GetAgentRequestObject) (api.GetAgentResponseObject, error) {
 	head, err := heads.GetHeadByID(ctx, s.DockerClient, s.ProjectRoot, request.Id)
 	if err != nil {
 		code := 500
 		msg := err.Error()
-		return GetAgent500JSONResponse{Code: code, Error: msg}, nil
+		return api.GetAgent500JSONResponse{Code: code, Error: msg}, nil
 	}
 	if head == nil {
 		code := 404
 		msg := "agent not found"
-		return GetAgent404JSONResponse{Code: code, Error: msg}, nil
+		return api.GetAgent404JSONResponse{Code: code, Error: msg}, nil
 	}
-	return GetAgent200JSONResponse(AgentResponse{
+	return api.GetAgent200JSONResponse(api.AgentResponse{
 		Id:              head.ID,
 		BranchName:      head.Branch,
 		WorktreePath:    head.Worktree,
@@ -176,28 +158,28 @@ func (s *Server) GetAgent(ctx context.Context, request GetAgentRequestObject) (G
 		PrePrompt:       head.PrePrompt,
 		Prompt:          head.Prompt,
 		BaseBranch:      head.BaseBranch,
-		AgentStatus:     toAPIAgentStatus(head.AgentStatus),
+		AgentStatus:     head.AgentStatus,
 	}), nil
 }
 
-func (s *Server) KillAgent(ctx context.Context, request KillAgentRequestObject) (KillAgentResponseObject, error) {
+func (s *Server) KillAgent(ctx context.Context, request api.KillAgentRequestObject) (api.KillAgentResponseObject, error) {
 	head, err := heads.GetHeadByID(ctx, s.DockerClient, s.ProjectRoot, request.Id)
 	if err != nil {
 		code := 500
 		msg := err.Error()
-		return KillAgent500JSONResponse{Code: code, Error: msg}, nil
+		return api.KillAgent500JSONResponse{Code: code, Error: msg}, nil
 	}
 	if head == nil {
 		code := 404
 		msg := "agent not found"
-		return KillAgent404JSONResponse{Code: code, Error: msg}, nil
+		return api.KillAgent404JSONResponse{Code: code, Error: msg}, nil
 	}
 
 	if err := heads.KillHead(ctx, s.DockerClient, *head); err != nil {
 		code := 500
 		msg := err.Error()
-		return KillAgent500JSONResponse{Code: code, Error: msg}, nil
+		return api.KillAgent500JSONResponse{Code: code, Error: msg}, nil
 	}
 
-	return KillAgent204Response{}, nil
+	return api.KillAgent204Response{}, nil
 }

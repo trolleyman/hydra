@@ -589,16 +589,16 @@ func (m Model) viewInfo(w int) string {
 		return strings.Join(lines, "\n")
 	}
 
-	status := head.ContainerStatus
-	if status == "" {
-		status = "no container"
+	containerStatus := head.ContainerStatus
+	if containerStatus == "" {
+		containerStatus = "no container"
 	}
 
-	claudeStatus := "-"
-	if head.ClaudeStatus != nil {
-		claudeStatus = head.ClaudeStatus.Status
-		if head.ClaudeStatus.Timestamp != "" {
-			claudeStatus += " (" + head.ClaudeStatus.Timestamp[:min(len(head.ClaudeStatus.Timestamp), 19)] + ")"
+	agentStatus := "-"
+	if head.AgentStatus != nil {
+		agentStatus = fmt.Sprintf("%s", head.AgentStatus.Status)
+		if head.AgentStatus.Timestamp != "" {
+			agentStatus += " (" + head.AgentStatus.Timestamp[:min(len(head.AgentStatus.Timestamp), 19)] + ")"
 		}
 	}
 
@@ -617,13 +617,13 @@ func (m Model) viewInfo(w int) string {
 	}
 
 	fields := []struct{ k, v string }{
-		{" ID:    ", head.ID},
-		{" Agent: ", string(head.AgentType)},
-		{" Status:", status},
-		{" Claude:", claudeStatus},
-		{" Branch:", branchDisplay},
-		{" Base:  ", head.BaseBranch},
-		{" Prompt:", prompt},
+		{" ID:              ", head.ID},
+		{" Agent:           ", string(head.AgentType)},
+		{" Container Status:", containerStatus},
+		{" Agent Status:    ", agentStatus},
+		{" Branch:          ", branchDisplay},
+		{" Base:            ", head.BaseBranch},
+		{" Prompt:          ", prompt},
 	}
 
 	var lines []string
