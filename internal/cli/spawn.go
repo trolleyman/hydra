@@ -81,17 +81,17 @@ var spawnCmd = &cobra.Command{
 
 		agentType := docker.AgentType(spawnFlags.agentType)
 
-		// If no --dockerfile flag, check project config for a per-agent Dockerfile.
+		// Resolve Dockerfile path: --flag > config.toml > .hydra/config/<type>/Dockerfile
 		dockerfilePath := spawnFlags.dockerfile
 		if dockerfilePath == "" {
-			if agentCfg, ok := cfg.Agents[string(agentType)]; ok && agentCfg.Dockerfile != nil {
-				rel := *agentCfg.Dockerfile
+			rel := cfg.GetDockerfileForAgent(projectRoot, string(agentType))
+			if rel != "" {
 				if filepath.IsAbs(rel) {
 					dockerfilePath = rel
 				} else {
 					dockerfilePath = filepath.Join(projectRoot, rel)
 				}
-				log.Printf("Using config Dockerfile for %s: %s", agentType, dockerfilePath)
+				log.Printf("Using custom Dockerfile for %s: %s", agentType, dockerfilePath)
 			}
 		}
 		if dockerfilePath != "" {

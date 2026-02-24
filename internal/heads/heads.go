@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"os/user"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -17,6 +18,7 @@ import (
 	"braces.dev/errtrace"
 	dockerclient "github.com/docker/docker/client"
 	"github.com/trolleyman/hydra/internal/api"
+	"github.com/trolleyman/hydra/internal/config"
 	"github.com/trolleyman/hydra/internal/docker"
 	"github.com/trolleyman/hydra/internal/git"
 	"github.com/trolleyman/hydra/internal/paths"
@@ -173,11 +175,12 @@ func GetHeadByID(ctx context.Context, cli *dockerclient.Client, projectRoot, id 
 
 // SpawnHeadOptions holds parameters for spawning a new agent head.
 type SpawnHeadOptions struct {
-	ID         string           // empty = auto-generated
-	PrePrompt  string           // pre-prompt
-	Prompt     string           // prompt
-	AgentType  docker.AgentType // empty = "claude"
-	BaseBranch string           // empty = current HEAD branch
+	ID             string           // empty = auto-generated
+	PrePrompt      string           // pre-prompt
+	Prompt         string           // prompt
+	AgentType      docker.AgentType // empty = "claude"
+	BaseBranch     string           // empty = current HEAD branch
+	DockerfilePath string           // optional custom Dockerfile path
 }
 
 // SpawnHead creates a new git worktree, branch, and Docker container for an agent.
@@ -225,9 +228,24 @@ func SpawnHead(ctx context.Context, cli *dockerclient.Client, projectRoot string
 	gitAuthorName := readGitConfigVal(projectRoot, "user.name")
 	gitAuthorEmail := readGitConfigVal(projectRoot, "user.email")
 
+	// If no dockerfile provided in opts, resolve it from config.
+	if opts.DockerfilePath == "" {
+		if cfg, cfgErr := config.Load(projectRoot); cfgErr == nil {
+			rel := cfg.GetDockerfileForAgent(projectRoot, string(opts.AgentType))
+			if rel != "" {
+				if filepath.IsAbs(rel) {
+					opts.DockerfilePath = rel
+				} else {
+					opts.DockerfilePath = filepath.Join(projectRoot, rel)
+				}
+			}
+		}
+	}
+
 	containerID, err := docker.SpawnAgent(ctx, cli, docker.SpawnOptions{
 		Id:             opts.ID,
 		AgentType:      opts.AgentType,
+		DockerfilePath: opts.DockerfilePath,
 		PrePrompt:      opts.PrePrompt,
 		Prompt:         opts.Prompt,
 		ProjectPath:    projectRoot,
