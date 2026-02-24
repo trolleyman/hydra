@@ -15,7 +15,7 @@ export type AgentResponse = {
     prompt: string;
     base_branch: string;
     /**
-     * Unix timestamp (seconds) when the container was created/started; absent if no container
+     * Unix timestamp (seconds) when the container was created/started; 0 if no container
      */
     created_at?: number;
     agent_status?: AgentStatusInfo;

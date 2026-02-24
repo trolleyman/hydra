@@ -34,7 +34,7 @@ type AgentResponse struct {
 	ContainerId     string           `json:"container_id"`
 	ContainerStatus string           `json:"container_status"`
 
-	// CreatedAt Unix timestamp (seconds) when the container was created/started; absent if no container
+	// CreatedAt Unix timestamp (seconds) when the container was created/started; 0 if no container
 	CreatedAt    *int64  `json:"created_at,omitempty"`
 	Id           string  `json:"id"`
 	PrePrompt    string  `json:"pre_prompt"`
