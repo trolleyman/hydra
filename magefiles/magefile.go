@@ -3,6 +3,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/magefile/mage/mg"
 	"github.com/magefile/mage/sh"
+	"github.com/magefile/mage/target"
 )
 
 // getVersion returns the version from git describe.
@@ -233,6 +235,49 @@ func runInDirV(dir string, cmd string, args ...string) error {
 	return nil
 }
 
+// Custom error to break out of filepath.Walk early when a newer file is found.
+var errFoundNewer = errors.New("found newer file")
+
+// dirChangedIgnores checks if any file in srcDir is newer than the dst stamp file.
+// It skips any directories matching the names in the ignores slice.
+func dirChangedIgnores(dst string, srcDir string, ignores map[string]struct{}) (bool, error) {
+	dstInfo, err := os.Stat(dst)
+	if err != nil {
+		if os.IsNotExist(err) {
+			// The stamp file doesn't exist, so we must run the build.
+			return true, nil
+		}
+		return false, err
+	}
+	dstTime := dstInfo.ModTime()
+
+	err = filepath.Walk(srcDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		if info.IsDir() {
+			_, ignore := ignores[info.Name()]
+			if ignore {
+				// Skip this directory
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		if info.ModTime().After(dstTime) {
+			// Signal that we found a newer file and stop walking
+			return errFoundNewer
+		}
+		return nil
+	})
+
+	if err == errFoundNewer {
+		return true, nil
+	}
+	return false, err
+}
+
 func Tidy() error {
 	err := runV("go", "mod", "tidy")
 	if err != nil {
@@ -250,7 +295,7 @@ func Tidy() error {
 }
 
 func addGoBuildDeps() {
-	mg.Deps(Build.TypeScript, Generate.Go)
+	mg.Deps(BuildWeb, GenerateGo)
 }
 
 func Run() error {
@@ -258,36 +303,101 @@ func Run() error {
 	return runV("go", "run", "./")
 }
 
-type Build mg.Namespace
-
-func (Build) All() {
-	mg.Deps(Build.Go, Build.TypeScript)
+func Build() {
+	mg.Deps(BuildGo, BuildWeb)
 }
 
-func (Build) Go() error {
-	addGoBuildDeps()
-	err := runV("go", "mod", "download")
+func BuildGoDownload() error {
+	stamp := ".mage/go-mod.stamp"
+
+	changed, err := target.Path(stamp, "go.mod", "go.sum")
 	if err != nil {
 		return err
 	}
+	if !changed {
+		return nil
+	}
+
+	if err := runV("go", "mod", "download"); err != nil {
+		return err
+	}
+
+	os.MkdirAll(filepath.Dir(stamp), 0755)
+	return os.WriteFile(stamp, nil, 0644)
+}
+
+func BuildGo() error {
+	addGoBuildDeps()
+	mg.Deps(BuildGoDownload)
 	return runV("go", "build", "./...")
 }
 
-func (Build) TypeScript() error {
-	err := runInDirV("web", "bun", "install")
+func BuildGoDeps() error {
+	addGoBuildDeps()
+	mg.Deps(BuildGoDownload)
+	return nil
+}
+
+func BuildWeb() error {
+	stamp := ".mage/web-build.stamp"
+	ignores := map[string]struct{}{
+		"dist":         {},
+		"node_modules": {},
+	}
+
+	// Check if web/ or api/ have newer files than the last build stamp
+	webChanged, err := dirChangedIgnores(stamp, "web", ignores)
 	if err != nil {
 		return err
 	}
-	return runInDirV("web", "bun", "run", "build")
+
+	apiChanged, err := target.Dir(stamp, "api")
+	if err != nil {
+		return err
+	}
+
+	if !webChanged && !apiChanged {
+		return nil
+	}
+
+	// Run bun install + build
+	if err := runInDirV("web", "bun", "install"); err != nil {
+		return err
+	}
+	if err := runInDirV("web", "bun", "run", "build"); err != nil {
+		return err
+	}
+
+	// Record successful build
+	os.MkdirAll(filepath.Dir(stamp), 0755)
+	return os.WriteFile(stamp, nil, 0644)
 }
 
-type Generate mg.Namespace
+func GenerateGo() error {
+	stamp := ".mage/gen-go.stamp"
 
-func (Generate) Go() error {
-	// Ensure internal/api exists
+	apiChanged, err := target.Dir(stamp, "api")
+	if err != nil {
+		return err
+	}
+
+	internalApiChanged, err := target.Dir(stamp, "internal/api")
+	if err != nil {
+		return err
+	}
+
+	if !apiChanged && !internalApiChanged {
+		return nil
+	}
+
 	if err := os.MkdirAll("internal/api", 0755); err != nil {
 		return err
 	}
 
-	return runV("go", "generate", "./...")
+	if err := runV("go", "generate", "./..."); err != nil {
+		return err
+	}
+
+	os.MkdirAll(filepath.Dir(stamp), 0755)
+	return os.WriteFile(stamp, nil, 0644)
 }
