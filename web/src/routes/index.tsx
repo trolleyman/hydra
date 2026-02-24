@@ -281,10 +281,11 @@ function SpawnForm({
     setLoading(true)
     setError(null)
     try {
+      const finalId = idManuallyEdited ? slugify(agentId) : ''
       const req: SpawnAgentRequest = {
         prompt: prompt.trim(),
         agent_type: agentType,
-        id: idManuallyEdited ? slugify(agentId) : generateId(prompt.trim()),
+        id: finalId || generateId(prompt.trim()),
       }
       const agent = await api.default.spawnAgent(req)
       setPrompt('')
@@ -311,7 +312,7 @@ function SpawnForm({
   if (compact) {
     return (
       <form onSubmit={handleSubmit} className="px-3 py-3 border-b border-gray-100 dark:border-gray-700">
-        <div className="relative rounded-xl p-[1.5px] bg-gradient-to-br from-blue-500 via-indigo-500 to-purple-600 animate-gradient shadow-lg shadow-blue-500/20">
+        <div className="relative rounded-xl p-[1.5px] bg-gray-200 dark:bg-gray-600 focus-within:bg-gradient-to-br focus-within:from-blue-500 focus-within:via-indigo-500 focus-within:to-purple-600 transition-colors duration-200 focus-within:shadow-md focus-within:shadow-blue-500/20">
           <div className="rounded-[10px] bg-white dark:bg-gray-800 overflow-hidden">
             <textarea
               ref={textareaRef}
