@@ -95,10 +95,14 @@ function RootLayout() {
     <div className={`min-h-screen bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 flex flex-col${dark ? ' dark' : ''}`}>
       <header className="h-12 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex items-center px-4 gap-4 shrink-0">
         <div className="flex items-center gap-2 shrink-0">
-          <div className="w-6 h-6 bg-blue-600 rounded-md flex items-center justify-center">
-            <span className="text-white font-bold text-xs">H</span>
+          <div className="w-6 h-6 flex items-center justify-center">
+            <img
+              className='w-full h-full object-cover object-center'
+              srcSet="icon.png, icon.avif"
+              src="icon.png"
+              alt="Hydra icon" />
           </div>
-          <span className="font-semibold text-gray-900 dark:text-gray-100">Hydra</span>
+          <span className="text-2xl font-bold font-serif tracking-[-0.075em] dark:text-gray-100">Hydra</span>
         </div>
         {projectRoot && (
           <span className="text-xs font-mono text-gray-500 dark:text-gray-400 truncate min-w-0">
