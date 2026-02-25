@@ -44,3 +44,14 @@ Hydra supports the following agent types:
 - **Gemini**: Using `google` oauth credentials.
 
 See `GEMINI.md` for more developer instructions.
+
+# TODO
+- Fix non-default dockerfiles to have Go installed correctly
+- Install Go langauge server, as extension of above, so that Claude (/Gemini) can access language server information rather than just having to read files.
+- Remove Console PTY is coming, as it's already implemented
+- When console is connected, and agent is waiting, redraw somehow
+- Test with Claude's native install (just changed)
+- When hydra attach is run:
+    - if the docker container is stopped, run docker start -ai <containerID> claude --resume (unless it doesn't have a worktree and branch)
+    - Also, dd an optional arg to hydra attach <id> [<command>] - instead of attaching to claude or anything, run that command. e.g. bash would exec bash in the container (-i), and run docker start <container> bash, if it was stopped.
+- Use status_log.jsonl to provide better information on status, etc.
