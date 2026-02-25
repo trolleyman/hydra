@@ -25,6 +25,22 @@ const (
 	Waiting  AgentStatus = "waiting"
 )
 
+// Defines values for DiffFileChangeType.
+const (
+	Added    DiffFileChangeType = "added"
+	Deleted  DiffFileChangeType = "deleted"
+	Modified DiffFileChangeType = "modified"
+	Renamed  DiffFileChangeType = "renamed"
+)
+
+// Defines values for DiffLineType.
+const (
+	Addition  DiffLineType = "addition"
+	Context   DiffLineType = "context"
+	Deletion  DiffLineType = "deletion"
+	NoNewline DiffLineType = "no_newline"
+)
+
 // AddProjectRequest defines model for AddProjectRequest.
 type AddProjectRequest struct {
 	// Path Absolute filesystem path to the project root (must be a git repository)
@@ -68,6 +84,97 @@ type AgentStatusInfo struct {
 
 	// Timestamp ISO 8601 timestamp of when the status was set
 	Timestamp string `json:"timestamp"`
+}
+
+// CommitInfo defines model for CommitInfo.
+type CommitInfo struct {
+	AuthorEmail string `json:"author_email"`
+	AuthorName  string `json:"author_name"`
+
+	// Message Full commit message
+	Message string `json:"message"`
+
+	// Sha Full 40-character commit SHA
+	Sha string `json:"sha"`
+
+	// ShortSha Abbreviated 7-character commit SHA
+	ShortSha string `json:"short_sha"`
+
+	// Subject First line of the commit message
+	Subject *string `json:"subject,omitempty"`
+
+	// Timestamp ISO 8601 timestamp of the author date
+	Timestamp string `json:"timestamp"`
+}
+
+// DiffFile defines model for DiffFile.
+type DiffFile struct {
+	// Additions Number of added lines
+	Additions int `json:"additions"`
+
+	// Binary True if this is a binary file
+	Binary     bool               `json:"binary"`
+	ChangeType DiffFileChangeType `json:"change_type"`
+
+	// Deletions Number of deleted lines
+	Deletions int        `json:"deletions"`
+	Hunks     []DiffHunk `json:"hunks"`
+
+	// OldPath Original file path (only set for renamed files)
+	OldPath *string `json:"old_path"`
+
+	// Path File path (new path for renamed files)
+	Path string `json:"path"`
+}
+
+// DiffFileChangeType defines model for DiffFile.ChangeType.
+type DiffFileChangeType string
+
+// DiffHunk defines model for DiffHunk.
+type DiffHunk struct {
+	// Header The @@ ... @@ hunk header line
+	Header string     `json:"header"`
+	Lines  []DiffLine `json:"lines"`
+
+	// NewStart Starting line number in the new file
+	NewStart int `json:"new_start"`
+
+	// OldStart Starting line number in the old file
+	OldStart int `json:"old_start"`
+}
+
+// DiffLine defines model for DiffLine.
+type DiffLine struct {
+	// Content Line content without the diff prefix character
+	Content string `json:"content"`
+
+	// NewLineNum Line number in the new file (null for deletions)
+	NewLineNum *int `json:"new_line_num"`
+
+	// OldLineNum Line number in the old file (null for additions)
+	OldLineNum *int `json:"old_line_num"`
+
+	// Type context: unchanged line; addition: added line; deletion: removed line; no_newline: no newline at end of file
+	Type DiffLineType `json:"type"`
+}
+
+// DiffLineType context: unchanged line; addition: added line; deletion: removed line; no_newline: no newline at end of file
+type DiffLineType string
+
+// DiffResponse defines model for DiffResponse.
+type DiffResponse struct {
+	// BaseCommit Details of the base commit (if a specific commit SHA was given)
+	BaseCommit *CommitInfo `json:"base_commit"`
+
+	// BaseRef The base ref used for this diff
+	BaseRef string     `json:"base_ref"`
+	Files   []DiffFile `json:"files"`
+
+	// HeadCommit Details of the head commit
+	HeadCommit *CommitInfo `json:"head_commit"`
+
+	// HeadRef The head ref used for this diff
+	HeadRef string `json:"head_ref"`
 }
 
 // ErrorResponse defines model for ErrorResponse.
@@ -130,6 +237,27 @@ type GetAgentParams struct {
 	ProjectId *string `form:"project_id,omitempty" json:"project_id,omitempty"`
 }
 
+// GetAgentCommitsParams defines parameters for GetAgentCommits.
+type GetAgentCommitsParams struct {
+	// ProjectId Project ID to scope the lookup (defaults to server CWD project)
+	ProjectId *string `form:"project_id,omitempty" json:"project_id,omitempty"`
+}
+
+// GetAgentDiffParams defines parameters for GetAgentDiff.
+type GetAgentDiffParams struct {
+	// ProjectId Project ID to scope the lookup (defaults to server CWD project)
+	ProjectId *string `form:"project_id,omitempty" json:"project_id,omitempty"`
+
+	// BaseRef Base commit SHA or ref. Defaults to the agent's base branch.
+	BaseRef *string `form:"base_ref,omitempty" json:"base_ref,omitempty"`
+
+	// HeadRef Head commit SHA or ref. Defaults to the agent's branch.
+	HeadRef *string `form:"head_ref,omitempty" json:"head_ref,omitempty"`
+
+	// IgnoreWhitespace Ignore whitespace changes in the diff
+	IgnoreWhitespace *bool `form:"ignore_whitespace,omitempty" json:"ignore_whitespace,omitempty"`
+}
+
 // MergeAgentParams defines parameters for MergeAgent.
 type MergeAgentParams struct {
 	// ProjectId Project ID to scope the lookup (defaults to server CWD project)
@@ -162,6 +290,12 @@ type ServerInterface interface {
 	// Get a specific Hydra agent by ID
 	// (GET /api/agent/{id})
 	GetAgent(w http.ResponseWriter, r *http.Request, id string, params GetAgentParams)
+	// List commits on an agent's branch (between base branch and agent branch)
+	// (GET /api/agent/{id}/commits)
+	GetAgentCommits(w http.ResponseWriter, r *http.Request, id string, params GetAgentCommitsParams)
+	// Get the diff for an agent's branch
+	// (GET /api/agent/{id}/diff)
+	GetAgentDiff(w http.ResponseWriter, r *http.Request, id string, params GetAgentDiffParams)
 	// Merge a Hydra agent's branch into its base branch and kill it
 	// (POST /api/agent/{id}/merge)
 	MergeAgent(w http.ResponseWriter, r *http.Request, id string, params MergeAgentParams)
@@ -257,6 +391,102 @@ func (siw *ServerInterfaceWrapper) GetAgent(w http.ResponseWriter, r *http.Reque
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetAgent(w, r, id, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetAgentCommits operation middleware
+func (siw *ServerInterfaceWrapper) GetAgentCommits(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetAgentCommitsParams
+
+	// ------------- Optional query parameter "project_id" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "project_id", r.URL.Query(), &params.ProjectId)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetAgentCommits(w, r, id, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetAgentDiff operation middleware
+func (siw *ServerInterfaceWrapper) GetAgentDiff(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetAgentDiffParams
+
+	// ------------- Optional query parameter "project_id" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "project_id", r.URL.Query(), &params.ProjectId)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "base_ref" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "base_ref", r.URL.Query(), &params.BaseRef)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "base_ref", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "head_ref" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "head_ref", r.URL.Query(), &params.HeadRef)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "head_ref", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "ignore_whitespace" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "ignore_whitespace", r.URL.Query(), &params.IgnoreWhitespace)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "ignore_whitespace", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetAgentDiff(w, r, id, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -534,6 +764,8 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 
 	m.HandleFunc("DELETE "+options.BaseURL+"/api/agent/{id}", wrapper.KillAgent)
 	m.HandleFunc("GET "+options.BaseURL+"/api/agent/{id}", wrapper.GetAgent)
+	m.HandleFunc("GET "+options.BaseURL+"/api/agent/{id}/commits", wrapper.GetAgentCommits)
+	m.HandleFunc("GET "+options.BaseURL+"/api/agent/{id}/diff", wrapper.GetAgentDiff)
 	m.HandleFunc("POST "+options.BaseURL+"/api/agent/{id}/merge", wrapper.MergeAgent)
 	m.HandleFunc("GET "+options.BaseURL+"/api/agents", wrapper.ListAgents)
 	m.HandleFunc("POST "+options.BaseURL+"/api/agents", wrapper.SpawnAgent)
@@ -610,6 +842,78 @@ func (response GetAgent404JSONResponse) VisitGetAgentResponse(w http.ResponseWri
 type GetAgent500JSONResponse ErrorResponse
 
 func (response GetAgent500JSONResponse) VisitGetAgentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetAgentCommitsRequestObject struct {
+	Id     string `json:"id"`
+	Params GetAgentCommitsParams
+}
+
+type GetAgentCommitsResponseObject interface {
+	VisitGetAgentCommitsResponse(w http.ResponseWriter) error
+}
+
+type GetAgentCommits200JSONResponse []CommitInfo
+
+func (response GetAgentCommits200JSONResponse) VisitGetAgentCommitsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetAgentCommits404JSONResponse ErrorResponse
+
+func (response GetAgentCommits404JSONResponse) VisitGetAgentCommitsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetAgentCommits500JSONResponse ErrorResponse
+
+func (response GetAgentCommits500JSONResponse) VisitGetAgentCommitsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetAgentDiffRequestObject struct {
+	Id     string `json:"id"`
+	Params GetAgentDiffParams
+}
+
+type GetAgentDiffResponseObject interface {
+	VisitGetAgentDiffResponse(w http.ResponseWriter) error
+}
+
+type GetAgentDiff200JSONResponse DiffResponse
+
+func (response GetAgentDiff200JSONResponse) VisitGetAgentDiffResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetAgentDiff404JSONResponse ErrorResponse
+
+func (response GetAgentDiff404JSONResponse) VisitGetAgentDiffResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetAgentDiff500JSONResponse ErrorResponse
+
+func (response GetAgentDiff500JSONResponse) VisitGetAgentDiffResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(500)
 
@@ -832,6 +1136,12 @@ type StrictServerInterface interface {
 	// Get a specific Hydra agent by ID
 	// (GET /api/agent/{id})
 	GetAgent(ctx context.Context, request GetAgentRequestObject) (GetAgentResponseObject, error)
+	// List commits on an agent's branch (between base branch and agent branch)
+	// (GET /api/agent/{id}/commits)
+	GetAgentCommits(ctx context.Context, request GetAgentCommitsRequestObject) (GetAgentCommitsResponseObject, error)
+	// Get the diff for an agent's branch
+	// (GET /api/agent/{id}/diff)
+	GetAgentDiff(ctx context.Context, request GetAgentDiffRequestObject) (GetAgentDiffResponseObject, error)
 	// Merge a Hydra agent's branch into its base branch and kill it
 	// (POST /api/agent/{id}/merge)
 	MergeAgent(ctx context.Context, request MergeAgentRequestObject) (MergeAgentResponseObject, error)
@@ -931,6 +1241,60 @@ func (sh *strictHandler) GetAgent(w http.ResponseWriter, r *http.Request, id str
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetAgentResponseObject); ok {
 		if err := validResponse.VisitGetAgentResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetAgentCommits operation middleware
+func (sh *strictHandler) GetAgentCommits(w http.ResponseWriter, r *http.Request, id string, params GetAgentCommitsParams) {
+	var request GetAgentCommitsRequestObject
+
+	request.Id = id
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetAgentCommits(ctx, request.(GetAgentCommitsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetAgentCommits")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetAgentCommitsResponseObject); ok {
+		if err := validResponse.VisitGetAgentCommitsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetAgentDiff operation middleware
+func (sh *strictHandler) GetAgentDiff(w http.ResponseWriter, r *http.Request, id string, params GetAgentDiffParams) {
+	var request GetAgentDiffRequestObject
+
+	request.Id = id
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetAgentDiff(ctx, request.(GetAgentDiffRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetAgentDiff")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetAgentDiffResponseObject); ok {
+		if err := validResponse.VisitGetAgentDiffResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

@@ -15,6 +15,7 @@ import (
 	"github.com/trolleyman/hydra/internal/api"
 	"github.com/trolleyman/hydra/internal/config"
 	"github.com/trolleyman/hydra/internal/docker"
+	"github.com/trolleyman/hydra/internal/git"
 	"github.com/trolleyman/hydra/internal/heads"
 	"github.com/trolleyman/hydra/internal/paths"
 	"github.com/trolleyman/hydra/internal/projects"
@@ -326,4 +327,170 @@ func (s *Server) KillAgent(ctx context.Context, request api.KillAgentRequestObje
 	}
 
 	return api.KillAgent204Response{}, nil
+}
+
+func (s *Server) GetAgentCommits(ctx context.Context, request api.GetAgentCommitsRequestObject) (api.GetAgentCommitsResponseObject, error) {
+	projectRoot := s.resolveProjectRoot(request.Params.ProjectId)
+	head, err := heads.GetHeadByID(ctx, s.DockerClient, projectRoot, request.Id)
+	if err != nil {
+		code := 500
+		msg := err.Error()
+		return api.GetAgentCommits500JSONResponse{Code: code, Error: msg}, nil
+	}
+	if head == nil {
+		code := 404
+		msg := "agent not found"
+		return api.GetAgentCommits404JSONResponse{Code: code, Error: msg}, nil
+	}
+
+	baseBranch := head.BaseBranch
+	headBranch := ""
+	if head.Branch != nil {
+		headBranch = *head.Branch
+	}
+	if headBranch == "" {
+		return api.GetAgentCommits200JSONResponse{}, nil
+	}
+
+	commits, err := git.ListCommits(projectRoot, baseBranch, headBranch)
+	if err != nil {
+		code := 500
+		msg := err.Error()
+		return api.GetAgentCommits500JSONResponse{Code: code, Error: msg}, nil
+	}
+
+	resp := make(api.GetAgentCommits200JSONResponse, len(commits))
+	for i, c := range commits {
+		subject := c.Subject
+		resp[i] = api.CommitInfo{
+			Sha:         c.SHA,
+			ShortSha:    c.ShortSHA,
+			Message:     c.Message,
+			Subject:     &subject,
+			AuthorName:  c.AuthorName,
+			AuthorEmail: c.AuthorEmail,
+			Timestamp:   c.Timestamp,
+		}
+	}
+	return resp, nil
+}
+
+func (s *Server) GetAgentDiff(ctx context.Context, request api.GetAgentDiffRequestObject) (api.GetAgentDiffResponseObject, error) {
+	projectRoot := s.resolveProjectRoot(request.Params.ProjectId)
+	head, err := heads.GetHeadByID(ctx, s.DockerClient, projectRoot, request.Id)
+	if err != nil {
+		code := 500
+		msg := err.Error()
+		return api.GetAgentDiff500JSONResponse{Code: code, Error: msg}, nil
+	}
+	if head == nil {
+		code := 404
+		msg := "agent not found"
+		return api.GetAgentDiff404JSONResponse{Code: code, Error: msg}, nil
+	}
+
+	headBranch := ""
+	if head.Branch != nil {
+		headBranch = *head.Branch
+	}
+	if headBranch == "" {
+		empty := api.DiffResponse{Files: []api.DiffFile{}, BaseRef: head.BaseBranch, HeadRef: ""}
+		return api.GetAgentDiff200JSONResponse(empty), nil
+	}
+
+	// Resolve base and head refs.
+	baseRef := head.BaseBranch
+	headRef := headBranch
+	if request.Params.BaseRef != nil && *request.Params.BaseRef != "" {
+		baseRef = *request.Params.BaseRef
+	}
+	if request.Params.HeadRef != nil && *request.Params.HeadRef != "" {
+		headRef = *request.Params.HeadRef
+	}
+
+	ignoreWhitespace := false
+	if request.Params.IgnoreWhitespace != nil {
+		ignoreWhitespace = *request.Params.IgnoreWhitespace
+	}
+
+	// Use triple-dot (merge-base) diff when using default branch refs (whole MR view).
+	// Use double-dot when specific commits are given (commit-to-commit view).
+	useTripleDot := (request.Params.BaseRef == nil || *request.Params.BaseRef == "") &&
+		(request.Params.HeadRef == nil || *request.Params.HeadRef == "")
+
+	diffFiles, err := git.GetDiff(projectRoot, baseRef, headRef, ignoreWhitespace, useTripleDot)
+	if err != nil {
+		code := 500
+		msg := err.Error()
+		return api.GetAgentDiff500JSONResponse{Code: code, Error: msg}, nil
+	}
+
+	// Fetch commit info for base and head if they look like SHAs.
+	var baseCommitInfo *api.CommitInfo
+	var headCommitInfo *api.CommitInfo
+
+	fetchCommitInfo := func(ref string) *api.CommitInfo {
+		c, err := git.GetCommitInfo(projectRoot, ref)
+		if err != nil || c == nil {
+			return nil
+		}
+		subject := c.Subject
+		return &api.CommitInfo{
+			Sha:         c.SHA,
+			ShortSha:    c.ShortSHA,
+			Message:     c.Message,
+			Subject:     &subject,
+			AuthorName:  c.AuthorName,
+			AuthorEmail: c.AuthorEmail,
+			Timestamp:   c.Timestamp,
+		}
+	}
+
+	if request.Params.BaseRef != nil && *request.Params.BaseRef != "" {
+		baseCommitInfo = fetchCommitInfo(baseRef)
+	}
+	if request.Params.HeadRef != nil && *request.Params.HeadRef != "" {
+		headCommitInfo = fetchCommitInfo(headRef)
+	}
+
+	// Convert git.DiffFile slice to api.DiffFile slice.
+	apiFiles := make([]api.DiffFile, len(diffFiles))
+	for i, f := range diffFiles {
+		apiHunks := make([]api.DiffHunk, len(f.Hunks))
+		for j, h := range f.Hunks {
+			apiLines := make([]api.DiffLine, len(h.Lines))
+			for k, l := range h.Lines {
+				apiLines[k] = api.DiffLine{
+					Type:       api.DiffLineType(l.Type),
+					Content:    l.Content,
+					OldLineNum: l.OldLineNum,
+					NewLineNum: l.NewLineNum,
+				}
+			}
+			apiHunks[j] = api.DiffHunk{
+				Header:   h.Header,
+				OldStart: h.OldStart,
+				NewStart: h.NewStart,
+				Lines:    apiLines,
+			}
+		}
+		apiFiles[i] = api.DiffFile{
+			Path:       f.Path,
+			OldPath:    f.OldPath,
+			ChangeType: api.DiffFileChangeType(f.ChangeType),
+			Additions:  f.Additions,
+			Deletions:  f.Deletions,
+			Binary:     f.Binary,
+			Hunks:      apiHunks,
+		}
+	}
+
+	resp := api.DiffResponse{
+		Files:      apiFiles,
+		BaseRef:    baseRef,
+		HeadRef:    headRef,
+		BaseCommit: baseCommitInfo,
+		HeadCommit: headCommitInfo,
+	}
+	return api.GetAgentDiff200JSONResponse(resp), nil
 }
