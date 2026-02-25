@@ -159,7 +159,7 @@ function AgentDetail({
 
   return (
     <div className="flex-1 overflow-auto p-6">
-      <div className="max-w-5xl">
+      <div className="w-full">
         {/* Header */}
         <div className="mb-6">
           {/* Title row */}

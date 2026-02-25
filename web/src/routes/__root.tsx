@@ -135,7 +135,7 @@ function ProjectDropdown({
     <div ref={dropdownRef} className="relative shrink-0">
       <button
         onClick={() => { setOpen((o) => !o); setShowAddInput(false); setAddError(null) }}
-        className="flex items-center gap-1.5 h-8 px-2.5 rounded-md text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors max-w-xs"
+        className="flex items-center gap-1.5 h-8 px-2.5 rounded-md text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors max-w-xs cursor-pointer"
         title={selected?.path ?? 'Select project'}
       >
         <FolderIcon />
