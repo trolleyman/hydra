@@ -33,8 +33,10 @@ RUN npm install -g @google/gemini-cli
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
-# Install Go & tools
-RUN tar -C /usr/local -xzf go1.26.0.linux-amd64.tar.gz \
-    && go install github.com/magefile/mage@latest
+# # Install Go & tools
+# RUN curl https://go.dev/dl/go1.26.0.linux-amd64.tar.gz -o ~/go1.26.0.linux-amd64.tar.gz \
+#     && tar -C /usr/local -xzf ~/go1.26.0.linux-amd64.tar.gz \
+#     && rm ~/go1.26.0.linux-amd64.tar.gz \
+#     && go install github.com/magefile/mage@latest
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
