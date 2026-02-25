@@ -17,12 +17,15 @@ import (
 
 // Defines values for AgentStatus.
 const (
-	Ended    AgentStatus = "ended"
-	Exited   AgentStatus = "exited"
-	Pending  AgentStatus = "pending"
-	Starting AgentStatus = "starting"
-	Unknown  AgentStatus = "unknown"
-	Waiting  AgentStatus = "waiting"
+	Building  AgentStatus = "building"
+	Deploying AgentStatus = "deploying"
+	Ended     AgentStatus = "ended"
+	Exited    AgentStatus = "exited"
+	Pending   AgentStatus = "pending"
+	Running   AgentStatus = "running"
+	Starting  AgentStatus = "starting"
+	Unknown   AgentStatus = "unknown"
+	Waiting   AgentStatus = "waiting"
 )
 
 // Defines values for DiffFileChangeType.

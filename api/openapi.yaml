@@ -414,6 +414,9 @@ components:
       type: string
       enum:
         - pending
+        - building
+        - deploying
+        - running
         - starting
         - waiting
         - ended

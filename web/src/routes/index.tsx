@@ -50,12 +50,15 @@ function agentTypeColor(agentType: string): string {
 
 function agentStatusBadge(status: string | undefined): { label: string; className: string } {
   switch (status) {
-    case 'pending':  return { label: 'pending',  className: 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400' }
-    case 'starting': return { label: 'starting', className: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' }
-    case 'waiting':  return { label: 'waiting',  className: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400' }
-    case 'ended':    return { label: 'ended',    className: 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400' }
-    case 'exited':   return { label: 'exited',   className: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' }
-    default:         return { label: status ?? '', className: 'bg-gray-50 text-gray-400 dark:bg-gray-800 dark:text-gray-500' }
+    case 'pending':   return { label: 'pending',   className: 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400' }
+    case 'building':  return { label: 'building',  className: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' }
+    case 'deploying': return { label: 'deploying', className: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400' }
+    case 'running':   return { label: 'running',   className: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' }
+    case 'starting':  return { label: 'starting',  className: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' }
+    case 'waiting':   return { label: 'waiting',   className: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400' }
+    case 'ended':     return { label: 'ended',     className: 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400' }
+    case 'exited':    return { label: 'exited',    className: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' }
+    default:          return { label: status ?? '', className: 'bg-gray-50 text-gray-400 dark:bg-gray-800 dark:text-gray-500' }
   }
 }
 

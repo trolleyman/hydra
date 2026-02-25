@@ -16,8 +16,31 @@ func init() {
 	rootCmd.AddCommand(triggerHookCmd)
 }
 
+func openStatusLog() (*os.File, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("get home dir: %w", err)
+	}
+	statusLogPath := filepath.Join(home, ".hydra", "status_log.jsonl")
+	if err := os.MkdirAll(filepath.Dir(statusLogPath), 0755); err != nil {
+		return nil, fmt.Errorf("create status dir: %w", err)
+	}
+	return os.OpenFile(statusLogPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+}
+
+var statusLog *os.File
+
+func logStatusMessage(object any) {
+	var w io.Writer = statusLog
+	if w == nil {
+		w = os.Stderr
+	}
+	encoder := json.NewEncoder(w)
+	_ = encoder.Encode(object)
+}
+
 // triggerHookCmd is an internal command run inside agent containers via Claude Code / Gemini hooks.
-// It reads a JSON hook payload from stdin and writes the current agent status to ~/.hydra/status.json.
+// It reads a JSON hook payload from stdin and writes the current agent status to ~/.hydra/status.json and ~/.hydra/status_log.jsonl.
 //
 // Usage (internal only):
 //
@@ -27,15 +50,24 @@ func init() {
 // name in the payload drives the resulting status value.
 var triggerHookCmd = &cobra.Command{
 	Use:    "trigger-hook <agentType>",
-	Short:  "Internal: process a hook event and write ~/.hydra/status.json",
+	Short:  "Internal: process a hook event and write ~/.hydra/status.json and ~/.hydra/status_log.jsonl",
 	Long:   `Internal command used by hook scripts inside agent containers to update the agent status file. Not intended for direct use.`,
 	Hidden: true,
 	Args:   cobra.ExactArgs(1),
 	// Always exit 0 so we never block the agent session.
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := runTriggerHook(args[0]); err != nil {
-			// Log to stderr but don't propagate – hooks must not fail the agent.
-			fmt.Fprintf(os.Stderr, "hydra trigger-hook: %v\n", err)
+		statusLog, err := openStatusLog()
+		defer func() {
+			if statusLog != nil {
+				statusLog.Close()
+				statusLog = nil
+			}
+		}()
+
+		err = runTriggerHook(args[0])
+		if err != nil {
+			// Log to status_log.jsonl and stderr but don't propagate – hooks must not fail the agent.
+			fmt.Fprintf(os.Stderr, "hydra trigger-hook error: %v\n", err)
 		}
 		return nil
 	},
@@ -58,7 +90,7 @@ func runTriggerHook(agentType string) error {
 	var status api.AgentStatus
 	switch event {
 	case "SessionStart":
-		status = api.Starting
+		status = api.Running
 	case "Stop", "AfterAgent":
 		status = api.Waiting
 	case "SessionEnd":
