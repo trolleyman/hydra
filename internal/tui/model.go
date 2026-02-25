@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"os/user"
-	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -22,9 +21,8 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	dockercontainer "github.com/docker/docker/api/types/container"
 	dockerclient "github.com/docker/docker/client"
-	"github.com/trolleyman/hydra/internal/config"
+	"github.com/trolleyman/hydra/internal/api"
 	"github.com/trolleyman/hydra/internal/docker"
-	"github.com/trolleyman/hydra/internal/git"
 	"github.com/trolleyman/hydra/internal/heads"
 )
 
@@ -399,7 +397,7 @@ func (m Model) resumeSelected() (tea.Model, tea.Cmd) {
 			GroupName:      groupName,
 			Resume:         true,
 			OnStatus: func(status api.AgentStatus) {
-				s := heads.readAgentStatus(headCopy.ProjectPath, headCopy.ID)
+				s := heads.ReadAgentStatus(headCopy.ProjectPath, headCopy.ID)
 				if s == nil {
 					e := "polling"
 					s = &api.AgentStatusInfo{

@@ -7,6 +7,9 @@
  */
 export enum AgentStatus {
     PENDING = 'pending',
+    BUILDING = 'building',
+    DEPLOYING = 'deploying',
+    RUNNING = 'running',
     STARTING = 'starting',
     WAITING = 'waiting',
     ENDED = 'ended',
