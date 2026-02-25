@@ -367,6 +367,14 @@ func getAgentBinds(agentType AgentType, projectRoot, id, containerHome string) (
 	statusJsonContainer := filepath.Join(containerHome, ".hydra", "status.json")
 	binds := []string{statusJsonHost + ":" + statusJsonContainer}
 
+	// Create and share status log JSONL (truncated fresh on each spawn).
+	statusLogHost := paths.GetStatusLogFromProjectRoot(projectRoot, id)
+	if err := os.WriteFile(statusLogHost, []byte(""), 0644); err != nil {
+		return nil, errtrace.Wrap(fmt.Errorf("write %s: %w", statusLogHost, err))
+	}
+	statusLogContainer := filepath.Join(containerHome, ".hydra", "status_log.jsonl")
+	binds = append(binds, statusLogHost+":"+statusLogContainer)
+
 	// Mount the hydra binary itself (read-only) so hook commands can call it directly.
 	hydraBin, err := os.Executable()
 	if err != nil {
@@ -434,68 +442,71 @@ func getAgentBinds(agentType AgentType, projectRoot, id, containerHome string) (
 	return binds, nil
 }
 
-// buildGeminiSettings generates the settings.json content with hook configuration for Gemini.
-func buildGeminiSettings() ([]byte, error) {
-	hookCmd := "$HOME/.hydra/hydra trigger-hook gemini"
-	hookGroup := []claudeMatcherGroup{
-		{Hooks: []claudeHookHandler{{Type: "command", Command: hookCmd}}},
-	}
-	// Note: Gemini uses AfterAgent instead of Stop.
-	settings := map[string]interface{}{
-		"hooks": map[string]interface{}{
-			"SessionStart": hookGroup,
-			"AfterAgent":   hookGroup,
-			"SessionEnd":   hookGroup,
-		},
-	}
-	data, err := json.MarshalIndent(settings, "", "  ")
-	if err != nil {
-		return nil, errtrace.Wrap(fmt.Errorf("marshal gemini settings: %w", err))
-	}
-	return data, nil
-}
-
-// claudeHookHandler is a single hook handler entry in settings.json.
-type claudeHookHandler struct {
+// hookHandler is a single hook handler entry in a hooks settings.json.
+type hookHandler struct {
 	Type    string `json:"type"`
 	Command string `json:"command"`
 }
 
-// claudeMatcherGroup is a matcher group (with optional matcher) in settings.json.
-type claudeMatcherGroup struct {
-	Hooks []claudeHookHandler `json:"hooks"`
+// matcherGroup is a matcher group (with optional matcher) in a hooks settings.json.
+type matcherGroup struct {
+	Hooks []hookHandler `json:"hooks"`
 }
 
-// claudeHooksConfig holds the hooks section of settings.json.
-type claudeHooksConfig struct {
-	SessionStart []claudeMatcherGroup `json:"SessionStart"`
-	Stop         []claudeMatcherGroup `json:"Stop"`
-	SessionEnd   []claudeMatcherGroup `json:"SessionEnd"`
-}
-
-// claudeSettings is the full settings.json structure.
-type claudeSettings struct {
-	SkipDangerousModePermissionPrompt bool              `json:"skipDangerousModePermissionPrompt"`
-	Hooks                             claudeHooksConfig `json:"hooks"`
-}
-
-// buildClaudeSettings generates the settings.json content with hook configuration.
-func buildClaudeSettings() ([]byte, error) {
-	hookCmd := "$HOME/.hydra/hydra trigger-hook claude"
-	hookGroup := []claudeMatcherGroup{
-		{Hooks: []claudeHookHandler{{Type: "command", Command: hookCmd}}},
+// buildHooksMap constructs a hooks map from a list of event names, all sharing the same command.
+func buildHooksMap(cmd string, events []string) map[string]interface{} {
+	group := []matcherGroup{{Hooks: []hookHandler{{Type: "command", Command: cmd}}}}
+	m := make(map[string]interface{}, len(events))
+	for _, event := range events {
+		m[event] = group
 	}
-	settings := claudeSettings{
-		SkipDangerousModePermissionPrompt: true,
-		Hooks: claudeHooksConfig{
-			SessionStart: hookGroup,
-			Stop:         hookGroup,
-			SessionEnd:   hookGroup,
-		},
+	return m
+}
+
+// buildClaudeSettings generates the settings.json content with hook configuration for Claude Code.
+func buildClaudeSettings() ([]byte, error) {
+	hooks := buildHooksMap("$HOME/.hydra/hydra trigger-hook claude", []string{
+		"SessionStart",
+		"UserPromptSubmit",
+		"PreToolUse",
+		"PostToolUse",
+		"PostToolUseFailure",
+		"Notification",
+		"Stop",
+		"PreCompact",
+		"SubagentStart",
+		"SubagentStop",
+		"SessionEnd",
+	})
+	settings := map[string]interface{}{
+		"skipDangerousModePermissionPrompt": true,
+		"hooks": hooks,
 	}
 	data, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
 		return nil, errtrace.Wrap(fmt.Errorf("marshal claude settings: %w", err))
+	}
+	return data, nil
+}
+
+// buildGeminiSettings generates the settings.json content with hook configuration for Gemini CLI.
+func buildGeminiSettings() ([]byte, error) {
+	hooks := buildHooksMap("$HOME/.hydra/hydra trigger-hook gemini", []string{
+		"SessionStart",
+		"BeforeAgent",
+		"AfterAgent",
+		"BeforeTool",
+		"AfterTool",
+		"Notification",
+		"PreCompress",
+		"SessionEnd",
+	})
+	settings := map[string]interface{}{
+		"hooks": hooks,
+	}
+	data, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		return nil, errtrace.Wrap(fmt.Errorf("marshal gemini settings: %w", err))
 	}
 	return data, nil
 }

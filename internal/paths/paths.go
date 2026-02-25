@@ -55,6 +55,10 @@ func GetStatusJsonFromProjectRoot(projectRoot, id string) string {
 	return filepath.Join(GetHydraDirFromProjectRoot(projectRoot), "status", id+".json")
 }
 
+func GetStatusLogFromProjectRoot(projectRoot, id string) string {
+	return filepath.Join(GetHydraDirFromProjectRoot(projectRoot), "status", id+"_log.jsonl")
+}
+
 // WriteFileIfChanged writes content to path only when it differs from the existing file.
 // Reports whether the file was (over)written.
 func WriteFileIfChanged(path, content string, perm os.FileMode) error {

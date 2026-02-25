@@ -28,10 +28,9 @@ func openStatusLog() (*os.File, error) {
 	return os.OpenFile(statusLogPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 }
 
-var statusLog *os.File
-
-func logStatusMessage(object any) {
-	var w io.Writer = statusLog
+// appendJSONLine encodes object as a single JSON line and writes it to w.
+// Falls back to stderr if w is nil.
+func appendJSONLine(w io.Writer, object any) {
 	if w == nil {
 		w = os.Stderr
 	}
@@ -40,7 +39,8 @@ func logStatusMessage(object any) {
 }
 
 // triggerHookCmd is an internal command run inside agent containers via Claude Code / Gemini hooks.
-// It reads a JSON hook payload from stdin and writes the current agent status to ~/.hydra/status.json and ~/.hydra/status_log.jsonl.
+// It reads a JSON hook payload from stdin, appends {"hook": <payload>} to ~/.hydra/status_log.jsonl,
+// and for status-changing events also writes ~/.hydra/status.json.
 //
 // Usage (internal only):
 //
@@ -56,24 +56,24 @@ var triggerHookCmd = &cobra.Command{
 	Args:   cobra.ExactArgs(1),
 	// Always exit 0 so we never block the agent session.
 	RunE: func(cmd *cobra.Command, args []string) error {
-		statusLog, err := openStatusLog()
-		defer func() {
-			if statusLog != nil {
-				statusLog.Close()
-				statusLog = nil
-			}
-		}()
+		logFile, logErr := openStatusLog()
+		if logErr != nil {
+			fmt.Fprintf(os.Stderr, "hydra trigger-hook: open log: %v\n", logErr)
+		}
+		if logFile != nil {
+			defer logFile.Close()
+		}
 
-		err = runTriggerHook(args[0])
-		if err != nil {
+		if err := runTriggerHook(args[0], logFile); err != nil {
 			// Log to status_log.jsonl and stderr but don't propagate – hooks must not fail the agent.
 			fmt.Fprintf(os.Stderr, "hydra trigger-hook error: %v\n", err)
+			appendJSONLine(logFile, map[string]interface{}{"error": err.Error()})
 		}
 		return nil
 	},
 }
 
-func runTriggerHook(agentType string) error {
+func runTriggerHook(agentType string, logFile *os.File) error {
 	raw, err := io.ReadAll(os.Stdin)
 	if err != nil {
 		return fmt.Errorf("read stdin: %w", err)
@@ -82,11 +82,16 @@ func runTriggerHook(agentType string) error {
 	var input map[string]interface{}
 	_ = json.Unmarshal(raw, &input) // ignore parse errors; input stays empty map
 
+	// Always append {"hook": <payload>} to the log for every hook invocation.
+	appendJSONLine(logFile, map[string]interface{}{"hook": input})
+
 	event := ""
 	if v, ok := input["hook_event_name"].(string); ok {
 		event = v
 	}
 
+	// Only update status.json for events that represent a meaningful status change.
+	// All other events are logged above but do not alter the displayed status.
 	var status api.AgentStatus
 	switch event {
 	case "SessionStart":
@@ -96,7 +101,7 @@ func runTriggerHook(agentType string) error {
 	case "SessionEnd":
 		status = api.Ended
 	default:
-		status = api.Unknown
+		return nil
 	}
 
 	_ = agentType // available for future per-agent logic
