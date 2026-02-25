@@ -1,7 +1,10 @@
 package http
 
 import (
+	"bufio"
+	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"time"
 )
@@ -21,6 +24,17 @@ func (r *statusRecorder) WriteHeader(code int) {
 // to detect interfaces like http.Flusher on the original writer.
 func (r *statusRecorder) Unwrap() http.ResponseWriter {
 	return r.ResponseWriter
+}
+
+// Hijack implements http.Hijacker, delegating to the underlying ResponseWriter.
+// This is required for WebSocket upgrades which use http.Hijacker to take over
+// the raw TCP connection.
+func (r *statusRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	hj, ok := r.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, fmt.Errorf("underlying ResponseWriter does not implement http.Hijacker")
+	}
+	return hj.Hijack()
 }
 
 // LoggingMiddleware logs each HTTP request with method, path, status code, and duration.
