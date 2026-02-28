@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"syscall"
 
 	"braces.dev/errtrace"
@@ -376,9 +377,11 @@ func getAgentBinds(agentType AgentType, projectRoot, id, containerHome string) (
 	binds = append(binds, statusLogHost+":"+statusLogContainer)
 
 	// Mount the hydra binary itself (read-only) so hook commands can call it directly.
-	hydraBin, err := os.Executable()
+	// On non-Linux hosts (e.g. macOS) the current executable is a darwin binary which
+	// can't run inside the Linux container, so we cross-compile and cache a linux build.
+	hydraBin, err := resolveContainerHydraBin(cacheDir)
 	if err != nil {
-		return nil, errtrace.Wrap(fmt.Errorf("resolve hydra executable: %w", err))
+		return nil, errtrace.Wrap(fmt.Errorf("resolve hydra binary for container: %w", err))
 	}
 	hydraBinContainer := filepath.Join(containerHome, ".hydra", "hydra")
 	binds = append(binds, hydraBin+":"+hydraBinContainer+":ro")
@@ -704,4 +707,43 @@ func prepareDefaultDockerfileDir(agentType AgentType) (string, error) {
 		}
 	}
 	return dir, nil
+}
+
+// resolveContainerHydraBin returns the path to a hydra binary that can run
+// inside a Linux container. On Linux hosts the current executable is returned
+// directly. On non-Linux hosts the binary embedded at build time (via
+// `mage build`) is extracted to cacheDir/hydra and that path is returned.
+func resolveContainerHydraBin(cacheDir string) (string, error) {
+	if runtime.GOOS == "linux" {
+		return os.Executable()
+	}
+
+	if len(embeddedLinuxBinary) == 0 {
+		return "", fmt.Errorf(
+			"no Linux binary embedded in hydra; on non-Linux systems you must build with `mage build` or `mage dev` rather than `go run ./`",
+		)
+	}
+
+	dest := filepath.Join(cacheDir, "hydra")
+
+	// Re-extract only when the embedded binary may have changed (i.e. when the
+	// current executable is newer than the previously extracted file).
+	currentBin, err := os.Executable()
+	if err != nil {
+		return "", errtrace.Wrap(fmt.Errorf("resolve current executable: %w", err))
+	}
+	currentInfo, err := os.Stat(currentBin)
+	if err != nil {
+		return "", errtrace.Wrap(fmt.Errorf("stat current executable: %w", err))
+	}
+	if destInfo, err := os.Stat(dest); err != nil || destInfo.ModTime().Before(currentInfo.ModTime()) {
+		if err := os.MkdirAll(cacheDir, 0755); err != nil {
+			return "", errtrace.Wrap(fmt.Errorf("create cache dir: %w", err))
+		}
+		if err := os.WriteFile(dest, embeddedLinuxBinary, 0755); err != nil {
+			return "", errtrace.Wrap(fmt.Errorf("write linux hydra binary: %w", err))
+		}
+	}
+
+	return dest, nil
 }

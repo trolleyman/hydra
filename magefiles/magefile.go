@@ -346,12 +346,37 @@ func Tidy() error {
 }
 
 func addGoBuildDeps() {
-	mg.Deps(BuildWeb, GenerateGo)
+	mg.Deps(BuildWeb, GenerateGo, BuildLinuxBinary)
+}
+
+// goBuildTags returns the extra go tool flags needed for the current platform.
+// On non-Linux hosts this activates embedding of the cross-compiled Linux binary.
+func goBuildTags() []string {
+	if runtime.GOOS == "linux" {
+		return nil
+	}
+	return []string{"-tags", "hydra_embed_linux_binary"}
+}
+
+// BuildLinuxBinary cross-compiles hydra for linux/GOARCH and writes the result
+// to internal/docker/hydra-linux so it can be embedded by the main build.
+// No-op on Linux hosts.
+func BuildLinuxBinary() error {
+	if runtime.GOOS == "linux" {
+		return nil
+	}
+	output := filepath.Join("internal", "docker", "hydra-linux")
+	return runWithEnv(
+		map[string]string{"GOOS": "linux", "GOARCH": runtime.GOARCH},
+		"go", "build", "-o", output, ".",
+	)
 }
 
 func Run() error {
 	addGoBuildDeps()
-	return runV("go", "run", "./")
+	args := append([]string{"run"}, goBuildTags()...)
+	args = append(args, "./")
+	return runV("go", args...)
 }
 
 func Build() {
@@ -380,7 +405,9 @@ func BuildGoDownload() error {
 func BuildGo() error {
 	addGoBuildDeps()
 	mg.Deps(BuildGoDownload)
-	return runV("go", "build", "./...")
+	args := append([]string{"build"}, goBuildTags()...)
+	args = append(args, "./...")
+	return runV("go", args...)
 }
 
 func BuildGoDeps() error {
@@ -458,6 +485,11 @@ func GenerateGo() error {
 func getGoSourceModTime() (time.Time, error) {
 	var latest time.Time
 
+	// generatedFiles are produced by the build itself and must not trigger a rebuild.
+	generatedFiles := map[string]struct{}{
+		filepath.Join("internal", "docker", "hydra-linux"): {},
+	}
+
 	check := func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			if os.IsNotExist(err) {
@@ -466,6 +498,9 @@ func getGoSourceModTime() (time.Time, error) {
 			return err
 		}
 		if info.IsDir() {
+			return nil
+		}
+		if _, skip := generatedFiles[path]; skip {
 			return nil
 		}
 		if info.ModTime().After(latest) {
@@ -506,6 +541,9 @@ func getGoSourceModTime() (time.Time, error) {
 func Dev() error {
 	// Ensure generated Go code is up to date.
 	if err := GenerateGo(); err != nil {
+		return err
+	}
+	if err := BuildLinuxBinary(); err != nil {
 		return err
 	}
 	// Build the frontend once to ensure web/dist/ exists for Go compilation.
@@ -554,6 +592,11 @@ func Dev() error {
 				time.Sleep(2 * time.Second)
 				continue
 			}
+			if err := BuildLinuxBinary(); err != nil {
+				fmt.Printf("BuildLinuxBinary error: %v\n", err)
+				time.Sleep(2 * time.Second)
+				continue
+			}
 
 			if serverCmd != nil && serverCmd.Process != nil {
 				printCmd("restarting server")
@@ -561,8 +604,10 @@ func Dev() error {
 				serverCmd.Wait()
 			}
 
-			printCmd("go", "build", "-o", ".mage/server", "./")
-			buildCmd := exec.Command("go", "build", "-o", ".mage/server", "./")
+			devBuildArgs := append([]string{"build"}, goBuildTags()...)
+			devBuildArgs = append(devBuildArgs, "-o", ".mage/server", "./")
+			printCmdLine(append([]string{"go"}, devBuildArgs...))
+			buildCmd := exec.Command("go", devBuildArgs...)
 			buildCmd.Stdout = os.Stdout
 			buildCmd.Stderr = os.Stderr
 			if err := buildCmd.Run(); err != nil {
@@ -623,7 +668,9 @@ func Preview() error {
 				cmd.Wait()
 			}
 
-			buildCmd := exec.Command("go", "build", "-o", ".mage/server", "./")
+			previewBuildArgs := append([]string{"build"}, goBuildTags()...)
+			previewBuildArgs = append(previewBuildArgs, "-o", ".mage/server", "./")
+			buildCmd := exec.Command("go", previewBuildArgs...)
 			buildCmd.Stdout = os.Stdout
 			buildCmd.Stderr = os.Stderr
 			if err := buildCmd.Run(); err != nil {
