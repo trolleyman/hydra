@@ -20,8 +20,9 @@ RUN apt-get update && apt-get install -y \
 
 ENV DEVCONTAINER=true
 
-# Install Claude Code.
-RUN curl -fsSL https://claude.ai/install.sh | bash
+# Install Claude Code and make it available to all users.
+RUN curl -fsSL https://claude.ai/install.sh | bash && \
+    cp -L /root/.local/bin/claude /usr/local/bin/claude
 
 # Entrypoint: creates a matching host user at runtime, then exec's the command as that user.
 # AGENT_UID, AGENT_GID, AGENT_USER, AGENT_GROUP, AGENT_HOME are passed as container env vars.
