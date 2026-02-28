@@ -105,13 +105,16 @@ function AgentDetail({
   agent,
   projectId,
   onKilled,
+  onRestarted,
 }: {
   agent: AgentResponse
   projectId: string | null
   onKilled: (id: string) => void
+  onRestarted: (agent: AgentResponse) => void
 }) {
   const [killing, setKilling] = useState(false)
   const [merging, setMerging] = useState(false)
+  const [restarting, setRestarting] = useState(false)
   const [, setTick] = useState(0)
 
   useEffect(() => {
@@ -157,6 +160,21 @@ function AgentDetail({
     }
   }
 
+  async function handleRestart() {
+    if (!window.confirm(`Are you sure you want to restart agent "${agent.id}"?\n\nThis will discard all progress (container, worktree, branch) and restart with the same prompt.`)) {
+      return
+    }
+    setRestarting(true)
+    try {
+      const newAgent = await api.default.restartAgent(agent.id, projectId ?? undefined)
+      onRestarted(newAgent)
+    } catch (err) {
+      alert(`Failed to restart agent: ${err}`)
+    } finally {
+      setRestarting(false)
+    }
+  }
+
   return (
     <div className="flex-1 overflow-auto p-6">
       <div className="w-full">
@@ -167,7 +185,7 @@ function AgentDetail({
             <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">{agent.id}</h1>
             <button
               onClick={handleMerge}
-              disabled={merging || killing}
+              disabled={merging || killing || restarting}
               className="ml-2 w-6 h-6 flex items-center justify-center rounded-md border border-green-200 text-green-600 hover:bg-green-50 dark:border-green-900/30 dark:text-green-400 dark:hover:bg-green-900/20 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
               title="Merge agent"
             >
@@ -183,8 +201,25 @@ function AgentDetail({
               )}
             </button>
             <button
+              onClick={handleRestart}
+              disabled={restarting || killing || merging}
+              className="w-6 h-6 flex items-center justify-center rounded-md border border-amber-200 text-amber-600 hover:bg-amber-50 dark:border-amber-900/30 dark:text-amber-400 dark:hover:bg-amber-900/20 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+              title="Restart agent (discard all progress and restart with same prompt)"
+            >
+              {restarting ? (
+                <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                </svg>
+              ) : (
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+              )}
+            </button>
+            <button
               onClick={handleKill}
-              disabled={killing || merging}
+              disabled={killing || merging || restarting}
               className="w-6 h-6 flex items-center justify-center rounded-md border border-red-200 text-red-500 hover:bg-red-50 dark:border-red-900/30 dark:text-red-400 dark:hover:bg-red-900/20 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
               title="Kill agent"
             >
@@ -627,6 +662,10 @@ function HomePage() {
     }
   }
 
+  function handleRestarted(agent: AgentResponse) {
+    setAgents((prev) => prev.map((a) => a.id === agent.id ? agent : a))
+  }
+
   if (loading) {
     return (
       <div className="flex-1 flex items-center justify-center text-gray-400 dark:text-gray-500">
@@ -692,7 +731,7 @@ function HomePage() {
       {showSpawn ? (
         <SpawnForm projectId={selectedProjectId} onSpawned={handleSpawned} />
       ) : selectedAgent ? (
-        <AgentDetail agent={selectedAgent} projectId={selectedProjectId} onKilled={handleKilled} />
+        <AgentDetail agent={selectedAgent} projectId={selectedProjectId} onKilled={handleKilled} onRestarted={handleRestarted} />
       ) : (
         <EmptyDetail onSpawn={() => setShowSpawn(true)} />
       )}
