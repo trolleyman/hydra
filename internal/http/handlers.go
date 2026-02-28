@@ -306,6 +306,85 @@ func (s *Server) MergeAgent(ctx context.Context, request api.MergeAgentRequestOb
 	return api.MergeAgent204Response{}, nil
 }
 
+func (s *Server) RestartAgent(ctx context.Context, request api.RestartAgentRequestObject) (api.RestartAgentResponseObject, error) {
+	projectRoot := s.resolveProjectRoot(request.Params.ProjectId)
+	head, err := heads.GetHeadByID(ctx, s.DockerClient, projectRoot, request.Id)
+	if err != nil {
+		code := 500
+		msg := err.Error()
+		return api.RestartAgent500JSONResponse{Code: code, Error: msg}, nil
+	}
+	if head == nil {
+		code := 404
+		msg := "agent not found"
+		return api.RestartAgent404JSONResponse{Code: code, Error: msg}, nil
+	}
+
+	// Save the fields we need to respawn.
+	id := head.ID
+	prompt := head.Prompt
+	prePrompt := head.PrePrompt
+	agentType := head.AgentType
+	baseBranch := head.BaseBranch
+
+	// Kill the existing head (container, worktree, branch).
+	if err := heads.KillHead(ctx, s.DockerClient, *head); err != nil {
+		code := 500
+		msg := err.Error()
+		return api.RestartAgent500JSONResponse{Code: code, Error: msg}, nil
+	}
+
+	// Resolve dockerfile from config (same as SpawnAgent).
+	dockerfilePath := ""
+	if cfg, cfgErr := config.Load(projectRoot); cfgErr == nil {
+		rel := cfg.GetDockerfileForAgent(projectRoot, string(agentType))
+		if rel != "" {
+			if filepath.IsAbs(rel) {
+				dockerfilePath = rel
+			} else {
+				dockerfilePath = filepath.Join(projectRoot, rel)
+			}
+		}
+		// Override pre_prompt from config if we didn't already have one stored.
+		if prePrompt == "" && cfg.PrePrompt != nil {
+			prePrompt = *cfg.PrePrompt
+		}
+	}
+
+	newHead, err := heads.SpawnHead(ctx, s.DockerClient, projectRoot, heads.SpawnHeadOptions{
+		ID:             id,
+		PrePrompt:      prePrompt,
+		Prompt:         prompt,
+		AgentType:      agentType,
+		BaseBranch:     baseBranch,
+		DockerfilePath: dockerfilePath,
+	})
+	if err != nil {
+		code := 500
+		msg := err.Error()
+		return api.RestartAgent500JSONResponse{Code: code, Error: msg}, nil
+	}
+
+	var restartCreatedAt *int64
+	if newHead.CreatedAt != 0 {
+		restartCreatedAt = &newHead.CreatedAt
+	}
+	return api.RestartAgent200JSONResponse(api.AgentResponse{
+		Id:              newHead.ID,
+		BranchName:      newHead.Branch,
+		WorktreePath:    newHead.Worktree,
+		ProjectPath:     newHead.ProjectPath,
+		ContainerId:     newHead.ContainerID,
+		ContainerStatus: newHead.ContainerStatus,
+		AgentType:       string(newHead.AgentType),
+		PrePrompt:       newHead.PrePrompt,
+		Prompt:          newHead.Prompt,
+		BaseBranch:      newHead.BaseBranch,
+		CreatedAt:       restartCreatedAt,
+		AgentStatus:     newHead.AgentStatus,
+	}), nil
+}
+
 func (s *Server) KillAgent(ctx context.Context, request api.KillAgentRequestObject) (api.KillAgentResponseObject, error) {
 	projectRoot := s.resolveProjectRoot(request.Params.ProjectId)
 	head, err := heads.GetHeadByID(ctx, s.DockerClient, projectRoot, request.Id)

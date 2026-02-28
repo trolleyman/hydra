@@ -267,6 +267,12 @@ type MergeAgentParams struct {
 	ProjectId *string `form:"project_id,omitempty" json:"project_id,omitempty"`
 }
 
+// RestartAgentParams defines parameters for RestartAgent.
+type RestartAgentParams struct {
+	// ProjectId Project ID to scope the lookup (defaults to server CWD project)
+	ProjectId *string `form:"project_id,omitempty" json:"project_id,omitempty"`
+}
+
 // ListAgentsParams defines parameters for ListAgents.
 type ListAgentsParams struct {
 	// ProjectId Project ID to scope the agent list (defaults to server CWD project)
@@ -302,6 +308,9 @@ type ServerInterface interface {
 	// Merge a Hydra agent's branch into its base branch and kill it
 	// (POST /api/agent/{id}/merge)
 	MergeAgent(w http.ResponseWriter, r *http.Request, id string, params MergeAgentParams)
+	// Restart a Hydra agent (kill and respawn with the same prompt)
+	// (POST /api/agent/{id}/restart)
+	RestartAgent(w http.ResponseWriter, r *http.Request, id string, params RestartAgentParams)
 	// List all Hydra agents (heads)
 	// (GET /api/agents)
 	ListAgents(w http.ResponseWriter, r *http.Request, params ListAgentsParams)
@@ -526,6 +535,42 @@ func (siw *ServerInterfaceWrapper) MergeAgent(w http.ResponseWriter, r *http.Req
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.MergeAgent(w, r, id, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RestartAgent operation middleware
+func (siw *ServerInterfaceWrapper) RestartAgent(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params RestartAgentParams
+
+	// ------------- Optional query parameter "project_id" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "project_id", r.URL.Query(), &params.ProjectId)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RestartAgent(w, r, id, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -770,6 +815,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("GET "+options.BaseURL+"/api/agent/{id}/commits", wrapper.GetAgentCommits)
 	m.HandleFunc("GET "+options.BaseURL+"/api/agent/{id}/diff", wrapper.GetAgentDiff)
 	m.HandleFunc("POST "+options.BaseURL+"/api/agent/{id}/merge", wrapper.MergeAgent)
+	m.HandleFunc("POST "+options.BaseURL+"/api/agent/{id}/restart", wrapper.RestartAgent)
 	m.HandleFunc("GET "+options.BaseURL+"/api/agents", wrapper.ListAgents)
 	m.HandleFunc("POST "+options.BaseURL+"/api/agents", wrapper.SpawnAgent)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects", wrapper.ListProjects)
@@ -967,6 +1013,42 @@ func (response MergeAgent500JSONResponse) VisitMergeAgentResponse(w http.Respons
 	return json.NewEncoder(w).Encode(response)
 }
 
+type RestartAgentRequestObject struct {
+	Id     string `json:"id"`
+	Params RestartAgentParams
+}
+
+type RestartAgentResponseObject interface {
+	VisitRestartAgentResponse(w http.ResponseWriter) error
+}
+
+type RestartAgent200JSONResponse AgentResponse
+
+func (response RestartAgent200JSONResponse) VisitRestartAgentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type RestartAgent404JSONResponse ErrorResponse
+
+func (response RestartAgent404JSONResponse) VisitRestartAgentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type RestartAgent500JSONResponse ErrorResponse
+
+func (response RestartAgent500JSONResponse) VisitRestartAgentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 type ListAgentsRequestObject struct {
 	Params ListAgentsParams
 }
@@ -1148,6 +1230,9 @@ type StrictServerInterface interface {
 	// Merge a Hydra agent's branch into its base branch and kill it
 	// (POST /api/agent/{id}/merge)
 	MergeAgent(ctx context.Context, request MergeAgentRequestObject) (MergeAgentResponseObject, error)
+	// Restart a Hydra agent (kill and respawn with the same prompt)
+	// (POST /api/agent/{id}/restart)
+	RestartAgent(ctx context.Context, request RestartAgentRequestObject) (RestartAgentResponseObject, error)
 	// List all Hydra agents (heads)
 	// (GET /api/agents)
 	ListAgents(ctx context.Context, request ListAgentsRequestObject) (ListAgentsResponseObject, error)
@@ -1325,6 +1410,33 @@ func (sh *strictHandler) MergeAgent(w http.ResponseWriter, r *http.Request, id s
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(MergeAgentResponseObject); ok {
 		if err := validResponse.VisitMergeAgentResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RestartAgent operation middleware
+func (sh *strictHandler) RestartAgent(w http.ResponseWriter, r *http.Request, id string, params RestartAgentParams) {
+	var request RestartAgentRequestObject
+
+	request.Id = id
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RestartAgent(ctx, request.(RestartAgentRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RestartAgent")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RestartAgentResponseObject); ok {
+		if err := validResponse.VisitRestartAgentResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

@@ -118,6 +118,32 @@ export class DefaultService {
         });
     }
     /**
+     * Restart a Hydra agent (kill and respawn with the same prompt)
+     * @param id
+     * @param projectId Project ID to scope the lookup (defaults to server CWD project)
+     * @returns AgentResponse OK (Agent restarted, new agent returned)
+     * @throws ApiError
+     */
+    public restartAgent(
+        id: string,
+        projectId?: string,
+    ): CancelablePromise<AgentResponse> {
+        return this.httpRequest.request({
+            method: 'POST',
+            url: '/api/agent/{id}/restart',
+            path: {
+                'id': id,
+            },
+            query: {
+                'project_id': projectId,
+            },
+            errors: {
+                404: `Not Found`,
+                500: `Internal Server Error`,
+            },
+        });
+    }
+    /**
      * Merge a Hydra agent's branch into its base branch and kill it
      * @param id
      * @param projectId Project ID to scope the lookup (defaults to server CWD project)
