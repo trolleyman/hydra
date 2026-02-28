@@ -72,6 +72,7 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 
 	// WebSocket → container stdin (reads from ws, writes to docker attach)
 	go func() {
+		sentRedraw := false
 		for {
 			msgType, data, err := conn.ReadMessage()
 			if err != nil {
@@ -89,6 +90,14 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 						Height: msg.Rows,
 						Width:  msg.Cols,
 					})
+					// After the first resize (which sets correct terminal dimensions),
+					// inject Ctrl+L to force the TUI to clear and fully redraw.
+					// Without this, a newly connected terminal is blank because Claude/Gemini
+					// only sends cursor-relative delta updates, not a full screen repaint.
+					if !sentRedraw {
+						sentRedraw = true
+						_, _ = attach.Conn.Write([]byte{'\x0c'})
+					}
 				}
 			}
 		}
