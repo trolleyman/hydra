@@ -1,4 +1,4 @@
-# Gemini Guidelines for Hydra
+# Guidelines for Hydra
 
 Hydra is an AI orchestration platform for managing autonomous agents (Heads).
 

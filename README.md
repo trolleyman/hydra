@@ -23,7 +23,17 @@ Hydra manages:
 
 Build the entire project (backend and frontend):
 ```bash
-mage build:all
+mage build
+```
+
+Run the development server (with auto-rebuild):
+```bash
+mage dev
+```
+
+Or build and run in one command:
+```bash
+mage run
 ```
 
 ### Running
