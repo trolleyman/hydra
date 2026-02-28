@@ -481,16 +481,25 @@ function SpawnForm({
               {/* Footer bar */}
               <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100 dark:border-gray-700 gap-4">
                 <div className="flex items-center gap-2 min-w-0 flex-1">
-                  {/* Agent type dropdown */}
-                  <select
-                    value={agentType}
-                    onChange={(e) => setAgentType(e.target.value as AgentTypeOption)}
-                    className="text-xs bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-md px-2 py-1 focus:outline-none focus:border-blue-300 dark:focus:border-blue-500 cursor-pointer shrink-0"
-                  >
+                  {/* Agent type pills */}
+                  <div className="flex gap-1.5 shrink-0">
                     {(['claude', 'gemini'] as AgentTypeOption[]).map((t) => (
-                      <option key={t} value={t}>{t}</option>
+                      <button
+                        key={t}
+                        type="button"
+                        onClick={() => setAgentType(t)}
+                        className={`text-xs px-3 py-1 rounded-full font-medium transition-all cursor-pointer ${
+                          agentType === t
+                            ? t === 'claude'
+                              ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300 shadow-sm'
+                              : 'bg-teal-100 text-teal-700 dark:bg-teal-900/40 dark:text-teal-300 shadow-sm'
+                            : 'text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
+                        }`}
+                      >
+                        {t}
+                      </button>
                     ))}
-                  </select>
+                  </div>
                   {/* Divider */}
                   <span className="text-gray-200 dark:text-gray-600 text-sm shrink-0">|</span>
                   {/* ID field */}
