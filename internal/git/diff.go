@@ -25,8 +25,8 @@ type DiffLineType string
 
 const (
 	DiffLineContext   DiffLineType = "context"
-	DiffLineAddition DiffLineType = "addition"
-	DiffLineDeletion DiffLineType = "deletion"
+	DiffLineAddition  DiffLineType = "addition"
+	DiffLineDeletion  DiffLineType = "deletion"
 	DiffLineNoNewline DiffLineType = "no_newline"
 )
 
@@ -151,7 +151,7 @@ func GetDiff(projectRoot, baseRef, headRef string, ignoreWhitespace, useTripleDo
 		}
 	}
 
-	return parseDiff(string(out))
+	return errtrace.Wrap2(parseDiff(string(out)))
 }
 
 // parseDiff parses the output of `git diff --no-color` into a slice of DiffFile.

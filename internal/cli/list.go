@@ -8,6 +8,7 @@ import (
 
 	"braces.dev/errtrace"
 	"github.com/spf13/cobra"
+	"github.com/trolleyman/hydra/internal/db"
 	"github.com/trolleyman/hydra/internal/docker"
 	"github.com/trolleyman/hydra/internal/heads"
 	"github.com/trolleyman/hydra/internal/paths"
@@ -32,7 +33,12 @@ var listCmd = &cobra.Command{
 		}
 		defer cli.Close()
 
-		hs, err := heads.ListHeads(context.Background(), cli, projectRoot)
+		store, err := db.Open(projectRoot)
+		if err != nil {
+			return errtrace.Wrap(err)
+		}
+
+		hs, err := heads.ListHeads(context.Background(), cli, store, projectRoot)
 		if err != nil {
 			return errtrace.Wrap(err)
 		}

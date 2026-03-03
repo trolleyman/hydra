@@ -51,6 +51,14 @@ func GetWorktreeDirFromProjectRoot(projectRoot, id string) string {
 	return filepath.Join(GetWorktreesDirFromProjectRoot(projectRoot), id)
 }
 
+func GetStateDirFromProjectRoot(projectRoot string) string {
+	return filepath.Join(GetHydraDirFromProjectRoot(projectRoot), "state")
+}
+
+func GetDBPathFromProjectRoot(projectRoot string) string {
+	return filepath.Join(GetStateDirFromProjectRoot(projectRoot), "db.sqlite3")
+}
+
 func GetStatusJsonFromProjectRoot(projectRoot, id string) string {
 	return filepath.Join(GetHydraDirFromProjectRoot(projectRoot), "status", id+".json")
 }

@@ -11,21 +11,21 @@ import (
 	"fmt"
 	"net/http"
 
+	"braces.dev/errtrace"
 	"github.com/oapi-codegen/runtime"
 	strictnethttp "github.com/oapi-codegen/runtime/strictmiddleware/nethttp"
 )
 
 // Defines values for AgentStatus.
 const (
-	Building  AgentStatus = "building"
-	Deploying AgentStatus = "deploying"
-	Ended     AgentStatus = "ended"
-	Exited    AgentStatus = "exited"
-	Pending   AgentStatus = "pending"
-	Running   AgentStatus = "running"
-	Starting  AgentStatus = "starting"
-	Unknown   AgentStatus = "unknown"
-	Waiting   AgentStatus = "waiting"
+	Building AgentStatus = "building"
+	Killing  AgentStatus = "killing"
+	Merging  AgentStatus = "merging"
+	Pending  AgentStatus = "pending"
+	Running  AgentStatus = "running"
+	Starting AgentStatus = "starting"
+	Stopped  AgentStatus = "stopped"
+	Waiting  AgentStatus = "waiting"
 )
 
 // Defines values for DiffFileChangeType.
@@ -68,7 +68,7 @@ type AgentResponse struct {
 	WorktreePath *string `json:"worktree_path"`
 }
 
-// AgentStatus The hook-reported status of the agent session
+// AgentStatus The computed status of the agent (derived from container, agent, and head status)
 type AgentStatus string
 
 // AgentStatusInfo defines model for AgentStatusInfo.
@@ -82,7 +82,7 @@ type AgentStatusInfo struct {
 	// Reason Session end reason (only present on SessionEnd events)
 	Reason *string `json:"reason,omitempty"`
 
-	// Status The hook-reported status of the agent session
+	// Status The computed status of the agent (derived from container, agent, and head status)
 	Status AgentStatus `json:"status"`
 
 	// Timestamp ISO 8601 timestamp of when the status was set
@@ -870,7 +870,16 @@ func (response KillAgent404JSONResponse) VisitKillAgentResponse(w http.ResponseW
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(404)
 
-	return json.NewEncoder(w).Encode(response)
+	return errtrace.Wrap(json.NewEncoder(w).Encode(response))
+}
+
+type KillAgent409JSONResponse ErrorResponse
+
+func (response KillAgent409JSONResponse) VisitKillAgentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+
+	return errtrace.Wrap(json.NewEncoder(w).Encode(response))
 }
 
 type KillAgent500JSONResponse ErrorResponse
@@ -879,7 +888,7 @@ func (response KillAgent500JSONResponse) VisitKillAgentResponse(w http.ResponseW
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(500)
 
-	return json.NewEncoder(w).Encode(response)
+	return errtrace.Wrap(json.NewEncoder(w).Encode(response))
 }
 
 type GetAgentRequestObject struct {
@@ -897,7 +906,7 @@ func (response GetAgent200JSONResponse) VisitGetAgentResponse(w http.ResponseWri
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(200)
 
-	return json.NewEncoder(w).Encode(response)
+	return errtrace.Wrap(json.NewEncoder(w).Encode(response))
 }
 
 type GetAgent404JSONResponse ErrorResponse
@@ -906,7 +915,7 @@ func (response GetAgent404JSONResponse) VisitGetAgentResponse(w http.ResponseWri
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(404)
 
-	return json.NewEncoder(w).Encode(response)
+	return errtrace.Wrap(json.NewEncoder(w).Encode(response))
 }
 
 type GetAgent500JSONResponse ErrorResponse
@@ -915,7 +924,7 @@ func (response GetAgent500JSONResponse) VisitGetAgentResponse(w http.ResponseWri
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(500)
 
-	return json.NewEncoder(w).Encode(response)
+	return errtrace.Wrap(json.NewEncoder(w).Encode(response))
 }
 
 type GetAgentCommitsRequestObject struct {
@@ -933,7 +942,7 @@ func (response GetAgentCommits200JSONResponse) VisitGetAgentCommitsResponse(w ht
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(200)
 
-	return json.NewEncoder(w).Encode(response)
+	return errtrace.Wrap(json.NewEncoder(w).Encode(response))
 }
 
 type GetAgentCommits404JSONResponse ErrorResponse
@@ -942,7 +951,7 @@ func (response GetAgentCommits404JSONResponse) VisitGetAgentCommitsResponse(w ht
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(404)
 
-	return json.NewEncoder(w).Encode(response)
+	return errtrace.Wrap(json.NewEncoder(w).Encode(response))
 }
 
 type GetAgentCommits500JSONResponse ErrorResponse
@@ -951,7 +960,7 @@ func (response GetAgentCommits500JSONResponse) VisitGetAgentCommitsResponse(w ht
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(500)
 
-	return json.NewEncoder(w).Encode(response)
+	return errtrace.Wrap(json.NewEncoder(w).Encode(response))
 }
 
 type GetAgentDiffRequestObject struct {
@@ -969,7 +978,7 @@ func (response GetAgentDiff200JSONResponse) VisitGetAgentDiffResponse(w http.Res
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(200)
 
-	return json.NewEncoder(w).Encode(response)
+	return errtrace.Wrap(json.NewEncoder(w).Encode(response))
 }
 
 type GetAgentDiff404JSONResponse ErrorResponse
@@ -978,7 +987,7 @@ func (response GetAgentDiff404JSONResponse) VisitGetAgentDiffResponse(w http.Res
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(404)
 
-	return json.NewEncoder(w).Encode(response)
+	return errtrace.Wrap(json.NewEncoder(w).Encode(response))
 }
 
 type GetAgentDiff500JSONResponse ErrorResponse
@@ -987,7 +996,7 @@ func (response GetAgentDiff500JSONResponse) VisitGetAgentDiffResponse(w http.Res
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(500)
 
-	return json.NewEncoder(w).Encode(response)
+	return errtrace.Wrap(json.NewEncoder(w).Encode(response))
 }
 
 type MergeAgentRequestObject struct {
@@ -1013,7 +1022,7 @@ func (response MergeAgent400JSONResponse) VisitMergeAgentResponse(w http.Respons
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(400)
 
-	return json.NewEncoder(w).Encode(response)
+	return errtrace.Wrap(json.NewEncoder(w).Encode(response))
 }
 
 type MergeAgent404JSONResponse ErrorResponse
@@ -1022,7 +1031,16 @@ func (response MergeAgent404JSONResponse) VisitMergeAgentResponse(w http.Respons
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(404)
 
-	return json.NewEncoder(w).Encode(response)
+	return errtrace.Wrap(json.NewEncoder(w).Encode(response))
+}
+
+type MergeAgent409JSONResponse ErrorResponse
+
+func (response MergeAgent409JSONResponse) VisitMergeAgentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+
+	return errtrace.Wrap(json.NewEncoder(w).Encode(response))
 }
 
 type MergeAgent500JSONResponse ErrorResponse
@@ -1031,7 +1049,7 @@ func (response MergeAgent500JSONResponse) VisitMergeAgentResponse(w http.Respons
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(500)
 
-	return json.NewEncoder(w).Encode(response)
+	return errtrace.Wrap(json.NewEncoder(w).Encode(response))
 }
 
 type RestartAgentRequestObject struct {
@@ -1049,7 +1067,7 @@ func (response RestartAgent200JSONResponse) VisitRestartAgentResponse(w http.Res
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(200)
 
-	return json.NewEncoder(w).Encode(response)
+	return errtrace.Wrap(json.NewEncoder(w).Encode(response))
 }
 
 type RestartAgent404JSONResponse ErrorResponse
@@ -1058,7 +1076,16 @@ func (response RestartAgent404JSONResponse) VisitRestartAgentResponse(w http.Res
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(404)
 
-	return json.NewEncoder(w).Encode(response)
+	return errtrace.Wrap(json.NewEncoder(w).Encode(response))
+}
+
+type RestartAgent409JSONResponse ErrorResponse
+
+func (response RestartAgent409JSONResponse) VisitRestartAgentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+
+	return errtrace.Wrap(json.NewEncoder(w).Encode(response))
 }
 
 type RestartAgent500JSONResponse ErrorResponse
@@ -1067,7 +1094,7 @@ func (response RestartAgent500JSONResponse) VisitRestartAgentResponse(w http.Res
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(500)
 
-	return json.NewEncoder(w).Encode(response)
+	return errtrace.Wrap(json.NewEncoder(w).Encode(response))
 }
 
 type ListAgentsRequestObject struct {
@@ -1084,7 +1111,7 @@ func (response ListAgents200JSONResponse) VisitListAgentsResponse(w http.Respons
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(200)
 
-	return json.NewEncoder(w).Encode(response)
+	return errtrace.Wrap(json.NewEncoder(w).Encode(response))
 }
 
 type ListAgents500JSONResponse ErrorResponse
@@ -1093,7 +1120,7 @@ func (response ListAgents500JSONResponse) VisitListAgentsResponse(w http.Respons
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(500)
 
-	return json.NewEncoder(w).Encode(response)
+	return errtrace.Wrap(json.NewEncoder(w).Encode(response))
 }
 
 type SpawnAgentRequestObject struct {
@@ -1111,7 +1138,7 @@ func (response SpawnAgent201JSONResponse) VisitSpawnAgentResponse(w http.Respons
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(201)
 
-	return json.NewEncoder(w).Encode(response)
+	return errtrace.Wrap(json.NewEncoder(w).Encode(response))
 }
 
 type SpawnAgent400JSONResponse ErrorResponse
@@ -1120,7 +1147,7 @@ func (response SpawnAgent400JSONResponse) VisitSpawnAgentResponse(w http.Respons
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(400)
 
-	return json.NewEncoder(w).Encode(response)
+	return errtrace.Wrap(json.NewEncoder(w).Encode(response))
 }
 
 type SpawnAgent500JSONResponse ErrorResponse
@@ -1129,7 +1156,7 @@ func (response SpawnAgent500JSONResponse) VisitSpawnAgentResponse(w http.Respons
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(500)
 
-	return json.NewEncoder(w).Encode(response)
+	return errtrace.Wrap(json.NewEncoder(w).Encode(response))
 }
 
 type DevRestartRequestObject struct {
@@ -1153,7 +1180,7 @@ func (response DevRestart403JSONResponse) VisitDevRestartResponse(w http.Respons
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(403)
 
-	return json.NewEncoder(w).Encode(response)
+	return errtrace.Wrap(json.NewEncoder(w).Encode(response))
 }
 
 type ListProjectsRequestObject struct {
@@ -1169,7 +1196,7 @@ func (response ListProjects200JSONResponse) VisitListProjectsResponse(w http.Res
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(200)
 
-	return json.NewEncoder(w).Encode(response)
+	return errtrace.Wrap(json.NewEncoder(w).Encode(response))
 }
 
 type ListProjects500JSONResponse ErrorResponse
@@ -1178,7 +1205,7 @@ func (response ListProjects500JSONResponse) VisitListProjectsResponse(w http.Res
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(500)
 
-	return json.NewEncoder(w).Encode(response)
+	return errtrace.Wrap(json.NewEncoder(w).Encode(response))
 }
 
 type AddProjectRequestObject struct {
@@ -1195,7 +1222,7 @@ func (response AddProject201JSONResponse) VisitAddProjectResponse(w http.Respons
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(201)
 
-	return json.NewEncoder(w).Encode(response)
+	return errtrace.Wrap(json.NewEncoder(w).Encode(response))
 }
 
 type AddProject400JSONResponse ErrorResponse
@@ -1204,7 +1231,7 @@ func (response AddProject400JSONResponse) VisitAddProjectResponse(w http.Respons
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(400)
 
-	return json.NewEncoder(w).Encode(response)
+	return errtrace.Wrap(json.NewEncoder(w).Encode(response))
 }
 
 type AddProject500JSONResponse ErrorResponse
@@ -1213,7 +1240,7 @@ func (response AddProject500JSONResponse) VisitAddProjectResponse(w http.Respons
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(500)
 
-	return json.NewEncoder(w).Encode(response)
+	return errtrace.Wrap(json.NewEncoder(w).Encode(response))
 }
 
 type GetStatusRequestObject struct {
@@ -1229,7 +1256,7 @@ func (response GetStatus200JSONResponse) VisitGetStatusResponse(w http.ResponseW
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(200)
 
-	return json.NewEncoder(w).Encode(response)
+	return errtrace.Wrap(json.NewEncoder(w).Encode(response))
 }
 
 type GetStatus500JSONResponse ErrorResponse
@@ -1238,7 +1265,7 @@ func (response GetStatus500JSONResponse) VisitGetStatusResponse(w http.ResponseW
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(500)
 
-	return json.NewEncoder(w).Encode(response)
+	return errtrace.Wrap(json.NewEncoder(w).Encode(response))
 }
 
 type CheckHealthRequestObject struct {
@@ -1255,7 +1282,7 @@ func (response CheckHealth200TextResponse) VisitCheckHealthResponse(w http.Respo
 	w.WriteHeader(200)
 
 	_, err := w.Write([]byte(response))
-	return err
+	return errtrace.Wrap(err)
 }
 
 // StrictServerInterface represents all server handlers.
@@ -1338,7 +1365,7 @@ func (sh *strictHandler) KillAgent(w http.ResponseWriter, r *http.Request, id st
 	request.Params = params
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.KillAgent(ctx, request.(KillAgentRequestObject))
+		return errtrace.Wrap2(sh.ssi.KillAgent(ctx, request.(KillAgentRequestObject)))
 	}
 	for _, middleware := range sh.middlewares {
 		handler = middleware(handler, "KillAgent")
@@ -1365,7 +1392,7 @@ func (sh *strictHandler) GetAgent(w http.ResponseWriter, r *http.Request, id str
 	request.Params = params
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.GetAgent(ctx, request.(GetAgentRequestObject))
+		return errtrace.Wrap2(sh.ssi.GetAgent(ctx, request.(GetAgentRequestObject)))
 	}
 	for _, middleware := range sh.middlewares {
 		handler = middleware(handler, "GetAgent")
@@ -1392,7 +1419,7 @@ func (sh *strictHandler) GetAgentCommits(w http.ResponseWriter, r *http.Request,
 	request.Params = params
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.GetAgentCommits(ctx, request.(GetAgentCommitsRequestObject))
+		return errtrace.Wrap2(sh.ssi.GetAgentCommits(ctx, request.(GetAgentCommitsRequestObject)))
 	}
 	for _, middleware := range sh.middlewares {
 		handler = middleware(handler, "GetAgentCommits")
@@ -1419,7 +1446,7 @@ func (sh *strictHandler) GetAgentDiff(w http.ResponseWriter, r *http.Request, id
 	request.Params = params
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.GetAgentDiff(ctx, request.(GetAgentDiffRequestObject))
+		return errtrace.Wrap2(sh.ssi.GetAgentDiff(ctx, request.(GetAgentDiffRequestObject)))
 	}
 	for _, middleware := range sh.middlewares {
 		handler = middleware(handler, "GetAgentDiff")
@@ -1446,7 +1473,7 @@ func (sh *strictHandler) MergeAgent(w http.ResponseWriter, r *http.Request, id s
 	request.Params = params
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.MergeAgent(ctx, request.(MergeAgentRequestObject))
+		return errtrace.Wrap2(sh.ssi.MergeAgent(ctx, request.(MergeAgentRequestObject)))
 	}
 	for _, middleware := range sh.middlewares {
 		handler = middleware(handler, "MergeAgent")
@@ -1473,7 +1500,7 @@ func (sh *strictHandler) RestartAgent(w http.ResponseWriter, r *http.Request, id
 	request.Params = params
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.RestartAgent(ctx, request.(RestartAgentRequestObject))
+		return errtrace.Wrap2(sh.ssi.RestartAgent(ctx, request.(RestartAgentRequestObject)))
 	}
 	for _, middleware := range sh.middlewares {
 		handler = middleware(handler, "RestartAgent")
@@ -1499,7 +1526,7 @@ func (sh *strictHandler) ListAgents(w http.ResponseWriter, r *http.Request, para
 	request.Params = params
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.ListAgents(ctx, request.(ListAgentsRequestObject))
+		return errtrace.Wrap2(sh.ssi.ListAgents(ctx, request.(ListAgentsRequestObject)))
 	}
 	for _, middleware := range sh.middlewares {
 		handler = middleware(handler, "ListAgents")
@@ -1532,7 +1559,7 @@ func (sh *strictHandler) SpawnAgent(w http.ResponseWriter, r *http.Request, para
 	request.Body = &body
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.SpawnAgent(ctx, request.(SpawnAgentRequestObject))
+		return errtrace.Wrap2(sh.ssi.SpawnAgent(ctx, request.(SpawnAgentRequestObject)))
 	}
 	for _, middleware := range sh.middlewares {
 		handler = middleware(handler, "SpawnAgent")
@@ -1556,7 +1583,7 @@ func (sh *strictHandler) DevRestart(w http.ResponseWriter, r *http.Request) {
 	var request DevRestartRequestObject
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.DevRestart(ctx, request.(DevRestartRequestObject))
+		return errtrace.Wrap2(sh.ssi.DevRestart(ctx, request.(DevRestartRequestObject)))
 	}
 	for _, middleware := range sh.middlewares {
 		handler = middleware(handler, "DevRestart")
@@ -1580,7 +1607,7 @@ func (sh *strictHandler) ListProjects(w http.ResponseWriter, r *http.Request) {
 	var request ListProjectsRequestObject
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.ListProjects(ctx, request.(ListProjectsRequestObject))
+		return errtrace.Wrap2(sh.ssi.ListProjects(ctx, request.(ListProjectsRequestObject)))
 	}
 	for _, middleware := range sh.middlewares {
 		handler = middleware(handler, "ListProjects")
@@ -1611,7 +1638,7 @@ func (sh *strictHandler) AddProject(w http.ResponseWriter, r *http.Request) {
 	request.Body = &body
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.AddProject(ctx, request.(AddProjectRequestObject))
+		return errtrace.Wrap2(sh.ssi.AddProject(ctx, request.(AddProjectRequestObject)))
 	}
 	for _, middleware := range sh.middlewares {
 		handler = middleware(handler, "AddProject")
@@ -1635,7 +1662,7 @@ func (sh *strictHandler) GetStatus(w http.ResponseWriter, r *http.Request) {
 	var request GetStatusRequestObject
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.GetStatus(ctx, request.(GetStatusRequestObject))
+		return errtrace.Wrap2(sh.ssi.GetStatus(ctx, request.(GetStatusRequestObject)))
 	}
 	for _, middleware := range sh.middlewares {
 		handler = middleware(handler, "GetStatus")
@@ -1659,7 +1686,7 @@ func (sh *strictHandler) CheckHealth(w http.ResponseWriter, r *http.Request) {
 	var request CheckHealthRequestObject
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.CheckHealth(ctx, request.(CheckHealthRequestObject))
+		return errtrace.Wrap2(sh.ssi.CheckHealth(ctx, request.(CheckHealthRequestObject)))
 	}
 	for _, middleware := range sh.middlewares {
 		handler = middleware(handler, "CheckHealth")

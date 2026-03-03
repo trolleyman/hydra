@@ -3,6 +3,7 @@ package http
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -14,6 +15,7 @@ import (
 	dockerclient "github.com/docker/docker/client"
 	"github.com/trolleyman/hydra/internal/api"
 	"github.com/trolleyman/hydra/internal/config"
+	"github.com/trolleyman/hydra/internal/db"
 	"github.com/trolleyman/hydra/internal/docker"
 	"github.com/trolleyman/hydra/internal/git"
 	"github.com/trolleyman/hydra/internal/heads"
@@ -28,13 +30,14 @@ const devRestartExitCode = 42
 
 // Server implements StrictServerInterface.
 type Server struct {
-	WorktreesDir    string
-	ProjectRoot     string
-	DefaultProject  projects.ProjectInfo
-	ProjectsManager *projects.Manager
-	DockerClient       *dockerclient.Client
-	StartTime          time.Time
-	DevRestartEnabled  bool // set when running under mage dev / mage DevAutoReload
+	WorktreesDir      string
+	ProjectRoot       string
+	DefaultProject    projects.ProjectInfo
+	ProjectsManager   *projects.Manager
+	DockerClient      *dockerclient.Client
+	DB                *db.Store
+	StartTime         time.Time
+	DevRestartEnabled bool // set when running under mage dev / mage DevAutoReload
 }
 
 // NewHandler creates a handler with routing matching the OpenAPI spec.
@@ -106,7 +109,7 @@ func (s *Server) AddProject(_ context.Context, request api.AddProjectRequestObje
 
 func (s *Server) ListAgents(ctx context.Context, request api.ListAgentsRequestObject) (api.ListAgentsResponseObject, error) {
 	projectRoot := s.resolveProjectRoot(request.Params.ProjectId)
-	headList, err := heads.ListHeads(ctx, s.DockerClient, projectRoot)
+	headList, err := heads.ListHeads(ctx, s.DockerClient, s.DB, projectRoot)
 	if err != nil {
 		code := 500
 		msg := err.Error()
@@ -221,7 +224,7 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 		baseBranch = strings.TrimSpace(*request.Body.BaseBranch)
 	}
 
-	head, err := heads.SpawnHead(ctx, s.DockerClient, projectRoot, heads.SpawnHeadOptions{
+	head, err := heads.SpawnHead(ctx, s.DockerClient, s.DB, projectRoot, heads.SpawnHeadOptions{
 		ID:             id,
 		PrePrompt:      prePrompt,
 		Prompt:         prompt,
@@ -255,7 +258,7 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 
 func (s *Server) GetAgent(ctx context.Context, request api.GetAgentRequestObject) (api.GetAgentResponseObject, error) {
 	projectRoot := s.resolveProjectRoot(request.Params.ProjectId)
-	head, err := heads.GetHeadByID(ctx, s.DockerClient, projectRoot, request.Id)
+	head, err := heads.GetHeadByID(ctx, s.DockerClient, s.DB, projectRoot, request.Id)
 	if err != nil {
 		code := 500
 		msg := err.Error()
@@ -288,7 +291,7 @@ func (s *Server) GetAgent(ctx context.Context, request api.GetAgentRequestObject
 
 func (s *Server) MergeAgent(ctx context.Context, request api.MergeAgentRequestObject) (api.MergeAgentResponseObject, error) {
 	projectRoot := s.resolveProjectRoot(request.Params.ProjectId)
-	head, err := heads.GetHeadByID(ctx, s.DockerClient, projectRoot, request.Id)
+	head, err := heads.GetHeadByID(ctx, s.DockerClient, s.DB, projectRoot, request.Id)
 	if err != nil {
 		code := 500
 		msg := err.Error()
@@ -307,16 +310,36 @@ func (s *Server) MergeAgent(ctx context.Context, request api.MergeAgentRequestOb
 	}
 	branchName := *head.Branch
 
+	// Atomically claim the merge operation.
+	if s.DB != nil {
+		ok, err := s.DB.TrySetHeadStatus(head.ID, "idle", "merging")
+		if err != nil {
+			code := 500
+			msg := err.Error()
+			return api.MergeAgent500JSONResponse{Code: code, Error: msg}, nil
+		}
+		if !ok {
+			code := 409
+			msg := "operation already in progress"
+			return api.MergeAgent409JSONResponse{Code: code, Error: msg}, nil
+		}
+	}
+
 	var stderr bytes.Buffer
 	gitMergeCmd := exec.CommandContext(ctx, "git", "-C", projectRoot, "merge", branchName)
 	gitMergeCmd.Stderr = &stderr
 	if err := gitMergeCmd.Run(); err != nil {
+		if s.DB != nil {
+			errMsg := fmt.Sprintf("git merge failed: %s", strings.TrimSpace(stderr.String()))
+			_ = s.DB.ClearHeadStatus(head.ID, &errMsg)
+		}
 		code := 500
 		msg := fmt.Sprintf("git merge failed: %s", strings.TrimSpace(stderr.String()))
 		return api.MergeAgent500JSONResponse{Code: code, Error: msg}, nil
 	}
 
-	if err := heads.KillHead(ctx, s.DockerClient, *head); err != nil {
+	// Kill cleanup without re-doing the CAS (already in "merging" state).
+	if err := heads.KillHeadNoLock(ctx, s.DockerClient, s.DB, *head); err != nil {
 		code := 500
 		msg := err.Error()
 		return api.MergeAgent500JSONResponse{Code: code, Error: msg}, nil
@@ -327,7 +350,7 @@ func (s *Server) MergeAgent(ctx context.Context, request api.MergeAgentRequestOb
 
 func (s *Server) RestartAgent(ctx context.Context, request api.RestartAgentRequestObject) (api.RestartAgentResponseObject, error) {
 	projectRoot := s.resolveProjectRoot(request.Params.ProjectId)
-	head, err := heads.GetHeadByID(ctx, s.DockerClient, projectRoot, request.Id)
+	head, err := heads.GetHeadByID(ctx, s.DockerClient, s.DB, projectRoot, request.Id)
 	if err != nil {
 		code := 500
 		msg := err.Error()
@@ -347,7 +370,12 @@ func (s *Server) RestartAgent(ctx context.Context, request api.RestartAgentReque
 	baseBranch := head.BaseBranch
 
 	// Kill the existing head (container, worktree, branch).
-	if err := heads.KillHead(ctx, s.DockerClient, *head); err != nil {
+	if err := heads.KillHead(ctx, s.DockerClient, s.DB, *head); err != nil {
+		if errors.Is(err, db.ErrOperationInProgress) {
+			code := 409
+			msg := "operation already in progress"
+			return api.RestartAgent409JSONResponse{Code: code, Error: msg}, nil
+		}
 		code := 500
 		msg := err.Error()
 		return api.RestartAgent500JSONResponse{Code: code, Error: msg}, nil
@@ -370,7 +398,7 @@ func (s *Server) RestartAgent(ctx context.Context, request api.RestartAgentReque
 		}
 	}
 
-	newHead, err := heads.SpawnHead(ctx, s.DockerClient, projectRoot, heads.SpawnHeadOptions{
+	newHead, err := heads.SpawnHead(ctx, s.DockerClient, s.DB, projectRoot, heads.SpawnHeadOptions{
 		ID:             id,
 		PrePrompt:      prePrompt,
 		Prompt:         prompt,
@@ -406,7 +434,7 @@ func (s *Server) RestartAgent(ctx context.Context, request api.RestartAgentReque
 
 func (s *Server) KillAgent(ctx context.Context, request api.KillAgentRequestObject) (api.KillAgentResponseObject, error) {
 	projectRoot := s.resolveProjectRoot(request.Params.ProjectId)
-	head, err := heads.GetHeadByID(ctx, s.DockerClient, projectRoot, request.Id)
+	head, err := heads.GetHeadByID(ctx, s.DockerClient, s.DB, projectRoot, request.Id)
 	if err != nil {
 		code := 500
 		msg := err.Error()
@@ -418,7 +446,12 @@ func (s *Server) KillAgent(ctx context.Context, request api.KillAgentRequestObje
 		return api.KillAgent404JSONResponse{Code: code, Error: msg}, nil
 	}
 
-	if err := heads.KillHead(ctx, s.DockerClient, *head); err != nil {
+	if err := heads.KillHead(ctx, s.DockerClient, s.DB, *head); err != nil {
+		if errors.Is(err, db.ErrOperationInProgress) {
+			code := 409
+			msg := "operation already in progress"
+			return api.KillAgent409JSONResponse{Code: code, Error: msg}, nil
+		}
 		code := 500
 		msg := err.Error()
 		return api.KillAgent500JSONResponse{Code: code, Error: msg}, nil
@@ -429,7 +462,7 @@ func (s *Server) KillAgent(ctx context.Context, request api.KillAgentRequestObje
 
 func (s *Server) GetAgentCommits(ctx context.Context, request api.GetAgentCommitsRequestObject) (api.GetAgentCommitsResponseObject, error) {
 	projectRoot := s.resolveProjectRoot(request.Params.ProjectId)
-	head, err := heads.GetHeadByID(ctx, s.DockerClient, projectRoot, request.Id)
+	head, err := heads.GetHeadByID(ctx, s.DockerClient, s.DB, projectRoot, request.Id)
 	if err != nil {
 		code := 500
 		msg := err.Error()
@@ -475,7 +508,7 @@ func (s *Server) GetAgentCommits(ctx context.Context, request api.GetAgentCommit
 
 func (s *Server) GetAgentDiff(ctx context.Context, request api.GetAgentDiffRequestObject) (api.GetAgentDiffResponseObject, error) {
 	projectRoot := s.resolveProjectRoot(request.Params.ProjectId)
-	head, err := heads.GetHeadByID(ctx, s.DockerClient, projectRoot, request.Id)
+	head, err := heads.GetHeadByID(ctx, s.DockerClient, s.DB, projectRoot, request.Id)
 	if err != nil {
 		code := 500
 		msg := err.Error()

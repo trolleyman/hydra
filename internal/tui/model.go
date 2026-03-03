@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"braces.dev/errtrace"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -22,6 +23,7 @@ import (
 	dockercontainer "github.com/docker/docker/api/types/container"
 	dockerclient "github.com/docker/docker/client"
 	"github.com/trolleyman/hydra/internal/api"
+	"github.com/trolleyman/hydra/internal/db"
 	"github.com/trolleyman/hydra/internal/docker"
 	"github.com/trolleyman/hydra/internal/heads"
 )
@@ -37,6 +39,7 @@ const (
 // Model is the Bubble Tea model for the Hydra TUI.
 type Model struct {
 	client      *dockerclient.Client
+	store       *db.Store
 	projectRoot string
 	heads       []heads.Head
 	width       int
@@ -176,10 +179,11 @@ var (
 )
 
 // New creates a new TUI model.
-func New(cli *dockerclient.Client, projectRoot string) Model {
+func New(cli *dockerclient.Client, store *db.Store, projectRoot string) Model {
 	vp := viewport.New(0, 0)
 	return Model{
 		client:      cli,
+		store:       store,
 		projectRoot: projectRoot,
 		logViewport: vp,
 		focused:     panelSidebar,
@@ -196,7 +200,7 @@ func tickCmd() tea.Cmd {
 
 func (m Model) doRefresh() tea.Cmd {
 	return func() tea.Msg {
-		hs, err := heads.ListHeads(context.Background(), m.client, m.projectRoot)
+		hs, err := heads.ListHeads(context.Background(), m.client, m.store, m.projectRoot)
 		if err != nil {
 			return errMsg{err}
 		}
@@ -303,7 +307,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if head := m.selectedHead(); head != nil {
 			h := *head
 			return m, func() tea.Msg {
-				if err := heads.KillHead(context.Background(), m.client, h); err != nil {
+				if err := heads.KillHead(context.Background(), m.client, m.store, h); err != nil {
 					return errMsg{err}
 				}
 				return killDoneMsg(h.ID)
@@ -483,7 +487,7 @@ func (m Model) updateSpawnForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.statusMsg = fmt.Sprintf("Spawning agent %s...", id)
 
 			return m, func() tea.Msg {
-				if err := spawnHead(projectRoot, id, agentType, dockerfilePath, promptText, m.client); err != nil {
+				if err := spawnHead(projectRoot, id, agentType, dockerfilePath, promptText, m.client, m.store); err != nil {
 					return errMsg{err}
 				}
 				return spawnDoneMsg(id)
@@ -881,14 +885,14 @@ func isContainerRunning(status string) bool {
 	return strings.HasPrefix(s, "up") || s == "running"
 }
 
-func spawnHead(projectRoot, id string, agentType docker.AgentType, dockerfilePath, prompt string, cli *dockerclient.Client) error {
-	_, err := heads.SpawnHead(context.Background(), cli, projectRoot, heads.SpawnHeadOptions{
+func spawnHead(projectRoot, id string, agentType docker.AgentType, dockerfilePath, prompt string, cli *dockerclient.Client, store *db.Store) error {
+	_, err := heads.SpawnHead(context.Background(), cli, store, projectRoot, heads.SpawnHeadOptions{
 		ID:             id,
 		AgentType:      agentType,
 		DockerfilePath: dockerfilePath,
 		Prompt:         prompt,
 	})
-	return err
+	return errtrace.Wrap(err)
 }
 
 // currentUserInfo returns the current OS user's UID, GID, username, and primary group name.
@@ -910,7 +914,7 @@ func currentUserInfo() (uid, gid int, username, groupName string) {
 func randomTUIID() (string, error) {
 	b := make([]byte, 4)
 	if _, err := rand.Read(b); err != nil {
-		return "", err
+		return "", errtrace.Wrap(err)
 	}
 	return fmt.Sprintf("%x", b), nil
 }

@@ -34,8 +34,9 @@ import (
 type Agent struct {
 	ContainerID   string
 	ContainerName string
-	Created       int64 // Unix timestamp
-	Status        string
+	Created       int64  // Unix timestamp
+	State         string // machine-readable: "running", "exited", "stopped", etc.
+	Status        string // human-readable: "Up 2 hours", "Exited (0) 2 minutes ago", etc.
 	ImageName     string
 	Meta          *AgentMetadata
 }
@@ -82,6 +83,7 @@ func ListAgents(ctx context.Context, cli *dockerclient.Client) ([]Agent, error) 
 			ContainerID:   c.ID,
 			ContainerName: name,
 			Created:       c.Created,
+			State:         string(c.State),
 			Status:        c.Status,
 			ImageName:     c.Image,
 			Meta:          meta,
@@ -130,7 +132,7 @@ func SpawnAgent(ctx context.Context, cli *dockerclient.Client, opts SpawnOptions
 	}
 
 	if opts.OnStatus != nil {
-		opts.OnStatus(api.Deploying)
+		opts.OnStatus(api.Starting)
 	}
 	meta := &AgentMetadata{
 		Id:               opts.Id,
@@ -186,7 +188,7 @@ func SpawnAgent(ctx context.Context, cli *dockerclient.Client, opts SpawnOptions
 	var netCfg *network.NetworkingConfig
 	var platform *ocispec.Platform
 
-	containerName := "hydra-" + opts.Id
+	containerName := "hydra-agent-" + opts.Id
 	log.Printf("Creating container %s...", containerName)
 	var cmd []string
 	switch opts.AgentType {
@@ -203,7 +205,7 @@ func SpawnAgent(ctx context.Context, cli *dockerclient.Client, opts SpawnOptions
 			cmd = []string{"gemini", "--approval-mode=yolo", "-i", CombinePrompt(opts.PrePrompt, opts.Prompt)}
 		}
 	default:
-		return "", fmt.Errorf("unknown agent type: %q", opts.AgentType)
+		return "", errtrace.Wrap(fmt.Errorf("unknown agent type: %q", opts.AgentType))
 	}
 
 	resp, err := cli.ContainerCreate(ctx,
@@ -344,7 +346,7 @@ func defaultDockerfileContent(agentType AgentType) (string, error) {
 	case AgentTypeGemini:
 		return config.DefaultDockerfileGemini, nil
 	default:
-		return "", fmt.Errorf("unknown agent type: %q", agentType)
+		return "", errtrace.Wrap(fmt.Errorf("unknown agent type: %q", agentType))
 	}
 }
 
@@ -541,9 +543,9 @@ func ensureImage(ctx context.Context, cli *dockerclient.Client, agentType AgentT
 	}
 
 	if customDockerfile == "" {
-		return ensureDefaultImage(ctx, cli, agentType)
+		return errtrace.Wrap2(ensureDefaultImage(ctx, cli, agentType))
 	}
-	return ensureCustomImage(ctx, cli, agentType, customDockerfile)
+	return errtrace.Wrap2(ensureCustomImage(ctx, cli, agentType, customDockerfile))
 }
 
 func GetDefaultImageTag(agentType AgentType) string {
@@ -651,35 +653,35 @@ func buildDockerImage(ctx context.Context, cli *dockerclient.Client, tag, docker
 
 		walkErr = filepath.Walk(buildContext, func(path string, info os.FileInfo, err error) error {
 			if err != nil {
-				return err
+				return errtrace.Wrap(err)
 			}
 
 			header, err := tar.FileInfoHeader(info, info.Name())
 			if err != nil {
-				return err
+				return errtrace.Wrap(err)
 			}
 
 			rel, err := filepath.Rel(buildContext, path)
 			if err != nil {
-				return err
+				return errtrace.Wrap(err)
 			}
 
 			// Docker expects forward slashes in tar headers regardless of the host OS
 			header.Name = filepath.ToSlash(rel)
 
 			if err := tw.WriteHeader(header); err != nil {
-				return err
+				return errtrace.Wrap(err)
 			}
 			if !info.Mode().IsRegular() {
 				return nil
 			}
 			f, err := os.Open(path)
 			if err != nil {
-				return err
+				return errtrace.Wrap(err)
 			}
 			defer f.Close()
 			_, err = io.Copy(tw, f)
-			return err
+			return errtrace.Wrap(err)
 		})
 	}()
 
@@ -726,13 +728,13 @@ func buildDockerImage(ctx context.Context, cli *dockerclient.Client, tag, docker
 // `mage build`) is extracted to cacheDir/hydra and that path is returned.
 func resolveContainerHydraBin(cacheDir string) (string, error) {
 	if runtime.GOOS == "linux" {
-		return os.Executable()
+		return errtrace.Wrap2(os.Executable())
 	}
 
 	if len(embeddedLinuxBinary) == 0 {
-		return "", fmt.Errorf(
+		return "", errtrace.Wrap(fmt.Errorf(
 			"no Linux binary embedded in hydra; on non-Linux systems you must build with `mage build` or `mage dev` rather than `go run ./`",
-		)
+		))
 	}
 
 	dest := filepath.Join(cacheDir, "hydra")

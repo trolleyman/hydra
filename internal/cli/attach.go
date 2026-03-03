@@ -6,6 +6,7 @@ import (
 	"braces.dev/errtrace"
 	"github.com/cockroachdb/errors"
 	"github.com/spf13/cobra"
+	"github.com/trolleyman/hydra/internal/db"
 	"github.com/trolleyman/hydra/internal/docker"
 	"github.com/trolleyman/hydra/internal/heads"
 	"github.com/trolleyman/hydra/internal/paths"
@@ -33,7 +34,12 @@ var attachCmd = &cobra.Command{
 		}
 		defer cli.Close()
 
-		head, err := heads.GetHeadByID(context.Background(), cli, projectRoot, id)
+		store, err := db.Open(projectRoot)
+		if err != nil {
+			return errtrace.Wrap(err)
+		}
+
+		head, err := heads.GetHeadByID(context.Background(), cli, store, projectRoot, id)
 		if err != nil {
 			return errtrace.Wrap(err)
 		}

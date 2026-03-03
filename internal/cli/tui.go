@@ -4,6 +4,7 @@ import (
 	"braces.dev/errtrace"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
+	"github.com/trolleyman/hydra/internal/db"
 	"github.com/trolleyman/hydra/internal/docker"
 	"github.com/trolleyman/hydra/internal/paths"
 	"github.com/trolleyman/hydra/internal/tui"
@@ -31,7 +32,12 @@ func runTUI(_ *cobra.Command, _ []string) error {
 	}
 	defer cli.Close()
 
-	m := tui.New(cli, projectRoot)
+	store, err := db.Open(projectRoot)
+	if err != nil {
+		return errtrace.Wrap(err)
+	}
+
+	m := tui.New(cli, store, projectRoot)
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	_, err = p.Run()
 	return errtrace.Wrap(err)

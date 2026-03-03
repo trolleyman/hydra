@@ -188,6 +188,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Conflict (operation already in progress)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '500':
           description: Internal Server Error
           content:
@@ -222,6 +228,12 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         '404':
           description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Conflict (operation already in progress)
           content:
             application/json:
               schema:
@@ -384,6 +396,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Conflict (operation already in progress)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '500':
           description: Internal Server Error
           content:
@@ -468,14 +486,13 @@ components:
       enum:
         - pending
         - building
-        - deploying
-        - running
         - starting
+        - running
         - waiting
-        - ended
-        - exited
-        - unknown
-      description: "The hook-reported status of the agent session"
+        - stopped
+        - killing
+        - merging
+      description: "The computed status of the agent (derived from container, agent, and head status)"
 
     AgentStatusInfo:
       type: object

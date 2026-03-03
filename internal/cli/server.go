@@ -1,14 +1,18 @@
 package cli
 
 import (
+	"context"
 	"io/fs"
 	"log"
 	"net/http"
 	"os"
 	"time"
 
+	"braces.dev/errtrace"
 	"github.com/spf13/cobra"
+	"github.com/trolleyman/hydra/internal/db"
 	"github.com/trolleyman/hydra/internal/docker"
+	"github.com/trolleyman/hydra/internal/heads"
 	httppkg "github.com/trolleyman/hydra/internal/http"
 	"github.com/trolleyman/hydra/internal/paths"
 	"github.com/trolleyman/hydra/internal/projects"
@@ -39,6 +43,12 @@ func runServer(_ *cobra.Command, _ []string) error {
 		log.Fatalf("Create docker client: %v", err)
 	}
 
+	store, err := db.Open(projectRoot)
+	if err != nil {
+		log.Fatalf("Open database: %v", err)
+	}
+	log.Printf("Database: %s", paths.GetDBPathFromProjectRoot(projectRoot))
+
 	pm, err := projects.NewManager()
 	if err != nil {
 		log.Fatalf("Create projects manager: %v", err)
@@ -51,12 +61,22 @@ func runServer(_ *cobra.Command, _ []string) error {
 	}
 	log.Printf("Default project: %s (%s)", defaultProject.Name, defaultProject.ID)
 
+	// Run immediate first cycles of both pollers before accepting HTTP requests.
+	ctx := context.Background()
+	heads.RunDockerPollerOnce(ctx, dockerClient, store, projectRoot)
+	heads.RunJSONStatusPollerOnce(store, projectRoot)
+
+	// Start background pollers.
+	go heads.RunDockerPoller(ctx, dockerClient, store, projectRoot)
+	go heads.RunJSONStatusPoller(ctx, store, projectRoot)
+
 	server := &httppkg.Server{
 		WorktreesDir:      worktreesDir,
 		ProjectRoot:       projectRoot,
 		DefaultProject:    defaultProject,
 		ProjectsManager:   pm,
 		DockerClient:      dockerClient,
+		DB:                store,
 		StartTime:         time.Now(),
 		DevRestartEnabled: os.Getenv("HYDRA_DEV_RESTART") == "1",
 	}
@@ -81,7 +101,7 @@ func runServer(_ *cobra.Command, _ []string) error {
 
 	addr := "localhost:8080"
 	log.Printf("Server starting on http://%s", addr)
-	return http.ListenAndServe(addr, httppkg.LoggingMiddleware(mux))
+	return errtrace.Wrap(http.ListenAndServe(addr, httppkg.LoggingMiddleware(mux)))
 }
 
 func spaHandler(fsys fs.FS) http.HandlerFunc {

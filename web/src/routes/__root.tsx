@@ -151,7 +151,7 @@ function ProjectDropdown({
                 <button
                   key={p.id}
                   onClick={() => { onSelect(p.id); setOpen(false) }}
-                  className={`w-full flex items-start gap-2.5 px-3 py-2 text-left hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors ${
+                  className={`w-full flex items-start gap-2.5 px-3 py-2 text-left cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors ${
                     p.id === selectedId ? 'bg-blue-50 dark:bg-blue-900/20' : ''
                   }`}
                 >
@@ -175,7 +175,7 @@ function ProjectDropdown({
             {!showAddInput ? (
               <button
                 onClick={() => setShowAddInput(true)}
-                className="w-full flex items-center gap-2 px-3 py-2 text-left text-sm text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                className="w-full flex items-center gap-2 px-3 py-2 cursor-pointer text-left text-sm text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
               >
                 <PlusIcon />
                 Open folder…

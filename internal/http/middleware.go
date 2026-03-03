@@ -1,6 +1,7 @@
 package http
 
 import (
+	"braces.dev/errtrace"
 	"bufio"
 	"fmt"
 	"log"
@@ -32,9 +33,9 @@ func (r *statusRecorder) Unwrap() http.ResponseWriter {
 func (r *statusRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	hj, ok := r.ResponseWriter.(http.Hijacker)
 	if !ok {
-		return nil, nil, fmt.Errorf("underlying ResponseWriter does not implement http.Hijacker")
+		return nil, nil, errtrace.Wrap(fmt.Errorf("underlying ResponseWriter does not implement http.Hijacker"))
 	}
-	return hj.Hijack()
+	return errtrace.Wrap3(hj.Hijack())
 }
 
 // LoggingMiddleware logs each HTTP request with method, path, status code, and duration.

@@ -3,6 +3,7 @@ package cli
 import (
 	"braces.dev/errtrace"
 	"github.com/spf13/cobra"
+	"github.com/trolleyman/hydra/internal/db"
 	"github.com/trolleyman/hydra/internal/docker"
 	"github.com/trolleyman/hydra/internal/heads"
 	"github.com/trolleyman/hydra/internal/paths"
@@ -30,7 +31,12 @@ var killCmd = &cobra.Command{
 		}
 		defer cli.Close()
 
-		head, err := heads.GetHeadByID(cmd.Context(), cli, projectRoot, id)
+		store, err := db.Open(projectRoot)
+		if err != nil {
+			return errtrace.Wrap(err)
+		}
+
+		head, err := heads.GetHeadByID(cmd.Context(), cli, store, projectRoot, id)
 		if err != nil {
 			return errtrace.Wrap(err)
 		}
@@ -39,8 +45,7 @@ var killCmd = &cobra.Command{
 			return errtrace.Errorf("no head found with ID: %s", id)
 		}
 
-		// log.Printf("head found with ID: %s: %v: %s", id, head.HasWorktree, head.WorktreePath)
-		err = heads.KillHead(cmd.Context(), cli, *head)
+		err = heads.KillHead(cmd.Context(), cli, store, *head)
 		if err != nil {
 			return errtrace.Wrap(err)
 		}

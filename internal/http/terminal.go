@@ -38,7 +38,7 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 	projectID := r.URL.Query().Get("project_id")
 	projectRoot := s.resolveProjectRoot(&projectID)
 
-	head, err := heads.GetHeadByID(r.Context(), s.DockerClient, projectRoot, agentID)
+	head, err := heads.GetHeadByID(r.Context(), s.DockerClient, s.DB, projectRoot, agentID)
 	if err != nil {
 		log.Printf("terminal ws: get head %q: %v", agentID, err)
 		http.Error(w, "failed to find agent", http.StatusInternalServerError)

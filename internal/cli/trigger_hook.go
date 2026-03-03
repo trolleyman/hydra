@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"braces.dev/errtrace"
 	"github.com/spf13/cobra"
 	"github.com/trolleyman/hydra/internal/api"
 )
@@ -19,13 +20,13 @@ func init() {
 func openStatusLog() (*os.File, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return nil, fmt.Errorf("get home dir: %w", err)
+		return nil, errtrace.Wrap(fmt.Errorf("get home dir: %w", err))
 	}
 	statusLogPath := filepath.Join(home, ".hydra", "status_log.jsonl")
 	if err := os.MkdirAll(filepath.Dir(statusLogPath), 0755); err != nil {
-		return nil, fmt.Errorf("create status dir: %w", err)
+		return nil, errtrace.Wrap(fmt.Errorf("create status dir: %w", err))
 	}
-	return os.OpenFile(statusLogPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	return errtrace.Wrap2(os.OpenFile(statusLogPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644))
 }
 
 // appendJSONLine encodes object as a single JSON line and writes it to w.
@@ -76,7 +77,7 @@ var triggerHookCmd = &cobra.Command{
 func runTriggerHook(agentType string, logFile *os.File) error {
 	raw, err := io.ReadAll(os.Stdin)
 	if err != nil {
-		return fmt.Errorf("read stdin: %w", err)
+		return errtrace.Wrap(fmt.Errorf("read stdin: %w", err))
 	}
 
 	var input map[string]interface{}
@@ -99,7 +100,7 @@ func runTriggerHook(agentType string, logFile *os.File) error {
 	case "Stop", "AfterAgent":
 		status = api.Waiting
 	case "SessionEnd":
-		status = api.Ended
+		status = api.Stopped
 	default:
 		return nil
 	}
@@ -130,21 +131,21 @@ func runTriggerHook(agentType string, logFile *os.File) error {
 
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return fmt.Errorf("get home dir: %w", err)
+		return errtrace.Wrap(fmt.Errorf("get home dir: %w", err))
 	}
 
 	statusPath := filepath.Join(home, ".hydra", "status.json")
 	if err := os.MkdirAll(filepath.Dir(statusPath), 0755); err != nil {
-		return fmt.Errorf("create status dir: %w", err)
+		return errtrace.Wrap(fmt.Errorf("create status dir: %w", err))
 	}
 
 	data, err := json.Marshal(info)
 	if err != nil {
-		return fmt.Errorf("marshal status: %w", err)
+		return errtrace.Wrap(fmt.Errorf("marshal status: %w", err))
 	}
 
 	if err := os.WriteFile(statusPath, data, 0644); err != nil {
-		return fmt.Errorf("write status: %w", err)
+		return errtrace.Wrap(fmt.Errorf("write status: %w", err))
 	}
 
 	return nil

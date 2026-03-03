@@ -9,6 +9,7 @@ import (
 
 	"braces.dev/errtrace"
 	"github.com/spf13/cobra"
+	"github.com/trolleyman/hydra/internal/db"
 	"github.com/trolleyman/hydra/internal/docker"
 	"github.com/trolleyman/hydra/internal/heads"
 	"github.com/trolleyman/hydra/internal/paths"
@@ -41,8 +42,13 @@ var mergeCmd = &cobra.Command{
 		}
 		defer cli.Close()
 
+		store, err := db.Open(projectRoot)
+		if err != nil {
+			return errtrace.Wrap(err)
+		}
+
 		ctx := cmd.Context()
-		head, err := heads.GetHeadByID(ctx, cli, projectRoot, id)
+		head, err := heads.GetHeadByID(ctx, cli, store, projectRoot, id)
 		if err != nil {
 			return errtrace.Wrap(err)
 		}
@@ -85,7 +91,7 @@ var mergeCmd = &cobra.Command{
 			return errtrace.Wrap(fmt.Errorf("merge failed (resolve conflicts then run 'hydra kill %s'): %w", id, err))
 		}
 
-		if err := heads.KillHead(ctx, cli, *head); err != nil {
+		if err := heads.KillHead(ctx, cli, store, *head); err != nil {
 			return errtrace.Wrap(err)
 		}
 

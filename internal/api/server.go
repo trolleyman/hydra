@@ -3,6 +3,7 @@
 package api
 
 import (
+	"braces.dev/errtrace"
 	"encoding/json"
 	"net/http"
 )
@@ -24,5 +25,5 @@ func WriteError(w http.ResponseWriter, status int, message string) {
 
 // ReadJSON reads JSON from a request body
 func ReadJSON(r *http.Request, v interface{}) error {
-	return json.NewDecoder(r.Body).Decode(v)
+	return errtrace.Wrap(json.NewDecoder(r.Body).Decode(v))
 }

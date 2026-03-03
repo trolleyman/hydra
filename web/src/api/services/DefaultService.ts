@@ -153,6 +153,7 @@ export class DefaultService {
             },
             errors: {
                 404: `Not Found`,
+                409: `Conflict (operation already in progress)`,
                 500: `Internal Server Error`,
             },
         });
@@ -180,6 +181,7 @@ export class DefaultService {
             errors: {
                 400: `Bad Request (e.g. no branch to merge)`,
                 404: `Not Found`,
+                409: `Conflict (operation already in progress)`,
                 500: `Internal Server Error`,
             },
         });
@@ -293,6 +295,7 @@ export class DefaultService {
             },
             errors: {
                 404: `Not Found`,
+                409: `Conflict (operation already in progress)`,
                 500: `Internal Server Error`,
             },
         });

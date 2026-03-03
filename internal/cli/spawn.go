@@ -12,6 +12,7 @@ import (
 	"braces.dev/errtrace"
 	"github.com/spf13/cobra"
 	"github.com/trolleyman/hydra/internal/config"
+	"github.com/trolleyman/hydra/internal/db"
 	"github.com/trolleyman/hydra/internal/docker"
 	"github.com/trolleyman/hydra/internal/git"
 	"github.com/trolleyman/hydra/internal/heads"
@@ -62,8 +63,13 @@ var spawnCmd = &cobra.Command{
 		}
 		defer cli.Close()
 
+		store, err := db.Open(projectRoot)
+		if err != nil {
+			return errtrace.Wrap(err)
+		}
+
 		// If forced, and head already exists, kill it
-		existingHead, err := heads.GetHeadByID(cmd.Context(), cli, projectRoot, id)
+		existingHead, err := heads.GetHeadByID(cmd.Context(), cli, store, projectRoot, id)
 		if err != nil {
 			return errtrace.Wrap(err)
 		}
@@ -71,7 +77,7 @@ var spawnCmd = &cobra.Command{
 			if !spawnFlags.force {
 				return errtrace.Errorf("existing head running: %s in container %s: --force to kill", id, existingHead.ContainerID)
 			}
-			if err := heads.KillHead(cmd.Context(), cli, *existingHead); err != nil {
+			if err := heads.KillHead(cmd.Context(), cli, store, *existingHead); err != nil {
 				return errtrace.Wrap(err)
 			}
 		}
@@ -101,7 +107,7 @@ var spawnCmd = &cobra.Command{
 		case docker.AgentTypeClaude, docker.AgentTypeGemini:
 			// valid
 		default:
-			return fmt.Errorf("unknown agent type %q; supported: claude, gemini", agentType)
+			return errtrace.Wrap(fmt.Errorf("unknown agent type %q; supported: claude, gemini", agentType))
 		}
 
 		baseBranch := spawnFlags.baseBranch
@@ -112,7 +118,7 @@ var spawnCmd = &cobra.Command{
 			}
 		}
 
-		head, err := heads.SpawnHead(cmd.Context(), cli, projectRoot, heads.SpawnHeadOptions{
+		head, err := heads.SpawnHead(cmd.Context(), cli, store, projectRoot, heads.SpawnHeadOptions{
 			ID:             id,
 			PrePrompt:      prePrompt,
 			Prompt:         prompt,

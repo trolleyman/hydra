@@ -3,16 +3,15 @@
 /* tslint:disable */
 /* eslint-disable */
 /**
- * The hook-reported status of the agent session
+ * The computed status of the agent (derived from container, agent, and head status)
  */
 export enum AgentStatus {
     PENDING = 'pending',
     BUILDING = 'building',
-    DEPLOYING = 'deploying',
-    RUNNING = 'running',
     STARTING = 'starting',
+    RUNNING = 'running',
     WAITING = 'waiting',
-    ENDED = 'ended',
-    EXITED = 'exited',
-    UNKNOWN = 'unknown',
+    STOPPED = 'stopped',
+    KILLING = 'killing',
+    MERGING = 'merging',
 }
