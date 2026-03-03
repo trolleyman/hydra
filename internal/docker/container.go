@@ -483,7 +483,7 @@ func buildClaudeSettings() ([]byte, error) {
 	})
 	settings := map[string]interface{}{
 		"skipDangerousModePermissionPrompt": true,
-		"hooks": hooks,
+		"hooks":                             hooks,
 	}
 	data, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
@@ -546,8 +546,12 @@ func ensureImage(ctx context.Context, cli *dockerclient.Client, agentType AgentT
 	return ensureCustomImage(ctx, cli, agentType, customDockerfile)
 }
 
+func GetDefaultImageTag(agentType AgentType) string {
+	return "hydra-agent-" + string(agentType) + ":latest"
+}
+
 func ensureDefaultImage(ctx context.Context, cli *dockerclient.Client, agentType AgentType) (string, error) {
-	tag := "hydra-agent-" + string(agentType) + ":default"
+	tag := GetDefaultImageTag(agentType)
 
 	// Copy the embedded Dockerfile to a stable per-user directory.
 	ctxDir, err := prepareDefaultDockerfileDir(agentType)
@@ -560,6 +564,65 @@ func ensureDefaultImage(ctx context.Context, cli *dockerclient.Client, agentType
 		return "", errtrace.Wrap(err)
 	}
 	return tag, nil
+}
+
+func ensureCustomImage(ctx context.Context, cli *dockerclient.Client, agentType AgentType, dockerfilePath string) (string, error) {
+	abs, err := filepath.Abs(dockerfilePath)
+	if err != nil {
+		return "", errtrace.Wrap(fmt.Errorf("resolve dockerfile path: %w", err))
+	}
+
+	// Build default image so FROM works
+	_, err = ensureDefaultImage(ctx, cli, agentType)
+	if err != nil {
+		return "", errtrace.Wrap(fmt.Errorf("build default agent image: %w", err))
+	}
+
+	// Build custom image
+	hash := fmt.Sprintf("%x", sha256.Sum256([]byte(abs)))[:8]
+	tag := "hydra-agent-" + string(agentType) + "-custom:" + hash
+
+	err = buildDockerImage(ctx, cli, tag, dockerfilePath, filepath.Dir(abs))
+	if err != nil {
+		return "", errtrace.Wrap(err)
+	}
+	return tag, nil
+}
+
+// prepareDefaultDockerfileDir ensures ~/.hydra/default_dockerfiles/<type>/Dockerfile
+// and entrypoint.sh exist with the current embedded content, then returns the directory.
+func prepareDefaultDockerfileDir(agentType AgentType) (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", errtrace.Wrap(fmt.Errorf("get home dir: %w", err))
+	}
+	dir := filepath.Join(home, ".hydra", "default_dockerfiles", string(agentType))
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return "", errtrace.Wrap(fmt.Errorf("create dockerfile dir: %w", err))
+	}
+
+	dockerfileContent, err := defaultDockerfileContent(agentType)
+	if err != nil {
+		return "", errtrace.Wrap(err)
+	}
+
+	for _, f := range []struct {
+		name    string
+		content string
+		perm    os.FileMode
+	}{
+		{"Dockerfile", dockerfileContent, 0644},
+		{"entrypoint.sh", config.DefaultEntrypointScript, 0755},
+	} {
+		path := filepath.Join(dir, f.name)
+		existing, readErr := os.ReadFile(path)
+		if readErr != nil || string(existing) != f.content {
+			if err := os.WriteFile(path, []byte(f.content), f.perm); err != nil {
+				return "", errtrace.Wrap(fmt.Errorf("write %s: %w", f.name, err))
+			}
+		}
+	}
+	return dir, nil
 }
 
 func buildDockerImage(ctx context.Context, cli *dockerclient.Client, tag, dockerfilePath, buildContext string) error {
@@ -655,58 +718,6 @@ func buildDockerImage(ctx context.Context, cli *dockerclient.Client, tag, docker
 
 	log.Printf("Built Docker image: %s (from %s in %s)", tag, dockerfilePath, buildContext)
 	return nil
-}
-
-func ensureCustomImage(ctx context.Context, cli *dockerclient.Client, agentType AgentType, dockerfilePath string) (string, error) {
-	abs, err := filepath.Abs(dockerfilePath)
-	if err != nil {
-		return "", errtrace.Wrap(fmt.Errorf("resolve dockerfile path: %w", err))
-	}
-
-	hash := fmt.Sprintf("%x", sha256.Sum256([]byte(abs)))[:8]
-	tag := "hydra-agent-" + string(agentType) + ":" + hash
-
-	err = buildDockerImage(ctx, cli, tag, dockerfilePath, filepath.Dir(abs))
-	if err != nil {
-		return "", errtrace.Wrap(err)
-	}
-	return tag, nil
-}
-
-// prepareDefaultDockerfileDir ensures ~/.hydra/default_dockerfiles/<type>/Dockerfile
-// and entrypoint.sh exist with the current embedded content, then returns the directory.
-func prepareDefaultDockerfileDir(agentType AgentType) (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", errtrace.Wrap(fmt.Errorf("get home dir: %w", err))
-	}
-	dir := filepath.Join(home, ".hydra", "default_dockerfiles", string(agentType))
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return "", errtrace.Wrap(fmt.Errorf("create dockerfile dir: %w", err))
-	}
-
-	dockerfileContent, err := defaultDockerfileContent(agentType)
-	if err != nil {
-		return "", errtrace.Wrap(err)
-	}
-
-	for _, f := range []struct {
-		name    string
-		content string
-		perm    os.FileMode
-	}{
-		{"Dockerfile", dockerfileContent, 0644},
-		{"entrypoint.sh", config.DefaultEntrypointScript, 0755},
-	} {
-		path := filepath.Join(dir, f.name)
-		existing, readErr := os.ReadFile(path)
-		if readErr != nil || string(existing) != f.content {
-			if err := os.WriteFile(path, []byte(f.content), f.perm); err != nil {
-				return "", errtrace.Wrap(fmt.Errorf("write %s: %w", f.name, err))
-			}
-		}
-	}
-	return dir, nil
 }
 
 // resolveContainerHydraBin returns the path to a hydra binary that can run

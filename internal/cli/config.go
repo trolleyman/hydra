@@ -7,7 +7,6 @@ import (
 
 	"braces.dev/errtrace"
 	"github.com/spf13/cobra"
-	"github.com/trolleyman/hydra/internal/config"
 	"github.com/trolleyman/hydra/internal/docker"
 	"github.com/trolleyman/hydra/internal/paths"
 )
@@ -52,23 +51,15 @@ func writeDefaultConfigForAgent(agentType docker.AgentType, projectRoot string) 
 		return errtrace.Wrap(fmt.Errorf("create config dir: %w", err))
 	}
 
-	var dockerfileContent string
-	switch agentType {
-	case docker.AgentTypeClaude:
-		dockerfileContent = config.DefaultDockerfileClaude
-	case docker.AgentTypeGemini:
-		dockerfileContent = config.DefaultDockerfileGemini
-	default:
-		return fmt.Errorf("unknown agent type: %q", agentType)
-	}
+	var dockerfileContent = fmt.Sprintf(`FROM %s
+
+# Add additional necessary steps to e.g. add developer tools
+#RUN apt install ...
+`, docker.GetDefaultImageTag(agentType))
 
 	dockerfilePath := filepath.Join(outDir, "Dockerfile")
-	entrypointPath := filepath.Join(outDir, "entrypoint.sh")
 
 	if err := paths.WriteFileIfChanged(dockerfilePath, dockerfileContent, 0644); err != nil {
-		return errtrace.Wrap(err)
-	}
-	if err := paths.WriteFileIfChanged(entrypointPath, config.DefaultEntrypointScript, 0755); err != nil {
 		return errtrace.Wrap(err)
 	}
 
