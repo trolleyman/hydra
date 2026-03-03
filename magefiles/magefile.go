@@ -15,6 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"braces.dev/errtrace"
 	"github.com/magefile/mage/mg"
 	"github.com/magefile/mage/sh"
 	"github.com/magefile/mage/target"
@@ -171,7 +172,7 @@ func printCmdLine(cmdLine []string) {
 func run(cmd string, args ...string) error {
 	printCmd(cmd, args...)
 	if err := sh.Run(cmd, args...); err != nil {
-		return fmt.Errorf("failed to run %q: %w", cmd, err)
+		return errtrace.Wrap(fmt.Errorf("failed to run %q: %w", cmd, err))
 	}
 	return nil
 }
@@ -180,7 +181,7 @@ func run(cmd string, args ...string) error {
 func start(cmd string, args ...string) error {
 	printCmdBackground(cmd, args...)
 	if err := exec.Command(cmd, args...).Start(); err != nil {
-		return fmt.Errorf("failed to start %q: %w", cmd, err)
+		return errtrace.Wrap(fmt.Errorf("failed to start %q: %w", cmd, err))
 	}
 	return nil
 }
@@ -189,7 +190,7 @@ func start(cmd string, args ...string) error {
 func runV(cmd string, args ...string) error {
 	printCmd(cmd, args...)
 	if err := sh.RunV(cmd, args...); err != nil {
-		return fmt.Errorf("failed to run %q: %w", cmd, err)
+		return errtrace.Wrap(fmt.Errorf("failed to run %q: %w", cmd, err))
 	}
 	return nil
 }
@@ -198,7 +199,7 @@ func runV(cmd string, args ...string) error {
 func runWithEnv(env map[string]string, cmd string, args ...string) error {
 	printCmd(cmd, args...)
 	if err := sh.RunWith(env, cmd, args...); err != nil {
-		return fmt.Errorf("failed to run %q: %w", cmd, err)
+		return errtrace.Wrap(fmt.Errorf("failed to run %q: %w", cmd, err))
 	}
 	return nil
 }
@@ -217,7 +218,7 @@ func runInDir(dir string, cmd string, args ...string) error {
 	err := c.Run()
 	printCmd("popd")
 	if err != nil {
-		return fmt.Errorf("failed to run %q in %q: %w", cmd, dir, err)
+		return errtrace.Wrap(fmt.Errorf("failed to run %q in %q: %w", cmd, dir, err))
 	}
 	return nil
 }
@@ -237,7 +238,7 @@ func runInDirV(dir string, cmd string, args ...string) error {
 	c.Stderr = os.Stderr
 	err := c.Run()
 	if err != nil {
-		return fmt.Errorf("failed to run %q in %q: %w", cmd, dir, err)
+		return errtrace.Wrap(fmt.Errorf("failed to run %q in %q: %w", cmd, dir, err))
 	}
 	return nil
 }
@@ -254,27 +255,27 @@ func dirChangedIgnores(dst string, srcDir string, ignores map[string]struct{}) (
 			// The stamp file doesn't exist, so we must run the build.
 			return true, nil
 		}
-		return false, err
+		return false, errtrace.Wrap(err)
 	}
 	dstTime := dstInfo.ModTime()
 
 	err = filepath.Walk(srcDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			return err
+			return errtrace.Wrap(err)
 		}
 
 		if info.IsDir() {
 			_, ignore := ignores[info.Name()]
 			if ignore {
 				// Skip this directory
-				return filepath.SkipDir
+				return filepath.SkipDir //errtrace:skip // This error must be filepath.SkipDir, not wrapped.
 			}
 			return nil
 		}
 
 		if info.ModTime().After(dstTime) {
 			// Signal that we found a newer file and stop walking
-			return errFoundNewer
+			return errFoundNewer //errtrace:skip // This error must be errFoundNewer, not wrapped.
 		}
 		return nil
 	})
@@ -282,7 +283,7 @@ func dirChangedIgnores(dst string, srcDir string, ignores map[string]struct{}) (
 	if err == errFoundNewer {
 		return true, nil
 	}
-	return false, err
+	return false, errtrace.Wrap(err)
 }
 
 // getProjectModTime scans the target files and directories for the most recent modification time.
@@ -294,12 +295,12 @@ func getProjectModTime() (time.Time, error) {
 			if os.IsNotExist(err) {
 				return nil
 			}
-			return err
+			return errtrace.Wrap(err)
 		}
 		if info.IsDir() {
 			base := filepath.Base(path)
 			if base == "dist" || base == "node_modules" || base == ".git" {
-				return filepath.SkipDir
+				return filepath.SkipDir //errtrace:skip // This error must be filepath.SkipDir, not wrapped.
 			}
 			return nil
 		}
@@ -313,7 +314,7 @@ func getProjectModTime() (time.Time, error) {
 	for _, dir := range dirs {
 		if err := filepath.Walk(dir, check); err != nil {
 			if !os.IsNotExist(err) {
-				return latest, err
+				return latest, errtrace.Wrap(err)
 			}
 		}
 	}
@@ -325,7 +326,7 @@ func getProjectModTime() (time.Time, error) {
 			if os.IsNotExist(err) {
 				continue
 			}
-			return latest, err
+			return latest, errtrace.Wrap(err)
 		}
 		if info.ModTime().After(latest) {
 			latest = info.ModTime()
@@ -338,17 +339,40 @@ func getProjectModTime() (time.Time, error) {
 func Tidy() error {
 	err := runV("go", "mod", "tidy")
 	if err != nil {
-		return err
+		return errtrace.Wrap(err)
 	}
 	err = runV("go", "fmt", "./...")
 	if err != nil {
-		return err
+		return errtrace.Wrap(err)
 	}
-	err = runV("go", "run", "braces.dev/errtrace/cmd/errtrace@latest", "-w", "./...")
+
+	// Collect all .go files except .gen.go files, including magefiles/magefile.go
+	// (which is excluded from ./... due to its build tag).
+	skipDirs := map[string]struct{}{
+		".git": {}, "vendor": {}, "node_modules": {}, ".mage": {}, ".hydra": {},
+	}
+	var goFiles []string
+	err = filepath.Walk(".", func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return errtrace.Wrap(walkErr)
+		}
+		if info.IsDir() {
+			if _, skip := skipDirs[info.Name()]; skip {
+				return filepath.SkipDir //errtrace:skip // This error must be filepath.SkipDir, not wrapped.
+			}
+			return nil
+		}
+		if strings.HasSuffix(path, ".go") && !strings.HasSuffix(path, ".gen.go") {
+			goFiles = append(goFiles, path)
+		}
+		return nil
+	})
 	if err != nil {
-		return err
+		return errtrace.Wrap(err)
 	}
-	return nil
+
+	args := append([]string{"run", "braces.dev/errtrace/cmd/errtrace@latest", "-w"}, goFiles...)
+	return errtrace.Wrap(runV("go", args...))
 }
 
 func addGoBuildDeps() {
@@ -372,17 +396,17 @@ func BuildLinuxBinary() error {
 		return nil
 	}
 	output := filepath.Join("internal", "docker", "hydra-linux")
-	return runWithEnv(
+	return errtrace.Wrap(runWithEnv(
 		map[string]string{"GOOS": "linux", "GOARCH": runtime.GOARCH},
 		"go", "build", "-o", output, ".",
-	)
+	))
 }
 
 func Run() error {
 	addGoBuildDeps()
 	args := append([]string{"run"}, goBuildTags()...)
 	args = append(args, "./")
-	return runV("go", args...)
+	return errtrace.Wrap(runV("go", args...))
 }
 
 func Build() {
@@ -394,18 +418,18 @@ func BuildGoDownload() error {
 
 	changed, err := target.Path(stamp, "go.mod", "go.sum")
 	if err != nil {
-		return err
+		return errtrace.Wrap(err)
 	}
 	if !changed {
 		return nil
 	}
 
 	if err := runV("go", "mod", "download"); err != nil {
-		return err
+		return errtrace.Wrap(err)
 	}
 
 	os.MkdirAll(filepath.Dir(stamp), 0755)
-	return os.WriteFile(stamp, nil, 0644)
+	return errtrace.Wrap(os.WriteFile(stamp, nil, 0644))
 }
 
 func BuildGo() error {
@@ -413,7 +437,7 @@ func BuildGo() error {
 	mg.Deps(BuildGoDownload)
 	args := append([]string{"build"}, goBuildTags()...)
 	args = append(args, "./...")
-	return runV("go", args...)
+	return errtrace.Wrap(runV("go", args...))
 }
 
 func BuildGoDeps() error {
@@ -432,12 +456,12 @@ func BuildWeb() error {
 	// Check if web/ or api/ have newer files than the last build stamp
 	webChanged, err := dirChangedIgnores(stamp, "web", ignores)
 	if err != nil {
-		return err
+		return errtrace.Wrap(err)
 	}
 
 	apiChanged, err := target.Dir(stamp, "api")
 	if err != nil {
-		return err
+		return errtrace.Wrap(err)
 	}
 
 	if !webChanged && !apiChanged {
@@ -446,15 +470,15 @@ func BuildWeb() error {
 
 	// Run bun install + build
 	if err := runInDirV("web", "bun", "install"); err != nil {
-		return err
+		return errtrace.Wrap(err)
 	}
 	if err := runInDirV("web", "bun", "run", "build"); err != nil {
-		return err
+		return errtrace.Wrap(err)
 	}
 
 	// Record successful build
 	os.MkdirAll(filepath.Dir(stamp), 0755)
-	return os.WriteFile(stamp, nil, 0644)
+	return errtrace.Wrap(os.WriteFile(stamp, nil, 0644))
 }
 
 func GenerateGo() error {
@@ -462,12 +486,12 @@ func GenerateGo() error {
 
 	apiChanged, err := target.Dir(stamp, "api")
 	if err != nil {
-		return err
+		return errtrace.Wrap(err)
 	}
 
 	filesChanged, err := target.Path(stamp, "main.go", "go.mod", "go.sum", "internal/api/config.yaml", "internal/api/server.go")
 	if err != nil {
-		return err
+		return errtrace.Wrap(err)
 	}
 
 	if !apiChanged && !filesChanged {
@@ -475,15 +499,15 @@ func GenerateGo() error {
 	}
 
 	if err := os.MkdirAll("internal/api", 0755); err != nil {
-		return err
+		return errtrace.Wrap(err)
 	}
 
 	if err := runV("go", "generate", "./..."); err != nil {
-		return err
+		return errtrace.Wrap(err)
 	}
 
 	os.MkdirAll(filepath.Dir(stamp), 0755)
-	return os.WriteFile(stamp, nil, 0644)
+	return errtrace.Wrap(os.WriteFile(stamp, nil, 0644))
 }
 
 // getGoSourceModTime returns the most recent modification time across Go source
@@ -501,7 +525,7 @@ func getGoSourceModTime() (time.Time, error) {
 			if os.IsNotExist(err) {
 				return nil
 			}
-			return err
+			return errtrace.Wrap(err)
 		}
 		if info.IsDir() {
 			return nil
@@ -519,7 +543,7 @@ func getGoSourceModTime() (time.Time, error) {
 	for _, dir := range dirs {
 		if err := filepath.Walk(dir, check); err != nil {
 			if !os.IsNotExist(err) {
-				return latest, err
+				return latest, errtrace.Wrap(err)
 			}
 		}
 	}
@@ -531,7 +555,7 @@ func getGoSourceModTime() (time.Time, error) {
 			if os.IsNotExist(err) {
 				continue
 			}
-			return latest, err
+			return latest, errtrace.Wrap(err)
 		}
 		if info.ModTime().After(latest) {
 			latest = info.ModTime()
@@ -547,19 +571,19 @@ func getGoSourceModTime() (time.Time, error) {
 func Dev() error {
 	for {
 		if err := GenerateGo(); err != nil {
-			return err
+			return errtrace.Wrap(err)
 		}
 		if err := BuildLinuxBinary(); err != nil {
-			return err
+			return errtrace.Wrap(err)
 		}
 		if err := BuildWeb(); err != nil {
-			return err
+			return errtrace.Wrap(err)
 		}
 
 		devBuildArgs := append([]string{"build"}, goBuildTags()...)
 		devBuildArgs = append(devBuildArgs, "-o", ".mage/server", "./")
 		if err := runV("go", devBuildArgs...); err != nil {
-			return err
+			return errtrace.Wrap(err)
 		}
 
 		printCmd("./.mage/server", "server")
@@ -574,7 +598,7 @@ func Dev() error {
 				log.Println("Restart requested via UI, rebuilding...")
 				continue
 			}
-			return err
+			return errtrace.Wrap(err)
 		}
 		return nil // clean exit
 	}
@@ -587,15 +611,15 @@ func Dev() error {
 func DevAutoReload() error {
 	// Ensure generated Go code is up to date.
 	if err := GenerateGo(); err != nil {
-		return err
+		return errtrace.Wrap(err)
 	}
 	if err := BuildLinuxBinary(); err != nil {
-		return err
+		return errtrace.Wrap(err)
 	}
 	// Build the frontend once to ensure web/dist/ exists for Go compilation.
 	// Subsequent frontend changes are handled by the Vite dev server with HMR.
 	if err := BuildWeb(); err != nil {
-		return err
+		return errtrace.Wrap(err)
 	}
 
 	// Start the Vite dev server (frontend with HMR on http://localhost:5173).
@@ -605,7 +629,7 @@ func DevAutoReload() error {
 	viteCmd.Stdout = os.Stdout
 	viteCmd.Stderr = os.Stderr
 	if err := viteCmd.Start(); err != nil {
-		return fmt.Errorf("failed to start Vite dev server: %w", err)
+		return errtrace.Wrap(fmt.Errorf("failed to start Vite dev server: %w", err))
 	}
 	defer func() {
 		if viteCmd.Process != nil {
@@ -655,7 +679,7 @@ func DevAutoReload() error {
 	for {
 		latest, err := getGoSourceModTime()
 		if err != nil {
-			return err
+			return errtrace.Wrap(err)
 		}
 
 		if latest.After(lastBuild) || needRestart.CompareAndSwap(1, 0) {
@@ -715,7 +739,7 @@ func Preview() error {
 	for {
 		latest, err := getProjectModTime()
 		if err != nil {
-			return err
+			return errtrace.Wrap(err)
 		}
 
 		if latest.After(lastRun) {
@@ -764,15 +788,15 @@ func Preview() error {
 // Clean removes the build cache and build files
 func Clean() error {
 	if err := os.RemoveAll(".mage"); err != nil {
-		return fmt.Errorf("failed to remove .mage directory: %w", err)
+		return errtrace.Wrap(fmt.Errorf("failed to remove .mage directory: %w", err))
 	}
 
 	if err := os.RemoveAll("web/dist"); err != nil {
-		return fmt.Errorf("failed to remove web/dist directory: %w", err)
+		return errtrace.Wrap(fmt.Errorf("failed to remove web/dist directory: %w", err))
 	}
 
 	if err := os.RemoveAll("web/node_modules"); err != nil {
-		return fmt.Errorf("failed to remove web/node_modules directory: %w", err)
+		return errtrace.Wrap(fmt.Errorf("failed to remove web/node_modules directory: %w", err))
 	}
 
 	// TODO: Remove .hydra cached files?
