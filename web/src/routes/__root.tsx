@@ -225,6 +225,8 @@ function ProjectDropdown({
 function RootLayout() {
   const spawnedAt = useRef<number | null>(null)
   const [, setTick] = useState(0)
+  const [devRestartAvailable, setDevRestartAvailable] = useState(false)
+  const [restarting, setRestarting] = useState(false)
   const [dark, setDark] = useState<boolean>(() => {
     const stored = localStorage.getItem('hydra-dark-mode')
     if (stored !== null) return stored === 'true'
@@ -245,6 +247,7 @@ function RootLayout() {
       try {
         const status = await api.default.getStatus()
         if (cancelled) return
+        setDevRestartAvailable(status.dev_restart_available ?? false)
         if (status.uptime_seconds != null) {
           if (spawnedAt.current === null) {
             spawnedAt.current = Date.now() - status.uptime_seconds * 1000
@@ -285,6 +288,16 @@ function RootLayout() {
       if (ticker !== null) clearInterval(ticker)
     }
   }, [setProjects, setSelectedProjectId])
+
+  async function handleRestart() {
+    setRestarting(true)
+    try { await api.default.devRestart() } catch { /* server exits — expected */ }
+    for (;;) {
+      await new Promise<void>((r) => setTimeout(r, 500))
+      try { await fetch('/health'); break } catch { /* still restarting */ }
+    }
+    window.location.reload()
+  }
 
   async function handleAddProject(path: string) {
     const p = await api.default.addProject({ path })
@@ -337,9 +350,19 @@ function RootLayout() {
               {formatSpawnedAgo(Date.now() - spawnedAt.current)}
             </span>
           )}
+          {devRestartAvailable && (
+            <button
+              onClick={handleRestart}
+              disabled={restarting}
+              className="text-xs px-2 py-0.5 rounded bg-amber-100 cursor-pointer dark:bg-amber-900 text-amber-700 dark:text-amber-300 hover:bg-amber-200 dark:hover:bg-amber-800 disabled:opacity-50 transition-colors hidden md:block"
+              title="Rebuild and restart the server"
+            >
+              {restarting ? 'Restarting…' : 'Restart'}
+            </button>
+          )}
           <button
             onClick={() => setDark((d) => !d)}
-            className="w-7 h-7 flex items-center justify-center rounded-md text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+            className="w-7 h-7 flex items-center justify-center rounded-md cursor-pointer text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
             title={dark ? 'Switch to light mode' : 'Switch to dark mode'}
           >
             {dark ? <SunIcon /> : <MoonIcon />}

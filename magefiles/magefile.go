@@ -5,11 +5,14 @@ package main
 import (
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/magefile/mage/mg"
@@ -48,6 +51,9 @@ const (
 func style(codes ...string) string {
 	return strings.Join(codes, "")
 }
+
+// devRestartExitCode must match the constant in internal/http/handlers.go.
+const devRestartExitCode = 42
 
 var (
 	// Matching bun
@@ -535,10 +541,50 @@ func getGoSourceModTime() (time.Time, error) {
 	return latest, nil
 }
 
-// Dev runs the Go API server (restarting on Go source changes) and the Vite
+// Dev builds once and runs the server with the /api/dev/restart endpoint enabled.
+// Use the UI restart button to trigger a full rebuild and restart.
+// For auto-reload on file changes use DevAutoReload instead.
+func Dev() error {
+	for {
+		if err := GenerateGo(); err != nil {
+			return err
+		}
+		if err := BuildLinuxBinary(); err != nil {
+			return err
+		}
+		if err := BuildWeb(); err != nil {
+			return err
+		}
+
+		devBuildArgs := append([]string{"build"}, goBuildTags()...)
+		devBuildArgs = append(devBuildArgs, "-o", ".mage/server", "./")
+		if err := runV("go", devBuildArgs...); err != nil {
+			return err
+		}
+
+		printCmd("./.mage/server", "server")
+		serverCmd := exec.Command("./.mage/server", "server")
+		serverCmd.Stdout = os.Stdout
+		serverCmd.Stderr = os.Stderr
+		serverCmd.Env = append(os.Environ(), "HYDRA_DEV_RESTART=1")
+
+		if err := serverCmd.Run(); err != nil {
+			var exitErr *exec.ExitError
+			if errors.As(err, &exitErr) && exitErr.ExitCode() == devRestartExitCode {
+				log.Println("Restart requested via UI, rebuilding...")
+				continue
+			}
+			return err
+		}
+		return nil // clean exit
+	}
+}
+
+// DevAutoReload runs the Go API server (restarting on Go source changes) and the Vite
 // frontend dev server in parallel for fast UI iteration with hot module replacement.
 // Access the frontend at http://localhost:5173; API calls are proxied to http://localhost:8080.
-func Dev() error {
+// The /api/dev/restart UI button is also available alongside auto-reload.
+func DevAutoReload() error {
 	// Ensure generated Go code is up to date.
 	if err := GenerateGo(); err != nil {
 		return err
@@ -570,12 +616,40 @@ func Dev() error {
 
 	// Watch Go source files and restart the API server on changes.
 	var serverCmd *exec.Cmd
+	var serverMu sync.Mutex
 	defer func() {
+		serverMu.Lock()
+		defer serverMu.Unlock()
 		if serverCmd != nil && serverCmd.Process != nil {
 			serverCmd.Process.Kill()
 			serverCmd.Wait()
 		}
 	}()
+
+	// needRestart is set to 1 when the server exits with the restart code.
+	var needRestart atomic.Int32
+
+	startServer := func() {
+		serverMu.Lock()
+		defer serverMu.Unlock()
+		printCmd("./.mage/server", "server")
+		serverCmd = exec.Command("./.mage/server", "server")
+		serverCmd.Stdout = os.Stdout
+		serverCmd.Stderr = os.Stderr
+		serverCmd.Env = append(os.Environ(), "HYDRA_DEV_RESTART=1")
+		if err := serverCmd.Start(); err != nil {
+			fmt.Printf("start error: %v\n", err)
+			return
+		}
+		go func(cmd *exec.Cmd) {
+			err := cmd.Wait()
+			var exitErr *exec.ExitError
+			if errors.As(err, &exitErr) && exitErr.ExitCode() == devRestartExitCode {
+				log.Println("Restart requested via UI, rebuilding...")
+				needRestart.Store(1)
+			}
+		}(serverCmd)
+	}
 
 	var lastBuild time.Time
 	for {
@@ -584,7 +658,7 @@ func Dev() error {
 			return err
 		}
 
-		if latest.After(lastBuild) {
+		if latest.After(lastBuild) || needRestart.CompareAndSwap(1, 0) {
 			lastBuild = time.Now()
 
 			if err := GenerateGo(); err != nil {
@@ -598,11 +672,13 @@ func Dev() error {
 				continue
 			}
 
+			serverMu.Lock()
 			if serverCmd != nil && serverCmd.Process != nil {
 				printCmd("restarting server")
 				serverCmd.Process.Kill()
 				serverCmd.Wait()
 			}
+			serverMu.Unlock()
 
 			devBuildArgs := append([]string{"build"}, goBuildTags()...)
 			devBuildArgs = append(devBuildArgs, "-o", ".mage/server", "./")
@@ -616,13 +692,7 @@ func Dev() error {
 				continue
 			}
 
-			printCmd("./.mage/server", "server")
-			serverCmd = exec.Command("./.mage/server", "server")
-			serverCmd.Stdout = os.Stdout
-			serverCmd.Stderr = os.Stderr
-			if err := serverCmd.Start(); err != nil {
-				fmt.Printf("start error: %v\n", err)
-			}
+			startServer()
 		}
 
 		time.Sleep(1 * time.Second)

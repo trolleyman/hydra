@@ -17,5 +17,9 @@ export type StatusResponse = {
      * Project ID of the default (CWD) project
      */
     default_project_id?: string;
+    /**
+     * Whether /api/dev/restart is available (dev mode only)
+     */
+    dev_restart_available?: boolean;
 };
 

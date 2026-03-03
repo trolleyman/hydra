@@ -23,14 +23,18 @@ import (
 
 const version = "0.1.0"
 
+// devRestartExitCode is the process exit code that signals mage to rebuild and restart.
+const devRestartExitCode = 42
+
 // Server implements StrictServerInterface.
 type Server struct {
 	WorktreesDir    string
 	ProjectRoot     string
 	DefaultProject  projects.ProjectInfo
 	ProjectsManager *projects.Manager
-	DockerClient    *dockerclient.Client
-	StartTime       time.Time
+	DockerClient       *dockerclient.Client
+	StartTime          time.Time
+	DevRestartEnabled  bool // set when running under mage dev / mage DevAutoReload
 }
 
 // NewHandler creates a handler with routing matching the OpenAPI spec.
@@ -138,13 +142,28 @@ func (s *Server) GetStatus(_ context.Context, _ api.GetStatusRequestObject) (api
 	uptime := float32(time.Since(s.StartTime).Seconds())
 	projectRoot := s.ProjectRoot
 	defaultProjectID := s.DefaultProject.ID
+	devRestartAvailable := s.DevRestartEnabled
 	return api.GetStatus200JSONResponse(api.StatusResponse{
-		Status:           &status,
-		Version:          &v,
-		UptimeSeconds:    &uptime,
-		ProjectRoot:      &projectRoot,
-		DefaultProjectId: &defaultProjectID,
+		Status:              &status,
+		Version:             &v,
+		UptimeSeconds:       &uptime,
+		ProjectRoot:         &projectRoot,
+		DefaultProjectId:    &defaultProjectID,
+		DevRestartAvailable: &devRestartAvailable,
 	}), nil
+}
+
+func (s *Server) DevRestart(_ context.Context, _ api.DevRestartRequestObject) (api.DevRestartResponseObject, error) {
+	if !s.DevRestartEnabled {
+		code := 403
+		return api.DevRestart403JSONResponse{Code: code, Error: "not in dev mode"}, nil
+	}
+	// Respond 200 then exit with the restart code after a short delay to allow the response to flush.
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		os.Exit(devRestartExitCode)
+	}()
+	return api.DevRestart200Response{}, nil
 }
 
 func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestObject) (api.SpawnAgentResponseObject, error) {

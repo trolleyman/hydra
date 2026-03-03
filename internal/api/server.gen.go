@@ -219,6 +219,9 @@ type StatusResponse struct {
 	// DefaultProjectId Project ID of the default (CWD) project
 	DefaultProjectId *string `json:"default_project_id,omitempty"`
 
+	// DevRestartAvailable Whether /api/dev/restart is available (dev mode only)
+	DevRestartAvailable *bool `json:"dev_restart_available,omitempty"`
+
 	// ProjectRoot Absolute path to the default project root (server CWD)
 	ProjectRoot *string `json:"project_root,omitempty"`
 	Status      *string `json:"status,omitempty"`
@@ -317,6 +320,9 @@ type ServerInterface interface {
 	// Spawn a new Hydra agent
 	// (POST /api/agents)
 	SpawnAgent(w http.ResponseWriter, r *http.Request, params SpawnAgentParams)
+	// Trigger a server rebuild and restart (dev mode only)
+	// (POST /api/dev/restart)
+	DevRestart(w http.ResponseWriter, r *http.Request)
 	// List all known projects
 	// (GET /api/projects)
 	ListProjects(w http.ResponseWriter, r *http.Request)
@@ -634,6 +640,20 @@ func (siw *ServerInterfaceWrapper) SpawnAgent(w http.ResponseWriter, r *http.Req
 	handler.ServeHTTP(w, r)
 }
 
+// DevRestart operation middleware
+func (siw *ServerInterfaceWrapper) DevRestart(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DevRestart(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListProjects operation middleware
 func (siw *ServerInterfaceWrapper) ListProjects(w http.ResponseWriter, r *http.Request) {
 
@@ -818,6 +838,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("POST "+options.BaseURL+"/api/agent/{id}/restart", wrapper.RestartAgent)
 	m.HandleFunc("GET "+options.BaseURL+"/api/agents", wrapper.ListAgents)
 	m.HandleFunc("POST "+options.BaseURL+"/api/agents", wrapper.SpawnAgent)
+	m.HandleFunc("POST "+options.BaseURL+"/api/dev/restart", wrapper.DevRestart)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects", wrapper.ListProjects)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects", wrapper.AddProject)
 	m.HandleFunc("GET "+options.BaseURL+"/api/status", wrapper.GetStatus)
@@ -1111,6 +1132,30 @@ func (response SpawnAgent500JSONResponse) VisitSpawnAgentResponse(w http.Respons
 	return json.NewEncoder(w).Encode(response)
 }
 
+type DevRestartRequestObject struct {
+}
+
+type DevRestartResponseObject interface {
+	VisitDevRestartResponse(w http.ResponseWriter) error
+}
+
+type DevRestart200Response struct {
+}
+
+func (response DevRestart200Response) VisitDevRestartResponse(w http.ResponseWriter) error {
+	w.WriteHeader(200)
+	return nil
+}
+
+type DevRestart403JSONResponse ErrorResponse
+
+func (response DevRestart403JSONResponse) VisitDevRestartResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 type ListProjectsRequestObject struct {
 }
 
@@ -1239,6 +1284,9 @@ type StrictServerInterface interface {
 	// Spawn a new Hydra agent
 	// (POST /api/agents)
 	SpawnAgent(ctx context.Context, request SpawnAgentRequestObject) (SpawnAgentResponseObject, error)
+	// Trigger a server rebuild and restart (dev mode only)
+	// (POST /api/dev/restart)
+	DevRestart(ctx context.Context, request DevRestartRequestObject) (DevRestartResponseObject, error)
 	// List all known projects
 	// (GET /api/projects)
 	ListProjects(ctx context.Context, request ListProjectsRequestObject) (ListProjectsResponseObject, error)
@@ -1496,6 +1544,30 @@ func (sh *strictHandler) SpawnAgent(w http.ResponseWriter, r *http.Request, para
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(SpawnAgentResponseObject); ok {
 		if err := validResponse.VisitSpawnAgentResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DevRestart operation middleware
+func (sh *strictHandler) DevRestart(w http.ResponseWriter, r *http.Request) {
+	var request DevRestartRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DevRestart(ctx, request.(DevRestartRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DevRestart")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DevRestartResponseObject); ok {
+		if err := validResponse.VisitDevRestartResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

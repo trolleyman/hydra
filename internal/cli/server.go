@@ -4,6 +4,7 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -51,12 +52,13 @@ func runServer(_ *cobra.Command, _ []string) error {
 	log.Printf("Default project: %s (%s)", defaultProject.Name, defaultProject.ID)
 
 	server := &httppkg.Server{
-		WorktreesDir:    worktreesDir,
-		ProjectRoot:     projectRoot,
-		DefaultProject:  defaultProject,
-		ProjectsManager: pm,
-		DockerClient:    dockerClient,
-		StartTime:       time.Now(),
+		WorktreesDir:      worktreesDir,
+		ProjectRoot:       projectRoot,
+		DefaultProject:    defaultProject,
+		ProjectsManager:   pm,
+		DockerClient:      dockerClient,
+		StartTime:         time.Now(),
+		DevRestartEnabled: os.Getenv("HYDRA_DEV_RESTART") == "1",
 	}
 
 	// Build the main mux

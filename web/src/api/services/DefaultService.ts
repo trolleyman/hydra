@@ -39,6 +39,20 @@ export class DefaultService {
         });
     }
     /**
+     * Trigger a server rebuild and restart (dev mode only)
+     * @returns any Restart initiated
+     * @throws ApiError
+     */
+    public devRestart(): CancelablePromise<any> {
+        return this.httpRequest.request({
+            method: 'POST',
+            url: '/api/dev/restart',
+            errors: {
+                403: `Not running in dev mode`,
+            },
+        });
+    }
+    /**
      * List all known projects
      * @returns ProjectInfo OK
      * @throws ApiError
