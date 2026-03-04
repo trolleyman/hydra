@@ -355,13 +355,13 @@ func defaultDockerfileContent(agentType AgentType) (string, error) {
 func getAgentBinds(agentType AgentType, projectRoot, id, containerHome string) ([]string, error) {
 	hydraDir := paths.GetHydraDirFromProjectRoot(projectRoot)
 	cacheDir := filepath.Join(hydraDir, "cache")
-	if err := git.CreateGitignoreAllInDir(cacheDir); err != nil {
+	if err := paths.CreateGitignoreAllInDir(cacheDir); err != nil {
 		return nil, errtrace.Wrap(err)
 	}
 
 	// Create and share status JSON
 	statusJsonHost := paths.GetStatusJsonFromProjectRoot(projectRoot, id)
-	if err := git.CreateGitignoreAllInDir(filepath.Dir(statusJsonHost)); err != nil {
+	if err := paths.CreateGitignoreAllInDir(filepath.Dir(statusJsonHost)); err != nil {
 		return nil, errtrace.Wrap(err)
 	}
 	if err := os.WriteFile(statusJsonHost, []byte("{}"), 0644); err != nil {

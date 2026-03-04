@@ -39,7 +39,7 @@ func ListHydraBranches(projectRoot string) ([]string, error) {
 // CreateWorktree runs `git worktree add -b <branchName> <path> <baseBranch>`.
 func CreateWorktree(projectRoot, worktreePath, branchName, baseBranch string) error {
 	worktreesDir := filepath.Dir(worktreePath)
-	if err := CreateGitignoreAllInDir(worktreesDir); err != nil {
+	if err := paths.CreateGitignoreAllInDir(worktreesDir); err != nil {
 		return errtrace.Wrap(err)
 	}
 
@@ -50,21 +50,6 @@ func CreateWorktree(projectRoot, worktreePath, branchName, baseBranch string) er
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
 		return errtrace.Wrap(fmt.Errorf("git worktree add: %w", err))
-	}
-	return nil
-}
-
-// CreateGitignoreAllInDir adds a .gitignore in the specified directory that ignores all files in that directory
-func CreateGitignoreAllInDir(dir string) error {
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return errtrace.Wrap(fmt.Errorf("create dir: %w: %s", err, dir))
-	}
-
-	gitignorePath := filepath.Join(dir, ".gitignore")
-	if _, err := os.Stat(gitignorePath); os.IsNotExist(err) {
-		if err := os.WriteFile(gitignorePath, []byte("*\n"), 0644); err != nil {
-			return errtrace.Wrap(fmt.Errorf("create .gitignore: %w: %s", err, gitignorePath))
-		}
 	}
 	return nil
 }

@@ -20,7 +20,7 @@ type Store struct {
 // enables WAL mode, and runs AutoMigrate to ensure the schema is current.
 func Open(projectRoot string) (*Store, error) {
 	stateDir := paths.GetStateDirFromProjectRoot(projectRoot)
-	if err := os.MkdirAll(stateDir, 0755); err != nil {
+	if err := paths.CreateGitignoreAllInDir(stateDir); err != nil {
 		return nil, errtrace.Wrap(fmt.Errorf("create state dir: %w", err))
 	}
 

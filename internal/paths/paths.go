@@ -76,3 +76,18 @@ func WriteFileIfChanged(path, content string, perm os.FileMode) error {
 	}
 	return errtrace.Wrap(os.WriteFile(path, []byte(content), perm))
 }
+
+// CreateGitignoreAllInDir adds a .gitignore in the specified directory that ignores all files in that directory
+func CreateGitignoreAllInDir(dir string) error {
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return errtrace.Wrap(fmt.Errorf("create dir: %w: %s", err, dir))
+	}
+
+	gitignorePath := filepath.Join(dir, ".gitignore")
+	if _, err := os.Stat(gitignorePath); os.IsNotExist(err) {
+		if err := os.WriteFile(gitignorePath, []byte("*\n"), 0644); err != nil {
+			return errtrace.Wrap(fmt.Errorf("create .gitignore: %w: %s", err, gitignorePath))
+		}
+	}
+	return nil
+}
