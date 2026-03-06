@@ -185,7 +185,7 @@ function ChangeTypeIcon({ type }: { type: string }) {
 // ── Diff Hunk rendering ───────────────────────────────────────────────────────
 
 const UNIFIED_LINE_NUM_CLASS = 'select-none text-right pr-2 text-gray-400 dark:text-gray-600 text-xs font-mono w-10 shrink-0 border-r border-gray-200 dark:border-gray-700 leading-5'
-const UNIFIED_CODE_CLASS = 'pl-2 font-mono text-xs leading-5 flex-1 whitespace-pre overflow-x-auto'
+const UNIFIED_CODE_CLASS = 'pl-2 font-mono text-xs leading-5 flex-1 whitespace-pre-wrap break-words overflow-hidden'
 
 function UnifiedHunk({
   hunk,
@@ -260,7 +260,7 @@ function UnifiedHunk({
 }
 
 const SBS_LINE_NUM = 'select-none text-right text-gray-400 dark:text-gray-600 text-xs font-mono w-8 shrink-0 pr-1 leading-5'
-const SBS_CODE = 'pl-1 font-mono text-xs leading-5 flex-1 whitespace-pre overflow-x-auto min-w-0'
+const SBS_CODE = 'pl-1 font-mono text-xs leading-5 flex-1 whitespace-pre-wrap break-words overflow-hidden min-w-0'
 
 function SideBySideHunk({
   hunk,
@@ -298,7 +298,7 @@ function SideBySideHunk({
         return (
           <div key={idx} className="flex items-stretch divide-x divide-gray-200 dark:divide-gray-700">
             {/* Old side */}
-            <div className={`flex items-center flex-1 min-w-0 ${oldBg}`}>
+            <div className={`flex items-start flex-1 min-w-0 ${oldBg}`}>
               <span className={SBS_LINE_NUM}>{line.oldLineNum ?? ''}</span>
               <span className={`select-none font-mono text-xs w-3 shrink-0 text-center leading-5 ${
                 line.oldType === 'deletion' ? 'text-red-500' : 'text-gray-300 dark:text-gray-700'
@@ -312,7 +312,7 @@ function SideBySideHunk({
               )}
             </div>
             {/* New side */}
-            <div className={`flex items-center flex-1 min-w-0 ${newBg}`}>
+            <div className={`flex items-start flex-1 min-w-0 ${newBg}`}>
               <span className={SBS_LINE_NUM}>{line.newLineNum ?? ''}</span>
               <span className={`select-none font-mono text-xs w-3 shrink-0 text-center leading-5 ${
                 line.newType === 'addition' ? 'text-green-500' : 'text-gray-300 dark:text-gray-700'
@@ -331,6 +331,7 @@ function SideBySideHunk({
     </div>
   )
 }
+
 
 // ── File diff card ────────────────────────────────────────────────────────────
 
@@ -415,7 +416,7 @@ function FileDiff({
           No changes
         </div>
       ) : (
-        <div className="overflow-x-auto">
+        <div className="overflow-hidden">
           {file.hunks.map((hunk, idx) =>
             sideBySide ? (
               <SideBySideHunk
