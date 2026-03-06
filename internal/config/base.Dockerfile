@@ -16,11 +16,6 @@ RUN apt-get update && apt-get install -y \
         build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Node.js 22.x
-RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
-    && apt-get install -y nodejs \
-    && rm -rf /var/lib/apt/lists/*
-
 ENV DEVCONTAINER=true
 ENV TERM=xterm-256color
 ENV COLORTERM=truecolor
