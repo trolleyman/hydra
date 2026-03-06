@@ -101,6 +101,11 @@ func runTriggerHook(agentType string, logFile *os.File) error {
 		status = api.Waiting
 	case "SessionEnd":
 		status = api.Stopped
+	case "AfterTool":
+		// AfterTool doesn't change the status (it remains Running), but we want
+		// to update status.json so the timestamp changes, signaling to the
+		// frontend that it might need to refresh (e.g. after a git commit).
+		status = api.Running
 	default:
 		return nil
 	}

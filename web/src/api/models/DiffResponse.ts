@@ -15,6 +15,14 @@ export type DiffResponse = {
      */
     head_ref: string;
     /**
+     * True if there are merge conflicts between base_ref and head_ref
+     */
+    merge_conflict?: boolean;
+    /**
+     * True if there are uncommitted changes in the worktree
+     */
+    uncommitted_changes?: boolean;
+    /**
      * Details of the base commit (if a specific commit SHA was given)
      */
     base_commit?: CommitInfo | null;
