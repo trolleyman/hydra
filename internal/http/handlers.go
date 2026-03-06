@@ -179,6 +179,7 @@ func (s *Server) GetConfig(_ context.Context, request api.GetConfigRequestObject
 		Defaults: api.AgentConfig{
 			Dockerfile:         cfg.Defaults.Dockerfile,
 			DockerfileContents: cfg.Defaults.DockerfileContents,
+			DockerignoreContents: cfg.Defaults.DockerignoreContents,
 			Context:            cfg.Defaults.Context,
 			PrePrompt:          cfg.Defaults.PrePrompt,
 		},
@@ -189,6 +190,7 @@ func (s *Server) GetConfig(_ context.Context, request api.GetConfigRequestObject
 		resp.Agents[name] = api.AgentConfig{
 			Dockerfile:         agent.Dockerfile,
 			DockerfileContents: agent.DockerfileContents,
+			DockerignoreContents: agent.DockerignoreContents,
 			Context:            agent.Context,
 			PrePrompt:          agent.PrePrompt,
 		}
@@ -204,6 +206,7 @@ func (s *Server) SaveConfig(_ context.Context, request api.SaveConfigRequestObje
 		Defaults: config.AgentConfig{
 			Dockerfile:         request.Body.Defaults.Dockerfile,
 			DockerfileContents: request.Body.Defaults.DockerfileContents,
+			DockerignoreContents: request.Body.Defaults.DockerignoreContents,
 			Context:            request.Body.Defaults.Context,
 			PrePrompt:          request.Body.Defaults.PrePrompt,
 		},
@@ -213,6 +216,7 @@ func (s *Server) SaveConfig(_ context.Context, request api.SaveConfigRequestObje
 		newCfg.Agents[name] = config.AgentConfig{
 			Dockerfile:         agent.Dockerfile,
 			DockerfileContents: agent.DockerfileContents,
+			DockerignoreContents: agent.DockerignoreContents,
 			Context:            agent.Context,
 			PrePrompt:          agent.PrePrompt,
 		}
@@ -311,11 +315,15 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 	// Resolve Dockerfile path and contents
 	dockerfilePath := ""
 	dockerfileContents := ""
+	dockerignoreContents := ""
 	if resolved.Dockerfile != nil {
 		dockerfilePath = *resolved.Dockerfile
 	}
 	if resolved.DockerfileContents != nil {
 		dockerfileContents = *resolved.DockerfileContents
+	}
+	if resolved.DockerignoreContents != nil {
+		dockerignoreContents = *resolved.DockerignoreContents
 	}
 	if dockerfilePath != "" {
 		if _, readErr := os.ReadFile(dockerfilePath); readErr != nil {
@@ -339,14 +347,15 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 	}
 
 	head, err := heads.SpawnHead(ctx, s.DockerClient, s.DB, projectRoot, heads.SpawnHeadOptions{
-		ID:                 id,
-		PrePrompt:          prePrompt,
-		Prompt:             prompt,
-		AgentType:          agentType,
-		BaseBranch:         baseBranch,
-		DockerfilePath:     dockerfilePath,
-		DockerfileContents: dockerfileContents,
-		Ephemeral:          ephemeral,
+		ID:                   id,
+		PrePrompt:            prePrompt,
+		Prompt:               prompt,
+		AgentType:            agentType,
+		BaseBranch:           baseBranch,
+		DockerfilePath:       dockerfilePath,
+		DockerfileContents:   dockerfileContents,
+		DockerignoreContents: dockerignoreContents,
+		Ephemeral:            ephemeral,
 	})
 	if err != nil {
 		return api.SpawnAgent500JSONResponse{
@@ -584,6 +593,7 @@ func (s *Server) RestartAgent(ctx context.Context, request api.RestartAgentReque
 	// Resolve dockerfile from config (same as SpawnAgent).
 	dockerfilePath := ""
 	dockerfileContents := ""
+	dockerignoreContents := ""
 	if cfg, cfgErr := config.Load(projectRoot); cfgErr == nil {
 		resolved := cfg.GetResolvedConfig(string(agentType))
 		if resolved.Dockerfile != nil {
@@ -592,6 +602,9 @@ func (s *Server) RestartAgent(ctx context.Context, request api.RestartAgentReque
 		if resolved.DockerfileContents != nil {
 			dockerfileContents = *resolved.DockerfileContents
 		}
+		if resolved.DockerignoreContents != nil {
+			dockerignoreContents = *resolved.DockerignoreContents
+		}
 		// Override pre_prompt from config if we didn't already have one stored.
 		if prePrompt == "" && resolved.PrePrompt != nil {
 			prePrompt = *resolved.PrePrompt
@@ -599,13 +612,14 @@ func (s *Server) RestartAgent(ctx context.Context, request api.RestartAgentReque
 	}
 
 	newHead, err := heads.SpawnHead(ctx, s.DockerClient, s.DB, projectRoot, heads.SpawnHeadOptions{
-		ID:                 id,
-		PrePrompt:          prePrompt,
-		Prompt:             prompt,
-		AgentType:          agentType,
-		BaseBranch:         baseBranch,
-		DockerfilePath:     dockerfilePath,
-		DockerfileContents: dockerfileContents,
+		ID:                   id,
+		PrePrompt:            prePrompt,
+		Prompt:               prompt,
+		AgentType:            agentType,
+		BaseBranch:           baseBranch,
+		DockerfilePath:       dockerfilePath,
+		DockerfileContents:   dockerfileContents,
+		DockerignoreContents: dockerignoreContents,
 	})
 	if err != nil {
 		return api.RestartAgent500JSONResponse{

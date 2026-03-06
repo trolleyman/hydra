@@ -13,6 +13,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 
 	"braces.dev/errtrace"
@@ -97,6 +98,7 @@ type SpawnOptions struct {
 	AgentType          AgentType
 	DockerfilePath     string // optional; empty = use embedded default for AgentType
 	DockerfileContents string // optional; if set, used as extension of default image
+	DockerignoreContents string // optional; if set, used as .dockerignore content
 	PrePrompt          string
 	Prompt             string
 	ProjectPath        string
@@ -128,7 +130,7 @@ func SpawnAgent(ctx context.Context, cli *dockerclient.Client, opts SpawnOptions
 	if opts.OnStatus != nil {
 		opts.OnStatus(api.Building)
 	}
-	imageTag, err := ensureImage(ctx, cli, opts.AgentType, opts.DockerfilePath, opts.DockerfileContents, opts.ProjectPath, opts.BuildLog)
+	imageTag, err := ensureImage(ctx, cli, opts.AgentType, opts.DockerfilePath, opts.DockerfileContents, opts.DockerignoreContents, opts.ProjectPath, opts.BuildLog)
 	if err != nil {
 		return "", errtrace.Wrap(fmt.Errorf("ensure image: %w", err))
 	}
@@ -621,7 +623,7 @@ func buildGeminiSettings(existing []byte) ([]byte, error) {
 // Custom images (customDockerfile != ""):
 //   - Uses the provided Dockerfile; build context is its parent directory
 //   - Tag: hydra-agent-<type>-<sha256(absPath)[:8]>
-func ensureImage(ctx context.Context, cli *dockerclient.Client, agentType AgentType, customDockerfile string, dockerfileContents string, projectRoot string, buildLog io.Writer) (string, error) {
+func ensureImage(ctx context.Context, cli *dockerclient.Client, agentType AgentType, customDockerfile string, dockerfileContents string, dockerignoreContents string, projectRoot string, buildLog io.Writer) (string, error) {
 	var buildContext string
 	if customDockerfile == "" && dockerfileContents == "" && projectRoot != "" {
 		cfg, err := config.Load(projectRoot)
@@ -633,30 +635,52 @@ func ensureImage(ctx context.Context, cli *dockerclient.Client, agentType AgentT
 			if resolved.DockerfileContents != nil {
 				dockerfileContents = *resolved.DockerfileContents
 			}
+			if resolved.DockerignoreContents != nil {
+				dockerignoreContents = *resolved.DockerignoreContents
+			}
 			if resolved.Context != nil {
 				buildContext = *resolved.Context
 			}
 		}
 	}
 
+	// Resolve build context relative to project root
+	if buildContext != "" && !filepath.IsAbs(buildContext) && projectRoot != "" {
+		buildContext = filepath.Join(projectRoot, buildContext)
+	}
+
+	// Default build context to <projectDir>/.hydra/build/tmp
+	if buildContext == "" && projectRoot != "" {
+		buildContext = filepath.Join(projectRoot, ".hydra", "build", "tmp")
+		if err := os.MkdirAll(buildContext, 0755); err != nil {
+			return "", errtrace.Wrap(fmt.Errorf("create build context dir: %w", err))
+		}
+		// Create .gitignore and .dockerignore with *
+		for _, f := range []string{".gitignore", ".dockerignore"} {
+			if err := os.WriteFile(filepath.Join(buildContext, f), []byte("*\n"), 0644); err != nil {
+				return "", errtrace.Wrap(fmt.Errorf("write %s: %w", f, err))
+			}
+		}
+	}
+
 	if dockerfileContents != "" {
-		return errtrace.Wrap2(ensureExtendedImage(ctx, cli, agentType, dockerfileContents, buildContext, buildLog))
+		return errtrace.Wrap2(ensureExtendedImage(ctx, cli, agentType, dockerfileContents, dockerignoreContents, buildContext, buildLog))
 	}
 
 	if customDockerfile == "" {
 		return errtrace.Wrap2(ensureDefaultImage(ctx, cli, agentType, buildLog))
 	}
-	return errtrace.Wrap2(ensureCustomImage(ctx, cli, agentType, customDockerfile, buildContext, buildLog))
+	return errtrace.Wrap2(ensureCustomImage(ctx, cli, agentType, customDockerfile, dockerignoreContents, buildContext, buildLog))
 }
 
-func ensureExtendedImage(ctx context.Context, cli *dockerclient.Client, agentType AgentType, contents string, buildContext string, buildLog io.Writer) (string, error) {
+func ensureExtendedImage(ctx context.Context, cli *dockerclient.Client, agentType AgentType, contents string, dockerignore string, buildContext string, buildLog io.Writer) (string, error) {
 	// Build default image so FROM works
 	baseTag, err := ensureDefaultImage(ctx, cli, agentType, buildLog)
 	if err != nil {
 		return "", errtrace.Wrap(fmt.Errorf("build default agent image: %w", err))
 	}
 
-	hash := fmt.Sprintf("%x", sha256.Sum256([]byte(contents+buildContext)))[:8]
+	hash := fmt.Sprintf("%x", sha256.Sum256([]byte(contents+dockerignore+buildContext)))[:8]
 	tag := "hydra-agent-" + string(agentType) + "-extended:" + hash
 
 	// Create a temporary Dockerfile that extends the base
@@ -673,11 +697,20 @@ func ensureExtendedImage(ctx context.Context, cli *dockerclient.Client, agentTyp
 		return "", errtrace.Wrap(fmt.Errorf("write temp dockerfile: %w", err))
 	}
 
-	if buildContext == "" {
-		buildContext = tempDir
+	if dockerignore != "" {
+		if err := os.WriteFile(filepath.Join(tempDir, ".dockerignore"), []byte(dockerignore), 0644); err != nil {
+			return "", errtrace.Wrap(fmt.Errorf("write temp .dockerignore: %w", err))
+		}
+		// If using the tempDir as buildContext, it's fine.
+		// If using a custom buildContext, we should probably handle .dockerignore there.
 	}
 
-	err = buildDockerImage(ctx, cli, tag, dockerfilePath, buildContext, buildLog)
+	actualBuildContext := buildContext
+	if actualBuildContext == "" {
+		actualBuildContext = tempDir
+	}
+
+	err = buildDockerImage(ctx, cli, tag, dockerfilePath, actualBuildContext, dockerignore, buildLog)
 	if err != nil {
 		return "", errtrace.Wrap(err)
 	}
@@ -697,7 +730,7 @@ func ensureBaseImage(ctx context.Context, cli *dockerclient.Client, buildLog io.
 		return errtrace.Wrap(err)
 	}
 
-	err = buildDockerImage(ctx, cli, tag, filepath.Join(ctxDir, "Dockerfile"), ctxDir, buildLog)
+	err = buildDockerImage(ctx, cli, tag, filepath.Join(ctxDir, "Dockerfile"), ctxDir, "", buildLog)
 	if err != nil {
 		return errtrace.Wrap(err)
 	}
@@ -718,7 +751,7 @@ func ensureDefaultImage(ctx context.Context, cli *dockerclient.Client, agentType
 		return "", errtrace.Wrap(err)
 	}
 
-	err = buildDockerImage(ctx, cli, tag, filepath.Join(ctxDir, "Dockerfile"), ctxDir, buildLog)
+	err = buildDockerImage(ctx, cli, tag, filepath.Join(ctxDir, "Dockerfile"), ctxDir, "", buildLog)
 	if err != nil {
 		return "", errtrace.Wrap(err)
 	}
@@ -726,7 +759,7 @@ func ensureDefaultImage(ctx context.Context, cli *dockerclient.Client, agentType
 }
 
 
-func ensureCustomImage(ctx context.Context, cli *dockerclient.Client, agentType AgentType, dockerfilePath string, buildContext string, buildLog io.Writer) (string, error) {
+func ensureCustomImage(ctx context.Context, cli *dockerclient.Client, agentType AgentType, dockerfilePath string, dockerignore string, buildContext string, buildLog io.Writer) (string, error) {
 	abs, err := filepath.Abs(dockerfilePath)
 	if err != nil {
 		return "", errtrace.Wrap(fmt.Errorf("resolve dockerfile path: %w", err))
@@ -739,14 +772,14 @@ func ensureCustomImage(ctx context.Context, cli *dockerclient.Client, agentType 
 	}
 
 	// Build custom image
-	hash := fmt.Sprintf("%x", sha256.Sum256([]byte(abs+buildContext)))[:8]
+	hash := fmt.Sprintf("%x", sha256.Sum256([]byte(abs+dockerignore+buildContext)))[:8]
 	tag := "hydra-agent-" + string(agentType) + "-custom:" + hash
 
 	if buildContext == "" {
 		buildContext = filepath.Dir(abs)
 	}
 
-	err = buildDockerImage(ctx, cli, tag, abs, buildContext, buildLog)
+	err = buildDockerImage(ctx, cli, tag, abs, buildContext, dockerignore, buildLog)
 	if err != nil {
 		return "", errtrace.Wrap(err)
 	}
@@ -789,7 +822,7 @@ func prepareDefaultDockerfileDir(agentType AgentType) (string, error) {
 	return dir, nil
 }
 
-func buildDockerImage(ctx context.Context, cli *dockerclient.Client, tag, dockerfilePath, buildContext string, buildLog io.Writer) error {
+func buildDockerImage(ctx context.Context, cli *dockerclient.Client, tag, dockerfilePath, buildContext string, dockerignoreContents string, buildLog io.Writer) error {
 	log.Printf("Building Docker image: %s (from %s in %s)", tag, dockerfilePath, buildContext)
 
 	// Docker expects the Dockerfile path to be relative to the build context root.
@@ -799,6 +832,26 @@ func buildDockerImage(ctx context.Context, cli *dockerclient.Client, tag, docker
 	}
 	// Ensure the path uses forward slashes, as required by the Docker daemon.
 	relDockerfile = filepath.ToSlash(relDockerfile)
+
+	// Parse .dockerignore if it exists in the build context, or use override
+	var excludes []string
+	if dockerignoreContents != "" {
+		excludes = strings.Split(dockerignoreContents, "\n")
+	} else {
+		ignorePath := filepath.Join(buildContext, ".dockerignore")
+		if data, err := os.ReadFile(ignorePath); err == nil {
+			excludes = strings.Split(string(data), "\n")
+		}
+	}
+
+	// Filter out empty lines and comments from excludes
+	var cleanExcludes []string
+	for _, e := range excludes {
+		e = strings.TrimSpace(e)
+		if e != "" && !strings.HasPrefix(e, "#") {
+			cleanExcludes = append(cleanExcludes, e)
+		}
+	}
 
 	pr, pw := io.Pipe()
 	errChan := make(chan error, 1)
@@ -818,18 +871,41 @@ func buildDockerImage(ctx context.Context, cli *dockerclient.Client, tag, docker
 				return errtrace.Wrap(err)
 			}
 
+			rel, err := filepath.Rel(buildContext, path)
+			if err != nil {
+				return errtrace.Wrap(err)
+			}
+			rel = filepath.ToSlash(rel)
+
+			if rel == "." {
+				return nil
+			}
+
+			// Simple .dockerignore matching (matching against rel path)
+			// For a full implementation we should use github.com/docker/docker/pkg/fileutils
+			// but for now we'll do simple prefix/exact match or support *
+			for _, pattern := range cleanExcludes {
+				if pattern == "*" && rel != relDockerfile {
+					// Special case: if .dockerignore is *, we only include the Dockerfile itself
+					// (and .dockerignore if we wanted to, but Docker doesn't need it)
+					return nil
+				}
+				// Very basic matching:
+				if rel == pattern || strings.HasPrefix(rel, pattern+"/") {
+					if info.IsDir() {
+						return filepath.SkipDir
+					}
+					return nil
+				}
+			}
+
 			header, err := tar.FileInfoHeader(info, info.Name())
 			if err != nil {
 				return errtrace.Wrap(err)
 			}
 
-			rel, err := filepath.Rel(buildContext, path)
-			if err != nil {
-				return errtrace.Wrap(err)
-			}
-
 			// Docker expects forward slashes in tar headers regardless of the host OS
-			header.Name = filepath.ToSlash(rel)
+			header.Name = rel
 
 			if err := tw.WriteHeader(header); err != nil {
 				return errtrace.Wrap(err)

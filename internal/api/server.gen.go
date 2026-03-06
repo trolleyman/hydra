@@ -62,10 +62,11 @@ type AddProjectRequest struct {
 
 // AgentConfig defines model for AgentConfig.
 type AgentConfig struct {
-	Context            *string `json:"context"`
-	Dockerfile         *string `json:"dockerfile"`
-	DockerfileContents *string `json:"dockerfile_contents"`
-	PrePrompt          *string `json:"pre_prompt"`
+	Context              *string `json:"context"`
+	Dockerfile           *string `json:"dockerfile"`
+	DockerfileContents   *string `json:"dockerfile_contents"`
+	DockerignoreContents *string `json:"dockerignore_contents"`
+	PrePrompt            *string `json:"pre_prompt"`
 }
 
 // AgentResponse defines model for AgentResponse.

@@ -798,6 +798,9 @@ components:
         dockerfile_contents:
           type: string
           nullable: true
+        dockerignore_contents:
+          type: string
+          nullable: true
         context:
           type: string
           nullable: true

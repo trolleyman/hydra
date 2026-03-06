@@ -16,7 +16,7 @@ const DOCKERFILE_TEMPLATES: Record<string, { label: string; content: string }> =
   none: { label: 'None', content: '' },
   golang: {
     label: 'Go (Golang)',
-    content: '# Install Go 1.22\nRUN curl -fsSL https://go.dev/dl/go1.22.0.linux-amd64.tar.gz | tar -C /usr/local -xz\nENV PATH=$PATH:/usr/local/go/bin'
+    content: '# Install Go 1.22\nRUN curl -fsSL https://go.dev/dl/go1.22.0.linux-amd64.tar.gz | tar -C /usr/local -xz\nENV PATH=$PATH:/usr/local/go/bin\n\n# Pre-install dependencies\nCOPY go.mod go.sum ./\nRUN go mod download'
   },
   rust: {
     label: 'Rust',
@@ -27,8 +27,8 @@ const DOCKERFILE_TEMPLATES: Record<string, { label: string; content: string }> =
     content: '# Install Python libraries\nRUN apt-get update && apt-get install -y python3-pip\nRUN pip3 install numpy pandas matplotlib scipy scikit-learn --break-system-packages'
   },
   nodejs: {
-    label: 'Node.js Extra',
-    content: '# Install additional Node.js tools\nRUN npm install -g pnpm yarn'
+    label: 'Node.js',
+    content: '# Pre-install dependencies\nCOPY package.json bun.lockb* package-lock.json* yarn.lock* ./\nRUN if [ -f bun.lockb ]; then npm install -g bun && bun install; \\\n    elif [ -f package-lock.json ]; then npm install; \\\n    elif [ -f yarn.lock ]; then npm install -g yarn && yarn install; \\\n    else npm install; fi'
   }
 }
 
@@ -327,18 +327,18 @@ function ConfigForm({
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div className="space-y-1.5">
+        <div className="space-y-1.5 opacity-50">
           <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">
             Dockerfile Path
           </label>
           <input
             type="text"
             value={value.dockerfile || ''}
-            onChange={(e) => onChange({ ...value, dockerfile: e.target.value || null })}
+            disabled
             placeholder={inherited?.dockerfile || './Dockerfile'}
-            className="w-full text-sm px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-100 placeholder-gray-300 dark:placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-mono shadow-inner"
+            className="w-full text-sm px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 font-mono shadow-inner cursor-not-allowed"
           />
-          <p className="text-[10px] text-gray-400 dark:text-gray-500 italic">Overrides Dockerfile Contents below if set.</p>
+          <p className="text-[10px] text-gray-400 dark:text-gray-500 italic">Custom Dockerfile path (not editable here)</p>
         </div>
         <div className="space-y-1.5">
           <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">
@@ -348,7 +348,7 @@ function ConfigForm({
             type="text"
             value={value.context || ''}
             onChange={(e) => onChange({ ...value, context: e.target.value || null })}
-            placeholder={inherited?.context || '.'}
+            placeholder={inherited?.context || '<projectDir>/.hydra/build/tmp'}
             className="w-full text-sm px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-100 placeholder-gray-300 dark:placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-mono shadow-inner"
           />
         </div>
@@ -390,6 +390,23 @@ function ConfigForm({
             <div className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-400 border border-gray-200 dark:border-gray-700 font-mono">
               Dockerfile Extension
             </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">
+          Dockerignore Contents (Override)
+        </label>
+        <div className="relative group rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 focus-within:ring-2 focus-within:ring-blue-500/20 focus-within:border-blue-500 transition-all shadow-inner overflow-hidden">
+          <div className="max-h-32 overflow-y-auto">
+            <textarea
+              value={value.dockerignore_contents || ''}
+              onChange={(e) => onChange({ ...value, dockerignore_contents: e.target.value || null })}
+              placeholder={inherited?.dockerignore_contents || '# Add files to ignore during build\n.git\nnode_modules'}
+              className="w-full text-sm p-3 bg-transparent text-gray-800 dark:text-gray-100 placeholder-gray-300 dark:placeholder-gray-600 focus:outline-none font-mono leading-relaxed resize-y"
+              spellCheck={false}
+            />
           </div>
         </div>
       </div>

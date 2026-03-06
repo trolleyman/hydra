@@ -88,13 +88,21 @@ var spawnCmd = &cobra.Command{
 			}
 		}
 
-		// Resolve Dockerfile path: --flag > config.toml
+		// Resolve Dockerfile path and contents
 		dockerfilePath := spawnFlags.dockerfile
+		dockerfileContents := ""
+		dockerignoreContents := ""
 		if dockerfilePath == "" {
 			if resolved.Dockerfile != nil {
 				dockerfilePath = *resolved.Dockerfile
 				log.Printf("Using custom Dockerfile for %s: %s", agentType, dockerfilePath)
 			}
+		}
+		if resolved.DockerfileContents != nil {
+			dockerfileContents = *resolved.DockerfileContents
+		}
+		if resolved.DockerignoreContents != nil {
+			dockerignoreContents = *resolved.DockerignoreContents
 		}
 		if dockerfilePath != "" {
 			if _, readErr := os.ReadFile(dockerfilePath); readErr != nil {
@@ -118,12 +126,14 @@ var spawnCmd = &cobra.Command{
 		}
 
 		head, err := heads.SpawnHead(cmd.Context(), cli, store, projectRoot, heads.SpawnHeadOptions{
-			ID:             id,
-			PrePrompt:      prePrompt,
-			Prompt:         prompt,
-			AgentType:      agentType,
-			BaseBranch:     baseBranch,
-			DockerfilePath: dockerfilePath,
+			ID:                   id,
+			PrePrompt:            prePrompt,
+			Prompt:               prompt,
+			AgentType:            agentType,
+			BaseBranch:           baseBranch,
+			DockerfilePath:       dockerfilePath,
+			DockerfileContents:   dockerfileContents,
+			DockerignoreContents: dockerignoreContents,
 		})
 		if err != nil {
 			return errtrace.Wrap(err)

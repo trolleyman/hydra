@@ -25,6 +25,7 @@ import (
 	dockercontainer "github.com/docker/docker/api/types/container"
 	dockerclient "github.com/docker/docker/client"
 	"github.com/trolleyman/hydra/internal/api"
+	"github.com/trolleyman/hydra/internal/config"
 	"github.com/trolleyman/hydra/internal/db"
 	"github.com/trolleyman/hydra/internal/docker"
 	"github.com/trolleyman/hydra/internal/heads"
@@ -901,11 +902,28 @@ func isContainerRunning(status string) bool {
 }
 
 func spawnHead(projectRoot, id string, agentType docker.AgentType, dockerfilePath, prompt string, cli *dockerclient.Client, store *db.Store) error {
+	var dockerfileContents string
+	var dockerignoreContents string
+	if cfg, err := config.Load(projectRoot); err == nil {
+		resolved := cfg.GetResolvedConfig(string(agentType))
+		if dockerfilePath == "" && resolved.Dockerfile != nil {
+			dockerfilePath = *resolved.Dockerfile
+		}
+		if resolved.DockerfileContents != nil {
+			dockerfileContents = *resolved.DockerfileContents
+		}
+		if resolved.DockerignoreContents != nil {
+			dockerignoreContents = *resolved.DockerignoreContents
+		}
+	}
+
 	_, err := heads.SpawnHead(context.Background(), cli, store, projectRoot, heads.SpawnHeadOptions{
-		ID:             id,
-		AgentType:      agentType,
-		DockerfilePath: dockerfilePath,
-		Prompt:         prompt,
+		ID:                   id,
+		AgentType:            agentType,
+		DockerfilePath:       dockerfilePath,
+		DockerfileContents:   dockerfileContents,
+		DockerignoreContents: dockerignoreContents,
+		Prompt:               prompt,
 	})
 	return errtrace.Wrap(err)
 }
