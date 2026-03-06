@@ -389,7 +389,7 @@ function FileDiff({
   return (
     <div ref={fileRef} className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden mb-4">
       {/* File header */}
-      <div className="flex items-center gap-2 px-3 py-2 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
+      <div className="flex items-center gap-2 px-3 py-2 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 sticky top-0 z-10">
         <ChangeTypeIcon type={file.change_type} />
         <span className="font-mono text-xs text-gray-700 dark:text-gray-300 flex-1 min-w-0 truncate" title={displayPath}>
           {displayPath}
@@ -504,7 +504,7 @@ function CommitSelector({
     <div ref={ref} className="relative">
       <button
         onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-1.5 h-7 px-2.5 rounded-md text-xs font-medium text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors"
+        className="flex items-center gap-1.5 h-7 px-2.5 rounded-md text-xs font-medium text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors cursor-pointer"
       >
         <svg className="w-3.5 h-3.5 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
@@ -629,6 +629,8 @@ export function DiffViewer({
   const [diffError, setDiffError] = useState<string | null>(null)
   const [sideBySide, setSideBySide] = useState(false)
   const [ignoreWhitespace, setIgnoreWhitespace] = useState(false)
+  const [singleFile, setSingleFile] = useState(false)
+  const [singleFileIdx, setSingleFileIdx] = useState(0)
   const fileRefs = useRef<Map<string, HTMLDivElement>>(new Map())
 
   // Fetch commits list whenever the agent changes.
@@ -685,6 +687,15 @@ export function DiffViewer({
     el?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }, [])
 
+  const handleFileClick = useCallback((path: string) => {
+    if (singleFile && diff) {
+      const idx = diff.files.findIndex((f) => f.path === path)
+      if (idx >= 0) setSingleFileIdx(idx)
+    } else {
+      scrollToFile(path)
+    }
+  }, [singleFile, diff, scrollToFile])
+
   const selectedCommit = selectedView.type === 'commit'
     ? commits.find((c) => c.sha === selectedView.sha) ?? null
     : null
@@ -711,6 +722,7 @@ export function DiffViewer({
           <CommitSelector commits={commits} selected={selectedView} onChange={setSelectedView} />
           <Toggle label="Side-by-side" active={sideBySide} onClick={() => setSideBySide((v) => !v)} />
           <Toggle label="Ignore whitespace" active={ignoreWhitespace} onClick={() => setIgnoreWhitespace((v) => !v)} />
+          <Toggle label="One file" active={singleFile} onClick={() => { setSingleFile((v) => !v); setSingleFileIdx(0) }} />
         </div>
       </div>
 
@@ -737,18 +749,20 @@ export function DiffViewer({
       ) : diff ? (
         <div className="flex gap-3 min-h-0">
           {/* File list sidebar */}
-          <div className="w-52 shrink-0 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden bg-white dark:bg-gray-800 self-start sticky top-0">
+          <div className="w-52 shrink-0 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden bg-white dark:bg-gray-800 self-start sticky top-0 z-10">
             <div className="px-2.5 py-2 border-b border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
               <span className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">
                 Changed files ({diff.files.length})
               </span>
             </div>
             <div className="overflow-y-auto max-h-80">
-              {diff.files.map((f) => (
+              {diff.files.map((f, i) => (
                 <button
                   key={f.path}
-                  onClick={() => scrollToFile(f.path)}
-                  className="w-full flex items-center gap-1.5 px-2.5 py-1.5 text-left hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors group"
+                  onClick={() => handleFileClick(f.path)}
+                  className={`w-full flex items-center gap-1.5 px-2.5 py-1.5 text-left hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors group cursor-pointer ${
+                    singleFile && i === singleFileIdx ? 'bg-blue-50 dark:bg-blue-900/20' : ''
+                  }`}
                 >
                   <ChangeTypeIcon type={f.change_type} />
                   <span className="font-mono text-[10px] text-gray-700 dark:text-gray-300 truncate flex-1 min-w-0" title={f.path}>
@@ -769,17 +783,57 @@ export function DiffViewer({
 
           {/* Diff content */}
           <div className="flex-1 min-w-0">
-            {diff.files.map((f) => (
-              <FileDiff
-                key={f.path}
-                file={f}
-                sideBySide={sideBySide}
-                fileRef={(el) => {
-                  if (el) fileRefs.current.set(f.path, el)
-                  else fileRefs.current.delete(f.path)
-                }}
-              />
-            ))}
+            {singleFile ? (
+              <>
+                {/* Single-file navigation */}
+                <div className="flex items-center gap-2 mb-3">
+                  <button
+                    onClick={() => setSingleFileIdx((i) => Math.max(0, i - 1))}
+                    disabled={singleFileIdx === 0}
+                    className="flex items-center justify-center w-7 h-7 rounded-md border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="m15 19-7-7 7-7" />
+                    </svg>
+                  </button>
+                  <span className="text-xs text-gray-500 dark:text-gray-400">
+                    {singleFileIdx + 1} / {diff.files.length}
+                  </span>
+                  <button
+                    onClick={() => setSingleFileIdx((i) => Math.min(diff.files.length - 1, i + 1))}
+                    disabled={singleFileIdx === diff.files.length - 1}
+                    className="flex items-center justify-center w-7 h-7 rounded-md border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="m9 5 7 7-7 7" />
+                    </svg>
+                  </button>
+                </div>
+                <FileDiff
+                  key={diff.files[singleFileIdx]?.path}
+                  file={diff.files[singleFileIdx]!}
+                  sideBySide={sideBySide}
+                  fileRef={(el) => {
+                    const f = diff.files[singleFileIdx]
+                    if (!f) return
+                    if (el) fileRefs.current.set(f.path, el)
+                    else fileRefs.current.delete(f.path)
+                  }}
+                />
+              </>
+            ) : (
+              diff.files.map((f) => (
+                <FileDiff
+                  key={f.path}
+                  file={f}
+                  sideBySide={sideBySide}
+                  fileRef={(el) => {
+                    if (el) fileRefs.current.set(f.path, el)
+                    else fileRefs.current.delete(f.path)
+                  }}
+                />
+              ))
+            )}
           </div>
         </div>
       ) : null}
