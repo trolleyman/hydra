@@ -187,24 +187,23 @@ func (s *Server) GetConfig(_ context.Context, request api.GetConfigRequestObject
 func (s *Server) SaveConfig(_ context.Context, request api.SaveConfigRequestObject) (api.SaveConfigResponseObject, error) {
 	projectRoot := s.resolveProjectRoot(request.Params.ProjectId)
 
-		newCfg := config.Config{
-			Defaults: config.AgentConfig{
-				Dockerfile:         request.Body.Defaults.Dockerfile,
-				DockerfileContents: request.Body.Defaults.DockerfileContents,
-				Context:            request.Body.Defaults.Context,
-				PrePrompt:          request.Body.Defaults.PrePrompt,
-			},
-			Agents: make(map[string]config.AgentConfig),
+	newCfg := config.Config{
+		Defaults: config.AgentConfig{
+			Dockerfile:         request.Body.Defaults.Dockerfile,
+			DockerfileContents: request.Body.Defaults.DockerfileContents,
+			Context:            request.Body.Defaults.Context,
+			PrePrompt:          request.Body.Defaults.PrePrompt,
+		},
+		Agents: make(map[string]config.AgentConfig),
+	}
+	for name, agent := range request.Body.Agents {
+		newCfg.Agents[name] = config.AgentConfig{
+			Dockerfile:         agent.Dockerfile,
+			DockerfileContents: agent.DockerfileContents,
+			Context:            agent.Context,
+			PrePrompt:          agent.PrePrompt,
 		}
-		for name, agent := range request.Body.Agents {
-			newCfg.Agents[name] = config.AgentConfig{
-				Dockerfile:         agent.Dockerfile,
-				DockerfileContents: agent.DockerfileContents,
-				Context:            agent.Context,
-				PrePrompt:          agent.PrePrompt,
-			}
-		}
-	
+	}
 
 	scope := api.Project
 	if request.Params.Scope != nil {
