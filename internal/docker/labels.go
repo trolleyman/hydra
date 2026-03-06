@@ -17,6 +17,7 @@ type AgentType string
 const (
 	AgentTypeClaude AgentType = "claude"
 	AgentTypeGemini AgentType = "gemini"
+	AgentTypeBash   AgentType = "bash"
 )
 
 // AgentMetadata is the structured data stored in the Hydra Docker label.

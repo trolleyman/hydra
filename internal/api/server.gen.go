@@ -223,7 +223,7 @@ type ProjectInfo struct {
 
 // SpawnAgentRequest defines model for SpawnAgentRequest.
 type SpawnAgentRequest struct {
-	// AgentType Agent type: claude or gemini
+	// AgentType Agent type: claude, gemini, or bash
 	AgentType *string `json:"agent_type,omitempty"`
 
 	// BaseBranch Base branch to create the worktree from (defaults to current branch)

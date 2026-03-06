@@ -539,7 +539,7 @@ components:
           description: Unique identifier for the agent (slug format, max 40 chars)
         agent_type:
           type: string
-          description: "Agent type: claude or gemini"
+          description: "Agent type: claude, gemini, or bash"
         base_branch:
           type: string
           description: Base branch to create the worktree from (defaults to current branch)

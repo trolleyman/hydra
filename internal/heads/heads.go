@@ -191,6 +191,12 @@ func SpawnHead(ctx context.Context, cli *dockerclient.Client, store *db.Store, p
 	}
 
 	branchName := "hydra/" + opts.ID
+	worktreePath := paths.GetWorktreeDirFromProjectRoot(projectRoot, opts.ID)
+	if opts.Ephemeral {
+		branchName = baseBranch
+		worktreePath = projectRoot
+	}
+
 	now := time.Now()
 
 	// Write DB record first so the agent is visible immediately.
@@ -214,18 +220,21 @@ func SpawnHead(ctx context.Context, cli *dockerclient.Client, store *db.Store, p
 		}
 	}
 
-	worktreePath := paths.GetWorktreeDirFromProjectRoot(projectRoot, opts.ID)
-	if err := git.CreateWorktree(projectRoot, worktreePath, branchName, baseBranch); err != nil {
-		if store != nil {
-			_ = store.SoftDeleteAgent(opts.ID)
+	if !opts.Ephemeral {
+		if err := git.CreateWorktree(projectRoot, worktreePath, branchName, baseBranch); err != nil {
+			if store != nil {
+				_ = store.SoftDeleteAgent(opts.ID)
+			}
+			return nil, errtrace.Wrap(err)
 		}
-		return nil, errtrace.Wrap(err)
 	}
 
 	currentUser, err := user.Current()
 	if err != nil {
-		_ = git.RemoveWorktree(projectRoot, worktreePath)
-		_ = git.DeleteBranch(projectRoot, branchName)
+		if !opts.Ephemeral {
+			_ = git.RemoveWorktree(projectRoot, worktreePath)
+			_ = git.DeleteBranch(projectRoot, branchName)
+		}
 		if store != nil {
 			_ = store.SoftDeleteAgent(opts.ID)
 		}
@@ -334,10 +343,17 @@ func SpawnHead(ctx context.Context, cli *dockerclient.Client, store *db.Store, p
 		}
 	}()
 
+	var hBranch *string
+	var hWorktree *string
+	if !opts.Ephemeral {
+		hBranch = &branchName
+		hWorktree = &worktreePath
+	}
+
 	return &Head{
 		ID:              opts.ID,
-		Branch:          &branchName,
-		Worktree:        &worktreePath,
+		Branch:          hBranch,
+		Worktree:        hWorktree,
 		ProjectPath:     projectRoot,
 		ContainerID:     "",
 		ContainerStatus: "pending",
