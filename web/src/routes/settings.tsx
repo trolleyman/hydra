@@ -77,7 +77,7 @@ function SettingsPage() {
     setTesting(true)
     try {
       const resp = await api.default.spawnAgent({
-        prompt: 'bash',
+        prompt: '',
         agent_type: agentType,
         id: `test-${agentType}-${Math.random().toString(36).slice(2, 6)}`,
         ephemeral: true,

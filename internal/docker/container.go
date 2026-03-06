@@ -198,13 +198,19 @@ func SpawnAgent(ctx context.Context, cli *dockerclient.Client, opts SpawnOptions
 		if opts.Resume {
 			cmd = []string{"claude", "--resume"}
 		} else {
-			cmd = []string{"claude", "--dangerously-skip-permissions", "--", CombinePrompt(opts.PrePrompt, opts.Prompt)}
+			cmd = []string{"claude", "--dangerously-skip-permissions"}
+			if opts.Prompt != "" {
+				cmd = append(cmd, "--", CombinePrompt(opts.PrePrompt, opts.Prompt))
+			}
 		}
 	case AgentTypeGemini:
 		if opts.Resume {
 			cmd = []string{"gemini", "--resume"}
 		} else {
-			cmd = []string{"gemini", "--approval-mode=yolo", "-i", CombinePrompt(opts.PrePrompt, opts.Prompt)}
+			cmd = []string{"gemini", "--approval-mode=yolo"}
+			if opts.Prompt != "" {
+				cmd = append(cmd, "-i", CombinePrompt(opts.PrePrompt, opts.Prompt))
+			}
 		}
 	default:
 		return "", errtrace.Wrap(fmt.Errorf("unknown agent type: %q", opts.AgentType))
