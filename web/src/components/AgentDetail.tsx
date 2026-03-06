@@ -3,7 +3,7 @@ import { api } from '../stores/apiClient'
 import type { AgentResponse } from '../api'
 import { AgentTerminal } from './AgentTerminal'
 import { DiffViewer } from '../DiffViewer'
-import { formatStartedAgo, agentStatusBadge } from './AgentComponents'
+import { formatStartedAgo } from './AgentComponents'
 
 export function AgentDetail({
   agent,

@@ -22,6 +22,8 @@ function AgentsLayout() {
   const params = useParams({ strict: false }) as { agentId?: string }
   const selectedId = params.agentId
 
+  const filteredAgents = agents.filter((a) => !a.ephemeral)
+
   const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
     try {
       const saved = localStorage.getItem('hydra-sidebar-width')
@@ -94,7 +96,7 @@ function AgentsLayout() {
     navigate({ to: '/agent/$agentId', params: { agentId: agent.id } })
   }
 
-  if (loading && agents.length === 0) {
+  if (loading && filteredAgents.length === 0) {
     return (
       <div className="flex-1 flex items-center justify-center text-gray-400 dark:text-gray-500">
         Loading agents...
@@ -102,7 +104,7 @@ function AgentsLayout() {
     )
   }
 
-  if (error && agents.length === 0) {
+  if (error && filteredAgents.length === 0) {
     return (
       <div className="flex-1 flex items-center justify-center">
         <div className="text-center text-red-600 dark:text-red-400">
@@ -127,10 +129,10 @@ function AgentsLayout() {
           <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">
             Agents
           </span>
-          <span className="ml-2 text-xs text-gray-400 dark:text-gray-500">({agents.length})</span>
+          <span className="ml-2 text-xs text-gray-400 dark:text-gray-500">({filteredAgents.length})</span>
         </div>
         <div className="flex-1 overflow-y-auto p-2 space-y-0.5">
-          {agents.map((agent) => (
+          {filteredAgents.map((agent) => (
             <AgentSidebarItem
               key={agent.id}
               agent={agent}

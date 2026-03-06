@@ -33,12 +33,14 @@ function HomePage() {
   const [showSpawn, setShowSpawn] = useState(false)
   const navigate = useNavigate()
 
+  const filteredAgents = agents.filter((a) => !a.ephemeral)
+
   function handleSpawned(agent: AgentResponse) {
     addAgent(agent)
     navigate({ to: '/agent/$agentId', params: { agentId: agent.id } })
   }
 
-  if (agents.length === 0 || showSpawn) {
+  if (filteredAgents.length === 0 || showSpawn) {
     return <SpawnForm projectId={selectedProjectId} onSpawned={handleSpawned} />
   }
 

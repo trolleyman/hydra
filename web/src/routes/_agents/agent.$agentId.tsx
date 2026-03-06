@@ -1,6 +1,7 @@
 import { createFileRoute, useNavigate, useParams } from '@tanstack/react-router'
 import { useProjectStore } from '../../stores/projectStore'
 import { useAgentStore } from '../../stores/agentStore'
+import { api } from '../../stores/apiClient'
 import { AgentDetail } from '../../components/AgentDetail'
 import type { AgentResponse } from '../../api'
 
