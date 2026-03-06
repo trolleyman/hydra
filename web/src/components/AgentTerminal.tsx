@@ -136,9 +136,9 @@ export function AgentTerminal({ agentId, projectId, containerStatus, isEphemeral
     containerStatus.toLowerCase().startsWith('up')
 
   return (
-    <div className="rounded-lg overflow-hidden border border-gray-700 dark:border-gray-600" style={{ background: '#111827' }}>
+    <div className="rounded-lg overflow-hidden border border-gray-700 dark:border-gray-600 flex flex-col resize-y" style={{ background: '#111827', height: '450px', minHeight: '150px' }}>
       {/* Title bar */}
-      <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-700 dark:border-gray-600 bg-gray-800/80">
+      <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-700 dark:border-gray-600 bg-gray-800/80 shrink-0">
         <div className="flex gap-1.5">
           <span className="w-3 h-3 rounded-full bg-red-500/70" />
           <span className="w-3 h-3 rounded-full bg-yellow-500/70" />
@@ -166,8 +166,7 @@ export function AgentTerminal({ agentId, projectId, containerStatus, isEphemeral
       {/* xterm.js mount point */}
       <div
         ref={containerRef}
-        className="p-2"
-        style={{ height: '384px' }}
+        className="p-2 flex-1 min-h-0"
       />
     </div>
   )

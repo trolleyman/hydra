@@ -20,7 +20,7 @@ const DOCKERFILE_TEMPLATES: Record<string, { label: string; content: string }> =
   },
   rust: {
     label: 'Rust',
-    content: '# Install Rust\nRUN curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | s h -s -- -y\nENV PATH=$PATH:$HOME/.cargo/bin'
+    content: '# Install Rust\nRUN curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y\nENV PATH=$PATH:$HOME/.cargo/bin'
   },
   python: {
     label: 'Python Data Science',
@@ -313,13 +313,6 @@ function ConfigForm({
   const [template, setTemplate] = useState('none')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
-  useEffect(() => {
-    if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto'
-      textareaRef.current.style.height = textareaRef.current.scrollHeight + 'px'
-    }
-  }, [value.dockerfile_contents])
-
   function handleTemplateChange(name: string) {
     setTemplate(name)
     if (name !== 'none') {
@@ -389,7 +382,7 @@ function ConfigForm({
               value={value.dockerfile_contents || ''}
               onChange={(e) => onChange({ ...value, dockerfile_contents: e.target.value || null })}
               placeholder={inherited?.dockerfile_contents || '# Add your custom Dockerfile instructions here\nRUN apt-get install -y ...'}
-              className="w-full text-sm px-3 pb-3 bg-transparent text-gray-800 dark:text-gray-100 placeholder-gray-300 dark:placeholder-gray-600 focus:outline-none font-mono leading-relaxed resize-none overflow-hidden"
+              className="w-full text-sm px-3 pb-3 bg-transparent text-gray-800 dark:text-gray-100 placeholder-gray-300 dark:placeholder-gray-600 focus:outline-none font-mono leading-relaxed resize-y"
               spellCheck={false}
             />
           </div>
@@ -410,7 +403,7 @@ function ConfigForm({
           onChange={(e) => onChange({ ...value, pre_prompt: e.target.value || null })}
           placeholder={inherited?.pre_prompt || 'You are a helpful assistant...'}
           rows={4}
-          className="w-full text-sm px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-100 placeholder-gray-300 dark:placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all leading-relaxed shadow-inner"
+          className="w-full text-sm px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-100 placeholder-gray-300 dark:placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all leading-relaxed shadow-inner resize-y"
         />
       </div>
     </div>
