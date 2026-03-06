@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
@@ -7,6 +7,7 @@ interface Props {
   agentId: string
   projectId: string | null
   containerStatus: string
+  onRefresh?: () => void
 }
 
 function getWsUrl(agentId: string, projectId: string | null): string {
@@ -16,11 +17,12 @@ function getWsUrl(agentId: string, projectId: string | null): string {
   return `${protocol}//${host}/ws/agent/${encodeURIComponent(agentId)}/terminal${qs}`
 }
 
-export function AgentTerminal({ agentId, projectId, containerStatus }: Props) {
+export function AgentTerminal({ agentId, projectId, containerStatus, onRefresh }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<Terminal | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
+  const [reconnectAttempt, setReconnectAttempt] = useState(0)
 
   useEffect(() => {
     const el = containerRef.current
@@ -76,6 +78,14 @@ export function AgentTerminal({ agentId, projectId, containerStatus }: Props) {
     ws.onmessage = (e: MessageEvent) => {
       if (e.data instanceof ArrayBuffer) {
         term.write(new Uint8Array(e.data))
+      } else if (typeof e.data === 'string') {
+        term.write(e.data)
+        // If the backend sent the "Build finished" message, it will close the connection.
+        // We want to trigger a status refresh on the parent so it updates containerStatus,
+        // which will trigger this useEffect to re-run and connect to the real container.
+        if (e.data.includes('Build finished')) {
+          setTimeout(() => onRefresh?.(), 500)
+        }
       }
     }
 
@@ -113,7 +123,7 @@ export function AgentTerminal({ agentId, projectId, containerStatus }: Props) {
       wsRef.current = null
       fitAddonRef.current = null
     }
-  }, [agentId, projectId, containerStatus])
+  }, [agentId, projectId, containerStatus, reconnectAttempt])
 
   const isRunning = containerStatus.toLowerCase() === 'running' ||
     containerStatus.toLowerCase().startsWith('up')
@@ -133,6 +143,18 @@ export function AgentTerminal({ agentId, projectId, containerStatus }: Props) {
         <span className={`ml-auto text-[10px] px-1.5 py-0.5 rounded font-medium ${isRunning ? 'text-green-400' : 'text-gray-500'}`}>
           {isRunning ? '● live' : '○ stopped'}
         </span>
+        <button
+          onClick={() => {
+            setReconnectAttempt(prev => prev + 1)
+            onRefresh?.()
+          }}
+          className="p-1 rounded hover:bg-gray-700 text-gray-400 hover:text-gray-200 transition-colors cursor-pointer"
+          title="Refresh terminal"
+        >
+          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          </svg>
+        </button>
       </div>
       {/* xterm.js mount point */}
       <div
