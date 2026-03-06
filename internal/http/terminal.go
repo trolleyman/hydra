@@ -105,8 +105,10 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 				_ = conn.WriteMessage(websocket.BinaryMessage, []byte("\r\n\x1b[31mError: Build finished but container not found.\x1b[0m\r\n"))
 				return
 			}
+			// Clear terminal before switching to the real agent
+			_ = conn.WriteMessage(websocket.BinaryMessage, []byte("\x1bc")) // RIS (Reset to Initial State) - clears screen and scrollback
 			// Notify the user that the agent is starting
-			_ = conn.WriteMessage(websocket.BinaryMessage, []byte("\r\nLoading...\r\n"))
+			_ = conn.WriteMessage(websocket.BinaryMessage, []byte("Loading...\r\n"))
 		} else {
 			log.Printf("terminal ws: container ID is empty for agent %q and no build log found", agentID)
 			_ = conn.WriteMessage(websocket.BinaryMessage, []byte("Agent container not started and no build logs found.\r\n"))
