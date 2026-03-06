@@ -276,14 +276,11 @@ func AttachAgent(ctx context.Context, cli *dockerclient.Client, containerID stri
 	syncTerminalSize(ctx, cli, containerID)
 
 	// Inject a Ctrl+L byte (\x0c) into the container's stdin to force a TUI redraw.
-	// We ignore the error here as a failed redraw signal shouldn't crash the attachment.
 	_, _ = resp.Conn.Write([]byte{'\x0c'})
 
 	// Listen for window resize events from the host OS and forward them to the container.
-	// syscall.SIGWINCH is Unix-specific. If compiling for Windows, this signal won't fire,
-	// but the initial sync above will at least give the container a starting size.
 	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGWINCH)
+	notifyWindowResize(sigChan)
 	go func() {
 		for {
 			select {
@@ -321,8 +318,6 @@ func syncTerminalSize(ctx context.Context, cli *dockerclient.Client, containerID
 	if err != nil {
 		return
 	}
-
-	// Tell the Docker daemon the new dimensions of the TTY.
 	_ = cli.ContainerResize(ctx, containerID, container.ResizeOptions{
 		Height: uint(height),
 		Width:  uint(width),
