@@ -16,6 +16,12 @@ var DefaultDockerfileClaude string
 //go:embed gemini.Dockerfile
 var DefaultDockerfileGemini string
 
+//go:embed bash.Dockerfile
+var DefaultDockerfileBash string
+
+//go:embed base.Dockerfile
+var DefaultDockerfileBase string
+
 //go:embed entrypoint.sh
 var DefaultEntrypointScript string
 

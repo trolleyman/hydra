@@ -409,10 +409,14 @@ func ViewLogs(containerID string) error {
 // defaultDockerfileContent returns the embedded Dockerfile content for the given agent type.
 func defaultDockerfileContent(agentType AgentType) (string, error) {
 	switch agentType {
-	case AgentTypeClaude, AgentTypeBash:
+	case AgentTypeClaude:
 		return config.DefaultDockerfileClaude, nil
 	case AgentTypeGemini:
 		return config.DefaultDockerfileGemini, nil
+	case AgentTypeBash:
+		return config.DefaultDockerfileBash, nil
+	case "base":
+		return config.DefaultDockerfileBase, nil
 	default:
 		return "", errtrace.Wrap(fmt.Errorf("unknown agent type: %q", agentType))
 	}
@@ -684,8 +688,29 @@ func GetDefaultImageTag(agentType AgentType) string {
 	return "hydra-agent-" + string(agentType) + ":latest"
 }
 
+func ensureBaseImage(ctx context.Context, cli *dockerclient.Client, buildLog io.Writer) error {
+	tag := "hydra-base:latest"
+
+	// Copy the embedded Dockerfile to a stable per-user directory.
+	ctxDir, err := prepareDefaultDockerfileDir("base")
+	if err != nil {
+		return errtrace.Wrap(err)
+	}
+
+	err = buildDockerImage(ctx, cli, tag, filepath.Join(ctxDir, "Dockerfile"), ctxDir, buildLog)
+	if err != nil {
+		return errtrace.Wrap(err)
+	}
+	return nil
+}
+
 func ensureDefaultImage(ctx context.Context, cli *dockerclient.Client, agentType AgentType, buildLog io.Writer) (string, error) {
 	tag := GetDefaultImageTag(agentType)
+
+	// Build base image first
+	if err := ensureBaseImage(ctx, cli, buildLog); err != nil {
+		return "", errtrace.Wrap(fmt.Errorf("build base image: %w", err))
+	}
 
 	// Copy the embedded Dockerfile to a stable per-user directory.
 	ctxDir, err := prepareDefaultDockerfileDir(agentType)
@@ -699,6 +724,7 @@ func ensureDefaultImage(ctx context.Context, cli *dockerclient.Client, agentType
 	}
 	return tag, nil
 }
+
 
 func ensureCustomImage(ctx context.Context, cli *dockerclient.Client, agentType AgentType, dockerfilePath string, buildContext string, buildLog io.Writer) (string, error) {
 	abs, err := filepath.Abs(dockerfilePath)
