@@ -158,6 +158,8 @@ func SpawnAgent(ctx context.Context, cli *dockerclient.Client, opts SpawnOptions
 		"AGENT_USER=" + opts.Username,
 		"AGENT_GROUP=" + opts.GroupName,
 		"AGENT_HOME=" + containerHome,
+		"TERM=xterm-256color",
+		"COLORTERM=truecolor",
 	}
 	if opts.GitAuthorName != "" {
 		env = append(env,

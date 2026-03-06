@@ -26,6 +26,8 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && rm -rf /var/lib/apt/lists/*
 
 ENV DEVCONTAINER=true
+ENV TERM=xterm-256color
+ENV COLORTERM=truecolor
 
 # Install Gemini CLI.
 RUN npm install -g @google/gemini-cli
