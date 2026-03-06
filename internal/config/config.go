@@ -62,15 +62,6 @@ func GetUserConfigPath() (string, error) {
 	return filepath.Join(configDir, "hydra", "config.toml"), nil
 }
 
-// GetUserCacheDir returns the path to the global user cache directory.
-func GetUserCacheDir() (string, error) {
-	cacheDir, err := os.UserCacheDir()
-	if err != nil {
-		return "", errtrace.Wrap(err)
-	}
-	return filepath.Join(cacheDir, "hydra"), nil
-}
-
 // GetProjectConfigPath returns the path to the project-specific configuration file.
 func GetProjectConfigPath(projectRoot string) string {
 	return filepath.Join(projectRoot, ".hydra", "config.toml")

@@ -15,6 +15,10 @@ export type AgentResponse = {
     prompt: string;
     base_branch: string;
     /**
+     * If true, the agent is temporary and its container will be removed on stop.
+     */
+    ephemeral?: boolean;
+    /**
      * Unix timestamp (seconds) when the container was created/started; 0 if no container
      */
     created_at?: number;

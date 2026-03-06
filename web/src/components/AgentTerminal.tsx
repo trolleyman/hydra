@@ -2,11 +2,13 @@ import { useEffect, useRef, useState } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
+import { api } from '../stores/apiClient'
 
 interface Props {
   agentId: string
   projectId: string | null
   containerStatus: string
+  isEphemeral?: boolean
   onRefresh?: () => void
 }
 
@@ -17,7 +19,7 @@ function getWsUrl(agentId: string, projectId: string | null): string {
   return `${protocol}//${host}/ws/agent/${encodeURIComponent(agentId)}/terminal${qs}`
 }
 
-export function AgentTerminal({ agentId, projectId, containerStatus, onRefresh }: Props) {
+export function AgentTerminal({ agentId, projectId, containerStatus, isEphemeral, onRefresh }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<Terminal | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
@@ -122,8 +124,13 @@ export function AgentTerminal({ agentId, projectId, containerStatus, onRefresh }
       termRef.current = null
       wsRef.current = null
       fitAddonRef.current = null
+
+      if (isEphemeral) {
+        // Fire and forget kill request
+        api.default.killAgent(agentId, projectId ?? undefined).catch(() => {})
+      }
     }
-  }, [agentId, projectId, containerStatus, reconnectAttempt])
+  }, [agentId, projectId, containerStatus, reconnectAttempt, isEphemeral])
 
   const isRunning = containerStatus.toLowerCase() === 'running' ||
     containerStatus.toLowerCase().startsWith('up')

@@ -280,6 +280,7 @@ function SettingsPage() {
                   agentId={testAgent.id}
                   projectId={selectedProjectId}
                   containerStatus={testAgent.container_status}
+                  isEphemeral={testAgent.ephemeral}
                 />              </div>
             </div>
           </div>
