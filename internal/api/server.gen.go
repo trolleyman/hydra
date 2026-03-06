@@ -284,6 +284,9 @@ type GetAgentDiffParams struct {
 
 	// IgnoreWhitespace Ignore whitespace changes in the diff
 	IgnoreWhitespace *bool `form:"ignore_whitespace,omitempty" json:"ignore_whitespace,omitempty"`
+
+	// IncludeUncommitted Include uncommitted changes in the worktree in the diff
+	IncludeUncommitted *bool `form:"include_uncommitted,omitempty" json:"include_uncommitted,omitempty"`
 }
 
 // MergeAgentParams defines parameters for MergeAgent.
@@ -549,6 +552,14 @@ func (siw *ServerInterfaceWrapper) GetAgentDiff(w http.ResponseWriter, r *http.R
 	err = runtime.BindQueryParameter("form", true, false, "ignore_whitespace", r.URL.Query(), &params.IgnoreWhitespace)
 	if err != nil {
 		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "ignore_whitespace", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "include_uncommitted" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "include_uncommitted", r.URL.Query(), &params.IncludeUncommitted)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "include_uncommitted", Err: err})
 		return
 	}
 

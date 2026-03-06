@@ -469,7 +469,7 @@ function CommitCard({ commit }: { commit: CommitInfo }) {
 
 // ── Commit selector dropdown ──────────────────────────────────────────────────
 
-type ViewSelection = { type: 'full' } | { type: 'commit'; sha: string }
+type ViewSelection = { type: 'full' } | { type: 'uncommitted' } | { type: 'commit'; sha: string }
 
 function CommitSelector({
   commits,
@@ -494,9 +494,11 @@ function CommitSelector({
 
   const label = selected.type === 'full'
     ? 'Full diff'
-    : commits.find((c) => c.sha === selected.sha)
-      ? `${commits.find((c) => c.sha === selected.sha)!.short_sha} ${commits.find((c) => c.sha === selected.sha)!.message.slice(0, 28)}${commits.find((c) => c.sha === selected.sha)!.message.length > 28 ? '…' : ''}`
-      : selected.sha.slice(0, 7)
+    : selected.type === 'uncommitted'
+      ? 'Uncommitted'
+      : commits.find((c) => c.sha === selected.sha)
+        ? `${commits.find((c) => c.sha === selected.sha)!.short_sha} ${commits.find((c) => c.sha === selected.sha)!.message.slice(0, 28)}${commits.find((c) => c.sha === selected.sha)!.message.length > 28 ? '…' : ''}`
+        : selected.sha.slice(0, 7)
 
   return (
     <div ref={ref} className="relative">
@@ -515,7 +517,7 @@ function CommitSelector({
 
       {open && (
         <div className="absolute left-0 top-full mt-1 w-72 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50 overflow-hidden">
-          {/* Full diff option */}
+          {/* Main diff options */}
           <div className="py-1 border-b border-gray-100 dark:border-gray-700">
             <button
               onClick={() => { onChange({ type: 'full' }); setOpen(false) }}
@@ -529,6 +531,23 @@ function CommitSelector({
               <span className="font-medium text-gray-800 dark:text-gray-200">Full diff</span>
               <span className="text-gray-400 dark:text-gray-500 ml-auto">base → current</span>
               {selected.type === 'full' && (
+                <svg className="w-3 h-3 text-blue-500 shrink-0" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M20 6 9 17l-5-5" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+                </svg>
+              )}
+            </button>
+            <button
+              onClick={() => { onChange({ type: 'uncommitted' }); setOpen(false) }}
+              className={`w-full flex items-center gap-2 px-3 py-2 text-left text-xs hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors ${
+                selected.type === 'uncommitted' ? 'bg-blue-50 dark:bg-blue-900/20' : ''
+              }`}
+            >
+              <svg className="w-3.5 h-3.5 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              </svg>
+              <span className="font-medium text-gray-800 dark:text-gray-200">Include uncommitted</span>
+              <span className="text-gray-400 dark:text-gray-500 ml-auto">base → worktree</span>
+              {selected.type === 'uncommitted' && (
                 <svg className="w-3 h-3 text-blue-500 shrink-0" fill="currentColor" viewBox="0 0 24 24">
                   <path d="M20 6 9 17l-5-5" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
                 </svg>
@@ -629,7 +648,7 @@ export function DiffViewer({
     setLoadingDiff(true)
     setDiffError(null)
 
-    const params: { baseRef?: string; headRef?: string; ignoreWhitespace?: boolean } = {
+    const params: { baseRef?: string; headRef?: string; ignoreWhitespace?: boolean; includeUncommitted?: boolean } = {
       ignoreWhitespace: ignoreWhitespace || undefined,
     }
 
@@ -637,6 +656,8 @@ export function DiffViewer({
       // Show a single commit: diff parent^..sha
       params.baseRef = `${selectedView.sha}^`
       params.headRef = selectedView.sha
+    } else if (selectedView.type === 'uncommitted') {
+      params.includeUncommitted = true
     }
     // For 'full', omit base/head refs — backend uses triple-dot merge-base diff.
 
@@ -647,6 +668,7 @@ export function DiffViewer({
         params.baseRef,
         params.headRef,
         params.ignoreWhitespace,
+        params.includeUncommitted,
       )
       .then((d) => {
         if (!cancelled) { setDiff(d); setLoadingDiff(false) }
