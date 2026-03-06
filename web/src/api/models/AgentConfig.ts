@@ -4,6 +4,7 @@
 /* eslint-disable */
 export type AgentConfig = {
     dockerfile?: string | null;
+    dockerfile_contents?: string | null;
     context?: string | null;
     pre_prompt?: string | null;
 };
