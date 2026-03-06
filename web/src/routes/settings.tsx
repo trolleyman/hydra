@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from '@tanstack/react-router'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { api } from '../stores/apiClient'
 import { useProjectStore } from '../stores/projectStore'
 import type { ConfigResponse, AgentConfig, AgentResponse } from '../api'
@@ -302,6 +302,14 @@ function ConfigForm({
   agentType: string
 }) {
   const [template, setTemplate] = useState('none')
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto'
+      textareaRef.current.style.height = textareaRef.current.scrollHeight + 'px'
+    }
+  }, [value.dockerfile_contents])
 
   function handleTemplateChange(name: string) {
     setTemplate(name)
@@ -362,17 +370,20 @@ function ConfigForm({
             </select>
           </div>
         </div>
-        <div className="relative group">
-          <div className="absolute left-3 top-2 text-blue-500 dark:text-blue-400 font-mono text-sm pointer-events-none opacity-60">
-            FROM {baseImage}
+        <div className="relative group rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 focus-within:ring-2 focus-within:ring-blue-500/20 focus-within:border-blue-500 transition-all shadow-inner overflow-hidden">
+          <div className="max-h-64 overflow-y-auto">
+            <div className="px-3 pt-3 text-blue-500 dark:text-blue-400 font-mono text-sm pointer-events-none opacity-60">
+              FROM {baseImage}
+            </div>
+            <textarea
+              ref={textareaRef}
+              value={value.dockerfile_contents || ''}
+              onChange={(e) => onChange({ ...value, dockerfile_contents: e.target.value || null })}
+              placeholder={inherited?.dockerfile_contents || '# Add your custom Dockerfile instructions here\nRUN apt-get install -y ...'}
+              className="w-full text-sm px-3 pb-3 bg-transparent text-gray-800 dark:text-gray-100 placeholder-gray-300 dark:placeholder-gray-600 focus:outline-none font-mono leading-relaxed resize-none overflow-hidden"
+              spellCheck={false}
+            />
           </div>
-          <textarea
-            value={value.dockerfile_contents || ''}
-            onChange={(e) => onChange({ ...value, dockerfile_contents: e.target.value || null })}
-            placeholder={inherited?.dockerfile_contents || '# Add your custom Dockerfile instructions here\nRUN apt-get install -y ...'}
-            rows={6}
-            className="w-full text-sm pt-8 px-3 pb-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-100 placeholder-gray-300 dark:placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-mono shadow-inner leading-relaxed"
-          />
           <div className="absolute right-3 bottom-3 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
             <div className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-400 border border-gray-200 dark:border-gray-700 font-mono">
               Dockerfile Extension
