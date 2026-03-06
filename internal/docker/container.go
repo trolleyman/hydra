@@ -400,8 +400,7 @@ func getAgentBinds(agentType AgentType, projectRoot, id, containerHome string) (
 
 		// Always write settings.json with hooks configuration.
 		claudeSettingsJson := filepath.Join(claudeSettingsDir, "settings.json")
-		existingSettings, _ := os.ReadFile(claudeSettingsJson)
-		settingsData, err := buildClaudeSettings(existingSettings)
+		settingsData, err := buildClaudeSettings()
 		if err != nil {
 			return nil, errtrace.Wrap(err)
 		}
@@ -432,8 +431,7 @@ func getAgentBinds(agentType AgentType, projectRoot, id, containerHome string) (
 
 		// Always write settings.json with hooks configuration.
 		geminiSettingsJson := filepath.Join(geminiSettingsDir, "settings.json")
-		existingSettings, _ := os.ReadFile(geminiSettingsJson)
-		settingsData, err := buildGeminiSettings(existingSettings)
+		settingsData, err := buildGeminiSettings()
 		if err != nil {
 			return nil, errtrace.Wrap(err)
 		}
@@ -474,12 +472,7 @@ func buildHooksMap(cmd string, events []string) map[string]interface{} {
 }
 
 // buildClaudeSettings generates the settings.json content with hook configuration for Claude Code.
-func buildClaudeSettings(existing []byte) ([]byte, error) {
-	settings := make(map[string]any)
-	if len(existing) > 0 {
-		_ = json.Unmarshal(existing, &settings)
-	}
-
+func buildClaudeSettings() ([]byte, error) {
 	hooks := buildHooksMap("$HOME/.hydra/hydra trigger-hook claude", []string{
 		"SessionStart",
 		"UserPromptSubmit",
@@ -493,21 +486,10 @@ func buildClaudeSettings(existing []byte) ([]byte, error) {
 		"SubagentStop",
 		"SessionEnd",
 	})
-
-	settings["skipDangerousModePermissionPrompt"] = true
-
-	existingHooksRaw, ok := settings["hooks"]
-	if !ok {
-		settings["hooks"] = hooks
-	} else if existingHooks, ok := existingHooksRaw.(map[string]any); ok {
-		for event, handlers := range hooks {
-			existingHooks[event] = handlers
-		}
-		settings["hooks"] = existingHooks
-	} else {
-		settings["hooks"] = hooks
+	settings := map[string]interface{}{
+		"skipDangerousModePermissionPrompt": true,
+		"hooks":                             hooks,
 	}
-
 	data, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
 		return nil, errtrace.Wrap(fmt.Errorf("marshal claude settings: %w", err))
@@ -516,12 +498,7 @@ func buildClaudeSettings(existing []byte) ([]byte, error) {
 }
 
 // buildGeminiSettings generates the settings.json content with hook configuration for Gemini CLI.
-func buildGeminiSettings(existing []byte) ([]byte, error) {
-	settings := make(map[string]any)
-	if len(existing) > 0 {
-		_ = json.Unmarshal(existing, &settings)
-	}
-
+func buildGeminiSettings() ([]byte, error) {
 	hooks := buildHooksMap("$HOME/.hydra/hydra trigger-hook gemini", []string{
 		"SessionStart",
 		"BeforeAgent",
@@ -532,19 +509,9 @@ func buildGeminiSettings(existing []byte) ([]byte, error) {
 		"PreCompress",
 		"SessionEnd",
 	})
-
-	existingHooksRaw, ok := settings["hooks"]
-	if !ok {
-		settings["hooks"] = hooks
-	} else if existingHooks, ok := existingHooksRaw.(map[string]any); ok {
-		for event, handlers := range hooks {
-			existingHooks[event] = handlers
-		}
-		settings["hooks"] = existingHooks
-	} else {
-		settings["hooks"] = hooks
+	settings := map[string]interface{}{
+		"hooks": hooks,
 	}
-
 	data, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
 		return nil, errtrace.Wrap(fmt.Errorf("marshal gemini settings: %w", err))
