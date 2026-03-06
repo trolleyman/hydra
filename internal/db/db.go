@@ -2,7 +2,6 @@ package db
 
 import (
 	"fmt"
-	"os"
 
 	"braces.dev/errtrace"
 	"github.com/glebarez/sqlite"

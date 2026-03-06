@@ -19,5 +19,9 @@ export type SpawnAgentRequest = {
      * Base branch to create the worktree from (defaults to current branch)
      */
     base_branch?: string;
+    /**
+     * If true, the agent is temporary and its container will be removed on stop.
+     */
+    ephemeral?: boolean;
 };
 

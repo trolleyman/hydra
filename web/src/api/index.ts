@@ -11,10 +11,12 @@ export { OpenAPI } from './core/OpenAPI';
 export type { OpenAPIConfig } from './core/OpenAPI';
 
 export type { AddProjectRequest } from './models/AddProjectRequest';
+export type { AgentConfig } from './models/AgentConfig';
 export type { AgentResponse } from './models/AgentResponse';
 export { AgentStatus } from './models/AgentStatus';
 export type { AgentStatusInfo } from './models/AgentStatusInfo';
 export type { CommitInfo } from './models/CommitInfo';
+export type { ConfigResponse } from './models/ConfigResponse';
 export { DiffFile } from './models/DiffFile';
 export type { DiffHunk } from './models/DiffHunk';
 export { DiffLine } from './models/DiffLine';

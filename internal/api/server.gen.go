@@ -43,10 +43,23 @@ const (
 	NoNewline DiffLineType = "no_newline"
 )
 
+// Defines values for SaveConfigParamsScope.
+const (
+	Project SaveConfigParamsScope = "project"
+	User    SaveConfigParamsScope = "user"
+)
+
 // AddProjectRequest defines model for AddProjectRequest.
 type AddProjectRequest struct {
 	// Path Absolute filesystem path to the project root (must be a git repository)
 	Path string `json:"path"`
+}
+
+// AgentConfig defines model for AgentConfig.
+type AgentConfig struct {
+	Context    *string `json:"context"`
+	Dockerfile *string `json:"dockerfile"`
+	PrePrompt  *string `json:"pre_prompt"`
 }
 
 // AgentResponse defines model for AgentResponse.
@@ -107,6 +120,12 @@ type CommitInfo struct {
 
 	// Timestamp ISO 8601 timestamp of the author date
 	Timestamp string `json:"timestamp"`
+}
+
+// ConfigResponse defines model for ConfigResponse.
+type ConfigResponse struct {
+	Agents   map[string]AgentConfig `json:"agents"`
+	Defaults AgentConfig            `json:"defaults"`
 }
 
 // DiffFile defines model for DiffFile.
@@ -206,6 +225,9 @@ type SpawnAgentRequest struct {
 	// BaseBranch Base branch to create the worktree from (defaults to current branch)
 	BaseBranch *string `json:"base_branch,omitempty"`
 
+	// Ephemeral If true, the agent is temporary and its container will be removed on stop.
+	Ephemeral *bool `json:"ephemeral,omitempty"`
+
 	// Id Unique identifier for the agent (slug format, max 40 chars)
 	Id string `json:"id"`
 
@@ -287,8 +309,29 @@ type SpawnAgentParams struct {
 	ProjectId *string `form:"project_id,omitempty" json:"project_id,omitempty"`
 }
 
+// GetConfigParams defines parameters for GetConfig.
+type GetConfigParams struct {
+	// ProjectId Project ID to scope the config (defaults to server CWD project)
+	ProjectId *string `form:"project_id,omitempty" json:"project_id,omitempty"`
+}
+
+// SaveConfigParams defines parameters for SaveConfig.
+type SaveConfigParams struct {
+	// ProjectId Project ID to save the config to (defaults to server CWD project)
+	ProjectId *string `form:"project_id,omitempty" json:"project_id,omitempty"`
+
+	// Scope Whether to save to the project or user config file (defaults to project)
+	Scope *SaveConfigParamsScope `form:"scope,omitempty" json:"scope,omitempty"`
+}
+
+// SaveConfigParamsScope defines parameters for SaveConfig.
+type SaveConfigParamsScope string
+
 // SpawnAgentJSONRequestBody defines body for SpawnAgent for application/json ContentType.
 type SpawnAgentJSONRequestBody = SpawnAgentRequest
+
+// SaveConfigJSONRequestBody defines body for SaveConfig for application/json ContentType.
+type SaveConfigJSONRequestBody = ConfigResponse
 
 // AddProjectJSONRequestBody defines body for AddProject for application/json ContentType.
 type AddProjectJSONRequestBody = AddProjectRequest
@@ -319,6 +362,12 @@ type ServerInterface interface {
 	// Spawn a new Hydra agent
 	// (POST /api/agents)
 	SpawnAgent(w http.ResponseWriter, r *http.Request, params SpawnAgentParams)
+	// Get the merged configuration
+	// (GET /api/config)
+	GetConfig(w http.ResponseWriter, r *http.Request, params GetConfigParams)
+	// Save configuration changes
+	// (POST /api/config)
+	SaveConfig(w http.ResponseWriter, r *http.Request, params SaveConfigParams)
 	// Trigger a server rebuild and restart (dev mode only)
 	// (POST /api/dev/restart)
 	DevRestart(w http.ResponseWriter, r *http.Request)
@@ -639,6 +688,68 @@ func (siw *ServerInterfaceWrapper) SpawnAgent(w http.ResponseWriter, r *http.Req
 	handler.ServeHTTP(w, r)
 }
 
+// GetConfig operation middleware
+func (siw *ServerInterfaceWrapper) GetConfig(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetConfigParams
+
+	// ------------- Optional query parameter "project_id" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "project_id", r.URL.Query(), &params.ProjectId)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetConfig(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SaveConfig operation middleware
+func (siw *ServerInterfaceWrapper) SaveConfig(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params SaveConfigParams
+
+	// ------------- Optional query parameter "project_id" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "project_id", r.URL.Query(), &params.ProjectId)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "scope" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "scope", r.URL.Query(), &params.Scope)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "scope", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SaveConfig(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // DevRestart operation middleware
 func (siw *ServerInterfaceWrapper) DevRestart(w http.ResponseWriter, r *http.Request) {
 
@@ -837,6 +948,8 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("POST "+options.BaseURL+"/api/agent/{id}/restart", wrapper.RestartAgent)
 	m.HandleFunc("GET "+options.BaseURL+"/api/agents", wrapper.ListAgents)
 	m.HandleFunc("POST "+options.BaseURL+"/api/agents", wrapper.SpawnAgent)
+	m.HandleFunc("GET "+options.BaseURL+"/api/config", wrapper.GetConfig)
+	m.HandleFunc("POST "+options.BaseURL+"/api/config", wrapper.SaveConfig)
 	m.HandleFunc("POST "+options.BaseURL+"/api/dev/restart", wrapper.DevRestart)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects", wrapper.ListProjects)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects", wrapper.AddProject)
@@ -1158,6 +1271,58 @@ func (response SpawnAgent500JSONResponse) VisitSpawnAgentResponse(w http.Respons
 	return json.NewEncoder(w).Encode(response)
 }
 
+type GetConfigRequestObject struct {
+	Params GetConfigParams
+}
+
+type GetConfigResponseObject interface {
+	VisitGetConfigResponse(w http.ResponseWriter) error
+}
+
+type GetConfig200JSONResponse ConfigResponse
+
+func (response GetConfig200JSONResponse) VisitGetConfigResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetConfig500JSONResponse ErrorResponse
+
+func (response GetConfig500JSONResponse) VisitGetConfigResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type SaveConfigRequestObject struct {
+	Params SaveConfigParams
+	Body   *SaveConfigJSONRequestBody
+}
+
+type SaveConfigResponseObject interface {
+	VisitSaveConfigResponse(w http.ResponseWriter) error
+}
+
+type SaveConfig200Response struct {
+}
+
+func (response SaveConfig200Response) VisitSaveConfigResponse(w http.ResponseWriter) error {
+	w.WriteHeader(200)
+	return nil
+}
+
+type SaveConfig500JSONResponse ErrorResponse
+
+func (response SaveConfig500JSONResponse) VisitSaveConfigResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 type DevRestartRequestObject struct {
 }
 
@@ -1310,6 +1475,12 @@ type StrictServerInterface interface {
 	// Spawn a new Hydra agent
 	// (POST /api/agents)
 	SpawnAgent(ctx context.Context, request SpawnAgentRequestObject) (SpawnAgentResponseObject, error)
+	// Get the merged configuration
+	// (GET /api/config)
+	GetConfig(ctx context.Context, request GetConfigRequestObject) (GetConfigResponseObject, error)
+	// Save configuration changes
+	// (POST /api/config)
+	SaveConfig(ctx context.Context, request SaveConfigRequestObject) (SaveConfigResponseObject, error)
 	// Trigger a server rebuild and restart (dev mode only)
 	// (POST /api/dev/restart)
 	DevRestart(ctx context.Context, request DevRestartRequestObject) (DevRestartResponseObject, error)
@@ -1570,6 +1741,65 @@ func (sh *strictHandler) SpawnAgent(w http.ResponseWriter, r *http.Request, para
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(SpawnAgentResponseObject); ok {
 		if err := validResponse.VisitSpawnAgentResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetConfig operation middleware
+func (sh *strictHandler) GetConfig(w http.ResponseWriter, r *http.Request, params GetConfigParams) {
+	var request GetConfigRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetConfig(ctx, request.(GetConfigRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetConfig")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetConfigResponseObject); ok {
+		if err := validResponse.VisitGetConfigResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SaveConfig operation middleware
+func (sh *strictHandler) SaveConfig(w http.ResponseWriter, r *http.Request, params SaveConfigParams) {
+	var request SaveConfigRequestObject
+
+	request.Params = params
+
+	var body SaveConfigJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SaveConfig(ctx, request.(SaveConfigRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SaveConfig")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SaveConfigResponseObject); ok {
+		if err := validResponse.VisitSaveConfigResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"os/user"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -37,6 +36,7 @@ type Head struct {
 	PrePrompt       string
 	Prompt          string
 	BaseBranch      string
+	Ephemeral       bool
 	// AgentStatus holds the computed status for display.
 	AgentStatus *api.AgentStatusInfo
 	CreatedAt   int64 // Unix timestamp from container creation; 0 if no container
@@ -91,6 +91,7 @@ func ListHeads(ctx context.Context, cli *dockerclient.Client, store *db.Store, p
 			PrePrompt:       a.PrePrompt,
 			Prompt:          a.Prompt,
 			BaseBranch:      a.BaseBranch,
+			Ephemeral:       a.Ephemeral,
 			CreatedAt:       a.CreatedAt.Unix(),
 			AgentStatus:     computeAgentStatus(&a),
 		}
@@ -155,12 +156,14 @@ func GetHeadByID(ctx context.Context, cli *dockerclient.Client, store *db.Store,
 
 // SpawnHeadOptions holds parameters for spawning a new agent head.
 type SpawnHeadOptions struct {
-	ID             string           // empty = auto-generated
-	PrePrompt      string           // pre-prompt
-	Prompt         string           // prompt
-	AgentType      docker.AgentType // empty = "claude"
-	BaseBranch     string           // empty = current HEAD branch
-	DockerfilePath string           // optional custom Dockerfile path
+	ID                 string           // empty = auto-generated
+	PrePrompt          string           // pre-prompt
+	Prompt             string           // prompt
+	AgentType          docker.AgentType // empty = "claude"
+	BaseBranch         string           // empty = current HEAD branch
+	DockerfilePath     string           // optional custom Dockerfile path
+	DockerfileContents string           // optional custom Dockerfile contents
+	Ephemeral          bool             // if true, container is auto-removed
 }
 
 // SpawnHead creates a new git worktree, branch, and Docker container for an agent.
@@ -200,6 +203,7 @@ func SpawnHead(ctx context.Context, cli *dockerclient.Client, store *db.Store, p
 			AgentType:       string(opts.AgentType),
 			PrePrompt:       opts.PrePrompt,
 			Prompt:          opts.Prompt,
+			Ephemeral:       opts.Ephemeral,
 			ContainerStatus: "pending",
 			HeadStatus:      "idle",
 			CreatedAt:       now,
@@ -239,13 +243,9 @@ func SpawnHead(ctx context.Context, cli *dockerclient.Client, store *db.Store, p
 	// If no dockerfile provided in opts, resolve it from config.
 	if opts.DockerfilePath == "" {
 		if cfg, cfgErr := config.Load(projectRoot); cfgErr == nil {
-			rel := cfg.GetDockerfileForAgent(projectRoot, string(opts.AgentType))
-			if rel != "" {
-				if filepath.IsAbs(rel) {
-					opts.DockerfilePath = rel
-				} else {
-					opts.DockerfilePath = filepath.Join(projectRoot, rel)
-				}
+			resolved := cfg.GetResolvedConfig(string(opts.AgentType))
+			if resolved.Dockerfile != nil {
+				opts.DockerfilePath = *resolved.Dockerfile
 			}
 		}
 	}
@@ -272,21 +272,23 @@ func SpawnHead(ctx context.Context, cli *dockerclient.Client, store *db.Store, p
 		}
 
 		containerID, err := docker.SpawnAgent(bgCtx, cli, docker.SpawnOptions{
-			Id:             opts.ID,
-			AgentType:      opts.AgentType,
-			DockerfilePath: opts.DockerfilePath,
-			PrePrompt:      opts.PrePrompt,
-			Prompt:         opts.Prompt,
-			ProjectPath:    projectRoot,
-			WorktreePath:   worktreePath,
-			BranchName:     branchName,
-			BaseBranch:     baseBranch,
-			GitAuthorName:  gitAuthorName,
-			GitAuthorEmail: gitAuthorEmail,
-			UID:            uid,
-			GID:            gid,
-			Username:       currentUser.Username,
-			GroupName:      groupName,
+			Id:                 opts.ID,
+			AgentType:          opts.AgentType,
+			DockerfilePath:     opts.DockerfilePath,
+			DockerfileContents: opts.DockerfileContents,
+			PrePrompt:          opts.PrePrompt,
+			Prompt:             opts.Prompt,
+			ProjectPath:        projectRoot,
+			WorktreePath:       worktreePath,
+			BranchName:         branchName,
+			BaseBranch:         baseBranch,
+			GitAuthorName:      gitAuthorName,
+			GitAuthorEmail:     gitAuthorEmail,
+			UID:                uid,
+			GID:                gid,
+			Username:           currentUser.Username,
+			GroupName:          groupName,
+			Ephemeral:          opts.Ephemeral,
 			OnStatus: func(status api.AgentStatus) {
 				s := initialStatus
 				s.Status = status
@@ -330,6 +332,7 @@ func SpawnHead(ctx context.Context, cli *dockerclient.Client, store *db.Store, p
 		PrePrompt:       opts.PrePrompt,
 		Prompt:          opts.Prompt,
 		BaseBranch:      baseBranch,
+		Ephemeral:       opts.Ephemeral,
 		AgentStatus:     initialStatus,
 		CreatedAt:       now.Unix(),
 	}, nil

@@ -337,6 +337,63 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /api/config:
+    get:
+      summary: Get the merged configuration
+      operationId: getConfig
+      parameters:
+        - in: query
+          name: project_id
+          required: false
+          schema:
+            type: string
+          description: Project ID to scope the config (defaults to server CWD project)
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConfigResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    post:
+      summary: Save configuration changes
+      operationId: saveConfig
+      parameters:
+        - in: query
+          name: project_id
+          required: false
+          schema:
+            type: string
+          description: Project ID to save the config to (defaults to server CWD project)
+        - in: query
+          name: scope
+          required: false
+          schema:
+            type: string
+            enum: [project, user]
+          description: Whether to save to the project or user config file (defaults to project)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfigResponse'
+      responses:
+        '200':
+          description: OK
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /api/agent/{id}:
     get:
       summary: Get a specific Hydra agent by ID
@@ -480,6 +537,9 @@ components:
         base_branch:
           type: string
           description: Base branch to create the worktree from (defaults to current branch)
+        ephemeral:
+          type: boolean
+          description: If true, the agent is temporary and its container will be removed on stop.
 
     AgentStatus:
       type: string
@@ -660,3 +720,30 @@ components:
           allOf:
             - $ref: '#/components/schemas/CommitInfo'
           description: Details of the head commit
+
+    AgentConfig:
+      type: object
+      properties:
+        dockerfile:
+          type: string
+          nullable: true
+        dockerfile_contents:
+          type: string
+          nullable: true
+        context:
+          type: string
+          nullable: true
+        pre_prompt:
+          type: string
+          nullable: true
+
+    ConfigResponse:
+      type: object
+      required: [defaults, agents]
+      properties:
+        defaults:
+          $ref: '#/components/schemas/AgentConfig'
+        agents:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/AgentConfig'

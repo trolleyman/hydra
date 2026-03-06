@@ -5,6 +5,7 @@
 import type { AddProjectRequest } from '../models/AddProjectRequest';
 import type { AgentResponse } from '../models/AgentResponse';
 import type { CommitInfo } from '../models/CommitInfo';
+import type { ConfigResponse } from '../models/ConfigResponse';
 import type { DiffResponse } from '../models/DiffResponse';
 import type { ProjectInfo } from '../models/ProjectInfo';
 import type { SpawnAgentRequest } from '../models/SpawnAgentRequest';
@@ -243,6 +244,53 @@ export class DefaultService {
             },
             errors: {
                 404: `Not Found`,
+                500: `Internal Server Error`,
+            },
+        });
+    }
+    /**
+     * Get the merged configuration
+     * @param projectId Project ID to scope the config (defaults to server CWD project)
+     * @returns ConfigResponse OK
+     * @throws ApiError
+     */
+    public getConfig(
+        projectId?: string,
+    ): CancelablePromise<ConfigResponse> {
+        return this.httpRequest.request({
+            method: 'GET',
+            url: '/api/config',
+            query: {
+                'project_id': projectId,
+            },
+            errors: {
+                500: `Internal Server Error`,
+            },
+        });
+    }
+    /**
+     * Save configuration changes
+     * @param requestBody
+     * @param projectId Project ID to save the config to (defaults to server CWD project)
+     * @param scope Whether to save to the project or user config file (defaults to project)
+     * @returns any OK
+     * @throws ApiError
+     */
+    public saveConfig(
+        requestBody: ConfigResponse,
+        projectId?: string,
+        scope?: 'project' | 'user',
+    ): CancelablePromise<any> {
+        return this.httpRequest.request({
+            method: 'POST',
+            url: '/api/config',
+            query: {
+                'project_id': projectId,
+                'scope': scope,
+            },
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
                 500: `Internal Server Error`,
             },
         });

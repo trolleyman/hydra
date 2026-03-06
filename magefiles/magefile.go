@@ -405,7 +405,7 @@ func BuildLinuxBinary() error {
 func Run() error {
 	addGoBuildDeps()
 	args := append([]string{"run"}, goBuildTags()...)
-	args = append(args, "./")
+	args = append(args, "./", "server")
 	return errtrace.Wrap(runV("go", args...))
 }
 

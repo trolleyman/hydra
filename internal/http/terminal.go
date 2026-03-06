@@ -1,6 +1,7 @@
 package http
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -109,11 +110,18 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 		n, err := attach.Reader.Read(buf)
 		if n > 0 {
 			if writeErr := conn.WriteMessage(websocket.BinaryMessage, buf[:n]); writeErr != nil {
-				return
+				break
 			}
 		}
 		if err != nil {
-			return
+			break
+		}
+	}
+
+	if head.Ephemeral {
+		log.Printf("terminal ws: killing ephemeral agent %s on disconnect", agentID)
+		if err := heads.KillHead(context.Background(), s.DockerClient, s.DB, *head); err != nil {
+			log.Printf("terminal ws: error killing ephemeral agent %s: %v", agentID, err)
 		}
 	}
 }

@@ -20,6 +20,7 @@ type Agent struct {
 	AgentType string `gorm:"not null"` // "claude" | "gemini"
 	PrePrompt string
 	Prompt    string
+	Ephemeral bool `gorm:"default:false"`
 
 	// Docker — updated by Docker poller
 	ContainerID     string

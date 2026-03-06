@@ -5,7 +5,6 @@ import (
 	"log"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"text/tabwriter"
 
@@ -52,9 +51,13 @@ var spawnCmd = &cobra.Command{
 		if err != nil {
 			return errtrace.Wrap(err)
 		}
+
+		agentType := docker.AgentType(spawnFlags.agentType)
+		resolved := cfg.GetResolvedConfig(string(agentType))
+
 		prePrompt := config.DefaultPrePrompt
-		if cfg.PrePrompt != nil {
-			prePrompt = *cfg.PrePrompt
+		if resolved.PrePrompt != nil {
+			prePrompt = *resolved.PrePrompt
 		}
 
 		cli, err := docker.NewClient()
@@ -82,18 +85,11 @@ var spawnCmd = &cobra.Command{
 			}
 		}
 
-		agentType := docker.AgentType(spawnFlags.agentType)
-
-		// Resolve Dockerfile path: --flag > config.toml > .hydra/config/<type>/Dockerfile
+		// Resolve Dockerfile path: --flag > config.toml
 		dockerfilePath := spawnFlags.dockerfile
 		if dockerfilePath == "" {
-			rel := cfg.GetDockerfileForAgent(projectRoot, string(agentType))
-			if rel != "" {
-				if filepath.IsAbs(rel) {
-					dockerfilePath = rel
-				} else {
-					dockerfilePath = filepath.Join(projectRoot, rel)
-				}
+			if resolved.Dockerfile != nil {
+				dockerfilePath = *resolved.Dockerfile
 				log.Printf("Using custom Dockerfile for %s: %s", agentType, dockerfilePath)
 			}
 		}

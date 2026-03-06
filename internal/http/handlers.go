@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -156,6 +155,80 @@ func (s *Server) GetStatus(_ context.Context, _ api.GetStatusRequestObject) (api
 	}), nil
 }
 
+func (s *Server) GetConfig(_ context.Context, request api.GetConfigRequestObject) (api.GetConfigResponseObject, error) {
+	projectRoot := s.resolveProjectRoot(request.Params.ProjectId)
+	cfg, err := config.Load(projectRoot)
+	if err != nil {
+		return api.GetConfig500JSONResponse{Code: 500, Error: err.Error()}, nil
+	}
+
+	resp := api.ConfigResponse{
+		Defaults: api.AgentConfig{
+			Dockerfile:         cfg.Defaults.Dockerfile,
+			DockerfileContents: cfg.Defaults.DockerfileContents,
+			Context:            cfg.Defaults.Context,
+			PrePrompt:          cfg.Defaults.PrePrompt,
+		},
+		Agents: make(map[string]api.AgentConfig),
+	}
+
+	for name, agent := range cfg.Agents {
+		resp.Agents[name] = api.AgentConfig{
+			Dockerfile:         agent.Dockerfile,
+			DockerfileContents: agent.DockerfileContents,
+			Context:            agent.Context,
+			PrePrompt:          agent.PrePrompt,
+		}
+	}
+
+	return api.GetConfig200JSONResponse(resp), nil
+}
+
+func (s *Server) SaveConfig(_ context.Context, request api.SaveConfigRequestObject) (api.SaveConfigResponseObject, error) {
+	projectRoot := s.resolveProjectRoot(request.Params.ProjectId)
+
+		newCfg := config.Config{
+			Defaults: config.AgentConfig{
+				Dockerfile:         request.Body.Defaults.Dockerfile,
+				DockerfileContents: request.Body.Defaults.DockerfileContents,
+				Context:            request.Body.Defaults.Context,
+				PrePrompt:          request.Body.Defaults.PrePrompt,
+			},
+			Agents: make(map[string]config.AgentConfig),
+		}
+		for name, agent := range request.Body.Agents {
+			newCfg.Agents[name] = config.AgentConfig{
+				Dockerfile:         agent.Dockerfile,
+				DockerfileContents: agent.DockerfileContents,
+				Context:            agent.Context,
+				PrePrompt:          agent.PrePrompt,
+			}
+		}
+	
+
+	scope := api.Project
+	if request.Params.Scope != nil {
+		scope = *request.Params.Scope
+	}
+
+	var savePath string
+	if scope == api.User {
+		var err error
+		savePath, err = config.GetUserConfigPath()
+		if err != nil {
+			return api.SaveConfig500JSONResponse{Code: 500, Error: err.Error()}, nil
+		}
+	} else {
+		savePath = config.GetProjectConfigPath(projectRoot)
+	}
+
+	if err := config.SaveToFile(savePath, newCfg); err != nil {
+		return api.SaveConfig500JSONResponse{Code: 500, Error: err.Error()}, nil
+	}
+
+	return api.SaveConfig200Response{}, nil
+}
+
 func (s *Server) DevRestart(_ context.Context, _ api.DevRestartRequestObject) (api.DevRestartResponseObject, error) {
 	if !s.DevRestartEnabled {
 		code := 403
@@ -194,21 +267,23 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 		msg := err.Error()
 		return api.SpawnAgent500JSONResponse{Code: code, Error: msg}, nil
 	}
+
+	resolved := cfg.GetResolvedConfig(string(agentType))
+
 	prePrompt := config.DefaultPrePrompt
-	if cfg.PrePrompt != nil {
-		prePrompt = *cfg.PrePrompt
+	if resolved.PrePrompt != nil {
+		prePrompt = *resolved.PrePrompt
 	}
 	prompt := strings.TrimSpace(request.Body.Prompt)
 
-	// Resolve Dockerfile path
+	// Resolve Dockerfile path and contents
 	dockerfilePath := ""
-	rel := cfg.GetDockerfileForAgent(projectRoot, string(agentType))
-	if rel != "" {
-		if filepath.IsAbs(rel) {
-			dockerfilePath = rel
-		} else {
-			dockerfilePath = filepath.Join(projectRoot, rel)
-		}
+	dockerfileContents := ""
+	if resolved.Dockerfile != nil {
+		dockerfilePath = *resolved.Dockerfile
+	}
+	if resolved.DockerfileContents != nil {
+		dockerfileContents = *resolved.DockerfileContents
 	}
 	if dockerfilePath != "" {
 		if _, readErr := os.ReadFile(dockerfilePath); readErr != nil {
@@ -224,13 +299,20 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 		baseBranch = strings.TrimSpace(*request.Body.BaseBranch)
 	}
 
+	ephemeral := false
+	if request.Body.Ephemeral != nil {
+		ephemeral = *request.Body.Ephemeral
+	}
+
 	head, err := heads.SpawnHead(ctx, s.DockerClient, s.DB, projectRoot, heads.SpawnHeadOptions{
-		ID:             id,
-		PrePrompt:      prePrompt,
-		Prompt:         prompt,
-		AgentType:      agentType,
-		BaseBranch:     baseBranch,
-		DockerfilePath: dockerfilePath,
+		ID:                 id,
+		PrePrompt:          prePrompt,
+		Prompt:             prompt,
+		AgentType:          agentType,
+		BaseBranch:         baseBranch,
+		DockerfilePath:     dockerfilePath,
+		DockerfileContents: dockerfileContents,
+		Ephemeral:          ephemeral,
 	})
 	if err != nil {
 		code := 500
@@ -383,28 +465,29 @@ func (s *Server) RestartAgent(ctx context.Context, request api.RestartAgentReque
 
 	// Resolve dockerfile from config (same as SpawnAgent).
 	dockerfilePath := ""
+	dockerfileContents := ""
 	if cfg, cfgErr := config.Load(projectRoot); cfgErr == nil {
-		rel := cfg.GetDockerfileForAgent(projectRoot, string(agentType))
-		if rel != "" {
-			if filepath.IsAbs(rel) {
-				dockerfilePath = rel
-			} else {
-				dockerfilePath = filepath.Join(projectRoot, rel)
-			}
+		resolved := cfg.GetResolvedConfig(string(agentType))
+		if resolved.Dockerfile != nil {
+			dockerfilePath = *resolved.Dockerfile
+		}
+		if resolved.DockerfileContents != nil {
+			dockerfileContents = *resolved.DockerfileContents
 		}
 		// Override pre_prompt from config if we didn't already have one stored.
-		if prePrompt == "" && cfg.PrePrompt != nil {
-			prePrompt = *cfg.PrePrompt
+		if prePrompt == "" && resolved.PrePrompt != nil {
+			prePrompt = *resolved.PrePrompt
 		}
 	}
 
 	newHead, err := heads.SpawnHead(ctx, s.DockerClient, s.DB, projectRoot, heads.SpawnHeadOptions{
-		ID:             id,
-		PrePrompt:      prePrompt,
-		Prompt:         prompt,
-		AgentType:      agentType,
-		BaseBranch:     baseBranch,
-		DockerfilePath: dockerfilePath,
+		ID:                 id,
+		PrePrompt:          prePrompt,
+		Prompt:             prompt,
+		AgentType:          agentType,
+		BaseBranch:         baseBranch,
+		DockerfilePath:     dockerfilePath,
+		DockerfileContents: dockerfileContents,
 	})
 	if err != nil {
 		code := 500

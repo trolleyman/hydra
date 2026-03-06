@@ -9,6 +9,7 @@ import (
 
 	"braces.dev/errtrace"
 	"github.com/trolleyman/hydra/internal/common"
+	"github.com/trolleyman/hydra/internal/paths"
 )
 
 // GetCurrentBranch returns the name of the currently checked-out branch.
