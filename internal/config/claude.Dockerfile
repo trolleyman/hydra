@@ -21,6 +21,8 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 ENV DEVCONTAINER=true
+ENV TERM=xterm-256color
+ENV COLORTERM=truecolor
 
 # Install Claude Code and make it available to all users.
 RUN curl -fsSL https://claude.ai/install.sh | bash && \
