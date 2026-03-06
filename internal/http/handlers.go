@@ -131,6 +131,7 @@ func (s *Server) ListAgents(ctx context.Context, request api.ListAgentsRequestOb
 			PrePrompt:       h.PrePrompt,
 			Prompt:          h.Prompt,
 			BaseBranch:      h.BaseBranch,
+			Ephemeral:       &h.Ephemeral,
 			CreatedAt:       createdAt,
 			AgentStatus:     h.AgentStatus,
 		}
@@ -242,9 +243,9 @@ func (s *Server) DevRestart(_ context.Context, _ api.DevRestartRequestObject) (a
 }
 
 func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestObject) (api.SpawnAgentResponseObject, error) {
-	if request.Body == nil || strings.TrimSpace(request.Body.Prompt) == "" {
+	if request.Body == nil {
 		code := 400
-		msg := "prompt is required"
+		msg := "request body is required"
 		return api.SpawnAgent400JSONResponse{Code: code, Error: msg}, nil
 	}
 
@@ -273,7 +274,10 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 	if resolved.PrePrompt != nil {
 		prePrompt = *resolved.PrePrompt
 	}
-	prompt := strings.TrimSpace(request.Body.Prompt)
+	prompt := ""
+	if request.Body.Prompt != nil {
+		prompt = strings.TrimSpace(*request.Body.Prompt)
+	}
 
 	// Resolve Dockerfile path and contents
 	dockerfilePath := ""
@@ -330,8 +334,10 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 		ContainerId:     head.ContainerID,
 		ContainerStatus: head.ContainerStatus,
 		AgentType:       string(head.AgentType),
+		PrePrompt:       head.PrePrompt,
 		Prompt:          head.Prompt,
 		BaseBranch:      head.BaseBranch,
+		Ephemeral:       &head.Ephemeral,
 		CreatedAt:       spawnCreatedAt,
 		AgentStatus:     head.AgentStatus,
 	}), nil
@@ -365,6 +371,7 @@ func (s *Server) GetAgent(ctx context.Context, request api.GetAgentRequestObject
 		PrePrompt:       head.PrePrompt,
 		Prompt:          head.Prompt,
 		BaseBranch:      head.BaseBranch,
+		Ephemeral:       &head.Ephemeral,
 		CreatedAt:       getCreatedAt,
 		AgentStatus:     head.AgentStatus,
 	}), nil
@@ -509,6 +516,7 @@ func (s *Server) RestartAgent(ctx context.Context, request api.RestartAgentReque
 		PrePrompt:       newHead.PrePrompt,
 		Prompt:          newHead.Prompt,
 		BaseBranch:      newHead.BaseBranch,
+		Ephemeral:       &newHead.Ephemeral,
 		CreatedAt:       restartCreatedAt,
 		AgentStatus:     newHead.AgentStatus,
 	}), nil

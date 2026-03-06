@@ -10,7 +10,7 @@ export const Route = createFileRoute('/_agents/agent/$agentId')({
 
 function AgentPage() {
   const { selectedProjectId } = useProjectStore()
-  const { agents, removeAgent, updateAgent } = useAgentStore()
+  const { agents, removeAgent, updateAgent, setAgents } = useAgentStore()
   const navigate = useNavigate()
   const { agentId } = useParams({ from: '/_agents/agent/$agentId' })
 
@@ -24,6 +24,15 @@ function AgentPage() {
   function handleRestarted(newAgent: AgentResponse) {
     updateAgent(newAgent)
     navigate({ to: '/agent/$agentId', params: { agentId: newAgent.id } })
+  }
+
+  async function handleRefresh() {
+    try {
+      const result = await api.default.listAgents(selectedProjectId ?? undefined)
+      setAgents(result)
+    } catch (e) {
+      console.error('Failed to refresh agents:', e)
+    }
   }
 
   if (!agent) {
@@ -48,6 +57,7 @@ function AgentPage() {
       projectId={selectedProjectId}
       onKilled={handleKilled}
       onRestarted={handleRestarted}
+      onRefresh={handleRefresh}
     />
   )
 }

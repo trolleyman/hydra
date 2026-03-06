@@ -6,7 +6,7 @@ export type SpawnAgentRequest = {
     /**
      * The prompt to give to the agent
      */
-    prompt: string;
+    prompt?: string;
     /**
      * Unique identifier for the agent (slug format, max 40 chars)
      */

@@ -198,13 +198,19 @@ func SpawnAgent(ctx context.Context, cli *dockerclient.Client, opts SpawnOptions
 		if opts.Resume {
 			cmd = []string{"claude", "--resume"}
 		} else {
-			cmd = []string{"claude", "--dangerously-skip-permissions", "--", CombinePrompt(opts.PrePrompt, opts.Prompt)}
+			cmd = []string{"claude", "--dangerously-skip-permissions"}
+			if opts.Prompt != "" {
+				cmd = append(cmd, "--", CombinePrompt(opts.PrePrompt, opts.Prompt))
+			}
 		}
 	case AgentTypeGemini:
 		if opts.Resume {
 			cmd = []string{"gemini", "--resume"}
 		} else {
-			cmd = []string{"gemini", "--approval-mode=yolo", "-i", CombinePrompt(opts.PrePrompt, opts.Prompt)}
+			cmd = []string{"gemini", "--approval-mode=yolo"}
+			if opts.Prompt != "" {
+				cmd = append(cmd, "-i", CombinePrompt(opts.PrePrompt, opts.Prompt))
+			}
 		}
 	default:
 		return "", errtrace.Wrap(fmt.Errorf("unknown agent type: %q", opts.AgentType))
@@ -400,7 +406,11 @@ func getAgentBinds(agentType AgentType, projectRoot, id, containerHome string) (
 
 		// Always write settings.json with hooks configuration.
 		claudeSettingsJson := filepath.Join(claudeSettingsDir, "settings.json")
-		settingsData, err := buildClaudeSettings()
+		var existing []byte
+		if data, err := os.ReadFile(claudeSettingsJson); err == nil {
+			existing = data
+		}
+		settingsData, err := buildClaudeSettings(existing)
 		if err != nil {
 			return nil, errtrace.Wrap(err)
 		}
@@ -431,7 +441,11 @@ func getAgentBinds(agentType AgentType, projectRoot, id, containerHome string) (
 
 		// Always write settings.json with hooks configuration.
 		geminiSettingsJson := filepath.Join(geminiSettingsDir, "settings.json")
-		settingsData, err := buildGeminiSettings()
+		var existing []byte
+		if data, err := os.ReadFile(geminiSettingsJson); err == nil {
+			existing = data
+		}
+		settingsData, err := buildGeminiSettings(existing)
 		if err != nil {
 			return nil, errtrace.Wrap(err)
 		}
@@ -472,7 +486,7 @@ func buildHooksMap(cmd string, events []string) map[string]interface{} {
 }
 
 // buildClaudeSettings generates the settings.json content with hook configuration for Claude Code.
-func buildClaudeSettings() ([]byte, error) {
+func buildClaudeSettings(existing []byte) ([]byte, error) {
 	hooks := buildHooksMap("$HOME/.hydra/hydra trigger-hook claude", []string{
 		"SessionStart",
 		"UserPromptSubmit",
@@ -486,10 +500,17 @@ func buildClaudeSettings() ([]byte, error) {
 		"SubagentStop",
 		"SessionEnd",
 	})
-	settings := map[string]interface{}{
-		"skipDangerousModePermissionPrompt": true,
-		"hooks":                             hooks,
+
+	settings := make(map[string]interface{})
+	if len(existing) > 0 {
+		if err := json.Unmarshal(existing, &settings); err != nil {
+			log.Printf("warn: failed to unmarshal existing claude settings: %v", err)
+		}
 	}
+
+	settings["skipDangerousModePermissionPrompt"] = true
+	settings["hooks"] = hooks
+
 	data, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
 		return nil, errtrace.Wrap(fmt.Errorf("marshal claude settings: %w", err))
@@ -498,7 +519,7 @@ func buildClaudeSettings() ([]byte, error) {
 }
 
 // buildGeminiSettings generates the settings.json content with hook configuration for Gemini CLI.
-func buildGeminiSettings() ([]byte, error) {
+func buildGeminiSettings(existing []byte) ([]byte, error) {
 	hooks := buildHooksMap("$HOME/.hydra/hydra trigger-hook gemini", []string{
 		"SessionStart",
 		"BeforeAgent",
@@ -509,9 +530,16 @@ func buildGeminiSettings() ([]byte, error) {
 		"PreCompress",
 		"SessionEnd",
 	})
-	settings := map[string]interface{}{
-		"hooks": hooks,
+
+	settings := make(map[string]interface{})
+	if len(existing) > 0 {
+		if err := json.Unmarshal(existing, &settings); err != nil {
+			log.Printf("warn: failed to unmarshal existing gemini settings: %v", err)
+		}
 	}
+
+	settings["hooks"] = hooks
+
 	data, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
 		return nil, errtrace.Wrap(fmt.Errorf("marshal gemini settings: %w", err))

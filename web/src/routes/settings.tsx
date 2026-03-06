@@ -14,17 +14,17 @@ type SettingsSection = 'all' | 'claude' | 'gemini'
 
 const DOCKERFILE_TEMPLATES: Record<string, { label: string; content: string }> = {
   none: { label: 'None', content: '' },
-  golang: { 
-    label: 'Go (Golang)', 
-    content: '# Install Go 1.22\nRUN curl -fsSL https://go.dev/dl/go1.22.0.linux-amd64.tar.gz | tar -C /usr/local -xz\nENV PATH=$PATH:/usr/local/go/bin' 
+  golang: {
+    label: 'Go (Golang)',
+    content: '# Install Go 1.22\nRUN curl -fsSL https://go.dev/dl/go1.22.0.linux-amd64.tar.gz | tar -C /usr/local -xz\nENV PATH=$PATH:/usr/local/go/bin'
   },
-  rust: { 
-    label: 'Rust', 
-    content: '# Install Rust\nRUN curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | s h -s -- -y\nENV PATH=$PATH:$HOME/.cargo/bin' 
+  rust: {
+    label: 'Rust',
+    content: '# Install Rust\nRUN curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | s h -s -- -y\nENV PATH=$PATH:$HOME/.cargo/bin'
   },
-  python: { 
-    label: 'Python Data Science', 
-    content: '# Install Python libraries\nRUN apt-get update && apt-get install -y python3-pip\nRUN pip3 install numpy pandas matplotlib scipy scikit-learn --break-system-packages' 
+  python: {
+    label: 'Python Data Science',
+    content: '# Install Python libraries\nRUN apt-get update && apt-get install -y python3-pip\nRUN pip3 install numpy pandas matplotlib scipy scikit-learn --break-system-packages'
   },
   nodejs: {
     label: 'Node.js Extra',
@@ -77,7 +77,7 @@ function SettingsPage() {
     setTesting(true)
     try {
       const resp = await api.default.spawnAgent({
-        prompt: 'bash',
+        prompt: '',
         agent_type: agentType,
         id: `test-${agentType}-${Math.random().toString(36).slice(2, 6)}`,
         ephemeral: true,
@@ -104,28 +104,26 @@ function SettingsPage() {
               <div className="flex p-1 bg-gray-200 dark:bg-gray-800 rounded-lg shrink-0">
                 <button
                   onClick={() => setScope('project')}
-                  className={`px-3 py-1 text-xs font-medium rounded-md transition-all cursor-pointer ${
-                    scope === 'project'
+                  className={`px-3 py-1 text-xs font-medium rounded-md transition-all cursor-pointer ${scope === 'project'
                       ? 'bg-white dark:bg-gray-700 text-blue-600 dark:text-blue-400 shadow-sm'
                       : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
-                  }`}
+                    }`}
                 >
                   Project: {selectedProject?.name || 'Current'}
                 </button>
                 <button
                   onClick={() => setScope('user')}
-                  className={`px-3 py-1 text-xs font-medium rounded-md transition-all cursor-pointer ${
-                    scope === 'user'
+                  className={`px-3 py-1 text-xs font-medium rounded-md transition-all cursor-pointer ${scope === 'user'
                       ? 'bg-white dark:bg-gray-700 text-blue-600 dark:text-blue-400 shadow-sm'
                       : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
-                  }`}
+                    }`}
                 >
                   User (Global)
                 </button>
               </div>
               <p className="text-xs text-gray-500 dark:text-gray-400">
-                {scope === 'project' 
-                  ? 'Settings stored in .hydra/config.toml within the project root.' 
+                {scope === 'project'
+                  ? 'Settings stored in .hydra/config.toml within the project root.'
                   : 'Settings stored in ~/.config/hydra/config.toml for all projects.'}
               </p>
             </div>
@@ -140,31 +138,28 @@ function SettingsPage() {
           <div className="flex border-b border-gray-100 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-800/50 px-4">
             <button
               onClick={() => setActiveSection('all')}
-              className={`px-4 py-3 text-sm font-semibold transition-all border-b-2 cursor-pointer ${
-                activeSection === 'all'
+              className={`px-4 py-3 text-sm font-semibold transition-all border-b-2 cursor-pointer ${activeSection === 'all'
                   ? 'border-blue-500 text-blue-600 dark:text-blue-400'
                   : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
-              }`}
+                }`}
             >
               All Agents
             </button>
             <button
               onClick={() => setActiveSection('claude')}
-              className={`px-4 py-3 text-sm font-semibold transition-all border-b-2 cursor-pointer ${
-                activeSection === 'claude'
+              className={`px-4 py-3 text-sm font-semibold transition-all border-b-2 cursor-pointer ${activeSection === 'claude'
                   ? 'border-purple-500 text-purple-600 dark:text-purple-400'
                   : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
-              }`}
+                }`}
             >
               Claude
             </button>
             <button
               onClick={() => setActiveSection('gemini')}
-              className={`px-4 py-3 text-sm font-semibold transition-all border-b-2 cursor-pointer ${
-                activeSection === 'gemini'
+              className={`px-4 py-3 text-sm font-semibold transition-all border-b-2 cursor-pointer ${activeSection === 'gemini'
                   ? 'border-teal-500 text-teal-600 dark:text-teal-400'
                   : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
-              }`}
+                }`}
             >
               Gemini
             </button>
@@ -278,15 +273,15 @@ function SettingsPage() {
               </div>
               <div className="p-6 overflow-auto flex-1">
                 <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">
-                  This is an ephemeral agent running with <code className="bg-gray-100 dark:bg-gray-700 px-1 py-0.5 rounded">bash</code>. 
+                  This is an ephemeral agent.
                   It will be automatically killed when you close this window.
                 </p>
                 <AgentTerminal
                   agentId={testAgent.id}
                   projectId={selectedProjectId}
                   containerStatus={testAgent.container_status}
-                />
-              </div>
+                  isEphemeral={testAgent.ephemeral}
+                />              </div>
             </div>
           </div>
         )}

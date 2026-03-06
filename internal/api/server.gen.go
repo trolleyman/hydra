@@ -73,7 +73,10 @@ type AgentResponse struct {
 	ContainerStatus string           `json:"container_status"`
 
 	// CreatedAt Unix timestamp (seconds) when the container was created/started; 0 if no container
-	CreatedAt    *int64  `json:"created_at,omitempty"`
+	CreatedAt *int64 `json:"created_at,omitempty"`
+
+	// Ephemeral If true, the agent is temporary and its container will be removed on stop.
+	Ephemeral    *bool   `json:"ephemeral,omitempty"`
 	Id           string  `json:"id"`
 	PrePrompt    string  `json:"pre_prompt"`
 	ProjectPath  string  `json:"project_path"`
@@ -233,7 +236,7 @@ type SpawnAgentRequest struct {
 	Id string `json:"id"`
 
 	// Prompt The prompt to give to the agent
-	Prompt string `json:"prompt"`
+	Prompt *string `json:"prompt,omitempty"`
 }
 
 // StatusResponse defines model for StatusResponse.

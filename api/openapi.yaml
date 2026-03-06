@@ -523,7 +523,7 @@ components:
 
     SpawnAgentRequest:
       type: object
-      required: [prompt, id]
+      required: [id]
       properties:
         prompt:
           type: string
@@ -599,6 +599,9 @@ components:
           type: string
         base_branch:
           type: string
+        ephemeral:
+          type: boolean
+          description: If true, the agent is temporary and its container will be removed on stop.
         created_at:
           type: integer
           format: int64

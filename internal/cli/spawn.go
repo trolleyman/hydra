@@ -34,13 +34,16 @@ func init() {
 }
 
 var spawnCmd = &cobra.Command{
-	Use:   "spawn [--agent <agent>] [--dockerfile <path>] [--base-branch <base-branch>] [--force|-f] <id> <prompt>",
+	Use:   "spawn [--agent <agent>] [--dockerfile <path>] [--base-branch <base-branch>] [--force|-f] <id> [prompt]",
 	Short: "Spawn a new AI agent for the given prompt",
-	Args:  cobra.MinimumNArgs(2),
+	Args:  cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		id := args[0]
 		// Allow multi-word prompts without requiring quotes
-		prompt := strings.Join(args[1:], " ")
+		var prompt string
+		if len(args) > 1 {
+			prompt = strings.Join(args[1:], " ")
+		}
 
 		projectRoot, err := paths.GetProjectRootFromCwd()
 		if err != nil {
