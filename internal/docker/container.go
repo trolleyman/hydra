@@ -10,8 +10,10 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"runtime"
+	"sync"
 
 	"braces.dev/errtrace"
 	"github.com/charmbracelet/x/term"
@@ -261,8 +263,11 @@ func KillAgent(ctx context.Context, cli *dockerclient.Client, containerID string
 	return nil
 }
 
-// AttachAgent runs attaches to a container, handing over the terminal.
+// AttachAgent attaches to a running container's TTY, forwarding stdin/stdout.
+// Press Ctrl+C to detach without stopping the container.
 func AttachAgent(ctx context.Context, cli *dockerclient.Client, containerID string) error {
+	fmt.Fprintln(os.Stderr, "Attached to agent. Press Ctrl+C to detach (container keeps running).")
+
 	oldState, err := term.MakeRaw(os.Stdin.Fd())
 	if err != nil {
 		return errtrace.Wrap(fmt.Errorf("set raw mode: %w", err))
@@ -286,15 +291,39 @@ func AttachAgent(ctx context.Context, cli *dockerclient.Client, containerID stri
 	// Inject a Ctrl+L byte (\x0c) into the container's stdin to force a TUI redraw.
 	_, _ = resp.Conn.Write([]byte{'\x0c'})
 
+	// detach closes the Docker attach connection once, unblocking all I/O goroutines.
+	var detachOnce sync.Once
+	detach := func() {
+		detachOnce.Do(func() { resp.Close() })
+	}
+
+	// Handle external SIGINT (e.g. kill -2). In raw mode, keyboard Ctrl+C sends \x03
+	// as a byte instead of SIGINT, which is intercepted in the stdin goroutine below.
+	sigIntCh := make(chan os.Signal, 1)
+	signal.Notify(sigIntCh, os.Interrupt)
+	defer signal.Stop(sigIntCh)
+
 	// Listen for window resize events from the host OS and forward them to the container.
-	sigChan := make(chan os.Signal, 1)
-	notifyWindowResize(sigChan)
+	sigResizeCh := make(chan os.Signal, 1)
+	notifyWindowResize(sigResizeCh)
+	defer signal.Stop(sigResizeCh)
+
+	// done is closed when AttachAgent returns, stopping the signal-handling goroutine.
+	done := make(chan struct{})
+	defer close(done)
+
 	go func() {
 		for {
 			select {
-			case <-ctx.Done():
+			case <-done:
 				return
-			case <-sigChan:
+			case <-ctx.Done():
+				detach()
+				return
+			case <-sigIntCh:
+				detach()
+				return
+			case <-sigResizeCh:
 				syncTerminalSize(ctx, cli, containerID)
 			}
 		}
@@ -302,22 +331,50 @@ func AttachAgent(ctx context.Context, cli *dockerclient.Client, containerID stri
 
 	errCh := make(chan error, 2)
 
+	// stdin → container. Ctrl+C (\x03) detaches without killing the container; all
+	// other bytes are forwarded verbatim.
 	go func() {
-		_, err := io.Copy(resp.Conn, os.Stdin)
-		resp.CloseWrite()
-		errCh <- err
+		buf := make([]byte, 32*1024)
+		for {
+			n, err := os.Stdin.Read(buf)
+			if n > 0 {
+				for i := 0; i < n; i++ {
+					if buf[i] == 0x03 { // Ctrl+C in raw mode
+						if i > 0 {
+							_, _ = resp.Conn.Write(buf[:i])
+						}
+						detach()
+						errCh <- nil
+						return
+					}
+				}
+				if _, werr := resp.Conn.Write(buf[:n]); werr != nil {
+					errCh <- werr
+					return
+				}
+			}
+			if err != nil {
+				if err == io.EOF {
+					resp.CloseWrite()
+				}
+				errCh <- err
+				return
+			}
+		}
 	}()
 
+	// container → stdout.
 	go func() {
 		_, err := io.Copy(os.Stdout, resp.Reader)
 		errCh <- err
 	}()
 
 	err = <-errCh
+	detach()
+
 	if err != nil && err != io.EOF {
 		return errtrace.Wrap(fmt.Errorf("stream copy: %w", err))
 	}
-
 	return nil
 }
 
