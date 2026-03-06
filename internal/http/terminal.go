@@ -107,6 +107,8 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 			}
 			// Clear terminal before switching to the real agent
 			_ = conn.WriteMessage(websocket.BinaryMessage, []byte("\x1bc")) // RIS (Reset to Initial State) - clears screen and scrollback
+			// Notify the user that the agent is starting
+			_ = conn.WriteMessage(websocket.BinaryMessage, []byte("Loading...\r\n"))
 		} else {
 			log.Printf("terminal ws: container ID is empty for agent %q and no build log found", agentID)
 			_ = conn.WriteMessage(websocket.BinaryMessage, []byte("Agent container not started and no build logs found.\r\n"))
@@ -133,7 +135,6 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 	// WebSocket → container stdin (reads from ws, writes to docker attach)
 	go func() {
 		defer close(done)
-		sentRedraw := false
 		for {
 			msgType, data, err := conn.ReadMessage()
 			if err != nil {
@@ -151,12 +152,6 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 						Height: msg.Rows,
 						Width:  msg.Cols,
 					})
-					// After the first resize (which sets correct terminal dimensions),
-					// inject Ctrl+L to force the TUI to clear and fully redraw.
-					if !sentRedraw {
-						sentRedraw = true
-						_, _ = attach.Conn.Write([]byte{'\x0c'})
-					}
 				}
 			}
 		}
