@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"os/user"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -899,11 +900,30 @@ func spawnHead(projectRoot, id string, agentType docker.AgentType, dockerfilePat
 func currentUserInfo() (uid, gid int, username, groupName string) {
 	u, err := user.Current()
 	if err != nil {
-		return os.Getuid(), os.Getgid(), "user", "user"
+		return 1000, 1000, "user", "user"
 	}
-	uid, _ = strconv.Atoi(u.Uid)
-	gid, _ = strconv.Atoi(u.Gid)
+	uid, err = strconv.Atoi(u.Uid)
+	if err != nil {
+		uid = 1000
+	}
+	gid, err = strconv.Atoi(u.Gid)
+	if err != nil {
+		gid = 1000
+	}
 	username = u.Username
+	if runtime.GOOS == "windows" {
+		// Sanitize Windows username (e.g. "DESKTOP-123\User" -> "user")
+		if idx := strings.LastIndex(username, "\\"); idx != -1 {
+			username = username[idx+1:]
+		}
+		username = strings.ToLower(username)
+		// Remove non-alphanumeric characters to ensure valid Linux username
+		reg := regexp.MustCompile("[^a-z0-9]")
+		username = reg.ReplaceAllString(username, "")
+		if username == "" {
+			username = "user"
+		}
+	}
 	groupName = u.Username
 	if grp, err := user.LookupGroupId(u.Gid); err == nil {
 		groupName = grp.Name
