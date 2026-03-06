@@ -7,13 +7,21 @@ type AgentTypeOption = 'claude' | 'gemini'
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/i.test(navigator.platform)
 
 function slugify(text: string, maxLength = 40, allowTrailingHyphen = false): string {
-  const slug = text
+  let slug = text
     .toLowerCase()
     .trim()
     .replace(/[^a-z0-9\s-]/g, '')
     .replace(/\s+/g, '-')
     .replace(/-+/g, '-')
-    .slice(0, maxLength)
+
+  if (slug.length > maxLength) {
+    const lastHyphen = slug.lastIndexOf('-', maxLength)
+    if (lastHyphen > 0) {
+      slug = slug.slice(0, lastHyphen)
+    } else {
+      slug = slug.slice(0, maxLength)
+    }
+  }
 
   return allowTrailingHyphen ? slug : slug.replace(/-$/, '')
 }
