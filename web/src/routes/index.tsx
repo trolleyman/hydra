@@ -643,7 +643,7 @@ function HomePage() {
   function handleSpawned(agent: AgentResponse) {
     setAgents((prev) => {
       const exists = prev.some((a) => a.id === agent.id)
-      return exists ? prev : [...prev, agent]
+      return exists ? prev : [agent, ...prev]
     })
     setSelectedId(agent.id)
     setShowSpawn(false)
