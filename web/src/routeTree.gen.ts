@@ -10,42 +10,62 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as SettingsRouteImport } from './routes/settings'
-import { Route as IndexRouteImport } from './routes/index'
+import { Route as AgentsRouteImport } from './routes/_agents'
+import { Route as AgentsIndexRouteImport } from './routes/_agents/index'
+import { Route as AgentsAgentAgentIdRouteImport } from './routes/_agents/agent.$agentId'
 
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
   getParentRoute: () => rootRouteImport,
 } as any)
-const IndexRoute = IndexRouteImport.update({
+const AgentsRoute = AgentsRouteImport.update({
+  id: '/_agents',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AgentsIndexRoute = AgentsIndexRouteImport.update({
   id: '/',
   path: '/',
-  getParentRoute: () => rootRouteImport,
+  getParentRoute: () => AgentsRoute,
+} as any)
+const AgentsAgentAgentIdRoute = AgentsAgentAgentIdRouteImport.update({
+  id: '/agent/$agentId',
+  path: '/agent/$agentId',
+  getParentRoute: () => AgentsRoute,
 } as any)
 
 export interface FileRoutesByFullPath {
-  '/': typeof IndexRoute
+  '/': typeof AgentsIndexRoute
   '/settings': typeof SettingsRoute
+  '/agent/$agentId': typeof AgentsAgentAgentIdRoute
 }
 export interface FileRoutesByTo {
-  '/': typeof IndexRoute
   '/settings': typeof SettingsRoute
+  '/': typeof AgentsIndexRoute
+  '/agent/$agentId': typeof AgentsAgentAgentIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
-  '/': typeof IndexRoute
+  '/_agents': typeof AgentsRouteWithChildren
   '/settings': typeof SettingsRoute
+  '/_agents/': typeof AgentsIndexRoute
+  '/_agents/agent/$agentId': typeof AgentsAgentAgentIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/settings'
+  fullPaths: '/' | '/settings' | '/agent/$agentId'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/settings'
-  id: '__root__' | '/' | '/settings'
+  to: '/settings' | '/' | '/agent/$agentId'
+  id:
+    | '__root__'
+    | '/_agents'
+    | '/settings'
+    | '/_agents/'
+    | '/_agents/agent/$agentId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
-  IndexRoute: typeof IndexRoute
+  AgentsRoute: typeof AgentsRouteWithChildren
   SettingsRoute: typeof SettingsRoute
 }
 
@@ -58,18 +78,45 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/': {
-      id: '/'
+    '/_agents': {
+      id: '/_agents'
+      path: ''
+      fullPath: '/'
+      preLoaderRoute: typeof AgentsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/_agents/': {
+      id: '/_agents/'
       path: '/'
       fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
-      parentRoute: typeof rootRouteImport
+      preLoaderRoute: typeof AgentsIndexRouteImport
+      parentRoute: typeof AgentsRoute
+    }
+    '/_agents/agent/$agentId': {
+      id: '/_agents/agent/$agentId'
+      path: '/agent/$agentId'
+      fullPath: '/agent/$agentId'
+      preLoaderRoute: typeof AgentsAgentAgentIdRouteImport
+      parentRoute: typeof AgentsRoute
     }
   }
 }
 
+interface AgentsRouteChildren {
+  AgentsIndexRoute: typeof AgentsIndexRoute
+  AgentsAgentAgentIdRoute: typeof AgentsAgentAgentIdRoute
+}
+
+const AgentsRouteChildren: AgentsRouteChildren = {
+  AgentsIndexRoute: AgentsIndexRoute,
+  AgentsAgentAgentIdRoute: AgentsAgentAgentIdRoute,
+}
+
+const AgentsRouteWithChildren =
+  AgentsRoute._addFileChildren(AgentsRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
-  IndexRoute: IndexRoute,
+  AgentsRoute: AgentsRouteWithChildren,
   SettingsRoute: SettingsRoute,
 }
 export const routeTree = rootRouteImport
