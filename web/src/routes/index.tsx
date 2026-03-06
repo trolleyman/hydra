@@ -107,11 +107,13 @@ function AgentDetail({
   projectId,
   onKilled,
   onRestarted,
+  onRefresh,
 }: {
   agent: AgentResponse
   projectId: string | null
   onKilled: (id: string) => void
   onRestarted: (agent: AgentResponse) => void
+  onRefresh?: () => void
 }) {
   const [killing, setKilling] = useState(false)
   const [merging, setMerging] = useState(false)
@@ -197,17 +199,15 @@ function AgentDetail({
                 </svg>
               ) : (
                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <circle cx="18" cy="18" r="3" strokeWidth={2} />
-                  <circle cx="6" cy="6" r="3" strokeWidth={2} />
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 9v12m12-6V9a9 9 0 00-9 9" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                 </svg>
               )}
             </button>
             <button
               onClick={handleRestart}
-              disabled={restarting || killing || merging}
-              className="w-6 h-6 flex items-center justify-center rounded-md border border-amber-200 text-amber-600 hover:bg-amber-50 dark:border-amber-900/30 dark:text-amber-400 dark:hover:bg-amber-900/20 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
-              title="Restart agent (discard all progress and restart with same prompt)"
+              disabled={merging || killing || restarting}
+              className="w-6 h-6 flex items-center justify-center rounded-md border border-blue-200 text-blue-600 hover:bg-blue-50 dark:border-blue-900/30 dark:text-blue-400 dark:hover:bg-blue-900/20 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+              title="Restart agent"
             >
               {restarting ? (
                 <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
@@ -222,8 +222,8 @@ function AgentDetail({
             </button>
             <button
               onClick={handleKill}
-              disabled={killing || merging || restarting}
-              className="w-6 h-6 flex items-center justify-center rounded-md border border-red-200 text-red-500 hover:bg-red-50 dark:border-red-900/30 dark:text-red-400 dark:hover:bg-red-900/20 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+              disabled={merging || killing || restarting}
+              className="w-6 h-6 flex items-center justify-center rounded-md border border-red-200 text-red-600 hover:bg-red-50 dark:border-red-900/30 dark:text-red-400 dark:hover:bg-red-900/20 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
               title="Kill agent"
             >
               {killing ? (
@@ -233,41 +233,30 @@ function AgentDetail({
                 </svg>
               ) : (
                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                 </svg>
               )}
             </button>
           </div>
-          {/* Labels row */}
-          <div className="flex items-center flex-wrap">
-            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${agentTypeClass}`}>
-              {agent.agent_type || 'unknown'}
+
+          {/* Metadata row */}
+          <div className="flex items-center gap-3">
+            <span className={`text-xs px-2.5 py-0.5 rounded-full font-medium ${agentTypeClass}`}>
+              {agent.agent_type}
             </span>
-            {agent.agent_status && (() => {
-              const badge = agentStatusBadge(agent.agent_status.status)
-              return (
-                <span
-                  className={`text-xs px-2 py-0.5 rounded-full font-medium ${badge.className}`}
-                  title={`Since ${agent.agent_status.timestamp}`}
-                >
-                  {badge.label}
-                </span>
-              )
-            })()}
-            {agent.container_id && (
-              <span
-                className="text-xs px-2 py-0.5 rounded-full font-medium font-mono bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300 cursor-default"
-                title={agent.container_id}
-              >
-                {agent.container_id.slice(0, 12)}
+            <span className="text-gray-300 dark:text-gray-600">|</span>
+            {agent.branch_name && (
+              <span className="text-xs font-mono text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 01-2 2h2m2 0h10a2 2 0 002-2v-2" />
+                </svg>
+                {agent.branch_name}
               </span>
             )}
-            {agent.created_at != null && (
-              <span
-                className="text-xs px-2 py-0.5 rounded-full font-medium bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400 cursor-default"
-                title={`Started at ${new Date(agent.created_at * 1000).toUTCString()}`}
-              >
-                {formatStartedAgo(agent.created_at)}
+            <span className="text-gray-300 dark:text-gray-600">|</span>
+            {agent.created_at !== 0 && agent.created_at !== undefined && (
+              <span className="text-xs text-gray-500 dark:text-gray-400">
+                created {formatStartedAgo(agent.created_at)}
               </span>
             )}
           </div>
@@ -286,6 +275,7 @@ function AgentDetail({
           agentId={agent.id}
           projectId={projectId}
           containerStatus={agent.container_status}
+          onRefresh={onRefresh}
         />
 
         {/* Diff viewer */}
@@ -398,6 +388,7 @@ function SpawnForm({
   }
 
   const derivedIdPlaceholder = generateId(prompt) || 'auto-generated…'
+
   const submitHint = isMac ? '⌘↵ to spawn' : 'Ctrl+Enter to spawn'
 
   if (compact) {
@@ -611,34 +602,33 @@ function HomePage() {
     setError(null)
   }, [selectedProjectId])
 
+  const fetchAgents = useCallback(async (cancelled = false) => {
+    try {
+      const result = await api.default.listAgents(selectedProjectId ?? undefined)
+      if (cancelled) return
+      setAgents(result)
+      setError(null)
+      // Auto-select first agent if nothing selected
+      setSelectedId((prev) => {
+        if (prev != null && result.some((a) => a.id === prev)) return prev
+        return result.length > 0 ? result[0].id : null
+      })
+    } catch (e) {
+      if (!cancelled) setError(String(e))
+    } finally {
+      if (!cancelled) setLoading(false)
+    }
+  }, [selectedProjectId])
+
   useEffect(() => {
     let cancelled = false
-
-    async function fetchAgents() {
-      try {
-        const result = await api.default.listAgents(selectedProjectId ?? undefined)
-        if (cancelled) return
-        setAgents(result)
-        setError(null)
-        // Auto-select first agent if nothing selected
-        setSelectedId((prev) => {
-          if (prev != null && result.some((a) => a.id === prev)) return prev
-          return result.length > 0 ? result[0].id : null
-        })
-      } catch (e) {
-        if (!cancelled) setError(String(e))
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    }
-
-    fetchAgents()
-    const interval = setInterval(fetchAgents, 5_000)
+    fetchAgents(cancelled)
+    const interval = setInterval(() => fetchAgents(cancelled), 5_000)
     return () => {
       cancelled = true
       clearInterval(interval)
     }
-  }, [selectedProjectId])
+  }, [fetchAgents])
 
   function handleSpawned(agent: AgentResponse) {
     setAgents((prev) => {
@@ -725,7 +715,13 @@ function HomePage() {
       {showSpawn ? (
         <SpawnForm projectId={selectedProjectId} onSpawned={handleSpawned} />
       ) : selectedAgent ? (
-        <AgentDetail agent={selectedAgent} projectId={selectedProjectId} onKilled={handleKilled} onRestarted={handleRestarted} />
+        <AgentDetail 
+          agent={selectedAgent} 
+          projectId={selectedProjectId} 
+          onKilled={handleKilled} 
+          onRestarted={handleRestarted} 
+          onRefresh={() => fetchAgents()}
+        />
       ) : (
         <EmptyDetail onSpawn={() => setShowSpawn(true)} />
       )}
