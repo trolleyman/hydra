@@ -108,7 +108,7 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 			// Clear terminal before switching to the real agent
 			_ = conn.WriteMessage(websocket.BinaryMessage, []byte("\x1bc")) // RIS (Reset to Initial State) - clears screen and scrollback
 			// Notify the user that the agent is starting
-			_ = conn.WriteMessage(websocket.BinaryMessage, []byte("Loading...\r\n"))
+			_ = conn.WriteMessage(websocket.BinaryMessage, []byte("\x1b[32mStarting agent...\x1b[0m\r\n\r\n"))
 		} else {
 			log.Printf("terminal ws: container ID is empty for agent %q and no build log found", agentID)
 			_ = conn.WriteMessage(websocket.BinaryMessage, []byte("Agent container not started and no build logs found.\r\n"))
@@ -189,7 +189,7 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 
 // streamBuildLog returns true if the build finished successfully and we should transition to attach.
 func (s *Server) streamBuildLog(ctx context.Context, conn *websocket.Conn, projectRoot, agentID, logPath string) bool {
-	_ = conn.WriteMessage(websocket.BinaryMessage, []byte("\x1b[32mAgent is building. Showing build logs...\x1b[0m\r\n\r\n"))
+	_ = conn.WriteMessage(websocket.BinaryMessage, []byte("\x1b[32mBuilding agent...\x1b[0m\r\n\r\n"))
 
 	f, err := os.Open(logPath)
 	if err != nil {
