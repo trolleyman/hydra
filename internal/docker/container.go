@@ -214,6 +214,8 @@ func SpawnAgent(ctx context.Context, cli *dockerclient.Client, opts SpawnOptions
 				cmd = append(cmd, "-i", CombinePrompt(opts.PrePrompt, opts.Prompt))
 			}
 		}
+	case AgentTypeBash:
+		cmd = []string{"/bin/bash"}
 	default:
 		return "", errtrace.Wrap(fmt.Errorf("unknown agent type: %q", opts.AgentType))
 	}
@@ -407,7 +409,7 @@ func ViewLogs(containerID string) error {
 // defaultDockerfileContent returns the embedded Dockerfile content for the given agent type.
 func defaultDockerfileContent(agentType AgentType) (string, error) {
 	switch agentType {
-	case AgentTypeClaude:
+	case AgentTypeClaude, AgentTypeBash:
 		return config.DefaultDockerfileClaude, nil
 	case AgentTypeGemini:
 		return config.DefaultDockerfileGemini, nil

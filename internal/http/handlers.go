@@ -255,9 +255,9 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 	if request.Body.AgentType != nil && *request.Body.AgentType != "" {
 		agentType = docker.AgentType(*request.Body.AgentType)
 	}
-	if agentType != docker.AgentTypeClaude && agentType != docker.AgentTypeGemini {
+	if agentType != docker.AgentTypeClaude && agentType != docker.AgentTypeGemini && agentType != docker.AgentTypeBash {
 		code := 400
-		msg := "unknown agent_type; supported: claude, gemini"
+		msg := "unknown agent_type; supported: claude, gemini, bash"
 		return api.SpawnAgent400JSONResponse{Code: code, Error: msg}, nil
 	}
 
