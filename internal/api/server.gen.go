@@ -200,6 +200,9 @@ type DiffResponse struct {
 
 	// HeadRef The head ref used for this diff
 	HeadRef string `json:"head_ref"`
+
+	// MergeConflict True if there are merge conflicts between base_ref and head_ref
+	MergeConflict *bool `json:"merge_conflict,omitempty"`
 }
 
 // ErrorResponse defines model for ErrorResponse.
@@ -304,6 +307,12 @@ type RestartAgentParams struct {
 	ProjectId *string `form:"project_id,omitempty" json:"project_id,omitempty"`
 }
 
+// UpdateAgentFromBaseParams defines parameters for UpdateAgentFromBase.
+type UpdateAgentFromBaseParams struct {
+	// ProjectId Project ID to scope the lookup (defaults to server CWD project)
+	ProjectId *string `form:"project_id,omitempty" json:"project_id,omitempty"`
+}
+
 // ListAgentsParams defines parameters for ListAgents.
 type ListAgentsParams struct {
 	// ProjectId Project ID to scope the agent list (defaults to server CWD project)
@@ -363,6 +372,9 @@ type ServerInterface interface {
 	// Restart a Hydra agent (kill and respawn with the same prompt)
 	// (POST /api/agent/{id}/restart)
 	RestartAgent(w http.ResponseWriter, r *http.Request, id string, params RestartAgentParams)
+	// Update a Hydra agent's branch from its base branch (merge base into head)
+	// (POST /api/agent/{id}/update-from-base)
+	UpdateAgentFromBase(w http.ResponseWriter, r *http.Request, id string, params UpdateAgentFromBaseParams)
 	// List all Hydra agents (heads)
 	// (GET /api/agents)
 	ListAgents(w http.ResponseWriter, r *http.Request, params ListAgentsParams)
@@ -640,6 +652,42 @@ func (siw *ServerInterfaceWrapper) RestartAgent(w http.ResponseWriter, r *http.R
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.RestartAgent(w, r, id, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateAgentFromBase operation middleware
+func (siw *ServerInterfaceWrapper) UpdateAgentFromBase(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params UpdateAgentFromBaseParams
+
+	// ------------- Optional query parameter "project_id" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "project_id", r.URL.Query(), &params.ProjectId)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateAgentFromBase(w, r, id, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -961,6 +1009,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("GET "+options.BaseURL+"/api/agent/{id}/diff", wrapper.GetAgentDiff)
 	m.HandleFunc("POST "+options.BaseURL+"/api/agent/{id}/merge", wrapper.MergeAgent)
 	m.HandleFunc("POST "+options.BaseURL+"/api/agent/{id}/restart", wrapper.RestartAgent)
+	m.HandleFunc("POST "+options.BaseURL+"/api/agent/{id}/update-from-base", wrapper.UpdateAgentFromBase)
 	m.HandleFunc("GET "+options.BaseURL+"/api/agents", wrapper.ListAgents)
 	m.HandleFunc("POST "+options.BaseURL+"/api/agents", wrapper.SpawnAgent)
 	m.HandleFunc("GET "+options.BaseURL+"/api/config", wrapper.GetConfig)
@@ -1218,6 +1267,50 @@ func (response RestartAgent409JSONResponse) VisitRestartAgentResponse(w http.Res
 type RestartAgent500JSONResponse ErrorResponse
 
 func (response RestartAgent500JSONResponse) VisitRestartAgentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type UpdateAgentFromBaseRequestObject struct {
+	Id     string `json:"id"`
+	Params UpdateAgentFromBaseParams
+}
+
+type UpdateAgentFromBaseResponseObject interface {
+	VisitUpdateAgentFromBaseResponse(w http.ResponseWriter) error
+}
+
+type UpdateAgentFromBase204Response struct {
+}
+
+func (response UpdateAgentFromBase204Response) VisitUpdateAgentFromBaseResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type UpdateAgentFromBase404JSONResponse ErrorResponse
+
+func (response UpdateAgentFromBase404JSONResponse) VisitUpdateAgentFromBaseResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type UpdateAgentFromBase409JSONResponse ErrorResponse
+
+func (response UpdateAgentFromBase409JSONResponse) VisitUpdateAgentFromBaseResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type UpdateAgentFromBase500JSONResponse ErrorResponse
+
+func (response UpdateAgentFromBase500JSONResponse) VisitUpdateAgentFromBaseResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(500)
 
@@ -1484,6 +1577,9 @@ type StrictServerInterface interface {
 	// Restart a Hydra agent (kill and respawn with the same prompt)
 	// (POST /api/agent/{id}/restart)
 	RestartAgent(ctx context.Context, request RestartAgentRequestObject) (RestartAgentResponseObject, error)
+	// Update a Hydra agent's branch from its base branch (merge base into head)
+	// (POST /api/agent/{id}/update-from-base)
+	UpdateAgentFromBase(ctx context.Context, request UpdateAgentFromBaseRequestObject) (UpdateAgentFromBaseResponseObject, error)
 	// List all Hydra agents (heads)
 	// (GET /api/agents)
 	ListAgents(ctx context.Context, request ListAgentsRequestObject) (ListAgentsResponseObject, error)
@@ -1697,6 +1793,33 @@ func (sh *strictHandler) RestartAgent(w http.ResponseWriter, r *http.Request, id
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(RestartAgentResponseObject); ok {
 		if err := validResponse.VisitRestartAgentResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdateAgentFromBase operation middleware
+func (sh *strictHandler) UpdateAgentFromBase(w http.ResponseWriter, r *http.Request, id string, params UpdateAgentFromBaseParams) {
+	var request UpdateAgentFromBaseRequestObject
+
+	request.Id = id
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateAgentFromBase(ctx, request.(UpdateAgentFromBaseRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateAgentFromBase")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdateAgentFromBaseResponseObject); ok {
+		if err := validResponse.VisitUpdateAgentFromBaseResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

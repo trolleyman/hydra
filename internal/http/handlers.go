@@ -417,13 +417,16 @@ func (s *Server) MergeAgent(ctx context.Context, request api.MergeAgentRequestOb
 	gitMergeCmd := exec.CommandContext(ctx, "git", "-C", projectRoot, "merge", branchName)
 	gitMergeCmd.Stderr = &stderr
 	if err := gitMergeCmd.Run(); err != nil {
+		// If merge fails, abort it to keep the base branch clean.
+		exec.CommandContext(ctx, "git", "-C", projectRoot, "merge", "--abort").Run()
+
 		if s.DB != nil {
 			errMsg := fmt.Sprintf("git merge failed: %s", strings.TrimSpace(stderr.String()))
 			_ = s.DB.ClearHeadStatus(head.ID, &errMsg)
 		}
-		code := 500
+		code := 409
 		msg := fmt.Sprintf("git merge failed: %s", strings.TrimSpace(stderr.String()))
-		return api.MergeAgent500JSONResponse{Code: code, Error: msg}, nil
+		return api.MergeAgent409JSONResponse{Code: code, Error: msg}, nil
 	}
 
 	// Kill cleanup without re-doing the CAS (already in "merging" state).
@@ -434,6 +437,40 @@ func (s *Server) MergeAgent(ctx context.Context, request api.MergeAgentRequestOb
 	}
 
 	return api.MergeAgent204Response{}, nil
+}
+
+func (s *Server) UpdateAgentFromBase(ctx context.Context, request api.UpdateAgentFromBaseRequestObject) (api.UpdateAgentFromBaseResponseObject, error) {
+	projectRoot := s.resolveProjectRoot(request.Params.ProjectId)
+	head, err := heads.GetHeadByID(ctx, s.DockerClient, s.DB, projectRoot, request.Id)
+	if err != nil {
+		return api.UpdateAgentFromBase500JSONResponse{Code: 500, Error: err.Error()}, nil
+	}
+	if head == nil {
+		return api.UpdateAgentFromBase404JSONResponse{Code: 404, Error: "agent not found"}, nil
+	}
+
+	if head.Branch == nil {
+		return api.UpdateAgentFromBase500JSONResponse{Code: 500, Error: "agent has no git branch to update"}, nil
+	}
+
+	mergeDir := projectRoot
+	if head.Worktree != nil {
+		mergeDir = *head.Worktree
+	}
+
+	// Attempt merge (base branch into current branch)
+	var stderr bytes.Buffer
+	gitMergeCmd := exec.CommandContext(ctx, "git", "-C", mergeDir, "merge", head.BaseBranch)
+	gitMergeCmd.Stderr = &stderr
+	if err := gitMergeCmd.Run(); err != nil {
+		// If merge fails, abort it to keep worktree clean
+		exec.CommandContext(ctx, "git", "-C", mergeDir, "merge", "--abort").Run()
+
+		msg := fmt.Sprintf("git merge failed: %s", strings.TrimSpace(stderr.String()))
+		return api.UpdateAgentFromBase409JSONResponse{Code: 409, Error: msg}, nil
+	}
+
+	return api.UpdateAgentFromBase204Response{}, nil
 }
 
 func (s *Server) RestartAgent(ctx context.Context, request api.RestartAgentRequestObject) (api.RestartAgentResponseObject, error) {
@@ -732,12 +769,20 @@ func (s *Server) GetAgentDiff(ctx context.Context, request api.GetAgentDiffReque
 		}
 	}
 
+	mergeConflict := false
+	if head.Branch != nil {
+		if conflicts, err := git.HasConflicts(projectRoot, head.BaseBranch, *head.Branch); err == nil {
+			mergeConflict = conflicts
+		}
+	}
+
 	resp := api.DiffResponse{
-		Files:      apiFiles,
-		BaseRef:    baseRef,
-		HeadRef:    headRef,
-		BaseCommit: baseCommitInfo,
-		HeadCommit: headCommitInfo,
+		Files:         apiFiles,
+		BaseRef:       baseRef,
+		HeadRef:       headRef,
+		MergeConflict: &mergeConflict,
+		BaseCommit:    baseCommitInfo,
+		HeadCommit:    headCommitInfo,
 	}
 	return api.GetAgentDiff200JSONResponse(resp), nil
 }

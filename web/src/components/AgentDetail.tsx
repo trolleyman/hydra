@@ -20,6 +20,7 @@ export function AgentDetail({
 }) {
   const [killing, setKilling] = useState(false)
   const [merging, setMerging] = useState(false)
+  const [updating, setUpdating] = useState(false)
   const [restarting, setRestarting] = useState(false)
   const [, setTick] = useState(0)
 
@@ -59,10 +60,33 @@ export function AgentDetail({
     try {
       await api.default.mergeAgent(agent.id, projectId ?? undefined)
       onKilled(agent.id)
-    } catch (err) {
-      alert(`Failed to merge agent: ${err}`)
+    } catch (err: any) {
+      if (err.status === 409) {
+        alert(`CONFLICT: Merge failed due to git conflicts. Please resolve them manually or update from base.`)
+      } else {
+        alert(`Failed to merge agent: ${err}`)
+      }
     } finally {
       setMerging(false)
+    }
+  }
+
+  async function handleUpdateFromBase() {
+    if (!window.confirm(`Update "${agent.branch_name}" from "${agent.base_branch}"?\n\nThis will attempt to merge "${agent.base_branch}" into your agent branch.`)) {
+      return
+    }
+    setUpdating(true)
+    try {
+      await api.default.updateAgentFromBase(agent.id, projectId ?? undefined)
+      if (onRefresh) onRefresh()
+    } catch (err: any) {
+      if (err.status === 409) {
+        alert(`CONFLICT: Update failed due to git conflicts. You may need to resolve them manually in the worktree.`)
+      } else {
+        alert(`Failed to update from base: ${err}`)
+      }
+    } finally {
+      setUpdating(false)
     }
   }
 
@@ -91,7 +115,7 @@ export function AgentDetail({
             <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">{agent.id}</h1>
             <button
               onClick={handleMerge}
-              disabled={merging || killing || restarting}
+              disabled={merging || killing || restarting || updating}
               className="ml-2 w-6 h-6 flex items-center justify-center rounded-md border border-green-200 text-green-600 hover:bg-green-50 dark:border-green-900/30 dark:text-green-400 dark:hover:bg-green-900/20 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
               title="Merge agent"
             >
@@ -102,13 +126,30 @@ export function AgentDetail({
                 </svg>
               ) : (
                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 11V5m0 6a3 3 0 100 6h4a3 3 0 100-6h-4zm0 0l4 4" />
+                </svg>
+              )}
+            </button>
+            <button
+              onClick={handleUpdateFromBase}
+              disabled={merging || killing || restarting || updating}
+              className="w-6 h-6 flex items-center justify-center rounded-md border border-amber-200 text-amber-600 hover:bg-amber-50 dark:border-amber-900/30 dark:text-amber-400 dark:hover:bg-amber-900/20 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+              title="Update from base branch"
+            >
+              {updating ? (
+                <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                </svg>
+              ) : (
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 17V11m0 0a3 3 0 110-6h4a3 3 0 110 6h-4zm0 0L8 7" />
                 </svg>
               )}
             </button>
             <button
               onClick={handleRestart}
-              disabled={merging || killing || restarting}
+              disabled={merging || killing || restarting || updating}
               className="w-6 h-6 flex items-center justify-center rounded-md border border-blue-200 text-blue-600 hover:bg-blue-50 dark:border-blue-900/30 dark:text-blue-400 dark:hover:bg-blue-900/20 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
               title="Restart agent"
             >

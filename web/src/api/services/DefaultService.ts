@@ -182,7 +182,34 @@ export class DefaultService {
             errors: {
                 400: `Bad Request (e.g. no branch to merge)`,
                 404: `Not Found`,
-                409: `Conflict (operation already in progress)`,
+                409: `Conflict (operation already in progress or merge conflicts)`,
+                500: `Internal Server Error`,
+            },
+        });
+    }
+    /**
+     * Update a Hydra agent's branch from its base branch (merge base into head)
+     * @param id
+     * @param projectId Project ID to scope the lookup (defaults to server CWD project)
+     * @returns void
+     * @throws ApiError
+     */
+    public updateAgentFromBase(
+        id: string,
+        projectId?: string,
+    ): CancelablePromise<void> {
+        return this.httpRequest.request({
+            method: 'POST',
+            url: '/api/agent/{id}/update-from-base',
+            path: {
+                'id': id,
+            },
+            query: {
+                'project_id': projectId,
+            },
+            errors: {
+                404: `Not Found`,
+                409: `Conflict (merge conflicts)`,
                 500: `Internal Server Error`,
             },
         });

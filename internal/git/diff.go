@@ -311,3 +311,19 @@ func GetMergeBase(projectRoot, baseRef, headRef string) (string, error) {
 	}
 	return strings.TrimSpace(string(out)), nil
 }
+
+// HasConflicts returns true if there would be conflicts when merging headRef into baseRef.
+func HasConflicts(projectRoot, baseRef, headRef string) (bool, error) {
+	// git merge-tree --real baseRef headRef
+	// This command exits with 0 if no conflicts, and 1 if there are conflicts.
+	// It doesn't modify the worktree.
+	cmd := exec.Command("git", "-C", projectRoot, "merge-tree", "--real", baseRef, headRef)
+	err := cmd.Run()
+	if err == nil {
+		return false, nil
+	}
+	if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+		return true, nil
+	}
+	return false, errtrace.Wrap(fmt.Errorf("git merge-tree: %w", err))
+}
