@@ -10,10 +10,8 @@ import (
 	"log"
 	"os"
 	"os/exec"
-	"os/signal"
 	"path/filepath"
 	"runtime"
-	"syscall"
 
 	"braces.dev/errtrace"
 	"github.com/charmbracelet/x/term"
@@ -26,7 +24,6 @@ import (
 	"github.com/trolleyman/hydra/internal/api"
 	"github.com/trolleyman/hydra/internal/common"
 	"github.com/trolleyman/hydra/internal/config"
-	"github.com/trolleyman/hydra/internal/git"
 	"github.com/trolleyman/hydra/internal/paths"
 )
 
@@ -111,6 +108,7 @@ type SpawnOptions struct {
 	GroupName      string
 	Resume         bool // if true, run agent with --resume instead of a fresh prompt
 	OnStatus       func(api.AgentStatus)
+	BuildLog       io.Writer // optional; if set, build output is written here
 }
 
 func CombinePrompt(prePrompt, prompt string) string {
@@ -126,7 +124,7 @@ func SpawnAgent(ctx context.Context, cli *dockerclient.Client, opts SpawnOptions
 	if opts.OnStatus != nil {
 		opts.OnStatus(api.Building)
 	}
-	imageTag, err := ensureImage(ctx, cli, opts.AgentType, opts.DockerfilePath, opts.ProjectPath)
+	imageTag, err := ensureImage(ctx, cli, opts.AgentType, opts.DockerfilePath, opts.ProjectPath, opts.BuildLog)
 	if err != nil {
 		return "", errtrace.Wrap(fmt.Errorf("ensure image: %w", err))
 	}
@@ -522,7 +520,7 @@ func buildGeminiSettings() ([]byte, error) {
 // Custom images (customDockerfile != ""):
 //   - Uses the provided Dockerfile; build context is its parent directory
 //   - Tag: hydra-agent-<type>-<sha256(absPath)[:8]>
-func ensureImage(ctx context.Context, cli *dockerclient.Client, agentType AgentType, customDockerfile string, projectRoot string) (string, error) {
+func ensureImage(ctx context.Context, cli *dockerclient.Client, agentType AgentType, customDockerfile string, projectRoot string, buildLog io.Writer) (string, error) {
 	if customDockerfile == "" && projectRoot != "" {
 		cfg, err := config.Load(projectRoot)
 		if err == nil {
@@ -538,16 +536,16 @@ func ensureImage(ctx context.Context, cli *dockerclient.Client, agentType AgentT
 	}
 
 	if customDockerfile == "" {
-		return errtrace.Wrap2(ensureDefaultImage(ctx, cli, agentType))
+		return errtrace.Wrap2(ensureDefaultImage(ctx, cli, agentType, buildLog))
 	}
-	return errtrace.Wrap2(ensureCustomImage(ctx, cli, agentType, customDockerfile))
+	return errtrace.Wrap2(ensureCustomImage(ctx, cli, agentType, customDockerfile, buildLog))
 }
 
 func GetDefaultImageTag(agentType AgentType) string {
 	return "hydra-agent-" + string(agentType) + ":latest"
 }
 
-func ensureDefaultImage(ctx context.Context, cli *dockerclient.Client, agentType AgentType) (string, error) {
+func ensureDefaultImage(ctx context.Context, cli *dockerclient.Client, agentType AgentType, buildLog io.Writer) (string, error) {
 	tag := GetDefaultImageTag(agentType)
 
 	// Copy the embedded Dockerfile to a stable per-user directory.
@@ -556,21 +554,21 @@ func ensureDefaultImage(ctx context.Context, cli *dockerclient.Client, agentType
 		return "", errtrace.Wrap(err)
 	}
 
-	err = buildDockerImage(ctx, cli, tag, filepath.Join(ctxDir, "Dockerfile"), ctxDir)
+	err = buildDockerImage(ctx, cli, tag, filepath.Join(ctxDir, "Dockerfile"), ctxDir, buildLog)
 	if err != nil {
 		return "", errtrace.Wrap(err)
 	}
 	return tag, nil
 }
 
-func ensureCustomImage(ctx context.Context, cli *dockerclient.Client, agentType AgentType, dockerfilePath string) (string, error) {
+func ensureCustomImage(ctx context.Context, cli *dockerclient.Client, agentType AgentType, dockerfilePath string, buildLog io.Writer) (string, error) {
 	abs, err := filepath.Abs(dockerfilePath)
 	if err != nil {
 		return "", errtrace.Wrap(fmt.Errorf("resolve dockerfile path: %w", err))
 	}
 
 	// Build default image so FROM works
-	_, err = ensureDefaultImage(ctx, cli, agentType)
+	_, err = ensureDefaultImage(ctx, cli, agentType, buildLog)
 	if err != nil {
 		return "", errtrace.Wrap(fmt.Errorf("build default agent image: %w", err))
 	}
@@ -579,7 +577,7 @@ func ensureCustomImage(ctx context.Context, cli *dockerclient.Client, agentType 
 	hash := fmt.Sprintf("%x", sha256.Sum256([]byte(abs)))[:8]
 	tag := "hydra-agent-" + string(agentType) + "-custom:" + hash
 
-	err = buildDockerImage(ctx, cli, tag, dockerfilePath, filepath.Dir(abs))
+	err = buildDockerImage(ctx, cli, tag, dockerfilePath, filepath.Dir(abs), buildLog)
 	if err != nil {
 		return "", errtrace.Wrap(err)
 	}
@@ -622,7 +620,7 @@ func prepareDefaultDockerfileDir(agentType AgentType) (string, error) {
 	return dir, nil
 }
 
-func buildDockerImage(ctx context.Context, cli *dockerclient.Client, tag, dockerfilePath, buildContext string) error {
+func buildDockerImage(ctx context.Context, cli *dockerclient.Client, tag, dockerfilePath, buildContext string, buildLog io.Writer) error {
 	log.Printf("Building Docker image: %s (from %s in %s)", tag, dockerfilePath, buildContext)
 
 	// Docker expects the Dockerfile path to be relative to the build context root.
@@ -705,7 +703,10 @@ func buildDockerImage(ctx context.Context, cli *dockerclient.Client, tag, docker
 			return errtrace.Wrap(fmt.Errorf("build error: %s", line.Error))
 		}
 		if line.Stream != "" {
-			log.Printf("%s", line.Stream)
+			log.Printf("[Building %s] %s", tag, line.Stream)
+			if buildLog != nil {
+				fmt.Fprint(buildLog, line.Stream)
+			}
 		}
 	}
 
