@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM ubuntu:24.04
+FROM debian:slim
 
 # Install base utilities and helpful tools
 RUN apt-get update && apt-get install -y \
@@ -14,7 +14,12 @@ RUN apt-get update && apt-get install -y \
         tree \
         sudo \
         build-essential \
-    && rm -rf /var/lib/apt/lists/*
+        procps \
+        psmisc \
+        lsb-release \
+        gnupg \
+    && rm -rf /var/lib/apt/lists/* \
+    && ln -s /usr/bin/fdfind /usr/local/bin/fd
 
 ENV DEVCONTAINER=true
 ENV TERM=xterm-256color
