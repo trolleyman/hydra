@@ -1,0 +1,4 @@
+[defaults]
+  dockerfile_contents = "\n# Install Go 1.22\nRUN curl -fsSL https://go.dev/dl/go1.22.0.linux-amd64.tar.gz | tar -C /usr/local -xz\nENV PATH=$PATH:/usr/local/go/bin\n"
+
+[agents]
