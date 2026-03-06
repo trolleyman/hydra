@@ -247,11 +247,16 @@ func KillAgent(ctx context.Context, cli *dockerclient.Client, containerID string
 	timeout := 10
 	log.Printf("Stopping container %s...", containerID[:12])
 	if err := cli.ContainerStop(ctx, containerID, container.StopOptions{Timeout: &timeout}); err != nil {
-		log.Printf("warn: stop container %s: %v", containerID[:12], err)
+		if !dockerclient.IsErrNotFound(err) {
+			log.Printf("warn: stop container %s: %v", containerID[:12], err)
+		}
 	}
 	log.Printf("Removing container %s...", containerID[:12])
 	if err := cli.ContainerRemove(ctx, containerID, container.RemoveOptions{Force: true}); err != nil {
-		return errtrace.Wrap(fmt.Errorf("remove container: %w", err))
+		if !dockerclient.IsErrNotFound(err) {
+			return errtrace.Wrap(fmt.Errorf("remove container: %w", err))
+		}
+		log.Printf("info: container %s already removed", containerID[:12])
 	}
 	return nil
 }
