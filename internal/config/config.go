@@ -183,7 +183,7 @@ func (c Config) GetResolvedConfig(agentType string) AgentConfig {
 
 // Save saves a configuration to the project-specific configuration file.
 func Save(projectRoot string, cfg Config) error {
-	return SaveToFile(GetProjectConfigPath(projectRoot), cfg)
+	return errtrace.Wrap(SaveToFile(GetProjectConfigPath(projectRoot), cfg))
 }
 
 // SaveToFile saves a configuration to the given file path.
