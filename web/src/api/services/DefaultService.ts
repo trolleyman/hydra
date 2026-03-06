@@ -220,6 +220,7 @@ export class DefaultService {
      * @param baseRef Base commit SHA or ref. Defaults to the agent's base branch.
      * @param headRef Head commit SHA or ref. Defaults to the agent's branch.
      * @param ignoreWhitespace Ignore whitespace changes in the diff
+     * @param includeUncommitted Include uncommitted changes in the worktree in the diff
      * @returns DiffResponse OK
      * @throws ApiError
      */
@@ -229,6 +230,7 @@ export class DefaultService {
         baseRef?: string,
         headRef?: string,
         ignoreWhitespace?: boolean,
+        includeUncommitted?: boolean,
     ): CancelablePromise<DiffResponse> {
         return this.httpRequest.request({
             method: 'GET',
@@ -241,6 +243,7 @@ export class DefaultService {
                 'base_ref': baseRef,
                 'head_ref': headRef,
                 'ignore_whitespace': ignoreWhitespace,
+                'include_uncommitted': includeUncommitted,
             },
             errors: {
                 404: `Not Found`,

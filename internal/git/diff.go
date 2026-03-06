@@ -302,3 +302,12 @@ func parseHunkHeader(header string) (oldStart, newStart int) {
 
 	return parseStart(old), parseStart(newS)
 }
+
+// GetMergeBase returns the merge-base between two refs.
+func GetMergeBase(projectRoot, baseRef, headRef string) (string, error) {
+	out, err := exec.Command("git", "-C", projectRoot, "merge-base", baseRef, headRef).Output()
+	if err != nil {
+		return "", errtrace.Wrap(fmt.Errorf("git merge-base: %w", err))
+	}
+	return strings.TrimSpace(string(out)), nil
+}

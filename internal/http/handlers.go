@@ -634,12 +634,38 @@ func (s *Server) GetAgentDiff(ctx context.Context, request api.GetAgentDiffReque
 		ignoreWhitespace = *request.Params.IgnoreWhitespace
 	}
 
+	includeUncommitted := false
+	if request.Params.IncludeUncommitted != nil {
+		includeUncommitted = *request.Params.IncludeUncommitted
+	}
+
 	// Use triple-dot (merge-base) diff when using default branch refs (whole MR view).
 	// Use double-dot when specific commits are given (commit-to-commit view).
 	useTripleDot := (request.Params.BaseRef == nil || *request.Params.BaseRef == "") &&
-		(request.Params.HeadRef == nil || *request.Params.HeadRef == "")
+		(request.Params.HeadRef == nil || *request.Params.HeadRef == "") &&
+		!includeUncommitted
 
-	diffFiles, err := git.GetDiff(projectRoot, baseRef, headRef, ignoreWhitespace, useTripleDot)
+	diffRoot := projectRoot
+	if includeUncommitted && head.Worktree != nil {
+		// Use the agent's worktree to see uncommitted changes.
+		diffRoot = *head.Worktree
+
+		// If using default refs (full diff), compare merge-base with worktree.
+		if (request.Params.BaseRef == nil || *request.Params.BaseRef == "") &&
+			(request.Params.HeadRef == nil || *request.Params.HeadRef == "") {
+			if mb, err := git.GetMergeBase(diffRoot, baseRef, "HEAD"); err == nil {
+				baseRef = mb
+				headRef = "" // git diff baseRef compares baseRef to worktree
+				useTripleDot = false
+			}
+		} else if headRef == headBranch {
+			// If headRef is the current branch tip, compare baseRef with worktree.
+			headRef = ""
+			useTripleDot = false
+		}
+	}
+
+	diffFiles, err := git.GetDiff(diffRoot, baseRef, headRef, ignoreWhitespace, useTripleDot)
 	if err != nil {
 		code := 500
 		msg := err.Error()
