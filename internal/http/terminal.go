@@ -3,13 +3,17 @@ package http
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"log"
 	"net/http"
+	"os"
 	"strings"
+	"time"
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/gorilla/websocket"
 	"github.com/trolleyman/hydra/internal/heads"
+	"github.com/trolleyman/hydra/internal/paths"
 )
 
 var wsUpgrader = websocket.Upgrader{
@@ -47,6 +51,25 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 	}
 	if head == nil {
 		http.Error(w, "agent not found", http.StatusNotFound)
+		return
+	}
+
+	// If the agent is still building (no container ID yet), stream the build log if it exists.
+	if head.ContainerID == "" {
+		buildLogPath := paths.GetBuildLogFromProjectRoot(projectRoot, agentID)
+		if _, err := os.Stat(buildLogPath); err == nil {
+			conn, err := wsUpgrader.Upgrade(w, r, nil)
+			if err != nil {
+				log.Printf("terminal ws: upgrade (build log): %v", err)
+				return
+			}
+			defer conn.Close()
+			s.streamBuildLog(r.Context(), conn, projectRoot, agentID, buildLogPath)
+			return
+		}
+
+		log.Printf("terminal ws: container ID is empty for agent %q and no build log found", agentID)
+		http.Error(w, "agent container not started", http.StatusAccepted)
 		return
 	}
 
@@ -122,6 +145,55 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 		log.Printf("terminal ws: killing ephemeral agent %s on disconnect", agentID)
 		if err := heads.KillHead(context.Background(), s.DockerClient, s.DB, *head); err != nil {
 			log.Printf("terminal ws: error killing ephemeral agent %s: %v", agentID, err)
+		}
+	}
+}
+
+func (s *Server) streamBuildLog(ctx context.Context, conn *websocket.Conn, projectRoot, agentID, logPath string) {
+	_ = conn.WriteMessage(websocket.BinaryMessage, []byte("\x1b[32mAgent is building. Showing build logs...\x1b[0m\r\n\r\n"))
+
+	f, err := os.Open(logPath)
+	if err != nil {
+		_ = conn.WriteMessage(websocket.BinaryMessage, []byte("error: failed to open build log: "+err.Error()))
+		return
+	}
+	defer f.Close()
+
+	lastCheck := time.Now()
+
+	// Simple tail: read current content, then poll for more.
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+			buf := make([]byte, 4096)
+			n, err := f.Read(buf)
+			if n > 0 {
+				// Convert newlines to \r\n for the terminal (Xterm.js expects \r\n)
+				data := strings.ReplaceAll(string(buf[:n]), "\n", "\r\n")
+				_ = conn.WriteMessage(websocket.BinaryMessage, []byte(data))
+			}
+			if err == io.EOF {
+				// Periodically check if build finished
+				if time.Since(lastCheck) > 1*time.Second {
+					lastCheck = time.Now()
+					head, _ := heads.GetHeadByID(ctx, s.DockerClient, s.DB, projectRoot, agentID)
+					if head != nil && head.ContainerID != "" {
+						_ = conn.WriteMessage(websocket.BinaryMessage, []byte("\r\n\x1b[32mBuild finished. Terminal will now switch to the agent.\x1b[0m\r\n"))
+						// We could potentially try to transition here, but for now just exit and let the user refresh
+						// OR we can tell the frontend to reconnect?
+						// For now, let's just exit and let the frontend notice the closure.
+						time.Sleep(1 * time.Second)
+						return
+					}
+				}
+				time.Sleep(200 * time.Millisecond)
+				continue
+			}
+			if err != nil {
+				return
+			}
 		}
 	}
 }

@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"os/user"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"strconv"
@@ -27,6 +28,7 @@ import (
 	"github.com/trolleyman/hydra/internal/db"
 	"github.com/trolleyman/hydra/internal/docker"
 	"github.com/trolleyman/hydra/internal/heads"
+	"github.com/trolleyman/hydra/internal/paths"
 )
 
 // focusPanel identifies which panel currently has keyboard focus.
@@ -385,7 +387,18 @@ func (m Model) resumeSelected() (tea.Model, tea.Cmd) {
 		// Look up current user identity for container user creation.
 		uid, gid, username, groupName := currentUserInfo()
 
-		_, err := docker.SpawnAgent(ctx, client, docker.SpawnOptions{
+		buildLogPath := paths.GetBuildLogFromProjectRoot(headCopy.ProjectPath, headCopy.ID)
+		if err := os.MkdirAll(filepath.Dir(buildLogPath), 0755); err != nil {
+			log.Printf("warn: failed to create build log directory: %v", err)
+		}
+		buildLogFile, err := os.Create(buildLogPath)
+		if err != nil {
+			log.Printf("warn: failed to create build log file %s: %v", buildLogPath, err)
+		} else {
+			defer buildLogFile.Close()
+		}
+
+		_, err = docker.SpawnAgent(ctx, client, docker.SpawnOptions{
 			Id:             headCopy.ID,
 			AgentType:      headCopy.AgentType,
 			PrePrompt:      headCopy.PrePrompt,
@@ -401,6 +414,7 @@ func (m Model) resumeSelected() (tea.Model, tea.Cmd) {
 			Username:       username,
 			GroupName:      groupName,
 			Resume:         true,
+			BuildLog:       buildLogFile,
 			OnStatus: func(status api.AgentStatus) {
 				s := heads.ReadAgentStatus(headCopy.ProjectPath, headCopy.ID)
 				if s == nil {

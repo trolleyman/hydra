@@ -113,7 +113,7 @@ export function AgentTerminal({ agentId, projectId, containerStatus }: Props) {
       wsRef.current = null
       fitAddonRef.current = null
     }
-  }, [agentId, projectId])
+  }, [agentId, projectId, containerStatus])
 
   const isRunning = containerStatus.toLowerCase() === 'running' ||
     containerStatus.toLowerCase().startsWith('up')

@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"os/user"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -271,6 +272,17 @@ func SpawnHead(ctx context.Context, cli *dockerclient.Client, store *db.Store, p
 			}
 		}
 
+		buildLogPath := paths.GetBuildLogFromProjectRoot(projectRoot, opts.ID)
+		if err := os.MkdirAll(filepath.Dir(buildLogPath), 0755); err != nil {
+			log.Printf("warn: failed to create build log directory: %v", err)
+		}
+		buildLogFile, err := os.Create(buildLogPath)
+		if err != nil {
+			log.Printf("warn: failed to create build log file %s: %v", buildLogPath, err)
+		} else {
+			defer buildLogFile.Close()
+		}
+
 		containerID, err := docker.SpawnAgent(bgCtx, cli, docker.SpawnOptions{
 			Id:                 opts.ID,
 			AgentType:          opts.AgentType,
@@ -289,6 +301,7 @@ func SpawnHead(ctx context.Context, cli *dockerclient.Client, store *db.Store, p
 			Username:           currentUser.Username,
 			GroupName:          groupName,
 			Ephemeral:          opts.Ephemeral,
+			BuildLog:           buildLogFile,
 			OnStatus: func(status api.AgentStatus) {
 				s := initialStatus
 				s.Status = status
