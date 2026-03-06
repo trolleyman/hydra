@@ -246,6 +246,11 @@ function RootLayout() {
 
   useEffect(() => {
     localStorage.setItem('hydra-dark-mode', String(dark))
+    if (dark) {
+      document.documentElement.classList.add('dark')
+    } else {
+      document.documentElement.classList.remove('dark')
+    }
   }, [dark])
 
   useEffect(() => {
@@ -321,7 +326,7 @@ function RootLayout() {
   const selectedProject = projects.find((p) => p.id === selectedProjectId) ?? null
 
   return (
-    <div className={`min-h-screen bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 flex flex-col${dark ? ' dark' : ''}`}>
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 flex flex-col">
       <header className="h-12 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex items-center px-4 gap-3 shrink-0">
         {/* Logo */}
         <Link to="/" className="flex items-center gap-2 shrink-0">
