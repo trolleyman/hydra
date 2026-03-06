@@ -40,6 +40,41 @@ export function SpawnForm({
   const [error, setError] = useState<string | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
+  // Persist textarea height for compact mode
+  useEffect(() => {
+    if (!compact || !textareaRef.current) return
+
+    const key = 'hydra-sidebar-spawn-height'
+    const textarea = textareaRef.current
+    try {
+      const savedHeight = localStorage.getItem(key)
+      if (savedHeight) {
+        textarea.style.height = `${savedHeight}px`
+      }
+    } catch { /* ignore */ }
+
+    let timer: ReturnType<typeof setTimeout>
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const height = (entry.target as HTMLElement).offsetHeight
+        if (height > 0) {
+          clearTimeout(timer)
+          timer = setTimeout(() => {
+            try {
+              localStorage.setItem(key, String(height))
+            } catch { /* ignore */ }
+          }, 200)
+        }
+      }
+    })
+
+    observer.observe(textarea)
+    return () => {
+      observer.disconnect()
+      clearTimeout(timer)
+    }
+  }, [compact])
+
   useEffect(() => {
     if (!compact) textareaRef.current?.focus()
   }, [compact])
