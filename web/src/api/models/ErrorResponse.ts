@@ -3,8 +3,17 @@
 /* tslint:disable */
 /* eslint-disable */
 export type ErrorResponse = {
+    /**
+     * Machine-readable error type (e.g. internal_error, not_found, unauthorized)
+     */
     error: string;
+    /**
+     * HTTP status code
+     */
     code: number;
-    details?: string;
+    /**
+     * Human-readable error description
+     */
+    details: string;
 };
 

@@ -61,10 +61,11 @@ export function AgentDetail({
       await api.default.mergeAgent(agent.id, projectId ?? undefined)
       onKilled(agent.id)
     } catch (err: any) {
-      if (err.status === 409) {
+      const errorData = await err.json?.().catch(() => null) || err
+      if (errorData.error === 'merge_conflict') {
         alert(`CONFLICT: Merge failed due to git conflicts. Please resolve them manually or update from base.`)
       } else {
-        alert(`Failed to merge agent: ${err}`)
+        alert(`Failed to merge agent: ${errorData.details || errorData.error || err}`)
       }
     } finally {
       setMerging(false)
@@ -80,10 +81,11 @@ export function AgentDetail({
       await api.default.updateAgentFromBase(agent.id, projectId ?? undefined)
       if (onRefresh) onRefresh()
     } catch (err: any) {
-      if (err.status === 409) {
+      const errorData = await err.json?.().catch(() => null) || err
+      if (errorData.error === 'merge_conflict') {
         alert(`CONFLICT: Update failed due to git conflicts. You may need to resolve them manually in the worktree.`)
       } else {
-        alert(`Failed to update from base: ${err}`)
+        alert(`Failed to update from base: ${errorData.details || errorData.error || err}`)
       }
     } finally {
       setUpdating(false)

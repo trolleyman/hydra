@@ -43,6 +43,11 @@ const (
 	NoNewline DiffLineType = "no_newline"
 )
 
+// Defines values for MergeConflictErrorError.
+const (
+	MergeConflict MergeConflictErrorError = "merge_conflict"
+)
+
 // Defines values for SaveConfigParamsScope.
 const (
 	Project SaveConfigParamsScope = "project"
@@ -203,14 +208,35 @@ type DiffResponse struct {
 
 	// MergeConflict True if there are merge conflicts between base_ref and head_ref
 	MergeConflict *bool `json:"merge_conflict,omitempty"`
+
+	// UncommittedChanges True if there are uncommitted changes in the worktree
+	UncommittedChanges *bool `json:"uncommitted_changes,omitempty"`
 }
 
 // ErrorResponse defines model for ErrorResponse.
 type ErrorResponse struct {
-	Code    int     `json:"code"`
-	Details *string `json:"details,omitempty"`
-	Error   string  `json:"error"`
+	// Code HTTP status code
+	Code int `json:"code"`
+
+	// Details Human-readable error description
+	Details string `json:"details"`
+
+	// Error Machine-readable error type (e.g. internal_error, not_found, unauthorized)
+	Error string `json:"error"`
 }
+
+// MergeConflictError defines model for MergeConflictError.
+type MergeConflictError struct {
+	// Code HTTP status code
+	Code int `json:"code"`
+
+	// Details Human-readable error description
+	Details string                  `json:"details"`
+	Error   MergeConflictErrorError `json:"error"`
+}
+
+// MergeConflictErrorError defines model for MergeConflictError.Error.
+type MergeConflictErrorError string
 
 // ProjectInfo defines model for ProjectInfo.
 type ProjectInfo struct {
@@ -1210,7 +1236,7 @@ func (response MergeAgent404JSONResponse) VisitMergeAgentResponse(w http.Respons
 	return json.NewEncoder(w).Encode(response)
 }
 
-type MergeAgent409JSONResponse ErrorResponse
+type MergeAgent409JSONResponse MergeConflictError
 
 func (response MergeAgent409JSONResponse) VisitMergeAgentResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/json")
@@ -1299,7 +1325,7 @@ func (response UpdateAgentFromBase404JSONResponse) VisitUpdateAgentFromBaseRespo
 	return json.NewEncoder(w).Encode(response)
 }
 
-type UpdateAgentFromBase409JSONResponse ErrorResponse
+type UpdateAgentFromBase409JSONResponse MergeConflictError
 
 func (response UpdateAgentFromBase409JSONResponse) VisitUpdateAgentFromBaseResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/json")

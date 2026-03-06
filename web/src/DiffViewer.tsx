@@ -475,10 +475,12 @@ function CommitSelector({
   commits,
   selected,
   onChange,
+  hasUncommitted,
 }: {
   commits: CommitInfo[]
   selected: ViewSelection
   onChange: (v: ViewSelection) => void
+  hasUncommitted?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -510,6 +512,11 @@ function CommitSelector({
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
         </svg>
         <span className="max-w-[180px] truncate">{label}</span>
+        {hasUncommitted && (
+          <svg className="w-3.5 h-3.5 text-amber-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" title="Uncommitted changes">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+          </svg>
+        )}
         <svg className="w-3 h-3 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="m6 9 6 6 6-6" />
         </svg>
@@ -719,7 +726,12 @@ export function DiffViewer({
           </div>
         )}
         <div className="flex items-center gap-2 ml-auto flex-wrap">
-          <CommitSelector commits={commits} selected={selectedView} onChange={setSelectedView} />
+          <CommitSelector
+            commits={commits}
+            selected={selectedView}
+            onChange={setSelectedView}
+            hasUncommitted={diff?.uncommitted_changes}
+          />
           <Toggle label="Side-by-side" active={sideBySide} onClick={() => setSideBySide((v) => !v)} />
           <Toggle label="Ignore whitespace" active={ignoreWhitespace} onClick={() => setIgnoreWhitespace((v) => !v)} />
           <Toggle label="One file" active={singleFile} onClick={() => { setSingleFile((v) => !v); setSingleFileIdx(0) }} />

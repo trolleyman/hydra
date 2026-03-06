@@ -19,6 +19,10 @@ export type DiffResponse = {
      */
     merge_conflict?: boolean;
     /**
+     * True if there are uncommitted changes in the worktree
+     */
+    uncommitted_changes?: boolean;
+    /**
      * Details of the base commit (if a specific commit SHA was given)
      */
     base_commit?: CommitInfo | null;

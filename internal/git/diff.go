@@ -327,3 +327,13 @@ func HasConflicts(projectRoot, baseRef, headRef string) (bool, error) {
 	}
 	return false, errtrace.Wrap(fmt.Errorf("git merge-tree: %w", err))
 }
+
+// HasUncommittedChanges returns true if there are uncommitted changes in the worktree.
+func HasUncommittedChanges(projectRoot string) (bool, error) {
+	// git status --porcelain
+	out, err := exec.Command("git", "-C", projectRoot, "status", "--porcelain").Output()
+	if err != nil {
+		return false, errtrace.Wrap(fmt.Errorf("git status: %w", err))
+	}
+	return len(strings.TrimSpace(string(out))) > 0, nil
+}

@@ -79,25 +79,31 @@ func (s *Server) ListProjects(_ context.Context, _ api.ListProjectsRequestObject
 
 func (s *Server) AddProject(_ context.Context, request api.AddProjectRequestObject) (api.AddProjectResponseObject, error) {
 	if request.Body == nil || strings.TrimSpace(request.Body.Path) == "" {
-		code := 400
-		msg := "path is required"
-		return api.AddProject400JSONResponse{Code: code, Error: msg}, nil
+		return api.AddProject400JSONResponse{
+			Code:    400,
+			Error:   "bad_request",
+			Details: "path is required",
+		}, nil
 	}
 
 	projectPath := strings.TrimSpace(request.Body.Path)
 
 	// Validate it's a git repository.
 	if _, err := paths.GetProjectRoot(projectPath); err != nil {
-		code := 400
-		msg := "path is not a git repository: " + err.Error()
-		return api.AddProject400JSONResponse{Code: code, Error: msg}, nil
+		return api.AddProject400JSONResponse{
+			Code:    400,
+			Error:   "bad_request",
+			Details: "path is not a git repository: " + err.Error(),
+		}, nil
 	}
 
 	p, err := s.ProjectsManager.AddProject(projectPath)
 	if err != nil {
-		code := 500
-		msg := err.Error()
-		return api.AddProject500JSONResponse{Code: code, Error: msg}, nil
+		return api.AddProject500JSONResponse{
+			Code:    500,
+			Error:   "internal_error",
+			Details: err.Error(),
+		}, nil
 	}
 	return api.AddProject201JSONResponse(api.ProjectInfo{
 		Id:   p.ID,
@@ -110,9 +116,11 @@ func (s *Server) ListAgents(ctx context.Context, request api.ListAgentsRequestOb
 	projectRoot := s.resolveProjectRoot(request.Params.ProjectId)
 	headList, err := heads.ListHeads(ctx, s.DockerClient, s.DB, projectRoot)
 	if err != nil {
-		code := 500
-		msg := err.Error()
-		return api.ListAgents500JSONResponse{Code: code, Error: msg}, nil
+		return api.ListAgents500JSONResponse{
+			Code:    500,
+			Error:   "internal_error",
+			Details: err.Error(),
+		}, nil
 	}
 	resp := make(api.ListAgents200JSONResponse, len(headList))
 	for i, h := range headList {
@@ -160,7 +168,11 @@ func (s *Server) GetConfig(_ context.Context, request api.GetConfigRequestObject
 	projectRoot := s.resolveProjectRoot(request.Params.ProjectId)
 	cfg, err := config.Load(projectRoot)
 	if err != nil {
-		return api.GetConfig500JSONResponse{Code: 500, Error: err.Error()}, nil
+		return api.GetConfig500JSONResponse{
+			Code:    500,
+			Error:   "internal_error",
+			Details: err.Error(),
+		}, nil
 	}
 
 	resp := api.ConfigResponse{
@@ -216,14 +228,22 @@ func (s *Server) SaveConfig(_ context.Context, request api.SaveConfigRequestObje
 		var err error
 		savePath, err = config.GetUserConfigPath()
 		if err != nil {
-			return api.SaveConfig500JSONResponse{Code: 500, Error: err.Error()}, nil
+			return api.SaveConfig500JSONResponse{
+				Code:    500,
+				Error:   "internal_error",
+				Details: err.Error(),
+			}, nil
 		}
 	} else {
 		savePath = config.GetProjectConfigPath(projectRoot)
 	}
 
 	if err := config.SaveToFile(savePath, newCfg); err != nil {
-		return api.SaveConfig500JSONResponse{Code: 500, Error: err.Error()}, nil
+		return api.SaveConfig500JSONResponse{
+			Code:    500,
+			Error:   "internal_error",
+			Details: err.Error(),
+		}, nil
 	}
 
 	return api.SaveConfig200Response{}, nil
@@ -231,8 +251,11 @@ func (s *Server) SaveConfig(_ context.Context, request api.SaveConfigRequestObje
 
 func (s *Server) DevRestart(_ context.Context, _ api.DevRestartRequestObject) (api.DevRestartResponseObject, error) {
 	if !s.DevRestartEnabled {
-		code := 403
-		return api.DevRestart403JSONResponse{Code: code, Error: "not in dev mode"}, nil
+		return api.DevRestart403JSONResponse{
+			Code:    403,
+			Error:   "unauthorized",
+			Details: "not in dev mode",
+		}, nil
 	}
 	// Respond 200 then exit with the restart code after a short delay to allow the response to flush.
 	go func() {
@@ -244,9 +267,11 @@ func (s *Server) DevRestart(_ context.Context, _ api.DevRestartRequestObject) (a
 
 func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestObject) (api.SpawnAgentResponseObject, error) {
 	if request.Body == nil {
-		code := 400
-		msg := "request body is required"
-		return api.SpawnAgent400JSONResponse{Code: code, Error: msg}, nil
+		return api.SpawnAgent400JSONResponse{
+			Code:    400,
+			Error:   "bad_request",
+			Details: "request body is required",
+		}, nil
 	}
 
 	projectRoot := s.resolveProjectRoot(request.Params.ProjectId)
@@ -256,16 +281,20 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 		agentType = docker.AgentType(*request.Body.AgentType)
 	}
 	if agentType != docker.AgentTypeClaude && agentType != docker.AgentTypeGemini && agentType != docker.AgentTypeBash {
-		code := 400
-		msg := "unknown agent_type; supported: claude, gemini, bash"
-		return api.SpawnAgent400JSONResponse{Code: code, Error: msg}, nil
+		return api.SpawnAgent400JSONResponse{
+			Code:    400,
+			Error:   "bad_request",
+			Details: "unknown agent_type; supported: claude, gemini, bash",
+		}, nil
 	}
 
 	cfg, err := config.Load(projectRoot)
 	if err != nil {
-		code := 500
-		msg := err.Error()
-		return api.SpawnAgent500JSONResponse{Code: code, Error: msg}, nil
+		return api.SpawnAgent500JSONResponse{
+			Code:    500,
+			Error:   "internal_error",
+			Details: err.Error(),
+		}, nil
 	}
 
 	resolved := cfg.GetResolvedConfig(string(agentType))
@@ -290,9 +319,11 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 	}
 	if dockerfilePath != "" {
 		if _, readErr := os.ReadFile(dockerfilePath); readErr != nil {
-			code := 500
-			msg := "read dockerfile: " + readErr.Error()
-			return api.SpawnAgent500JSONResponse{Code: code, Error: msg}, nil
+			return api.SpawnAgent500JSONResponse{
+				Code:    500,
+				Error:   "internal_error",
+				Details: "read dockerfile: " + readErr.Error(),
+			}, nil
 		}
 	}
 
@@ -318,9 +349,11 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 		Ephemeral:          ephemeral,
 	})
 	if err != nil {
-		code := 500
-		msg := err.Error()
-		return api.SpawnAgent500JSONResponse{Code: code, Error: msg}, nil
+		return api.SpawnAgent500JSONResponse{
+			Code:    500,
+			Error:   "internal_error",
+			Details: err.Error(),
+		}, nil
 	}
 	var spawnCreatedAt *int64
 	if head.CreatedAt != 0 {
@@ -347,14 +380,18 @@ func (s *Server) GetAgent(ctx context.Context, request api.GetAgentRequestObject
 	projectRoot := s.resolveProjectRoot(request.Params.ProjectId)
 	head, err := heads.GetHeadByID(ctx, s.DockerClient, s.DB, projectRoot, request.Id)
 	if err != nil {
-		code := 500
-		msg := err.Error()
-		return api.GetAgent500JSONResponse{Code: code, Error: msg}, nil
+		return api.GetAgent500JSONResponse{
+			Code:    500,
+			Error:   "internal_error",
+			Details: err.Error(),
+		}, nil
 	}
 	if head == nil {
-		code := 404
-		msg := "agent not found"
-		return api.GetAgent404JSONResponse{Code: code, Error: msg}, nil
+		return api.GetAgent404JSONResponse{
+			Code:    404,
+			Error:   "not_found",
+			Details: "agent not found",
+		}, nil
 	}
 	var getCreatedAt *int64
 	if head.CreatedAt != 0 {
@@ -381,20 +418,26 @@ func (s *Server) MergeAgent(ctx context.Context, request api.MergeAgentRequestOb
 	projectRoot := s.resolveProjectRoot(request.Params.ProjectId)
 	head, err := heads.GetHeadByID(ctx, s.DockerClient, s.DB, projectRoot, request.Id)
 	if err != nil {
-		code := 500
-		msg := err.Error()
-		return api.MergeAgent500JSONResponse{Code: code, Error: msg}, nil
+		return api.MergeAgent500JSONResponse{
+			Error:   "internal_error",
+			Code:    500,
+			Details: err.Error(),
+		}, nil
 	}
 	if head == nil {
-		code := 404
-		msg := "agent not found"
-		return api.MergeAgent404JSONResponse{Code: code, Error: msg}, nil
+		return api.MergeAgent404JSONResponse{
+			Error:   "not_found",
+			Code:    404,
+			Details: "agent not found",
+		}, nil
 	}
 
 	if head.Branch == nil {
-		code := 400
-		msg := "agent has no git branch to merge"
-		return api.MergeAgent400JSONResponse{Code: code, Error: msg}, nil
+		return api.MergeAgent400JSONResponse{
+			Error:   "bad_request",
+			Code:    400,
+			Details: "agent has no git branch to merge",
+		}, nil
 	}
 	branchName := *head.Branch
 
@@ -402,14 +445,18 @@ func (s *Server) MergeAgent(ctx context.Context, request api.MergeAgentRequestOb
 	if s.DB != nil {
 		ok, err := s.DB.TrySetHeadStatus(head.ID, "idle", "merging")
 		if err != nil {
-			code := 500
-			msg := err.Error()
-			return api.MergeAgent500JSONResponse{Code: code, Error: msg}, nil
+			return api.MergeAgent500JSONResponse{
+				Error:   "internal_error",
+				Code:    500,
+				Details: err.Error(),
+			}, nil
 		}
 		if !ok {
-			code := 409
-			msg := "operation already in progress"
-			return api.MergeAgent409JSONResponse{Code: code, Error: msg}, nil
+			return api.MergeAgent409JSONResponse{
+				Error:   "conflict",
+				Code:    409,
+				Details: "operation already in progress",
+			}, nil
 		}
 	}
 
@@ -420,20 +467,24 @@ func (s *Server) MergeAgent(ctx context.Context, request api.MergeAgentRequestOb
 		// If merge fails, abort it to keep the base branch clean.
 		exec.CommandContext(ctx, "git", "-C", projectRoot, "merge", "--abort").Run()
 
+		errMsg := fmt.Sprintf("git merge failed: %s", strings.TrimSpace(stderr.String()))
 		if s.DB != nil {
-			errMsg := fmt.Sprintf("git merge failed: %s", strings.TrimSpace(stderr.String()))
 			_ = s.DB.ClearHeadStatus(head.ID, &errMsg)
 		}
-		code := 409
-		msg := fmt.Sprintf("git merge failed: %s", strings.TrimSpace(stderr.String()))
-		return api.MergeAgent409JSONResponse{Code: code, Error: msg}, nil
+		return api.MergeAgent409JSONResponse(api.MergeConflictError{
+			Error:   api.MergeConflict,
+			Code:    409,
+			Details: errMsg,
+		}), nil
 	}
 
 	// Kill cleanup without re-doing the CAS (already in "merging" state).
 	if err := heads.KillHeadNoLock(ctx, s.DockerClient, s.DB, *head); err != nil {
-		code := 500
-		msg := err.Error()
-		return api.MergeAgent500JSONResponse{Code: code, Error: msg}, nil
+		return api.MergeAgent500JSONResponse{
+			Error:   "internal_error",
+			Code:    500,
+			Details: err.Error(),
+		}, nil
 	}
 
 	return api.MergeAgent204Response{}, nil
@@ -443,14 +494,26 @@ func (s *Server) UpdateAgentFromBase(ctx context.Context, request api.UpdateAgen
 	projectRoot := s.resolveProjectRoot(request.Params.ProjectId)
 	head, err := heads.GetHeadByID(ctx, s.DockerClient, s.DB, projectRoot, request.Id)
 	if err != nil {
-		return api.UpdateAgentFromBase500JSONResponse{Code: 500, Error: err.Error()}, nil
+		return api.UpdateAgentFromBase500JSONResponse{
+			Error:   "internal_error",
+			Code:    500,
+			Details: err.Error(),
+		}, nil
 	}
 	if head == nil {
-		return api.UpdateAgentFromBase404JSONResponse{Code: 404, Error: "agent not found"}, nil
+		return api.UpdateAgentFromBase404JSONResponse{
+			Error:   "not_found",
+			Code:    404,
+			Details: "agent not found",
+		}, nil
 	}
 
 	if head.Branch == nil {
-		return api.UpdateAgentFromBase500JSONResponse{Code: 500, Error: "agent has no git branch to update"}, nil
+		return api.UpdateAgentFromBase500JSONResponse{
+			Error:   "bad_request",
+			Code:    500,
+			Details: "agent has no git branch to update",
+		}, nil
 	}
 
 	mergeDir := projectRoot
@@ -466,8 +529,12 @@ func (s *Server) UpdateAgentFromBase(ctx context.Context, request api.UpdateAgen
 		// If merge fails, abort it to keep worktree clean
 		exec.CommandContext(ctx, "git", "-C", mergeDir, "merge", "--abort").Run()
 
-		msg := fmt.Sprintf("git merge failed: %s", strings.TrimSpace(stderr.String()))
-		return api.UpdateAgentFromBase409JSONResponse{Code: 409, Error: msg}, nil
+		errMsg := fmt.Sprintf("git merge failed: %s", strings.TrimSpace(stderr.String()))
+		return api.UpdateAgentFromBase409JSONResponse(api.MergeConflictError{
+			Error:   api.MergeConflict,
+			Code:    409,
+			Details: errMsg,
+		}), nil
 	}
 
 	return api.UpdateAgentFromBase204Response{}, nil
@@ -477,14 +544,18 @@ func (s *Server) RestartAgent(ctx context.Context, request api.RestartAgentReque
 	projectRoot := s.resolveProjectRoot(request.Params.ProjectId)
 	head, err := heads.GetHeadByID(ctx, s.DockerClient, s.DB, projectRoot, request.Id)
 	if err != nil {
-		code := 500
-		msg := err.Error()
-		return api.RestartAgent500JSONResponse{Code: code, Error: msg}, nil
+		return api.RestartAgent500JSONResponse{
+			Code:    500,
+			Error:   "internal_error",
+			Details: err.Error(),
+		}, nil
 	}
 	if head == nil {
-		code := 404
-		msg := "agent not found"
-		return api.RestartAgent404JSONResponse{Code: code, Error: msg}, nil
+		return api.RestartAgent404JSONResponse{
+			Code:    404,
+			Error:   "not_found",
+			Details: "agent not found",
+		}, nil
 	}
 
 	// Save the fields we need to respawn.
@@ -497,13 +568,17 @@ func (s *Server) RestartAgent(ctx context.Context, request api.RestartAgentReque
 	// Kill the existing head (container, worktree, branch).
 	if err := heads.KillHead(ctx, s.DockerClient, s.DB, *head); err != nil {
 		if errors.Is(err, db.ErrOperationInProgress) {
-			code := 409
-			msg := "operation already in progress"
-			return api.RestartAgent409JSONResponse{Code: code, Error: msg}, nil
+			return api.RestartAgent409JSONResponse{
+				Code:    409,
+				Error:   "conflict",
+				Details: "operation already in progress",
+			}, nil
 		}
-		code := 500
-		msg := err.Error()
-		return api.RestartAgent500JSONResponse{Code: code, Error: msg}, nil
+		return api.RestartAgent500JSONResponse{
+			Code:    500,
+			Error:   "internal_error",
+			Details: err.Error(),
+		}, nil
 	}
 
 	// Resolve dockerfile from config (same as SpawnAgent).
@@ -533,9 +608,11 @@ func (s *Server) RestartAgent(ctx context.Context, request api.RestartAgentReque
 		DockerfileContents: dockerfileContents,
 	})
 	if err != nil {
-		code := 500
-		msg := err.Error()
-		return api.RestartAgent500JSONResponse{Code: code, Error: msg}, nil
+		return api.RestartAgent500JSONResponse{
+			Code:    500,
+			Error:   "internal_error",
+			Details: err.Error(),
+		}, nil
 	}
 
 	var restartCreatedAt *int64
@@ -563,25 +640,33 @@ func (s *Server) KillAgent(ctx context.Context, request api.KillAgentRequestObje
 	projectRoot := s.resolveProjectRoot(request.Params.ProjectId)
 	head, err := heads.GetHeadByID(ctx, s.DockerClient, s.DB, projectRoot, request.Id)
 	if err != nil {
-		code := 500
-		msg := err.Error()
-		return api.KillAgent500JSONResponse{Code: code, Error: msg}, nil
+		return api.KillAgent500JSONResponse{
+			Code:    500,
+			Error:   "internal_error",
+			Details: err.Error(),
+		}, nil
 	}
 	if head == nil {
-		code := 404
-		msg := "agent not found"
-		return api.KillAgent404JSONResponse{Code: code, Error: msg}, nil
+		return api.KillAgent404JSONResponse{
+			Code:    404,
+			Error:   "not_found",
+			Details: "agent not found",
+		}, nil
 	}
 
 	if err := heads.KillHead(ctx, s.DockerClient, s.DB, *head); err != nil {
 		if errors.Is(err, db.ErrOperationInProgress) {
-			code := 409
-			msg := "operation already in progress"
-			return api.KillAgent409JSONResponse{Code: code, Error: msg}, nil
+			return api.KillAgent409JSONResponse{
+				Code:    409,
+				Error:   "conflict",
+				Details: "operation already in progress",
+			}, nil
 		}
-		code := 500
-		msg := err.Error()
-		return api.KillAgent500JSONResponse{Code: code, Error: msg}, nil
+		return api.KillAgent500JSONResponse{
+			Code:    500,
+			Error:   "internal_error",
+			Details: err.Error(),
+		}, nil
 	}
 
 	return api.KillAgent204Response{}, nil
@@ -591,14 +676,18 @@ func (s *Server) GetAgentCommits(ctx context.Context, request api.GetAgentCommit
 	projectRoot := s.resolveProjectRoot(request.Params.ProjectId)
 	head, err := heads.GetHeadByID(ctx, s.DockerClient, s.DB, projectRoot, request.Id)
 	if err != nil {
-		code := 500
-		msg := err.Error()
-		return api.GetAgentCommits500JSONResponse{Code: code, Error: msg}, nil
+		return api.GetAgentCommits500JSONResponse{
+			Code:    500,
+			Error:   "internal_error",
+			Details: err.Error(),
+		}, nil
 	}
 	if head == nil {
-		code := 404
-		msg := "agent not found"
-		return api.GetAgentCommits404JSONResponse{Code: code, Error: msg}, nil
+		return api.GetAgentCommits404JSONResponse{
+			Code:    404,
+			Error:   "not_found",
+			Details: "agent not found",
+		}, nil
 	}
 
 	baseBranch := head.BaseBranch
@@ -612,9 +701,11 @@ func (s *Server) GetAgentCommits(ctx context.Context, request api.GetAgentCommit
 
 	commits, err := git.ListCommits(projectRoot, baseBranch, headBranch)
 	if err != nil {
-		code := 500
-		msg := err.Error()
-		return api.GetAgentCommits500JSONResponse{Code: code, Error: msg}, nil
+		return api.GetAgentCommits500JSONResponse{
+			Code:    500,
+			Error:   "internal_error",
+			Details: err.Error(),
+		}, nil
 	}
 
 	resp := make(api.GetAgentCommits200JSONResponse, len(commits))
@@ -637,14 +728,18 @@ func (s *Server) GetAgentDiff(ctx context.Context, request api.GetAgentDiffReque
 	projectRoot := s.resolveProjectRoot(request.Params.ProjectId)
 	head, err := heads.GetHeadByID(ctx, s.DockerClient, s.DB, projectRoot, request.Id)
 	if err != nil {
-		code := 500
-		msg := err.Error()
-		return api.GetAgentDiff500JSONResponse{Code: code, Error: msg}, nil
+		return api.GetAgentDiff500JSONResponse{
+			Code:    500,
+			Error:   "internal_error",
+			Details: err.Error(),
+		}, nil
 	}
 	if head == nil {
-		code := 404
-		msg := "agent not found"
-		return api.GetAgentDiff404JSONResponse{Code: code, Error: msg}, nil
+		return api.GetAgentDiff404JSONResponse{
+			Code:    404,
+			Error:   "not_found",
+			Details: "agent not found",
+		}, nil
 	}
 
 	headBranch := ""
@@ -704,9 +799,11 @@ func (s *Server) GetAgentDiff(ctx context.Context, request api.GetAgentDiffReque
 
 	diffFiles, err := git.GetDiff(diffRoot, baseRef, headRef, ignoreWhitespace, useTripleDot)
 	if err != nil {
-		code := 500
-		msg := err.Error()
-		return api.GetAgentDiff500JSONResponse{Code: code, Error: msg}, nil
+		return api.GetAgentDiff500JSONResponse{
+			Code:    500,
+			Error:   "internal_error",
+			Details: err.Error(),
+		}, nil
 	}
 
 	// Fetch commit info for base and head if they look like SHAs.
@@ -776,13 +873,21 @@ func (s *Server) GetAgentDiff(ctx context.Context, request api.GetAgentDiffReque
 		}
 	}
 
+	uncommittedChanges := false
+	if head.Worktree != nil {
+		if uncommitted, err := git.HasUncommittedChanges(*head.Worktree); err == nil {
+			uncommittedChanges = uncommitted
+		}
+	}
+
 	resp := api.DiffResponse{
-		Files:         apiFiles,
-		BaseRef:       baseRef,
-		HeadRef:       headRef,
-		MergeConflict: &mergeConflict,
-		BaseCommit:    baseCommitInfo,
-		HeadCommit:    headCommitInfo,
+		Files:              apiFiles,
+		BaseRef:            baseRef,
+		HeadRef:            headRef,
+		MergeConflict:      &mergeConflict,
+		UncommittedChanges: &uncommittedChanges,
+		BaseCommit:         baseCommitInfo,
+		HeadCommit:         headCommitInfo,
 	}
 	return api.GetAgentDiff200JSONResponse(resp), nil
 }

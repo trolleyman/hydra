@@ -237,7 +237,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: '#/components/schemas/MergeConflictError'
         '500':
           description: Internal Server Error
           content:
@@ -275,7 +275,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: '#/components/schemas/MergeConflictError'
         '500':
           description: Internal Server Error
           content:
@@ -514,11 +514,26 @@ components:
   schemas:
     ErrorResponse:
       type: object
-      required: [error, code]
+      required: [error, code, details]
       properties:
-        error: { type: string }
-        code: { type: integer }
-        details: { type: string }
+        error:
+          type: string
+          description: "Machine-readable error type (e.g. internal_error, not_found, unauthorized)"
+        code:
+          type: integer
+          description: "HTTP status code"
+        details:
+          type: string
+          description: "Human-readable error description"
+
+    MergeConflictError:
+      allOf:
+        - $ref: '#/components/schemas/ErrorResponse'
+        - type: object
+          properties:
+            error:
+              type: string
+              enum: [merge_conflict]
 
     StatusResponse:
       type: object
@@ -760,6 +775,9 @@ components:
         merge_conflict:
           type: boolean
           description: True if there are merge conflicts between base_ref and head_ref
+        uncommitted_changes:
+          type: boolean
+          description: True if there are uncommitted changes in the worktree
         base_commit:
           nullable: true
           allOf:
