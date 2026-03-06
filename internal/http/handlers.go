@@ -242,9 +242,9 @@ func (s *Server) DevRestart(_ context.Context, _ api.DevRestartRequestObject) (a
 }
 
 func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestObject) (api.SpawnAgentResponseObject, error) {
-	if request.Body == nil || strings.TrimSpace(request.Body.Prompt) == "" {
+	if request.Body == nil {
 		code := 400
-		msg := "prompt is required"
+		msg := "request body is required"
 		return api.SpawnAgent400JSONResponse{Code: code, Error: msg}, nil
 	}
 
@@ -273,7 +273,10 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 	if resolved.PrePrompt != nil {
 		prePrompt = *resolved.PrePrompt
 	}
-	prompt := strings.TrimSpace(request.Body.Prompt)
+	prompt := ""
+	if request.Body.Prompt != nil {
+		prompt = strings.TrimSpace(*request.Body.Prompt)
+	}
 
 	// Resolve Dockerfile path and contents
 	dockerfilePath := ""

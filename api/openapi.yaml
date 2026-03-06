@@ -523,7 +523,7 @@ components:
 
     SpawnAgentRequest:
       type: object
-      required: [prompt, id]
+      required: [id]
       properties:
         prompt:
           type: string

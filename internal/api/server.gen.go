@@ -233,7 +233,7 @@ type SpawnAgentRequest struct {
 	Id string `json:"id"`
 
 	// Prompt The prompt to give to the agent
-	Prompt string `json:"prompt"`
+	Prompt *string `json:"prompt,omitempty"`
 }
 
 // StatusResponse defines model for StatusResponse.
