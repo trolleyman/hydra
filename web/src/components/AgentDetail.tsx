@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { api } from '../stores/apiClient'
+import { useProjectStore } from '../stores/projectStore'
 import type { AgentResponse } from '../api'
 import { AgentTerminal } from './AgentTerminal'
 import { DiffViewer } from '../DiffViewer'
@@ -56,6 +57,15 @@ export function AgentDetail({
   const [copied, setCopied] = useState(false)
   const [activeTab, setActiveTab] = useState<'terminal' | 'bash'>('terminal')
   const [, setTick] = useState(0)
+
+  const systemStatus = useProjectStore(state => state.systemStatus)
+  const terminalBashEnabled = systemStatus?.features?.terminal_bash ?? false
+
+  useEffect(() => {
+    if (!terminalBashEnabled && activeTab === 'bash') {
+      setActiveTab('terminal')
+    }
+  }, [terminalBashEnabled, activeTab])
 
   useEffect(() => {
     if (agent.created_at == null) return
@@ -249,17 +259,19 @@ export function AgentDetail({
               <Terminal className="w-4 h-4" />
               Terminal
             </button>
-            <button
-              onClick={() => setActiveTab('bash')}
-              className={`px-4 py-2 text-sm font-medium flex items-center gap-2 transition-colors cursor-pointer ${
-                activeTab === 'bash'
-                  ? 'border-b-2 border-blue-500 text-blue-600 dark:text-blue-400'
-                  : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
-              }`}
-            >
-              <Shell className="w-4 h-4" />
-              Bash
-            </button>
+            {terminalBashEnabled && (
+              <button
+                onClick={() => setActiveTab('bash')}
+                className={`px-4 py-2 text-sm font-medium flex items-center gap-2 transition-colors cursor-pointer ${
+                  activeTab === 'bash'
+                    ? 'border-b-2 border-blue-500 text-blue-600 dark:text-blue-400'
+                    : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
+                }`}
+              >
+                <Shell className="w-4 h-4" />
+                Bash
+              </button>
+            )}
           </div>
         </div>
 

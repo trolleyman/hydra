@@ -334,6 +334,10 @@ type StatusResponse struct {
 
 	// DockerError Error message if there is an issue connecting to Docker
 	DockerError *string `json:"docker_error"`
+	Features    *struct {
+		// TerminalBash Whether the bash terminal feature is enabled
+		TerminalBash *bool `json:"terminal_bash,omitempty"`
+	} `json:"features,omitempty"`
 
 	// ProjectRoot Absolute path to the default project root (server CWD)
 	ProjectRoot *string `json:"project_root,omitempty"`

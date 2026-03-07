@@ -191,7 +191,7 @@ function RootLayout() {
     return window.matchMedia('(prefers-color-scheme: dark)').matches
   })
 
-  const { projects, selectedProjectId, setProjects, setSelectedProjectId } = useProjectStore()
+  const { projects, selectedProjectId, setProjects, setSelectedProjectId, setSystemStatus } = useProjectStore()
 
   useEffect(() => {
     localStorage.setItem('hydra-dark-mode', String(dark))
@@ -210,6 +210,7 @@ function RootLayout() {
       try {
         const status = await api.default.getStatus()
         if (cancelled) return
+        setSystemStatus(status)
         setDevRestartAvailable(status.dev_restart_available ?? false)
         if (status.uptime_seconds != null) {
           if (spawnedAt.current === null) {

@@ -63,11 +63,17 @@ type AgentConfig struct {
 	PrePrompt *string `toml:"pre_prompt"`
 }
 
+type Features struct {
+	TerminalBash bool `toml:"terminal_bash"`
+}
+
 type Config struct {
 	// Defaults for all agents.
 	Defaults AgentConfig `toml:"defaults"`
 	// Per-agent overrides (e.g. claude, gemini).
 	Agents map[string]AgentConfig `toml:"agents"`
+	// Feature flags.
+	Features Features `toml:"features"`
 }
 
 // GetUserConfigPath returns the path to the global user configuration file.
@@ -140,6 +146,10 @@ func (c *Config) Merge(other Config) {
 			agent.Merge(otherAgent)
 			c.Agents[name] = agent
 		}
+	}
+
+	if other.Features.TerminalBash {
+		c.Features.TerminalBash = true
 	}
 }
 
@@ -288,6 +298,14 @@ func marshalConfig(cfg Config) string {
 		}
 		buf.WriteString("[agents." + name + "]\n")
 		writeAgentConfigFields(&buf, cfg.Agents[name])
+	}
+
+	if cfg.Features.TerminalBash {
+		if buf.Len() > 0 {
+			buf.WriteString("\n")
+		}
+		buf.WriteString("[features]\n")
+		buf.WriteString("terminal_bash = true\n")
 	}
 
 	return buf.String()

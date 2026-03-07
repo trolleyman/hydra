@@ -25,5 +25,11 @@ export type StatusResponse = {
      * Whether /api/dev/restart is available (dev mode only)
      */
     dev_restart_available?: boolean;
+    features?: {
+        /**
+         * Whether the bash terminal feature is enabled
+         */
+        terminal_bash?: boolean;
+    };
 };
 

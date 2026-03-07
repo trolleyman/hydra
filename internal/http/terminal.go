@@ -12,6 +12,7 @@ import (
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/gorilla/websocket"
+	"github.com/trolleyman/hydra/internal/config"
 	"github.com/trolleyman/hydra/internal/heads"
 	"github.com/trolleyman/hydra/internal/paths"
 )
@@ -85,6 +86,15 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 	useShell := r.URL.Query().Get("shell") == "true"
 	projectRoot := s.resolveProjectRoot(&projectID)
 	log.Printf("terminal ws: resolved projectRoot: %q, useShell: %v", projectRoot, useShell)
+
+	if useShell {
+		cfg, err := config.Load(projectRoot)
+		if err != nil || !cfg.Features.TerminalBash {
+			log.Printf("terminal ws: bash shell disabled or config error: %v", err)
+			http.Error(w, "bash shell is disabled", http.StatusForbidden)
+			return
+		}
+	}
 
 	head, err := heads.GetHeadByID(r.Context(), s.DockerClient, s.DB, projectRoot, agentID)
 	if err != nil {

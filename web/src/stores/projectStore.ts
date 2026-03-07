@@ -1,13 +1,15 @@
 import { create } from 'zustand'
-import type { ProjectInfo } from '../api'
+import type { ProjectInfo, StatusResponse } from '../api'
 
 const STORAGE_KEY = 'hydra-project-id'
 
 interface ProjectState {
   projects: ProjectInfo[]
   selectedProjectId: string | null
+  systemStatus: StatusResponse | null
   setProjects: (projects: ProjectInfo[]) => void
   setSelectedProjectId: (id: string | null) => void
+  setSystemStatus: (status: StatusResponse) => void
 }
 
 export const useProjectStore = create<ProjectState>((set) => ({
@@ -19,6 +21,7 @@ export const useProjectStore = create<ProjectState>((set) => ({
       return null
     }
   })(),
+  systemStatus: null,
   setProjects: (projects) => set({ projects }),
   setSelectedProjectId: (id) => {
     try {
@@ -30,4 +33,5 @@ export const useProjectStore = create<ProjectState>((set) => ({
     } catch { /* ignore */ }
     set({ selectedProjectId: id })
   },
+  setSystemStatus: (systemStatus) => set({ systemStatus }),
 }))

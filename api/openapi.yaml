@@ -633,6 +633,12 @@ components:
         dev_restart_available:
           type: boolean
           description: Whether /api/dev/restart is available (dev mode only)
+        features:
+          type: object
+          properties:
+            terminal_bash:
+              type: boolean
+              description: Whether the bash terminal feature is enabled
 
     ProjectInfo:
       type: object

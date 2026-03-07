@@ -232,6 +232,11 @@ func (s *Server) GetStatus(_ context.Context, _ api.GetStatusRequestObject) (api
 		dockerErr = &errStr
 	}
 
+	terminalBashEnabled := false
+	if cfg, err := config.Load(projectRoot); err == nil {
+		terminalBashEnabled = cfg.Features.TerminalBash
+	}
+
 	return api.GetStatus200JSONResponse(api.StatusResponse{
 		Status:              &status,
 		DockerError:         dockerErr,
@@ -240,6 +245,11 @@ func (s *Server) GetStatus(_ context.Context, _ api.GetStatusRequestObject) (api
 		ProjectRoot:         &projectRoot,
 		DefaultProjectId:    &defaultProjectID,
 		DevRestartAvailable: &devRestartAvailable,
+		Features: &struct {
+			TerminalBash *bool `json:"terminal_bash,omitempty"`
+		}{
+			TerminalBash: &terminalBashEnabled,
+		},
 	}), nil
 }
 
