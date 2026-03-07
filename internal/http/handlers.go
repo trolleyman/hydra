@@ -64,7 +64,14 @@ func NewHandler(s *Server) http.Handler {
 	opts := api.StrictHTTPServerOptions{
 		ResponseErrorHandlerFunc: func(w http.ResponseWriter, r *http.Request, err error) {
 			RecordError(r, err)
-			api.WriteError(w, http.StatusInternalServerError, "internal_error")
+			code := http.StatusInternalServerError
+			errType := api.InternalError
+			var apiErr *apiError
+			if errors.As(err, &apiErr) {
+				code = apiErr.Code
+				errType = apiErr.Type
+			}
+			api.WriteError(w, code, string(errType))
 		},
 	}
 	strict := api.NewStrictHandlerWithOptions(s, nil, opts)
@@ -143,11 +150,17 @@ func (s *Server) ListAgents(ctx context.Context, request api.ListAgentsRequestOb
 	headList, err := heads.ListHeads(ctx, s.DockerClient, s.DB, projectRoot)
 	if err != nil {
 		errStr := err.Error()
+		errorType := api.InternalError
 		if dockerclient.IsErrConnectionFailed(err) || strings.Contains(errStr, "error during connect") {
-			errStr = "Error connecting to Docker: " + errStr
+			errorType = api.DockerConnect
+			err = fmt.Errorf("Error connecting to Docker: %w", err)
 		}
 
-		return nil, errors.New(errStr)
+		return nil, &apiError{
+			Code: 500,
+			Type: errorType,
+			Err:  err,
+		}
 	}
 	resp := make(api.ListAgents200JSONResponse, len(headList))
 	for i, h := range headList {
@@ -563,7 +576,11 @@ func (s *Server) UpdateAgentFromBase(ctx context.Context, request api.UpdateAgen
 	}
 
 	if head.Branch == nil {
-		return nil, errors.New("agent has no git branch to update")
+		return nil, &apiError{
+			Code: 500,
+			Type: "bad_request",
+			Err:  errors.New("agent has no git branch to update"),
+		}
 	}
 
 	mergeDir := projectRoot

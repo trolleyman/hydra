@@ -20,6 +20,16 @@ type errorTracker struct {
 	err error
 }
 
+type apiError struct {
+	Code int
+	Type api.ErrorResponseError
+	Err  error
+}
+
+func (e *apiError) Error() string {
+	return e.Err.Error()
+}
+
 type contextKey string
 
 const errorTrackerKey contextKey = "errorTracker"
