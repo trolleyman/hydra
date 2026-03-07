@@ -934,6 +934,9 @@ components:
           additionalProperties:
             type: string
           description: Built-in default Dockerfiles for each agent type (read-only)
+        default_pre_prompt:
+          type: string
+          description: Built-in default pre-prompt always prepended to agent prompts (read-only)
 
     TerminalEvent:
       type: object

@@ -180,7 +180,10 @@ type ConfigResponse struct {
 
 	// DefaultDockerfiles Built-in default Dockerfiles for each agent type (read-only)
 	DefaultDockerfiles *map[string]string `json:"default_dockerfiles,omitempty"`
-	Defaults           AgentConfig        `json:"defaults"`
+
+	// DefaultPrePrompt Built-in default pre-prompt always prepended to agent prompts (read-only)
+	DefaultPrePrompt *string     `json:"default_pre_prompt,omitempty"`
+	Defaults         AgentConfig `json:"defaults"`
 }
 
 // DiffFile defines model for DiffFile.
