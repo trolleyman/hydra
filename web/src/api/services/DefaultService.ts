@@ -16,6 +16,25 @@ import type { BaseHttpRequest } from '../core/BaseHttpRequest';
 export class DefaultService {
     constructor(public readonly httpRequest: BaseHttpRequest) {}
     /**
+     * Chrome DevTools workspace configuration
+     * @returns any OK
+     * @throws ApiError
+     */
+    public getDevToolsConfig(): CancelablePromise<{
+        workspace?: {
+            root?: string;
+            uuid?: string;
+        };
+    }> {
+        return this.httpRequest.request({
+            method: 'GET',
+            url: '/.well-known/appspecific/com.chrome.devtools.json',
+            errors: {
+                403: `Not running in dev mode`,
+            },
+        });
+    }
+    /**
      * Health check
      * @returns string OK
      * @throws ApiError
