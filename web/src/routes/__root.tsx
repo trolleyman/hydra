@@ -5,6 +5,8 @@ import { useProjectStore } from '../stores/projectStore'
 import type { ProjectInfo } from '../api'
 import { Sun, Moon, ChevronDown, Folder, Plus, Settings, Check } from 'lucide-react'
 
+import { Dialog } from '../components/Dialog'
+
 export const Route = createRootRoute({
   component: RootLayout,
   notFoundComponent: () => (
@@ -16,6 +18,8 @@ export const Route = createRootRoute({
     </div>
   ),
 })
+
+import { useDialogStore } from '../stores/dialogStore'
 
 function formatSpawnedAgo(ms: number): string {
   const seconds = Math.floor(ms / 1000)
@@ -260,7 +264,11 @@ function RootLayout() {
     } catch (err: any) {
       // If 403, we're not in dev mode, so stop.
       if (err?.status === 403) {
-        alert("Server is not running in dev mode.")
+        useDialogStore.getState().show({
+          title: 'Dev Mode Required',
+          message: 'Server is not running in dev mode.',
+          type: 'warning'
+        })
         setRestarting(false)
         return
       }
@@ -363,6 +371,7 @@ function RootLayout() {
       <div className="flex flex-1 overflow-hidden">
         <Outlet />
       </div>
+      <Dialog />
     </div>
   )
 }
