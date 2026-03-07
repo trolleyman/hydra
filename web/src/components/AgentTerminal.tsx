@@ -85,7 +85,14 @@ export function AgentTerminal({ agentId, projectId, isEphemeral, onRefresh, onSt
 
     ws.onopen = () => {
       const { cols, rows } = term
-      ws.send(JSON.stringify({ type: 'resize', cols, rows }))
+      // Send a slightly smaller resize first, then the actual size.
+      // This forces SIGWINCH to fire twice, causing the terminal app to fully redraw.
+      ws.send(JSON.stringify({ type: 'resize', cols: Math.max(1, cols - 1), rows: Math.max(1, rows - 1) }))
+      setTimeout(() => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'resize', cols, rows }))
+        }
+      }, 50)
     }
 
     ws.onmessage = (e: MessageEvent) => {
