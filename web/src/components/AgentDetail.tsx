@@ -4,7 +4,7 @@ import type { AgentResponse } from '../api'
 import { AgentTerminal } from './AgentTerminal'
 import { DiffViewer } from '../DiffViewer'
 import { formatStartedAgo } from './AgentComponents'
-import { LoaderCircle, Merge, Trash2, Tag, RotateCcw, FolderSync, Copy, Check } from 'lucide-react'
+import { LoaderCircle, Merge, Trash2, Tag, RotateCcw, FolderSync, Copy, Check, Terminal, Shell } from 'lucide-react'
 
 function PromptBlock({ prompt }: { prompt: string }) {
   const [expanded, setExpanded] = useState(false)
@@ -54,6 +54,7 @@ export function AgentDetail({
   const [updating, setUpdating] = useState(false)
   const [restarting, setRestarting] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [activeTab, setActiveTab] = useState<'terminal' | 'bash'>('terminal')
   const [, setTick] = useState(0)
 
   useEffect(() => {
@@ -234,13 +235,44 @@ export function AgentDetail({
         {/* Prompt */}
         {agent.prompt && <PromptBlock key={agent.id} prompt={agent.prompt} />}
 
+        {/* Terminal Tabs */}
+        <div className="mb-4">
+          <div className="flex border-b border-gray-200 dark:border-gray-700">
+            <button
+              onClick={() => setActiveTab('terminal')}
+              className={`px-4 py-2 text-sm font-medium flex items-center gap-2 transition-colors cursor-pointer ${
+                activeTab === 'terminal'
+                  ? 'border-b-2 border-blue-500 text-blue-600 dark:text-blue-400'
+                  : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
+              }`}
+            >
+              <Terminal className="w-4 h-4" />
+              Terminal
+            </button>
+            <button
+              onClick={() => setActiveTab('bash')}
+              className={`px-4 py-2 text-sm font-medium flex items-center gap-2 transition-colors cursor-pointer ${
+                activeTab === 'bash'
+                  ? 'border-b-2 border-blue-500 text-blue-600 dark:text-blue-400'
+                  : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
+              }`}
+            >
+              <Shell className="w-4 h-4" />
+              Bash
+            </button>
+          </div>
+        </div>
+
         {/* Terminal */}
-        <AgentTerminal
-          agentId={agent.id}
-          projectId={projectId}
-          isEphemeral={agent.ephemeral}
-          onRefresh={onRefresh}
-        />
+        <div key={activeTab}>
+          <AgentTerminal
+            agentId={agent.id}
+            projectId={projectId}
+            isEphemeral={agent.ephemeral}
+            shell={activeTab === 'bash'}
+            onRefresh={onRefresh}
+          />
+        </div>
 
         {/* Diff viewer */}
         <DiffViewer agent={agent} projectId={projectId} />

@@ -9,18 +9,22 @@ interface Props {
   agentId: string
   projectId: string | null
   isEphemeral?: boolean
+  shell?: boolean
   onRefresh?: () => void
   onStatusUpdate?: (status: string) => void
 }
 
-function getWsUrl(agentId: string, projectId: string | null): string {
+function getWsUrl(agentId: string, projectId: string | null, shell?: boolean): string {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
   const host = window.location.host
-  const qs = projectId ? `?project_id=${encodeURIComponent(projectId)}` : ''
+  const params = new URLSearchParams()
+  if (projectId) params.set('project_id', projectId)
+  if (shell) params.set('shell', 'true')
+  const qs = params.toString() ? `?${params.toString()}` : ''
   return `${protocol}//${host}/ws/agent/${encodeURIComponent(agentId)}/terminal${qs}`
 }
 
-export function AgentTerminal({ agentId, projectId, isEphemeral, onRefresh, onStatusUpdate }: Props) {
+export function AgentTerminal({ agentId, projectId, isEphemeral, shell, onRefresh, onStatusUpdate }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<Terminal | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
@@ -80,7 +84,7 @@ export function AgentTerminal({ agentId, projectId, isEphemeral, onRefresh, onSt
     termRef.current = term
     fitAddonRef.current = fitAddon
 
-    const url = getWsUrl(agentId, projectId)
+    const url = getWsUrl(agentId, projectId, shell)
     const ws = new WebSocket(url)
     ws.binaryType = 'arraybuffer'
     wsRef.current = ws
@@ -231,7 +235,7 @@ export function AgentTerminal({ agentId, projectId, isEphemeral, onRefresh, onSt
           <span className="w-3 h-3 rounded-full bg-green-500/70" />
         </div>
         <span className="text-xs text-gray-400 font-mono ml-1">
-          terminal - {agentId}
+          {shell ? 'bash' : 'terminal'} - {agentId}
         </span>
         <span className={`ml-auto text-[10px] px-1.5 py-0.5 rounded font-medium ${isRunning ? 'text-green-400' : isWaiting ? 'text-yellow-400' : isLoading ? "text-blue-400" : 'text-gray-500'}`}>
           {isRunning || isWaiting ? '● ' : '○ '}{status}

@@ -82,8 +82,9 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	projectID := r.URL.Query().Get("project_id")
+	useShell := r.URL.Query().Get("shell") == "true"
 	projectRoot := s.resolveProjectRoot(&projectID)
-	log.Printf("terminal ws: resolved projectRoot: %q", projectRoot)
+	log.Printf("terminal ws: resolved projectRoot: %q, useShell: %v", projectRoot, useShell)
 
 	head, err := heads.GetHeadByID(r.Context(), s.DockerClient, s.DB, projectRoot, agentID)
 	if err != nil {
@@ -159,20 +160,62 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	log.Printf("terminal ws: attaching to container %s for agent %q", head.ContainerID[:12], agentID)
-	// Now we (should) have a ContainerID.
-	attach, err := s.DockerClient.ContainerAttach(ctx, head.ContainerID, container.AttachOptions{
-		Stream: true,
-		Stdin:  true,
-		Stdout: true,
-		Stderr: true,
-	})
-	if err != nil {
-		log.Printf("terminal ws: attach container %q: %v", head.ContainerID, err)
-		_ = conn.WriteMessage(websocket.TextMessage, []byte("error: "+err.Error()))
-		return
+	var attachID string
+	var attachConn io.ReadWriteCloser
+	var attachReader io.Reader
+
+	if useShell {
+		log.Printf("terminal ws: creating exec bash for container %s agent %q", head.ContainerID[:12], agentID)
+		execConfig := container.ExecOptions{
+			AttachStdin:  true,
+			AttachStdout: true,
+			AttachStderr: true,
+			Tty:          true,
+			Cmd:          []string{"/bin/bash"},
+			Env:          []string{"TERM=xterm-256color"},
+		}
+		execID, err := s.DockerClient.ContainerExecCreate(ctx, head.ContainerID, execConfig)
+		if err != nil {
+			log.Printf("terminal ws: failed to create bash exec, trying sh: %v", err)
+			execConfig.Cmd = []string{"/bin/sh"}
+			execID, err = s.DockerClient.ContainerExecCreate(ctx, head.ContainerID, execConfig)
+		}
+		if err != nil {
+			log.Printf("terminal ws: exec create container %q: %v", head.ContainerID, err)
+			_ = conn.WriteMessage(websocket.TextMessage, []byte("error: "+err.Error()))
+			return
+		}
+
+		resp, err := s.DockerClient.ContainerExecAttach(ctx, execID.ID, container.ExecStartOptions{
+			Tty: true,
+		})
+		if err != nil {
+			log.Printf("terminal ws: exec attach container %q: %v", head.ContainerID, err)
+			_ = conn.WriteMessage(websocket.TextMessage, []byte("error: "+err.Error()))
+			return
+		}
+		attachID = execID.ID
+		attachConn = resp.Conn
+		attachReader = resp.Reader
+	} else {
+		log.Printf("terminal ws: attaching to container %s for agent %q", head.ContainerID[:12], agentID)
+		// Now we (should) have a ContainerID.
+		attach, err := s.DockerClient.ContainerAttach(ctx, head.ContainerID, container.AttachOptions{
+			Stream: true,
+			Stdin:  true,
+			Stdout: true,
+			Stderr: true,
+		})
+		if err != nil {
+			log.Printf("terminal ws: attach container %q: %v", head.ContainerID, err)
+			_ = conn.WriteMessage(websocket.TextMessage, []byte("error: "+err.Error()))
+			return
+		}
+		attachID = head.ContainerID
+		attachConn = attach.Conn
+		attachReader = attach.Reader
 	}
-	defer attach.Close()
+	defer attachConn.Close()
 
 	// Initial status again just in case it changed between checks
 	sendStatusUpdate(conn, "running")
@@ -189,16 +232,23 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 			}
 			switch msgType {
 			case websocket.BinaryMessage:
-				if _, err := attach.Conn.Write(data); err != nil {
+				if _, err := attachConn.Write(data); err != nil {
 					return
 				}
 			case websocket.TextMessage:
 				var msg termResizeMsg
 				if err := json.Unmarshal(data, &msg); err == nil && msg.Type == "resize" && msg.Cols > 0 && msg.Rows > 0 {
-					_ = s.DockerClient.ContainerResize(ctx, head.ContainerID, container.ResizeOptions{
-						Height: msg.Rows,
-						Width:  msg.Cols,
-					})
+					if useShell {
+						_ = s.DockerClient.ContainerExecResize(ctx, attachID, container.ResizeOptions{
+							Height: msg.Rows,
+							Width:  msg.Cols,
+						})
+					} else {
+						_ = s.DockerClient.ContainerResize(ctx, attachID, container.ResizeOptions{
+							Height: msg.Rows,
+							Width:  msg.Cols,
+						})
+					}
 				}
 			}
 		}
@@ -208,13 +258,15 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		defer func() {
 			log.Printf("terminal ws: stdout goroutine exiting for agent %q", agentID)
-			sendStatusUpdate(conn, "stopped")
+			if !useShell {
+				sendStatusUpdate(conn, "stopped")
+			}
 			_ = conn.Close() // Closing the WS will unblock the ReadMessage in the other goroutine
 		}()
 
 		buf := make([]byte, 32*1024)
 		for {
-			n, err := attach.Reader.Read(buf)
+			n, err := attachReader.Read(buf)
 			if n > 0 {
 				if writeErr := conn.WriteMessage(websocket.BinaryMessage, buf[:n]); writeErr != nil {
 					log.Printf("terminal ws: error writing to WS for %q: %v", agentID, writeErr)
@@ -228,8 +280,8 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 				break
 			}
 		}
-		// When stdout ends (container stopped), closing attach.Conn will unblock stdin Write if it was pending
-		_ = attach.Conn.Close()
+		// When stdout ends (container stopped or exec finished), closing attachConn will unblock stdin Write if it was pending
+		_ = attachConn.Close()
 	}()
 
 	// Wait for connection to close or container to stop
