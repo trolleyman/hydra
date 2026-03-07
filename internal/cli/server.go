@@ -91,9 +91,8 @@ func runServer(_ *cobra.Command, _ []string) error {
 	// WebSocket terminal endpoint
 	mux.HandleFunc("/ws/agent/", server.HandleTerminalWS)
 
-	if server.DevRestartEnabled {
-		mux.Handle("/.well-known/appspecific/com.chrome.devtools.json", apiHandler)
-	}
+	// API routes for well-known and specific paths
+	mux.Handle("/.well-known/", apiHandler)
 
 	registerFrontend(mux)
 

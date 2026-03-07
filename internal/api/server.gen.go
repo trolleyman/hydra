@@ -1176,6 +1176,15 @@ func (response GetDevToolsConfig200JSONResponse) VisitGetDevToolsConfigResponse(
 	return json.NewEncoder(w).Encode(response)
 }
 
+type GetDevToolsConfig403JSONResponse ErrorResponse
+
+func (response GetDevToolsConfig403JSONResponse) VisitGetDevToolsConfigResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 type KillAgentRequestObject struct {
 	Id     string `json:"id"`
 	Params KillAgentParams

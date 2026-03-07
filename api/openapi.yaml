@@ -23,6 +23,12 @@ paths:
                         type: string
                       uuid:
                         type: string
+        '403':
+          description: Not running in dev mode
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 
   /health:
     get:
