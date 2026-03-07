@@ -79,10 +79,10 @@ export function AgentDetail({
     agent.agent_type === 'claude'
       ? 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300'
       : agent.agent_type === 'gemini'
-      ? 'bg-teal-100 text-teal-800 dark:bg-teal-900/40 dark:text-teal-300'
-      : agent.agent_type === 'copilot'
-      ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300'
-      : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'
+        ? 'bg-teal-100 text-teal-800 dark:bg-teal-900/40 dark:text-teal-300'
+        : agent.agent_type === 'copilot'
+          ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300'
+          : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'
 
   async function handleKill() {
     useDialogStore.getState().show({
@@ -288,34 +288,32 @@ export function AgentDetail({
         {agent.prompt && <PromptBlock key={agent.id} prompt={agent.prompt} />}
 
         {/* Terminal Tabs */}
-        <div className="mb-4">
-          <div className="flex border-b border-gray-200 dark:border-gray-700">
-            <button
-              onClick={() => setActiveTab('terminal')}
-              className={`px-4 py-2 text-sm font-medium flex items-center gap-2 transition-colors cursor-pointer ${
-                activeTab === 'terminal'
-                  ? 'border-b-2 border-blue-500 text-blue-600 dark:text-blue-400'
-                  : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
-              }`}
-            >
-              <Terminal className="w-4 h-4" />
-              Terminal
-            </button>
-            {terminalBashEnabled && (
+        {terminalBashEnabled && (
+          <div className="mb-4">
+            <div className="flex border-b border-gray-200 dark:border-gray-700">
               <button
-                onClick={() => setActiveTab('bash')}
-                className={`px-4 py-2 text-sm font-medium flex items-center gap-2 transition-colors cursor-pointer ${
-                  activeTab === 'bash'
+                onClick={() => setActiveTab('terminal')}
+                className={`px-4 py-2 text-sm font-medium flex items-center gap-2 transition-colors cursor-pointer ${activeTab === 'terminal'
                     ? 'border-b-2 border-blue-500 text-blue-600 dark:text-blue-400'
                     : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
-                }`}
+                  }`}
+              >
+                <Terminal className="w-4 h-4" />
+                Terminal
+              </button>
+              <button
+                onClick={() => setActiveTab('bash')}
+                className={`px-4 py-2 text-sm font-medium flex items-center gap-2 transition-colors cursor-pointer ${activeTab === 'bash'
+                    ? 'border-b-2 border-blue-500 text-blue-600 dark:text-blue-400'
+                    : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
+                  }`}
               >
                 <Shell className="w-4 h-4" />
                 Bash
               </button>
-            )}
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Terminal */}
         <div key={activeTab}>
