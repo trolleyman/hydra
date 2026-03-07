@@ -20,6 +20,11 @@ RUN apt-get update && apt-get install -y \
         gnupg \
     && ln -s /usr/bin/fdfind /usr/local/bin/fd
 
+# Allow git to operate in mounted directories regardless of ownership.
+# Required when running on Windows hosts where Docker-mounted NTFS volumes
+# report ownership that doesn't match the container user.
+RUN git config --system --add safe.directory '*'
+
 ENV DEVCONTAINER=true
 ENV TERM=xterm-256color
 ENV COLORTERM=truecolor

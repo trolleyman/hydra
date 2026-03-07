@@ -19,9 +19,4 @@ usermod -aG sudo "$AGENT_USER"
 echo "$AGENT_USER ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/"$AGENT_USER"
 chmod 0440 /etc/sudoers.d/"$AGENT_USER"
 
-# Allow git to operate in mounted directories regardless of ownership.
-# This is required when running on Windows hosts where mounted NTFS volumes
-# may report ownership that doesn't match the container user.
-git config --system --add safe.directory '*'
-
 exec gosu "$AGENT_USER" "$@"
