@@ -97,7 +97,7 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("terminal ws: found head: %+v", head)
+	log.Printf("terminal ws: found head: %s", head.ID)
 
 	conn, err := wsUpgrader.Upgrade(w, r, nil)
 	if err != nil {
