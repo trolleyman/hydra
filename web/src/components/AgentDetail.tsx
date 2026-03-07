@@ -7,6 +7,8 @@ import { DiffViewer } from '../DiffViewer'
 import { formatStartedAgo } from './AgentComponents'
 import { LoaderCircle, Merge, Trash2, Tag, RotateCcw, FolderSync, Copy, Check, Terminal, Shell } from 'lucide-react'
 
+import { useDialogStore } from '../stores/dialogStore'
+
 function PromptBlock({ prompt }: { prompt: string }) {
   const [expanded, setExpanded] = useState(false)
   const isLong = prompt.length > 200 || prompt.split('\n').length > 3
@@ -83,73 +85,113 @@ export function AgentDetail({
       : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'
 
   async function handleKill() {
-    if (!window.confirm(`Are you sure you want to kill agent "${agent.id}"?\n\nThis will permanently stop the container, remove the git worktree, and delete the branch.`)) {
-      return
-    }
-    setKilling(true)
-    try {
-      await api.default.killAgent(agent.id, projectId ?? undefined)
-      onKilled(agent.id)
-    } catch (err) {
-      alert(`Failed to kill agent: ${err}`)
-    } finally {
-      setKilling(false)
-    }
+    useDialogStore.getState().show({
+      title: 'Kill Agent',
+      message: `Are you sure you want to kill agent "${agent.id}"?\n\nThis will permanently stop the container, remove the git worktree, and delete the branch.`,
+      type: 'confirm',
+      onConfirm: async () => {
+        setKilling(true)
+        try {
+          await api.default.killAgent(agent.id, projectId ?? undefined)
+          onKilled(agent.id)
+        } catch (err) {
+          useDialogStore.getState().show({
+            title: 'Kill Failed',
+            message: `Failed to kill agent: ${err}`,
+            type: 'error'
+          })
+        } finally {
+          setKilling(false)
+        }
+      }
+    })
   }
 
   async function handleMerge() {
-    if (!window.confirm(`Are you sure you want to merge agent "${agent.id}"?\n\nThis will merge the agent's branch into the base branch, then stop the container and clean up.`)) {
-      return
-    }
-    setMerging(true)
-    try {
-      await api.default.mergeAgent(agent.id, projectId ?? undefined)
-      onKilled(agent.id)
-    } catch (err: any) {
-      const errorData = await err.json?.().catch(() => null) || err
-      if (errorData.error === 'merge_conflict') {
-        alert(`CONFLICT: Merge failed due to git conflicts. Please resolve them manually or update from base.`)
-      } else {
-        alert(`Failed to merge agent: ${errorData.details || errorData.error || err}`)
+    useDialogStore.getState().show({
+      title: 'Merge Agent',
+      message: `Are you sure you want to merge agent "${agent.id}"?\n\nThis will merge the agent's branch into the base branch, then stop the container and clean up.`,
+      type: 'confirm',
+      onConfirm: async () => {
+        setMerging(true)
+        try {
+          await api.default.mergeAgent(agent.id, projectId ?? undefined)
+          onKilled(agent.id)
+        } catch (err: any) {
+          const errorData = await err.json?.().catch(() => null) || err
+          if (errorData.error === 'merge_conflict') {
+            useDialogStore.getState().show({
+              title: 'Merge Conflict',
+              message: `CONFLICT: Merge failed due to git conflicts. Please resolve them manually or update from base.`,
+              type: 'warning'
+            })
+          } else {
+            useDialogStore.getState().show({
+              title: 'Merge Failed',
+              message: `Failed to merge agent: ${errorData.details || errorData.error || err}`,
+              type: 'error'
+            })
+          }
+        } finally {
+          setMerging(false)
+        }
       }
-    } finally {
-      setMerging(false)
-    }
+    })
   }
 
   async function handleUpdateFromBase() {
-    if (!window.confirm(`Update "${agent.branch_name}" from "${agent.base_branch}"?\n\nThis will attempt to merge "${agent.base_branch}" into your agent branch.`)) {
-      return
-    }
-    setUpdating(true)
-    try {
-      await api.default.updateAgentFromBase(agent.id, projectId ?? undefined)
-      if (onRefresh) onRefresh()
-    } catch (err: any) {
-      const errorData = await err.json?.().catch(() => null) || err
-      if (errorData.error === 'merge_conflict') {
-        alert(`CONFLICT: Update failed due to git conflicts. You may need to resolve them manually in the worktree.`)
-      } else {
-        alert(`Failed to update from base: ${errorData.details || errorData.error || err}`)
+    useDialogStore.getState().show({
+      title: 'Update from Base',
+      message: `Update "${agent.branch_name}" from "${agent.base_branch}"?\n\nThis will attempt to merge "${agent.base_branch}" into your agent branch.`,
+      type: 'confirm',
+      onConfirm: async () => {
+        setUpdating(true)
+        try {
+          await api.default.updateAgentFromBase(agent.id, projectId ?? undefined)
+          if (onRefresh) onRefresh()
+        } catch (err: any) {
+          const errorData = await err.json?.().catch(() => null) || err
+          if (errorData.error === 'merge_conflict') {
+            useDialogStore.getState().show({
+              title: 'Update Conflict',
+              message: `CONFLICT: Update failed due to git conflicts. You may need to resolve them manually in the worktree.`,
+              type: 'warning'
+            })
+          } else {
+            useDialogStore.getState().show({
+              title: 'Update Failed',
+              message: `Failed to update from base: ${errorData.details || errorData.error || err}`,
+              type: 'error'
+            })
+          }
+        } finally {
+          setUpdating(false)
+        }
       }
-    } finally {
-      setUpdating(false)
-    }
+    })
   }
 
   async function handleRestart() {
-    if (!window.confirm(`Are you sure you want to restart agent "${agent.id}"?\n\nThis will discard all progress (container, worktree, branch) and restart with the same prompt.`)) {
-      return
-    }
-    setRestarting(true)
-    try {
-      const newAgent = await api.default.restartAgent(agent.id, projectId ?? undefined)
-      onRestarted(newAgent)
-    } catch (err) {
-      alert(`Failed to restart agent: ${err}`)
-    } finally {
-      setRestarting(false)
-    }
+    useDialogStore.getState().show({
+      title: 'Restart Agent',
+      message: `Are you sure you want to restart agent "${agent.id}"?\n\nThis will discard all progress (container, worktree, branch) and restart with the same prompt.`,
+      type: 'confirm',
+      onConfirm: async () => {
+        setRestarting(true)
+        try {
+          const newAgent = await api.default.restartAgent(agent.id, projectId ?? undefined)
+          onRestarted(newAgent)
+        } catch (err) {
+          useDialogStore.getState().show({
+            title: 'Restart Failed',
+            message: `Failed to restart agent: ${err}`,
+            type: 'error'
+          })
+        } finally {
+          setRestarting(false)
+        }
+      }
+    })
   }
 
   return (

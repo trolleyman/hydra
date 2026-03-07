@@ -9,6 +9,8 @@ import { X, Layers, Monitor, Sparkles, FileText, Plus, Trash2 } from 'lucide-rea
 import { InfoTooltip } from '../components/InfoTooltip'
 import type { ProjectInfo } from '../api'
 
+import { useDialogStore } from '../stores/dialogStore'
+
 export const Route = createFileRoute('/settings')({
   component: SettingsPage,
 })
@@ -77,9 +79,17 @@ function SettingsPage() {
     setSaving(true)
     try {
       await api.default.saveConfig(config, selectedProjectId ?? undefined, scope)
-      alert(`Configuration saved to ${scope} successfully!`)
+      useDialogStore.getState().show({
+        title: 'Settings Saved',
+        message: `Configuration saved to ${scope} successfully!`,
+        type: 'info'
+      })
     } catch (err) {
-      alert(`Failed to save configuration: ${err}`)
+      useDialogStore.getState().show({
+        title: 'Save Failed',
+        message: `Failed to save configuration: ${err}`,
+        type: 'error'
+      })
     } finally {
       setSaving(false)
     }
@@ -96,7 +106,11 @@ function SettingsPage() {
       }, selectedProjectId ?? undefined)
       setTestAgent(resp)
     } catch (err) {
-      alert(`Failed to spawn test agent: ${err}`)
+      useDialogStore.getState().show({
+        title: 'Test Failed',
+        message: `Failed to spawn test agent: ${err}`,
+        type: 'error'
+      })
     } finally {
       setTesting(false)
     }
