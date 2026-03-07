@@ -158,7 +158,7 @@ func GetHeadByID(ctx context.Context, cli *dockerclient.Client, store *db.Store,
 // SpawnHeadOptions holds parameters for spawning a new agent head.
 type SpawnHeadOptions struct {
 	ID                   string           // empty = auto-generated
-	PrePrompt             string           // pre-prompt
+	PrePrompt            string           // pre-prompt
 	Prompt               string           // prompt
 	AgentType            docker.AgentType // empty = "claude"
 	BaseBranch           string           // empty = current HEAD branch
@@ -299,17 +299,17 @@ func SpawnHead(ctx context.Context, cli *dockerclient.Client, store *db.Store, p
 			PrePrompt:            opts.PrePrompt,
 			Prompt:               opts.Prompt,
 			ProjectPath:          projectRoot,
-			WorktreePath:       worktreePath,
-			BranchName:         branchName,
-			BaseBranch:         baseBranch,
-			GitAuthorName:      gitAuthorName,
-			GitAuthorEmail:     gitAuthorEmail,
-			UID:                uid,
-			GID:                gid,
-			Username:           username,
-			GroupName:          groupName,
-			Ephemeral:          opts.Ephemeral,
-			BuildLog:           buildLogFile,
+			WorktreePath:         worktreePath,
+			BranchName:           branchName,
+			BaseBranch:           baseBranch,
+			GitAuthorName:        gitAuthorName,
+			GitAuthorEmail:       gitAuthorEmail,
+			UID:                  uid,
+			GID:                  gid,
+			Username:             username,
+			GroupName:            groupName,
+			Ephemeral:            opts.Ephemeral,
+			BuildLog:             buildLogFile,
 			OnStatus: func(status api.AgentStatus) {
 				s := initialStatus
 				s.Status = status

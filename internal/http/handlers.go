@@ -183,12 +183,12 @@ func (s *Server) GetConfig(_ context.Context, request api.GetConfigRequestObject
 	}
 	resp := api.ConfigResponse{
 		Defaults: api.AgentConfig{
-			Dockerfile:         cfg.Defaults.Dockerfile,
-			DockerfileContents: cfg.Defaults.DockerfileContents,
+			Dockerfile:           cfg.Defaults.Dockerfile,
+			DockerfileContents:   cfg.Defaults.DockerfileContents,
 			DockerignoreContents: cfg.Defaults.DockerignoreContents,
-			SharedMounts:       &cfg.Defaults.SharedMounts,
-			Context:            cfg.Defaults.Context,
-			PrePrompt:          cfg.Defaults.PrePrompt,
+			SharedMounts:         &cfg.Defaults.SharedMounts,
+			Context:              cfg.Defaults.Context,
+			PrePrompt:            cfg.Defaults.PrePrompt,
 		},
 		Agents:             make(map[string]api.AgentConfig),
 		DefaultDockerfiles: &defaultDockerfiles,
@@ -198,12 +198,12 @@ func (s *Server) GetConfig(_ context.Context, request api.GetConfigRequestObject
 		// Create a local copy to take its address
 		sharedMounts := agent.SharedMounts
 		resp.Agents[name] = api.AgentConfig{
-			Dockerfile:         agent.Dockerfile,
-			DockerfileContents: agent.DockerfileContents,
+			Dockerfile:           agent.Dockerfile,
+			DockerfileContents:   agent.DockerfileContents,
 			DockerignoreContents: agent.DockerignoreContents,
-			SharedMounts:       &sharedMounts,
-			Context:            agent.Context,
-			PrePrompt:          agent.PrePrompt,
+			SharedMounts:         &sharedMounts,
+			Context:              agent.Context,
+			PrePrompt:            agent.PrePrompt,
 		}
 	}
 
@@ -215,12 +215,12 @@ func (s *Server) SaveConfig(_ context.Context, request api.SaveConfigRequestObje
 
 	newCfg := config.Config{
 		Defaults: config.AgentConfig{
-			Dockerfile:         request.Body.Defaults.Dockerfile,
-			DockerfileContents: request.Body.Defaults.DockerfileContents,
+			Dockerfile:           request.Body.Defaults.Dockerfile,
+			DockerfileContents:   request.Body.Defaults.DockerfileContents,
 			DockerignoreContents: request.Body.Defaults.DockerignoreContents,
-			SharedMounts:       *request.Body.Defaults.SharedMounts,
-			Context:            request.Body.Defaults.Context,
-			PrePrompt:          request.Body.Defaults.PrePrompt,
+			SharedMounts:         *request.Body.Defaults.SharedMounts,
+			Context:              request.Body.Defaults.Context,
+			PrePrompt:            request.Body.Defaults.PrePrompt,
 		},
 		Agents: make(map[string]config.AgentConfig),
 	}
@@ -230,12 +230,12 @@ func (s *Server) SaveConfig(_ context.Context, request api.SaveConfigRequestObje
 			sm = *agent.SharedMounts
 		}
 		newCfg.Agents[name] = config.AgentConfig{
-			Dockerfile:         agent.Dockerfile,
-			DockerfileContents: agent.DockerfileContents,
+			Dockerfile:           agent.Dockerfile,
+			DockerfileContents:   agent.DockerfileContents,
 			DockerignoreContents: agent.DockerignoreContents,
-			SharedMounts:       sm,
-			Context:            agent.Context,
-			PrePrompt:          agent.PrePrompt,
+			SharedMounts:         sm,
+			Context:              agent.Context,
+			PrePrompt:            agent.PrePrompt,
 		}
 	}
 

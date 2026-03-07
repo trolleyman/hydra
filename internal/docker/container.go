@@ -94,28 +94,28 @@ func ListAgents(ctx context.Context, cli *dockerclient.Client) ([]Agent, error) 
 
 // SpawnOptions holds all configuration for launching a new agent container.
 type SpawnOptions struct {
-	Id                 string
-	AgentType          AgentType
-	DockerfilePath     string // optional; empty = use embedded default for AgentType
-	DockerfileContents string // optional; if set, used as extension of default image
-	DockerignoreContents string // optional; if set, used as .dockerignore content
-	SharedMounts       []string // optional; container paths to share across agents
-	PrePrompt          string
-	Prompt             string
-	ProjectPath        string
-	WorktreePath       string
-	BranchName         string
-	BaseBranch         string
-	GitAuthorName      string
-	GitAuthorEmail     string
-	UID                int
-	GID                int
-	Username           string
-	GroupName          string
-	Resume             bool // if true, run agent with --resume instead of a fresh prompt
-	Ephemeral          bool // if true, set AutoRemove: true on the container
-	OnStatus           func(api.AgentStatus)
-	BuildLog           io.Writer // optional; if set, build output is written here
+	Id                   string
+	AgentType            AgentType
+	DockerfilePath       string   // optional; empty = use embedded default for AgentType
+	DockerfileContents   string   // optional; if set, used as extension of default image
+	DockerignoreContents string   // optional; if set, used as .dockerignore content
+	SharedMounts         []string // optional; container paths to share across agents
+	PrePrompt            string
+	Prompt               string
+	ProjectPath          string
+	WorktreePath         string
+	BranchName           string
+	BaseBranch           string
+	GitAuthorName        string
+	GitAuthorEmail       string
+	UID                  int
+	GID                  int
+	Username             string
+	GroupName            string
+	Resume               bool // if true, run agent with --resume instead of a fresh prompt
+	Ephemeral            bool // if true, set AutoRemove: true on the container
+	OnStatus             func(api.AgentStatus)
+	BuildLog             io.Writer // optional; if set, build output is written here
 }
 
 func CombinePrompt(prePrompt, prompt string) string {
@@ -955,7 +955,7 @@ func buildDockerImage(ctx context.Context, cli *dockerclient.Client, tag, docker
 				// Very basic matching:
 				if rel == pattern || strings.HasPrefix(rel, pattern+"/") {
 					if info.IsDir() {
-						return filepath.SkipDir
+						return filepath.SkipDir //errtrace:skip // This error must be filepath.SkipDir, not wrapped.
 					}
 					return nil
 				}

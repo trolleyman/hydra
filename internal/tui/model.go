@@ -942,7 +942,6 @@ func spawnHead(projectRoot, id string, agentType docker.AgentType, dockerfilePat
 	return errtrace.Wrap(err)
 }
 
-
 func randomTUIID() (string, error) {
 	b := make([]byte, 4)
 	if _, err := rand.Read(b); err != nil {
