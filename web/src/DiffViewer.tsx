@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import hljs from 'highlight.js'
 import { api } from './stores/apiClient'
 import type { AgentResponse, CommitInfo, DiffFile, DiffResponse } from './api'
-import { Plus, Minus, SquareDot, Diff, Calendar, TriangleAlert, ChevronDown, ChevronRight, ChevronLeft, Check, LoaderCircle } from 'lucide-react'
+import { Plus, Minus, SquareDot, Diff, Calendar, TriangleAlert, ChevronDown, ChevronRight, ChevronLeft, Check, LoaderCircle, RefreshCw } from 'lucide-react'
 
 // ── Syntax highlighting helpers ───────────────────────────────────────────────
 
@@ -407,46 +407,107 @@ function FileDiff({
   )
 }
 
-// ── Commit info card ──────────────────────────────────────────────────────────
+// ── Commit selector types & helpers ───────────────────────────────────────────
 
-function CommitCard({ commit }: { commit: CommitInfo }) {
-  const date = new Date(commit.timestamp)
-  const dateStr = date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
-  const timeStr = date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+type LeftSel = { type: 'base' } | { type: 'commit'; sha: string }
+type RightSel = { type: 'uncommitted' } | { type: 'latest' } | { type: 'commit'; sha: string }
+
+function commitIdx(sha: string, commits: CommitInfo[]): number {
+  return commits.findIndex((c) => c.sha === sha)
+}
+
+function formatShortLabel(commit: CommitInfo | null | undefined, sha: string): string {
+  if (!commit) return sha.slice(0, 7)
+  const msg = commit.message.slice(0, 24)
+  return `${commit.short_sha} ${msg}${commit.message.length > 24 ? '…' : ''}`
+}
+
+// ── Left commit selector ──────────────────────────────────────────────────────
+
+function LeftSelector({
+  commits, selected, onChange,
+}: { commits: CommitInfo[]; selected: LeftSel; onChange: (v: LeftSel) => void }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    function handleClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [open])
+
+  const label = selected.type === 'base'
+    ? 'Base'
+    : formatShortLabel(commits.find((c) => c.sha === selected.sha), selected.sha)
 
   return (
-    <div className="mb-4 p-3 bg-gray-50 dark:bg-gray-800/60 border border-gray-200 dark:border-gray-700 rounded-lg">
-      <div className="flex items-start gap-3">
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{commit.message}</p>
-          <div className="flex items-center gap-2 mt-1 flex-wrap">
-            <span className="font-mono text-xs text-gray-400 dark:text-gray-500 bg-gray-100 dark:bg-gray-700 px-1.5 py-0.5 rounded">
-              {commit.short_sha}
-            </span>
-            <span className="text-xs text-gray-500 dark:text-gray-400">{commit.author_name}</span>
-            <span className="text-xs text-gray-400 dark:text-gray-500" title={commit.timestamp}>
-              {dateStr} {timeStr}
-            </span>
+    <div ref={ref} className="relative">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="flex items-center gap-1.5 h-7 px-2.5 rounded-md text-xs font-medium text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors cursor-pointer"
+      >
+        <Calendar className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+        <span className="max-w-[150px] truncate">{label}</span>
+        <ChevronDown className="w-3 h-3 text-gray-400 shrink-0" />
+      </button>
+
+      {open && (
+        <div className="absolute left-0 top-full mt-1 w-64 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50 overflow-hidden">
+          <div className="py-1 border-b border-gray-100 dark:border-gray-700">
+            <button
+              onClick={() => { onChange({ type: 'base' }); setOpen(false) }}
+              className={`w-full flex items-center gap-2 px-3 py-2 text-left text-xs hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer ${
+                selected.type === 'base' ? 'bg-blue-50 dark:bg-blue-900/20' : ''
+              }`}
+            >
+              <ChevronRight className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+              <span className="font-medium text-gray-800 dark:text-gray-200">Base</span>
+              <span className="text-gray-400 dark:text-gray-500 ml-auto text-[10px]">branch point</span>
+              {selected.type === 'base' && <Check className="w-3 h-3 text-blue-500 shrink-0" />}
+            </button>
           </div>
+          {commits.length > 0 && (
+            <div className="max-h-64 overflow-y-auto py-1">
+              <p className="px-3 py-1 text-[10px] text-gray-400 dark:text-gray-500 uppercase tracking-wide font-medium">
+                Commits ({commits.length})
+              </p>
+              {commits.map((c) => (
+                <button
+                  key={c.sha}
+                  onClick={() => { onChange({ type: 'commit', sha: c.sha }); setOpen(false) }}
+                  className={`w-full flex items-start gap-2 px-3 py-1.5 text-left hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer ${
+                    selected.type === 'commit' && selected.sha === c.sha ? 'bg-blue-50 dark:bg-blue-900/20' : ''
+                  }`}
+                >
+                  <span className="font-mono text-[10px] text-gray-400 dark:text-gray-500 bg-gray-100 dark:bg-gray-700 px-1 py-0.5 rounded shrink-0 mt-0.5">
+                    {c.short_sha}
+                  </span>
+                  <span className="text-xs text-gray-700 dark:text-gray-300 leading-tight truncate">{c.message}</span>
+                  {selected.type === 'commit' && selected.sha === c.sha && (
+                    <Check className="w-3 h-3 text-blue-500 shrink-0 mt-0.5" />
+                  )}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
-      </div>
+      )}
     </div>
   )
 }
 
-// ── Commit selector dropdown ──────────────────────────────────────────────────
+// ── Right commit selector ─────────────────────────────────────────────────────
 
-type ViewSelection = { type: 'full' } | { type: 'uncommitted' } | { type: 'commit'; sha: string }
-
-function CommitSelector({
-  commits,
-  selected,
-  onChange,
-  hasUncommitted,
+function RightSelector({
+  commits, selected, onChange, left, hasUncommitted,
 }: {
   commits: CommitInfo[]
-  selected: ViewSelection
-  onChange: (v: ViewSelection) => void
+  selected: RightSel
+  onChange: (v: RightSel) => void
+  left: LeftSel
   hasUncommitted?: boolean
 }) {
   const [open, setOpen] = useState(false)
@@ -461,13 +522,18 @@ function CommitSelector({
     return () => document.removeEventListener('mousedown', handleClick)
   }, [open])
 
-  const label = selected.type === 'full'
-    ? 'Full diff'
-    : selected.type === 'uncommitted'
-      ? 'Uncommitted'
-      : commits.find((c) => c.sha === selected.sha)
-        ? `${commits.find((c) => c.sha === selected.sha)!.short_sha} ${commits.find((c) => c.sha === selected.sha)!.message.slice(0, 28)}${commits.find((c) => c.sha === selected.sha)!.message.length > 28 ? '…' : ''}`
-        : selected.sha.slice(0, 7)
+  const label = selected.type === 'uncommitted'
+    ? 'Latest changes'
+    : selected.type === 'latest'
+    ? 'Latest commit'
+    : formatShortLabel(commits.find((c) => c.sha === selected.sha), selected.sha)
+
+  // Valid commits for right: must be newer than left (lower index in newest-first array)
+  const validCommits = commits.filter((_, idx) => {
+    if (left.type === 'base') return true
+    const li = commitIdx(left.sha, commits)
+    return li === -1 || idx < li
+  })
 
   return (
     <div ref={ref} className="relative">
@@ -475,31 +541,17 @@ function CommitSelector({
         onClick={() => setOpen((o) => !o)}
         className="flex items-center gap-1.5 h-7 px-2.5 rounded-md text-xs font-medium text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors cursor-pointer"
       >
-        <Calendar className="w-3.5 h-3.5 text-gray-400 shrink-0" />
-        <span className="max-w-[180px] truncate">{label}</span>
-        {hasUncommitted && (
+        <ChevronRight className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+        <span className="max-w-[150px] truncate">{label}</span>
+        {hasUncommitted && selected.type !== 'uncommitted' && (
           <TriangleAlert className="w-3.5 h-3.5 text-amber-500 shrink-0" />
         )}
         <ChevronDown className="w-3 h-3 text-gray-400 shrink-0" />
       </button>
 
       {open && (
-        <div className="absolute left-0 top-full mt-1 w-72 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50 overflow-hidden">
-          {/* Main diff options */}
+        <div className="absolute left-0 top-full mt-1 w-64 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50 overflow-hidden">
           <div className="py-1 border-b border-gray-100 dark:border-gray-700">
-            <button
-              onClick={() => { onChange({ type: 'full' }); setOpen(false) }}
-              className={`w-full flex items-center gap-2 px-3 py-2 text-left text-xs hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer ${
-                selected.type === 'full' ? 'bg-blue-50 dark:bg-blue-900/20' : ''
-              }`}
-            >
-              <ChevronRight className="w-3.5 h-3.5 text-gray-400 shrink-0" />
-              <span className="font-medium text-gray-800 dark:text-gray-200">Full diff</span>
-              <span className="text-gray-400 dark:text-gray-500 ml-auto">base → current</span>
-              {selected.type === 'full' && (
-                <Check className="w-3 h-3 text-blue-500 shrink-0" />
-              )}
-            </button>
             <button
               onClick={() => { onChange({ type: 'uncommitted' }); setOpen(false) }}
               className={`w-full flex items-center gap-2 px-3 py-2 text-left text-xs hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer ${
@@ -507,21 +559,28 @@ function CommitSelector({
               }`}
             >
               <Plus className="w-3.5 h-3.5 text-gray-400 shrink-0" />
-              <span className="font-medium text-gray-800 dark:text-gray-200">Include uncommitted</span>
-              <span className="text-gray-400 dark:text-gray-500 ml-auto">base → worktree</span>
-              {selected.type === 'uncommitted' && (
-                <Check className="w-3 h-3 text-blue-500 shrink-0" />
-              )}
+              <span className="font-medium text-gray-800 dark:text-gray-200">Latest changes</span>
+              <span className="text-gray-400 dark:text-gray-500 ml-auto text-[10px]">incl. uncommitted</span>
+              {selected.type === 'uncommitted' && <Check className="w-3 h-3 text-blue-500 shrink-0" />}
+            </button>
+            <button
+              onClick={() => { onChange({ type: 'latest' }); setOpen(false) }}
+              className={`w-full flex items-center gap-2 px-3 py-2 text-left text-xs hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer ${
+                selected.type === 'latest' ? 'bg-blue-50 dark:bg-blue-900/20' : ''
+              }`}
+            >
+              <ChevronRight className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+              <span className="font-medium text-gray-800 dark:text-gray-200">Latest commit</span>
+              <span className="text-gray-400 dark:text-gray-500 ml-auto text-[10px]">HEAD</span>
+              {selected.type === 'latest' && <Check className="w-3 h-3 text-blue-500 shrink-0" />}
             </button>
           </div>
-
-          {/* Individual commits */}
-          {commits.length > 0 && (
+          {validCommits.length > 0 && (
             <div className="max-h-64 overflow-y-auto py-1">
               <p className="px-3 py-1 text-[10px] text-gray-400 dark:text-gray-500 uppercase tracking-wide font-medium">
-                Commits ({commits.length})
+                Commits ({validCommits.length})
               </p>
-              {commits.map((c) => (
+              {validCommits.map((c) => (
                 <button
                   key={c.sha}
                   onClick={() => { onChange({ type: 'commit', sha: c.sha }); setOpen(false) }}
@@ -581,15 +640,34 @@ export function DiffViewer({
   projectId: string | null
 }) {
   const [commits, setCommits] = useState<CommitInfo[]>([])
-  const [selectedView, setSelectedView] = useState<ViewSelection>({ type: 'full' })
+  const [leftSel, setLeftSel] = useState<LeftSel>({ type: 'base' })
+  const [rightSel, setRightSel] = useState<RightSel>({ type: 'uncommitted' })
   const [diff, setDiff] = useState<DiffResponse | null>(null)
   const [loadingDiff, setLoadingDiff] = useState(false)
   const [diffError, setDiffError] = useState<string | null>(null)
-  const [sideBySide, setSideBySide] = useState(false)
-  const [ignoreWhitespace, setIgnoreWhitespace] = useState(false)
-  const [singleFile, setSingleFile] = useState(false)
+  const [refreshKey, setRefreshKey] = useState(0)
+  const [sideBySide, setSideBySide] = useState(() => {
+    try { return localStorage.getItem('hydra-diff-side-by-side') === 'true' } catch { return false }
+  })
+  const [ignoreWhitespace, setIgnoreWhitespace] = useState(() => {
+    try { return localStorage.getItem('hydra-diff-ignore-whitespace') === 'true' } catch { return false }
+  })
+  const [singleFile, setSingleFile] = useState(() => {
+    try { return localStorage.getItem('hydra-diff-single-file') === 'true' } catch { return false }
+  })
   const [singleFileIdx, setSingleFileIdx] = useState(0)
   const fileRefs = useRef<Map<string, HTMLDivElement>>(new Map())
+
+  // Persist settings
+  useEffect(() => {
+    try { localStorage.setItem('hydra-diff-side-by-side', String(sideBySide)) } catch {}
+  }, [sideBySide])
+  useEffect(() => {
+    try { localStorage.setItem('hydra-diff-ignore-whitespace', String(ignoreWhitespace)) } catch {}
+  }, [ignoreWhitespace])
+  useEffect(() => {
+    try { localStorage.setItem('hydra-diff-single-file', String(singleFile)) } catch {}
+  }, [singleFile])
 
   // Fetch commits list whenever the agent changes.
   useEffect(() => {
@@ -600,7 +678,8 @@ export function DiffViewer({
       .catch(() => setCommits([]))
   }, [agent.id, agent.branch_name, projectId])
 
-  // Fetch diff when selection or options change.
+  // Fetch diff when selection, options, or manual refresh changes.
+  // Does NOT auto-reload on agent status changes.
   useEffect(() => {
     if (!agent.branch_name) return
 
@@ -608,18 +687,12 @@ export function DiffViewer({
     setLoadingDiff(true)
     setDiffError(null)
 
-    const params: { baseRef?: string; headRef?: string; ignoreWhitespace?: boolean; includeUncommitted?: boolean } = {
-      ignoreWhitespace: ignoreWhitespace || undefined,
-    }
-
-    if (selectedView.type === 'commit') {
-      // Show a single commit: diff parent^..sha
-      params.baseRef = `${selectedView.sha}^`
-      params.headRef = selectedView.sha
-    } else if (selectedView.type === 'uncommitted') {
-      params.includeUncommitted = true
-    }
-    // For 'full', omit base/head refs — backend uses triple-dot merge-base diff.
+    const params: { baseRef?: string; headRef?: string; ignoreWhitespace?: boolean; includeUncommitted?: boolean } = {}
+    if (ignoreWhitespace) params.ignoreWhitespace = true
+    if (leftSel.type === 'commit') params.baseRef = leftSel.sha
+    if (rightSel.type === 'uncommitted') params.includeUncommitted = true
+    else if (rightSel.type === 'commit') params.headRef = rightSel.sha
+    // rightSel.type === 'latest': no headRef (uses HEAD)
 
     api.default
       .getAgentDiff(
@@ -638,7 +711,29 @@ export function DiffViewer({
       })
 
     return () => { cancelled = true }
-  }, [agent.id, agent.branch_name, projectId, selectedView, ignoreWhitespace, agent.agent_status?.timestamp])
+  }, [agent.id, agent.branch_name, projectId, leftSel, rightSel, ignoreWhitespace, refreshKey])
+
+  const handleLeftChange = useCallback((newLeft: LeftSel) => {
+    setLeftSel(newLeft)
+    // If current right commit is now invalid (left >= right), reset right to uncommitted
+    setRightSel((prev) => {
+      if (prev.type !== 'commit') return prev
+      if (newLeft.type === 'base') return prev
+      // Both are specific commits: validate ordering
+      // This runs with stale `commits` from closure — but that's fine since commits don't change here
+      return prev // will be fixed in the render if needed
+    })
+  }, [])
+
+  // Enforce validity: if left commit is newer or equal to right commit, reset right
+  useEffect(() => {
+    if (leftSel.type !== 'commit' || rightSel.type !== 'commit') return
+    const li = commitIdx(leftSel.sha, commits)
+    const ri = commitIdx(rightSel.sha, commits)
+    if (li !== -1 && ri !== -1 && li <= ri) {
+      setRightSel({ type: 'uncommitted' })
+    }
+  }, [leftSel, rightSel, commits])
 
   const scrollToFile = useCallback((path: string) => {
     const el = fileRefs.current.get(path)
@@ -653,10 +748,6 @@ export function DiffViewer({
       scrollToFile(path)
     }
   }, [singleFile, diff, scrollToFile])
-
-  const selectedCommit = selectedView.type === 'commit'
-    ? commits.find((c) => c.sha === selectedView.sha) ?? null
-    : null
 
   const totalAdditions = diff?.files.reduce((s, f) => s + f.additions, 0) ?? 0
   const totalDeletions = diff?.files.reduce((s, f) => s + f.deletions, 0) ?? 0
@@ -677,10 +768,23 @@ export function DiffViewer({
           </div>
         )}
         <div className="flex items-center gap-2 ml-auto flex-wrap">
-          <CommitSelector
+          {/* Refresh button — leftmost, before commit selectors */}
+          <button
+            onClick={() => setRefreshKey((k) => k + 1)}
+            disabled={loadingDiff}
+            className="flex items-center justify-center w-7 h-7 rounded-md text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50 transition-colors cursor-pointer"
+            title="Refresh diff"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${loadingDiff ? 'animate-spin' : ''}`} />
+          </button>
+          {/* Two-button commit range selector */}
+          <LeftSelector commits={commits} selected={leftSel} onChange={handleLeftChange} />
+          <span className="text-gray-400 dark:text-gray-500 text-xs select-none">→</span>
+          <RightSelector
             commits={commits}
-            selected={selectedView}
-            onChange={setSelectedView}
+            selected={rightSel}
+            onChange={setRightSel}
+            left={leftSel}
             hasUncommitted={diff?.uncommitted_changes}
           />
           <Toggle label="Side-by-side" active={sideBySide} onClick={() => setSideBySide((v) => !v)} />
@@ -688,9 +792,6 @@ export function DiffViewer({
           <Toggle label="One file" active={singleFile} onClick={() => { setSingleFile((v) => !v); setSingleFileIdx(0) }} />
         </div>
       </div>
-
-      {/* Commit details (when a specific commit is selected) */}
-      {selectedCommit && <CommitCard commit={selectedCommit} />}
 
       {/* Conflict warning */}
       {diff?.merge_conflict && (
