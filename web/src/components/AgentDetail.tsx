@@ -11,7 +11,7 @@ function PromptBlock({ prompt }: { prompt: string }) {
   const isLong = prompt.length > 200 || prompt.split('\n').length > 3
 
   return (
-    <div className="mb-6 p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg border border-gray-200 dark:border-gray-600">
+    <div className="mb-6 p-4 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
       <p className="text-xs text-gray-400 dark:text-gray-500 mb-1 uppercase tracking-wide font-medium">Prompt</p>
       <div className="relative">
         <div
@@ -21,7 +21,7 @@ function PromptBlock({ prompt }: { prompt: string }) {
           <p className="text-sm text-gray-800 dark:text-gray-200 whitespace-pre-wrap">{prompt}</p>
         </div>
         {isLong && !expanded && (
-          <div className="absolute bottom-0 left-0 right-0 h-8 bg-gradient-to-t from-gray-50 dark:from-gray-700/50 to-transparent pointer-events-none" />
+          <div className="absolute bottom-0 left-0 right-0 h-8 bg-gradient-to-t from-gray-50 dark:from-gray-800 to-transparent pointer-events-none" />
         )}
       </div>
       {isLong && (
