@@ -25,7 +25,7 @@ const DOCKERFILE_TEMPLATES: Record<string, { label: string; content: string; sha
   },
   python: {
     label: 'Python Data Science',
-    content: '# Install Python libraries\nRUN apt-get update && apt-get install -y python3-pip\nRUN pip3 install numpy pandas matplotlib scipy scikit-learn --break-system-packages'
+    content: '# Install Python libraries with apt cache mounts\nRUN --mount=type=cache,target=/var/cache/apt,sharing=locked \\\n    --mount=type=cache,target=/var/lib/apt,sharing=locked \\\n    apt-get update && apt-get install -y python3-pip\nRUN pip3 install numpy pandas matplotlib scipy scikit-learn --break-system-packages'
   },
   nodejs: {
     label: 'Node.js',
