@@ -16,6 +16,7 @@
         - Make it a bit more performant - load the files diff first, then load the individual file (do this optimization if loading one-by-one, or if headers of a file are collapsed)
         - Make diff sidebar (changed files) size modifiable (draggable), and save that setting like the sidebar.
         - Remove copy filepath button from changed files diff sidebar, and instead add it to the filepath in the diff file header.
+        - Fix 2 scroll bars issue when opening settings panel below agent terminal when diff is empty (No changes).
 
 - Install Go langauge server, as extension of above, so that Claude (/Gemini) can access language server information rather than just having to read files.
 
