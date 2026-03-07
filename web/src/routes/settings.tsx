@@ -4,6 +4,7 @@ import { api } from '../stores/apiClient'
 import { useProjectStore } from '../stores/projectStore'
 import type { ConfigResponse, AgentConfig, AgentResponse } from '../api'
 import { AgentTerminal } from '../components/AgentTerminal'
+import { XIcon, LayersIcon, MonitorIcon, SparklesIcon, DocumentIcon } from '../components/icons'
 
 export const Route = createFileRoute('/settings')({
   component: SettingsPage,
@@ -180,9 +181,7 @@ function SettingsPage() {
                 <div className="flex items-center justify-between mb-6">
                   <div className="flex items-center gap-2">
                     <div className="w-8 h-8 rounded-lg bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center">
-                      <svg className="w-4 h-4 text-blue-600 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
-                      </svg>
+                      <LayersIcon className="w-4 h-4 text-blue-600 dark:text-blue-400" />
                     </div>
                     <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">Global Defaults</h2>
                   </div>
@@ -208,9 +207,7 @@ function SettingsPage() {
                 <div className="flex items-center justify-between mb-6">
                   <div className="flex items-center gap-2">
                     <div className="w-8 h-8 rounded-lg bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center">
-                      <svg className="w-4 h-4 text-purple-600 dark:text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                      </svg>
+                      <MonitorIcon className="w-4 h-4 text-purple-600 dark:text-purple-400" />
                     </div>
                     <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">Claude Overrides</h2>
                   </div>
@@ -236,9 +233,7 @@ function SettingsPage() {
                 <div className="flex items-center justify-between mb-6">
                   <div className="flex items-center gap-2">
                     <div className="w-8 h-8 rounded-lg bg-teal-100 dark:bg-teal-900/30 flex items-center justify-center">
-                      <svg className="w-4 h-4 text-teal-600 dark:text-teal-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
-                      </svg>
+                      <SparklesIcon className="w-4 h-4 text-teal-600 dark:text-teal-400" />
                     </div>
                     <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">Gemini Overrides</h2>
                   </div>
@@ -263,9 +258,7 @@ function SettingsPage() {
               <div className="animate-in fade-in slide-in-from-bottom-1 duration-200">
                 <div className="flex items-center gap-2 mb-6">
                   <div className="w-8 h-8 rounded-lg bg-orange-100 dark:bg-orange-900/30 flex items-center justify-center">
-                    <svg className="w-4 h-4 text-orange-600 dark:text-orange-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                    </svg>
+                    <DocumentIcon className="w-4 h-4 text-orange-600 dark:text-orange-400" />
                   </div>
                   <div>
                     <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">Built-in Default Dockerfiles</h2>
@@ -301,9 +294,7 @@ function SettingsPage() {
                   onClick={() => setTestAgent(null)}
                   className="p-1 rounded-md hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-500 transition-colors cursor-pointer"
                 >
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
+                  <XIcon className="w-5 h-5" />
                 </button>
               </div>
               <div className="p-6 overflow-auto flex-1">

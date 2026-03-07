@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import hljs from 'highlight.js'
 import { api } from './stores/apiClient'
 import type { AgentResponse, CommitInfo, DiffFile, DiffResponse } from './api'
+import { FileAddedIcon, FileDeletedIcon, FileModifiedIcon, FileRenamedIcon, CalendarIcon, WarningIcon, ChevronDownIcon, ChevronRightIcon, ChevronLeftIcon, CheckIcon, SpinnerIcon } from './components/icons'
 
 // ── Syntax highlighting helpers ───────────────────────────────────────────────
 
@@ -139,46 +140,12 @@ function buildSideBySide(hunkLines: DiffFile['hunks'][0]['lines']): SideBySideLi
   return result
 }
 
-// ── Icons ─────────────────────────────────────────────────────────────────────
-
-function FileAddedIcon() {
-  return (
-    <svg className="w-3.5 h-3.5 text-green-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
-    </svg>
-  )
-}
-
-function FileDeletedIcon() {
-  return (
-    <svg className="w-3.5 h-3.5 text-red-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M4 12h16" />
-    </svg>
-  )
-}
-
-function FileModifiedIcon() {
-  return (
-    <svg className="w-3.5 h-3.5 text-yellow-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <circle cx="12" cy="12" r="4" strokeWidth={2.5} />
-    </svg>
-  )
-}
-
-function FileRenamedIcon() {
-  return (
-    <svg className="w-3.5 h-3.5 text-blue-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7l10 10M17 7v10H7" />
-    </svg>
-  )
-}
-
 function ChangeTypeIcon({ type }: { type: string }) {
   switch (type) {
-    case 'added':   return <FileAddedIcon />
-    case 'deleted': return <FileDeletedIcon />
-    case 'renamed': return <FileRenamedIcon />
-    default:        return <FileModifiedIcon />
+    case 'added':   return <FileAddedIcon className="w-3.5 h-3.5 text-green-500 shrink-0" />
+    case 'deleted': return <FileDeletedIcon className="w-3.5 h-3.5 text-red-500 shrink-0" />
+    case 'renamed': return <FileRenamedIcon className="w-3.5 h-3.5 text-blue-500 shrink-0" />
+    default:        return <FileModifiedIcon className="w-3.5 h-3.5 text-yellow-500 shrink-0" />
   }
 }
 
@@ -508,19 +475,12 @@ function CommitSelector({
         onClick={() => setOpen((o) => !o)}
         className="flex items-center gap-1.5 h-7 px-2.5 rounded-md text-xs font-medium text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors cursor-pointer"
       >
-        <svg className="w-3.5 h-3.5 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-        </svg>
+        <CalendarIcon className="w-3.5 h-3.5 text-gray-400 shrink-0" />
         <span className="max-w-[180px] truncate">{label}</span>
         {hasUncommitted && (
-          <svg className="w-3.5 h-3.5 text-amber-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <title>Uncommitted changes</title>
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-          </svg>
+          <WarningIcon className="w-3.5 h-3.5 text-amber-500 shrink-0" />
         )}
-        <svg className="w-3 h-3 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="m6 9 6 6 6-6" />
-        </svg>
+        <ChevronDownIcon className="w-3 h-3 text-gray-400 shrink-0" />
       </button>
 
       {open && (
@@ -533,15 +493,11 @@ function CommitSelector({
                 selected.type === 'full' ? 'bg-blue-50 dark:bg-blue-900/20' : ''
               }`}
             >
-              <svg className="w-3.5 h-3.5 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-              </svg>
+              <ChevronRightIcon className="w-3.5 h-3.5 text-gray-400 shrink-0" />
               <span className="font-medium text-gray-800 dark:text-gray-200">Full diff</span>
               <span className="text-gray-400 dark:text-gray-500 ml-auto">base → current</span>
               {selected.type === 'full' && (
-                <svg className="w-3 h-3 text-blue-500 shrink-0" fill="currentColor" viewBox="0 0 24 24">
-                  <path d="M20 6 9 17l-5-5" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
-                </svg>
+                <CheckIcon className="w-3 h-3 text-blue-500 shrink-0" />
               )}
             </button>
             <button
@@ -550,15 +506,11 @@ function CommitSelector({
                 selected.type === 'uncommitted' ? 'bg-blue-50 dark:bg-blue-900/20' : ''
               }`}
             >
-              <svg className="w-3.5 h-3.5 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-              </svg>
+              <FileAddedIcon className="w-3.5 h-3.5 text-gray-400 shrink-0" />
               <span className="font-medium text-gray-800 dark:text-gray-200">Include uncommitted</span>
               <span className="text-gray-400 dark:text-gray-500 ml-auto">base → worktree</span>
               {selected.type === 'uncommitted' && (
-                <svg className="w-3 h-3 text-blue-500 shrink-0" fill="currentColor" viewBox="0 0 24 24">
-                  <path d="M20 6 9 17l-5-5" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
-                </svg>
+                <CheckIcon className="w-3 h-3 text-blue-500 shrink-0" />
               )}
             </button>
           </div>
@@ -582,9 +534,7 @@ function CommitSelector({
                   </span>
                   <span className="text-xs text-gray-700 dark:text-gray-300 leading-tight truncate">{c.message}</span>
                   {selected.type === 'commit' && selected.sha === c.sha && (
-                    <svg className="w-3 h-3 text-blue-500 shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 24 24">
-                      <path d="M20 6 9 17l-5-5" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
-                    </svg>
+                    <CheckIcon className="w-3 h-3 text-blue-500 shrink-0 mt-0.5" />
                   )}
                 </button>
               ))}
@@ -745,9 +695,7 @@ export function DiffViewer({
       {/* Conflict warning */}
       {diff?.merge_conflict && (
         <div className="mb-4 px-4 py-3 bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-900/50 rounded-lg flex items-start gap-3">
-          <svg className="w-5 h-5 text-red-500 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-          </svg>
+          <WarningIcon className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
           <div>
             <p className="text-sm font-semibold text-red-800 dark:text-red-400">Merge Conflict Detected</p>
             <p className="text-xs text-red-600 dark:text-red-500 mt-1">
@@ -760,10 +708,7 @@ export function DiffViewer({
       {/* Content */}
       {loadingDiff ? (
         <div className="flex items-center justify-center py-8 text-gray-400 dark:text-gray-500">
-          <svg className="w-4 h-4 animate-spin mr-2" fill="none" viewBox="0 0 24 24">
-            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
-          </svg>
+          <SpinnerIcon className="w-4 h-4 animate-spin mr-2" />
           <span className="text-sm">Loading diff…</span>
         </div>
       ) : diffError ? (
@@ -820,9 +765,7 @@ export function DiffViewer({
                     disabled={singleFileIdx === 0}
                     className="flex items-center justify-center w-7 h-7 rounded-md border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors"
                   >
-                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="m15 19-7-7 7-7" />
-                    </svg>
+                    <ChevronLeftIcon className="w-3.5 h-3.5" />
                   </button>
                   <span className="text-xs text-gray-500 dark:text-gray-400">
                     {singleFileIdx + 1} / {diff.files.length}
@@ -832,9 +775,7 @@ export function DiffViewer({
                     disabled={singleFileIdx === diff.files.length - 1}
                     className="flex items-center justify-center w-7 h-7 rounded-md border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors"
                   >
-                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="m9 5 7 7-7 7" />
-                    </svg>
+                    <ChevronRightIcon className="w-3.5 h-3.5" />
                   </button>
                 </div>
                 <FileDiff
