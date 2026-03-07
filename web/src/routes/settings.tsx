@@ -4,7 +4,9 @@ import { api } from '../stores/apiClient'
 import { useProjectStore } from '../stores/projectStore'
 import type { ConfigResponse, AgentConfig, AgentResponse } from '../api'
 import { AgentTerminal } from '../components/AgentTerminal'
-import { X, Layers, Monitor, Sparkles, FileText } from 'lucide-react'
+import { X, Layers, Monitor, Sparkles, FileText, Plus, Trash2 } from 'lucide-react'
+import { InfoTooltip } from '../components/InfoTooltip'
+import type { ProjectInfo } from '../api'
 
 export const Route = createFileRoute('/settings')({
   component: SettingsPage,
@@ -199,6 +201,8 @@ function SettingsPage() {
                   onChange={(defaults) => setConfig({ ...config, defaults })}
                   inherited={null}
                   agentType="default"
+                  scope={scope}
+                  selectedProject={selectedProject}
                 />
               </div>
             )}
@@ -225,6 +229,8 @@ function SettingsPage() {
                   onChange={(val) => setConfig({ ...config, agents: { ...config.agents, claude: val } })}
                   inherited={config.defaults}
                   agentType="claude"
+                  scope={scope}
+                  selectedProject={selectedProject}
                 />
               </div>
             )}
@@ -251,6 +257,8 @@ function SettingsPage() {
                   onChange={(val) => setConfig({ ...config, agents: { ...config.agents, gemini: val } })}
                   inherited={config.defaults}
                   agentType="gemini"
+                  scope={scope}
+                  selectedProject={selectedProject}
                 />
               </div>
             )}
@@ -279,7 +287,7 @@ function SettingsPage() {
             disabled={saving}
             className="px-6 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-500/25 active:scale-95 disabled:opacity-50 cursor-pointer"
           >
-            {saving ? 'Saving...' : `Save ${scope === 'project' ? 'Project' : 'Global'} Configuration`}
+            {saving ? 'Saving...' : 'Save'}
           </button>
         </div>
 
@@ -369,11 +377,15 @@ function ConfigForm({
   onChange,
   inherited,
   agentType,
+  scope,
+  selectedProject,
 }: {
   value: AgentConfig
   onChange: (val: AgentConfig) => void
   inherited: AgentConfig | null
   agentType: string
+  scope: ConfigScope
+  selectedProject?: ProjectInfo
 }) {
   const [template, setTemplate] = useState('none')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -403,40 +415,78 @@ function ConfigForm({
 
   const baseImage = `hydra-agent-${agentType === 'default' ? '<type>' : agentType}`
 
+  const projectDir = scope === 'project' ? (selectedProject?.path || '/project') : '/home/<user>/project'
+
+  function resolvePathExample(path: string) {
+    if (!path) return '...'
+
+    let hostSubDir = 'root'
+    let hostPathSuffix = path
+
+    if (path.startsWith('~/')) {
+      hostSubDir = 'user'
+      hostPathSuffix = path.substring(2)
+    } else if (path.startsWith('/')) {
+      hostSubDir = 'root'
+      hostPathSuffix = path.substring(1)
+    } else {
+      hostSubDir = 'worktree'
+      hostPathSuffix = path
+    }
+
+    return `${projectDir}/.hydra/cache/custom/${hostSubDir}/${hostPathSuffix}`
+  }
+
+  function resolveContainerPathExample(path: string) {
+    if (!path) return '...'
+    if (path.startsWith('~/')) {
+      return `/home/hydra/${path.substring(2)}`
+    }
+    if (path.startsWith('/')) {
+      return path
+    }
+    return `/project/${path}`
+  }
+
+  function resolveBuildContextExample(path: string) {
+    if (!path) return `${projectDir}/.hydra/build/tmp`
+    if (path.startsWith('/')) {
+      return path
+    }
+    if (path.startsWith('~')) {
+      return `/home/<user>${path.substring(1)}`
+    }
+    return `${projectDir}/${path}`
+  }
+
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div className="space-y-1.5 opacity-50">
-          <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">
-            Dockerfile Path
-          </label>
-          <input
-            type="text"
-            value={value.dockerfile || ''}
-            disabled
-            placeholder={inherited?.dockerfile || './Dockerfile'}
-            className="w-full text-sm px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 font-mono shadow-inner cursor-not-allowed"
-          />
-          <p className="text-[10px] text-gray-400 dark:text-gray-500 italic">Custom Dockerfile path (not editable here)</p>
-        </div>
-        <div className="space-y-1.5">
-          <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">
-            Build Context
-          </label>
-          <input
-            type="text"
-            value={value.context || ''}
-            onChange={(e) => onChange({ ...value, context: e.target.value || null })}
-            placeholder={inherited?.context || '<projectDir>/.hydra/build/tmp'}
-            className="w-full text-sm px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-100 placeholder-gray-300 dark:placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-mono shadow-inner"
-          />
-        </div>
+      <div className="space-y-1.5">
+        <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">
+          Build Context
+          <InfoTooltip title="Build Context">
+            <p>The directory where the Docker build will be executed.</p>
+            <ul className="list-disc ml-3 space-y-1 mt-1">
+              <li><code className="text-blue-300">/abs/path</code>: Absolute path on the host.</li>
+              <li><code className="text-blue-300">~/path</code>: Relative to your home directory.</li>
+              <li><code className="text-blue-300">rel/path</code>: Relative to the project directory.</li>
+            </ul>
+            <p className="mt-2 text-gray-400 italic">Resolved path: {resolveBuildContextExample(value.context || '')}</p>
+          </InfoTooltip>
+        </label>
+        <input
+          type="text"
+          value={value.context || ''}
+          onChange={(e) => onChange({ ...value, context: e.target.value || null })}
+          placeholder={inherited?.context || '<projectDir>/.hydra/build/tmp'}
+          className="w-full text-sm px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-100 placeholder-gray-300 dark:placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-mono shadow-inner"
+        />
       </div>
 
       <div className="space-y-2">
         <div className="flex items-center justify-between">
           <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">
-            Dockerfile Contents (Extends Base)
+            Dockerfile (Extends Base)
           </label>
           <div className="flex items-center gap-2">
             <span className="text-[10px] text-gray-400 dark:text-gray-500">Add Template:</span>
@@ -451,20 +501,18 @@ function ConfigForm({
             </select>
           </div>
         </div>
-        <div className="relative group rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 focus-within:ring-2 focus-within:ring-blue-500/20 focus-within:border-blue-500 transition-all shadow-inner overflow-hidden">
-          <div className="max-h-64 overflow-y-auto">
-            <div className="px-3 pt-3 text-blue-500 dark:text-blue-400 font-mono text-sm pointer-events-none opacity-60">
-              FROM {baseImage}
-            </div>
-            <textarea
-              ref={textareaRef}
-              value={value.dockerfile_contents || ''}
-              onChange={(e) => onChange({ ...value, dockerfile_contents: e.target.value || null })}
-              placeholder={inherited?.dockerfile_contents || '# Add your custom Dockerfile instructions here\nRUN apt-get install -y ...'}
-              className="w-full text-sm px-3 pb-3 bg-transparent text-gray-800 dark:text-gray-100 placeholder-gray-300 dark:placeholder-gray-600 focus:outline-none font-mono leading-relaxed resize-y"
-              spellCheck={false}
-            />
+        <div className="relative group rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 focus-within:ring-2 focus-within:ring-blue-500/20 focus-within:border-blue-500 transition-all shadow-inner">
+          <div className="px-3 pt-3 text-blue-500 dark:text-blue-400 font-mono text-sm pointer-events-none opacity-60">
+            FROM {baseImage}
           </div>
+          <textarea
+            ref={textareaRef}
+            value={value.dockerfile_contents || ''}
+            onChange={(e) => onChange({ ...value, dockerfile_contents: e.target.value || null })}
+            placeholder={inherited?.dockerfile_contents || '# Add your custom Dockerfile instructions here\nRUN apt-get install -y ...'}
+            className="w-full min-h-[400px] text-sm px-3 pb-3 bg-transparent text-gray-800 dark:text-gray-100 placeholder-gray-300 dark:placeholder-gray-600 focus:outline-none font-mono leading-relaxed resize-y"
+            spellCheck={false}
+          />
           <div className="absolute right-3 bottom-3 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
             <div className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-400 border border-gray-200 dark:border-gray-700 font-mono">
               Dockerfile Extension
@@ -475,50 +523,86 @@ function ConfigForm({
 
       <div className="space-y-2">
         <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">
-          Dockerignore Contents (Override)
+          Dockerignore (Override)
         </label>
-        <div className="relative group rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 focus-within:ring-2 focus-within:ring-blue-500/20 focus-within:border-blue-500 transition-all shadow-inner overflow-hidden">
-          <div className="max-h-32 overflow-y-auto">
-            <textarea
-              value={value.dockerignore_contents || ''}
-              onChange={(e) => onChange({ ...value, dockerignore_contents: e.target.value || null })}
-              placeholder={inherited?.dockerignore_contents || '# Add files to ignore during build\n.git\nnode_modules'}
-              className="w-full text-sm p-3 bg-transparent text-gray-800 dark:text-gray-100 placeholder-gray-300 dark:placeholder-gray-600 focus:outline-none font-mono leading-relaxed resize-y"
-              spellCheck={false}
-            />
-          </div>
+        <div className="relative group rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 focus-within:ring-2 focus-within:ring-blue-500/20 focus-within:border-blue-500 transition-all shadow-inner">
+          <textarea
+            value={value.dockerignore_contents || ''}
+            onChange={(e) => onChange({ ...value, dockerignore_contents: e.target.value || null })}
+            placeholder={inherited?.dockerignore_contents || '# Add files to ignore during build\n.git\nnode_modules'}
+            className="w-full min-h-[200px] text-sm p-3 bg-transparent text-gray-800 dark:text-gray-100 placeholder-gray-300 dark:placeholder-gray-600 focus:outline-none font-mono leading-relaxed resize-y"
+            spellCheck={false}
+          />
         </div>
       </div>
 
       <div className="space-y-1.5">
-        <div className="flex items-center gap-2">
-          <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">
-            Shared Mounts (Comma separated)
-          </label>
-          <div className="group relative">
-            <svg className="w-3.5 h-3.5 text-gray-400 cursor-help" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-            <div className="absolute left-full ml-2 top-0 w-64 p-2 bg-gray-800 text-white text-[10px] rounded shadow-xl opacity-0 group-hover:opacity-100 transition-opacity z-10 pointer-events-none">
-              <p className="font-bold mb-1">Shared Bind Mounts</p>
-              <p className="mb-2">Paths inside the container that are shared between all agents in this project.</p>
-              <ul className="list-disc ml-3 space-y-1">
-                <li><code className="text-blue-300">/abs/path</code>: Stored in <code className="text-gray-300">.hydra/cache/custom/root/abs/path</code></li>
-                <li><code className="text-blue-300">~/path</code>: Stored in <code className="text-gray-300">.hydra/cache/custom/user/path</code></li>
-                <li><code className="text-blue-300">rel/path</code>: Relative to work directory.</li>
-              </ul>
-              <p className="mt-2 text-gray-400 italic">Example: ~/.cache/go-build, ~/go/pkg/mod</p>
+        <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">
+          Shared Mounts
+          <InfoTooltip title="Shared Bind Mounts">
+            <p>Paths inside the container that are shared between all agents in this project.</p>
+            <ul className="list-disc ml-3 space-y-1 mt-1">
+              <li><code className="text-blue-300">/abs/path</code>: Absolute path on the host (namespaced).</li>
+              <li><code className="text-blue-300">~/path</code>: Relative to home directory (namespaced).</li>
+              <li><code className="text-blue-300">rel/path</code>: Relative to project directory.</li>
+            </ul>
+          </InfoTooltip>
+        </label>
+        
+        <div className="space-y-4">
+          {(value.shared_mounts || []).map((mount, index) => (
+            <div key={index} className="flex flex-col gap-1.5 p-3 rounded-xl border border-gray-100 dark:border-gray-700/50 bg-gray-50/50 dark:bg-gray-800/30">
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={mount}
+                  onChange={(e) => {
+                    const newMounts = [...(value.shared_mounts || [])]
+                    newMounts[index] = e.target.value
+                    onChange({ ...value, shared_mounts: newMounts })
+                  }}
+                  placeholder="e.g. ~/.cache/go-build"
+                  className="flex-1 text-sm px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-100 font-mono shadow-inner focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+                />
+                <button
+                  onClick={() => {
+                    const newMounts = (value.shared_mounts || []).filter((_, i) => i !== index)
+                    onChange({ ...value, shared_mounts: newMounts.length > 0 ? newMounts : null })
+                  }}
+                  className="p-2 text-gray-400 hover:text-red-500 transition-colors"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2 px-1">
+                <div className="space-y-0.5">
+                  <span className="text-[9px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider">In Container</span>
+                  <p className="text-[10px] font-mono text-blue-600 dark:text-blue-400 truncate" title={resolveContainerPathExample(mount)}>
+                    {resolveContainerPathExample(mount)}
+                  </p>
+                </div>
+                <div className="space-y-0.5">
+                  <span className="text-[9px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Host Storage</span>
+                  <p className="text-[10px] font-mono text-orange-600 dark:text-orange-400 truncate" title={resolvePathExample(mount)}>
+                    {resolvePathExample(mount)}
+                  </p>
+                </div>
+              </div>
             </div>
-          </div>
+          ))}
+          <button
+            onClick={() => {
+              const newMounts = [...(value.shared_mounts || []), '']
+              onChange({ ...value, shared_mounts: newMounts })
+            }}
+            className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors ml-1"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            Add Shared Mount
+          </button>
         </div>
-        <input
-          type="text"
-          value={(value.shared_mounts || []).join(', ')}
-          onChange={(e) => onChange({ ...value, shared_mounts: e.target.value.split(',').map(s => s.trim()).filter(s => s !== '') })}
-          placeholder={inherited?.shared_mounts?.join(', ') || 'e.g. ~/.cache/go-build, ~/go/pkg/mod'}
-          className="w-full text-sm px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-100 placeholder-gray-300 dark:placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-mono shadow-inner"
-        />
       </div>
+
 
       <div className="space-y-1.5">
         <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">
@@ -535,3 +619,4 @@ function ConfigForm({
     </div>
   )
 }
+
