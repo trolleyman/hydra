@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 
 	"braces.dev/errtrace"
 	"github.com/BurntSushi/toml"
@@ -202,16 +204,71 @@ func SaveToFile(path string, cfg Config) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return errtrace.Wrap(fmt.Errorf("create config parent: %s: %w", path, err))
 	}
-	f, err := os.Create(path)
-	if err != nil {
-		return errtrace.Wrap(fmt.Errorf("create config: %s: %w", path, err))
-	}
-	defer f.Close()
-	encoder := toml.NewEncoder(f)
-	if err := encoder.Encode(cfg); err != nil {
+	content := marshalConfig(cfg)
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
 		return errtrace.Wrap(fmt.Errorf("save config: %s: %w", path, err))
 	}
 	return nil
+}
+
+// tomlStringValue returns the TOML value representation of a string.
+// Multi-line strings are encoded using triple-quoted """ syntax.
+func tomlStringValue(s string) string {
+	if strings.Contains(s, "\n") {
+		escaped := strings.ReplaceAll(s, `\`, `\\`)
+		escaped = strings.ReplaceAll(escaped, `"""`, `\"\"\"`)
+		return `"""` + "\n" + escaped + `"""`
+	}
+	escaped := strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(s)
+	return `"` + escaped + `"`
+}
+
+// writeAgentConfigFields writes the fields of an AgentConfig to buf.
+func writeAgentConfigFields(buf *strings.Builder, cfg AgentConfig) {
+	if cfg.Dockerfile != nil {
+		buf.WriteString("dockerfile = " + tomlStringValue(*cfg.Dockerfile) + "\n")
+	}
+	if cfg.DockerfileContents != nil {
+		buf.WriteString("dockerfile_contents = " + tomlStringValue(*cfg.DockerfileContents) + "\n")
+	}
+	if cfg.Context != nil {
+		buf.WriteString("context = " + tomlStringValue(*cfg.Context) + "\n")
+	}
+	if cfg.PrePrompt != nil {
+		buf.WriteString("pre_prompt = " + tomlStringValue(*cfg.PrePrompt) + "\n")
+	}
+}
+
+// marshalConfig serializes a Config to TOML without indentation and with
+// triple-quoted multi-line strings.
+func marshalConfig(cfg Config) string {
+	var buf strings.Builder
+
+	defaultsEmpty := cfg.Defaults.Dockerfile == nil &&
+		cfg.Defaults.DockerfileContents == nil &&
+		cfg.Defaults.Context == nil &&
+		cfg.Defaults.PrePrompt == nil
+
+	if !defaultsEmpty {
+		buf.WriteString("[defaults]\n")
+		writeAgentConfigFields(&buf, cfg.Defaults)
+	}
+
+	agentNames := make([]string, 0, len(cfg.Agents))
+	for name := range cfg.Agents {
+		agentNames = append(agentNames, name)
+	}
+	sort.Strings(agentNames)
+
+	for _, name := range agentNames {
+		if buf.Len() > 0 {
+			buf.WriteString("\n")
+		}
+		buf.WriteString("[agents." + name + "]\n")
+		writeAgentConfigFields(&buf, cfg.Agents[name])
+	}
+
+	return buf.String()
 }
 
 // Deprecated: Use GetResolvedConfig instead.
