@@ -2,7 +2,11 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import hljs from 'highlight.js'
 import { api } from './stores/apiClient'
 import type { AgentResponse, CommitInfo, DiffFile, DiffResponse } from './api'
-import { Plus, Minus, SquareDot, Diff, Calendar, TriangleAlert, ChevronDown, ChevronRight, ChevronLeft, Check, LoaderCircle, RefreshCw } from 'lucide-react'
+import {
+  Plus, Minus, SquareDot, Diff, Calendar, TriangleAlert,
+  ChevronDown, ChevronRight, ChevronLeft, Check, LoaderCircle, RefreshCw,
+  Settings, Copy, Folder, FolderOpen,
+} from 'lucide-react'
 
 // ── Syntax highlighting helpers ───────────────────────────────────────────────
 
@@ -49,13 +53,11 @@ function splitHighlightedLines(html: string): string[] {
       }
       i = end + 1
     } else if (html[i] === '\n') {
-      // Close open spans at line boundary, reopen on next line.
       current += openSpans.map(() => '</span>').join('')
       lines.push(current)
       current = openSpans.join('')
       i++
     } else {
-      // Escape any un-escaped & < > just in case (shouldn't happen from hljs output)
       current += html[i]
       i++
     }
@@ -73,7 +75,6 @@ function highlightCode(code: string, language: string): string[] {
     const result = hljs.highlight(code, { language, ignoreIllegals: true })
     return splitHighlightedLines(result.value)
   } catch {
-    // Fallback: escape and split
     return code.split('\n').map((l) =>
       l.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     )
@@ -92,7 +93,6 @@ interface SideBySideLine {
 }
 
 function buildSideBySide(hunkLines: DiffFile['hunks'][0]['lines']): SideBySideLine[] {
-  // Group consecutive additions/deletions into pairs.
   const result: SideBySideLine[] = []
   let i = 0
   while (i < hunkLines.length) {
@@ -106,7 +106,6 @@ function buildSideBySide(hunkLines: DiffFile['hunks'][0]['lines']): SideBySideLi
       })
       i++
     } else if (l.type === 'deletion') {
-      // Look ahead for matching additions.
       const dels: typeof hunkLines = []
       const adds: typeof hunkLines = []
       while (i < hunkLines.length && hunkLines[i].type === 'deletion') {
@@ -165,11 +164,9 @@ function UnifiedHunk({
 }) {
   return (
     <div>
-      {/* Hunk header */}
       <div className="flex items-center bg-blue-50 dark:bg-blue-950/30 border-y border-blue-100 dark:border-blue-900/50 px-2 py-0.5">
         <span className="font-mono text-xs text-blue-500 dark:text-blue-400">{hunk.header}</span>
       </div>
-      {/* Lines */}
       {hunk.lines.map((line, idx) => {
         const isAdd = line.type === 'addition'
         const isDel = line.type === 'deletion'
@@ -189,35 +186,22 @@ function UnifiedHunk({
             key={idx}
             className={`flex items-stretch hover:brightness-95 dark:hover:brightness-110 ${bgClass}`}
           >
-            {/* Old line number */}
-            <span className={UNIFIED_LINE_NUM_CLASS}>
-              {line.old_line_num ?? ''}
-            </span>
-            {/* New line number */}
-            <span className={UNIFIED_LINE_NUM_CLASS}>
-              {line.new_line_num ?? ''}
-            </span>
-            {/* Diff prefix */}
+            <span className={UNIFIED_LINE_NUM_CLASS}>{line.old_line_num ?? ''}</span>
+            <span className={UNIFIED_LINE_NUM_CLASS}>{line.new_line_num ?? ''}</span>
             <span className={`select-none font-mono text-xs leading-5 w-4 text-center shrink-0 ${
               isAdd ? 'text-green-600 dark:text-green-400' :
               isDel ? 'text-red-600 dark:text-red-400' : 'text-gray-300 dark:text-gray-700'
             }`}>
               {isAdd ? '+' : isDel ? '-' : isNoNewline ? '\\' : ' '}
             </span>
-            {/* Code content */}
             {isNoNewline ? (
               <span className={`${UNIFIED_CODE_CLASS} text-gray-400 dark:text-gray-500 italic`}>
                 {line.content}
               </span>
             ) : highlighted ? (
-              <span
-                className={UNIFIED_CODE_CLASS}
-                dangerouslySetInnerHTML={{ __html: highlighted }}
-              />
+              <span className={UNIFIED_CODE_CLASS} dangerouslySetInnerHTML={{ __html: highlighted }} />
             ) : (
-              <span className={UNIFIED_CODE_CLASS}>
-                {line.content}
-              </span>
+              <span className={UNIFIED_CODE_CLASS}>{line.content}</span>
             )}
           </div>
         )
@@ -242,11 +226,9 @@ function SideBySideHunk({
 
   return (
     <div>
-      {/* Hunk header */}
       <div className="flex items-center bg-blue-50 dark:bg-blue-950/30 border-y border-blue-100 dark:border-blue-900/50 px-2 py-0.5">
         <span className="font-mono text-xs text-blue-500 dark:text-blue-400">{hunk.header}</span>
       </div>
-      {/* Lines */}
       {sbsLines.map((line, idx) => {
         const oldHighlighted = line.oldLineNum != null ? highlightedOld.get(line.oldLineNum) : undefined
         const newHighlighted = line.newLineNum != null ? highlightedNew.get(line.newLineNum) : undefined
@@ -264,7 +246,6 @@ function SideBySideHunk({
 
         return (
           <div key={idx} className="flex items-stretch divide-x divide-gray-200 dark:divide-gray-700">
-            {/* Old side */}
             <div className={`flex items-start flex-1 min-w-0 ${oldBg}`}>
               <span className={SBS_LINE_NUM}>{line.oldLineNum ?? ''}</span>
               <span className={`select-none font-mono text-xs w-3 shrink-0 text-center leading-5 ${
@@ -278,7 +259,6 @@ function SideBySideHunk({
                 <span className={SBS_CODE}>{line.oldContent ?? ''}</span>
               )}
             </div>
-            {/* New side */}
             <div className={`flex items-start flex-1 min-w-0 ${newBg}`}>
               <span className={SBS_LINE_NUM}>{line.newLineNum ?? ''}</span>
               <span className={`select-none font-mono text-xs w-3 shrink-0 text-center leading-5 ${
@@ -299,7 +279,6 @@ function SideBySideHunk({
   )
 }
 
-
 // ── File diff card ────────────────────────────────────────────────────────────
 
 function FileDiff({
@@ -313,11 +292,9 @@ function FileDiff({
 }) {
   const lang = getLanguage(file.path)
 
-  // Reconstruct old/new code blocks and highlight them.
   const { highlightedOld, highlightedNew } = (() => {
     if (file.binary) return { highlightedOld: new Map<number, string>(), highlightedNew: new Map<number, string>() }
 
-    // Collect old lines (context + deletions) and new lines (context + additions).
     const oldLines: Array<{ lineNum: number; content: string }> = []
     const newLines: Array<{ lineNum: number; content: string }> = []
 
@@ -355,7 +332,6 @@ function FileDiff({
 
   return (
     <div ref={fileRef} className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden mb-4">
-      {/* File header */}
       <div className="flex items-center gap-2 px-3 py-2 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 sticky top-0 z-10">
         <ChangeTypeIcon type={file.change_type} />
         <span className="font-mono text-xs text-gray-700 dark:text-gray-300 flex-1 min-w-0 truncate" title={displayPath}>
@@ -373,32 +349,17 @@ function FileDiff({
         )}
       </div>
 
-      {/* Diff content */}
       {file.binary ? (
-        <div className="px-4 py-3 text-xs text-gray-400 dark:text-gray-500 italic">
-          Binary file changed
-        </div>
+        <div className="px-4 py-3 text-xs text-gray-400 dark:text-gray-500 italic">Binary file changed</div>
       ) : file.hunks.length === 0 ? (
-        <div className="px-4 py-3 text-xs text-gray-400 dark:text-gray-500 italic">
-          No changes
-        </div>
+        <div className="px-4 py-3 text-xs text-gray-400 dark:text-gray-500 italic">No changes</div>
       ) : (
         <div className="overflow-hidden">
           {file.hunks.map((hunk, idx) =>
             sideBySide ? (
-              <SideBySideHunk
-                key={idx}
-                hunk={hunk}
-                highlightedOld={highlightedOld}
-                highlightedNew={highlightedNew}
-              />
+              <SideBySideHunk key={idx} hunk={hunk} highlightedOld={highlightedOld} highlightedNew={highlightedNew} />
             ) : (
-              <UnifiedHunk
-                key={idx}
-                hunk={hunk}
-                highlightedOld={highlightedOld}
-                highlightedNew={highlightedNew}
-              />
+              <UnifiedHunk key={idx} hunk={hunk} highlightedOld={highlightedOld} highlightedNew={highlightedNew} />
             )
           )}
         </div>
@@ -528,7 +489,6 @@ function RightSelector({
     ? 'Latest commit'
     : formatShortLabel(commits.find((c) => c.sha === selected.sha), selected.sha)
 
-  // Valid commits for right: must be newer than left (lower index in newest-first array)
   const validCommits = commits.filter((_, idx) => {
     if (left.type === 'base') return true
     const li = commitIdx(left.sha, commits)
@@ -605,28 +565,273 @@ function RightSelector({
   )
 }
 
-// ── Toggle button ─────────────────────────────────────────────────────────────
+// ── File tree helpers ─────────────────────────────────────────────────────────
 
-function Toggle({
-  label,
-  active,
+type FileView = 'tree' | 'flat' | 'grouped'
+
+interface TreeNode {
+  name: string
+  path: string
+  type: 'file' | 'dir'
+  children: TreeNode[]
+  file?: DiffFile
+}
+
+function buildFileTree(files: DiffFile[]): TreeNode[] {
+  const root: TreeNode[] = []
+  for (const file of files) {
+    const parts = file.path.split('/')
+    let current = root
+    for (let i = 0; i < parts.length - 1; i++) {
+      let node = current.find((n) => n.type === 'dir' && n.name === parts[i])
+      if (!node) {
+        node = { name: parts[i], path: parts.slice(0, i + 1).join('/'), type: 'dir', children: [] }
+        current.push(node)
+      }
+      current = node.children
+    }
+    current.push({
+      name: parts[parts.length - 1],
+      path: file.path,
+      type: 'file',
+      children: [],
+      file,
+    })
+  }
+  return root
+}
+
+function getGroupedFiles(files: DiffFile[]): [string, DiffFile[]][] {
+  const map = new Map<string, DiffFile[]>()
+  for (const file of files) {
+    const parts = file.path.split('/')
+    const folder = parts.length > 1 ? parts.slice(0, -1).join('/') : ''
+    if (!map.has(folder)) map.set(folder, [])
+    map.get(folder)!.push(file)
+  }
+  return Array.from(map.entries())
+}
+
+// ── Sidebar components ────────────────────────────────────────────────────────
+
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false)
+  const handleCopy = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    navigator.clipboard.writeText(text).catch(() => {})
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1500)
+  }
+  return (
+    <button
+      onClick={handleCopy}
+      className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded hover:bg-gray-200 dark:hover:bg-gray-600 shrink-0 cursor-pointer"
+      title="Copy path"
+    >
+      {copied
+        ? <Check className="w-3 h-3 text-green-500" />
+        : <Copy className="w-3 h-3 text-gray-400" />
+      }
+    </button>
+  )
+}
+
+function FileRow({
+  file,
+  isActive,
   onClick,
+  indent = 0,
 }: {
-  label: string
-  active: boolean
+  file: DiffFile
+  isActive: boolean
   onClick: () => void
+  indent?: number
 }) {
   return (
     <button
       onClick={onClick}
-      className={`flex items-center gap-1.5 h-7 px-2.5 rounded-md text-xs font-medium border transition-colors cursor-pointer ${
-        active
-          ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800'
-          : 'bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
+      className={`w-full flex items-center gap-1.5 py-1.5 text-left hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors group cursor-pointer ${
+        isActive ? 'bg-blue-50 dark:bg-blue-900/20' : ''
       }`}
+      style={{ paddingLeft: `${10 + indent}px`, paddingRight: '10px' }}
     >
-      {label}
+      <ChangeTypeIcon type={file.change_type} />
+      <span
+        className="font-mono text-[10px] text-gray-700 dark:text-gray-300 truncate flex-1 min-w-0"
+        title={file.path}
+      >
+        {file.path.split('/').pop()}
+      </span>
+      <CopyButton text={file.path} />
+      <div className="flex items-center gap-1 shrink-0">
+        {file.additions > 0 && <span className="text-[10px] text-green-600 dark:text-green-400">+{file.additions}</span>}
+        {file.deletions > 0 && <span className="text-[10px] text-red-600 dark:text-red-400">−{file.deletions}</span>}
+      </div>
     </button>
+  )
+}
+
+function TreeNodeView({
+  node,
+  depth,
+  collapsedFolders,
+  toggleFolder,
+  onFileClick,
+  activeFilePath,
+}: {
+  node: TreeNode
+  depth: number
+  collapsedFolders: Set<string>
+  toggleFolder: (path: string) => void
+  onFileClick: (path: string) => void
+  activeFilePath: string | null
+}) {
+  const indent = depth * 12
+
+  if (node.type === 'dir') {
+    const isOpen = !collapsedFolders.has(node.path)
+    return (
+      <div>
+        <button
+          onClick={() => toggleFolder(node.path)}
+          className="w-full flex items-center gap-1.5 py-1 hover:bg-gray-50 dark:hover:bg-gray-700 text-left group cursor-pointer"
+          style={{ paddingLeft: `${10 + indent}px`, paddingRight: '10px' }}
+        >
+          {isOpen
+            ? <FolderOpen className="w-3.5 h-3.5 text-blue-400 dark:text-blue-500 shrink-0" />
+            : <Folder className="w-3.5 h-3.5 text-blue-400 dark:text-blue-500 shrink-0" />
+          }
+          <span className="font-mono text-[10px] text-gray-600 dark:text-gray-400 flex-1 min-w-0 truncate">
+            {node.name}
+          </span>
+          <CopyButton text={node.path} />
+          <ChevronDown
+            className={`w-3 h-3 text-gray-400 shrink-0 transition-transform ${isOpen ? '' : '-rotate-90'}`}
+          />
+        </button>
+        {isOpen && node.children.map((child) => (
+          <TreeNodeView
+            key={child.path}
+            node={child}
+            depth={depth + 1}
+            collapsedFolders={collapsedFolders}
+            toggleFolder={toggleFolder}
+            onFileClick={onFileClick}
+            activeFilePath={activeFilePath}
+          />
+        ))}
+      </div>
+    )
+  }
+
+  const file = node.file!
+  return (
+    <FileRow
+      file={file}
+      isActive={file.path === activeFilePath}
+      onClick={() => onFileClick(file.path)}
+      indent={indent}
+    />
+  )
+}
+
+// ── Settings popup ────────────────────────────────────────────────────────────
+
+function SettingsPopup({
+  fileView,
+  onFileViewChange,
+  sideBySide,
+  onSideBySideChange,
+  ignoreWhitespace,
+  onIgnoreWhitespaceChange,
+  singleFile,
+  onSingleFileChange,
+}: {
+  fileView: FileView
+  onFileViewChange: (v: FileView) => void
+  sideBySide: boolean
+  onSideBySideChange: (v: boolean) => void
+  ignoreWhitespace: boolean
+  onIgnoreWhitespaceChange: (v: boolean) => void
+  singleFile: boolean
+  onSingleFileChange: (v: boolean) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    function handleClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [open])
+
+  const viewOptions: { value: FileView; label: string }[] = [
+    { value: 'tree', label: 'Tree' },
+    { value: 'flat', label: 'Flat list' },
+    { value: 'grouped', label: 'Grouped by folder' },
+  ]
+
+  const checkboxOptions = [
+    { checked: sideBySide, onChange: onSideBySideChange, label: 'Side by side' },
+    { checked: ignoreWhitespace, onChange: onIgnoreWhitespaceChange, label: 'Ignore whitespace' },
+    { checked: singleFile, onChange: onSingleFileChange, label: 'One file at a time' },
+  ]
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className={`flex items-center justify-center w-7 h-7 rounded-md border transition-colors cursor-pointer ${
+          open
+            ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800'
+            : 'text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
+        }`}
+        title="Diff settings"
+      >
+        <Settings className="w-3.5 h-3.5" />
+      </button>
+
+      {open && (
+        <div className="absolute right-0 top-full mt-1 w-52 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50 p-3">
+          <p className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">
+            File list
+          </p>
+          <div className="flex flex-col gap-0.5 mb-3">
+            {viewOptions.map((opt) => (
+              <label key={opt.value} className="flex items-center gap-2 py-0.5 cursor-pointer">
+                <input
+                  type="radio"
+                  name="hydra-file-view"
+                  checked={fileView === opt.value}
+                  onChange={() => onFileViewChange(opt.value)}
+                  className="w-3 h-3 accent-blue-500"
+                />
+                <span className="text-xs text-gray-700 dark:text-gray-300">{opt.label}</span>
+              </label>
+            ))}
+          </div>
+          <p className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">
+            Options
+          </p>
+          <div className="flex flex-col gap-0.5">
+            {checkboxOptions.map(({ checked, onChange, label }) => (
+              <label key={label} className="flex items-center gap-2 py-0.5 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={(e) => onChange(e.target.checked)}
+                  className="w-3 h-3 accent-blue-500"
+                />
+                <span className="text-xs text-gray-700 dark:text-gray-300">{label}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -646,6 +851,7 @@ export function DiffViewer({
   const [loadingDiff, setLoadingDiff] = useState(false)
   const [diffError, setDiffError] = useState<string | null>(null)
   const [refreshKey, setRefreshKey] = useState(0)
+
   const [sideBySide, setSideBySide] = useState(() => {
     try { return localStorage.getItem('hydra-diff-side-by-side') === 'true' } catch { return false }
   })
@@ -655,7 +861,15 @@ export function DiffViewer({
   const [singleFile, setSingleFile] = useState(() => {
     try { return localStorage.getItem('hydra-diff-single-file') === 'true' } catch { return false }
   })
+  const [fileView, setFileView] = useState<FileView>(() => {
+    try {
+      const stored = localStorage.getItem('hydra-diff-file-view')
+      if (stored === 'tree' || stored === 'flat' || stored === 'grouped') return stored
+    } catch {}
+    return 'tree'
+  })
   const [singleFileIdx, setSingleFileIdx] = useState(0)
+  const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set())
   const fileRefs = useRef<Map<string, HTMLDivElement>>(new Map())
 
   // Persist settings
@@ -668,6 +882,18 @@ export function DiffViewer({
   useEffect(() => {
     try { localStorage.setItem('hydra-diff-single-file', String(singleFile)) } catch {}
   }, [singleFile])
+  useEffect(() => {
+    try { localStorage.setItem('hydra-diff-file-view', fileView) } catch {}
+  }, [fileView])
+
+  const toggleFolder = useCallback((path: string) => {
+    setCollapsedFolders((prev) => {
+      const next = new Set(prev)
+      if (next.has(path)) next.delete(path)
+      else next.add(path)
+      return next
+    })
+  }, [])
 
   // Fetch commits list whenever the agent changes.
   useEffect(() => {
@@ -679,7 +905,6 @@ export function DiffViewer({
   }, [agent.id, agent.branch_name, projectId])
 
   // Fetch diff when selection, options, or manual refresh changes.
-  // Does NOT auto-reload on agent status changes.
   useEffect(() => {
     if (!agent.branch_name) return
 
@@ -692,7 +917,6 @@ export function DiffViewer({
     if (leftSel.type === 'commit') params.baseRef = leftSel.sha
     if (rightSel.type === 'uncommitted') params.includeUncommitted = true
     else if (rightSel.type === 'commit') params.headRef = rightSel.sha
-    // rightSel.type === 'latest': no headRef (uses HEAD)
 
     api.default
       .getAgentDiff(
@@ -715,17 +939,13 @@ export function DiffViewer({
 
   const handleLeftChange = useCallback((newLeft: LeftSel) => {
     setLeftSel(newLeft)
-    // If current right commit is now invalid (left >= right), reset right to uncommitted
     setRightSel((prev) => {
       if (prev.type !== 'commit') return prev
       if (newLeft.type === 'base') return prev
-      // Both are specific commits: validate ordering
-      // This runs with stale `commits` from closure — but that's fine since commits don't change here
-      return prev // will be fixed in the render if needed
+      return prev
     })
   }, [])
 
-  // Enforce validity: if left commit is newer or equal to right commit, reset right
   useEffect(() => {
     if (leftSel.type !== 'commit' || rightSel.type !== 'commit') return
     const li = commitIdx(leftSel.sha, commits)
@@ -749,11 +969,75 @@ export function DiffViewer({
     }
   }, [singleFile, diff, scrollToFile])
 
+  const handleSingleFileChange = useCallback((v: boolean) => {
+    setSingleFile(v)
+    setSingleFileIdx(0)
+  }, [])
+
   const totalAdditions = diff?.files.reduce((s, f) => s + f.additions, 0) ?? 0
   const totalDeletions = diff?.files.reduce((s, f) => s + f.deletions, 0) ?? 0
 
-  // If the agent doesn't have a branch, don't show the viewer.
+  // The file that's currently "active" for tree/grouped highlighting
+  const activeFilePath = singleFile && diff ? (diff.files[singleFileIdx]?.path ?? null) : null
+
+  // Sidebar content based on view mode
+  const renderSidebar = (files: DiffFile[]) => {
+    if (fileView === 'tree') {
+      const tree = buildFileTree(files)
+      return tree.map((node) => (
+        <TreeNodeView
+          key={node.path}
+          node={node}
+          depth={0}
+          collapsedFolders={collapsedFolders}
+          toggleFolder={toggleFolder}
+          onFileClick={handleFileClick}
+          activeFilePath={activeFilePath}
+        />
+      ))
+    }
+
+    if (fileView === 'grouped') {
+      const groups = getGroupedFiles(files)
+      return groups.map(([folder, groupFiles]) => (
+        <div key={folder || '__root__'}>
+          {folder && (
+            <div className="flex items-center gap-1.5 px-2.5 py-1 bg-gray-50 dark:bg-gray-700/50 border-y border-gray-100 dark:border-gray-700/50 group">
+              <Folder className="w-3 h-3 text-blue-400 dark:text-blue-500 shrink-0" />
+              <span className="font-mono text-[9px] text-gray-500 dark:text-gray-400 truncate flex-1 min-w-0">{folder}</span>
+              <CopyButton text={folder} />
+            </div>
+          )}
+          {groupFiles.map((f) => {
+            const idx = diff!.files.findIndex((df) => df.path === f.path)
+            return (
+              <FileRow
+                key={f.path}
+                file={f}
+                isActive={singleFile && idx === singleFileIdx}
+                onClick={() => handleFileClick(f.path)}
+                indent={folder ? 4 : 0}
+              />
+            )
+          })}
+        </div>
+      ))
+    }
+
+    // Flat view
+    return files.map((f, i) => (
+      <FileRow
+        key={f.path}
+        file={f}
+        isActive={singleFile && i === singleFileIdx}
+        onClick={() => handleFileClick(f.path)}
+      />
+    ))
+  }
+
   if (!agent.branch_name) return null
+
+  const hasExistingDiff = diff !== null
 
   return (
     <div className="mt-4">
@@ -768,16 +1052,18 @@ export function DiffViewer({
           </div>
         )}
         <div className="flex items-center gap-2 ml-auto flex-wrap">
-          {/* Refresh button — leftmost, before commit selectors */}
+          {/* Loading indicator shown inline during refresh */}
+          {loadingDiff && hasExistingDiff && (
+            <LoaderCircle className="w-3.5 h-3.5 animate-spin text-gray-400 dark:text-gray-500 shrink-0" />
+          )}
           <button
             onClick={() => setRefreshKey((k) => k + 1)}
             disabled={loadingDiff}
             className="flex items-center justify-center w-7 h-7 rounded-md text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50 transition-colors cursor-pointer"
             title="Refresh diff"
           >
-            <RefreshCw className={`w-3.5 h-3.5 ${loadingDiff ? 'animate-spin' : ''}`} />
+            <RefreshCw className="w-3.5 h-3.5" />
           </button>
-          {/* Two-button commit range selector */}
           <LeftSelector commits={commits} selected={leftSel} onChange={handleLeftChange} />
           <span className="text-gray-400 dark:text-gray-500 text-xs select-none">→</span>
           <RightSelector
@@ -787,9 +1073,16 @@ export function DiffViewer({
             left={leftSel}
             hasUncommitted={diff?.uncommitted_changes}
           />
-          <Toggle label="Side-by-side" active={sideBySide} onClick={() => setSideBySide((v) => !v)} />
-          <Toggle label="Ignore whitespace" active={ignoreWhitespace} onClick={() => setIgnoreWhitespace((v) => !v)} />
-          <Toggle label="One file" active={singleFile} onClick={() => { setSingleFile((v) => !v); setSingleFileIdx(0) }} />
+          <SettingsPopup
+            fileView={fileView}
+            onFileViewChange={setFileView}
+            sideBySide={sideBySide}
+            onSideBySideChange={setSideBySide}
+            ignoreWhitespace={ignoreWhitespace}
+            onIgnoreWhitespaceChange={setIgnoreWhitespace}
+            singleFile={singleFile}
+            onSingleFileChange={handleSingleFileChange}
+          />
         </div>
       </div>
 
@@ -806,22 +1099,29 @@ export function DiffViewer({
         </div>
       )}
 
+      {/* Error banner when we have an existing diff but a refresh failed */}
+      {diffError && hasExistingDiff && (
+        <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-xs text-red-600 dark:text-red-400">
+          Refresh failed: {diffError}
+        </div>
+      )}
+
       {/* Content */}
-      {loadingDiff ? (
+      {!hasExistingDiff && loadingDiff ? (
         <div className="flex items-center justify-center py-8 text-gray-400 dark:text-gray-500">
           <LoaderCircle className="w-4 h-4 animate-spin mr-2" />
           <span className="text-sm">Loading diff…</span>
         </div>
-      ) : diffError ? (
+      ) : !hasExistingDiff && diffError ? (
         <div className="px-4 py-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-xs text-red-600 dark:text-red-400">
           {diffError}
         </div>
       ) : diff && diff.files.length === 0 ? (
-        <div className="flex items-center justify-center py-8 text-gray-400 dark:text-gray-500 text-sm">
+        <div className={`flex items-center justify-center py-8 text-gray-400 dark:text-gray-500 text-sm transition-opacity ${loadingDiff ? 'opacity-40' : ''}`}>
           No changes
         </div>
       ) : diff ? (
-        <div className="flex gap-3 min-h-0">
+        <div className={`flex gap-3 min-h-0 transition-opacity duration-150 ${loadingDiff ? 'opacity-40 pointer-events-none' : ''}`}>
           {/* File list sidebar */}
           <div className="w-52 shrink-0 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden bg-white dark:bg-gray-800 self-start sticky top-0 z-10">
             <div className="px-2.5 py-2 border-b border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
@@ -830,28 +1130,7 @@ export function DiffViewer({
               </span>
             </div>
             <div className="overflow-y-auto max-h-80">
-              {diff.files.map((f, i) => (
-                <button
-                  key={f.path}
-                  onClick={() => handleFileClick(f.path)}
-                  className={`w-full flex items-center gap-1.5 px-2.5 py-1.5 text-left hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors group cursor-pointer ${
-                    singleFile && i === singleFileIdx ? 'bg-blue-50 dark:bg-blue-900/20' : ''
-                  }`}
-                >
-                  <ChangeTypeIcon type={f.change_type} />
-                  <span className="font-mono text-[10px] text-gray-700 dark:text-gray-300 truncate flex-1 min-w-0" title={f.path}>
-                    {f.path.split('/').pop()}
-                  </span>
-                  <div className="flex items-center gap-1 shrink-0">
-                    {f.additions > 0 && (
-                      <span className="text-[10px] text-green-600 dark:text-green-400">+{f.additions}</span>
-                    )}
-                    {f.deletions > 0 && (
-                      <span className="text-[10px] text-red-600 dark:text-red-400">−{f.deletions}</span>
-                    )}
-                  </div>
-                </button>
-              ))}
+              {renderSidebar(diff.files)}
             </div>
           </div>
 
@@ -859,7 +1138,6 @@ export function DiffViewer({
           <div className="flex-1 min-w-0">
             {singleFile ? (
               <>
-                {/* Single-file navigation */}
                 <div className="flex items-center gap-2 mb-3">
                   <button
                     onClick={() => setSingleFileIdx((i) => Math.max(0, i - 1))}

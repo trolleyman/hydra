@@ -329,9 +329,11 @@ func HasConflicts(projectRoot, baseRef, headRef string) (bool, error) {
 }
 
 // HasUncommittedChanges returns true if there are uncommitted changes in the worktree.
+// Only considers tracked files (staged and unstaged modifications), not untracked files.
 func HasUncommittedChanges(projectRoot string) (bool, error) {
-	// git status --porcelain
-	out, err := exec.Command("git", "-C", projectRoot, "status", "--porcelain").Output()
+	// git status --porcelain -uno excludes untracked files so we only report
+	// actual staged/unstaged modifications to tracked files.
+	out, err := exec.Command("git", "-C", projectRoot, "status", "--porcelain", "-uno").Output()
 	if err != nil {
 		return false, errtrace.Wrap(fmt.Errorf("git status: %w", err))
 	}
