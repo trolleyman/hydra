@@ -148,6 +148,54 @@ func translateHostPathToContainer(path string) string {
 	return strings.ReplaceAll(path, "\\", "/")
 }
 
+// fixWorktreeGitFileBind checks whether the worktree's .git file contains a
+// Windows-style gitdir path. If so, it writes a Linux-translated copy into the
+// project's cache directory and returns a Docker bind-mount string that overlays
+// the translated file onto containerWorktreePath/.git inside the container.
+// The host's .git file is never modified.
+// Returns ("", nil) when no fix is needed.
+func fixWorktreeGitFileBind(worktreePath, projectPath, id, containerWorktreePath string) (string, error) {
+	gitFilePath := filepath.Join(worktreePath, ".git")
+	info, err := os.Stat(gitFilePath)
+	if err != nil || info.IsDir() {
+		// Not a worktree or .git is a directory (main repo) – nothing to do.
+		return "", nil
+	}
+
+	content, err := os.ReadFile(gitFilePath)
+	if err != nil {
+		return "", errtrace.Wrap(fmt.Errorf("read .git file: %w", err))
+	}
+
+	contentStr := strings.TrimSpace(string(content))
+	const gitdirPrefix = "gitdir:"
+	if !strings.HasPrefix(contentStr, gitdirPrefix) {
+		return "", nil
+	}
+
+	gitdirPath := strings.TrimSpace(contentStr[len(gitdirPrefix):])
+	translatedPath := translateHostPathToContainer(gitdirPath)
+	if translatedPath == gitdirPath {
+		// Already a Linux path – no translation needed.
+		return "", nil
+	}
+
+	// Write the translated .git file into the per-agent cache directory.
+	cacheDir := filepath.Join(projectPath, ".hydra", "cache", "worktrees", id)
+	if err := os.MkdirAll(cacheDir, 0755); err != nil {
+		return "", errtrace.Wrap(fmt.Errorf("create worktree cache dir: %w", err))
+	}
+	fixedGitFile := filepath.Join(cacheDir, ".git")
+	fixedContent := gitdirPrefix + " " + translatedPath + "\n"
+	if err := os.WriteFile(fixedGitFile, []byte(fixedContent), 0644); err != nil {
+		return "", errtrace.Wrap(fmt.Errorf("write translated .git file: %w", err))
+	}
+
+	// Return a bind that overlays this file on top of the mounted worktree directory.
+	containerGitFilePath := containerWorktreePath + "/.git"
+	return fixedGitFile + ":" + containerGitFilePath, nil
+}
+
 // SpawnAgent builds the Docker image if necessary, then creates and starts the container.
 // Returns the container ID.
 func SpawnAgent(ctx context.Context, cli *dockerclient.Client, opts SpawnOptions) (string, error) {
@@ -212,6 +260,17 @@ func SpawnAgent(ctx context.Context, cli *dockerclient.Client, opts SpawnOptions
 		hostGitDir + ":" + containerGitDir + ":rw",
 		opts.WorktreePath + ":" + containerWorktreePath + ":rw",
 	}
+
+	// On Windows hosts the worktree .git file contains a Windows-style gitdir path
+	// (e.g. "gitdir: C:/foo/.git/worktrees/bar") which Linux git cannot resolve as
+	// an absolute path. Create a translated copy in the cache and mount it over the
+	// .git file inside the container, leaving the host file untouched.
+	if fixedBind, fixErr := fixWorktreeGitFileBind(opts.WorktreePath, opts.ProjectPath, opts.Id, containerWorktreePath); fixErr != nil {
+		log.Printf("warn: fix worktree .git file: %v", fixErr)
+	} else if fixedBind != "" {
+		binds = append(binds, fixedBind)
+	}
+
 	agentBinds, err := getAgentBinds(opts.AgentType, opts.ProjectPath, opts.Id, containerHome, opts.SharedMounts, opts.WorktreePath)
 	if err != nil {
 		return "", errtrace.Wrap(err)
