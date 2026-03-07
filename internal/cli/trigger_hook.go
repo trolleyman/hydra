@@ -74,7 +74,9 @@ var triggerHookCmd = &cobra.Command{
 		if err := runTriggerHook(args[0], eventOverride, logFile); err != nil {
 			// Log to status_log.jsonl and stderr but don't propagate – hooks must not fail the agent.
 			fmt.Fprintf(os.Stderr, "hydra trigger-hook error: %v\n", err)
-			appendJSONLine(logFile, map[string]interface{}{"error": err.Error()})
+			if logFile != nil {
+				appendJSONLine(logFile, map[string]interface{}{"error": err.Error()})
+			}
 		}
 		return nil
 	},
@@ -116,7 +118,17 @@ func runTriggerHook(agentType string, eventOverride string, logFile *os.File) er
 		// want to update status.json so the timestamp changes, signaling to the frontend
 		// that it might need to refresh (e.g. after a git commit).
 		status = api.Running
+	case "Notification", "notification":
+		if nType, ok := input["notification_type"].(string); ok && nType == "ToolPermission" {
+			status = api.Waiting
+		} else {
+			return nil
+		}
 	default:
+		return nil
+	}
+
+	if status == "" {
 		return nil
 	}
 
@@ -131,6 +143,13 @@ func runTriggerHook(agentType string, eventOverride string, logFile *os.File) er
 
 	if event == "Stop" || event == "AfterAgent" {
 		if msg, ok := input["last_assistant_message"].(string); ok && msg != "" {
+			if len(msg) > 300 {
+				msg = msg[:300]
+			}
+			info.LastMessage = &msg
+		}
+	} else if event == "Notification" || event == "notification" {
+		if msg, ok := input["message"].(string); ok && msg != "" {
 			if len(msg) > 300 {
 				msg = msg[:300]
 			}
