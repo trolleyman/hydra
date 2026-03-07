@@ -11,13 +11,13 @@ import (
 	"os/user"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
 	"braces.dev/errtrace"
 	dockerclient "github.com/docker/docker/client"
 	"github.com/trolleyman/hydra/internal/api"
+	"github.com/trolleyman/hydra/internal/common"
 	"github.com/trolleyman/hydra/internal/config"
 	"github.com/trolleyman/hydra/internal/db"
 	"github.com/trolleyman/hydra/internal/docker"
@@ -240,12 +240,7 @@ func SpawnHead(ctx context.Context, cli *dockerclient.Client, store *db.Store, p
 		}
 		return nil, errtrace.Wrap(fmt.Errorf("get current user: %w", err))
 	}
-	uid, _ := strconv.Atoi(currentUser.Uid)
-	gid, _ := strconv.Atoi(currentUser.Gid)
-	groupName := currentUser.Username
-	if grp, err := user.LookupGroupId(currentUser.Gid); err == nil {
-		groupName = grp.Name
-	}
+	uid, gid, username, groupName := common.ContainerUserInfo(currentUser)
 
 	gitAuthorName := readGitConfigVal(projectRoot, "user.name")
 	gitAuthorEmail := readGitConfigVal(projectRoot, "user.email")
@@ -307,7 +302,7 @@ func SpawnHead(ctx context.Context, cli *dockerclient.Client, store *db.Store, p
 			GitAuthorEmail:     gitAuthorEmail,
 			UID:                uid,
 			GID:                gid,
-			Username:           currentUser.Username,
+			Username:           username,
 			GroupName:          groupName,
 			Ephemeral:          opts.Ephemeral,
 			BuildLog:           buildLogFile,

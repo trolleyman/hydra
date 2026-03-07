@@ -203,11 +203,11 @@ func SpawnAgent(ctx context.Context, cli *dockerclient.Client, opts SpawnOptions
 	// Mount the main .git directory and the worktree at the same absolute paths as on the host.
 	// This is required because git worktree .git files contain absolute paths back to the main .git dir.
 	containerWorktreePath := translateHostPathToContainer(opts.WorktreePath)
-	gitDir := opts.ProjectPath + "/.git"
-	containerGitDir := translateHostPathToContainer(gitDir)
+	hostGitDir := opts.ProjectPath + "/.git"
+	containerGitDir := translateHostPathToContainer(hostGitDir)
 	binds := []string{
-		containerGitDir + ":" + gitDir,
-		containerWorktreePath + ":" + opts.WorktreePath,
+		hostGitDir + ":" + containerGitDir,
+		opts.WorktreePath + ":" + containerWorktreePath,
 	}
 	agentBinds, err := getAgentBinds(opts.AgentType, opts.ProjectPath, opts.Id, containerHome)
 	if err != nil {

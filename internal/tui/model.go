@@ -12,8 +12,6 @@ import (
 	"os/user"
 	"path/filepath"
 	"regexp"
-	"runtime"
-	"strconv"
 	"strings"
 	"time"
 
@@ -25,6 +23,7 @@ import (
 	dockercontainer "github.com/docker/docker/api/types/container"
 	dockerclient "github.com/docker/docker/client"
 	"github.com/trolleyman/hydra/internal/api"
+	"github.com/trolleyman/hydra/internal/common"
 	"github.com/trolleyman/hydra/internal/db"
 	"github.com/trolleyman/hydra/internal/docker"
 	"github.com/trolleyman/hydra/internal/heads"
@@ -385,7 +384,8 @@ func (m Model) resumeSelected() (tea.Model, tea.Cmd) {
 		}
 
 		// Look up current user identity for container user creation.
-		uid, gid, username, groupName := currentUserInfo()
+		u, _ := user.Current()
+		uid, gid, username, groupName := common.ContainerUserInfo(u)
 
 		buildLogPath := paths.GetBuildLogFromProjectRoot(headCopy.ProjectPath, headCopy.ID)
 		if err := os.MkdirAll(filepath.Dir(buildLogPath), 0755); err != nil {
@@ -910,40 +910,6 @@ func spawnHead(projectRoot, id string, agentType docker.AgentType, dockerfilePat
 	return errtrace.Wrap(err)
 }
 
-// currentUserInfo returns the current OS user's UID, GID, username, and primary group name.
-func currentUserInfo() (uid, gid int, username, groupName string) {
-	u, err := user.Current()
-	if err != nil {
-		return 1000, 1000, "user", "user"
-	}
-	uid, err = strconv.Atoi(u.Uid)
-	if err != nil {
-		uid = 1000
-	}
-	gid, err = strconv.Atoi(u.Gid)
-	if err != nil {
-		gid = 1000
-	}
-	username = u.Username
-	if runtime.GOOS == "windows" {
-		// Sanitize Windows username (e.g. "DESKTOP-123\User" -> "user")
-		if idx := strings.LastIndex(username, "\\"); idx != -1 {
-			username = username[idx+1:]
-		}
-		username = strings.ToLower(username)
-		// Remove non-alphanumeric characters to ensure valid Linux username
-		reg := regexp.MustCompile("[^a-z0-9]")
-		username = reg.ReplaceAllString(username, "")
-		if username == "" {
-			username = "user"
-		}
-	}
-	groupName = u.Username
-	if grp, err := user.LookupGroupId(u.Gid); err == nil {
-		groupName = grp.Name
-	}
-	return
-}
 
 func randomTUIID() (string, error) {
 	b := make([]byte, 4)
