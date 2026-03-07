@@ -598,7 +598,7 @@ components:
 
     ProjectInfo:
       type: object
-      required: [id, path, name]
+      required: [id, path, name, uuid]
       properties:
         id:
           type: string
@@ -609,6 +609,9 @@ components:
         name:
           type: string
           description: Human-readable project name (last path component)
+        uuid:
+          type: string
+          description: Persistent project UUID
 
     AddProjectRequest:
       type: object

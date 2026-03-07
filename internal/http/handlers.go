@@ -14,7 +14,6 @@ import (
 	"time"
 
 	dockerclient "github.com/docker/docker/client"
-	"github.com/google/uuid"
 	"github.com/trolleyman/hydra/internal/api"
 	"github.com/trolleyman/hydra/internal/config"
 	"github.com/trolleyman/hydra/internal/db"
@@ -60,9 +59,6 @@ func (s *Server) GetDockerError() string {
 	return v.(string)
 }
 
-// DevToolsNamespace is used for generating stable UUIDs for workspace roots.
-var DevToolsNamespace = uuid.MustParse("d63f9661-d707-4054-9467-33f7d247f0e3")
-
 // NewHandler creates a handler with routing matching the OpenAPI spec.
 func NewHandler(s *Server) http.Handler {
 	strict := api.NewStrictHandler(s, nil)
@@ -78,11 +74,8 @@ func (s *Server) GetDevToolsConfig(_ context.Context, _ api.GetDevToolsConfigReq
 		}, nil
 	}
 
-	// Generate a stable UUID for this project root
-	u := uuid.NewSHA1(DevToolsNamespace, []byte(s.ProjectRoot))
-
 	root := s.ProjectRoot
-	uid := u.String()
+	uid := s.DefaultProject.UUID
 
 	return api.GetDevToolsConfig200JSONResponse{
 		Workspace: &struct {
@@ -126,6 +119,7 @@ func (s *Server) ListProjects(_ context.Context, _ api.ListProjectsRequestObject
 			Id:   p.ID,
 			Path: p.Path,
 			Name: p.Name,
+			Uuid: p.UUID,
 		}
 	}
 	return resp, nil
@@ -163,6 +157,7 @@ func (s *Server) AddProject(_ context.Context, request api.AddProjectRequestObje
 		Id:   p.ID,
 		Path: p.Path,
 		Name: p.Name,
+		Uuid: p.UUID,
 	}), nil
 }
 

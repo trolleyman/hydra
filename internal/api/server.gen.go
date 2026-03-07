@@ -291,6 +291,9 @@ type ProjectInfo struct {
 
 	// Path Absolute filesystem path to the project root
 	Path string `json:"path"`
+
+	// Uuid Persistent project UUID
+	Uuid string `json:"uuid"`
 }
 
 // SpawnAgentRequest defines model for SpawnAgentRequest.
