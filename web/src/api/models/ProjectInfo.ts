@@ -15,5 +15,9 @@ export type ProjectInfo = {
      * Human-readable project name (last path component)
      */
     name: string;
+    /**
+     * Persistent project UUID
+     */
+    uuid: string;
 };
 

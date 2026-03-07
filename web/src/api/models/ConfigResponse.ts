@@ -10,5 +10,9 @@ export type ConfigResponse = {
      * Built-in default Dockerfiles for each agent type (read-only)
      */
     default_dockerfiles?: Record<string, string>;
+    /**
+     * Built-in default pre-prompt always prepended to agent prompts (read-only)
+     */
+    default_pre_prompt?: string;
 };
 
