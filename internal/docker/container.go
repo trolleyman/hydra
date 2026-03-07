@@ -206,8 +206,8 @@ func SpawnAgent(ctx context.Context, cli *dockerclient.Client, opts SpawnOptions
 	hostGitDir := opts.ProjectPath + "/.git"
 	containerGitDir := translateHostPathToContainer(hostGitDir)
 	binds := []string{
-		hostGitDir + ":" + containerGitDir,
-		opts.WorktreePath + ":" + containerWorktreePath,
+		hostGitDir + ":" + containerGitDir + ":rw",
+		opts.WorktreePath + ":" + containerWorktreePath + ":rw",
 	}
 	agentBinds, err := getAgentBinds(opts.AgentType, opts.ProjectPath, opts.Id, containerHome)
 	if err != nil {
