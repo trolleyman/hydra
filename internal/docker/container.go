@@ -745,7 +745,7 @@ func buildCopilotHooks() ([]byte, error) {
 		Hooks   map[string][]hookEntry    `json:"hooks"`
 	}
 
-	cmd := "$HOME/.hydra/hydra trigger-hook copilot"
+	cmd := "\"$HOME/.hydra/hydra\" trigger-hook copilot"
 	hf := hooksFile{
 		Version: 1,
 		Hooks: map[string][]hookEntry{
