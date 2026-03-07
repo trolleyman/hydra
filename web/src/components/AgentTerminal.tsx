@@ -27,6 +27,7 @@ export function AgentTerminal({ agentId, projectId, isEphemeral, onRefresh, onSt
   const fitAddonRef = useRef<FitAddon | null>(null)
   const isRefreshing = useRef(false)
   const killTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const lastSentSize = useRef({ cols: 0, rows: 0 })
   const [reconnectAttempt, setReconnectAttempt] = useState(0)
   const [status, setStatus] = useState<string>('pending')
 
@@ -38,6 +39,7 @@ export function AgentTerminal({ agentId, projectId, isEphemeral, onRefresh, onSt
     }
 
     isRefreshing.current = false
+    lastSentSize.current = { cols: 0, rows: 0 }
     const el = containerRef.current
     if (!el) return
 
@@ -86,6 +88,7 @@ export function AgentTerminal({ agentId, projectId, isEphemeral, onRefresh, onSt
     ws.onopen = () => {
       const { cols, rows } = term
       ws.send(JSON.stringify({ type: 'resize', cols, rows }))
+      lastSentSize.current = { cols, rows }
     }
 
     ws.onmessage = (e: MessageEvent) => {
@@ -177,11 +180,20 @@ export function AgentTerminal({ agentId, projectId, isEphemeral, onRefresh, onSt
       }
     })
 
-    // Resize terminal when the container element resizes
+    // Resize terminal when the container element resizes.
+    // Only send the resize signal when the column/row count actually changes to
+    // avoid spurious SIGWINCH signals (e.g. from layout shifts caused by the
+    // diff viewer loading content below the terminal).
     const observer = new ResizeObserver(() => {
       fitAddon.fit()
-      if (ws.readyState === WebSocket.OPEN && term.cols > 0 && term.rows > 0) {
-        ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }))
+      const { cols, rows } = term
+      if (
+        ws.readyState === WebSocket.OPEN &&
+        cols > 0 && rows > 0 &&
+        (cols !== lastSentSize.current.cols || rows !== lastSentSize.current.rows)
+      ) {
+        ws.send(JSON.stringify({ type: 'resize', cols, rows }))
+        lastSentSize.current = { cols, rows }
       }
     })
     observer.observe(el)

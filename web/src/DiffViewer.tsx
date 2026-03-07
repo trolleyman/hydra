@@ -312,9 +312,26 @@ function formatShortLabel(commit: CommitInfo | null | undefined, sha: string): s
   return `${commit.short_sha} ${msg}${commit.message.length > 24 ? '…' : ''}`
 }
 
+// ── Commit info formatting ────────────────────────────────────────────────────
+
+function formatCommitDate(iso: string): string {
+  try {
+    return new Date(iso).toLocaleString(undefined, {
+      year: 'numeric', month: 'short', day: 'numeric',
+      hour: '2-digit', minute: '2-digit',
+    })
+  } catch {
+    return iso
+  }
+}
+
 // ── Custom tooltip ────────────────────────────────────────────────────────────
 
-function Tooltip({ content, children }: { content: React.ReactNode; children: React.ReactNode }) {
+function Tooltip({ content, children, side = 'bottom' }: {
+  content: React.ReactNode
+  children: React.ReactNode
+  side?: 'bottom' | 'right'
+}) {
   const [visible, setVisible] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
@@ -322,22 +339,42 @@ function Tooltip({ content, children }: { content: React.ReactNode; children: Re
   const show = useCallback(() => {
     if (ref.current) {
       const rect = ref.current.getBoundingClientRect()
-      setPos({ top: rect.bottom + 6, left: rect.left })
+      if (side === 'right') {
+        setPos({ top: rect.top, left: rect.right + 8 })
+      } else {
+        setPos({ top: rect.bottom + 6, left: rect.left })
+      }
     }
     setVisible(true)
-  }, [])
+  }, [side])
 
   return (
-    <div ref={ref} className="relative inline-flex" onMouseEnter={show} onMouseLeave={() => setVisible(false)}>
+    <div ref={ref} className="relative inline-flex w-full" onMouseEnter={show} onMouseLeave={() => setVisible(false)}>
       {children}
       {visible && pos && (
         <div
-          className="fixed z-[200] bg-gray-900 dark:bg-gray-700 text-white text-xs rounded-lg px-3 py-2 shadow-xl max-w-xs pointer-events-none"
+          className="fixed z-[200] bg-gray-900 dark:bg-gray-700 text-white text-xs rounded-lg px-3 py-2 shadow-xl max-w-sm pointer-events-none"
           style={{ top: pos.top, left: pos.left }}
         >
           {content}
         </div>
       )}
+    </div>
+  )
+}
+
+function CommitTooltipContent({ commit }: { commit: CommitInfo }) {
+  return (
+    <div className="font-mono space-y-0.5 min-w-[260px]">
+      <div className="flex items-center gap-2 mb-1.5">
+        <span className="text-yellow-400">commit</span>
+        <span className="text-gray-300 break-all">{commit.sha}</span>
+      </div>
+      <div><span className="text-gray-400 w-14 inline-block">Author:</span><span className="text-gray-200">{commit.author_name} &lt;{commit.author_email}&gt;</span></div>
+      <div><span className="text-gray-400 w-14 inline-block">Date:</span><span className="text-gray-200">{formatCommitDate(commit.timestamp)}</span></div>
+      <div className="mt-2 pt-2 border-t border-gray-700 text-gray-100 whitespace-pre-wrap break-words leading-relaxed">
+        {commit.message}
+      </div>
     </div>
   )
 }
@@ -398,19 +435,20 @@ function LeftSelector({ commits, selected, onChange, baseBranch }: {
                 Commits ({commits.length})
               </p>
               {commits.map((c) => (
-                <button
-                  key={c.sha}
-                  onClick={() => { onChange({ type: 'commit', sha: c.sha }); setOpen(false) }}
-                  className={`w-full flex items-start gap-2 px-3 py-1.5 text-left hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer ${
-                    selected.type === 'commit' && selected.sha === c.sha ? 'bg-blue-50 dark:bg-blue-900/20' : ''
-                  }`}
-                >
-                  <span className="font-mono text-[10px] text-gray-400 dark:text-gray-500 bg-gray-100 dark:bg-gray-700 px-1 py-0.5 rounded shrink-0 mt-0.5">
-                    {c.short_sha}
-                  </span>
-                  <span className="text-xs text-gray-700 dark:text-gray-300 leading-tight truncate">{c.message}</span>
-                  {selected.type === 'commit' && selected.sha === c.sha && <Check className="w-3 h-3 text-blue-500 shrink-0 mt-0.5" />}
-                </button>
+                <Tooltip key={c.sha} side="right" content={<CommitTooltipContent commit={c} />}>
+                  <button
+                    onClick={() => { onChange({ type: 'commit', sha: c.sha }); setOpen(false) }}
+                    className={`w-full flex items-start gap-2 px-3 py-1.5 text-left hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer ${
+                      selected.type === 'commit' && selected.sha === c.sha ? 'bg-blue-50 dark:bg-blue-900/20' : ''
+                    }`}
+                  >
+                    <span className="font-mono text-[10px] text-gray-400 dark:text-gray-500 bg-gray-100 dark:bg-gray-700 px-1 py-0.5 rounded shrink-0 mt-0.5">
+                      {c.short_sha}
+                    </span>
+                    <span className="text-xs text-gray-700 dark:text-gray-300 leading-tight truncate">{c.message}</span>
+                    {selected.type === 'commit' && selected.sha === c.sha && <Check className="w-3 h-3 text-blue-500 shrink-0 mt-0.5" />}
+                  </button>
+                </Tooltip>
               ))}
             </div>
           )}
@@ -497,19 +535,20 @@ function RightSelector({ commits, selected, onChange, left, hasUncommitted }: {
                 Commits ({validCommits.length})
               </p>
               {validCommits.map((c) => (
-                <button
-                  key={c.sha}
-                  onClick={() => { onChange({ type: 'commit', sha: c.sha }); setOpen(false) }}
-                  className={`w-full flex items-start gap-2 px-3 py-1.5 text-left hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer ${
-                    selected.type === 'commit' && selected.sha === c.sha ? 'bg-blue-50 dark:bg-blue-900/20' : ''
-                  }`}
-                >
-                  <span className="font-mono text-[10px] text-gray-400 dark:text-gray-500 bg-gray-100 dark:bg-gray-700 px-1 py-0.5 rounded shrink-0 mt-0.5">
-                    {c.short_sha}
-                  </span>
-                  <span className="text-xs text-gray-700 dark:text-gray-300 leading-tight truncate">{c.message}</span>
-                  {selected.type === 'commit' && selected.sha === c.sha && <Check className="w-3 h-3 text-blue-500 shrink-0 mt-0.5" />}
-                </button>
+                <Tooltip key={c.sha} side="right" content={<CommitTooltipContent commit={c} />}>
+                  <button
+                    onClick={() => { onChange({ type: 'commit', sha: c.sha }); setOpen(false) }}
+                    className={`w-full flex items-start gap-2 px-3 py-1.5 text-left hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer ${
+                      selected.type === 'commit' && selected.sha === c.sha ? 'bg-blue-50 dark:bg-blue-900/20' : ''
+                    }`}
+                  >
+                    <span className="font-mono text-[10px] text-gray-400 dark:text-gray-500 bg-gray-100 dark:bg-gray-700 px-1 py-0.5 rounded shrink-0 mt-0.5">
+                      {c.short_sha}
+                    </span>
+                    <span className="text-xs text-gray-700 dark:text-gray-300 leading-tight truncate">{c.message}</span>
+                    {selected.type === 'commit' && selected.sha === c.sha && <Check className="w-3 h-3 text-blue-500 shrink-0 mt-0.5" />}
+                  </button>
+                </Tooltip>
               ))}
             </div>
           )}
