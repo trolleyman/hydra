@@ -565,6 +565,14 @@ func getGoSourceModTime() (time.Time, error) {
 	return latest, nil
 }
 
+func getHydraOutputFile() string {
+	hydraOutputFile := filepath.Join(".mage", "hydra")
+	if runtime.GOOS == "windows" {
+		hydraOutputFile += ".exe"
+	}
+	return hydraOutputFile
+}
+
 // Dev builds once and runs the server with the /api/dev/restart endpoint enabled.
 // Use the UI restart button to trigger a full rebuild and restart.
 // For auto-reload on file changes use DevAutoReload instead.
@@ -580,14 +588,15 @@ func Dev() error {
 			return errtrace.Wrap(err)
 		}
 
+		hydraOutputFile := getHydraOutputFile()
 		devBuildArgs := append([]string{"build"}, goBuildTags()...)
-		devBuildArgs = append(devBuildArgs, "-o", ".mage/server", "./")
+		devBuildArgs = append(devBuildArgs, "-o", hydraOutputFile, "./")
 		if err := runV("go", devBuildArgs...); err != nil {
 			return errtrace.Wrap(err)
 		}
 
-		printCmd("./.mage/server", "server")
-		serverCmd := exec.Command("./.mage/server", "server")
+		printCmd(hydraOutputFile, "server")
+		serverCmd := exec.Command(hydraOutputFile, "server")
 		serverCmd.Stdout = os.Stdout
 		serverCmd.Stderr = os.Stderr
 		serverCmd.Env = append(os.Environ(), "HYDRA_DEV_RESTART=1")
@@ -653,11 +662,12 @@ func DevAutoReload() error {
 	// needRestart is set to 1 when the server exits with the restart code.
 	var needRestart atomic.Int32
 
+	hydraOutputFile := getHydraOutputFile()
 	startServer := func() {
 		serverMu.Lock()
 		defer serverMu.Unlock()
-		printCmd("./.mage/server", "server")
-		serverCmd = exec.Command("./.mage/server", "server")
+		printCmd(hydraOutputFile, "server")
+		serverCmd = exec.Command(hydraOutputFile, "server")
 		serverCmd.Stdout = os.Stdout
 		serverCmd.Stderr = os.Stderr
 		serverCmd.Env = append(os.Environ(), "HYDRA_DEV_RESTART=1")
@@ -705,7 +715,7 @@ func DevAutoReload() error {
 			serverMu.Unlock()
 
 			devBuildArgs := append([]string{"build"}, goBuildTags()...)
-			devBuildArgs = append(devBuildArgs, "-o", ".mage/server", "./")
+			devBuildArgs = append(devBuildArgs, "-o", hydraOutputFile, "./")
 			printCmdLine(append([]string{"go"}, devBuildArgs...))
 			buildCmd := exec.Command("go", devBuildArgs...)
 			buildCmd.Stdout = os.Stdout
