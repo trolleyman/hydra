@@ -133,6 +133,42 @@ export function AgentTerminal({ agentId, projectId, isEphemeral, onRefresh, onSt
       term.writeln('\r\n\x1b[31m[connection error]\x1b[0m')
     }
 
+    // Custom key handler for clipboard operations
+    term.attachCustomKeyEventHandler((e: KeyboardEvent) => {
+      if (e.type !== 'keydown') return true
+
+      // Ctrl+C with selection -> copy and clear selection (no ^C sent)
+      if (e.ctrlKey && !e.shiftKey && e.code === 'KeyC') {
+        const selection = term.getSelection()
+        if (selection) {
+          navigator.clipboard.writeText(selection).catch(() => {})
+          term.clearSelection()
+          return false
+        }
+        return true
+      }
+
+      // Ctrl+V -> paste from clipboard
+      if (e.ctrlKey && !e.shiftKey && e.code === 'KeyV') {
+        navigator.clipboard.readText().then((text) => {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(new TextEncoder().encode(text))
+          }
+        }).catch(() => {})
+        return false
+      }
+
+      // Ctrl+Shift+V -> send actual ^V (0x16) to terminal
+      if (e.ctrlKey && e.shiftKey && e.code === 'KeyV') {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(new Uint8Array([0x16]))
+        }
+        return false
+      }
+
+      return true
+    })
+
     // Forward keyboard input to the container
     const inputDisposable = term.onData((data) => {
       if (ws.readyState === WebSocket.OPEN) {
@@ -195,7 +231,7 @@ export function AgentTerminal({ agentId, projectId, isEphemeral, onRefresh, onSt
       {/* xterm.js mount point */}
       <div
         ref={containerRef}
-        className="p-2 flex-1 min-h-0"
+        className="flex-1 min-h-0 overflow-hidden"
       />
     </div>
   )
