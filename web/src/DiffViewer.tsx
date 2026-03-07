@@ -529,7 +529,7 @@ function CommitSelector({
           <div className="py-1 border-b border-gray-100 dark:border-gray-700">
             <button
               onClick={() => { onChange({ type: 'full' }); setOpen(false) }}
-              className={`w-full flex items-center gap-2 px-3 py-2 text-left text-xs hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors ${
+              className={`w-full flex items-center gap-2 px-3 py-2 text-left text-xs hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer ${
                 selected.type === 'full' ? 'bg-blue-50 dark:bg-blue-900/20' : ''
               }`}
             >
@@ -546,7 +546,7 @@ function CommitSelector({
             </button>
             <button
               onClick={() => { onChange({ type: 'uncommitted' }); setOpen(false) }}
-              className={`w-full flex items-center gap-2 px-3 py-2 text-left text-xs hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors ${
+              className={`w-full flex items-center gap-2 px-3 py-2 text-left text-xs hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer ${
                 selected.type === 'uncommitted' ? 'bg-blue-50 dark:bg-blue-900/20' : ''
               }`}
             >
@@ -573,7 +573,7 @@ function CommitSelector({
                 <button
                   key={c.sha}
                   onClick={() => { onChange({ type: 'commit', sha: c.sha }); setOpen(false) }}
-                  className={`w-full flex items-start gap-2 px-3 py-1.5 text-left hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors ${
+                  className={`w-full flex items-start gap-2 px-3 py-1.5 text-left hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer ${
                     selected.type === 'commit' && selected.sha === c.sha ? 'bg-blue-50 dark:bg-blue-900/20' : ''
                   }`}
                 >
