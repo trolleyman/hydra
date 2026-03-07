@@ -199,7 +199,6 @@ export function AgentDetail({
         <AgentTerminal
           agentId={agent.id}
           projectId={projectId}
-          containerStatus={agent.container_status}
           isEphemeral={agent.ephemeral}
           onRefresh={onRefresh}
         />

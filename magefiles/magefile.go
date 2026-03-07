@@ -614,6 +614,7 @@ func Dev() error {
 			var exitErr *exec.ExitError
 			if errors.As(err, &exitErr) && exitErr.ExitCode() == devRestartExitCode {
 				log.Println("Restart requested via UI, rebuilding...")
+				time.Sleep(1 * time.Second) // Give the OS time to release the port
 				continue
 			}
 			return errtrace.Wrap(err)
@@ -695,6 +696,7 @@ func DevFast() error {
 			var exitErr *exec.ExitError
 			if errors.As(serverErr, &exitErr) && exitErr.ExitCode() == devRestartExitCode {
 				log.Println("Restart requested via UI, rebuilding backend...")
+				time.Sleep(1 * time.Second) // Give the OS time to release the port
 				if err := GenerateGo(); err != nil {
 					fmt.Printf("GenerateGo error: %v\n", err)
 					time.Sleep(2 * time.Second)
@@ -797,6 +799,8 @@ func DevAutoReload() error {
 
 		if latest.After(lastBuild) || needRestart.CompareAndSwap(1, 0) {
 			lastBuild = time.Now()
+
+			time.Sleep(1 * time.Second) // Give the OS time to release the port
 
 			if err := GenerateGo(); err != nil {
 				fmt.Printf("GenerateGo error: %v\n", err)

@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"braces.dev/errtrace"
+	"github.com/trolleyman/hydra/internal/paths"
 )
 
 // ProjectInfo describes a registered Hydra project.
@@ -104,12 +105,17 @@ func (m *Manager) GetByPath(path string) *ProjectInfo {
 // AddProject registers the given absolute path as a project (idempotent by path).
 // Returns the ProjectInfo (existing or newly created).
 func (m *Manager) AddProject(path string) (ProjectInfo, error) {
+	norm, err := NormalizePath(path)
+	if err == nil {
+		path = norm
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	// Idempotent: return existing entry for this path.
 	for _, p := range m.projects {
-		if p.Path == path {
+		if paths.ComparePaths(p.Path, path) {
 			return p, nil
 		}
 	}
@@ -124,6 +130,20 @@ func (m *Manager) AddProject(path string) (ProjectInfo, error) {
 		return ProjectInfo{}, errtrace.Wrap(err)
 	}
 	return p, nil
+}
+
+// NormalizePath returns an absolute, symlink-resolved path with forward slashes.
+// Internal wrapper to avoid circular dependency if needed, or just use the logic directly.
+func NormalizePath(path string) (string, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", errtrace.Wrap(err)
+	}
+	eval, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		return filepath.ToSlash(abs), nil
+	}
+	return filepath.ToSlash(eval), nil
 }
 
 // generateID produces a unique project ID derived from the folder name.

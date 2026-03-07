@@ -57,7 +57,10 @@ func ListHeads(ctx context.Context, cli *dockerclient.Client, store *db.Store, p
 		log.Printf("warn: list docker agents: %v", dockerErr)
 	} else {
 		for _, a := range dockerAgents {
-			dockerByID[a.Meta.Id] = a
+			// Only include agents matching current project (platform-appropriate comparison)
+			if paths.ComparePaths(a.Meta.ProjectPath, projectRoot) {
+				dockerByID[a.Meta.Id] = a
+			}
 		}
 	}
 
@@ -172,6 +175,13 @@ type SpawnHeadOptions struct {
 // SpawnHead creates a new git worktree, branch, and Docker container for an agent.
 // Returns the newly created Head.
 func SpawnHead(ctx context.Context, cli *dockerclient.Client, store *db.Store, projectRoot string, opts SpawnHeadOptions) (*Head, error) {
+	norm, err := paths.NormalizePath(projectRoot)
+	if err == nil {
+		projectRoot = norm
+	}
+
+	log.Printf("heads: spawning agent %q (type=%v, project=%q, ephemeral=%v)", opts.ID, opts.AgentType, projectRoot, opts.Ephemeral)
+
 	if opts.AgentType == "" {
 		opts.AgentType = docker.AgentTypeClaude
 	}
@@ -338,6 +348,8 @@ func SpawnHead(ctx context.Context, cli *dockerclient.Client, store *db.Store, p
 		if store != nil {
 			if err := store.UpdateContainerInfo(opts.ID, containerID, "starting"); err != nil {
 				log.Printf("warn: update container status to starting for %s: %v", opts.ID, err)
+			} else {
+				log.Printf("heads: updated container info for %s: %s (starting)", opts.ID, containerID[:12])
 			}
 		}
 	}()
@@ -378,12 +390,14 @@ func readGitConfigVal(projectRoot, key string) string {
 // KillHead removes a Hydra head in safe order: container -> worktree -> branch.
 // When store is non-nil, uses atomic CAS to prevent concurrent kill operations and soft-deletes the record.
 func KillHead(ctx context.Context, cli *dockerclient.Client, store *db.Store, head Head) error {
+	log.Printf("heads: kill requested for agent %s", head.ID)
 	if store != nil {
 		ok, err := store.TrySetHeadStatus(head.ID, "idle", "killing")
 		if err != nil {
 			return errtrace.Wrap(err)
 		}
 		if !ok {
+			log.Printf("heads: kill already in progress for agent %s", head.ID)
 			return errtrace.Wrap(db.ErrOperationInProgress)
 		}
 	}
@@ -396,29 +410,38 @@ func KillHeadNoLock(ctx context.Context, cli *dockerclient.Client, store *db.Sto
 	var killErr error
 
 	if head.ContainerID != "" {
-		log.Printf("Killing head: %s in container %s", head.ID, head.ContainerID[:12])
+		log.Printf("heads: killing agent %s in container %s", head.ID, head.ContainerID[:12])
 		if err := docker.KillAgent(ctx, cli, head.ContainerID); err != nil {
+			log.Printf("warn: heads: kill container failed for %s: %v", head.ID, err)
 			killErr = errtrace.Wrap(err)
 		}
+	} else {
+		log.Printf("heads: agent %s has no container to kill", head.ID)
 	}
 
 	if killErr == nil {
 		if head.Worktree != nil && head.ProjectPath != "" {
+			log.Printf("heads: removing worktree %s for agent %s", *head.Worktree, head.ID)
 			if err := git.RemoveWorktree(head.ProjectPath, *head.Worktree); err != nil {
-				log.Printf("warn: remove worktree %s: %v", *head.Worktree, err)
+				log.Printf("warn: heads: remove worktree %s failed for %s: %v", *head.Worktree, head.ID, err)
 			}
 		}
 
 		if head.Branch != nil && head.ProjectPath != "" {
-			if err := git.DeleteBranch(head.ProjectPath, *head.Branch); err != nil {
-				log.Printf("warn: delete branch %s: %v", *head.Branch, err)
+			if strings.HasPrefix(*head.Branch, "hydra/") {
+				log.Printf("heads: deleting branch %s for agent %s", *head.Branch, head.ID)
+				if err := git.DeleteBranch(head.ProjectPath, *head.Branch); err != nil {
+					log.Printf("warn: heads: delete branch %s failed for %s: %v", *head.Branch, head.ID, err)
+				}
+			} else {
+				log.Printf("heads: skipping branch deletion for %s (not a hydra branch)", *head.Branch)
 			}
 		}
 
 		statusJson := paths.GetStatusJsonFromProjectRoot(head.ProjectPath, head.ID)
 		if _, err := os.Stat(statusJson); err == nil {
 			if err := os.Remove(statusJson); err != nil {
-				log.Printf("warn: remove status json %s: %v", statusJson, err)
+				log.Printf("warn: heads: remove status json %s failed for %s: %v", statusJson, head.ID, err)
 			}
 		}
 	}
@@ -428,9 +451,11 @@ func KillHeadNoLock(ctx context.Context, cli *dockerclient.Client, store *db.Sto
 			errMsg := killErr.Error()
 			_ = store.ClearHeadStatus(head.ID, &errMsg)
 		} else {
+			log.Printf("heads: soft-deleting agent %s from database", head.ID)
 			_ = store.SoftDeleteAgent(head.ID)
 		}
 	}
 
+	log.Printf("heads: kill complete for agent %s", head.ID)
 	return errtrace.Wrap(killErr)
 }

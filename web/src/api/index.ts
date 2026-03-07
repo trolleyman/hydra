@@ -26,5 +26,8 @@ export { MergeConflictError } from './models/MergeConflictError';
 export type { ProjectInfo } from './models/ProjectInfo';
 export type { SpawnAgentRequest } from './models/SpawnAgentRequest';
 export type { StatusResponse } from './models/StatusResponse';
+export type { TerminalDataEvent } from './models/TerminalDataEvent';
+export { TerminalEvent } from './models/TerminalEvent';
+export type { TerminalStatusEvent } from './models/TerminalStatusEvent';
 
 export { DefaultService } from './services/DefaultService';

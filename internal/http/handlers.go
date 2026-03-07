@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"os/exec"
@@ -48,14 +49,18 @@ func NewHandler(s *Server) http.Handler {
 // resolveProjectRoot returns the project root for the given project_id query param.
 // Falls back to the server's default project root when project_id is absent or unknown.
 func (s *Server) resolveProjectRoot(projectID *string) string {
-	if projectID == nil || *projectID == "" {
-		return s.ProjectRoot
+	path := s.ProjectRoot
+	if projectID != nil && *projectID != "" {
+		p := s.ProjectsManager.GetByID(*projectID)
+		if p != nil {
+			path = p.Path
+		}
 	}
-	p := s.ProjectsManager.GetByID(*projectID)
-	if p == nil {
-		return s.ProjectRoot
+	norm, err := paths.NormalizePath(path)
+	if err != nil {
+		return path // fallback to unnormalized if error
 	}
-	return p.Path
+	return norm
 }
 
 // --- StrictServerInterface implementations ---
@@ -213,12 +218,17 @@ func (s *Server) GetConfig(_ context.Context, request api.GetConfigRequestObject
 func (s *Server) SaveConfig(_ context.Context, request api.SaveConfigRequestObject) (api.SaveConfigResponseObject, error) {
 	projectRoot := s.resolveProjectRoot(request.Params.ProjectId)
 
+	var defaultSm []string
+	if request.Body.Defaults.SharedMounts != nil {
+		defaultSm = *request.Body.Defaults.SharedMounts
+	}
+
 	newCfg := config.Config{
 		Defaults: config.AgentConfig{
 			Dockerfile:           request.Body.Defaults.Dockerfile,
 			DockerfileContents:   request.Body.Defaults.DockerfileContents,
 			DockerignoreContents: request.Body.Defaults.DockerignoreContents,
-			SharedMounts:         *request.Body.Defaults.SharedMounts,
+			SharedMounts:         defaultSm,
 			Context:              request.Body.Defaults.Context,
 			PrePrompt:            request.Body.Defaults.PrePrompt,
 		},
@@ -296,8 +306,8 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 	}
 
 	projectRoot := s.resolveProjectRoot(request.Params.ProjectId)
-
-	agentType := docker.AgentTypeClaude
+	log.Printf("api: spawn agent request: id=%q, type=%v, project=%q", request.Body.Id, request.Body.AgentType, projectRoot)
+	var agentType docker.AgentType
 	if request.Body.AgentType != nil && *request.Body.AgentType != "" {
 		agentType = docker.AgentType(*request.Body.AgentType)
 	}
@@ -679,6 +689,7 @@ func (s *Server) RestartAgent(ctx context.Context, request api.RestartAgentReque
 
 func (s *Server) KillAgent(ctx context.Context, request api.KillAgentRequestObject) (api.KillAgentResponseObject, error) {
 	projectRoot := s.resolveProjectRoot(request.Params.ProjectId)
+	log.Printf("api: kill agent request: id=%q, project=%q", request.Id, projectRoot)
 	head, err := heads.GetHeadByID(ctx, s.DockerClient, s.DB, projectRoot, request.Id)
 	if err != nil {
 		return api.KillAgent500JSONResponse{

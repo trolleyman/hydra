@@ -5,12 +5,40 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"braces.dev/errtrace"
 )
 
 var cwdProjectRoot *string
+
+// NormalizePath returns an absolute, symlink-resolved path with forward slashes.
+func NormalizePath(path string) (string, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", errtrace.Wrap(err)
+	}
+	eval, err := filepath.EvalSymlinks(abs)
+	var final string
+	if err != nil {
+		// If the path doesn't exist, EvalSymlinks fails. We still want a normalized path.
+		final = abs
+	} else {
+		final = eval
+	}
+
+	return filepath.ToSlash(final), nil
+}
+
+// ComparePaths compares two paths using platform-appropriate rules.
+// On Windows it is case-insensitive; on other platforms it is case-sensitive.
+func ComparePaths(p1, p2 string) bool {
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(p1, p2)
+	}
+	return p1 == p2
+}
 
 // GetProjectRootFromCwd gets the git directory from the current directory
 func GetProjectRootFromCwd() (string, error) {
@@ -25,9 +53,12 @@ func GetProjectRootFromCwd() (string, error) {
 	if err != nil {
 		return "", errtrace.Wrap(err)
 	}
-	// fmt.Printf("GetProjectRootFromCwd: %s\n", projectRoot)
-	cwdProjectRoot = &projectRoot
-	return projectRoot, nil
+	norm, err := NormalizePath(projectRoot)
+	if err != nil {
+		return "", errtrace.Wrap(err)
+	}
+	cwdProjectRoot = &norm
+	return norm, nil
 }
 
 // GetProjectRoot returns the root of the git repository containing dir.
@@ -36,7 +67,7 @@ func GetProjectRoot(dir string) (string, error) {
 	if err != nil {
 		return "", errtrace.Wrap(fmt.Errorf("git rev-parse --show-toplevel: %w", err))
 	}
-	return strings.TrimSpace(string(out)), nil
+	return errtrace.Wrap2(NormalizePath(strings.TrimSpace(string(out))))
 }
 
 func GetHydraDirFromProjectRoot(projectRoot string) string {

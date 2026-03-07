@@ -2,15 +2,15 @@ import { useEffect, useRef, useState } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
-import { api } from '../stores/apiClient'
+import { TerminalEvent, type TerminalStatusEvent, type TerminalDataEvent, AgentStatus } from '../api'
 import { RefreshCw } from 'lucide-react'
 
 interface Props {
   agentId: string
   projectId: string | null
-  containerStatus: string
   isEphemeral?: boolean
   onRefresh?: () => void
+  onStatusUpdate?: (status: string) => void
 }
 
 function getWsUrl(agentId: string, projectId: string | null): string {
@@ -20,14 +20,24 @@ function getWsUrl(agentId: string, projectId: string | null): string {
   return `${protocol}//${host}/ws/agent/${encodeURIComponent(agentId)}/terminal${qs}`
 }
 
-export function AgentTerminal({ agentId, projectId, containerStatus, isEphemeral, onRefresh }: Props) {
+export function AgentTerminal({ agentId, projectId, isEphemeral, onRefresh, onStatusUpdate }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<Terminal | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
+  const isRefreshing = useRef(false)
+  const killTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [reconnectAttempt, setReconnectAttempt] = useState(0)
+  const [status, setStatus] = useState<string>('pending')
 
   useEffect(() => {
+    // If a kill was scheduled, cancel it because we are remounting
+    if (killTimeoutRef.current) {
+      clearTimeout(killTimeoutRef.current)
+      killTimeoutRef.current = null
+    }
+
+    isRefreshing.current = false
     const el = containerRef.current
     if (!el) return
 
@@ -82,18 +92,41 @@ export function AgentTerminal({ agentId, projectId, containerStatus, isEphemeral
       if (e.data instanceof ArrayBuffer) {
         term.write(new Uint8Array(e.data))
       } else if (typeof e.data === 'string') {
+        try {
+          const msg = JSON.parse(e.data) as TerminalEvent
+          switch (msg.type) {
+            case TerminalEvent.type.STATUS: {
+              const statusEvent = msg as TerminalStatusEvent
+              if (statusEvent.status) {
+                const newStatus = statusEvent.status.toLowerCase()
+                setStatus(newStatus)
+                onStatusUpdate?.(newStatus)
+              }
+              return
+            }
+            case TerminalEvent.type.BUILD_FINISHED: {
+              term.write('\x1bc') // RIS (Reset to Initial State) - clear screen
+              term.writeln('\x1b[32mBuild finished. Starting agent...\x1b[0m\r\n')
+              return
+            }
+            case TerminalEvent.type.DATA: {
+              const dataEvent = msg as TerminalDataEvent
+              if (dataEvent.data) {
+                term.write(dataEvent.data)
+              }
+              return
+            }
+          }
+        } catch { /* ignore, might be legacy plain text */ }
+
         term.write(e.data)
-        // If the backend sent the "Build finished" message, it will close the connection.
-        // We want to trigger a status refresh on the parent so it updates containerStatus,
-        // which will trigger this useEffect to re-run and connect to the real container.
-        if (e.data.includes('Build finished')) {
-          setTimeout(() => onRefresh?.(), 500)
-        }
       }
     }
 
     ws.onclose = () => {
       term.writeln('\r\n\x1b[90m[connection closed]\x1b[0m')
+      setStatus('stopped')
+      onStatusUpdate?.('stopped')
     }
 
     ws.onerror = () => {
@@ -125,17 +158,12 @@ export function AgentTerminal({ agentId, projectId, containerStatus, isEphemeral
       termRef.current = null
       wsRef.current = null
       fitAddonRef.current = null
-
-      if (isEphemeral) {
-        // Fire and forget kill request
-        api.default.killAgent(agentId, projectId ?? undefined).catch(() => { })
-      }
     }
-  }, [agentId, projectId, containerStatus, reconnectAttempt, isEphemeral])
+  }, [agentId, projectId, reconnectAttempt, isEphemeral])
 
-  const isRunning = containerStatus.toLowerCase() === 'running';
-  const isWaiting = containerStatus.toLowerCase() === 'waiting';
-  const isLoading = containerStatus.toLowerCase() === 'pending' || containerStatus.toLowerCase() === 'building' || containerStatus.toLowerCase() === 'starting';
+  const isRunning = status === AgentStatus.RUNNING || status === AgentStatus.STARTING;
+  const isWaiting = status === AgentStatus.WAITING;
+  const isLoading = status === AgentStatus.PENDING || status === AgentStatus.BUILDING;
 
   return (
     <div className="rounded-lg overflow-hidden border border-gray-700 dark:border-gray-600 flex flex-col resize-y" style={{ background: '#111827', height: '450px', minHeight: '150px' }}>
@@ -149,11 +177,12 @@ export function AgentTerminal({ agentId, projectId, containerStatus, isEphemeral
         <span className="text-xs text-gray-400 font-mono ml-1">
           terminal - {agentId}
         </span>
-        <span className={`ml-auto text-[10px] px-1.5 py-0.5 rounded font-medium ${isRunning ? 'text-green-400' : isLoading ? "text-blue-400" : isWaiting ?  'text-yellow-400' : 'text-gray-500'}`}>
-          {isRunning ? '● ' : '○ '}{containerStatus.toLowerCase()}
+        <span className={`ml-auto text-[10px] px-1.5 py-0.5 rounded font-medium ${isRunning ? 'text-green-400' : isWaiting ? 'text-yellow-400' : isLoading ? "text-blue-400" : 'text-gray-500'}`}>
+          {isRunning || isWaiting ? '● ' : '○ '}{status}
         </span>
         <button
           onClick={() => {
+            isRefreshing.current = true
             setReconnectAttempt(prev => prev + 1)
             onRefresh?.()
           }}

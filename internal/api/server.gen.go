@@ -48,6 +48,27 @@ const (
 	MergeConflict MergeConflictErrorError = "merge_conflict"
 )
 
+// Defines values for TerminalDataEventType.
+const (
+	TerminalDataEventTypeBuildFinished TerminalDataEventType = "build_finished"
+	TerminalDataEventTypeData          TerminalDataEventType = "data"
+	TerminalDataEventTypeStatus        TerminalDataEventType = "status"
+)
+
+// Defines values for TerminalEventType.
+const (
+	TerminalEventTypeBuildFinished TerminalEventType = "build_finished"
+	TerminalEventTypeData          TerminalEventType = "data"
+	TerminalEventTypeStatus        TerminalEventType = "status"
+)
+
+// Defines values for TerminalStatusEventType.
+const (
+	BuildFinished TerminalStatusEventType = "build_finished"
+	Data          TerminalStatusEventType = "data"
+	Status        TerminalStatusEventType = "status"
+)
+
 // Defines values for SaveConfigParamsScope.
 const (
 	Project SaveConfigParamsScope = "project"
@@ -289,6 +310,34 @@ type StatusResponse struct {
 	UptimeSeconds *float32 `json:"uptime_seconds,omitempty"`
 	Version       *string  `json:"version,omitempty"`
 }
+
+// TerminalDataEvent defines model for TerminalDataEvent.
+type TerminalDataEvent struct {
+	// Data Base64 encoded binary data or plain string
+	Data *string               `json:"data,omitempty"`
+	Type TerminalDataEventType `json:"type"`
+}
+
+// TerminalDataEventType defines model for TerminalDataEvent.Type.
+type TerminalDataEventType string
+
+// TerminalEvent defines model for TerminalEvent.
+type TerminalEvent struct {
+	Type TerminalEventType `json:"type"`
+}
+
+// TerminalEventType defines model for TerminalEvent.Type.
+type TerminalEventType string
+
+// TerminalStatusEvent defines model for TerminalStatusEvent.
+type TerminalStatusEvent struct {
+	// Status The computed status of the agent (derived from container, agent, and head status)
+	Status *AgentStatus            `json:"status,omitempty"`
+	Type   TerminalStatusEventType `json:"type"`
+}
+
+// TerminalStatusEventType defines model for TerminalStatusEvent.Type.
+type TerminalStatusEventType string
 
 // KillAgentParams defines parameters for KillAgent.
 type KillAgentParams struct {

@@ -1,11 +1,8 @@
-# syntax=docker/dockerfile:1
 FROM debian:stable-slim
 
-# Install base utilities and helpful tools with apt cache mounts
+# Install base utilities and helpful tools
 ARG DEBIAN_FRONTEND=noninteractive
-RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
-    --mount=type=cache,target=/var/lib/apt,sharing=locked \
-    apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y \
         git \
         curl \
         wget \

@@ -828,3 +828,34 @@ components:
           additionalProperties:
             type: string
           description: Built-in default Dockerfiles for each agent type (read-only)
+
+    TerminalEvent:
+      type: object
+      required: [type]
+      discriminator:
+        propertyName: type
+        mapping:
+          status: '#/components/schemas/TerminalStatusEvent'
+          data: '#/components/schemas/TerminalDataEvent'
+          build_finished: '#/components/schemas/TerminalEvent'
+      properties:
+        type:
+          type: string
+          enum: [status, data, build_finished]
+
+    TerminalStatusEvent:
+      allOf:
+        - $ref: '#/components/schemas/TerminalEvent'
+        - type: object
+          properties:
+            status:
+              $ref: '#/components/schemas/AgentStatus'
+
+    TerminalDataEvent:
+      allOf:
+        - $ref: '#/components/schemas/TerminalEvent'
+        - type: object
+          properties:
+            data:
+              type: string
+              description: Base64 encoded binary data or plain string

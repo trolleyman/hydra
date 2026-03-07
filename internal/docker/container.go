@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -276,6 +277,10 @@ func SpawnAgent(ctx context.Context, cli *dockerclient.Client, opts SpawnOptions
 		return "", errtrace.Wrap(fmt.Errorf("start container: %w", err))
 	}
 
+	if opts.AgentType == AgentTypeBash && opts.OnStatus != nil {
+		opts.OnStatus(api.Running)
+	}
+
 	log.Printf("Started container %s (%s)", containerName, resp.ID)
 	return resp.ID, nil
 }
@@ -467,7 +472,7 @@ func getAgentBinds(agentType AgentType, projectRoot, id, containerHome string, s
 	if err := os.WriteFile(statusJsonHost, []byte("{}"), 0644); err != nil {
 		return nil, errtrace.Wrap(fmt.Errorf("write %s: %w", statusJsonHost, err))
 	}
-	statusJsonContainer := filepath.Join(containerHome, ".hydra", "status.json")
+	statusJsonContainer := path.Join(containerHome, ".hydra", "status.json")
 	binds := []string{statusJsonHost + ":" + statusJsonContainer}
 
 	// Create and share status log JSONL (truncated fresh on each spawn).
@@ -475,7 +480,7 @@ func getAgentBinds(agentType AgentType, projectRoot, id, containerHome string, s
 	if err := os.WriteFile(statusLogHost, []byte(""), 0644); err != nil {
 		return nil, errtrace.Wrap(fmt.Errorf("write %s: %w", statusLogHost, err))
 	}
-	statusLogContainer := filepath.Join(containerHome, ".hydra", "status_log.jsonl")
+	statusLogContainer := path.Join(containerHome, ".hydra", "status_log.jsonl")
 	binds = append(binds, statusLogHost+":"+statusLogContainer)
 
 	// Mount the hydra binary itself (read-only) so hook commands can call it directly.
@@ -485,7 +490,7 @@ func getAgentBinds(agentType AgentType, projectRoot, id, containerHome string, s
 	if err != nil {
 		return nil, errtrace.Wrap(fmt.Errorf("resolve hydra binary for container: %w", err))
 	}
-	hydraBinContainer := filepath.Join(containerHome, ".hydra", "hydra")
+	hydraBinContainer := path.Join(containerHome, ".hydra", "hydra")
 	binds = append(binds, hydraBin+":"+hydraBinContainer+":ro")
 
 	switch agentType {
@@ -517,8 +522,8 @@ func getAgentBinds(agentType AgentType, projectRoot, id, containerHome string, s
 		}
 
 		for _, pair := range []struct{ host, container string }{
-			{claudeSettingsDir, containerHome + "/.claude"},
-			{claudeJson, containerHome + "/.claude.json"},
+			{claudeSettingsDir, path.Join(containerHome, ".claude")},
+			{claudeJson, path.Join(containerHome, ".claude.json")},
 		} {
 			if _, err := os.Stat(pair.host); err == nil {
 				binds = append(binds, pair.host+":"+pair.container)
@@ -545,7 +550,7 @@ func getAgentBinds(agentType AgentType, projectRoot, id, containerHome string, s
 		}
 
 		for _, pair := range []struct{ host, container string }{
-			{geminiSettingsDir, containerHome + "/.gemini"},
+			{geminiSettingsDir, path.Join(containerHome, ".gemini")},
 		} {
 			if _, err := os.Stat(pair.host); err == nil {
 				binds = append(binds, pair.host+":"+pair.container)
@@ -560,25 +565,25 @@ func getAgentBinds(agentType AgentType, projectRoot, id, containerHome string, s
 		}
 
 		hostSubDir := "root"
-		resolvedContainerPath := containerPath
+		var resolvedContainerPath string
 
 		if strings.HasPrefix(containerPath, "~/") {
 			hostSubDir = "user"
-			resolvedContainerPath = containerHome + containerPath[1:]
-		} else if !filepath.IsAbs(containerPath) {
+			resolvedContainerPath = path.Join(containerHome, containerPath[2:])
+		} else if path.IsAbs(containerPath) {
+			resolvedContainerPath = containerPath
+		} else {
 			// Relative paths are relative to the work directory (worktreePath)
-			resolvedContainerPath = filepath.Join(worktreePath, containerPath)
+			// This is a bit tricky as worktreePath is a host path.
+			// We'll treat it as a host path for now to find the backing store.
+			hostSubDir = "worktree"
+			resolvedContainerPath = containerPath // just use the relative path for the host storage suffix
 		}
 
-		// Host path: <projectDir>/.hydra/cache/custom/<root|user>/<resolvedContainerPath>
-		// Clean the path to avoid ".." etc
-		cleanPath := filepath.Clean(resolvedContainerPath)
-		// On windows this might have drive letter, but we are inside linux container paths here.
-		// If it's absolute, remove the leading slash for the host path.
-		hostPathSuffix := cleanPath
-		if filepath.IsAbs(cleanPath) {
-			// In docker containers (linux), paths start with /
-			hostPathSuffix = strings.TrimPrefix(cleanPath, "/")
+		// Host path suffix: remove leading slash if absolute
+		hostPathSuffix := resolvedContainerPath
+		if path.IsAbs(resolvedContainerPath) {
+			hostPathSuffix = strings.TrimPrefix(resolvedContainerPath, "/")
 		}
 
 		hostPath := filepath.Join(hydraDir, "cache", "custom", hostSubDir, hostPathSuffix)
@@ -586,7 +591,14 @@ func getAgentBinds(agentType AgentType, projectRoot, id, containerHome string, s
 			return nil, errtrace.Wrap(fmt.Errorf("create shared mount host dir: %w", err))
 		}
 
-		binds = append(binds, hostPath+":"+cleanPath+":rw")
+		// Container side path must be absolute and use forward slashes.
+		// If it was relative, we mount it relative to the worktree path in the container.
+		containerSidePath := resolvedContainerPath
+		if !path.IsAbs(containerSidePath) {
+			containerSidePath = path.Join(translateHostPathToContainer(worktreePath), containerSidePath)
+		}
+
+		binds = append(binds, hostPath+":"+containerSidePath+":rw")
 	}
 
 	return binds, nil
@@ -892,6 +904,14 @@ func buildDockerImage(ctx context.Context, cli *dockerclient.Client, tag, docker
 	if err != nil {
 		return errtrace.Wrap(fmt.Errorf("resolve relative dockerfile path: %w", err))
 	}
+
+	// Detect if Dockerfile is outside the build context.
+	isOutside := strings.HasPrefix(relDockerfile, "..") || filepath.IsAbs(relDockerfile)
+	if isOutside {
+		// Use a safe name within the context for the tarball.
+		relDockerfile = ".hydra.Dockerfile"
+	}
+
 	// Ensure the path uses forward slashes, as required by the Docker daemon.
 	relDockerfile = filepath.ToSlash(relDockerfile)
 
@@ -918,11 +938,43 @@ func buildDockerImage(ctx context.Context, cli *dockerclient.Client, tag, docker
 	pr, pw := io.Pipe()
 	errChan := make(chan error, 1)
 
+	var fileCount int
+	var mu sync.Mutex
+
 	go func() {
 		tw := tar.NewWriter(pw)
 		var walkErr error
 
 		defer func() {
+			if isOutside && walkErr == nil {
+				// Manually add the outside Dockerfile to the tar archive.
+				df, err := os.Open(dockerfilePath)
+				if err != nil {
+					walkErr = errtrace.Wrap(fmt.Errorf("open outside dockerfile: %w", err))
+				} else {
+					defer df.Close()
+					info, err := df.Stat()
+					if err != nil {
+						walkErr = errtrace.Wrap(fmt.Errorf("stat outside dockerfile: %w", err))
+					} else {
+						header, err := tar.FileInfoHeader(info, info.Name())
+						if err != nil {
+							walkErr = errtrace.Wrap(err)
+						} else {
+							header.Name = relDockerfile
+							if err := tw.WriteHeader(header); err != nil {
+								walkErr = errtrace.Wrap(err)
+							} else if _, err := io.Copy(tw, df); err != nil {
+								walkErr = errtrace.Wrap(err)
+							} else {
+								mu.Lock()
+								fileCount++
+								mu.Unlock()
+							}
+						}
+					}
+				}
+			}
 			tw.Close()
 			pw.CloseWithError(walkErr)
 			errChan <- walkErr
@@ -981,14 +1033,19 @@ func buildDockerImage(ctx context.Context, cli *dockerclient.Client, tag, docker
 			}
 			defer f.Close()
 			_, err = io.Copy(tw, f)
+			if err == nil {
+				mu.Lock()
+				fileCount++
+				mu.Unlock()
+			}
 			return errtrace.Wrap(err)
 		})
 	}()
 
+	log.Printf("Sending build context to Docker daemon: %s (%d files)", buildContext, fileCount)
 	resp, err := cli.ImageBuild(ctx, pr, build.ImageBuildOptions{
 		Tags:       []string{tag},
 		Dockerfile: relDockerfile, // Use the relative, slash-converted path here
-		Version:    build.BuilderBuildKit,
 	})
 	if err != nil {
 		return errtrace.Wrap(fmt.Errorf("build image: %w", err))

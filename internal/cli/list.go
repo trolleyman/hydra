@@ -15,6 +15,7 @@ import (
 )
 
 func init() {
+	listCmd.Flags().BoolP("all", "a", false, "List all agents, including ephemeral ones")
 	rootCmd.AddCommand(listCmd)
 }
 
@@ -22,6 +23,8 @@ var listCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all Hydra agents",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		showAll, _ := cmd.Flags().GetBool("all")
+
 		projectRoot, err := paths.GetProjectRootFromCwd()
 		if err != nil {
 			return errtrace.Wrap(err)
@@ -43,14 +46,33 @@ var listCmd = &cobra.Command{
 			return errtrace.Wrap(err)
 		}
 
+		// Filter out ephemeral agents unless --all is specified.
+		if !showAll {
+			var filtered []heads.Head
+			for _, h := range hs {
+				if !h.Ephemeral {
+					filtered = append(filtered, h)
+				}
+			}
+			hs = filtered
+		}
+
 		if len(hs) == 0 {
-			fmt.Println("No agents found.")
+			if showAll {
+				fmt.Println("No agents found.")
+			} else {
+				fmt.Println("No persistent agents found. Use --all to see ephemeral agents.")
+			}
 			return nil
 		}
 
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "ID\tAGENT\tBRANCH\tWORKTREE\tCONTAINER\tSTATUS\tAGENT STATUS\tPROMPT")
+		fmt.Fprintln(w, "ID\tAGENT\tEPHEMERAL\tBRANCH\tWORKTREE\tCONTAINER\tSTATUS\tAGENT STATUS\tPROMPT")
 		for _, h := range hs {
+			eph := "no"
+			if h.Ephemeral {
+				eph = "yes"
+			}
 			branch := "(no branch)"
 			if h.Branch != nil {
 				branch = *h.Branch
@@ -83,8 +105,8 @@ var listCmd = &cobra.Command{
 				prompt = prompt[:37] + "..."
 			}
 
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%q\n",
-				h.ID, h.AgentType, branch, worktree, container, status, agentStatus, prompt)
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%q\n",
+				h.ID, h.AgentType, eph, branch, worktree, container, status, agentStatus, prompt)
 		}
 		return errtrace.Wrap(w.Flush())
 	},

@@ -292,7 +292,12 @@ function SettingsPage() {
                   Test Console — {testAgent.agent_type}
                 </h3>
                 <button
-                  onClick={() => setTestAgent(null)}
+                  onClick={() => {
+                    if (testAgent.ephemeral) {
+                      api.default.killAgent(testAgent.id, selectedProjectId ?? undefined).catch(() => { })
+                    }
+                    setTestAgent(null)
+                  }}
                   className="p-1 rounded-md hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-500 transition-colors cursor-pointer"
                 >
                   <X className="w-5 h-5" />
@@ -306,7 +311,6 @@ function SettingsPage() {
                 <AgentTerminal
                   agentId={testAgent.id}
                   projectId={selectedProjectId}
-                  containerStatus={testAgent.container_status}
                   isEphemeral={testAgent.ephemeral}
                 />              </div>
             </div>
@@ -380,9 +384,9 @@ function ConfigForm({
       const template = DOCKERFILE_TEMPLATES[name]
       const content = template.content
       const current = value.dockerfile_contents || ''
-      
+
       const newConfig: AgentConfig = { ...value, dockerfile_contents: current ? current + '\n' + content : content }
-      
+
       if (template.shared_mounts) {
         const currentMounts = value.shared_mounts || []
         // Add only unique mounts
@@ -392,7 +396,7 @@ function ConfigForm({
         }
         newConfig.shared_mounts = newMounts
       }
-      
+
       onChange(newConfig)
     }
   }

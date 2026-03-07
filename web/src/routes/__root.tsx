@@ -254,10 +254,30 @@ function RootLayout() {
 
   async function handleRestart() {
     setRestarting(true)
-    try { await api.default.devRestart() } catch { /* server exits — expected */ }
-    for (;;) {
+    try {
+      await api.default.devRestart()
+    } catch (err: any) {
+      // If 403, we're not in dev mode, so stop.
+      if (err?.status === 403) {
+        alert("Server is not running in dev mode.")
+        setRestarting(false)
+        return
+      }
+      // Other errors (like network error) are expected as the server exits.
+    }
+
+    // Wait for the server to come back online.
+    for (let i = 0; i < 60; i++) { // Max 30 seconds
       await new Promise<void>((r) => setTimeout(r, 500))
-      try { await fetch('/health'); break } catch { /* still restarting */ }
+      try {
+        const resp = await fetch('/health')
+        if (resp.ok) {
+          const text = await resp.text()
+          if (text.trim() === 'OK') {
+            break
+          }
+        }
+      } catch { /* still restarting */ }
     }
     window.location.reload()
   }

@@ -1,10 +1,15 @@
 # TODO
-- Text box under Dockerfile Contents can get 2 scroll bars (inner and outer - one with the FROM and one without, when expanding the resize anchor)
 - Remove `Dockerfile Extension` hovering tooltip when editing Dockerfile
-- Test terminal does not work on Windows - opening it doesn't transition it to the actual bash after building, for example.
+- Test terminal does not work on Windows - opening it doesn't transition it to the actual bash after building, for example. This is a problem as also when refreshing the terminal in the ephemeral test terminal on the settings page it deletes the agent
 
 - Terminal sometimes has up to half a character mising at the bottom. Affected by resize-y, when resizing, this can get better / worse
 - Terminal should copy if there is text selected and if ctrl + c is pressed. This should copy the text, and clear the selection. Ctrl+C should still send Ctrl+C when there is no selection on the terminal. Ctrl+V should also paste, not Ctrl+Shift+V. Use Ctrl+Shift+V to actually send Ctrl+V to the term.
+
+- Make the Shared Mounts section in the settings page instead be a list rather than a comma separated system. Also it should show an example of the path that's shared in the container. If editing project settings the project dir should be the project dir, otherwise it should be e.g. `/home/<user>/project/.etc...`
+- remove dockerfile path field from settings page
+- make dockerfile contents and dockerignore contents fields taller, rename them to just dockerfile/dockerignore.
+- tweak build context so that the logic follows shared mounts (absolute is absolute, ~ is relative to home, relative is relative to project dir. mentioin in info tooltip, refactor out info tooltip into shared component.) in this tooltip, show exact path it will be (if in user settings mode, show example project dir if needed)
+- Text box under Dockerfile Contents can get 2 scroll bars (inner and outer - one with the FROM and one without, when expanding the resize anchor)
 
 - Add the ability to open a bash terminal for the container - new tab? in the agent mode. This job would be killed once the WebSocket connection was closed.
 
@@ -57,6 +62,16 @@ Same here:
 2026/03/07 10:46:05.255475 $ git -C C:/code_non_dev_drive/hydra branch -D main
 2026/03/07 10:46:05.257630 error: background spawn agent test-bash-1jp3: ensure image: build default agent image: build base image: build error: the --mount option requires BuildKit. Refer to https://docs.docker.com/go/buildkit/ to learn how to build images with BuildKit enabled
 error: cannot delete branch 'main' used by worktree at 'C:/code_non_dev_drive/hydra'
+```
+
+Same here:
+```log
+2026/03/07 11:01:35.810719 [Building hydra-agent-gemini:latest]  ---> f10a1b0c23ad
+2026/03/07 11:01:35.813929 [Building hydra-agent-gemini:latest] Successfully built f10a1b0c23ad
+2026/03/07 11:01:35.833952 [Building hydra-agent-gemini:latest] Successfully tagged hydra-agent-gemini:latest
+2026/03/07 11:01:35.833952 Built Docker image: hydra-agent-gemini:latest (from C:\Users\ctoll\.hydra\default_dockerfiles\gemini\Dockerfile in C:\Users\ctoll\.hydra\default_dockerfiles\gemini)
+2026/03/07 11:01:35.834479 Building Docker image: hydra-agent-gemini-extended:20418a26 (from C:\Users\ctoll\AppData\Local\Temp\hydra-build-102201914\Dockerfile in C:\code_non_dev_drive\hydra\.hydra\build\tmp)
+2026/03/07 11:01:35.839866 error: background spawn agent terminal-show-error: ensure image: build image: Error response from daemon: forbidden path outside the build context: ../../../../../Users/ctoll/AppData/Local/Temp/hydra-build-102201914/Dockerfile ()
 ```
 
 - Hydra tries to delete main worktree when the ephemeral test agents are deleted (when closing the test terminal window):
