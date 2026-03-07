@@ -39,6 +39,7 @@ const DOCKERFILE_TEMPLATES: Record<string, { label: string; content: string; sha
 function SettingsPage() {
   const { selectedProjectId, projects } = useProjectStore()
   const [config, setConfig] = useState<ConfigResponse | null>(null)
+  const [inheritedConfig, setInheritedConfig] = useState<ConfigResponse | null>(null)
   const [scope, setScope] = useState<ConfigScope>('project')
   const [activeSection, setActiveSection] = useState<SettingsSection>('all')
   const [loading, setLoading] = useState(true)
@@ -53,8 +54,14 @@ function SettingsPage() {
     async function fetchConfig() {
       setLoading(true)
       try {
-        const cfg = await api.default.getConfig(selectedProjectId ?? undefined)
-        setConfig(cfg)
+        const editCfg = await api.default.getConfig(selectedProjectId ?? undefined, scope)
+        setConfig(editCfg)
+        if (scope === 'project') {
+          const userCfg = await api.default.getConfig(selectedProjectId ?? undefined, 'user')
+          setInheritedConfig(userCfg)
+        } else {
+          setInheritedConfig(null)
+        }
       } catch (err) {
         setError(String(err))
       } finally {
@@ -62,7 +69,7 @@ function SettingsPage() {
       }
     }
     fetchConfig()
-  }, [selectedProjectId])
+  }, [selectedProjectId, scope])
 
   async function handleSave() {
     if (!config) return
@@ -199,7 +206,7 @@ function SettingsPage() {
                 <ConfigForm
                   value={config.defaults}
                   onChange={(defaults) => setConfig({ ...config, defaults })}
-                  inherited={null}
+                  inherited={inheritedConfig?.defaults ?? null}
                   agentType="default"
                   scope={scope}
                   selectedProject={selectedProject}
@@ -274,7 +281,7 @@ function SettingsPage() {
                     <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">These are the base Dockerfiles embedded in Hydra. They are read-only and serve as the foundation for agent containers.</p>
                   </div>
                 </div>
-                <DefaultDockerfilesSection dockerfiles={config.default_dockerfiles ?? {}} />
+                <DefaultDockerfilesSection dockerfiles={config.default_dockerfiles ?? inheritedConfig?.default_dockerfiles ?? {}} />
               </div>
             )}
           </div>
@@ -463,82 +470,22 @@ function ConfigForm({
     <div className="space-y-6">
       <div className="space-y-1.5">
         <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">
-          Build Context
-          <InfoTooltip title="Build Context">
-            <p>The directory where the Docker build will be executed.</p>
-            <ul className="list-disc ml-3 space-y-1 mt-1">
-              <li><code className="text-blue-300">/abs/path</code>: Absolute path on the host.</li>
-              <li><code className="text-blue-300">~/path</code>: Relative to your home directory.</li>
-              <li><code className="text-blue-300">rel/path</code>: Relative to the project directory.</li>
-            </ul>
-            <p className="mt-2 text-gray-400 italic">Resolved path: {resolveBuildContextExample(value.context || '')}</p>
-          </InfoTooltip>
+          System Pre-Prompt
         </label>
-        <input
-          type="text"
-          value={value.context || ''}
-          onChange={(e) => onChange({ ...value, context: e.target.value || null })}
-          placeholder={inherited?.context || '<projectDir>/.hydra/build/tmp'}
-          className="w-full text-sm px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-100 placeholder-gray-300 dark:placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-mono shadow-inner"
+        <textarea
+          value={value.pre_prompt || ''}
+          onChange={(e) => onChange({ ...value, pre_prompt: e.target.value || null })}
+          placeholder={inherited?.pre_prompt || 'You are a helpful assistant...'}
+          rows={4}
+          className="w-full text-sm px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-100 placeholder-gray-300 dark:placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 leading-relaxed shadow-inner resize-y"
         />
       </div>
 
-      <div className="space-y-2">
-        <div className="flex items-center justify-between">
-          <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">
-            Dockerfile (Extends Base)
-          </label>
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] text-gray-400 dark:text-gray-500">Add Template:</span>
-            <select
-              value={template}
-              onChange={(e) => handleTemplateChange(e.target.value)}
-              className="text-[10px] bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded px-1 py-0.5 focus:outline-none cursor-pointer"
-            >
-              {Object.entries(DOCKERFILE_TEMPLATES).map(([id, t]) => (
-                <option key={id} value={id}>{t.label}</option>
-              ))}
-            </select>
-          </div>
-        </div>
-        <div className="relative group rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 focus-within:ring-2 focus-within:ring-blue-500/20 focus-within:border-blue-500 transition-all shadow-inner">
-          <div className="px-3 pt-3 text-blue-500 dark:text-blue-400 font-mono text-sm pointer-events-none opacity-60">
-            FROM {baseImage}
-          </div>
-          <textarea
-            ref={textareaRef}
-            value={value.dockerfile_contents || ''}
-            onChange={(e) => onChange({ ...value, dockerfile_contents: e.target.value || null })}
-            placeholder={inherited?.dockerfile_contents || '# Add your custom Dockerfile instructions here\nRUN apt-get install -y ...'}
-            className="w-full min-h-[400px] text-sm px-3 pb-3 bg-transparent text-gray-800 dark:text-gray-100 placeholder-gray-300 dark:placeholder-gray-600 focus:outline-none font-mono leading-relaxed resize-y"
-            spellCheck={false}
-          />
-          <div className="absolute right-3 bottom-3 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
-            <div className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-400 border border-gray-200 dark:border-gray-700 font-mono">
-              Dockerfile Extension
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div className="space-y-2">
-        <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">
-          Dockerignore (Override)
-        </label>
-        <div className="relative group rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 focus-within:ring-2 focus-within:ring-blue-500/20 focus-within:border-blue-500 transition-all shadow-inner">
-          <textarea
-            value={value.dockerignore_contents || ''}
-            onChange={(e) => onChange({ ...value, dockerignore_contents: e.target.value || null })}
-            placeholder={inherited?.dockerignore_contents || '# Add files to ignore during build\n.git\nnode_modules'}
-            className="w-full min-h-[200px] text-sm p-3 bg-transparent text-gray-800 dark:text-gray-100 placeholder-gray-300 dark:placeholder-gray-600 focus:outline-none font-mono leading-relaxed resize-y"
-            spellCheck={false}
-          />
-        </div>
-      </div>
-
       <div className="space-y-1.5">
-        <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">
-          Shared Mounts
+        <div className="flex items-center gap-1.5">
+          <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">
+            Shared Mounts
+          </label>
           <InfoTooltip title="Shared Bind Mounts">
             <p>Paths inside the container that are shared between all agents in this project.</p>
             <ul className="list-disc ml-3 space-y-1 mt-1">
@@ -547,9 +494,8 @@ function ConfigForm({
               <li><code className="text-blue-300">rel/path</code>: Relative to project directory.</li>
             </ul>
           </InfoTooltip>
-        </label>
-        
-        <div className="space-y-4">
+        </div>
+        <div className="space-y-2 pt-0.5">
           {(value.shared_mounts || []).map((mount, index) => (
             <div key={index} className="flex flex-col gap-1.5 p-3 rounded-xl border border-gray-100 dark:border-gray-700/50 bg-gray-50/50 dark:bg-gray-800/30">
               <div className="flex items-center gap-2">
@@ -603,18 +549,76 @@ function ConfigForm({
         </div>
       </div>
 
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">
+            Dockerfile (Extends Base)
+          </label>
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] text-gray-400 dark:text-gray-500">Add Template:</span>
+            <select
+              value={template}
+              onChange={(e) => handleTemplateChange(e.target.value)}
+              className="text-[10px] bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded px-1 py-0.5 focus:outline-none cursor-pointer"
+            >
+              {Object.entries(DOCKERFILE_TEMPLATES).map(([id, t]) => (
+                <option key={id} value={id}>{t.label}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+        <div className="relative group rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 focus-within:ring-2 focus-within:ring-blue-500/20 focus-within:border-blue-500 transition-all shadow-inner">
+          <div className="px-3 pt-3 text-blue-500 dark:text-blue-400 font-mono text-sm pointer-events-none opacity-60">
+            FROM {baseImage}
+          </div>
+          <textarea
+            ref={textareaRef}
+            value={value.dockerfile_contents || ''}
+            onChange={(e) => onChange({ ...value, dockerfile_contents: e.target.value || null })}
+            placeholder={inherited?.dockerfile_contents || '# Add your custom Dockerfile instructions here\nRUN apt-get install -y ...'}
+            className="w-full min-h-[300px] text-sm px-3 pb-3 bg-transparent text-gray-800 dark:text-gray-100 placeholder-gray-300 dark:placeholder-gray-600 focus:outline-none font-mono leading-relaxed resize-y"
+            spellCheck={false}
+          />
+        </div>
+      </div>
 
       <div className="space-y-1.5">
-        <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">
-          System Pre-Prompt
-        </label>
-        <textarea
-          value={value.pre_prompt || ''}
-          onChange={(e) => onChange({ ...value, pre_prompt: e.target.value || null })}
-          placeholder={inherited?.pre_prompt || 'You are a helpful assistant...'}
-          rows={4}
-          className="w-full text-sm px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-100 placeholder-gray-300 dark:placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all leading-relaxed shadow-inner resize-y"
+        <div className="flex items-center gap-1.5">
+          <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">
+            Build Context
+          </label>
+          <InfoTooltip title="Build Context">
+            <p>The directory where the Docker build will be executed.</p>
+            <ul className="list-disc ml-3 space-y-1 mt-1">
+              <li><code className="text-blue-300">/abs/path</code>: Absolute path on the host.</li>
+              <li><code className="text-blue-300">~/path</code>: Relative to your home directory.</li>
+              <li><code className="text-blue-300">rel/path</code>: Relative to the project directory.</li>
+            </ul>
+            <p className="mt-2 text-gray-400 italic">Resolved: {resolveBuildContextExample(value.context || '')}</p>
+          </InfoTooltip>
+        </div>
+        <input
+          type="text"
+          value={value.context || ''}
+          onChange={(e) => onChange({ ...value, context: e.target.value || null })}
+          placeholder={inherited?.context || '<projectDir>/.hydra/build/tmp'}
+          className="w-full text-sm px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-100 placeholder-gray-300 dark:placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-mono shadow-inner"
         />
+      </div>
+
+      <div className="space-y-2">
+        <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">
+          Dockerignore (Override)
+        </label>
+        <div className="relative group rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 focus-within:ring-2 focus-within:ring-blue-500/20 focus-within:border-blue-500 transition-all shadow-inner">
+          <textarea
+            value={value.dockerignore_contents || ''}
+            onChange={(e) => onChange({ ...value, dockerignore_contents: e.target.value || null })}
+            placeholder={inherited?.dockerignore_contents || '# Add files to ignore during build\n.git\nnode_modules'}
+            className="w-full min-h-[200px] text-sm p-3 bg-transparent text-gray-800 dark:text-gray-100 placeholder-gray-300 dark:placeholder-gray-600 focus:outline-none font-mono leading-relaxed resize-y"
+            spellCheck={false}
+          />
+        </div>
       </div>
     </div>
   )

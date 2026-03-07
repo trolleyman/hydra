@@ -392,6 +392,13 @@ paths:
           schema:
             type: string
           description: Project ID to scope the config (defaults to server CWD project)
+        - in: query
+          name: scope
+          required: false
+          schema:
+            type: string
+            enum: [project, user]
+          description: Load only a specific scope's raw config instead of the merged config
       responses:
         '200':
           description: OK

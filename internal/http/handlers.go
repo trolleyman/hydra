@@ -171,13 +171,37 @@ func (s *Server) GetStatus(_ context.Context, _ api.GetStatusRequestObject) (api
 
 func (s *Server) GetConfig(_ context.Context, request api.GetConfigRequestObject) (api.GetConfigResponseObject, error) {
 	projectRoot := s.resolveProjectRoot(request.Params.ProjectId)
-	cfg, err := config.Load(projectRoot)
-	if err != nil {
-		return api.GetConfig500JSONResponse{
-			Code:    500,
-			Error:   "internal_error",
-			Details: err.Error(),
-		}, nil
+
+	var cfg config.Config
+	if request.Params.Scope != nil {
+		// Load only the raw config for the requested scope (not merged).
+		var path string
+		var err error
+		if *request.Params.Scope == api.GetConfigParamsScopeUser {
+			path, err = config.GetUserConfigPath()
+			if err != nil {
+				return api.GetConfig500JSONResponse{Code: 500, Error: "internal_error", Details: err.Error()}, nil
+			}
+		} else {
+			path = config.GetProjectConfigPath(projectRoot)
+		}
+		raw, err := config.LoadFile(path)
+		if err != nil {
+			return api.GetConfig500JSONResponse{Code: 500, Error: "internal_error", Details: err.Error()}, nil
+		}
+		if raw != nil {
+			cfg = *raw
+		}
+	} else {
+		var err error
+		cfg, err = config.Load(projectRoot)
+		if err != nil {
+			return api.GetConfig500JSONResponse{
+				Code:    500,
+				Error:   "internal_error",
+				Details: err.Error(),
+			}, nil
+		}
 	}
 
 	defaultDockerfiles := map[string]string{
@@ -200,7 +224,6 @@ func (s *Server) GetConfig(_ context.Context, request api.GetConfigRequestObject
 	}
 
 	for name, agent := range cfg.Agents {
-		// Create a local copy to take its address
 		sharedMounts := agent.SharedMounts
 		resp.Agents[name] = api.AgentConfig{
 			Dockerfile:           agent.Dockerfile,
@@ -249,13 +272,13 @@ func (s *Server) SaveConfig(_ context.Context, request api.SaveConfigRequestObje
 		}
 	}
 
-	scope := api.Project
+	scope := api.SaveConfigParamsScopeProject
 	if request.Params.Scope != nil {
 		scope = *request.Params.Scope
 	}
 
 	var savePath string
-	if scope == api.User {
+	if scope == api.SaveConfigParamsScopeUser {
 		var err error
 		savePath, err = config.GetUserConfigPath()
 		if err != nil {

@@ -69,10 +69,16 @@ const (
 	Status        TerminalStatusEventType = "status"
 )
 
+// Defines values for GetConfigParamsScope.
+const (
+	GetConfigParamsScopeProject GetConfigParamsScope = "project"
+	GetConfigParamsScopeUser    GetConfigParamsScope = "user"
+)
+
 // Defines values for SaveConfigParamsScope.
 const (
-	Project SaveConfigParamsScope = "project"
-	User    SaveConfigParamsScope = "user"
+	SaveConfigParamsScopeProject SaveConfigParamsScope = "project"
+	SaveConfigParamsScopeUser    SaveConfigParamsScope = "user"
 )
 
 // AddProjectRequest defines model for AddProjectRequest.
@@ -409,7 +415,13 @@ type SpawnAgentParams struct {
 type GetConfigParams struct {
 	// ProjectId Project ID to scope the config (defaults to server CWD project)
 	ProjectId *string `form:"project_id,omitempty" json:"project_id,omitempty"`
+
+	// Scope Load only a specific scope's raw config instead of the merged config
+	Scope *GetConfigParamsScope `form:"scope,omitempty" json:"scope,omitempty"`
 }
+
+// GetConfigParamsScope defines parameters for GetConfig.
+type GetConfigParamsScope string
 
 // SaveConfigParams defines parameters for SaveConfig.
 type SaveConfigParams struct {
@@ -844,6 +856,14 @@ func (siw *ServerInterfaceWrapper) GetConfig(w http.ResponseWriter, r *http.Requ
 	err = runtime.BindQueryParameter("form", true, false, "project_id", r.URL.Query(), &params.ProjectId)
 	if err != nil {
 		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "scope" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "scope", r.URL.Query(), &params.Scope)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "scope", Err: err})
 		return
 	}
 

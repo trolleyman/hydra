@@ -281,17 +281,20 @@ export class DefaultService {
     /**
      * Get the merged configuration
      * @param projectId Project ID to scope the config (defaults to server CWD project)
+     * @param scope Load only a specific scope's raw config instead of the merged config
      * @returns ConfigResponse OK
      * @throws ApiError
      */
     public getConfig(
         projectId?: string,
+        scope?: 'project' | 'user',
     ): CancelablePromise<ConfigResponse> {
         return this.httpRequest.request({
             method: 'GET',
             url: '/api/config',
             query: {
                 'project_id': projectId,
+                'scope': scope,
             },
             errors: {
                 500: `Internal Server Error`,
