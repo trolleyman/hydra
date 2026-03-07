@@ -13,6 +13,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 
 	"braces.dev/errtrace"
@@ -122,9 +123,32 @@ func CombinePrompt(prePrompt, prompt string) string {
 	return prePrompt + "\n" + prompt
 }
 
+func translateHostPathToContainer(path string) string {
+	// On non-Windows hosts, no translation is needed.
+	if runtime.GOOS != "windows" {
+		return path
+	}
+	// On Windows convert drive-letter paths like "C:\foo" or "C:/foo"
+	// into the Linux-style "/mnt/c/foo" that Docker for Windows exposes.
+	if len(path) >= 2 && path[1] == ':' {
+		drive := strings.ToLower(string(path[0]))
+		p := path[2:]
+		// normalize separators to forward slash
+		p = strings.ReplaceAll(p, "\\", "/")
+		// strip any leading slashes
+		for len(p) > 0 && p[0] == '/' {
+			p = p[1:]
+		}
+		return "/mnt/" + drive + "/" + p
+	}
+	// Fallback: just normalize separators
+	return strings.ReplaceAll(path, "\\", "/")
+}
+
 // SpawnAgent builds the Docker image if necessary, then creates and starts the container.
 // Returns the container ID.
 func SpawnAgent(ctx context.Context, cli *dockerclient.Client, opts SpawnOptions) (string, error) {
+	log.Printf("Spawning agent with options: %+v", opts)
 	if opts.OnStatus != nil {
 		opts.OnStatus(api.Building)
 	}
@@ -178,10 +202,12 @@ func SpawnAgent(ctx context.Context, cli *dockerclient.Client, opts SpawnOptions
 
 	// Mount the main .git directory and the worktree at the same absolute paths as on the host.
 	// This is required because git worktree .git files contain absolute paths back to the main .git dir.
+	containerWorktreePath := translateHostPathToContainer(opts.WorktreePath)
 	gitDir := opts.ProjectPath + "/.git"
+	containerGitDir := translateHostPathToContainer(gitDir)
 	binds := []string{
-		gitDir + ":" + gitDir + ":rw",
-		opts.WorktreePath + ":" + opts.WorktreePath + ":rw",
+		containerGitDir + ":" + gitDir,
+		containerWorktreePath + ":" + opts.WorktreePath,
 	}
 	agentBinds, err := getAgentBinds(opts.AgentType, opts.ProjectPath, opts.Id, containerHome)
 	if err != nil {
@@ -228,7 +254,7 @@ func SpawnAgent(ctx context.Context, cli *dockerclient.Client, opts SpawnOptions
 			Tty:        true,
 			OpenStdin:  true,
 			Env:        env,
-			WorkingDir: opts.WorktreePath,
+			WorkingDir: containerWorktreePath,
 		},
 		&container.HostConfig{
 			Binds:      binds,
@@ -724,7 +750,6 @@ func ensureDefaultImage(ctx context.Context, cli *dockerclient.Client, agentType
 	}
 	return tag, nil
 }
-
 
 func ensureCustomImage(ctx context.Context, cli *dockerclient.Client, agentType AgentType, dockerfilePath string, buildContext string, buildLog io.Writer) (string, error) {
 	abs, err := filepath.Abs(dockerfilePath)
