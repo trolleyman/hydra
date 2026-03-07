@@ -4,7 +4,7 @@ import type { AgentResponse } from '../api'
 import { AgentTerminal } from './AgentTerminal'
 import { DiffViewer } from '../DiffViewer'
 import { formatStartedAgo } from './AgentComponents'
-import { LoaderCircle, Merge, Trash2, Tag, RotateCcw, RefreshCcw, FolderSync } from 'lucide-react'
+import { LoaderCircle, Merge, Trash2, Tag, RotateCcw, FolderSync, Copy, Check } from 'lucide-react'
 
 export function AgentDetail({
   agent,
@@ -23,6 +23,7 @@ export function AgentDetail({
   const [merging, setMerging] = useState(false)
   const [updating, setUpdating] = useState(false)
   const [restarting, setRestarting] = useState(false)
+  const [copied, setCopied] = useState(false)
   const [, setTick] = useState(0)
 
   useEffect(() => {
@@ -116,6 +117,17 @@ export function AgentDetail({
           {/* Title row */}
           <div className="flex items-center gap-2 mb-2">
             <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">{agent.id}</h1>
+            <button
+              onClick={() => {
+                navigator.clipboard.writeText(agent.id)
+                setCopied(true)
+                setTimeout(() => setCopied(false), 2000)
+              }}
+              className="w-6 h-6 flex items-center justify-center rounded-md border border-gray-200 text-gray-400 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-500 dark:hover:bg-gray-700 transition-colors cursor-pointer shrink-0"
+              title="Copy ID"
+            >
+              {copied ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3 h-3" />}
+            </button>
             <button
               onClick={handleMerge}
               disabled={merging || killing || restarting || updating}
