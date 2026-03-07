@@ -121,7 +121,7 @@ export function SpawnForm({
     }
   }
 
-  function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+  function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement | HTMLInputElement>) {
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
       e.preventDefault()
       handleSubmit(e as unknown as React.FormEvent)
@@ -159,6 +159,7 @@ export function SpawnForm({
                   type="text"
                   value={idManuallyEdited ? agentId : ''}
                   onChange={(e) => handleIdChange(e.target.value)}
+                  onKeyDown={handleKeyDown}
                   placeholder={derivedIdPlaceholder}
                   className="min-w-0 flex-1 text-[10px] text-gray-500 dark:text-gray-400 bg-transparent font-mono focus:outline-none placeholder-gray-300 dark:placeholder-gray-600 truncate ml-1"
                 />
@@ -243,6 +244,7 @@ export function SpawnForm({
                       type="text"
                       value={idManuallyEdited ? agentId : ''}
                       onChange={(e) => handleIdChange(e.target.value)}
+                      onKeyDown={handleKeyDown}
                       placeholder={derivedIdPlaceholder}
                       className="flex-1 min-w-0 text-xs text-gray-600 dark:text-gray-300 font-mono bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-md px-2 py-0.5 focus:outline-none focus:border-blue-300 dark:focus:border-blue-500 focus:bg-white dark:focus:bg-gray-600 transition-colors placeholder-gray-300 dark:placeholder-gray-500"
                     />
