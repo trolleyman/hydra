@@ -3,7 +3,6 @@ package http
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -64,27 +63,28 @@ func (s *Server) GetDockerError() string {
 // DevToolsNamespace is used for generating stable UUIDs for workspace roots.
 var DevToolsNamespace = uuid.MustParse("d63f9661-d707-4054-9467-33f7d247f0e3")
 
-func (s *Server) HandleDevToolsJSON(w http.ResponseWriter, r *http.Request) {
-	// Generate a stable UUID for this project root
-	u := uuid.NewSHA1(DevToolsNamespace, []byte(s.ProjectRoot))
-
-	resp := map[string]interface{}{
-		"workspace": map[string]string{
-			"root": s.ProjectRoot,
-			"uuid": u.String(),
-		},
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		log.Printf("error encoding devtools json: %v", err)
-	}
-}
-
 // NewHandler creates a handler with routing matching the OpenAPI spec.
 func NewHandler(s *Server) http.Handler {
 	strict := api.NewStrictHandler(s, nil)
 	return api.HandlerFromMux(strict, http.NewServeMux())
+}
+
+func (s *Server) GetDevToolsConfig(_ context.Context, _ api.GetDevToolsConfigRequestObject) (api.GetDevToolsConfigResponseObject, error) {
+	// Generate a stable UUID for this project root
+	u := uuid.NewSHA1(DevToolsNamespace, []byte(s.ProjectRoot))
+
+	root := s.ProjectRoot
+	uid := u.String()
+
+	return api.GetDevToolsConfig200JSONResponse{
+		Workspace: &struct {
+			Root *string `json:"root,omitempty"`
+			Uuid *string `json:"uuid,omitempty"`
+		}{
+			Root: &root,
+			Uuid: &uid,
+		},
+	}, nil
 }
 
 // resolveProjectRoot returns the project root for the given project_id query param.

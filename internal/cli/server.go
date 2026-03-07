@@ -92,7 +92,7 @@ func runServer(_ *cobra.Command, _ []string) error {
 	mux.HandleFunc("/ws/agent/", server.HandleTerminalWS)
 
 	if server.DevRestartEnabled {
-		mux.HandleFunc("/.well-known/appspecific/com.chrome.devtools.json", server.HandleDevToolsJSON)
+		mux.Handle("/.well-known/appspecific/com.chrome.devtools.json", apiHandler)
 	}
 
 	registerFrontend(mux)

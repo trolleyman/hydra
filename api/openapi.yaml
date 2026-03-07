@@ -4,6 +4,26 @@ info:
   version: 1.0.0
 
 paths:
+  /.well-known/appspecific/com.chrome.devtools.json:
+    get:
+      summary: Chrome DevTools workspace configuration
+      operationId: getDevToolsConfig
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  workspace:
+                    type: object
+                    properties:
+                      root:
+                        type: string
+                      uuid:
+                        type: string
+
   /health:
     get:
       summary: Health check
