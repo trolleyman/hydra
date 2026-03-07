@@ -84,7 +84,7 @@ type spawnForm struct {
 	promptInput     textinput.Model
 }
 
-var agentTypes = []docker.AgentType{docker.AgentTypeClaude, docker.AgentTypeGemini}
+var agentTypes = []docker.AgentType{docker.AgentTypeClaude, docker.AgentTypeGemini, docker.AgentTypeCopilot}
 
 func newSpawnForm() spawnForm {
 	id := textinput.New()

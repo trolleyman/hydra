@@ -243,6 +243,15 @@ func SpawnAgent(ctx context.Context, cli *dockerclient.Client, opts SpawnOptions
 				cmd = append(cmd, "-i", CombinePrompt(opts.PrePrompt, opts.Prompt))
 			}
 		}
+	case AgentTypeCopilot:
+		if opts.Resume {
+			cmd = []string{"copilot", "--resume"}
+		} else {
+			cmd = []string{"copilot", "--yolo"}
+			if opts.Prompt != "" {
+				cmd = append(cmd, "--autopilot", "-p", CombinePrompt(opts.PrePrompt, opts.Prompt))
+			}
+		}
 	case AgentTypeBash:
 		cmd = []string{"/bin/bash"}
 	default:
@@ -277,7 +286,7 @@ func SpawnAgent(ctx context.Context, cli *dockerclient.Client, opts SpawnOptions
 		return "", errtrace.Wrap(fmt.Errorf("start container: %w", err))
 	}
 
-	if opts.AgentType == AgentTypeBash && opts.OnStatus != nil {
+	if (opts.AgentType == AgentTypeBash || opts.AgentType == AgentTypeCopilot) && opts.OnStatus != nil {
 		opts.OnStatus(api.Running)
 	}
 
@@ -448,6 +457,8 @@ func defaultDockerfileContent(agentType AgentType) (string, error) {
 		return config.DefaultDockerfileGemini, nil
 	case AgentTypeBash:
 		return config.DefaultDockerfileBash, nil
+	case AgentTypeCopilot:
+		return config.DefaultDockerfileCopilot, nil
 	case "base":
 		return config.DefaultDockerfileBase, nil
 	default:
@@ -555,6 +566,28 @@ func getAgentBinds(agentType AgentType, projectRoot, id, containerHome string, s
 			if _, err := os.Stat(pair.host); err == nil {
 				binds = append(binds, pair.host+":"+pair.container)
 			}
+		}
+
+	case AgentTypeCopilot:
+		// Mount ~/.copilot/ (auth token, config, session state) from a per-project cache dir.
+		copilotCacheDir := filepath.Join(cacheDir, ".copilot")
+		if err := os.MkdirAll(copilotCacheDir, 0755); err != nil {
+			return nil, errtrace.Wrap(err)
+		}
+		binds = append(binds, copilotCacheDir+":"+path.Join(containerHome, ".copilot"))
+
+		// Write Hydra hooks into the worktree at .github/hooks/hydra.json.
+		// Copilot CLI loads hooks from .github/hooks/ relative to the working directory.
+		hooksDir := filepath.Join(worktreePath, ".github", "hooks")
+		if err := os.MkdirAll(hooksDir, 0755); err != nil {
+			return nil, errtrace.Wrap(err)
+		}
+		hooksData, err := buildCopilotHooks()
+		if err != nil {
+			return nil, errtrace.Wrap(err)
+		}
+		if err := os.WriteFile(filepath.Join(hooksDir, "hydra.json"), hooksData, 0644); err != nil {
+			return nil, errtrace.Wrap(err)
 		}
 	}
 
@@ -695,6 +728,38 @@ func buildGeminiSettings(existing []byte) ([]byte, error) {
 	data, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
 		return nil, errtrace.Wrap(fmt.Errorf("marshal gemini settings: %w", err))
+	}
+	return data, nil
+}
+
+// buildCopilotHooks generates a hooks JSON file for GitHub Copilot CLI.
+// Copilot CLI loads hooks from .github/hooks/*.json in the working directory.
+// The format differs from Claude/Gemini: it uses {"version":1,"hooks":{...}}.
+func buildCopilotHooks() ([]byte, error) {
+	type hookEntry struct {
+		Type string `json:"type"`
+		Bash string `json:"bash"`
+	}
+	type hooksFile struct {
+		Version int                       `json:"version"`
+		Hooks   map[string][]hookEntry    `json:"hooks"`
+	}
+
+	cmd := "$HOME/.hydra/hydra trigger-hook copilot"
+	hf := hooksFile{
+		Version: 1,
+		Hooks: map[string][]hookEntry{
+			"sessionStart":        {{Type: "command", Bash: cmd + " sessionStart"}},
+			"userPromptSubmitted": {{Type: "command", Bash: cmd + " userPromptSubmitted"}},
+			"preToolUse":          {{Type: "command", Bash: cmd + " preToolUse"}},
+			"postToolUse":         {{Type: "command", Bash: cmd + " postToolUse"}},
+			"sessionEnd":          {{Type: "command", Bash: cmd + " sessionEnd"}},
+		},
+	}
+
+	data, err := json.MarshalIndent(hf, "", "  ")
+	if err != nil {
+		return nil, errtrace.Wrap(fmt.Errorf("marshal copilot hooks: %w", err))
 	}
 	return data, nil
 }

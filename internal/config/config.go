@@ -21,6 +21,9 @@ var DefaultDockerfileGemini string
 //go:embed bash.Dockerfile
 var DefaultDockerfileBash string
 
+//go:embed copilot.Dockerfile
+var DefaultDockerfileCopilot string
+
 //go:embed base.Dockerfile
 var DefaultDockerfileBase string
 
