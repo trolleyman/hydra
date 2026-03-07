@@ -331,6 +331,9 @@ func SpawnHead(ctx context.Context, cli *dockerclient.Client, store *db.Store, p
 		})
 		if err != nil {
 			log.Printf("error: background spawn agent %s: %v", opts.ID, err)
+			if buildLogFile != nil {
+				fmt.Fprintf(buildLogFile, "\nerror: %v\n", err)
+			}
 			s := initialStatus
 			s.Status = api.Stopped
 			e := "error"

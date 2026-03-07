@@ -278,6 +278,10 @@ func (s *Server) streamBuildLog(ctx context.Context, conn *websocket.Conn, proje
 						time.Sleep(100 * time.Millisecond)
 						return true
 					}
+					if head != nil && head.ContainerStatus == "stopped" {
+						log.Printf("streamBuildLog: build failed for %q", agentID)
+						return false
+					}
 				}
 				time.Sleep(200 * time.Millisecond)
 				continue
