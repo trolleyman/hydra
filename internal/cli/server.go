@@ -91,6 +91,10 @@ func runServer(_ *cobra.Command, _ []string) error {
 	// WebSocket terminal endpoint
 	mux.HandleFunc("/ws/agent/", server.HandleTerminalWS)
 
+	if server.DevRestartEnabled {
+		mux.HandleFunc("/.well-known/appspecific/com.chrome.devtools.json", server.HandleDevToolsJSON)
+	}
+
 	registerFrontend(mux)
 
 	addr := "localhost:8080"

@@ -741,8 +741,8 @@ func buildCopilotHooks() ([]byte, error) {
 		Bash string `json:"bash"`
 	}
 	type hooksFile struct {
-		Version int                       `json:"version"`
-		Hooks   map[string][]hookEntry    `json:"hooks"`
+		Version int                    `json:"version"`
+		Hooks   map[string][]hookEntry `json:"hooks"`
 	}
 
 	cmd := "\"$HOME/.hydra/hydra\" trigger-hook copilot"
