@@ -988,6 +988,7 @@ func buildDockerImage(ctx context.Context, cli *dockerclient.Client, tag, docker
 	resp, err := cli.ImageBuild(ctx, pr, build.ImageBuildOptions{
 		Tags:       []string{tag},
 		Dockerfile: relDockerfile, // Use the relative, slash-converted path here
+		Version:    build.BuilderBuildKit,
 	})
 	if err != nil {
 		return errtrace.Wrap(fmt.Errorf("build image: %w", err))
