@@ -30,7 +30,7 @@
 ```
 
 Same here:
-```log4dJzs8RK4vKIeVKtEeMylharxzl33ACso6g3Rn0R5cuxGoNK#nute7dQBkX-qHKdq3MTRzdHzSV02bcAUpu7vHD9kaf0
+```log
 2026/03/07 08:40:04.705291 [Building hydra-agent-claude-extended:2f399bfd] Successfully built 863a4259b2bb
 2026/03/07 08:40:04.709622 [Building hydra-agent-claude-extended:2f399bfd] Successfully tagged hydra-agent-claude-extended:2f399bfd
 2026/03/07 08:40:04.709622 Built Docker image: hydra-agent-claude-extended:2f399bfd (from C:\Users\ctoll\AppData\Local\Temp\hydra-build-1933415922\Dockerfile in C:\Users\ctoll\AppData\Local\Temp\hydra-build-1933415922)
@@ -48,8 +48,19 @@ Same here:
 2026/03/07 08:43:00.304666 error: background spawn agent add-a-defaults-section-to-the-settings: create container: Error response from daemon: the working directory 'C:\code_non_dev_drive\hydra\.hydra\worktrees\add-a-defaults-section-to-the-settings' is invalid, it needs to be an absolute path
 ```
 
-- Hydra tries to delete main worktree when the ephemeral test agents are deleted (when closing the test terminal window):
+Same here:
+```log
+2026/03/07 10:46:05.252685 [Building hydra-base:latest]  ---> Using cache
+2026/03/07 10:46:05.252685 [Building hydra-base:latest]  ---> 1e850dff6be9
+2026/03/07 10:46:05.252685 [Building hydra-base:latest] Step 3/9 : RUN --mount=type=cache,target=/var/cache/apt,sharing=locked     --mount=type=cache,target=/var/lib/apt,sharing=locked     apt-get update && apt-get install -y         git         curl         wget         ca-certificates         gosu         ripgrep         jq         fd-find         tree         sudo         build-essential         procps         psmisc         lsb-release         gnupg     && ln -s /usr/bin/fdfind /usr/local/bin/fd
+2026/03/07 10:46:05.253214 [Building hydra-base:latest]
+2026/03/07 10:46:05.255475 $ git -C C:/code_non_dev_drive/hydra branch -D main
+2026/03/07 10:46:05.257630 error: background spawn agent test-bash-1jp3: ensure image: build default agent image: build base image: build error: the --mount option requires BuildKit. Refer to https://docs.docker.com/go/buildkit/ to learn how to build images with BuildKit enabled
+error: cannot delete branch 'main' used by worktree at 'C:/code_non_dev_drive/hydra'
 ```
+
+- Hydra tries to delete main worktree when the ephemeral test agents are deleted (when closing the test terminal window):
+```log
 2026/03/07 00:48:49.143752 $ git -C C:/code_non_dev_drive/hydra branch -D main
 error: cannot delete branch 'main' used by worktree at 'C:/code_non_dev_drive/hydra'
 2026/03/07 00:48:49.164043 warn: delete branch main: git branch -D: exit status 1
