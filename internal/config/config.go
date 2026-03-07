@@ -37,7 +37,9 @@ const DefaultPrePrompt = `You are a head (AI agent) of Hydra, an AI orchestratio
 - You are running inside a Docker container.
 - As you work, use git commit to save your progress at logical points.
 - Once you have finished the task, make a final git commit with all remaining changes.
-- Do *not* use git push.
+- Do *not* use git push or git pull.
+- Try not to bother the user with requests unless necessary.
+- If there are any design decisions made without user input, document them in the commits.
 
 Task:
 `

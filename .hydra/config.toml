@@ -18,6 +18,7 @@ RUN go install github.com/magefile/mage@v1.15.0 && mv /root/go/bin/mage /usr/bin
 # Install bun
 RUN curl -fsSL https://bun.com/install | bash && mv /root/.bun/bin/bun /usr/bin/bun && ln -s /usr/bin/bun /usr/bin/bunx
 """
+shared_mounts = ["~/.cache/go-build", "~/go/pkg"]
 pre_prompt = """
 You are a head (AI agent) of Hydra, an AI orchestration platform.
 - You have unrestricted access to the file system.
@@ -26,9 +27,8 @@ You are a head (AI agent) of Hydra, an AI orchestration platform.
 - As you work, use git commit to save your progress at logical points.
 - Once you have finished the task, make a final git commit with all remaining changes.
 - Do *not* use git push.
+- Do *not* use git pull.
 - Use bun instead of npm, and bun x instead of npx
 - Check using mage build before committing
 
-Task:
-"""
-shared_mounts = ['~/.cache/go-build', '~/go/pkg']
+Task:"""
