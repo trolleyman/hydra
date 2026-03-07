@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"io/fs"
 	"log"
 	"net/http"
 	"os"
@@ -16,7 +15,6 @@ import (
 	httppkg "github.com/trolleyman/hydra/internal/http"
 	"github.com/trolleyman/hydra/internal/paths"
 	"github.com/trolleyman/hydra/internal/projects"
-	"github.com/trolleyman/hydra/web"
 )
 
 func init() {
@@ -92,53 +90,14 @@ func runServer(_ *cobra.Command, _ []string) error {
 	// WebSocket terminal endpoint
 	mux.HandleFunc("/ws/agent/", server.HandleTerminalWS)
 
-	// Serve the static React SPA
-	distFS, err := fs.Sub(web.FrontendAssets, "dist")
-	if err != nil {
-		log.Fatal(err)
-	}
-	mux.Handle("/", spaHandler(distFS))
+	registerFrontend(mux)
 
 	addr := "localhost:8080"
+	if envAddr := os.Getenv("HYDRA_API_ADDR"); envAddr != "" {
+		addr = envAddr
+	}
 	log.Printf("Server starting on http://%s", addr)
 	return errtrace.Wrap(http.ListenAndServe(addr, httppkg.LoggingMiddleware(mux)))
-}
-
-func spaHandler(fsys fs.FS) http.HandlerFunc {
-	fileServer := http.FileServer(http.FS(fsys))
-
-	return func(w http.ResponseWriter, r *http.Request) {
-		path := r.URL.Path
-		cleanPath := trimSlash(path)
-		if cleanPath == "" {
-			cleanPath = "index.html"
-		}
-
-		// Serve file if it exists in dist/
-		_, err := fs.Stat(fsys, cleanPath)
-		if err == nil {
-			fileServer.ServeHTTP(w, r)
-			return
-		}
-
-		// File does not exist - return index.html for client-side routing
-		indexContent, err := fs.ReadFile(fsys, "index.html")
-		if err != nil {
-			log.Printf("Error reading index.html: %v", err)
-			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-			return
-		}
-
-		w.Header().Set("Content-Type", "text/html")
-
-		if web.RoutesRegex.MatchString(path) {
-			w.WriteHeader(http.StatusOK)
-		} else {
-			w.WriteHeader(http.StatusNotFound)
-		}
-
-		w.Write(indexContent)
-	}
 }
 
 func trimSlash(s string) string {

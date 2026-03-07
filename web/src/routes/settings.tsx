@@ -10,7 +10,7 @@ export const Route = createFileRoute('/settings')({
 })
 
 type ConfigScope = 'project' | 'user'
-type SettingsSection = 'all' | 'claude' | 'gemini'
+type SettingsSection = 'all' | 'claude' | 'gemini' | 'defaults'
 
 const DOCKERFILE_TEMPLATES: Record<string, { label: string; content: string; shared_mounts?: string[] }> = {
   none: { label: 'None', content: '' },
@@ -164,6 +164,15 @@ function SettingsPage() {
             >
               Gemini
             </button>
+            <button
+              onClick={() => setActiveSection('defaults')}
+              className={`px-4 py-3 text-sm font-semibold transition-all border-b-2 cursor-pointer ${activeSection === 'defaults'
+                  ? 'border-orange-500 text-orange-600 dark:text-orange-400'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+                }`}
+            >
+              Built-in Defaults
+            </button>
           </div>
 
           <div className="p-6">
@@ -250,6 +259,23 @@ function SettingsPage() {
                 />
               </div>
             )}
+
+            {activeSection === 'defaults' && (
+              <div className="animate-in fade-in slide-in-from-bottom-1 duration-200">
+                <div className="flex items-center gap-2 mb-6">
+                  <div className="w-8 h-8 rounded-lg bg-orange-100 dark:bg-orange-900/30 flex items-center justify-center">
+                    <svg className="w-4 h-4 text-orange-600 dark:text-orange-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                  </div>
+                  <div>
+                    <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">Built-in Default Dockerfiles</h2>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">These are the base Dockerfiles embedded in Hydra. They are read-only and serve as the foundation for agent containers.</p>
+                  </div>
+                </div>
+                <DefaultDockerfilesSection dockerfiles={config.default_dockerfiles ?? {}} />
+              </div>
+            )}
           </div>
         </div>
 
@@ -296,6 +322,49 @@ function SettingsPage() {
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+const DOCKERFILE_LABELS: Record<string, string> = {
+  base: 'Base',
+  claude: 'Claude',
+  gemini: 'Gemini',
+  bash: 'Bash',
+}
+
+const DOCKERFILE_ORDER = ['base', 'claude', 'gemini', 'bash']
+
+function DefaultDockerfilesSection({ dockerfiles }: { dockerfiles: Record<string, string> }) {
+  const keys = DOCKERFILE_ORDER.filter(k => k in dockerfiles).concat(
+    Object.keys(dockerfiles).filter(k => !DOCKERFILE_ORDER.includes(k))
+  )
+
+  if (keys.length === 0) {
+    return <p className="text-sm text-gray-500 dark:text-gray-400">No default Dockerfiles available.</p>
+  }
+
+  return (
+    <div className="space-y-6">
+      {keys.map(key => (
+        <div key={key} className="space-y-2">
+          <div className="flex items-center gap-2">
+            <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">
+              {DOCKERFILE_LABELS[key] ?? key} Dockerfile
+            </label>
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-orange-100 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400 border border-orange-200 dark:border-orange-800 font-medium">
+              read-only
+            </span>
+          </div>
+          <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 overflow-hidden shadow-inner">
+            <div className="max-h-64 overflow-y-auto">
+              <pre className="px-4 py-3 text-xs font-mono text-gray-700 dark:text-gray-300 whitespace-pre leading-relaxed">
+                {dockerfiles[key]}
+              </pre>
+            </div>
+          </div>
+        </div>
+      ))}
     </div>
   )
 }

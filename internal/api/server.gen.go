@@ -135,8 +135,11 @@ type CommitInfo struct {
 
 // ConfigResponse defines model for ConfigResponse.
 type ConfigResponse struct {
-	Agents   map[string]AgentConfig `json:"agents"`
-	Defaults AgentConfig            `json:"defaults"`
+	Agents map[string]AgentConfig `json:"agents"`
+
+	// DefaultDockerfiles Built-in default Dockerfiles for each agent type (read-only)
+	DefaultDockerfiles *map[string]string `json:"default_dockerfiles,omitempty"`
+	Defaults           AgentConfig        `json:"defaults"`
 }
 
 // DiffFile defines model for DiffFile.

@@ -175,6 +175,12 @@ func (s *Server) GetConfig(_ context.Context, request api.GetConfigRequestObject
 		}, nil
 	}
 
+	defaultDockerfiles := map[string]string{
+		"base":   config.DefaultDockerfileBase,
+		"claude": config.DefaultDockerfileClaude,
+		"gemini": config.DefaultDockerfileGemini,
+		"bash":   config.DefaultDockerfileBash,
+	}
 	resp := api.ConfigResponse{
 		Defaults: api.AgentConfig{
 			Dockerfile:         cfg.Defaults.Dockerfile,
@@ -184,7 +190,8 @@ func (s *Server) GetConfig(_ context.Context, request api.GetConfigRequestObject
 			Context:            cfg.Defaults.Context,
 			PrePrompt:          cfg.Defaults.PrePrompt,
 		},
-		Agents: make(map[string]api.AgentConfig),
+		Agents:             make(map[string]api.AgentConfig),
+		DefaultDockerfiles: &defaultDockerfiles,
 	}
 
 	for name, agent := range cfg.Agents {

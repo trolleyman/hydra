@@ -127,13 +127,14 @@ export function AgentTerminal({ agentId, projectId, containerStatus, isEphemeral
 
       if (isEphemeral) {
         // Fire and forget kill request
-        api.default.killAgent(agentId, projectId ?? undefined).catch(() => {})
+        api.default.killAgent(agentId, projectId ?? undefined).catch(() => { })
       }
     }
   }, [agentId, projectId, containerStatus, reconnectAttempt, isEphemeral])
 
-  const isRunning = containerStatus.toLowerCase() === 'running' ||
-    containerStatus.toLowerCase().startsWith('up')
+  const isRunning = containerStatus.toLowerCase() === 'running';
+  const isWaiting = containerStatus.toLowerCase() === 'waiting';
+  const isLoading = containerStatus.toLowerCase() === 'pending' || containerStatus.toLowerCase() === 'building' || containerStatus.toLowerCase() === 'starting';
 
   return (
     <div className="rounded-lg overflow-hidden border border-gray-700 dark:border-gray-600 flex flex-col resize-y" style={{ background: '#111827', height: '450px', minHeight: '150px' }}>
@@ -145,10 +146,10 @@ export function AgentTerminal({ agentId, projectId, containerStatus, isEphemeral
           <span className="w-3 h-3 rounded-full bg-green-500/70" />
         </div>
         <span className="text-xs text-gray-400 font-mono ml-1">
-          terminal — {agentId}
+          terminal - {agentId}
         </span>
-        <span className={`ml-auto text-[10px] px-1.5 py-0.5 rounded font-medium ${isRunning ? 'text-green-400' : 'text-gray-500'}`}>
-          {isRunning ? '● live' : '○ stopped'}
+        <span className={`ml-auto text-[10px] px-1.5 py-0.5 rounded font-medium ${isRunning ? 'text-green-400' : isLoading ? "text-blue-400" : isWaiting ?  'text-yellow-400' : 'text-gray-500'}`}>
+          {isRunning ? '● ' : '○ '}{containerStatus.toLowerCase()}
         </span>
         <button
           onClick={() => {

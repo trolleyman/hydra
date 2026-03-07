@@ -823,3 +823,8 @@ components:
           type: object
           additionalProperties:
             $ref: '#/components/schemas/AgentConfig'
+        default_dockerfiles:
+          type: object
+          additionalProperties:
+            type: string
+          description: Built-in default Dockerfiles for each agent type (read-only)
