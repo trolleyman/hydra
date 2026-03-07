@@ -385,11 +385,16 @@ func addGoBuildDeps() {
 
 // goBuildTags returns the extra go tool flags needed for the current platform.
 // On non-Linux hosts this activates embedding of the cross-compiled Linux binary.
-func goBuildTags() []string {
-	if runtime.GOOS == "linux" {
+func goBuildTags(extra ...string) []string {
+	var tags []string
+	if runtime.GOOS != "linux" {
+		tags = append(tags, "hydra_embed_linux_binary")
+	}
+	tags = append(tags, extra...)
+	if len(tags) == 0 {
 		return nil
 	}
-	return []string{"-tags", "hydra_embed_linux_binary"}
+	return []string{"-tags", strings.Join(tags, ",")}
 }
 
 // BuildLinuxBinary cross-compiles hydra for linux/GOARCH and writes the result
@@ -617,10 +622,13 @@ func Dev() error {
 	}
 }
 
-// DevFast builds the Go backend once and runs it in API-only mode on a background port,
+// DevFast builds the Go backend and runs it in API-only mode on a background port,
 // while running the Vite dev server on http://localhost:8080 for hot-module-replacement.
 // Vite proxies /api, /health, and /ws to the Go backend automatically.
 // Clicking the UI restart button rebuilds the backend and restarts both servers.
+// The frontend is never embedded into the binary (hydra_no_frontend build tag).
+// BuildWeb is still called to keep the generated TS API client (web/src/api/) in sync;
+// it uses stamp-based caching so it is a no-op when neither web/ nor api/ have changed.
 func DevFast() error {
 	if err := GenerateGo(); err != nil {
 		return errtrace.Wrap(err)
@@ -628,8 +636,6 @@ func DevFast() error {
 	if err := BuildLinuxBinary(); err != nil {
 		return errtrace.Wrap(err)
 	}
-	// Build the frontend once so web/dist/ exists for Go embedding.
-	// Subsequent frontend changes are hot-reloaded by Vite — no rebuild needed.
 	if err := BuildWeb(); err != nil {
 		return errtrace.Wrap(err)
 	}
@@ -637,7 +643,7 @@ func DevFast() error {
 	hydraOutputFile := getHydraOutputFile()
 
 	buildBackend := func() error {
-		devBuildArgs := append([]string{"build"}, goBuildTags()...)
+		devBuildArgs := append([]string{"build"}, goBuildTags("hydra_no_frontend")...)
 		devBuildArgs = append(devBuildArgs, "-o", hydraOutputFile, "./")
 		return errtrace.Wrap(runV("go", devBuildArgs...))
 	}
@@ -675,7 +681,6 @@ func DevFast() error {
 		serverCmd.Env = append(os.Environ(),
 			"HYDRA_DEV_RESTART=1",
 			"HYDRA_API_ADDR=localhost:"+devFastAPIPort,
-			"HYDRA_API_ONLY=1",
 		)
 
 		serverErr := serverCmd.Run()
@@ -695,6 +700,9 @@ func DevFast() error {
 					time.Sleep(2 * time.Second)
 				} else if err := BuildLinuxBinary(); err != nil {
 					fmt.Printf("BuildLinuxBinary error: %v\n", err)
+					time.Sleep(2 * time.Second)
+				} else if err := BuildWeb(); err != nil {
+					fmt.Printf("BuildWeb error: %v\n", err)
 					time.Sleep(2 * time.Second)
 				} else if err := buildBackend(); err != nil {
 					fmt.Printf("build error: %v\n", err)
