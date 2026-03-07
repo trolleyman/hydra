@@ -24,6 +24,7 @@ import (
 	dockerclient "github.com/docker/docker/client"
 	"github.com/trolleyman/hydra/internal/api"
 	"github.com/trolleyman/hydra/internal/common"
+	"github.com/trolleyman/hydra/internal/config"
 	"github.com/trolleyman/hydra/internal/db"
 	"github.com/trolleyman/hydra/internal/docker"
 	"github.com/trolleyman/hydra/internal/heads"
@@ -387,6 +388,14 @@ func (m Model) resumeSelected() (tea.Model, tea.Cmd) {
 		u, _ := user.Current()
 		uid, gid, username, groupName := common.ContainerUserInfo(u)
 
+		var sharedMounts []string
+		if cfg, cfgErr := config.Load(headCopy.ProjectPath); cfgErr == nil {
+			resolved := cfg.GetResolvedConfig(string(headCopy.AgentType))
+			if resolved.SharedMounts != nil {
+				sharedMounts = resolved.SharedMounts
+			}
+		}
+
 		buildLogPath := paths.GetBuildLogFromProjectRoot(headCopy.ProjectPath, headCopy.ID)
 		if err := os.MkdirAll(filepath.Dir(buildLogPath), 0755); err != nil {
 			log.Printf("warn: failed to create build log directory: %v", err)
@@ -401,6 +410,7 @@ func (m Model) resumeSelected() (tea.Model, tea.Cmd) {
 		_, err = docker.SpawnAgent(ctx, client, docker.SpawnOptions{
 			Id:             headCopy.ID,
 			AgentType:      headCopy.AgentType,
+			SharedMounts:   sharedMounts,
 			PrePrompt:      headCopy.PrePrompt,
 			Prompt:         headCopy.Prompt,
 			ProjectPath:    headCopy.ProjectPath,
@@ -901,11 +911,33 @@ func isContainerRunning(status string) bool {
 }
 
 func spawnHead(projectRoot, id string, agentType docker.AgentType, dockerfilePath, prompt string, cli *dockerclient.Client, store *db.Store) error {
+	var dockerfileContents string
+	var dockerignoreContents string
+	var sharedMounts []string
+	if cfg, err := config.Load(projectRoot); err == nil {
+		resolved := cfg.GetResolvedConfig(string(agentType))
+		if dockerfilePath == "" && resolved.Dockerfile != nil {
+			dockerfilePath = *resolved.Dockerfile
+		}
+		if resolved.DockerfileContents != nil {
+			dockerfileContents = *resolved.DockerfileContents
+		}
+		if resolved.DockerignoreContents != nil {
+			dockerignoreContents = *resolved.DockerignoreContents
+		}
+		if resolved.SharedMounts != nil {
+			sharedMounts = resolved.SharedMounts
+		}
+	}
+
 	_, err := heads.SpawnHead(context.Background(), cli, store, projectRoot, heads.SpawnHeadOptions{
-		ID:             id,
-		AgentType:      agentType,
-		DockerfilePath: dockerfilePath,
-		Prompt:         prompt,
+		ID:                   id,
+		AgentType:            agentType,
+		DockerfilePath:       dockerfilePath,
+		DockerfileContents:   dockerfileContents,
+		DockerignoreContents: dockerignoreContents,
+		SharedMounts:         sharedMounts,
+		Prompt:               prompt,
 	})
 	return errtrace.Wrap(err)
 }

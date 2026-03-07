@@ -47,6 +47,10 @@ type AgentConfig struct {
 	// DockerfileContents is the actual content of the Dockerfile.
 	// This will be used as the base and always starts with FROM <default-agent-image>.
 	DockerfileContents *string `toml:"dockerfile_contents"`
+	// DockerignoreContents is the content of the .dockerignore file.
+	DockerignoreContents *string `toml:"dockerignore_contents"`
+	// SharedMounts is a list of container paths to share across agents.
+	SharedMounts []string `toml:"shared_mounts"`
 	// Context is the build context directory.
 	// Relative paths are resolved from the config file location.
 	Context *string `toml:"context"`
@@ -141,6 +145,12 @@ func (a *AgentConfig) Merge(other AgentConfig) {
 	}
 	if other.DockerfileContents != nil {
 		a.DockerfileContents = other.DockerfileContents
+	}
+	if other.DockerignoreContents != nil {
+		a.DockerignoreContents = other.DockerignoreContents
+	}
+	if other.SharedMounts != nil {
+		a.SharedMounts = other.SharedMounts
 	}
 	if other.Context != nil {
 		a.Context = other.Context

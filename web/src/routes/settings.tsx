@@ -13,11 +13,12 @@ export const Route = createFileRoute('/settings')({
 type ConfigScope = 'project' | 'user'
 type SettingsSection = 'all' | 'claude' | 'gemini' | 'defaults'
 
-const DOCKERFILE_TEMPLATES: Record<string, { label: string; content: string }> = {
+const DOCKERFILE_TEMPLATES: Record<string, { label: string; content: string; shared_mounts?: string[] }> = {
   none: { label: 'None', content: '' },
   golang: {
     label: 'Go (Golang)',
-    content: '# Install Go 1.22\nRUN curl -fsSL https://go.dev/dl/go1.22.0.linux-amd64.tar.gz | tar -C /usr/local -xz\nENV PATH=$PATH:/usr/local/go/bin'
+    content: '# Install Go 1.22\nRUN curl -fsSL https://go.dev/dl/go1.22.0.linux-amd64.tar.gz | tar -C /usr/local -xz\nENV PATH=$PATH:/usr/local/go/bin\n\n# Pre-install dependencies\nCOPY go.mod go.sum ./\nRUN go mod download',
+    shared_mounts: ['~/.cache/go-build', '~/go/pkg/mod']
   },
   rust: {
     label: 'Rust',
@@ -25,11 +26,11 @@ const DOCKERFILE_TEMPLATES: Record<string, { label: string; content: string }> =
   },
   python: {
     label: 'Python Data Science',
-    content: '# Install Python libraries\nRUN apt-get update && apt-get install -y python3-pip\nRUN pip3 install numpy pandas matplotlib scipy scikit-learn --break-system-packages'
+    content: '# Install Python libraries with apt cache mounts\nRUN --mount=type=cache,target=/var/cache/apt,sharing=locked \\\n    --mount=type=cache,target=/var/lib/apt,sharing=locked \\\n    apt-get update && apt-get install -y python3-pip\nRUN pip3 install numpy pandas matplotlib scipy scikit-learn --break-system-packages'
   },
   nodejs: {
-    label: 'Node.js Extra',
-    content: '# Install additional Node.js tools\nRUN npm install -g pnpm yarn'
+    label: 'Node.js',
+    content: '# Pre-install dependencies\nCOPY package.json bun.lockb* package-lock.json* yarn.lock* ./\nRUN if [ -f bun.lockb ]; then npm install -g bun && bun install; \\\n    elif [ -f package-lock.json ]; then npm install; \\\n    elif [ -f yarn.lock ]; then npm install -g yarn && yarn install; \\\n    else npm install; fi'
   }
 }
 
@@ -376,9 +377,23 @@ function ConfigForm({
   function handleTemplateChange(name: string) {
     setTemplate(name)
     if (name !== 'none') {
-      const content = DOCKERFILE_TEMPLATES[name].content
+      const template = DOCKERFILE_TEMPLATES[name]
+      const content = template.content
       const current = value.dockerfile_contents || ''
-      onChange({ ...value, dockerfile_contents: current ? current + '\n' + content : content })
+      
+      const newConfig: AgentConfig = { ...value, dockerfile_contents: current ? current + '\n' + content : content }
+      
+      if (template.shared_mounts) {
+        const currentMounts = value.shared_mounts || []
+        // Add only unique mounts
+        const newMounts = [...currentMounts]
+        for (const m of template.shared_mounts) {
+          if (!newMounts.includes(m)) newMounts.push(m)
+        }
+        newConfig.shared_mounts = newMounts
+      }
+      
+      onChange(newConfig)
     }
   }
 
@@ -387,18 +402,18 @@ function ConfigForm({
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div className="space-y-1.5">
+        <div className="space-y-1.5 opacity-50">
           <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">
             Dockerfile Path
           </label>
           <input
             type="text"
             value={value.dockerfile || ''}
-            onChange={(e) => onChange({ ...value, dockerfile: e.target.value || null })}
+            disabled
             placeholder={inherited?.dockerfile || './Dockerfile'}
-            className="w-full text-sm px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-100 placeholder-gray-300 dark:placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-mono shadow-inner"
+            className="w-full text-sm px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 font-mono shadow-inner cursor-not-allowed"
           />
-          <p className="text-[10px] text-gray-400 dark:text-gray-500 italic">Overrides Dockerfile Contents below if set.</p>
+          <p className="text-[10px] text-gray-400 dark:text-gray-500 italic">Custom Dockerfile path (not editable here)</p>
         </div>
         <div className="space-y-1.5">
           <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">
@@ -408,7 +423,7 @@ function ConfigForm({
             type="text"
             value={value.context || ''}
             onChange={(e) => onChange({ ...value, context: e.target.value || null })}
-            placeholder={inherited?.context || '.'}
+            placeholder={inherited?.context || '<projectDir>/.hydra/build/tmp'}
             className="w-full text-sm px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-100 placeholder-gray-300 dark:placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-mono shadow-inner"
           />
         </div>
@@ -452,6 +467,53 @@ function ConfigForm({
             </div>
           </div>
         </div>
+      </div>
+
+      <div className="space-y-2">
+        <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">
+          Dockerignore Contents (Override)
+        </label>
+        <div className="relative group rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 focus-within:ring-2 focus-within:ring-blue-500/20 focus-within:border-blue-500 transition-all shadow-inner overflow-hidden">
+          <div className="max-h-32 overflow-y-auto">
+            <textarea
+              value={value.dockerignore_contents || ''}
+              onChange={(e) => onChange({ ...value, dockerignore_contents: e.target.value || null })}
+              placeholder={inherited?.dockerignore_contents || '# Add files to ignore during build\n.git\nnode_modules'}
+              className="w-full text-sm p-3 bg-transparent text-gray-800 dark:text-gray-100 placeholder-gray-300 dark:placeholder-gray-600 focus:outline-none font-mono leading-relaxed resize-y"
+              spellCheck={false}
+            />
+          </div>
+        </div>
+      </div>
+
+      <div className="space-y-1.5">
+        <div className="flex items-center gap-2">
+          <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">
+            Shared Mounts (Comma separated)
+          </label>
+          <div className="group relative">
+            <svg className="w-3.5 h-3.5 text-gray-400 cursor-help" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <div className="absolute left-full ml-2 top-0 w-64 p-2 bg-gray-800 text-white text-[10px] rounded shadow-xl opacity-0 group-hover:opacity-100 transition-opacity z-10 pointer-events-none">
+              <p className="font-bold mb-1">Shared Bind Mounts</p>
+              <p className="mb-2">Paths inside the container that are shared between all agents in this project.</p>
+              <ul className="list-disc ml-3 space-y-1">
+                <li><code className="text-blue-300">/abs/path</code>: Stored in <code className="text-gray-300">.hydra/cache/custom/root/abs/path</code></li>
+                <li><code className="text-blue-300">~/path</code>: Stored in <code className="text-gray-300">.hydra/cache/custom/user/path</code></li>
+                <li><code className="text-blue-300">rel/path</code>: Relative to work directory.</li>
+              </ul>
+              <p className="mt-2 text-gray-400 italic">Example: ~/.cache/go-build, ~/go/pkg/mod</p>
+            </div>
+          </div>
+        </div>
+        <input
+          type="text"
+          value={(value.shared_mounts || []).join(', ')}
+          onChange={(e) => onChange({ ...value, shared_mounts: e.target.value.split(',').map(s => s.trim()).filter(s => s !== '') })}
+          placeholder={inherited?.shared_mounts?.join(', ') || 'e.g. ~/.cache/go-build, ~/go/pkg/mod'}
+          className="w-full text-sm px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-100 placeholder-gray-300 dark:placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-mono shadow-inner"
+        />
       </div>
 
       <div className="space-y-1.5">

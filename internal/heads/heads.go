@@ -157,14 +157,16 @@ func GetHeadByID(ctx context.Context, cli *dockerclient.Client, store *db.Store,
 
 // SpawnHeadOptions holds parameters for spawning a new agent head.
 type SpawnHeadOptions struct {
-	ID                 string           // empty = auto-generated
-	PrePrompt          string           // pre-prompt
-	Prompt             string           // prompt
-	AgentType          docker.AgentType // empty = "claude"
-	BaseBranch         string           // empty = current HEAD branch
-	DockerfilePath     string           // optional custom Dockerfile path
-	DockerfileContents string           // optional custom Dockerfile contents
-	Ephemeral          bool             // if true, container is auto-removed
+	ID                   string           // empty = auto-generated
+	PrePrompt             string           // pre-prompt
+	Prompt               string           // prompt
+	AgentType            docker.AgentType // empty = "claude"
+	BaseBranch           string           // empty = current HEAD branch
+	DockerfilePath       string           // optional custom Dockerfile path
+	DockerfileContents   string           // optional custom Dockerfile contents
+	DockerignoreContents string           // optional custom .dockerignore contents
+	SharedMounts         []string         // optional container paths to share
+	Ephemeral            bool             // if true, container is auto-removed
 }
 
 // SpawnHead creates a new git worktree, branch, and Docker container for an agent.
@@ -288,13 +290,15 @@ func SpawnHead(ctx context.Context, cli *dockerclient.Client, store *db.Store, p
 		}
 
 		containerID, err := docker.SpawnAgent(bgCtx, cli, docker.SpawnOptions{
-			Id:                 opts.ID,
-			AgentType:          opts.AgentType,
-			DockerfilePath:     opts.DockerfilePath,
-			DockerfileContents: opts.DockerfileContents,
-			PrePrompt:          opts.PrePrompt,
-			Prompt:             opts.Prompt,
-			ProjectPath:        projectRoot,
+			Id:                   opts.ID,
+			AgentType:            opts.AgentType,
+			DockerfilePath:       opts.DockerfilePath,
+			DockerfileContents:   opts.DockerfileContents,
+			DockerignoreContents: opts.DockerignoreContents,
+			SharedMounts:         opts.SharedMounts,
+			PrePrompt:            opts.PrePrompt,
+			Prompt:               opts.Prompt,
+			ProjectPath:          projectRoot,
 			WorktreePath:       worktreePath,
 			BranchName:         branchName,
 			BaseBranch:         baseBranch,
