@@ -44,9 +44,24 @@ export function SpawnForm({
   const [prompt, setPrompt] = useState('')
   const [agentId, setAgentId] = useState('')
   const [idManuallyEdited, setIdManuallyEdited] = useState(false)
-  const [agentType, setAgentType] = useState<AgentTypeOption>('claude')
+  const [agentType, setAgentType] = useState<AgentTypeOption>(() => {
+    try {
+      const saved = localStorage.getItem('hydra-default-agent-type')
+      if (saved && (saved === 'claude' || saved === 'gemini' || saved === 'copilot')) {
+        return saved as AgentTypeOption
+      }
+    } catch { /* ignore */ }
+    return 'claude'
+  })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('hydra-default-agent-type', agentType)
+    } catch { /* ignore */ }
+  }, [agentType])
+
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   // Persist textarea height for compact mode
