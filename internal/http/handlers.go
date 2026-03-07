@@ -81,6 +81,29 @@ func NewHandler(s *Server) http.Handler {
 	return api.HandlerFromMux(strict, http.NewServeMux())
 }
 
+func (s *Server) GetDevToolsConfig(_ context.Context, _ api.GetDevToolsConfigRequestObject) (api.GetDevToolsConfigResponseObject, error) {
+	if !s.DevRestartEnabled {
+		return api.GetDevToolsConfig403JSONResponse{
+			Code:    403,
+			Error:   "unauthorized",
+			Details: "not in dev mode",
+		}, nil
+	}
+
+	root := s.ProjectRoot
+	uid := s.DefaultProject.UUID
+
+	return api.GetDevToolsConfig200JSONResponse{
+		Workspace: &struct {
+			Root *string `json:"root,omitempty"`
+			Uuid *string `json:"uuid,omitempty"`
+		}{
+			Root: &root,
+			Uuid: &uid,
+		},
+	}, nil
+}
+
 // resolveProjectRoot returns the project root for the given project_id query param.
 // Falls back to the server's default project root when project_id is absent or unknown.
 func (s *Server) resolveProjectRoot(projectID *string) string {
@@ -112,6 +135,7 @@ func (s *Server) ListProjects(_ context.Context, _ api.ListProjectsRequestObject
 			Id:   p.ID,
 			Path: p.Path,
 			Name: p.Name,
+			Uuid: p.UUID,
 		}
 	}
 	return resp, nil
@@ -145,6 +169,7 @@ func (s *Server) AddProject(_ context.Context, request api.AddProjectRequestObje
 		Id:   p.ID,
 		Path: p.Path,
 		Name: p.Name,
+		Uuid: p.UUID,
 	}), nil
 }
 

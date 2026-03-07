@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"braces.dev/errtrace"
+	"github.com/google/uuid"
 	"github.com/trolleyman/hydra/internal/paths"
 )
 
@@ -17,6 +18,7 @@ type ProjectInfo struct {
 	ID   string `json:"id"`
 	Path string `json:"path"`
 	Name string `json:"name"`
+	UUID string `json:"uuid"`
 }
 
 // Manager persists the list of known projects to ~/.config/hydra/projects.json.
@@ -52,7 +54,22 @@ func (m *Manager) load() error {
 	if err != nil {
 		return errtrace.Wrap(fmt.Errorf("read projects file: %w", err))
 	}
-	return errtrace.Wrap(json.Unmarshal(data, &m.projects))
+	if err := json.Unmarshal(data, &m.projects); err != nil {
+		return errtrace.Wrap(err)
+	}
+
+	// Migrate: ensure all projects have a UUID.
+	changed := false
+	for i := range m.projects {
+		if m.projects[i].UUID == "" {
+			m.projects[i].UUID = uuid.New().String()
+			changed = true
+		}
+	}
+	if changed {
+		return m.save()
+	}
+	return nil
 }
 
 // save writes the project list to disk.
@@ -122,7 +139,7 @@ func (m *Manager) AddProject(path string) (ProjectInfo, error) {
 
 	id := m.generateID(path)
 	name := filepath.Base(path)
-	p := ProjectInfo{ID: id, Path: path, Name: name}
+	p := ProjectInfo{ID: id, Path: path, Name: name, UUID: uuid.New().String()}
 	m.projects = append(m.projects, p)
 	if err := m.save(); err != nil {
 		// Rollback in-memory addition.
