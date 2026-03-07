@@ -92,6 +92,7 @@ var spawnCmd = &cobra.Command{
 		dockerfilePath := spawnFlags.dockerfile
 		dockerfileContents := ""
 		dockerignoreContents := ""
+		var sharedMounts []string
 		if dockerfilePath == "" {
 			if resolved.Dockerfile != nil {
 				dockerfilePath = *resolved.Dockerfile
@@ -103,6 +104,9 @@ var spawnCmd = &cobra.Command{
 		}
 		if resolved.DockerignoreContents != nil {
 			dockerignoreContents = *resolved.DockerignoreContents
+		}
+		if resolved.SharedMounts != nil {
+			sharedMounts = resolved.SharedMounts
 		}
 		if dockerfilePath != "" {
 			if _, readErr := os.ReadFile(dockerfilePath); readErr != nil {
@@ -134,6 +138,7 @@ var spawnCmd = &cobra.Command{
 			DockerfilePath:       dockerfilePath,
 			DockerfileContents:   dockerfileContents,
 			DockerignoreContents: dockerignoreContents,
+			SharedMounts:         sharedMounts,
 		})
 		if err != nil {
 			return errtrace.Wrap(err)

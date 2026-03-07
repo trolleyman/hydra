@@ -12,11 +12,12 @@ export const Route = createFileRoute('/settings')({
 type ConfigScope = 'project' | 'user'
 type SettingsSection = 'all' | 'claude' | 'gemini'
 
-const DOCKERFILE_TEMPLATES: Record<string, { label: string; content: string }> = {
+const DOCKERFILE_TEMPLATES: Record<string, { label: string; content: string; shared_mounts?: string[] }> = {
   none: { label: 'None', content: '' },
   golang: {
     label: 'Go (Golang)',
-    content: '# Install Go 1.22\nRUN curl -fsSL https://go.dev/dl/go1.22.0.linux-amd64.tar.gz | tar -C /usr/local -xz\nENV PATH=$PATH:/usr/local/go/bin\n\n# Pre-install dependencies\nCOPY go.mod go.sum ./\nRUN go mod download'
+    content: '# Install Go 1.22\nRUN curl -fsSL https://go.dev/dl/go1.22.0.linux-amd64.tar.gz | tar -C /usr/local -xz\nENV PATH=$PATH:/usr/local/go/bin\n\n# Pre-install dependencies\nCOPY go.mod go.sum ./\nRUN go mod download',
+    shared_mounts: ['~/.cache/go-build', '~/go/pkg/mod']
   },
   rust: {
     label: 'Rust',
@@ -316,9 +317,23 @@ function ConfigForm({
   function handleTemplateChange(name: string) {
     setTemplate(name)
     if (name !== 'none') {
-      const content = DOCKERFILE_TEMPLATES[name].content
+      const template = DOCKERFILE_TEMPLATES[name]
+      const content = template.content
       const current = value.dockerfile_contents || ''
-      onChange({ ...value, dockerfile_contents: current ? current + '\n' + content : content })
+      
+      const newConfig: AgentConfig = { ...value, dockerfile_contents: current ? current + '\n' + content : content }
+      
+      if (template.shared_mounts) {
+        const currentMounts = value.shared_mounts || []
+        // Add only unique mounts
+        const newMounts = [...currentMounts]
+        for (const m of template.shared_mounts) {
+          if (!newMounts.includes(m)) newMounts.push(m)
+        }
+        newConfig.shared_mounts = newMounts
+      }
+      
+      onChange(newConfig)
     }
   }
 
@@ -409,6 +424,36 @@ function ConfigForm({
             />
           </div>
         </div>
+      </div>
+
+      <div className="space-y-1.5">
+        <div className="flex items-center gap-2">
+          <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">
+            Shared Mounts (Comma separated)
+          </label>
+          <div className="group relative">
+            <svg className="w-3.5 h-3.5 text-gray-400 cursor-help" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <div className="absolute left-full ml-2 top-0 w-64 p-2 bg-gray-800 text-white text-[10px] rounded shadow-xl opacity-0 group-hover:opacity-100 transition-opacity z-10 pointer-events-none">
+              <p className="font-bold mb-1">Shared Bind Mounts</p>
+              <p className="mb-2">Paths inside the container that are shared between all agents in this project.</p>
+              <ul className="list-disc ml-3 space-y-1">
+                <li><code className="text-blue-300">/abs/path</code>: Stored in <code className="text-gray-300">.hydra/cache/custom/root/abs/path</code></li>
+                <li><code className="text-blue-300">~/path</code>: Stored in <code className="text-gray-300">.hydra/cache/custom/user/path</code></li>
+                <li><code className="text-blue-300">rel/path</code>: Relative to work directory.</li>
+              </ul>
+              <p className="mt-2 text-gray-400 italic">Example: ~/.cache/go-build, ~/go/pkg/mod</p>
+            </div>
+          </div>
+        </div>
+        <input
+          type="text"
+          value={(value.shared_mounts || []).join(', ')}
+          onChange={(e) => onChange({ ...value, shared_mounts: e.target.value.split(',').map(s => s.trim()).filter(s => s !== '') })}
+          placeholder={inherited?.shared_mounts?.join(', ') || 'e.g. ~/.cache/go-build, ~/go/pkg/mod'}
+          className="w-full text-sm px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-100 placeholder-gray-300 dark:placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-mono shadow-inner"
+        />
       </div>
 
       <div className="space-y-1.5">

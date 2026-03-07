@@ -165,6 +165,7 @@ type SpawnHeadOptions struct {
 	DockerfilePath       string           // optional custom Dockerfile path
 	DockerfileContents   string           // optional custom Dockerfile contents
 	DockerignoreContents string           // optional custom .dockerignore contents
+	SharedMounts         []string         // optional container paths to share
 	Ephemeral            bool             // if true, container is auto-removed
 }
 
@@ -299,6 +300,7 @@ func SpawnHead(ctx context.Context, cli *dockerclient.Client, store *db.Store, p
 			DockerfilePath:       opts.DockerfilePath,
 			DockerfileContents:   opts.DockerfileContents,
 			DockerignoreContents: opts.DockerignoreContents,
+			SharedMounts:         opts.SharedMounts,
 			PrePrompt:            opts.PrePrompt,
 			Prompt:               opts.Prompt,
 			ProjectPath:          projectRoot,

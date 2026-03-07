@@ -180,6 +180,7 @@ func (s *Server) GetConfig(_ context.Context, request api.GetConfigRequestObject
 			Dockerfile:         cfg.Defaults.Dockerfile,
 			DockerfileContents: cfg.Defaults.DockerfileContents,
 			DockerignoreContents: cfg.Defaults.DockerignoreContents,
+			SharedMounts:       &cfg.Defaults.SharedMounts,
 			Context:            cfg.Defaults.Context,
 			PrePrompt:          cfg.Defaults.PrePrompt,
 		},
@@ -187,10 +188,13 @@ func (s *Server) GetConfig(_ context.Context, request api.GetConfigRequestObject
 	}
 
 	for name, agent := range cfg.Agents {
+		// Create a local copy to take its address
+		sharedMounts := agent.SharedMounts
 		resp.Agents[name] = api.AgentConfig{
 			Dockerfile:         agent.Dockerfile,
 			DockerfileContents: agent.DockerfileContents,
 			DockerignoreContents: agent.DockerignoreContents,
+			SharedMounts:       &sharedMounts,
 			Context:            agent.Context,
 			PrePrompt:          agent.PrePrompt,
 		}
@@ -207,16 +211,22 @@ func (s *Server) SaveConfig(_ context.Context, request api.SaveConfigRequestObje
 			Dockerfile:         request.Body.Defaults.Dockerfile,
 			DockerfileContents: request.Body.Defaults.DockerfileContents,
 			DockerignoreContents: request.Body.Defaults.DockerignoreContents,
+			SharedMounts:       *request.Body.Defaults.SharedMounts,
 			Context:            request.Body.Defaults.Context,
 			PrePrompt:          request.Body.Defaults.PrePrompt,
 		},
 		Agents: make(map[string]config.AgentConfig),
 	}
 	for name, agent := range request.Body.Agents {
+		var sm []string
+		if agent.SharedMounts != nil {
+			sm = *agent.SharedMounts
+		}
 		newCfg.Agents[name] = config.AgentConfig{
 			Dockerfile:         agent.Dockerfile,
 			DockerfileContents: agent.DockerfileContents,
 			DockerignoreContents: agent.DockerignoreContents,
+			SharedMounts:       sm,
 			Context:            agent.Context,
 			PrePrompt:          agent.PrePrompt,
 		}
@@ -316,6 +326,7 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 	dockerfilePath := ""
 	dockerfileContents := ""
 	dockerignoreContents := ""
+	var sharedMounts []string
 	if resolved.Dockerfile != nil {
 		dockerfilePath = *resolved.Dockerfile
 	}
@@ -324,6 +335,9 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 	}
 	if resolved.DockerignoreContents != nil {
 		dockerignoreContents = *resolved.DockerignoreContents
+	}
+	if resolved.SharedMounts != nil {
+		sharedMounts = resolved.SharedMounts
 	}
 	if dockerfilePath != "" {
 		if _, readErr := os.ReadFile(dockerfilePath); readErr != nil {
@@ -355,6 +369,7 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 		DockerfilePath:       dockerfilePath,
 		DockerfileContents:   dockerfileContents,
 		DockerignoreContents: dockerignoreContents,
+		SharedMounts:         sharedMounts,
 		Ephemeral:            ephemeral,
 	})
 	if err != nil {
@@ -594,6 +609,7 @@ func (s *Server) RestartAgent(ctx context.Context, request api.RestartAgentReque
 	dockerfilePath := ""
 	dockerfileContents := ""
 	dockerignoreContents := ""
+	var sharedMounts []string
 	if cfg, cfgErr := config.Load(projectRoot); cfgErr == nil {
 		resolved := cfg.GetResolvedConfig(string(agentType))
 		if resolved.Dockerfile != nil {
@@ -604,6 +620,9 @@ func (s *Server) RestartAgent(ctx context.Context, request api.RestartAgentReque
 		}
 		if resolved.DockerignoreContents != nil {
 			dockerignoreContents = *resolved.DockerignoreContents
+		}
+		if resolved.SharedMounts != nil {
+			sharedMounts = resolved.SharedMounts
 		}
 		// Override pre_prompt from config if we didn't already have one stored.
 		if prePrompt == "" && resolved.PrePrompt != nil {
@@ -620,6 +639,7 @@ func (s *Server) RestartAgent(ctx context.Context, request api.RestartAgentReque
 		DockerfilePath:       dockerfilePath,
 		DockerfileContents:   dockerfileContents,
 		DockerignoreContents: dockerignoreContents,
+		SharedMounts:         sharedMounts,
 	})
 	if err != nil {
 		return api.RestartAgent500JSONResponse{

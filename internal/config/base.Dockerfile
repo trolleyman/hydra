@@ -1,8 +1,10 @@
 # syntax=docker/dockerfile:1
 FROM debian:slim
 
-# Install base utilities and helpful tools
-RUN apt-get update && apt-get install -y \
+# Install base utilities and helpful tools with apt cache mounts
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
         git \
         curl \
         wget \
@@ -18,7 +20,6 @@ RUN apt-get update && apt-get install -y \
         psmisc \
         lsb-release \
         gnupg \
-    && rm -rf /var/lib/apt/lists/* \
     && ln -s /usr/bin/fdfind /usr/local/bin/fd
 
 ENV DEVCONTAINER=true

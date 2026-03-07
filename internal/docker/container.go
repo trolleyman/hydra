@@ -99,6 +99,7 @@ type SpawnOptions struct {
 	DockerfilePath     string // optional; empty = use embedded default for AgentType
 	DockerfileContents string // optional; if set, used as extension of default image
 	DockerignoreContents string // optional; if set, used as .dockerignore content
+	SharedMounts       []string // optional; container paths to share across agents
 	PrePrompt          string
 	Prompt             string
 	ProjectPath        string
@@ -185,7 +186,7 @@ func SpawnAgent(ctx context.Context, cli *dockerclient.Client, opts SpawnOptions
 		gitDir + ":" + gitDir + ":rw",
 		opts.WorktreePath + ":" + opts.WorktreePath + ":rw",
 	}
-	agentBinds, err := getAgentBinds(opts.AgentType, opts.ProjectPath, opts.Id, containerHome)
+	agentBinds, err := getAgentBinds(opts.AgentType, opts.ProjectPath, opts.Id, containerHome, opts.SharedMounts, opts.WorktreePath)
 	if err != nil {
 		return "", errtrace.Wrap(err)
 	}
@@ -426,7 +427,7 @@ func defaultDockerfileContent(agentType AgentType) (string, error) {
 
 // getAgentBinds returns host:container bind mounts for agent-specific config files.
 // containerHome is the home directory of the agent user inside the container (e.g. /home/callum).
-func getAgentBinds(agentType AgentType, projectRoot, id, containerHome string) ([]string, error) {
+func getAgentBinds(agentType AgentType, projectRoot, id, containerHome string, sharedMounts []string, worktreePath string) ([]string, error) {
 	hydraDir := paths.GetHydraDirFromProjectRoot(projectRoot)
 	cacheDir := filepath.Join(hydraDir, "cache")
 	if err := paths.CreateGitignoreAllInDir(cacheDir); err != nil {
@@ -526,6 +527,43 @@ func getAgentBinds(agentType AgentType, projectRoot, id, containerHome string) (
 			}
 		}
 	}
+
+	// Add shared custom mounts
+	for _, containerPath := range sharedMounts {
+		if containerPath == "" {
+			continue
+		}
+
+		hostSubDir := "root"
+		resolvedContainerPath := containerPath
+
+		if strings.HasPrefix(containerPath, "~/") {
+			hostSubDir = "user"
+			resolvedContainerPath = containerHome + containerPath[1:]
+		} else if !filepath.IsAbs(containerPath) {
+			// Relative paths are relative to the work directory (worktreePath)
+			resolvedContainerPath = filepath.Join(worktreePath, containerPath)
+		}
+
+		// Host path: <projectDir>/.hydra/cache/custom/<root|user>/<resolvedContainerPath>
+		// Clean the path to avoid ".." etc
+		cleanPath := filepath.Clean(resolvedContainerPath)
+		// On windows this might have drive letter, but we are inside linux container paths here.
+		// If it's absolute, remove the leading slash for the host path.
+		hostPathSuffix := cleanPath
+		if filepath.IsAbs(cleanPath) {
+			// In docker containers (linux), paths start with /
+			hostPathSuffix = strings.TrimPrefix(cleanPath, "/")
+		}
+
+		hostPath := filepath.Join(hydraDir, "cache", "custom", hostSubDir, hostPathSuffix)
+		if err := os.MkdirAll(hostPath, 0755); err != nil {
+			return nil, errtrace.Wrap(fmt.Errorf("create shared mount host dir: %w", err))
+		}
+
+		binds = append(binds, hostPath+":"+cleanPath+":rw")
+	}
+
 	return binds, nil
 }
 
