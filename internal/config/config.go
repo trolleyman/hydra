@@ -30,19 +30,18 @@ var DefaultDockerfileBase string
 //go:embed entrypoint.sh
 var DefaultEntrypointScript string
 
-// DefaultPrePrompt is the pre-prompt used when none is configured.
-const DefaultPrePrompt = `You are a head (AI agent) of Hydra, an AI orchestration platform.
-- You have unrestricted access to the file system.
-- You are allowed to install what is necessary to complete the task.
-- You are running inside a Docker container.
-- As you work, use git commit to save your progress at logical points.
-- Once you have finished the task, make a final git commit with all remaining changes.
-- Do *not* use git push or git pull.
-- Try not to bother the user with requests unless necessary.
-- If there are any design decisions made without user input, document them in the commits.
-
-Task:
-`
+// DefaultPrePrompt is the built-in pre-prompt always prepended to agent prompts.
+// The placeholders <branch> and <base-branch> are substituted at spawn time.
+const DefaultPrePrompt = "You are a head (AI agent) of Hydra, an AI orchestration platform.\n" +
+	"- You have unrestricted access to the file system.\n" +
+	"- You are allowed to install what is necessary to complete the task.\n" +
+	"- You are running inside a Docker container on a git worktree.\n" +
+	"- The current branch is `<branch>` and it targets `<base-branch>`.\n" +
+	"- As you work, use git commit to save your progress at logical points.\n" +
+	"- Once you have finished the task, make a final git commit with all remaining changes.\n" +
+	"- Do *not* use git push or git pull.\n" +
+	"- Try not to bother the user with requests unless necessary.\n" +
+	"- If there are any design decisions made without user input, document them in each commit."
 
 // AgentConfig holds per-agent-type configuration.
 type AgentConfig struct {
@@ -91,13 +90,26 @@ func GetProjectConfigPath(projectRoot string) string {
 }
 
 // LoadInternalDefaults returns the hardcoded internal default configuration.
+// Note: DefaultPrePrompt is not stored here — it is always prepended by BuildFinalPrePrompt.
 func LoadInternalDefaults() Config {
-	prePrompt := DefaultPrePrompt
-	return Config{
-		Defaults: AgentConfig{
-			PrePrompt: &prePrompt,
-		},
+	return Config{}
+}
+
+// BuildFinalPrePrompt constructs the final pre-prompt for an agent by merging:
+// 1. The built-in DefaultPrePrompt (always first)
+// 2. The configured defaults pre-prompt (if set)
+// 3. The agent-specific pre-prompt (if set)
+// The result ends with "\n\nTask:\n" to separate the pre-prompt from the user task.
+// Note: <branch> and <base-branch> placeholders are substituted by the caller.
+func BuildFinalPrePrompt(cfg Config, agentType string) string {
+	parts := []string{DefaultPrePrompt}
+	if cfg.Defaults.PrePrompt != nil && *cfg.Defaults.PrePrompt != "" {
+		parts = append(parts, *cfg.Defaults.PrePrompt)
 	}
+	if agentCfg, ok := cfg.Agents[agentType]; ok && agentCfg.PrePrompt != nil && *agentCfg.PrePrompt != "" {
+		parts = append(parts, *agentCfg.PrePrompt)
+	}
+	return strings.Join(parts, "\n") + "\n\nTask:\n"
 }
 
 // LoadFile loads a configuration from a file and resolves relative paths.

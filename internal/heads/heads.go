@@ -209,6 +209,12 @@ func SpawnHead(ctx context.Context, cli *dockerclient.Client, store *db.Store, p
 		worktreePath = projectRoot
 	}
 
+	// Substitute branch placeholders in the pre-prompt now that we know the branch names.
+	opts.PrePrompt = strings.NewReplacer(
+		"<branch>", branchName,
+		"<base-branch>", baseBranch,
+	).Replace(opts.PrePrompt)
+
 	now := time.Now()
 
 	// Write DB record first so the agent is visible immediately.

@@ -220,6 +220,7 @@ function SettingsPage() {
                   agentType="default"
                   scope={scope}
                   selectedProject={selectedProject}
+                  defaultPrePrompt={config.default_pre_prompt}
                 />
               </div>
             )}
@@ -248,6 +249,7 @@ function SettingsPage() {
                   agentType="claude"
                   scope={scope}
                   selectedProject={selectedProject}
+                  allAgentsPrePrompt={config.defaults.pre_prompt ?? null}
                 />
               </div>
             )}
@@ -276,6 +278,7 @@ function SettingsPage() {
                   agentType="gemini"
                   scope={scope}
                   selectedProject={selectedProject}
+                  allAgentsPrePrompt={config.defaults.pre_prompt ?? null}
                 />
               </div>
             )}
@@ -304,6 +307,7 @@ function SettingsPage() {
                   agentType="copilot"
                   scope={scope}
                   selectedProject={selectedProject}
+                  allAgentsPrePrompt={config.defaults.pre_prompt ?? null}
                 />
               </div>
             )}
@@ -473,6 +477,8 @@ function ConfigForm({
   agentType,
   scope,
   selectedProject,
+  defaultPrePrompt,
+  allAgentsPrePrompt,
 }: {
   value: AgentConfig
   onChange: (val: AgentConfig) => void
@@ -480,6 +486,8 @@ function ConfigForm({
   agentType: string
   scope: ConfigScope
   selectedProject?: ProjectInfo
+  defaultPrePrompt?: string
+  allAgentsPrePrompt?: string | null
 }) {
   const [template, setTemplate] = useState('none')
 
@@ -558,6 +566,32 @@ function ConfigForm({
         <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">
           System Pre-Prompt
         </label>
+        {defaultPrePrompt != null && (
+          <div className="flex items-center gap-1.5 text-[11px] text-gray-500 dark:text-gray-400 font-medium">
+            <span className="italic">&lt;default pre-prompt&gt;</span>
+            <InfoTooltip title="Default Pre-Prompt">
+              <p className="mb-1.5">This built-in pre-prompt is always prepended before any configured pre-prompts:</p>
+              <pre className="text-[10px] font-mono whitespace-pre-wrap text-gray-200 bg-gray-800 rounded p-1.5 max-h-48 overflow-y-auto">{defaultPrePrompt}</pre>
+              <p className="mt-1.5 text-gray-400 italic">{'<branch>'} and {'<base-branch>'} are substituted at spawn time.</p>
+            </InfoTooltip>
+          </div>
+        )}
+        {allAgentsPrePrompt != null && (
+          <div className="flex items-center gap-1.5 text-[11px] text-gray-500 dark:text-gray-400 font-medium">
+            <span className="italic">&lt;all agents pre-prompt&gt;</span>
+            <InfoTooltip title="All Agents Pre-Prompt">
+              {allAgentsPrePrompt ? (
+                <>
+                  <p className="mb-1.5">The "All Agents" pre-prompt is prepended before this agent's pre-prompt:</p>
+                  <pre className="text-[10px] font-mono whitespace-pre-wrap text-gray-200 bg-gray-800 rounded p-1.5 max-h-32 overflow-y-auto">{allAgentsPrePrompt}</pre>
+                </>
+              ) : (
+                <p>No "All Agents" pre-prompt is configured. Set one in the <strong>All Agents</strong> tab to have it prepended here.</p>
+              )}
+              <p className="mt-1.5 text-gray-400 italic">Pre-prompts are merged in order: default → all agents → agent-specific.</p>
+            </InfoTooltip>
+          </div>
+        )}
         <textarea
           value={value.pre_prompt || ''}
           onChange={(e) => onChange({ ...value, pre_prompt: e.target.value || null })}

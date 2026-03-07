@@ -6,6 +6,7 @@ import {
   Plus, Minus, SquareDot, Diff, Calendar, TriangleAlert,
   ChevronDown, ChevronRight, ChevronLeft, Check, LoaderCircle, RefreshCw,
   Settings, Copy, Folder, FolderOpen, X, GitMerge, Bot,
+  MoveRight,
 } from 'lucide-react'
 
 // ── Syntax highlighting helpers ───────────────────────────────────────────────
@@ -132,10 +133,10 @@ function buildSideBySide(hunkLines: DiffFile['hunks'][0]['lines']): SideBySideLi
 
 function ChangeTypeIcon({ type }: { type: string }) {
   switch (type) {
-    case 'added':   return <Plus className="w-3.5 h-3.5 text-green-500 shrink-0" />
+    case 'added': return <Plus className="w-3.5 h-3.5 text-green-500 shrink-0" />
     case 'deleted': return <Minus className="w-3.5 h-3.5 text-red-500 shrink-0" />
     case 'renamed': return <Diff className="w-3.5 h-3.5 text-blue-500 shrink-0" />
-    default:        return <SquareDot className="w-3.5 h-3.5 text-yellow-500 shrink-0" />
+    default: return <SquareDot className="w-3.5 h-3.5 text-yellow-500 shrink-0" />
   }
 }
 
@@ -166,9 +167,8 @@ function UnifiedHunk({ hunk, highlightedOld, highlightedNew }: {
           <div key={idx} className={`flex items-stretch hover:brightness-95 dark:hover:brightness-110 ${bgClass}`}>
             <span className={UNIFIED_LINE_NUM_CLASS}>{line.old_line_num ?? ''}</span>
             <span className={UNIFIED_LINE_NUM_CLASS}>{line.new_line_num ?? ''}</span>
-            <span className={`select-none font-mono text-xs leading-5 w-4 text-center shrink-0 ${
-              isAdd ? 'text-green-600 dark:text-green-400' : isDel ? 'text-red-600 dark:text-red-400' : 'text-gray-300 dark:text-gray-700'
-            }`}>
+            <span className={`select-none font-mono text-xs leading-5 w-4 text-center shrink-0 ${isAdd ? 'text-green-600 dark:text-green-400' : isDel ? 'text-red-600 dark:text-red-400' : 'text-gray-300 dark:text-gray-700'
+              }`}>
               {isAdd ? '+' : isDel ? '-' : isNoNewline ? '\\' : ' '}
             </span>
             {isNoNewline ? (
@@ -330,7 +330,7 @@ function formatCommitDate(iso: string): string {
 function Tooltip({ content, children, side = 'bottom' }: {
   content: React.ReactNode
   children: React.ReactNode
-  side?: 'bottom' | 'right'
+  side?: 'bottom' | 'right' | 'top' | 'left'
 }) {
   const [visible, setVisible] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -341,6 +341,10 @@ function Tooltip({ content, children, side = 'bottom' }: {
       const rect = ref.current.getBoundingClientRect()
       if (side === 'right') {
         setPos({ top: rect.top, left: rect.right + 8 })
+      } else if (side === 'left') {
+        setPos({ top: rect.top, left: rect.left - 8 })
+      } else if (side === 'top') {
+        setPos({ top: rect.top - 8, left: rect.left })
       } else {
         setPos({ top: rect.bottom + 6, left: rect.left })
       }
@@ -354,7 +358,11 @@ function Tooltip({ content, children, side = 'bottom' }: {
       {visible && pos && (
         <div
           className="fixed z-[200] bg-gray-900 dark:bg-gray-700 text-white text-xs rounded-lg px-3 py-2 shadow-xl max-w-sm pointer-events-none"
-          style={{ top: pos.top, left: pos.left }}
+          style={{
+            top: pos.top,
+            left: pos.left,
+            transform: side === 'left' ? 'translateX(-100%)' : side === 'top' ? 'translateY(-100%)' : undefined
+          }}
         >
           {content}
         </div>
@@ -419,9 +427,8 @@ function LeftSelector({ commits, selected, onChange, baseBranch }: {
           <div className="py-1 border-b border-gray-100 dark:border-gray-700">
             <button
               onClick={() => { onChange({ type: 'base' }); setOpen(false) }}
-              className={`w-full flex items-center gap-2 px-3 py-2 text-left text-xs hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer ${
-                selected.type === 'base' ? 'bg-blue-50 dark:bg-blue-900/20' : ''
-              }`}
+              className={`w-full flex items-center gap-2 px-3 py-2 text-left text-xs hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer ${selected.type === 'base' ? 'bg-blue-50 dark:bg-blue-900/20' : ''
+                }`}
             >
               <ChevronRight className="w-3.5 h-3.5 text-gray-400 shrink-0" />
               <span className="font-medium text-gray-800 dark:text-gray-200">{baseBranch}</span>
@@ -438,9 +445,8 @@ function LeftSelector({ commits, selected, onChange, baseBranch }: {
                 <Tooltip key={c.sha} side="right" content={<CommitTooltipContent commit={c} />}>
                   <button
                     onClick={() => { onChange({ type: 'commit', sha: c.sha }); setOpen(false) }}
-                    className={`w-full flex items-start gap-2 px-3 py-1.5 text-left hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer ${
-                      selected.type === 'commit' && selected.sha === c.sha ? 'bg-blue-50 dark:bg-blue-900/20' : ''
-                    }`}
+                    className={`w-full flex items-start gap-2 px-3 py-1.5 text-left hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer ${selected.type === 'commit' && selected.sha === c.sha ? 'bg-blue-50 dark:bg-blue-900/20' : ''
+                      }`}
                   >
                     <span className="font-mono text-[10px] text-gray-400 dark:text-gray-500 bg-gray-100 dark:bg-gray-700 px-1 py-0.5 rounded shrink-0 mt-0.5">
                       {c.short_sha}
@@ -481,7 +487,7 @@ function RightSelector({ commits, selected, onChange, left, hasUncommitted }: {
 
   const label = selected.type === 'uncommitted' ? 'Latest changes'
     : selected.type === 'latest' ? 'Latest commit'
-    : formatShortLabel(commits.find((c) => c.sha === selected.sha), selected.sha)
+      : formatShortLabel(commits.find((c) => c.sha === selected.sha), selected.sha)
 
   const validCommits = commits.filter((_, idx) => {
     if (left.type === 'base') return true
@@ -508,9 +514,8 @@ function RightSelector({ commits, selected, onChange, left, hasUncommitted }: {
           <div className="py-1 border-b border-gray-100 dark:border-gray-700">
             <button
               onClick={() => { onChange({ type: 'uncommitted' }); setOpen(false) }}
-              className={`w-full flex items-center gap-2 px-3 py-2 text-left text-xs hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer ${
-                selected.type === 'uncommitted' ? 'bg-blue-50 dark:bg-blue-900/20' : ''
-              }`}
+              className={`w-full flex items-center gap-2 px-3 py-2 text-left text-xs hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer ${selected.type === 'uncommitted' ? 'bg-blue-50 dark:bg-blue-900/20' : ''
+                }`}
             >
               <Plus className="w-3.5 h-3.5 text-gray-400 shrink-0" />
               <span className="font-medium text-gray-800 dark:text-gray-200">Latest changes</span>
@@ -519,9 +524,8 @@ function RightSelector({ commits, selected, onChange, left, hasUncommitted }: {
             </button>
             <button
               onClick={() => { onChange({ type: 'latest' }); setOpen(false) }}
-              className={`w-full flex items-center gap-2 px-3 py-2 text-left text-xs hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer ${
-                selected.type === 'latest' ? 'bg-blue-50 dark:bg-blue-900/20' : ''
-              }`}
+              className={`w-full flex items-center gap-2 px-3 py-2 text-left text-xs hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer ${selected.type === 'latest' ? 'bg-blue-50 dark:bg-blue-900/20' : ''
+                }`}
             >
               <ChevronRight className="w-3.5 h-3.5 text-gray-400 shrink-0" />
               <span className="font-medium text-gray-800 dark:text-gray-200">Latest commit</span>
@@ -538,9 +542,8 @@ function RightSelector({ commits, selected, onChange, left, hasUncommitted }: {
                 <Tooltip key={c.sha} side="right" content={<CommitTooltipContent commit={c} />}>
                   <button
                     onClick={() => { onChange({ type: 'commit', sha: c.sha }); setOpen(false) }}
-                    className={`w-full flex items-start gap-2 px-3 py-1.5 text-left hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer ${
-                      selected.type === 'commit' && selected.sha === c.sha ? 'bg-blue-50 dark:bg-blue-900/20' : ''
-                    }`}
+                    className={`w-full flex items-start gap-2 px-3 py-1.5 text-left hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer ${selected.type === 'commit' && selected.sha === c.sha ? 'bg-blue-50 dark:bg-blue-900/20' : ''
+                      }`}
                   >
                     <span className="font-mono text-[10px] text-gray-400 dark:text-gray-500 bg-gray-100 dark:bg-gray-700 px-1 py-0.5 rounded shrink-0 mt-0.5">
                       {c.short_sha}
@@ -762,7 +765,7 @@ function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false)
   const handleCopy = (e: React.MouseEvent) => {
     e.stopPropagation()
-    navigator.clipboard.writeText(text).catch(() => {})
+    navigator.clipboard.writeText(text).catch(() => { })
     setCopied(true)
     setTimeout(() => setCopied(false), 1500)
   }
@@ -783,9 +786,8 @@ function FileRow({ file, isActive, onClick, indent = 0 }: {
   return (
     <button
       onClick={onClick}
-      className={`w-full flex items-center gap-1.5 py-1.5 text-left hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors group cursor-pointer ${
-        isActive ? 'bg-blue-50 dark:bg-blue-900/20' : ''
-      }`}
+      className={`w-full flex items-center gap-1.5 py-1.5 text-left hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors group cursor-pointer ${isActive ? 'bg-blue-50 dark:bg-blue-900/20' : ''
+        }`}
       style={{ paddingLeft: `${10 + indent}px`, paddingRight: '10px' }}
     >
       <ChangeTypeIcon type={file.change_type} />
@@ -841,11 +843,11 @@ function TreeNodeView({ node, depth, collapsedFolders, toggleFolder, onFileClick
 
 function SettingsPopup({ fileView, onFileViewChange, sideBySide, onSideBySideChange,
   ignoreWhitespace, onIgnoreWhitespaceChange, singleFile, onSingleFileChange }: {
-  fileView: FileView; onFileViewChange: (v: FileView) => void
-  sideBySide: boolean; onSideBySideChange: (v: boolean) => void
-  ignoreWhitespace: boolean; onIgnoreWhitespaceChange: (v: boolean) => void
-  singleFile: boolean; onSingleFileChange: (v: boolean) => void
-}) {
+    fileView: FileView; onFileViewChange: (v: FileView) => void
+    sideBySide: boolean; onSideBySideChange: (v: boolean) => void
+    ignoreWhitespace: boolean; onIgnoreWhitespaceChange: (v: boolean) => void
+    singleFile: boolean; onSingleFileChange: (v: boolean) => void
+  }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
@@ -868,10 +870,9 @@ function SettingsPopup({ fileView, onFileViewChange, sideBySide, onSideBySideCha
     <div ref={ref} className="relative">
       <button
         onClick={() => setOpen((o) => !o)}
-        className={`flex items-center justify-center w-7 h-7 rounded-md border transition-colors cursor-pointer ${
-          open ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800'
-               : 'text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
-        }`}
+        className={`flex items-center justify-center w-7 h-7 rounded-md border transition-colors cursor-pointer ${open ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800'
+          : 'text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
+          }`}
         title="Diff settings"
       >
         <Settings className="w-3.5 h-3.5" />
@@ -933,17 +934,17 @@ export function DiffViewer({ agent, projectId }: { agent: AgentResponse; project
     try {
       const stored = localStorage.getItem('hydra-diff-file-view')
       if (stored === 'tree' || stored === 'flat' || stored === 'grouped') return stored
-    } catch {}
+    } catch { }
     return 'tree'
   })
   const [singleFileIdx, setSingleFileIdx] = useState(0)
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set())
   const fileRefs = useRef<Map<string, HTMLDivElement>>(new Map())
 
-  useEffect(() => { try { localStorage.setItem('hydra-diff-side-by-side', String(sideBySide)) } catch {} }, [sideBySide])
-  useEffect(() => { try { localStorage.setItem('hydra-diff-ignore-whitespace', String(ignoreWhitespace)) } catch {} }, [ignoreWhitespace])
-  useEffect(() => { try { localStorage.setItem('hydra-diff-single-file', String(singleFile)) } catch {} }, [singleFile])
-  useEffect(() => { try { localStorage.setItem('hydra-diff-file-view', fileView) } catch {} }, [fileView])
+  useEffect(() => { try { localStorage.setItem('hydra-diff-side-by-side', String(sideBySide)) } catch { } }, [sideBySide])
+  useEffect(() => { try { localStorage.setItem('hydra-diff-ignore-whitespace', String(ignoreWhitespace)) } catch { } }, [ignoreWhitespace])
+  useEffect(() => { try { localStorage.setItem('hydra-diff-single-file', String(singleFile)) } catch { } }, [singleFile])
+  useEffect(() => { try { localStorage.setItem('hydra-diff-file-view', fileView) } catch { } }, [fileView])
 
   const toggleFolder = useCallback((path: string) => {
     setCollapsedFolders((prev) => {
@@ -1066,29 +1067,32 @@ export function DiffViewer({ agent, projectId }: { agent: AgentResponse; project
             <span className="text-xs text-gray-400 dark:text-gray-500">in {diff.files.length} file{diff.files.length !== 1 ? 's' : ''}</span>
           </div>
         )}
+
+        <LeftSelector commits={commits} selected={leftSel} onChange={handleLeftChange} baseBranch={agent.base_branch} />
+        <span className="text-gray-400 dark:text-gray-500 text-xs select-none"><MoveRight className='w-6 h-6' strokeWidth='1.5' /></span>
+        <RightSelector commits={commits} selected={rightSel} onChange={setRightSel}
+          left={leftSel} hasUncommitted={diff?.uncommitted_changes} />
+
+        <button
+          onClick={() => setRefreshKey((k) => k + 1)}
+          disabled={loadingDiff}
+          className="flex items-center justify-center w-7 h-7 rounded-md text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50 transition-colors cursor-pointer"
+          title="Refresh diff"
+        >
+          <RefreshCw className="w-3.5 h-3.5" />
+        </button>
+
+        {/* Uncommitted changes warning button */}
+        <UncommittedButton diff={diff} onJumpToUncommitted={handleJumpToUncommittedActual} />
+
+        {/* Merge conflict button */}
+        <MergeConflictButton diff={diff} agent={agent} projectId={projectId} />
+
         <div className="flex items-center gap-2 ml-auto flex-wrap">
           {loadingDiff && hasExistingDiff && (
             <LoaderCircle className="w-3.5 h-3.5 animate-spin text-gray-400 dark:text-gray-500 shrink-0" />
           )}
-          <button
-            onClick={() => setRefreshKey((k) => k + 1)}
-            disabled={loadingDiff}
-            className="flex items-center justify-center w-7 h-7 rounded-md text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50 transition-colors cursor-pointer"
-            title="Refresh diff"
-          >
-            <RefreshCw className="w-3.5 h-3.5" />
-          </button>
 
-          {/* Uncommitted changes warning button */}
-          <UncommittedButton diff={diff} onJumpToUncommitted={handleJumpToUncommittedActual} />
-
-          {/* Merge conflict button */}
-          <MergeConflictButton diff={diff} agent={agent} projectId={projectId} />
-
-          <LeftSelector commits={commits} selected={leftSel} onChange={handleLeftChange} baseBranch={agent.base_branch} />
-          <span className="text-gray-400 dark:text-gray-500 text-xs select-none">→</span>
-          <RightSelector commits={commits} selected={rightSel} onChange={setRightSel}
-            left={leftSel} hasUncommitted={diff?.uncommitted_changes} />
           <SettingsPopup
             fileView={fileView} onFileViewChange={setFileView}
             sideBySide={sideBySide} onSideBySideChange={setSideBySide}

@@ -291,6 +291,7 @@ func (s *Server) GetConfig(_ context.Context, request api.GetConfigRequestObject
 		"gemini":  config.DefaultDockerfileGemini,
 		"bash":    config.DefaultDockerfileBash,
 	}
+	defaultPrePrompt := config.DefaultPrePrompt
 	resp := api.ConfigResponse{
 		Defaults: api.AgentConfig{
 			Dockerfile:           cfg.Defaults.Dockerfile,
@@ -302,6 +303,7 @@ func (s *Server) GetConfig(_ context.Context, request api.GetConfigRequestObject
 		},
 		Agents:             make(map[string]api.AgentConfig),
 		DefaultDockerfiles: &defaultDockerfiles,
+		DefaultPrePrompt:   &defaultPrePrompt,
 	}
 
 	for name, agent := range cfg.Agents {
@@ -422,10 +424,7 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 
 	resolved := cfg.GetResolvedConfig(string(agentType))
 
-	prePrompt := config.DefaultPrePrompt
-	if resolved.PrePrompt != nil {
-		prePrompt = *resolved.PrePrompt
-	}
+	prePrompt := config.BuildFinalPrePrompt(cfg, string(agentType))
 	prompt := ""
 	if request.Body.Prompt != nil {
 		prompt = strings.TrimSpace(*request.Body.Prompt)
