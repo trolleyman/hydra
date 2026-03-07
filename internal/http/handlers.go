@@ -41,7 +41,7 @@ type Server struct {
 	DockerClient      *dockerclient.Client
 	DB                *db.Store
 	StartTime         time.Time
-	DevRestartEnabled bool // set when running under mage dev / mage DevAutoReload
+	Development       bool // set when running under mage dev / mage DevAutoReload
 
 	lastDockerError atomic.Value // holds string
 }
@@ -82,7 +82,7 @@ func NewHandler(s *Server) http.Handler {
 }
 
 func (s *Server) GetDevToolsConfig(_ context.Context, _ api.GetDevToolsConfigRequestObject) (api.GetDevToolsConfigResponseObject, error) {
-	if !s.DevRestartEnabled {
+	if !s.Development {
 		return api.GetDevToolsConfig403JSONResponse{
 			Code:    403,
 			Error:   "unauthorized",
@@ -221,7 +221,7 @@ func (s *Server) GetStatus(_ context.Context, _ api.GetStatusRequestObject) (api
 	uptime := float32(time.Since(s.StartTime).Seconds())
 	projectRoot := s.ProjectRoot
 	defaultProjectID := s.DefaultProject.ID
-	devRestartAvailable := s.DevRestartEnabled
+	development := s.Development
 
 	var dockerErr *string
 	if lastErr := s.GetDockerError(); lastErr != "" {
@@ -238,13 +238,13 @@ func (s *Server) GetStatus(_ context.Context, _ api.GetStatusRequestObject) (api
 	}
 
 	return api.GetStatus200JSONResponse(api.StatusResponse{
-		Status:              &status,
-		DockerError:         dockerErr,
-		Version:             &v,
-		UptimeSeconds:       &uptime,
-		ProjectRoot:         &projectRoot,
-		DefaultProjectId:    &defaultProjectID,
-		DevRestartAvailable: &devRestartAvailable,
+		Status:           &status,
+		DockerError:      dockerErr,
+		Version:          &v,
+		UptimeSeconds:    &uptime,
+		ProjectRoot:      &projectRoot,
+		DefaultProjectId: &defaultProjectID,
+		Development:      &development,
 		Features: &struct {
 			TerminalBash *bool `json:"terminal_bash,omitempty"`
 		}{
@@ -301,7 +301,12 @@ func (s *Server) GetConfig(_ context.Context, request api.GetConfigRequestObject
 			Context:              cfg.Defaults.Context,
 			PrePrompt:            cfg.Defaults.PrePrompt,
 		},
-		Agents:             make(map[string]api.AgentConfig),
+		Agents: make(map[string]api.AgentConfig),
+		Features: &struct {
+			TerminalBash *bool `json:"terminal_bash,omitempty"`
+		}{
+			TerminalBash: &cfg.Features.TerminalBash,
+		},
 		DefaultDockerfiles: &defaultDockerfiles,
 		DefaultPrePrompt:   &defaultPrePrompt,
 	}
@@ -339,6 +344,9 @@ func (s *Server) SaveConfig(_ context.Context, request api.SaveConfigRequestObje
 			PrePrompt:            request.Body.Defaults.PrePrompt,
 		},
 		Agents: make(map[string]config.AgentConfig),
+	}
+	if request.Body.Features != nil && request.Body.Features.TerminalBash != nil {
+		newCfg.Features.TerminalBash = *request.Body.Features.TerminalBash
 	}
 	for name, agent := range request.Body.Agents {
 		var sm []string
@@ -379,7 +387,7 @@ func (s *Server) SaveConfig(_ context.Context, request api.SaveConfigRequestObje
 }
 
 func (s *Server) DevRestart(_ context.Context, _ api.DevRestartRequestObject) (api.DevRestartResponseObject, error) {
-	if !s.DevRestartEnabled {
+	if !s.Development {
 		return api.DevRestart403JSONResponse{
 			Code:    403,
 			Error:   "unauthorized",

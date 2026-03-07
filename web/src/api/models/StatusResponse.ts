@@ -22,9 +22,9 @@ export type StatusResponse = {
      */
     default_project_id?: string;
     /**
-     * Whether /api/dev/restart is available (dev mode only)
+     * Whether the server is running in development mode
      */
-    dev_restart_available?: boolean;
+    development?: boolean;
     features?: {
         /**
          * Whether the bash terminal feature is enabled

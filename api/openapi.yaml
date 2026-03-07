@@ -630,9 +630,9 @@ components:
         default_project_id:
           type: string
           description: Project ID of the default (CWD) project
-        dev_restart_available:
+        development:
           type: boolean
-          description: Whether /api/dev/restart is available (dev mode only)
+          description: Whether the server is running in development mode
         features:
           type: object
           properties:
@@ -935,6 +935,11 @@ components:
           type: object
           additionalProperties:
             $ref: '#/components/schemas/AgentConfig'
+        features:
+          type: object
+          properties:
+            terminal_bash:
+              type: boolean
         default_dockerfiles:
           type: object
           additionalProperties:

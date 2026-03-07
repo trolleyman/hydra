@@ -183,7 +183,7 @@ function ProjectDropdown({
 function RootLayout() {
   const spawnedAt = useRef<number | null>(null)
   const [, setTick] = useState(0)
-  const [devRestartAvailable, setDevRestartAvailable] = useState(false)
+  const [development, setDevelopment] = useState(false)
   const [restarting, setRestarting] = useState(false)
   const [dark, setDark] = useState<boolean>(() => {
     const stored = localStorage.getItem('hydra-dark-mode')
@@ -211,7 +211,7 @@ function RootLayout() {
         const status = await api.default.getStatus()
         if (cancelled) return
         setSystemStatus(status)
-        setDevRestartAvailable(status.dev_restart_available ?? false)
+        setDevelopment(status.development ?? false)
         if (status.uptime_seconds != null) {
           if (spawnedAt.current === null) {
             spawnedAt.current = Date.now() - status.uptime_seconds * 1000
@@ -334,7 +334,7 @@ function RootLayout() {
               {formatSpawnedAgo(Date.now() - spawnedAt.current)}
             </span>
           )}
-          {devRestartAvailable && (
+          {development && (
             <button
               onClick={handleRestart}
               disabled={restarting}

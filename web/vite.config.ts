@@ -10,23 +10,37 @@ const devPort = process.env.DEV_PORT ? parseInt(process.env.DEV_PORT) : undefine
 const apiBase = `http://localhost:${apiPort}`
 
 // https://vite.dev/config/
-export default defineConfig({
-  plugins: [
-    // '@tanstack/router-plugin' must be passed before '@vitejs/plugin-react'
-    tanstackRouter({
-      target: 'react',
-      autoCodeSplitting: true,
-    }),
-    react(),
-    tailwindcss(),
-  ],
-  clearScreen: false,
-  server: {
-    port: devPort,
-    proxy: {
-      '/api': apiBase,
-      '/health': apiBase,
-      '/ws': { target: `ws://localhost:${apiPort}`, ws: true },
+export default defineConfig(({ mode }) => {
+  const isDev = mode === 'development'
+
+  return {
+    plugins: [
+      // '@tanstack/router-plugin' must be passed before '@vitejs/plugin-react'
+      tanstackRouter({
+        target: 'react',
+        autoCodeSplitting: true,
+      }),
+      react(),
+      tailwindcss(),
+    ],
+    clearScreen: false,
+    server: {
+      port: devPort,
+      proxy: {
+        '/api': apiBase,
+        '/health': apiBase,
+        '/ws': { target: `ws://localhost:${apiPort}`, ws: true },
+      },
     },
-  },
+    build: {
+      // Disables minification entirely when in development mode to keep code readable
+      minify: isDev ? false : 'esbuild',
+
+      // Generates source maps to make debugging easier on the external server
+      sourcemap: isDev,
+
+      // Vite outputs to 'dist/' by default, but this explicitly defines the target
+      outDir: 'dist',
+    }
+  }
 })

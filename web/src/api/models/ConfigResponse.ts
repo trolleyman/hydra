@@ -6,6 +6,9 @@ import type { AgentConfig } from './AgentConfig';
 export type ConfigResponse = {
     defaults: AgentConfig;
     agents: Record<string, AgentConfig>;
+    features?: {
+        terminal_bash?: boolean;
+    };
     /**
      * Built-in default Dockerfiles for each agent type (read-only)
      */

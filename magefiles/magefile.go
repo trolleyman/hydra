@@ -247,6 +247,33 @@ func runInDirV(dir string, cmd string, args ...string) error {
 	return nil
 }
 
+// runInDirWithEnvV runs a command in a specific directory with environment variables set and stdout/stderr forwarded
+func runInDirWithEnvV(dir string, env map[string]string, cmd string, args ...string) error {
+	cmdLine := []string{
+		"pushd", displayPath(dir), "&&",
+	}
+	for k, v := range env {
+		cmdLine = append(cmdLine, fmt.Sprintf("%s=%s", k, v))
+	}
+	cmdLine = append(cmdLine, cmd)
+	cmdLine = append(cmdLine, args...)
+	cmdLine = append(cmdLine, "&&", "popd")
+	printCmdLine(cmdLine)
+	c := exec.Command(cmd, args...)
+	c.Dir = dir
+	c.Stdout = os.Stdout
+	c.Stderr = os.Stderr
+	c.Env = os.Environ()
+	for k, v := range env {
+		c.Env = append(c.Env, fmt.Sprintf("%s=%s", k, v))
+	}
+	err := c.Run()
+	if err != nil {
+		return errtrace.Wrap(fmt.Errorf("failed to run %q in %q: %w", cmd, dir, err))
+	}
+	return nil
+}
+
 // Custom error to break out of filepath.Walk early when a newer file is found.
 var errFoundNewer = errors.New("found newer file")
 
@@ -457,6 +484,11 @@ func BuildGoDeps() error {
 
 func BuildWeb() error {
 	stamp := ".mage/web-build.stamp"
+	isDev := os.Getenv("HYDRA_DEV_BUILD") == "1"
+	if isDev {
+		stamp = ".mage/web-build-dev.stamp"
+	}
+
 	ignores := map[string]struct{}{
 		"dist":         {},
 		"node_modules": {},
@@ -481,7 +513,15 @@ func BuildWeb() error {
 	if err := runInDirV("web", "bun", "install"); err != nil {
 		return errtrace.Wrap(err)
 	}
-	if err := runInDirV("web", "bun", "run", "build"); err != nil {
+
+	buildArgs := []string{"run", "build"}
+	env := map[string]string{}
+	if isDev {
+		env["NODE_ENV"] = "development"
+		buildArgs = append(buildArgs, "--", "--mode", "development")
+	}
+
+	if err := runInDirWithEnvV("web", env, "bun", buildArgs...); err != nil {
 		return errtrace.Wrap(err)
 	}
 
@@ -586,6 +626,7 @@ func getHydraOutputFile() string {
 // Use the UI restart button to trigger a full rebuild and restart.
 // For auto-reload on file changes use DevAutoReload instead.
 func Dev() error {
+	os.Setenv("HYDRA_DEV_BUILD", "1")
 	for {
 		if err := GenerateGo(); err != nil {
 			return errtrace.Wrap(err)
@@ -631,6 +672,7 @@ func Dev() error {
 // BuildWeb is still called to keep the generated TS API client (web/src/api/) in sync;
 // it uses stamp-based caching so it is a no-op when neither web/ nor api/ have changed.
 func DevFast() error {
+	os.Setenv("HYDRA_DEV_BUILD", "1")
 	if err := GenerateGo(); err != nil {
 		return errtrace.Wrap(err)
 	}
@@ -723,6 +765,7 @@ func DevFast() error {
 // Access the frontend at http://localhost:5173; API calls are proxied to http://localhost:8080.
 // The /api/dev/restart UI button is also available alongside auto-reload.
 func DevAutoReload() error {
+	os.Setenv("HYDRA_DEV_BUILD", "1")
 	// Ensure generated Go code is up to date.
 	if err := GenerateGo(); err != nil {
 		return errtrace.Wrap(err)

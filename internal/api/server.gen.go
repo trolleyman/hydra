@@ -184,6 +184,9 @@ type ConfigResponse struct {
 	// DefaultPrePrompt Built-in default pre-prompt always prepended to agent prompts (read-only)
 	DefaultPrePrompt *string     `json:"default_pre_prompt,omitempty"`
 	Defaults         AgentConfig `json:"defaults"`
+	Features         *struct {
+		TerminalBash *bool `json:"terminal_bash,omitempty"`
+	} `json:"features,omitempty"`
 }
 
 // DiffFile defines model for DiffFile.
@@ -332,8 +335,8 @@ type StatusResponse struct {
 	// DefaultProjectId Project ID of the default (CWD) project
 	DefaultProjectId *string `json:"default_project_id,omitempty"`
 
-	// DevRestartAvailable Whether /api/dev/restart is available (dev mode only)
-	DevRestartAvailable *bool `json:"dev_restart_available,omitempty"`
+	// Development Whether the server is running in development mode
+	Development *bool `json:"development,omitempty"`
 
 	// DockerError Error message if there is an issue connecting to Docker
 	DockerError *string `json:"docker_error"`

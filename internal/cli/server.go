@@ -69,7 +69,7 @@ func runServer(_ *cobra.Command, _ []string) error {
 		DockerClient:      dockerClient,
 		DB:                store,
 		StartTime:         time.Now(),
-		DevRestartEnabled: os.Getenv("HYDRA_DEV_RESTART") == "1",
+		Development:       os.Getenv("HYDRA_DEV_RESTART") == "1",
 	}
 
 	// Run immediate first cycles of both pollers before accepting HTTP requests.
