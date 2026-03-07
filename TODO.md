@@ -1,5 +1,5 @@
 # TODO
-- Add the ability to open a bash terminal for the container - new tab? in the agent mode. This job would be killed once the WebSocket connection was closed.
+- Add the ability to open a bash terminal for the container - new tab? in the agent mode. This job would be killed once the WebSocket connection was closed (when that terminal tab is closed).
 
 - [`diff-viewer-improvements`]
     - Make sure the warning about uncommitted changes is accurate - currently it is just always there if there are any changes, not just if there are uncommitted changes.
@@ -14,12 +14,8 @@
         - Add a button that can expand the diff up and down (it should be to the left of the diff header: `<expand down chevron> <expand up down chevron> <expand up chevron> @@ -3,7 +3,7 @@ import { api } from '../stores/apiClient'`) this should increase the lines seen by 5
         - Make the headers of a file able to collapse that file entirely
         - Make it a bit more performant - load the files diff first, then load the individual file (do this optimization if loading one-by-one, or if headers of a file are collapsed)
-
-- [`fix-the-dockerfile-syntax-highlit-files`] Dockerfile syntax highlighting: these highlit dockerfiles on the settings page are always in light mode - fix for dark mode.
-
-- [`copilot`] Add support for Copilot CLI
-
-- [`terminal-clear-resize-help`] When opening up a terminal, the CLI agent doesn't know that the terminal has just changed, so it only sends incremental updates, meaning the screen is sometimes blank or only has some changes. When opening, send a resize event to make it a bit smaller, and then the actual size of the terminal, so that the view is refreshed and it accurately represents a terminal
+        - Make diff sidebar (changed files) size modifiable (draggable), and save that setting like the sidebar.
+        - Remove copy filepath button from changed files diff sidebar, and instead add it to the filepath in the diff file header.
 
 - Install Go langauge server, as extension of above, so that Claude (/Gemini) can access language server information rather than just having to read files.
 
