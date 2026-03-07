@@ -74,7 +74,9 @@ var triggerHookCmd = &cobra.Command{
 		if err := runTriggerHook(args[0], eventOverride, logFile); err != nil {
 			// Log to status_log.jsonl and stderr but don't propagate – hooks must not fail the agent.
 			fmt.Fprintf(os.Stderr, "hydra trigger-hook error: %v\n", err)
-			appendJSONLine(logFile, map[string]interface{}{"error": err.Error()})
+			if logFile != nil {
+				appendJSONLine(logFile, map[string]interface{}{"error": err.Error()})
+			}
 		}
 		return nil
 	},
@@ -123,6 +125,10 @@ func runTriggerHook(agentType string, eventOverride string, logFile *os.File) er
 			return nil
 		}
 	default:
+		return nil
+	}
+
+	if status == "" {
 		return nil
 	}
 

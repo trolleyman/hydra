@@ -66,6 +66,10 @@ func (r *RotatingLogger) Write(p []byte) (n int, err error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	if r.file == nil {
+		return 0, errtrace.Wrap(fmt.Errorf("logger file is nil"))
+	}
+
 	fi, err := r.file.Stat()
 	if err != nil {
 		return 0, errtrace.Wrap(err)
