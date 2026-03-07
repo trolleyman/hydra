@@ -56,6 +56,10 @@ func style(codes ...string) string {
 // devRestartExitCode must match the constant in internal/http/handlers.go.
 const devRestartExitCode = 42
 
+// devFastAPIPort is the port the Go API server listens on in DevFast mode.
+// Vite dev server runs on 8080 and proxies /api, /health, /ws to this port.
+const devFastAPIPort = "17842"
+
 var (
 	// Matching bun
 	colorCommandDollar = style(colorReset, colorDim, colorMagenta)
@@ -608,6 +612,97 @@ func Dev() error {
 				continue
 			}
 			return errtrace.Wrap(err)
+		}
+		return nil // clean exit
+	}
+}
+
+// DevFast builds the Go backend once and runs it in API-only mode on a background port,
+// while running the Vite dev server on http://localhost:8080 for hot-module-replacement.
+// Vite proxies /api, /health, and /ws to the Go backend automatically.
+// Clicking the UI restart button rebuilds the backend and restarts both servers.
+func DevFast() error {
+	if err := GenerateGo(); err != nil {
+		return errtrace.Wrap(err)
+	}
+	if err := BuildLinuxBinary(); err != nil {
+		return errtrace.Wrap(err)
+	}
+	// Build the frontend once so web/dist/ exists for Go embedding.
+	// Subsequent frontend changes are hot-reloaded by Vite — no rebuild needed.
+	if err := BuildWeb(); err != nil {
+		return errtrace.Wrap(err)
+	}
+
+	hydraOutputFile := getHydraOutputFile()
+
+	buildBackend := func() error {
+		devBuildArgs := append([]string{"build"}, goBuildTags()...)
+		devBuildArgs = append(devBuildArgs, "-o", hydraOutputFile, "./")
+		return errtrace.Wrap(runV("go", devBuildArgs...))
+	}
+
+	startVite := func() (*exec.Cmd, error) {
+		printCmdBackground("bun", "run", "dev")
+		cmd := exec.Command("bun", "run", "dev")
+		cmd.Dir = "web"
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		cmd.Env = append(os.Environ(),
+			"API_PORT="+devFastAPIPort,
+			"DEV_PORT=8080",
+		)
+		if err := cmd.Start(); err != nil {
+			return nil, errtrace.Wrap(fmt.Errorf("start Vite dev server: %w", err))
+		}
+		return cmd, nil
+	}
+
+	if err := buildBackend(); err != nil {
+		return errtrace.Wrap(err)
+	}
+
+	for {
+		viteCmd, err := startVite()
+		if err != nil {
+			return errtrace.Wrap(err)
+		}
+
+		printCmd(hydraOutputFile, "server")
+		serverCmd := exec.Command(hydraOutputFile, "server")
+		serverCmd.Stdout = os.Stdout
+		serverCmd.Stderr = os.Stderr
+		serverCmd.Env = append(os.Environ(),
+			"HYDRA_DEV_RESTART=1",
+			"HYDRA_API_ADDR=localhost:"+devFastAPIPort,
+			"HYDRA_API_ONLY=1",
+		)
+
+		serverErr := serverCmd.Run()
+
+		// Always stop Vite when the backend exits.
+		if viteCmd.Process != nil {
+			viteCmd.Process.Kill()
+			viteCmd.Wait()
+		}
+
+		if serverErr != nil {
+			var exitErr *exec.ExitError
+			if errors.As(serverErr, &exitErr) && exitErr.ExitCode() == devRestartExitCode {
+				log.Println("Restart requested via UI, rebuilding backend...")
+				if err := GenerateGo(); err != nil {
+					fmt.Printf("GenerateGo error: %v\n", err)
+					time.Sleep(2 * time.Second)
+				} else if err := BuildLinuxBinary(); err != nil {
+					fmt.Printf("BuildLinuxBinary error: %v\n", err)
+					time.Sleep(2 * time.Second)
+				} else if err := buildBackend(); err != nil {
+					fmt.Printf("build error: %v\n", err)
+					time.Sleep(2 * time.Second)
+				}
+				continue
+			}
+			return errtrace.Wrap(serverErr)
 		}
 		return nil // clean exit
 	}

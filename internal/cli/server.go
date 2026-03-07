@@ -92,14 +92,19 @@ func runServer(_ *cobra.Command, _ []string) error {
 	// WebSocket terminal endpoint
 	mux.HandleFunc("/ws/agent/", server.HandleTerminalWS)
 
-	// Serve the static React SPA
-	distFS, err := fs.Sub(web.FrontendAssets, "dist")
-	if err != nil {
-		log.Fatal(err)
+	// In API-only mode (e.g. devFast) the frontend is served by the Vite dev server.
+	if os.Getenv("HYDRA_API_ONLY") != "1" {
+		distFS, err := fs.Sub(web.FrontendAssets, "dist")
+		if err != nil {
+			log.Fatal(err)
+		}
+		mux.Handle("/", spaHandler(distFS))
 	}
-	mux.Handle("/", spaHandler(distFS))
 
 	addr := "localhost:8080"
+	if envAddr := os.Getenv("HYDRA_API_ADDR"); envAddr != "" {
+		addr = envAddr
+	}
 	log.Printf("Server starting on http://%s", addr)
 	return errtrace.Wrap(http.ListenAndServe(addr, httppkg.LoggingMiddleware(mux)))
 }
