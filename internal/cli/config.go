@@ -33,7 +33,7 @@ dockerfiles for these agents.`,
 			return errtrace.Wrap(err)
 		}
 
-		agentTypes := []docker.AgentType{docker.AgentTypeClaude, docker.AgentTypeGemini}
+		agentTypes := []docker.AgentType{docker.AgentTypeClaude, docker.AgentTypeGemini, docker.AgentTypeCopilot}
 		for _, agentType := range agentTypes {
 			if err := writeDefaultConfigForAgent(agentType, projectRoot); err != nil {
 				return errtrace.Wrap(err)

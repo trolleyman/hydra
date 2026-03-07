@@ -242,10 +242,11 @@ func (s *Server) GetConfig(_ context.Context, request api.GetConfigRequestObject
 	}
 
 	defaultDockerfiles := map[string]string{
-		"base":   config.DefaultDockerfileBase,
-		"claude": config.DefaultDockerfileClaude,
-		"gemini": config.DefaultDockerfileGemini,
-		"bash":   config.DefaultDockerfileBash,
+		"base":    config.DefaultDockerfileBase,
+		"claude":  config.DefaultDockerfileClaude,
+		"copilot": config.DefaultDockerfileCopilot,
+		"gemini":  config.DefaultDockerfileGemini,
+		"bash":    config.DefaultDockerfileBash,
 	}
 	resp := api.ConfigResponse{
 		Defaults: api.AgentConfig{
@@ -371,11 +372,11 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 	if request.Body.AgentType != nil && *request.Body.AgentType != "" {
 		agentType = docker.AgentType(*request.Body.AgentType)
 	}
-	if agentType != docker.AgentTypeClaude && agentType != docker.AgentTypeGemini && agentType != docker.AgentTypeBash {
+	if agentType != docker.AgentTypeClaude && agentType != docker.AgentTypeGemini && agentType != docker.AgentTypeBash && agentType != docker.AgentTypeCopilot {
 		return api.SpawnAgent400JSONResponse{
 			Code:    400,
 			Error:   "bad_request",
-			Details: "unknown agent_type; supported: claude, gemini, bash",
+			Details: "unknown agent_type; supported: claude, gemini, copilot, bash",
 		}, nil
 	}
 

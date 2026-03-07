@@ -15,9 +15,10 @@ const LabelKey = "org.trolleyman.hydra"
 type AgentType string
 
 const (
-	AgentTypeClaude AgentType = "claude"
-	AgentTypeGemini AgentType = "gemini"
-	AgentTypeBash   AgentType = "bash"
+	AgentTypeClaude  AgentType = "claude"
+	AgentTypeGemini  AgentType = "gemini"
+	AgentTypeBash    AgentType = "bash"
+	AgentTypeCopilot AgentType = "copilot"
 )
 
 // AgentMetadata is the structured data stored in the Hydra Docker label.

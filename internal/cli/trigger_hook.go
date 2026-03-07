@@ -39,22 +39,23 @@ func appendJSONLine(w io.Writer, object any) {
 	_ = encoder.Encode(object)
 }
 
-// triggerHookCmd is an internal command run inside agent containers via Claude Code / Gemini hooks.
+// triggerHookCmd is an internal command run inside agent containers via Claude Code / Gemini / Copilot hooks.
 // It reads a JSON hook payload from stdin, appends {"hook": <payload>} to ~/.hydra/status_log.jsonl,
 // and for status-changing events also writes ~/.hydra/status.json.
 //
 // Usage (internal only):
 //
-//	hydra trigger-hook <agentType>
+//	hydra trigger-hook <agentType> [eventName]
 //
-// The agentType argument (e.g. "claude", "gemini") is accepted for future use; the hook event
-// name in the payload drives the resulting status value.
+// The agentType argument (e.g. "claude", "gemini", "copilot") is accepted for future use.
+// The optional eventName argument overrides reading the event from the JSON payload; this is
+// required for Copilot CLI hooks which do not include the event name in the payload.
 var triggerHookCmd = &cobra.Command{
-	Use:    "trigger-hook <agentType>",
+	Use:    "trigger-hook <agentType> [eventName]",
 	Short:  "Internal: process a hook event and write ~/.hydra/status.json and ~/.hydra/status_log.jsonl",
 	Long:   `Internal command used by hook scripts inside agent containers to update the agent status file. Not intended for direct use.`,
 	Hidden: true,
-	Args:   cobra.ExactArgs(1),
+	Args:   cobra.RangeArgs(1, 2),
 	// Always exit 0 so we never block the agent session.
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logFile, logErr := openStatusLog()
@@ -65,7 +66,12 @@ var triggerHookCmd = &cobra.Command{
 			defer logFile.Close()
 		}
 
-		if err := runTriggerHook(args[0], logFile); err != nil {
+		eventOverride := ""
+		if len(args) >= 2 {
+			eventOverride = args[1]
+		}
+
+		if err := runTriggerHook(args[0], eventOverride, logFile); err != nil {
 			// Log to status_log.jsonl and stderr but don't propagate – hooks must not fail the agent.
 			fmt.Fprintf(os.Stderr, "hydra trigger-hook error: %v\n", err)
 			appendJSONLine(logFile, map[string]interface{}{"error": err.Error()})
@@ -74,7 +80,7 @@ var triggerHookCmd = &cobra.Command{
 	},
 }
 
-func runTriggerHook(agentType string, logFile *os.File) error {
+func runTriggerHook(agentType string, eventOverride string, logFile *os.File) error {
 	raw, err := io.ReadAll(os.Stdin)
 	if err != nil {
 		return errtrace.Wrap(fmt.Errorf("read stdin: %w", err))
@@ -86,25 +92,29 @@ func runTriggerHook(agentType string, logFile *os.File) error {
 	// Always append {"hook": <payload>} to the log for every hook invocation.
 	appendJSONLine(logFile, map[string]interface{}{"hook": input})
 
-	event := ""
-	if v, ok := input["hook_event_name"].(string); ok {
-		event = v
+	// Determine event name: use the override (for Copilot CLI which omits it
+	// from the payload) or fall back to the JSON field used by Claude/Gemini.
+	event := eventOverride
+	if event == "" {
+		if v, ok := input["hook_event_name"].(string); ok {
+			event = v
+		}
 	}
 
 	// Only update status.json for events that represent a meaningful status change.
 	// All other events are logged above but do not alter the displayed status.
 	var status api.AgentStatus
 	switch event {
-	case "SessionStart":
+	case "SessionStart", "sessionStart":
 		status = api.Running
 	case "Stop", "AfterAgent":
 		status = api.Waiting
-	case "SessionEnd":
+	case "SessionEnd", "sessionEnd":
 		status = api.Stopped
-	case "AfterTool":
-		// AfterTool doesn't change the status (it remains Running), but we want
-		// to update status.json so the timestamp changes, signaling to the
-		// frontend that it might need to refresh (e.g. after a git commit).
+	case "AfterTool", "postToolUse":
+		// AfterTool/postToolUse doesn't change the status (it remains Running), but we
+		// want to update status.json so the timestamp changes, signaling to the frontend
+		// that it might need to refresh (e.g. after a git commit).
 		status = api.Running
 	default:
 		return nil

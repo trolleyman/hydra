@@ -3,7 +3,7 @@ import { api } from '../stores/apiClient'
 import type { AgentResponse, SpawnAgentRequest } from '../api'
 import { Zap, LoaderCircle } from 'lucide-react'
 
-type AgentTypeOption = 'claude' | 'gemini'
+type AgentTypeOption = 'claude' | 'gemini' | 'copilot'
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/i.test(navigator.platform)
 
@@ -152,7 +152,7 @@ export function SpawnForm({
                   value={agentType}
                   onChange={(e) => setAgentType(e.target.value as AgentTypeOption)}
                   className="text-[10px] bg-transparent text-gray-500 dark:text-gray-400 focus:outline-none cursor-pointer shrink-0"
-                >{(['claude', 'gemini'] as AgentTypeOption[]).map((t) => (
+                >{(['claude', 'gemini', 'copilot'] as AgentTypeOption[]).map((t) => (
                     <option key={t} value={t}>{t}</option>
                   ))}</select>
                 <input
@@ -215,7 +215,7 @@ export function SpawnForm({
                 <div className="flex items-center gap-2 min-w-0 flex-1">
                   {/* Agent type pills */}
                   <div className="flex gap-1.5 shrink-0">
-                    {(['claude', 'gemini'] as AgentTypeOption[]).map((t) => (
+                    {(['claude', 'gemini', 'copilot'] as AgentTypeOption[]).map((t) => (
                       <button
                         key={t}
                         type="button"
@@ -224,7 +224,9 @@ export function SpawnForm({
                           agentType === t
                             ? t === 'claude'
                               ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300 shadow-sm'
-                              : 'bg-teal-100 text-teal-700 dark:bg-teal-900/40 dark:text-teal-300 shadow-sm'
+                              : t === 'gemini'
+                              ? 'bg-teal-100 text-teal-700 dark:bg-teal-900/40 dark:text-teal-300 shadow-sm'
+                              : 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300 shadow-sm'
                             : 'text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
                         }`}
                       >

@@ -26,7 +26,7 @@ var spawnFlags struct {
 }
 
 func init() {
-	spawnCmd.Flags().StringVar(&spawnFlags.agentType, "agent", string(docker.AgentTypeClaude), "Agent type (claude, gemini)")
+	spawnCmd.Flags().StringVar(&spawnFlags.agentType, "agent", string(docker.AgentTypeClaude), "Agent type (claude, gemini, copilot)")
 	spawnCmd.Flags().StringVar(&spawnFlags.dockerfile, "dockerfile", "", "Custom Dockerfile path (agent type inferred from ENTRYPOINT if possible)")
 	spawnCmd.Flags().StringVar(&spawnFlags.baseBranch, "base-branch", "", "Base branch (default: current branch)")
 	spawnCmd.Flags().BoolVarP(&spawnFlags.force, "force", "f", false, "Force delete existing worktree and branch if they exist")
@@ -115,10 +115,10 @@ var spawnCmd = &cobra.Command{
 		}
 
 		switch agentType {
-		case docker.AgentTypeClaude, docker.AgentTypeGemini:
+		case docker.AgentTypeClaude, docker.AgentTypeGemini, docker.AgentTypeCopilot:
 			// valid
 		default:
-			return errtrace.Wrap(fmt.Errorf("unknown agent type %q; supported: claude, gemini", agentType))
+			return errtrace.Wrap(fmt.Errorf("unknown agent type %q; supported: claude, gemini, copilot", agentType))
 		}
 
 		baseBranch := spawnFlags.baseBranch
