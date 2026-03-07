@@ -1,14 +1,42 @@
 # TODO
 - Text box under Dockerfile Contents can get 2 scroll bars (inner and outer - one with the FROM and one without, when expanding the resize anchor)
-- Resize anchor when resizing can cause a transition which takes a while to complete
+- Remove `Dockerfile Extension` hovering tooltip when editing Dockerfile
+- Test terminal does not work on Windows - opening it doesn't transition it to the actual bash after building, for example.
+
+- Terminal sometimes has up to half a character mising at the bottom. Affected by resize-y, when resizing, this can get better / worse
+
+- Syntax highlight Dockerfile as editing
+
+- System pre-prompt is filled out even if it is just the default - fix this
+
+- Resize anchor when resizing can cause a transition which takes a while to complete (of system pre-prompt text box on the settings page)
 - Add building state for terminal title bars when the agent is building, rather than the "stopped" state it's currently in.
 
 - This error isn't shown in the terminal: (only `Building agent...` and `Step 1/8 : FROM debian:slim`. The error should be shown and the connection should be disconnected.)
-```
+```log
 2026/03/07 00:44:45.699471 Building Docker image: hydra-base:latest (from C:\Users\ctoll\.hydra\default_dockerfiles\base\Dockerfile in C:\Users\ctoll\.hydra\default_dockerfiles\base)
 2026/03/07 00:44:45.704734 [Building hydra-base:latest] Step 1/8 : FROM debian:slim
 2026/03/07 00:44:45.704734 [Building hydra-base:latest]
 2026/03/07 00:44:46.259502 error: background spawn agent test-bash-8h0z: ensure image: build default agent image: build base image: build error: failed to resolve reference "docker.io/library/debian:slim": docker.io/library/debian:slim: not found
+```
+
+Same here:
+```log
+2026/03/07 08:40:04.705291 [Building hydra-agent-claude-extended:2f399bfd] Successfully built 863a4259b2bb
+2026/03/07 08:40:04.709622 [Building hydra-agent-claude-extended:2f399bfd] Successfully tagged hydra-agent-claude-extended:2f399bfd
+2026/03/07 08:40:04.709622 Built Docker image: hydra-agent-claude-extended:2f399bfd (from C:\Users\ctoll\AppData\Local\Temp\hydra-build-1933415922\Dockerfile in C:\Users\ctoll\AppData\Local\Temp\hydra-build-1933415922)
+2026/03/07 08:40:04.711183 Creating container hydra-agent-add-a-defaults-section-to-the-settings...
+2026/03/07 08:40:04.711704 error: background spawn agent add-a-defaults-section-to-the-settings: create container: Error response from daemon: mount denied: the source path "/code_non_dev_drive/hydra/.git:C:/code_non_dev_drive/hydra/.git:rw" too many colons
+```
+
+Same here:
+```log
+2026/03/07 08:43:00.255491 [Building hydra-agent-claude-extended:2f399bfd]  ---> 863a4259b2bb
+2026/03/07 08:43:00.258457 [Building hydra-agent-claude-extended:2f399bfd] Successfully built 863a4259b2bb
+2026/03/07 08:43:00.263437 [Building hydra-agent-claude-extended:2f399bfd] Successfully tagged hydra-agent-claude-extended:2f399bfd
+2026/03/07 08:43:00.263437 Built Docker image: hydra-agent-claude-extended:2f399bfd (from C:\Users\ctoll\AppData\Local\Temp\hydra-build-1132204294\Dockerfile in C:\Users\ctoll\AppData\Local\Temp\hydra-build-1132204294)
+2026/03/07 08:43:00.298909 Creating container hydra-agent-add-a-defaults-section-to-the-settings...
+2026/03/07 08:43:00.304666 error: background spawn agent add-a-defaults-section-to-the-settings: create container: Error response from daemon: the working directory 'C:\code_non_dev_drive\hydra\.hydra\worktrees\add-a-defaults-section-to-the-settings' is invalid, it needs to be an absolute path
 ```
 
 - Hydra tries to delete main worktree when the ephemeral test agents are deleted (when closing the test terminal window):
