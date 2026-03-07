@@ -4,6 +4,10 @@
 /* eslint-disable */
 export type StatusResponse = {
     status?: string;
+    /**
+     * Error message if there is an issue connecting to Docker
+     */
+    docker_error?: string | null;
     version?: string;
     /**
      * Seconds since the server started

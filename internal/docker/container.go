@@ -506,7 +506,7 @@ func getAgentBinds(agentType AgentType, projectRoot, id, containerHome string, s
 		if data, err := os.ReadFile(claudeSettingsJson); err == nil {
 			existing = data
 		}
-		settingsData, err := buildClaudeSettings(existing)
+		settingsData, err := buildClaudeSettings(existing, translateHostPathToContainer(worktreePath))
 		if err != nil {
 			return nil, errtrace.Wrap(err)
 		}
@@ -626,7 +626,7 @@ func buildHooksMap(cmd string, events []string) map[string]interface{} {
 }
 
 // buildClaudeSettings generates the settings.json content with hook configuration for Claude Code.
-func buildClaudeSettings(existing []byte) ([]byte, error) {
+func buildClaudeSettings(existing []byte, containerWorktreePath string) ([]byte, error) {
 	hooks := buildHooksMap("$HOME/.hydra/hydra trigger-hook claude", []string{
 		"SessionStart",
 		"UserPromptSubmit",
@@ -650,6 +650,18 @@ func buildClaudeSettings(existing []byte) ([]byte, error) {
 
 	settings["skipDangerousModePermissionPrompt"] = true
 	settings["hooks"] = hooks
+
+	projects, _ := settings["projects"].(map[string]interface{})
+	if projects == nil {
+		projects = make(map[string]interface{})
+	}
+	project, _ := projects[containerWorktreePath].(map[string]interface{})
+	if project == nil {
+		project = make(map[string]interface{})
+	}
+	project["hasTrustDialogAccepted"] = true
+	projects[containerWorktreePath] = project
+	settings["projects"] = projects
 
 	data, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {

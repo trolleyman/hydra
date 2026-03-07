@@ -21,7 +21,7 @@ export { DiffFile } from './models/DiffFile';
 export type { DiffHunk } from './models/DiffHunk';
 export { DiffLine } from './models/DiffLine';
 export type { DiffResponse } from './models/DiffResponse';
-export type { ErrorResponse } from './models/ErrorResponse';
+export { ErrorResponse } from './models/ErrorResponse';
 export { MergeConflictError } from './models/MergeConflictError';
 export type { ProjectInfo } from './models/ProjectInfo';
 export type { SpawnAgentRequest } from './models/SpawnAgentRequest';

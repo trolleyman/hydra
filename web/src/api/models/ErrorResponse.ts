@@ -4,9 +4,9 @@
 /* eslint-disable */
 export type ErrorResponse = {
     /**
-     * Machine-readable error type (e.g. internal_error, not_found, unauthorized)
+     * Machine-readable error type (e.g. internal_error, not_found, unauthorized, docker_connect)
      */
-    error: string;
+    error: ErrorResponse.error;
     /**
      * HTTP status code
      */
@@ -16,4 +16,15 @@ export type ErrorResponse = {
      */
     details: string;
 };
+export namespace ErrorResponse {
+    /**
+     * Machine-readable error type (e.g. internal_error, not_found, unauthorized, docker_connect)
+     */
+    export enum error {
+        NOT_FOUND = 'not_found',
+        UNAUTHORIZED = 'unauthorized',
+        INTERNAL_ERROR = 'internal_error',
+        DOCKER_CONNECT = 'docker_connect',
+    }
+}
 
