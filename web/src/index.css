@@ -43,7 +43,7 @@ body {
 }
 
 /* Highlight.js dark mode overrides (used within .dark class context) */
-.dark .hljs { color: #abb2bf; }
+.dark .hljs { color: #abb2bf; background: transparent; }
 .dark .hljs-comment, .dark .hljs-quote { color: #5c6370; font-style: italic; }
 .dark .hljs-doctag, .dark .hljs-keyword, .dark .hljs-formula { color: #c678dd; }
 .dark .hljs-section, .dark .hljs-name, .dark .hljs-selector-tag,
