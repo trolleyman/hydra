@@ -87,8 +87,15 @@ export function AgentTerminal({ agentId, projectId, isEphemeral, onRefresh, onSt
 
     ws.onopen = () => {
       const { cols, rows } = term
-      ws.send(JSON.stringify({ type: 'resize', cols, rows }))
-      lastSentSize.current = { cols, rows }
+      // Send a slightly smaller resize first, then the actual size.
+      // This forces SIGWINCH to fire twice, causing the terminal app to fully redraw.
+      ws.send(JSON.stringify({ type: 'resize', cols: Math.max(1, cols - 1), rows: Math.max(1, rows - 1) }))
+      setTimeout(() => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'resize', cols, rows }))
+          lastSentSize.current = { cols, rows }
+        }
+      }, 50)
     }
 
     ws.onmessage = (e: MessageEvent) => {
@@ -136,12 +143,18 @@ export function AgentTerminal({ agentId, projectId, isEphemeral, onRefresh, onSt
       term.writeln('\r\n\x1b[31m[connection error]\x1b[0m')
     }
 
+    const isMac = /Mac/.test(navigator.platform)
+
     // Custom key handler for clipboard operations
     term.attachCustomKeyEventHandler((e: KeyboardEvent) => {
       if (e.type !== 'keydown') return true
 
-      // Ctrl+C with selection -> copy and clear selection (no ^C sent)
-      if (e.ctrlKey && !e.shiftKey && e.code === 'KeyC') {
+      const isCopyShortcut = (isMac ? e.metaKey : e.ctrlKey) && !e.shiftKey && e.code === 'KeyC'
+      const isPasteShortcut = (isMac ? e.metaKey : e.ctrlKey) && !e.shiftKey && e.code === 'KeyV'
+      const isLiteralVShortcut = (isMac ? e.metaKey : e.ctrlKey) && e.shiftKey && e.code === 'KeyV'
+
+      // Copy with selection -> copy and clear selection (no ^C sent)
+      if (isCopyShortcut) {
         const selection = term.getSelection()
         if (selection) {
           navigator.clipboard.writeText(selection).catch(() => {})
@@ -151,18 +164,13 @@ export function AgentTerminal({ agentId, projectId, isEphemeral, onRefresh, onSt
         return true
       }
 
-      // Ctrl+V -> paste from clipboard
-      if (e.ctrlKey && !e.shiftKey && e.code === 'KeyV') {
-        navigator.clipboard.readText().then((text) => {
-          if (ws.readyState === WebSocket.OPEN) {
-            ws.send(new TextEncoder().encode(text))
-          }
-        }).catch(() => {})
+      // Paste -> let browser handle it (triggers 'paste' event which xterm handles)
+      if (isPasteShortcut) {
         return false
       }
 
-      // Ctrl+Shift+V -> send actual ^V (0x16) to terminal
-      if (e.ctrlKey && e.shiftKey && e.code === 'KeyV') {
+      // Send actual ^V (0x16) to terminal
+      if (isLiteralVShortcut) {
         if (ws.readyState === WebSocket.OPEN) {
           ws.send(new Uint8Array([0x16]))
         }

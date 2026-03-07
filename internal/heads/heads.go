@@ -237,6 +237,7 @@ func SpawnHead(ctx context.Context, cli *dockerclient.Client, store *db.Store, p
 			if store != nil {
 				_ = store.SoftDeleteAgent(opts.ID)
 			}
+			RemoveAgentStatusFiles(projectRoot, opts.ID)
 			return nil, errtrace.Wrap(err)
 		}
 	}
@@ -250,6 +251,7 @@ func SpawnHead(ctx context.Context, cli *dockerclient.Client, store *db.Store, p
 		if store != nil {
 			_ = store.SoftDeleteAgent(opts.ID)
 		}
+		RemoveAgentStatusFiles(projectRoot, opts.ID)
 		return nil, errtrace.Wrap(fmt.Errorf("get current user: %w", err))
 	}
 	uid, gid, username, groupName := common.ContainerUserInfo(currentUser)
@@ -441,12 +443,7 @@ func KillHeadNoLock(ctx context.Context, cli *dockerclient.Client, store *db.Sto
 			}
 		}
 
-		statusJson := paths.GetStatusJsonFromProjectRoot(head.ProjectPath, head.ID)
-		if _, err := os.Stat(statusJson); err == nil {
-			if err := os.Remove(statusJson); err != nil {
-				log.Printf("warn: heads: remove status json %s failed for %s: %v", statusJson, head.ID, err)
-			}
-		}
+		RemoveAgentStatusFiles(head.ProjectPath, head.ID)
 	}
 
 	if store != nil {

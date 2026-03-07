@@ -14,7 +14,7 @@ export const Route = createFileRoute('/settings')({
 })
 
 type ConfigScope = 'project' | 'user'
-type SettingsSection = 'all' | 'claude' | 'gemini' | 'defaults'
+type SettingsSection = 'all' | 'claude' | 'gemini' | 'copilot' | 'defaults'
 
 const DOCKERFILE_TEMPLATES: Record<string, { label: string; content: string; shared_mounts?: string[] }> = {
   none: { label: 'None', content: '' },
@@ -176,6 +176,15 @@ function SettingsPage() {
               Gemini
             </button>
             <button
+              onClick={() => setActiveSection('copilot')}
+              className={`px-4 py-3 text-sm font-semibold transition-all border-b-2 cursor-pointer ${activeSection === 'copilot'
+                  ? 'border-blue-500 text-blue-600 dark:text-blue-400'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+                }`}
+            >
+              Copilot
+            </button>
+            <button
               onClick={() => setActiveSection('defaults')}
               className={`px-4 py-3 text-sm font-semibold transition-all border-b-2 cursor-pointer ${activeSection === 'defaults'
                   ? 'border-orange-500 text-orange-600 dark:text-orange-400'
@@ -265,6 +274,34 @@ function SettingsPage() {
                   onChange={(val) => setConfig({ ...config, agents: { ...config.agents, gemini: val } })}
                   inherited={config.defaults}
                   agentType="gemini"
+                  scope={scope}
+                  selectedProject={selectedProject}
+                />
+              </div>
+            )}
+
+            {activeSection === 'copilot' && (
+              <div className="animate-in fade-in slide-in-from-bottom-1 duration-200">
+                <div className="flex items-center justify-between mb-6">
+                  <div className="flex items-center gap-2">
+                    <div className="w-8 h-8 rounded-lg bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center">
+                      <Monitor className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                    </div>
+                    <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">Copilot Overrides</h2>
+                  </div>
+                  <button
+                    onClick={() => handleTest('copilot')}
+                    disabled={testing}
+                    className="px-3 py-1.5 rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 text-xs font-medium hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors disabled:opacity-50 cursor-pointer shadow-sm"
+                  >
+                    {testing ? 'Spawning...' : 'Test Copilot Console'}
+                  </button>
+                </div>
+                <ConfigForm
+                  value={config.agents['copilot'] || {}}
+                  onChange={(val) => setConfig({ ...config, agents: { ...config.agents, copilot: val } })}
+                  inherited={config.defaults}
+                  agentType="copilot"
                   scope={scope}
                   selectedProject={selectedProject}
                 />
@@ -388,10 +425,11 @@ const DOCKERFILE_LABELS: Record<string, string> = {
   base: 'Base',
   claude: 'Claude',
   gemini: 'Gemini',
+  copilot: 'Copilot',
   bash: 'Bash',
 }
 
-const DOCKERFILE_ORDER = ['base', 'claude', 'gemini', 'bash']
+const DOCKERFILE_ORDER = ['base', 'claude', 'gemini', 'copilot', 'bash']
 
 function DefaultDockerfilesSection({ dockerfiles }: { dockerfiles: Record<string, string> }) {
   const keys = DOCKERFILE_ORDER.filter(k => k in dockerfiles).concat(

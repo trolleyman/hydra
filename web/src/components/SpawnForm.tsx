@@ -3,7 +3,7 @@ import { api } from '../stores/apiClient'
 import type { AgentResponse, SpawnAgentRequest } from '../api'
 import { Zap, LoaderCircle } from 'lucide-react'
 
-type AgentTypeOption = 'claude' | 'gemini'
+type AgentTypeOption = 'claude' | 'gemini' | 'copilot'
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/i.test(navigator.platform)
 
@@ -121,7 +121,7 @@ export function SpawnForm({
     }
   }
 
-  function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+  function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement | HTMLInputElement>) {
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
       e.preventDefault()
       handleSubmit(e as unknown as React.FormEvent)
@@ -152,13 +152,14 @@ export function SpawnForm({
                   value={agentType}
                   onChange={(e) => setAgentType(e.target.value as AgentTypeOption)}
                   className="text-[10px] bg-transparent text-gray-500 dark:text-gray-400 focus:outline-none cursor-pointer shrink-0"
-                >{(['claude', 'gemini'] as AgentTypeOption[]).map((t) => (
+                >{(['claude', 'gemini', 'copilot'] as AgentTypeOption[]).map((t) => (
                     <option key={t} value={t}>{t}</option>
                   ))}</select>
                 <input
                   type="text"
                   value={idManuallyEdited ? agentId : ''}
                   onChange={(e) => handleIdChange(e.target.value)}
+                  onKeyDown={handleKeyDown}
                   placeholder={derivedIdPlaceholder}
                   className="min-w-0 flex-1 text-[10px] text-gray-500 dark:text-gray-400 bg-transparent font-mono focus:outline-none placeholder-gray-300 dark:placeholder-gray-600 truncate ml-1"
                 />
@@ -215,7 +216,7 @@ export function SpawnForm({
                 <div className="flex items-center gap-2 min-w-0 flex-1">
                   {/* Agent type pills */}
                   <div className="flex gap-1.5 shrink-0">
-                    {(['claude', 'gemini'] as AgentTypeOption[]).map((t) => (
+                    {(['claude', 'gemini', 'copilot'] as AgentTypeOption[]).map((t) => (
                       <button
                         key={t}
                         type="button"
@@ -224,7 +225,9 @@ export function SpawnForm({
                           agentType === t
                             ? t === 'claude'
                               ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300 shadow-sm'
-                              : 'bg-teal-100 text-teal-700 dark:bg-teal-900/40 dark:text-teal-300 shadow-sm'
+                              : t === 'gemini'
+                              ? 'bg-teal-100 text-teal-700 dark:bg-teal-900/40 dark:text-teal-300 shadow-sm'
+                              : 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300 shadow-sm'
                             : 'text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
                         }`}
                       >
@@ -241,6 +244,7 @@ export function SpawnForm({
                       type="text"
                       value={idManuallyEdited ? agentId : ''}
                       onChange={(e) => handleIdChange(e.target.value)}
+                      onKeyDown={handleKeyDown}
                       placeholder={derivedIdPlaceholder}
                       className="flex-1 min-w-0 text-xs text-gray-600 dark:text-gray-300 font-mono bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-md px-2 py-0.5 focus:outline-none focus:border-blue-300 dark:focus:border-blue-500 focus:bg-white dark:focus:bg-gray-600 transition-colors placeholder-gray-300 dark:placeholder-gray-500"
                     />

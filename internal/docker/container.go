@@ -148,6 +148,54 @@ func translateHostPathToContainer(path string) string {
 	return strings.ReplaceAll(path, "\\", "/")
 }
 
+// fixWorktreeGitFileBind checks whether the worktree's .git file contains a
+// Windows-style gitdir path. If so, it writes a Linux-translated copy into the
+// project's cache directory and returns a Docker bind-mount string that overlays
+// the translated file onto containerWorktreePath/.git inside the container.
+// The host's .git file is never modified.
+// Returns ("", nil) when no fix is needed.
+func fixWorktreeGitFileBind(worktreePath, projectPath, id, containerWorktreePath string) (string, error) {
+	gitFilePath := filepath.Join(worktreePath, ".git")
+	info, err := os.Stat(gitFilePath)
+	if err != nil || info.IsDir() {
+		// Not a worktree or .git is a directory (main repo) – nothing to do.
+		return "", nil
+	}
+
+	content, err := os.ReadFile(gitFilePath)
+	if err != nil {
+		return "", errtrace.Wrap(fmt.Errorf("read .git file: %w", err))
+	}
+
+	contentStr := strings.TrimSpace(string(content))
+	const gitdirPrefix = "gitdir:"
+	if !strings.HasPrefix(contentStr, gitdirPrefix) {
+		return "", nil
+	}
+
+	gitdirPath := strings.TrimSpace(contentStr[len(gitdirPrefix):])
+	translatedPath := translateHostPathToContainer(gitdirPath)
+	if translatedPath == gitdirPath {
+		// Already a Linux path – no translation needed.
+		return "", nil
+	}
+
+	// Write the translated .git file into the per-agent cache directory.
+	cacheDir := filepath.Join(projectPath, ".hydra", "cache", "worktrees", id)
+	if err := os.MkdirAll(cacheDir, 0755); err != nil {
+		return "", errtrace.Wrap(fmt.Errorf("create worktree cache dir: %w", err))
+	}
+	fixedGitFile := filepath.Join(cacheDir, ".git")
+	fixedContent := gitdirPrefix + " " + translatedPath + "\n"
+	if err := os.WriteFile(fixedGitFile, []byte(fixedContent), 0644); err != nil {
+		return "", errtrace.Wrap(fmt.Errorf("write translated .git file: %w", err))
+	}
+
+	// Return a bind that overlays this file on top of the mounted worktree directory.
+	containerGitFilePath := containerWorktreePath + "/.git"
+	return fixedGitFile + ":" + containerGitFilePath, nil
+}
+
 // SpawnAgent builds the Docker image if necessary, then creates and starts the container.
 // Returns the container ID.
 func SpawnAgent(ctx context.Context, cli *dockerclient.Client, opts SpawnOptions) (string, error) {
@@ -212,6 +260,17 @@ func SpawnAgent(ctx context.Context, cli *dockerclient.Client, opts SpawnOptions
 		hostGitDir + ":" + containerGitDir + ":rw",
 		opts.WorktreePath + ":" + containerWorktreePath + ":rw",
 	}
+
+	// On Windows hosts the worktree .git file contains a Windows-style gitdir path
+	// (e.g. "gitdir: C:/foo/.git/worktrees/bar") which Linux git cannot resolve as
+	// an absolute path. Create a translated copy in the cache and mount it over the
+	// .git file inside the container, leaving the host file untouched.
+	if fixedBind, fixErr := fixWorktreeGitFileBind(opts.WorktreePath, opts.ProjectPath, opts.Id, containerWorktreePath); fixErr != nil {
+		log.Printf("warn: fix worktree .git file: %v", fixErr)
+	} else if fixedBind != "" {
+		binds = append(binds, fixedBind)
+	}
+
 	agentBinds, err := getAgentBinds(opts.AgentType, opts.ProjectPath, opts.Id, containerHome, opts.SharedMounts, opts.WorktreePath)
 	if err != nil {
 		return "", errtrace.Wrap(err)
@@ -241,6 +300,15 @@ func SpawnAgent(ctx context.Context, cli *dockerclient.Client, opts SpawnOptions
 			cmd = []string{"gemini", "--approval-mode=yolo"}
 			if opts.Prompt != "" {
 				cmd = append(cmd, "-i", CombinePrompt(opts.PrePrompt, opts.Prompt))
+			}
+		}
+	case AgentTypeCopilot:
+		if opts.Resume {
+			cmd = []string{"copilot", "--resume"}
+		} else {
+			cmd = []string{"copilot", "--yolo"}
+			if opts.Prompt != "" {
+				cmd = append(cmd, "--autopilot", "-p", CombinePrompt(opts.PrePrompt, opts.Prompt))
 			}
 		}
 	case AgentTypeBash:
@@ -277,7 +345,7 @@ func SpawnAgent(ctx context.Context, cli *dockerclient.Client, opts SpawnOptions
 		return "", errtrace.Wrap(fmt.Errorf("start container: %w", err))
 	}
 
-	if opts.AgentType == AgentTypeBash && opts.OnStatus != nil {
+	if (opts.AgentType == AgentTypeBash || opts.AgentType == AgentTypeCopilot) && opts.OnStatus != nil {
 		opts.OnStatus(api.Running)
 	}
 
@@ -448,6 +516,8 @@ func defaultDockerfileContent(agentType AgentType) (string, error) {
 		return config.DefaultDockerfileGemini, nil
 	case AgentTypeBash:
 		return config.DefaultDockerfileBash, nil
+	case AgentTypeCopilot:
+		return config.DefaultDockerfileCopilot, nil
 	case "base":
 		return config.DefaultDockerfileBase, nil
 	default:
@@ -555,6 +625,28 @@ func getAgentBinds(agentType AgentType, projectRoot, id, containerHome string, s
 			if _, err := os.Stat(pair.host); err == nil {
 				binds = append(binds, pair.host+":"+pair.container)
 			}
+		}
+
+	case AgentTypeCopilot:
+		// Mount ~/.copilot/ (auth token, config, session state) from a per-project cache dir.
+		copilotCacheDir := filepath.Join(cacheDir, ".copilot")
+		if err := os.MkdirAll(copilotCacheDir, 0755); err != nil {
+			return nil, errtrace.Wrap(err)
+		}
+		binds = append(binds, copilotCacheDir+":"+path.Join(containerHome, ".copilot"))
+
+		// Write Hydra hooks into the worktree at .github/hooks/hydra.json.
+		// Copilot CLI loads hooks from .github/hooks/ relative to the working directory.
+		hooksDir := filepath.Join(worktreePath, ".github", "hooks")
+		if err := os.MkdirAll(hooksDir, 0755); err != nil {
+			return nil, errtrace.Wrap(err)
+		}
+		hooksData, err := buildCopilotHooks()
+		if err != nil {
+			return nil, errtrace.Wrap(err)
+		}
+		if err := os.WriteFile(filepath.Join(hooksDir, "hydra.json"), hooksData, 0644); err != nil {
+			return nil, errtrace.Wrap(err)
 		}
 	}
 
@@ -695,6 +787,38 @@ func buildGeminiSettings(existing []byte) ([]byte, error) {
 	data, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
 		return nil, errtrace.Wrap(fmt.Errorf("marshal gemini settings: %w", err))
+	}
+	return data, nil
+}
+
+// buildCopilotHooks generates a hooks JSON file for GitHub Copilot CLI.
+// Copilot CLI loads hooks from .github/hooks/*.json in the working directory.
+// The format differs from Claude/Gemini: it uses {"version":1,"hooks":{...}}.
+func buildCopilotHooks() ([]byte, error) {
+	type hookEntry struct {
+		Type string `json:"type"`
+		Bash string `json:"bash"`
+	}
+	type hooksFile struct {
+		Version int                    `json:"version"`
+		Hooks   map[string][]hookEntry `json:"hooks"`
+	}
+
+	cmd := "\"$HOME/.hydra/hydra\" trigger-hook copilot"
+	hf := hooksFile{
+		Version: 1,
+		Hooks: map[string][]hookEntry{
+			"sessionStart":        {{Type: "command", Bash: cmd + " sessionStart"}},
+			"userPromptSubmitted": {{Type: "command", Bash: cmd + " userPromptSubmitted"}},
+			"preToolUse":          {{Type: "command", Bash: cmd + " preToolUse"}},
+			"postToolUse":         {{Type: "command", Bash: cmd + " postToolUse"}},
+			"sessionEnd":          {{Type: "command", Bash: cmd + " sessionEnd"}},
+		},
+	}
+
+	data, err := json.MarshalIndent(hf, "", "  ")
+	if err != nil {
+		return nil, errtrace.Wrap(fmt.Errorf("marshal copilot hooks: %w", err))
 	}
 	return data, nil
 }

@@ -1,3 +1,4 @@
+import { useRef, useEffect } from 'react'
 import { createFileRoute, useNavigate, useParams } from '@tanstack/react-router'
 import { useProjectStore } from '../../stores/projectStore'
 import { useAgentStore } from '../../stores/agentStore'
@@ -15,16 +16,34 @@ function AgentPage() {
   const navigate = useNavigate()
   const { agentId } = useParams({ from: '/_agents/agent/$agentId' })
 
+  const isMounted = useRef(true)
+  const agentIdRef = useRef(agentId)
+
+  useEffect(() => {
+    isMounted.current = true
+    return () => {
+      isMounted.current = false
+    }
+  }, [])
+
+  useEffect(() => {
+    agentIdRef.current = agentId
+  }, [agentId])
+
   const agent = agents.find((a) => a.id === agentId)
 
   function handleKilled(id: string) {
     removeAgent(id)
-    navigate({ to: '/' })
+    if (isMounted.current && id === agentIdRef.current) {
+      navigate({ to: '/' })
+    }
   }
 
   function handleRestarted(newAgent: AgentResponse) {
     updateAgent(newAgent)
-    navigate({ to: '/agent/$agentId', params: { agentId: newAgent.id } })
+    if (isMounted.current && newAgent.id === agentIdRef.current) {
+      navigate({ to: '/agent/$agentId', params: { agentId: newAgent.id } })
+    }
   }
 
   async function handleRefresh() {
