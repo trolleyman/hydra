@@ -61,7 +61,13 @@ func (s *Server) GetDockerError() string {
 
 // NewHandler creates a handler with routing matching the OpenAPI spec.
 func NewHandler(s *Server) http.Handler {
-	strict := api.NewStrictHandler(s, nil)
+	opts := api.StrictHTTPServerOptions{
+		ResponseErrorHandlerFunc: func(w http.ResponseWriter, r *http.Request, err error) {
+			RecordError(r, err)
+			api.WriteError(w, http.StatusInternalServerError, "internal_error")
+		},
+	}
+	strict := api.NewStrictHandlerWithOptions(s, nil, opts)
 	return api.HandlerFromMux(strict, http.NewServeMux())
 }
 
