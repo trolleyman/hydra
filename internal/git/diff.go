@@ -328,14 +328,78 @@ func HasConflicts(projectRoot, baseRef, headRef string) (bool, error) {
 	return false, errtrace.Wrap(fmt.Errorf("git merge-tree: %w", err))
 }
 
-// HasUncommittedChanges returns true if there are uncommitted changes in the worktree.
+// UncommittedSummary holds counts of uncommitted changes in a worktree.
+type UncommittedSummary struct {
+	TrackedCount   int // staged or unstaged modifications to tracked files
+	UntrackedCount int // untracked (never-added) files
+}
+
+// GetUncommittedSummary returns counts of staged/unstaged tracked files and untracked files.
+func GetUncommittedSummary(projectRoot string) (*UncommittedSummary, error) {
+	out, err := exec.Command("git", "-C", projectRoot, "status", "--porcelain").Output()
+	if err != nil {
+		return nil, errtrace.Wrap(fmt.Errorf("git status: %w", err))
+	}
+	s := &UncommittedSummary{}
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if len(line) < 2 {
+			continue
+		}
+		if line[:2] == "??" {
+			s.UntrackedCount++
+		} else {
+			s.TrackedCount++
+		}
+	}
+	return s, nil
+}
+
+// HasUncommittedChanges returns true if there are uncommitted tracked-file changes in the worktree.
 // Only considers tracked files (staged and unstaged modifications), not untracked files.
 func HasUncommittedChanges(projectRoot string) (bool, error) {
-	// git status --porcelain -uno excludes untracked files so we only report
-	// actual staged/unstaged modifications to tracked files.
-	out, err := exec.Command("git", "-C", projectRoot, "status", "--porcelain", "-uno").Output()
+	s, err := GetUncommittedSummary(projectRoot)
 	if err != nil {
-		return false, errtrace.Wrap(fmt.Errorf("git status: %w", err))
+		return false, err
 	}
-	return len(strings.TrimSpace(string(out))) > 0, nil
+	return s.TrackedCount > 0, nil
+}
+
+// GetConflictingFiles returns the approximate list of files that would conflict when merging
+// headRef into baseRef. It finds files modified in both branches since their common ancestor.
+func GetConflictingFiles(projectRoot, baseRef, headRef string) ([]string, error) {
+	mergeBase, err := GetMergeBase(projectRoot, baseRef, headRef)
+	if err != nil {
+		return nil, err
+	}
+
+	getNames := func(from, to string) (map[string]bool, error) {
+		out, err := exec.Command("git", "-C", projectRoot, "diff", "--name-only", from+".."+to).Output()
+		if err != nil {
+			return nil, errtrace.Wrap(fmt.Errorf("git diff --name-only: %w", err))
+		}
+		m := make(map[string]bool)
+		for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+			if line = strings.TrimSpace(line); line != "" {
+				m[line] = true
+			}
+		}
+		return m, nil
+	}
+
+	baseChanged, err := getNames(mergeBase, baseRef)
+	if err != nil {
+		return nil, err
+	}
+	headChanged, err := getNames(mergeBase, headRef)
+	if err != nil {
+		return nil, err
+	}
+
+	var conflicts []string
+	for f := range headChanged {
+		if baseChanged[f] {
+			conflicts = append(conflicts, f)
+		}
+	}
+	return conflicts, nil
 }

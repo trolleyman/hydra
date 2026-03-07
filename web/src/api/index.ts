@@ -12,6 +12,7 @@ export type { OpenAPIConfig } from './core/OpenAPI';
 
 export type { AddProjectRequest } from './models/AddProjectRequest';
 export type { AgentConfig } from './models/AgentConfig';
+export type { AgentInputRequest } from './models/AgentInputRequest';
 export type { AgentResponse } from './models/AgentResponse';
 export { AgentStatus } from './models/AgentStatus';
 export type { AgentStatusInfo } from './models/AgentStatusInfo';
@@ -29,5 +30,6 @@ export type { StatusResponse } from './models/StatusResponse';
 export type { TerminalDataEvent } from './models/TerminalDataEvent';
 export { TerminalEvent } from './models/TerminalEvent';
 export type { TerminalStatusEvent } from './models/TerminalStatusEvent';
+export type { UncommittedSummary } from './models/UncommittedSummary';
 
 export { DefaultService } from './services/DefaultService';

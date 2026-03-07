@@ -3,6 +3,7 @@
 /* tslint:disable */
 /* eslint-disable */
 import type { AddProjectRequest } from '../models/AddProjectRequest';
+import type { AgentInputRequest } from '../models/AgentInputRequest';
 import type { AgentResponse } from '../models/AgentResponse';
 import type { CommitInfo } from '../models/CommitInfo';
 import type { ConfigResponse } from '../models/ConfigResponse';
@@ -272,6 +273,36 @@ export class DefaultService {
                 'ignore_whitespace': ignoreWhitespace,
                 'include_uncommitted': includeUncommitted,
             },
+            errors: {
+                404: `Not Found`,
+                500: `Internal Server Error`,
+            },
+        });
+    }
+    /**
+     * Send text input to an agent's terminal stdin
+     * @param id
+     * @param requestBody
+     * @param projectId Project ID to scope the lookup (defaults to server CWD project)
+     * @returns any OK
+     * @throws ApiError
+     */
+    public sendAgentInput(
+        id: string,
+        requestBody: AgentInputRequest,
+        projectId?: string,
+    ): CancelablePromise<any> {
+        return this.httpRequest.request({
+            method: 'POST',
+            url: '/api/agent/{id}/input',
+            path: {
+                'id': id,
+            },
+            query: {
+                'project_id': projectId,
+            },
+            body: requestBody,
+            mediaType: 'application/json',
             errors: {
                 404: `Not Found`,
                 500: `Internal Server Error`,

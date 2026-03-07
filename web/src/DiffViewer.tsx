@@ -5,7 +5,7 @@ import type { AgentResponse, CommitInfo, DiffFile, DiffResponse } from './api'
 import {
   Plus, Minus, SquareDot, Diff, Calendar, TriangleAlert,
   ChevronDown, ChevronRight, ChevronLeft, Check, LoaderCircle, RefreshCw,
-  Settings, Copy, Folder, FolderOpen,
+  Settings, Copy, Folder, FolderOpen, X, GitMerge, Bot,
 } from 'lucide-react'
 
 // ── Syntax highlighting helpers ───────────────────────────────────────────────
@@ -30,7 +30,6 @@ function getLanguage(filePath: string): string {
   return EXT_LANG_MAP[ext] ?? 'plaintext'
 }
 
-/** Split highlight.js HTML output into per-line strings while preserving open spans. */
 function splitHighlightedLines(html: string): string[] {
   const lines: string[] = []
   let current = ''
@@ -69,7 +68,6 @@ function splitHighlightedLines(html: string): string[] {
   return lines
 }
 
-/** Highlight code and return per-line HTML strings. */
 function highlightCode(code: string, language: string): string[] {
   try {
     const result = hljs.highlight(code, { language, ignoreIllegals: true })
@@ -99,21 +97,15 @@ function buildSideBySide(hunkLines: DiffFile['hunks'][0]['lines']): SideBySideLi
     const l = hunkLines[i]
     if (l.type === 'context') {
       result.push({
-        oldLineNum: l.old_line_num ?? null,
-        oldType: 'context', oldContent: l.content,
-        newLineNum: l.new_line_num ?? null,
-        newType: 'context', newContent: l.content,
+        oldLineNum: l.old_line_num ?? null, oldType: 'context', oldContent: l.content,
+        newLineNum: l.new_line_num ?? null, newType: 'context', newContent: l.content,
       })
       i++
     } else if (l.type === 'deletion') {
       const dels: typeof hunkLines = []
       const adds: typeof hunkLines = []
-      while (i < hunkLines.length && hunkLines[i].type === 'deletion') {
-        dels.push(hunkLines[i++])
-      }
-      while (i < hunkLines.length && hunkLines[i].type === 'addition') {
-        adds.push(hunkLines[i++])
-      }
+      while (i < hunkLines.length && hunkLines[i].type === 'deletion') dels.push(hunkLines[i++])
+      while (i < hunkLines.length && hunkLines[i].type === 'addition') adds.push(hunkLines[i++])
       const maxLen = Math.max(dels.length, adds.length)
       for (let j = 0; j < maxLen; j++) {
         result.push({
@@ -128,8 +120,7 @@ function buildSideBySide(hunkLines: DiffFile['hunks'][0]['lines']): SideBySideLi
     } else if (l.type === 'addition') {
       result.push({
         oldLineNum: null, oldType: 'empty', oldContent: null,
-        newLineNum: l.new_line_num ?? null,
-        newType: 'addition', newContent: l.content,
+        newLineNum: l.new_line_num ?? null, newType: 'addition', newContent: l.content,
       })
       i++
     } else {
@@ -153,11 +144,7 @@ function ChangeTypeIcon({ type }: { type: string }) {
 const UNIFIED_LINE_NUM_CLASS = 'select-none text-right pr-2 text-gray-400 dark:text-gray-600 text-xs font-mono w-10 shrink-0 border-r border-gray-200 dark:border-gray-700 leading-5'
 const UNIFIED_CODE_CLASS = 'pl-2 font-mono text-xs leading-5 flex-1 whitespace-pre-wrap break-words overflow-hidden'
 
-function UnifiedHunk({
-  hunk,
-  highlightedOld,
-  highlightedNew,
-}: {
+function UnifiedHunk({ hunk, highlightedOld, highlightedNew }: {
   hunk: DiffFile['hunks'][0]
   highlightedOld: Map<number, string>
   highlightedNew: Map<number, string>
@@ -174,30 +161,18 @@ function UnifiedHunk({
         const highlighted = isAdd
           ? (line.new_line_num != null ? highlightedNew.get(line.new_line_num) : undefined)
           : (line.old_line_num != null ? highlightedOld.get(line.old_line_num) : undefined)
-
-        const bgClass = isAdd
-          ? 'bg-green-50 dark:bg-green-950/30'
-          : isDel
-          ? 'bg-red-50 dark:bg-red-950/30'
-          : ''
-
+        const bgClass = isAdd ? 'bg-green-50 dark:bg-green-950/30' : isDel ? 'bg-red-50 dark:bg-red-950/30' : ''
         return (
-          <div
-            key={idx}
-            className={`flex items-stretch hover:brightness-95 dark:hover:brightness-110 ${bgClass}`}
-          >
+          <div key={idx} className={`flex items-stretch hover:brightness-95 dark:hover:brightness-110 ${bgClass}`}>
             <span className={UNIFIED_LINE_NUM_CLASS}>{line.old_line_num ?? ''}</span>
             <span className={UNIFIED_LINE_NUM_CLASS}>{line.new_line_num ?? ''}</span>
             <span className={`select-none font-mono text-xs leading-5 w-4 text-center shrink-0 ${
-              isAdd ? 'text-green-600 dark:text-green-400' :
-              isDel ? 'text-red-600 dark:text-red-400' : 'text-gray-300 dark:text-gray-700'
+              isAdd ? 'text-green-600 dark:text-green-400' : isDel ? 'text-red-600 dark:text-red-400' : 'text-gray-300 dark:text-gray-700'
             }`}>
               {isAdd ? '+' : isDel ? '-' : isNoNewline ? '\\' : ' '}
             </span>
             {isNoNewline ? (
-              <span className={`${UNIFIED_CODE_CLASS} text-gray-400 dark:text-gray-500 italic`}>
-                {line.content}
-              </span>
+              <span className={`${UNIFIED_CODE_CLASS} text-gray-400 dark:text-gray-500 italic`}>{line.content}</span>
             ) : highlighted ? (
               <span className={UNIFIED_CODE_CLASS} dangerouslySetInnerHTML={{ __html: highlighted }} />
             ) : (
@@ -213,17 +188,12 @@ function UnifiedHunk({
 const SBS_LINE_NUM = 'select-none text-right text-gray-400 dark:text-gray-600 text-xs font-mono w-8 shrink-0 pr-1 leading-5'
 const SBS_CODE = 'pl-1 font-mono text-xs leading-5 flex-1 whitespace-pre-wrap break-words overflow-hidden min-w-0'
 
-function SideBySideHunk({
-  hunk,
-  highlightedOld,
-  highlightedNew,
-}: {
+function SideBySideHunk({ hunk, highlightedOld, highlightedNew }: {
   hunk: DiffFile['hunks'][0]
   highlightedOld: Map<number, string>
   highlightedNew: Map<number, string>
 }) {
   const sbsLines = buildSideBySide(hunk.lines)
-
   return (
     <div>
       <div className="flex items-center bg-blue-50 dark:bg-blue-950/30 border-y border-blue-100 dark:border-blue-900/50 px-2 py-0.5">
@@ -232,45 +202,29 @@ function SideBySideHunk({
       {sbsLines.map((line, idx) => {
         const oldHighlighted = line.oldLineNum != null ? highlightedOld.get(line.oldLineNum) : undefined
         const newHighlighted = line.newLineNum != null ? highlightedNew.get(line.newLineNum) : undefined
-
-        const oldBg = line.oldType === 'deletion'
-          ? 'bg-red-50 dark:bg-red-950/30'
-          : line.oldType === 'empty'
-          ? 'bg-gray-50 dark:bg-gray-900/50'
-          : ''
-        const newBg = line.newType === 'addition'
-          ? 'bg-green-50 dark:bg-green-950/30'
-          : line.newType === 'empty'
-          ? 'bg-gray-50 dark:bg-gray-900/50'
-          : ''
-
+        const oldBg = line.oldType === 'deletion' ? 'bg-red-50 dark:bg-red-950/30' : line.oldType === 'empty' ? 'bg-gray-50 dark:bg-gray-900/50' : ''
+        const newBg = line.newType === 'addition' ? 'bg-green-50 dark:bg-green-950/30' : line.newType === 'empty' ? 'bg-gray-50 dark:bg-gray-900/50' : ''
         return (
           <div key={idx} className="flex items-stretch divide-x divide-gray-200 dark:divide-gray-700">
             <div className={`flex items-start flex-1 min-w-0 ${oldBg}`}>
               <span className={SBS_LINE_NUM}>{line.oldLineNum ?? ''}</span>
-              <span className={`select-none font-mono text-xs w-3 shrink-0 text-center leading-5 ${
-                line.oldType === 'deletion' ? 'text-red-500' : 'text-gray-300 dark:text-gray-700'
-              }`}>
+              <span className={`select-none font-mono text-xs w-3 shrink-0 text-center leading-5 ${line.oldType === 'deletion' ? 'text-red-500' : 'text-gray-300 dark:text-gray-700'}`}>
                 {line.oldType === 'deletion' ? '-' : line.oldType === 'empty' ? '' : ' '}
               </span>
-              {line.oldContent != null && oldHighlighted ? (
-                <span className={SBS_CODE} dangerouslySetInnerHTML={{ __html: oldHighlighted }} />
-              ) : (
-                <span className={SBS_CODE}>{line.oldContent ?? ''}</span>
-              )}
+              {line.oldContent != null && oldHighlighted
+                ? <span className={SBS_CODE} dangerouslySetInnerHTML={{ __html: oldHighlighted }} />
+                : <span className={SBS_CODE}>{line.oldContent ?? ''}</span>
+              }
             </div>
             <div className={`flex items-start flex-1 min-w-0 ${newBg}`}>
               <span className={SBS_LINE_NUM}>{line.newLineNum ?? ''}</span>
-              <span className={`select-none font-mono text-xs w-3 shrink-0 text-center leading-5 ${
-                line.newType === 'addition' ? 'text-green-500' : 'text-gray-300 dark:text-gray-700'
-              }`}>
+              <span className={`select-none font-mono text-xs w-3 shrink-0 text-center leading-5 ${line.newType === 'addition' ? 'text-green-500' : 'text-gray-300 dark:text-gray-700'}`}>
                 {line.newType === 'addition' ? '+' : line.newType === 'empty' ? '' : ' '}
               </span>
-              {line.newContent != null && newHighlighted ? (
-                <span className={SBS_CODE} dangerouslySetInnerHTML={{ __html: newHighlighted }} />
-              ) : (
-                <span className={SBS_CODE}>{line.newContent ?? ''}</span>
-              )}
+              {line.newContent != null && newHighlighted
+                ? <span className={SBS_CODE} dangerouslySetInnerHTML={{ __html: newHighlighted }} />
+                : <span className={SBS_CODE}>{line.newContent ?? ''}</span>
+              }
             </div>
           </div>
         )
@@ -281,54 +235,36 @@ function SideBySideHunk({
 
 // ── File diff card ────────────────────────────────────────────────────────────
 
-function FileDiff({
-  file,
-  sideBySide,
-  fileRef,
-}: {
+function FileDiff({ file, sideBySide, fileRef }: {
   file: DiffFile
   sideBySide: boolean
   fileRef?: (el: HTMLDivElement | null) => void
 }) {
   const lang = getLanguage(file.path)
-
   const { highlightedOld, highlightedNew } = (() => {
     if (file.binary) return { highlightedOld: new Map<number, string>(), highlightedNew: new Map<number, string>() }
-
     const oldLines: Array<{ lineNum: number; content: string }> = []
     const newLines: Array<{ lineNum: number; content: string }> = []
-
     for (const hunk of file.hunks) {
       for (const l of hunk.lines) {
-        if ((l.type === 'context' || l.type === 'deletion') && l.old_line_num != null) {
+        if ((l.type === 'context' || l.type === 'deletion') && l.old_line_num != null)
           oldLines.push({ lineNum: l.old_line_num, content: l.content })
-        }
-        if ((l.type === 'context' || l.type === 'addition') && l.new_line_num != null) {
+        if ((l.type === 'context' || l.type === 'addition') && l.new_line_num != null)
           newLines.push({ lineNum: l.new_line_num, content: l.content })
-        }
       }
     }
-
     const highlight = (lines: typeof oldLines): Map<number, string> => {
       if (lines.length === 0) return new Map()
-      const code = lines.map((l) => l.content).join('\n')
-      const highlighted = highlightCode(code, lang)
+      const highlighted = highlightCode(lines.map((l) => l.content).join('\n'), lang)
       const map = new Map<number, string>()
-      lines.forEach((l, i) => {
-        if (highlighted[i] !== undefined) map.set(l.lineNum, highlighted[i])
-      })
+      lines.forEach((l, i) => { if (highlighted[i] !== undefined) map.set(l.lineNum, highlighted[i]) })
       return map
     }
-
-    return {
-      highlightedOld: highlight(oldLines),
-      highlightedNew: highlight(newLines),
-    }
+    return { highlightedOld: highlight(oldLines), highlightedNew: highlight(newLines) }
   })()
 
   const displayPath = file.change_type === 'renamed' && file.old_path
-    ? `${file.old_path} → ${file.path}`
-    : file.path
+    ? `${file.old_path} → ${file.path}` : file.path
 
   return (
     <div ref={fileRef} className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden mb-4">
@@ -339,16 +275,11 @@ function FileDiff({
         </span>
         {!file.binary && (
           <div className="flex items-center gap-1.5 shrink-0">
-            {file.additions > 0 && (
-              <span className="text-xs text-green-600 dark:text-green-400 font-medium">+{file.additions}</span>
-            )}
-            {file.deletions > 0 && (
-              <span className="text-xs text-red-600 dark:text-red-400 font-medium">−{file.deletions}</span>
-            )}
+            {file.additions > 0 && <span className="text-xs text-green-600 dark:text-green-400 font-medium">+{file.additions}</span>}
+            {file.deletions > 0 && <span className="text-xs text-red-600 dark:text-red-400 font-medium">−{file.deletions}</span>}
           </div>
         )}
       </div>
-
       {file.binary ? (
         <div className="px-4 py-3 text-xs text-gray-400 dark:text-gray-500 italic">Binary file changed</div>
       ) : file.hunks.length === 0 ? (
@@ -356,11 +287,9 @@ function FileDiff({
       ) : (
         <div className="overflow-hidden">
           {file.hunks.map((hunk, idx) =>
-            sideBySide ? (
-              <SideBySideHunk key={idx} hunk={hunk} highlightedOld={highlightedOld} highlightedNew={highlightedNew} />
-            ) : (
-              <UnifiedHunk key={idx} hunk={hunk} highlightedOld={highlightedOld} highlightedNew={highlightedNew} />
-            )
+            sideBySide
+              ? <SideBySideHunk key={idx} hunk={hunk} highlightedOld={highlightedOld} highlightedNew={highlightedNew} />
+              : <UnifiedHunk key={idx} hunk={hunk} highlightedOld={highlightedOld} highlightedNew={highlightedNew} />
           )}
         </div>
       )}
@@ -383,11 +312,44 @@ function formatShortLabel(commit: CommitInfo | null | undefined, sha: string): s
   return `${commit.short_sha} ${msg}${commit.message.length > 24 ? '…' : ''}`
 }
 
+// ── Custom tooltip ────────────────────────────────────────────────────────────
+
+function Tooltip({ content, children }: { content: React.ReactNode; children: React.ReactNode }) {
+  const [visible, setVisible] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
+
+  const show = useCallback(() => {
+    if (ref.current) {
+      const rect = ref.current.getBoundingClientRect()
+      setPos({ top: rect.bottom + 6, left: rect.left })
+    }
+    setVisible(true)
+  }, [])
+
+  return (
+    <div ref={ref} className="relative inline-flex" onMouseEnter={show} onMouseLeave={() => setVisible(false)}>
+      {children}
+      {visible && pos && (
+        <div
+          className="fixed z-[200] bg-gray-900 dark:bg-gray-700 text-white text-xs rounded-lg px-3 py-2 shadow-xl max-w-xs pointer-events-none"
+          style={{ top: pos.top, left: pos.left }}
+        >
+          {content}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Left commit selector ──────────────────────────────────────────────────────
 
-function LeftSelector({
-  commits, selected, onChange,
-}: { commits: CommitInfo[]; selected: LeftSel; onChange: (v: LeftSel) => void }) {
+function LeftSelector({ commits, selected, onChange, baseBranch }: {
+  commits: CommitInfo[]
+  selected: LeftSel
+  onChange: (v: LeftSel) => void
+  baseBranch: string
+}) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
@@ -401,7 +363,7 @@ function LeftSelector({
   }, [open])
 
   const label = selected.type === 'base'
-    ? 'Base'
+    ? baseBranch
     : formatShortLabel(commits.find((c) => c.sha === selected.sha), selected.sha)
 
   return (
@@ -425,7 +387,7 @@ function LeftSelector({
               }`}
             >
               <ChevronRight className="w-3.5 h-3.5 text-gray-400 shrink-0" />
-              <span className="font-medium text-gray-800 dark:text-gray-200">Base</span>
+              <span className="font-medium text-gray-800 dark:text-gray-200">{baseBranch}</span>
               <span className="text-gray-400 dark:text-gray-500 ml-auto text-[10px]">branch point</span>
               {selected.type === 'base' && <Check className="w-3 h-3 text-blue-500 shrink-0" />}
             </button>
@@ -447,9 +409,7 @@ function LeftSelector({
                     {c.short_sha}
                   </span>
                   <span className="text-xs text-gray-700 dark:text-gray-300 leading-tight truncate">{c.message}</span>
-                  {selected.type === 'commit' && selected.sha === c.sha && (
-                    <Check className="w-3 h-3 text-blue-500 shrink-0 mt-0.5" />
-                  )}
+                  {selected.type === 'commit' && selected.sha === c.sha && <Check className="w-3 h-3 text-blue-500 shrink-0 mt-0.5" />}
                 </button>
               ))}
             </div>
@@ -462,9 +422,7 @@ function LeftSelector({
 
 // ── Right commit selector ─────────────────────────────────────────────────────
 
-function RightSelector({
-  commits, selected, onChange, left, hasUncommitted,
-}: {
+function RightSelector({ commits, selected, onChange, left, hasUncommitted }: {
   commits: CommitInfo[]
   selected: RightSel
   onChange: (v: RightSel) => void
@@ -483,10 +441,8 @@ function RightSelector({
     return () => document.removeEventListener('mousedown', handleClick)
   }, [open])
 
-  const label = selected.type === 'uncommitted'
-    ? 'Latest changes'
-    : selected.type === 'latest'
-    ? 'Latest commit'
+  const label = selected.type === 'uncommitted' ? 'Latest changes'
+    : selected.type === 'latest' ? 'Latest commit'
     : formatShortLabel(commits.find((c) => c.sha === selected.sha), selected.sha)
 
   const validCommits = commits.filter((_, idx) => {
@@ -552,9 +508,7 @@ function RightSelector({
                     {c.short_sha}
                   </span>
                   <span className="text-xs text-gray-700 dark:text-gray-300 leading-tight truncate">{c.message}</span>
-                  {selected.type === 'commit' && selected.sha === c.sha && (
-                    <Check className="w-3 h-3 text-blue-500 shrink-0 mt-0.5" />
-                  )}
+                  {selected.type === 'commit' && selected.sha === c.sha && <Check className="w-3 h-3 text-blue-500 shrink-0 mt-0.5" />}
                 </button>
               ))}
             </div>
@@ -562,6 +516,163 @@ function RightSelector({
         </div>
       )}
     </div>
+  )
+}
+
+// ── Uncommitted changes button ────────────────────────────────────────────────
+
+function UncommittedButton({ diff, onJumpToUncommitted }: {
+  diff: DiffResponse | null
+  onJumpToUncommitted: () => void
+}) {
+  const summary = diff?.uncommitted_summary
+  if (!summary || (summary.tracked_count === 0 && summary.untracked_count === 0)) return null
+
+  const lines: string[] = []
+  if (summary.tracked_count > 0) lines.push(`${summary.tracked_count} tracked file${summary.tracked_count !== 1 ? 's' : ''} modified`)
+  if (summary.untracked_count > 0) lines.push(`${summary.untracked_count} untracked file${summary.untracked_count !== 1 ? 's' : ''}`)
+
+  return (
+    <Tooltip content={
+      <div>
+        <p className="font-semibold mb-1">Uncommitted changes</p>
+        {lines.map((l) => <p key={l} className="text-gray-300">{l}</p>)}
+        <p className="text-gray-400 mt-1 text-[10px]">Click to view uncommitted changes</p>
+      </div>
+    }>
+      <button
+        onClick={onJumpToUncommitted}
+        className="flex items-center gap-1 h-7 px-2 rounded-md text-xs font-medium text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 hover:bg-amber-100 dark:hover:bg-amber-900/40 transition-colors cursor-pointer"
+      >
+        <TriangleAlert className="w-3.5 h-3.5 shrink-0" />
+        <span>{summary.tracked_count + summary.untracked_count}</span>
+      </button>
+    </Tooltip>
+  )
+}
+
+// ── Merge conflict panel ──────────────────────────────────────────────────────
+
+function MergeConflictButton({ diff, agent, projectId }: {
+  diff: DiffResponse | null
+  agent: AgentResponse
+  projectId: string | null
+}) {
+  const [open, setOpen] = useState(false)
+  const [sending, setSending] = useState(false)
+  const [sent, setSent] = useState(false)
+
+  if (!diff?.merge_conflict) return null
+
+  const conflictFiles = diff.conflict_files ?? []
+  const count = conflictFiles.length || '?'
+  const worktreePath = agent.worktree_path ?? '<worktree-path>'
+  const baseBranch = agent.base_branch
+
+  const handleFixWithAgent = async () => {
+    setSending(true)
+    try {
+      await api.default.sendAgentInput(agent.id, { text: `Fix the merge conflicts with branch ${baseBranch}` }, projectId ?? undefined)
+      setSent(true)
+      setTimeout(() => { setSent(false); setOpen(false) }, 2000)
+    } catch {
+      // silently ignore
+    } finally {
+      setSending(false)
+    }
+  }
+
+  return (
+    <>
+      <Tooltip content={
+        <div>
+          <p className="font-semibold mb-1">Merge Conflict</p>
+          <p className="text-gray-300">{count} file{count !== 1 ? 's' : ''} conflict with <span className="font-mono">{baseBranch}</span></p>
+          <p className="text-gray-400 mt-1 text-[10px]">Click for resolution instructions</p>
+        </div>
+      }>
+        <button
+          onClick={() => setOpen(true)}
+          className="flex items-center gap-1 h-7 px-2 rounded-md text-xs font-medium text-red-700 dark:text-red-400 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 hover:bg-red-100 dark:hover:bg-red-900/40 transition-colors cursor-pointer"
+        >
+          <GitMerge className="w-3.5 h-3.5 shrink-0" />
+          <span>{count} conflict{count !== 1 ? 's' : ''}</span>
+        </button>
+      </Tooltip>
+
+      {open && (
+        <div className="fixed inset-0 z-[300] flex items-center justify-center p-4">
+          {/* Backdrop */}
+          <div className="absolute inset-0 bg-black/40" onClick={() => setOpen(false)} />
+
+          {/* Panel */}
+          <div className="relative bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl shadow-2xl w-full max-w-lg">
+            {/* Header */}
+            <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-200 dark:border-gray-700">
+              <GitMerge className="w-4 h-4 text-red-500 shrink-0" />
+              <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 flex-1">
+                Merge Conflict — {count} file{count !== 1 ? 's' : ''} conflict with <span className="font-mono text-red-600 dark:text-red-400">{baseBranch}</span>
+              </h3>
+              <button onClick={() => setOpen(false)} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 cursor-pointer">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Conflicting files */}
+            {conflictFiles.length > 0 && (
+              <div className="px-4 pt-3 pb-1">
+                <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">Conflicting files</p>
+                <div className="bg-gray-50 dark:bg-gray-800 rounded-lg overflow-hidden divide-y divide-gray-100 dark:divide-gray-700/50 max-h-32 overflow-y-auto">
+                  {conflictFiles.map((f) => (
+                    <div key={f} className="px-3 py-1.5 font-mono text-xs text-gray-700 dark:text-gray-300">{f}</div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Resolution instructions */}
+            <div className="px-4 py-3">
+              <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">Resolving locally</p>
+              <div className="bg-gray-900 dark:bg-gray-950 rounded-lg p-3 space-y-1.5 text-xs font-mono">
+                <p className="text-gray-400"># Navigate to the agent's worktree</p>
+                <p className="text-green-400">cd {worktreePath}</p>
+                <p className="text-gray-400 mt-2"># Merge the base branch (triggers conflict markers)</p>
+                <p className="text-green-400">git merge {baseBranch}</p>
+                <p className="text-gray-400 mt-2"># Edit conflicting files, then stage and commit</p>
+                <p className="text-green-400">git add {'<resolved-files>'}</p>
+                <p className="text-green-400">git commit</p>
+              </div>
+              <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-2">
+                The worktree at <span className="font-mono">{worktreePath}</span> is isolated — changes only affect this agent's branch.
+              </p>
+            </div>
+
+            {/* Footer */}
+            <div className="flex items-center gap-2 px-4 py-3 border-t border-gray-200 dark:border-gray-700">
+              <button
+                onClick={() => setOpen(false)}
+                className="flex items-center gap-1.5 h-7 px-3 rounded-md text-xs font-medium text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer"
+              >
+                Dismiss
+              </button>
+              <button
+                onClick={handleFixWithAgent}
+                disabled={sending || sent}
+                className="flex items-center gap-1.5 h-7 px-3 rounded-md text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-60 transition-colors cursor-pointer ml-auto"
+              >
+                {sent ? (
+                  <><Check className="w-3.5 h-3.5" /> Sent to agent</>
+                ) : sending ? (
+                  <><LoaderCircle className="w-3.5 h-3.5 animate-spin" /> Sending…</>
+                ) : (
+                  <><Bot className="w-3.5 h-3.5" /> Fix with agent</>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   )
 }
 
@@ -590,13 +701,7 @@ function buildFileTree(files: DiffFile[]): TreeNode[] {
       }
       current = node.children
     }
-    current.push({
-      name: parts[parts.length - 1],
-      path: file.path,
-      type: 'file',
-      children: [],
-      file,
-    })
+    current.push({ name: parts[parts.length - 1], path: file.path, type: 'file', children: [], file })
   }
   return root
 }
@@ -628,24 +733,13 @@ function CopyButton({ text }: { text: string }) {
       className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded hover:bg-gray-200 dark:hover:bg-gray-600 shrink-0 cursor-pointer"
       title="Copy path"
     >
-      {copied
-        ? <Check className="w-3 h-3 text-green-500" />
-        : <Copy className="w-3 h-3 text-gray-400" />
-      }
+      {copied ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3 text-gray-400" />}
     </button>
   )
 }
 
-function FileRow({
-  file,
-  isActive,
-  onClick,
-  indent = 0,
-}: {
-  file: DiffFile
-  isActive: boolean
-  onClick: () => void
-  indent?: number
+function FileRow({ file, isActive, onClick, indent = 0 }: {
+  file: DiffFile; isActive: boolean; onClick: () => void; indent?: number
 }) {
   return (
     <button
@@ -656,10 +750,7 @@ function FileRow({
       style={{ paddingLeft: `${10 + indent}px`, paddingRight: '10px' }}
     >
       <ChangeTypeIcon type={file.change_type} />
-      <span
-        className="font-mono text-[10px] text-gray-700 dark:text-gray-300 truncate flex-1 min-w-0"
-        title={file.path}
-      >
+      <span className="font-mono text-[10px] text-gray-700 dark:text-gray-300 truncate flex-1 min-w-0" title={file.path}>
         {file.path.split('/').pop()}
       </span>
       <CopyButton text={file.path} />
@@ -671,23 +762,11 @@ function FileRow({
   )
 }
 
-function TreeNodeView({
-  node,
-  depth,
-  collapsedFolders,
-  toggleFolder,
-  onFileClick,
-  activeFilePath,
-}: {
-  node: TreeNode
-  depth: number
-  collapsedFolders: Set<string>
-  toggleFolder: (path: string) => void
-  onFileClick: (path: string) => void
-  activeFilePath: string | null
+function TreeNodeView({ node, depth, collapsedFolders, toggleFolder, onFileClick, activeFilePath }: {
+  node: TreeNode; depth: number; collapsedFolders: Set<string>
+  toggleFolder: (path: string) => void; onFileClick: (path: string) => void; activeFilePath: string | null
 }) {
   const indent = depth * 12
-
   if (node.type === 'dir') {
     const isOpen = !collapsedFolders.has(node.path)
     return (
@@ -701,60 +780,32 @@ function TreeNodeView({
             ? <FolderOpen className="w-3.5 h-3.5 text-blue-400 dark:text-blue-500 shrink-0" />
             : <Folder className="w-3.5 h-3.5 text-blue-400 dark:text-blue-500 shrink-0" />
           }
-          <span className="font-mono text-[10px] text-gray-600 dark:text-gray-400 flex-1 min-w-0 truncate">
-            {node.name}
-          </span>
+          <span className="font-mono text-[10px] text-gray-600 dark:text-gray-400 flex-1 min-w-0 truncate">{node.name}</span>
           <CopyButton text={node.path} />
-          <ChevronDown
-            className={`w-3 h-3 text-gray-400 shrink-0 transition-transform ${isOpen ? '' : '-rotate-90'}`}
-          />
+          <ChevronDown className={`w-3 h-3 text-gray-400 shrink-0 transition-transform ${isOpen ? '' : '-rotate-90'}`} />
         </button>
         {isOpen && node.children.map((child) => (
-          <TreeNodeView
-            key={child.path}
-            node={child}
-            depth={depth + 1}
-            collapsedFolders={collapsedFolders}
-            toggleFolder={toggleFolder}
-            onFileClick={onFileClick}
-            activeFilePath={activeFilePath}
-          />
+          <TreeNodeView key={child.path} node={child} depth={depth + 1}
+            collapsedFolders={collapsedFolders} toggleFolder={toggleFolder}
+            onFileClick={onFileClick} activeFilePath={activeFilePath} />
         ))}
       </div>
     )
   }
-
-  const file = node.file!
   return (
-    <FileRow
-      file={file}
-      isActive={file.path === activeFilePath}
-      onClick={() => onFileClick(file.path)}
-      indent={indent}
-    />
+    <FileRow file={node.file!} isActive={node.file!.path === activeFilePath}
+      onClick={() => onFileClick(node.file!.path)} indent={indent} />
   )
 }
 
 // ── Settings popup ────────────────────────────────────────────────────────────
 
-function SettingsPopup({
-  fileView,
-  onFileViewChange,
-  sideBySide,
-  onSideBySideChange,
-  ignoreWhitespace,
-  onIgnoreWhitespaceChange,
-  singleFile,
-  onSingleFileChange,
-}: {
-  fileView: FileView
-  onFileViewChange: (v: FileView) => void
-  sideBySide: boolean
-  onSideBySideChange: (v: boolean) => void
-  ignoreWhitespace: boolean
-  onIgnoreWhitespaceChange: (v: boolean) => void
-  singleFile: boolean
-  onSingleFileChange: (v: boolean) => void
+function SettingsPopup({ fileView, onFileViewChange, sideBySide, onSideBySideChange,
+  ignoreWhitespace, onIgnoreWhitespaceChange, singleFile, onSingleFileChange }: {
+  fileView: FileView; onFileViewChange: (v: FileView) => void
+  sideBySide: boolean; onSideBySideChange: (v: boolean) => void
+  ignoreWhitespace: boolean; onIgnoreWhitespaceChange: (v: boolean) => void
+  singleFile: boolean; onSingleFileChange: (v: boolean) => void
 }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -774,20 +825,13 @@ function SettingsPopup({
     { value: 'grouped', label: 'Grouped by folder' },
   ]
 
-  const checkboxOptions = [
-    { checked: sideBySide, onChange: onSideBySideChange, label: 'Side by side' },
-    { checked: ignoreWhitespace, onChange: onIgnoreWhitespaceChange, label: 'Ignore whitespace' },
-    { checked: singleFile, onChange: onSingleFileChange, label: 'One file at a time' },
-  ]
-
   return (
     <div ref={ref} className="relative">
       <button
         onClick={() => setOpen((o) => !o)}
         className={`flex items-center justify-center w-7 h-7 rounded-md border transition-colors cursor-pointer ${
-          open
-            ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800'
-            : 'text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
+          open ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800'
+               : 'text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
         }`}
         title="Diff settings"
       >
@@ -796,35 +840,26 @@ function SettingsPopup({
 
       {open && (
         <div className="absolute right-0 top-full mt-1 w-52 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50 p-3">
-          <p className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">
-            File list
-          </p>
+          <p className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">File list</p>
           <div className="flex flex-col gap-0.5 mb-3">
             {viewOptions.map((opt) => (
               <label key={opt.value} className="flex items-center gap-2 py-0.5 cursor-pointer">
-                <input
-                  type="radio"
-                  name="hydra-file-view"
-                  checked={fileView === opt.value}
-                  onChange={() => onFileViewChange(opt.value)}
-                  className="w-3 h-3 accent-blue-500"
-                />
+                <input type="radio" name="hydra-file-view" checked={fileView === opt.value}
+                  onChange={() => onFileViewChange(opt.value)} className="w-3 h-3 accent-blue-500" />
                 <span className="text-xs text-gray-700 dark:text-gray-300">{opt.label}</span>
               </label>
             ))}
           </div>
-          <p className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">
-            Options
-          </p>
+          <p className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">Options</p>
           <div className="flex flex-col gap-0.5">
-            {checkboxOptions.map(({ checked, onChange, label }) => (
+            {[
+              { checked: sideBySide, onChange: onSideBySideChange, label: 'Side by side' },
+              { checked: ignoreWhitespace, onChange: onIgnoreWhitespaceChange, label: 'Ignore whitespace' },
+              { checked: singleFile, onChange: onSingleFileChange, label: 'One file at a time' },
+            ].map(({ checked, onChange, label }) => (
               <label key={label} className="flex items-center gap-2 py-0.5 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={checked}
-                  onChange={(e) => onChange(e.target.checked)}
-                  className="w-3 h-3 accent-blue-500"
-                />
+                <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)}
+                  className="w-3 h-3 accent-blue-500" />
                 <span className="text-xs text-gray-700 dark:text-gray-300">{label}</span>
               </label>
             ))}
@@ -837,16 +872,10 @@ function SettingsPopup({
 
 // ── Main DiffViewer component ─────────────────────────────────────────────────
 
-export function DiffViewer({
-  agent,
-  projectId,
-}: {
-  agent: AgentResponse
-  projectId: string | null
-}) {
+export function DiffViewer({ agent, projectId }: { agent: AgentResponse; projectId: string | null }) {
   const [commits, setCommits] = useState<CommitInfo[]>([])
   const [leftSel, setLeftSel] = useState<LeftSel>({ type: 'base' })
-  const [rightSel, setRightSel] = useState<RightSel>({ type: 'uncommitted' })
+  const [rightSel, setRightSel] = useState<RightSel>({ type: 'latest' })
   const [diff, setDiff] = useState<DiffResponse | null>(null)
   const [loadingDiff, setLoadingDiff] = useState(false)
   const [diffError, setDiffError] = useState<string | null>(null)
@@ -872,19 +901,10 @@ export function DiffViewer({
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set())
   const fileRefs = useRef<Map<string, HTMLDivElement>>(new Map())
 
-  // Persist settings
-  useEffect(() => {
-    try { localStorage.setItem('hydra-diff-side-by-side', String(sideBySide)) } catch {}
-  }, [sideBySide])
-  useEffect(() => {
-    try { localStorage.setItem('hydra-diff-ignore-whitespace', String(ignoreWhitespace)) } catch {}
-  }, [ignoreWhitespace])
-  useEffect(() => {
-    try { localStorage.setItem('hydra-diff-single-file', String(singleFile)) } catch {}
-  }, [singleFile])
-  useEffect(() => {
-    try { localStorage.setItem('hydra-diff-file-view', fileView) } catch {}
-  }, [fileView])
+  useEffect(() => { try { localStorage.setItem('hydra-diff-side-by-side', String(sideBySide)) } catch {} }, [sideBySide])
+  useEffect(() => { try { localStorage.setItem('hydra-diff-ignore-whitespace', String(ignoreWhitespace)) } catch {} }, [ignoreWhitespace])
+  useEffect(() => { try { localStorage.setItem('hydra-diff-single-file', String(singleFile)) } catch {} }, [singleFile])
+  useEffect(() => { try { localStorage.setItem('hydra-diff-file-view', fileView) } catch {} }, [fileView])
 
   const toggleFolder = useCallback((path: string) => {
     setCollapsedFolders((prev) => {
@@ -895,19 +915,14 @@ export function DiffViewer({
     })
   }, [])
 
-  // Fetch commits list whenever the agent changes.
   useEffect(() => {
     if (!agent.branch_name) return
-    api.default
-      .getAgentCommits(agent.id, projectId ?? undefined)
-      .then(setCommits)
-      .catch(() => setCommits([]))
+    api.default.getAgentCommits(agent.id, projectId ?? undefined)
+      .then(setCommits).catch(() => setCommits([]))
   }, [agent.id, agent.branch_name, projectId])
 
-  // Fetch diff when selection, options, or manual refresh changes.
   useEffect(() => {
     if (!agent.branch_name) return
-
     let cancelled = false
     setLoadingDiff(true)
     setDiffError(null)
@@ -918,46 +933,27 @@ export function DiffViewer({
     if (rightSel.type === 'uncommitted') params.includeUncommitted = true
     else if (rightSel.type === 'commit') params.headRef = rightSel.sha
 
-    api.default
-      .getAgentDiff(
-        agent.id,
-        projectId ?? undefined,
-        params.baseRef,
-        params.headRef,
-        params.ignoreWhitespace,
-        params.includeUncommitted,
-      )
-      .then((d) => {
-        if (!cancelled) { setDiff(d); setLoadingDiff(false) }
-      })
-      .catch((e) => {
-        if (!cancelled) { setDiffError(String(e)); setLoadingDiff(false) }
-      })
+    api.default.getAgentDiff(agent.id, projectId ?? undefined,
+      params.baseRef, params.headRef, params.ignoreWhitespace, params.includeUncommitted)
+      .then((d) => { if (!cancelled) { setDiff(d); setLoadingDiff(false) } })
+      .catch((e) => { if (!cancelled) { setDiffError(String(e)); setLoadingDiff(false) } })
 
     return () => { cancelled = true }
   }, [agent.id, agent.branch_name, projectId, leftSel, rightSel, ignoreWhitespace, refreshKey])
 
   const handleLeftChange = useCallback((newLeft: LeftSel) => {
     setLeftSel(newLeft)
-    setRightSel((prev) => {
-      if (prev.type !== 'commit') return prev
-      if (newLeft.type === 'base') return prev
-      return prev
-    })
   }, [])
 
   useEffect(() => {
     if (leftSel.type !== 'commit' || rightSel.type !== 'commit') return
     const li = commitIdx(leftSel.sha, commits)
     const ri = commitIdx(rightSel.sha, commits)
-    if (li !== -1 && ri !== -1 && li <= ri) {
-      setRightSel({ type: 'uncommitted' })
-    }
+    if (li !== -1 && ri !== -1 && li <= ri) setRightSel({ type: 'latest' })
   }, [leftSel, rightSel, commits])
 
   const scrollToFile = useCallback((path: string) => {
-    const el = fileRefs.current.get(path)
-    el?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    fileRefs.current.get(path)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }, [])
 
   const handleFileClick = useCallback((path: string) => {
@@ -970,33 +966,28 @@ export function DiffViewer({
   }, [singleFile, diff, scrollToFile])
 
   const handleSingleFileChange = useCallback((v: boolean) => {
-    setSingleFile(v)
-    setSingleFileIdx(0)
+    setSingleFile(v); setSingleFileIdx(0)
+  }, [])
+
+  const handleJumpToUncommittedActual = useCallback(() => {
+    setLeftSel({ type: 'base' })
+    setRightSel({ type: 'uncommitted' })
   }, [])
 
   const totalAdditions = diff?.files.reduce((s, f) => s + f.additions, 0) ?? 0
   const totalDeletions = diff?.files.reduce((s, f) => s + f.deletions, 0) ?? 0
-
-  // The file that's currently "active" for tree/grouped highlighting
   const activeFilePath = singleFile && diff ? (diff.files[singleFileIdx]?.path ?? null) : null
+  const hasExistingDiff = diff !== null
 
-  // Sidebar content based on view mode
   const renderSidebar = (files: DiffFile[]) => {
     if (fileView === 'tree') {
       const tree = buildFileTree(files)
       return tree.map((node) => (
-        <TreeNodeView
-          key={node.path}
-          node={node}
-          depth={0}
-          collapsedFolders={collapsedFolders}
-          toggleFolder={toggleFolder}
-          onFileClick={handleFileClick}
-          activeFilePath={activeFilePath}
-        />
+        <TreeNodeView key={node.path} node={node} depth={0}
+          collapsedFolders={collapsedFolders} toggleFolder={toggleFolder}
+          onFileClick={handleFileClick} activeFilePath={activeFilePath} />
       ))
     }
-
     if (fileView === 'grouped') {
       const groups = getGroupedFiles(files)
       return groups.map(([folder, groupFiles]) => (
@@ -1010,34 +1001,19 @@ export function DiffViewer({
           )}
           {groupFiles.map((f) => {
             const idx = diff!.files.findIndex((df) => df.path === f.path)
-            return (
-              <FileRow
-                key={f.path}
-                file={f}
-                isActive={singleFile && idx === singleFileIdx}
-                onClick={() => handleFileClick(f.path)}
-                indent={folder ? 4 : 0}
-              />
-            )
+            return <FileRow key={f.path} file={f} isActive={singleFile && idx === singleFileIdx}
+              onClick={() => handleFileClick(f.path)} indent={folder ? 4 : 0} />
           })}
         </div>
       ))
     }
-
-    // Flat view
     return files.map((f, i) => (
-      <FileRow
-        key={f.path}
-        file={f}
-        isActive={singleFile && i === singleFileIdx}
-        onClick={() => handleFileClick(f.path)}
-      />
+      <FileRow key={f.path} file={f} isActive={singleFile && i === singleFileIdx}
+        onClick={() => handleFileClick(f.path)} />
     ))
   }
 
   if (!agent.branch_name) return null
-
-  const hasExistingDiff = diff !== null
 
   return (
     <div className="mt-4">
@@ -1052,7 +1028,6 @@ export function DiffViewer({
           </div>
         )}
         <div className="flex items-center gap-2 ml-auto flex-wrap">
-          {/* Loading indicator shown inline during refresh */}
           {loadingDiff && hasExistingDiff && (
             <LoaderCircle className="w-3.5 h-3.5 animate-spin text-gray-400 dark:text-gray-500 shrink-0" />
           )}
@@ -1064,42 +1039,27 @@ export function DiffViewer({
           >
             <RefreshCw className="w-3.5 h-3.5" />
           </button>
-          <LeftSelector commits={commits} selected={leftSel} onChange={handleLeftChange} />
+
+          {/* Uncommitted changes warning button */}
+          <UncommittedButton diff={diff} onJumpToUncommitted={handleJumpToUncommittedActual} />
+
+          {/* Merge conflict button */}
+          <MergeConflictButton diff={diff} agent={agent} projectId={projectId} />
+
+          <LeftSelector commits={commits} selected={leftSel} onChange={handleLeftChange} baseBranch={agent.base_branch} />
           <span className="text-gray-400 dark:text-gray-500 text-xs select-none">→</span>
-          <RightSelector
-            commits={commits}
-            selected={rightSel}
-            onChange={setRightSel}
-            left={leftSel}
-            hasUncommitted={diff?.uncommitted_changes}
-          />
+          <RightSelector commits={commits} selected={rightSel} onChange={setRightSel}
+            left={leftSel} hasUncommitted={diff?.uncommitted_changes} />
           <SettingsPopup
-            fileView={fileView}
-            onFileViewChange={setFileView}
-            sideBySide={sideBySide}
-            onSideBySideChange={setSideBySide}
-            ignoreWhitespace={ignoreWhitespace}
-            onIgnoreWhitespaceChange={setIgnoreWhitespace}
-            singleFile={singleFile}
-            onSingleFileChange={handleSingleFileChange}
+            fileView={fileView} onFileViewChange={setFileView}
+            sideBySide={sideBySide} onSideBySideChange={setSideBySide}
+            ignoreWhitespace={ignoreWhitespace} onIgnoreWhitespaceChange={setIgnoreWhitespace}
+            singleFile={singleFile} onSingleFileChange={handleSingleFileChange}
           />
         </div>
       </div>
 
-      {/* Conflict warning */}
-      {diff?.merge_conflict && (
-        <div className="mb-4 px-4 py-3 bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-900/50 rounded-lg flex items-start gap-3">
-          <TriangleAlert className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
-          <div>
-            <p className="text-sm font-semibold text-red-800 dark:text-red-400">Merge Conflict Detected</p>
-            <p className="text-xs text-red-600 dark:text-red-500 mt-1">
-              This branch cannot be merged automatically. Please update from base branch or resolve conflicts manually in the worktree.
-            </p>
-          </div>
-        </div>
-      )}
-
-      {/* Error banner when we have an existing diff but a refresh failed */}
+      {/* Error banner on refresh failure */}
       {diffError && hasExistingDiff && (
         <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-xs text-red-600 dark:text-red-400">
           Refresh failed: {diffError}
@@ -1129,9 +1089,7 @@ export function DiffViewer({
                 Changed files ({diff.files.length})
               </span>
             </div>
-            <div className="overflow-y-auto max-h-80">
-              {renderSidebar(diff.files)}
-            </div>
+            <div className="overflow-y-auto max-h-80">{renderSidebar(diff.files)}</div>
           </div>
 
           {/* Diff content */}
@@ -1146,9 +1104,7 @@ export function DiffViewer({
                   >
                     <ChevronLeft className="w-3.5 h-3.5" />
                   </button>
-                  <span className="text-xs text-gray-500 dark:text-gray-400">
-                    {singleFileIdx + 1} / {diff.files.length}
-                  </span>
+                  <span className="text-xs text-gray-500 dark:text-gray-400">{singleFileIdx + 1} / {diff.files.length}</span>
                   <button
                     onClick={() => setSingleFileIdx((i) => Math.min(diff.files.length - 1, i + 1))}
                     disabled={singleFileIdx === diff.files.length - 1}
@@ -1171,10 +1127,7 @@ export function DiffViewer({
               </>
             ) : (
               diff.files.map((f) => (
-                <FileDiff
-                  key={f.path}
-                  file={f}
-                  sideBySide={sideBySide}
+                <FileDiff key={f.path} file={f} sideBySide={sideBySide}
                   fileRef={(el) => {
                     if (el) fileRefs.current.set(f.path, el)
                     else fileRefs.current.delete(f.path)

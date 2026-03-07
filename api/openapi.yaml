@@ -381,6 +381,44 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /api/agent/{id}/input:
+    post:
+      summary: Send text input to an agent's terminal stdin
+      operationId: sendAgentInput
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: project_id
+          required: false
+          schema:
+            type: string
+          description: Project ID to scope the lookup (defaults to server CWD project)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgentInputRequest'
+      responses:
+        '200':
+          description: OK
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /api/config:
     get:
       summary: Get the merged configuration
@@ -787,9 +825,17 @@ components:
         merge_conflict:
           type: boolean
           description: True if there are merge conflicts between base_ref and head_ref
+        conflict_files:
+          type: array
+          description: List of files with merge conflicts (populated when merge_conflict is true)
+          items:
+            type: string
         uncommitted_changes:
           type: boolean
           description: True if there are uncommitted changes in the worktree
+        uncommitted_summary:
+          description: Counts of uncommitted changes in the worktree
+          $ref: '#/components/schemas/UncommittedSummary'
         base_commit:
           nullable: true
           allOf:
@@ -800,6 +846,25 @@ components:
           allOf:
             - $ref: '#/components/schemas/CommitInfo'
           description: Details of the head commit
+
+    UncommittedSummary:
+      type: object
+      required: [tracked_count, untracked_count]
+      properties:
+        tracked_count:
+          type: integer
+          description: Number of tracked files with staged or unstaged changes
+        untracked_count:
+          type: integer
+          description: Number of untracked (new, never-added) files
+
+    AgentInputRequest:
+      type: object
+      required: [text]
+      properties:
+        text:
+          type: string
+          description: Text to send to the agent's stdin (a newline is appended automatically)
 
     AgentConfig:
       type: object

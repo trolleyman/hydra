@@ -4,6 +4,7 @@
 /* eslint-disable */
 import type { CommitInfo } from './CommitInfo';
 import type { DiffFile } from './DiffFile';
+import type { UncommittedSummary } from './UncommittedSummary';
 export type DiffResponse = {
     files: Array<DiffFile>;
     /**
@@ -19,9 +20,17 @@ export type DiffResponse = {
      */
     merge_conflict?: boolean;
     /**
+     * List of files with merge conflicts (populated when merge_conflict is true)
+     */
+    conflict_files?: Array<string>;
+    /**
      * True if there are uncommitted changes in the worktree
      */
     uncommitted_changes?: boolean;
+    /**
+     * Counts of uncommitted changes in the worktree
+     */
+    uncommitted_summary?: UncommittedSummary;
     /**
      * Details of the base commit (if a specific commit SHA was given)
      */

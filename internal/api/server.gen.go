@@ -105,6 +105,12 @@ type AgentConfig struct {
 	SharedMounts         *[]string `json:"shared_mounts"`
 }
 
+// AgentInputRequest defines model for AgentInputRequest.
+type AgentInputRequest struct {
+	// Text Text to send to the agent's stdin (a newline is appended automatically)
+	Text string `json:"text"`
+}
+
 // AgentResponse defines model for AgentResponse.
 type AgentResponse struct {
 	AgentStatus     *AgentStatusInfo `json:"agent_status,omitempty"`
@@ -237,8 +243,11 @@ type DiffResponse struct {
 	BaseCommit *CommitInfo `json:"base_commit"`
 
 	// BaseRef The base ref used for this diff
-	BaseRef string     `json:"base_ref"`
-	Files   []DiffFile `json:"files"`
+	BaseRef string `json:"base_ref"`
+
+	// ConflictFiles List of files with merge conflicts (populated when merge_conflict is true)
+	ConflictFiles *[]string  `json:"conflict_files,omitempty"`
+	Files         []DiffFile `json:"files"`
 
 	// HeadCommit Details of the head commit
 	HeadCommit *CommitInfo `json:"head_commit"`
@@ -250,7 +259,8 @@ type DiffResponse struct {
 	MergeConflict *bool `json:"merge_conflict,omitempty"`
 
 	// UncommittedChanges True if there are uncommitted changes in the worktree
-	UncommittedChanges *bool `json:"uncommitted_changes,omitempty"`
+	UncommittedChanges *bool               `json:"uncommitted_changes,omitempty"`
+	UncommittedSummary *UncommittedSummary `json:"uncommitted_summary,omitempty"`
 }
 
 // ErrorResponse defines model for ErrorResponse.
@@ -359,6 +369,15 @@ type TerminalStatusEvent struct {
 // TerminalStatusEventType defines model for TerminalStatusEvent.Type.
 type TerminalStatusEventType string
 
+// UncommittedSummary defines model for UncommittedSummary.
+type UncommittedSummary struct {
+	// TrackedCount Number of tracked files with staged or unstaged changes
+	TrackedCount int `json:"tracked_count"`
+
+	// UntrackedCount Number of untracked (new, never-added) files
+	UntrackedCount int `json:"untracked_count"`
+}
+
 // KillAgentParams defines parameters for KillAgent.
 type KillAgentParams struct {
 	// ProjectId Project ID to scope the lookup (defaults to server CWD project)
@@ -393,6 +412,12 @@ type GetAgentDiffParams struct {
 
 	// IncludeUncommitted Include uncommitted changes in the worktree in the diff
 	IncludeUncommitted *bool `form:"include_uncommitted,omitempty" json:"include_uncommitted,omitempty"`
+}
+
+// SendAgentInputParams defines parameters for SendAgentInput.
+type SendAgentInputParams struct {
+	// ProjectId Project ID to scope the lookup (defaults to server CWD project)
+	ProjectId *string `form:"project_id,omitempty" json:"project_id,omitempty"`
 }
 
 // MergeAgentParams defines parameters for MergeAgent.
@@ -449,6 +474,9 @@ type SaveConfigParams struct {
 // SaveConfigParamsScope defines parameters for SaveConfig.
 type SaveConfigParamsScope string
 
+// SendAgentInputJSONRequestBody defines body for SendAgentInput for application/json ContentType.
+type SendAgentInputJSONRequestBody = AgentInputRequest
+
 // SpawnAgentJSONRequestBody defines body for SpawnAgent for application/json ContentType.
 type SpawnAgentJSONRequestBody = SpawnAgentRequest
 
@@ -472,6 +500,9 @@ type ServerInterface interface {
 	// Get the diff for an agent's branch
 	// (GET /api/agent/{id}/diff)
 	GetAgentDiff(w http.ResponseWriter, r *http.Request, id string, params GetAgentDiffParams)
+	// Send text input to an agent's terminal stdin
+	// (POST /api/agent/{id}/input)
+	SendAgentInput(w http.ResponseWriter, r *http.Request, id string, params SendAgentInputParams)
 	// Merge a Hydra agent's branch into its base branch and kill it
 	// (POST /api/agent/{id}/merge)
 	MergeAgent(w http.ResponseWriter, r *http.Request, id string, params MergeAgentParams)
@@ -686,6 +717,42 @@ func (siw *ServerInterfaceWrapper) GetAgentDiff(w http.ResponseWriter, r *http.R
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetAgentDiff(w, r, id, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SendAgentInput operation middleware
+func (siw *ServerInterfaceWrapper) SendAgentInput(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params SendAgentInputParams
+
+	// ------------- Optional query parameter "project_id" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "project_id", r.URL.Query(), &params.ProjectId)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SendAgentInput(w, r, id, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1121,6 +1188,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("GET "+options.BaseURL+"/api/agent/{id}", wrapper.GetAgent)
 	m.HandleFunc("GET "+options.BaseURL+"/api/agent/{id}/commits", wrapper.GetAgentCommits)
 	m.HandleFunc("GET "+options.BaseURL+"/api/agent/{id}/diff", wrapper.GetAgentDiff)
+	m.HandleFunc("POST "+options.BaseURL+"/api/agent/{id}/input", wrapper.SendAgentInput)
 	m.HandleFunc("POST "+options.BaseURL+"/api/agent/{id}/merge", wrapper.MergeAgent)
 	m.HandleFunc("POST "+options.BaseURL+"/api/agent/{id}/restart", wrapper.RestartAgent)
 	m.HandleFunc("POST "+options.BaseURL+"/api/agent/{id}/update-from-base", wrapper.UpdateAgentFromBase)
@@ -1283,6 +1351,42 @@ func (response GetAgentDiff404JSONResponse) VisitGetAgentDiffResponse(w http.Res
 type GetAgentDiff500JSONResponse ErrorResponse
 
 func (response GetAgentDiff500JSONResponse) VisitGetAgentDiffResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type SendAgentInputRequestObject struct {
+	Id     string `json:"id"`
+	Params SendAgentInputParams
+	Body   *SendAgentInputJSONRequestBody
+}
+
+type SendAgentInputResponseObject interface {
+	VisitSendAgentInputResponse(w http.ResponseWriter) error
+}
+
+type SendAgentInput200Response struct {
+}
+
+func (response SendAgentInput200Response) VisitSendAgentInputResponse(w http.ResponseWriter) error {
+	w.WriteHeader(200)
+	return nil
+}
+
+type SendAgentInput404JSONResponse ErrorResponse
+
+func (response SendAgentInput404JSONResponse) VisitSendAgentInputResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type SendAgentInput500JSONResponse ErrorResponse
+
+func (response SendAgentInput500JSONResponse) VisitSendAgentInputResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(500)
 
@@ -1685,6 +1789,9 @@ type StrictServerInterface interface {
 	// Get the diff for an agent's branch
 	// (GET /api/agent/{id}/diff)
 	GetAgentDiff(ctx context.Context, request GetAgentDiffRequestObject) (GetAgentDiffResponseObject, error)
+	// Send text input to an agent's terminal stdin
+	// (POST /api/agent/{id}/input)
+	SendAgentInput(ctx context.Context, request SendAgentInputRequestObject) (SendAgentInputResponseObject, error)
 	// Merge a Hydra agent's branch into its base branch and kill it
 	// (POST /api/agent/{id}/merge)
 	MergeAgent(ctx context.Context, request MergeAgentRequestObject) (MergeAgentResponseObject, error)
@@ -1853,6 +1960,40 @@ func (sh *strictHandler) GetAgentDiff(w http.ResponseWriter, r *http.Request, id
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetAgentDiffResponseObject); ok {
 		if err := validResponse.VisitGetAgentDiffResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SendAgentInput operation middleware
+func (sh *strictHandler) SendAgentInput(w http.ResponseWriter, r *http.Request, id string, params SendAgentInputParams) {
+	var request SendAgentInputRequestObject
+
+	request.Id = id
+	request.Params = params
+
+	var body SendAgentInputJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SendAgentInput(ctx, request.(SendAgentInputRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SendAgentInput")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SendAgentInputResponseObject); ok {
+		if err := validResponse.VisitSendAgentInputResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/docker/docker/api/types/container"
 	dockerclient "github.com/docker/docker/client"
 	"github.com/trolleyman/hydra/internal/api"
 	"github.com/trolleyman/hydra/internal/config"
@@ -986,9 +987,21 @@ func (s *Server) GetAgentDiff(ctx context.Context, request api.GetAgentDiffReque
 	}
 
 	uncommittedChanges := false
+	var uncommittedSummary *api.UncommittedSummary
 	if head.Worktree != nil {
-		if uncommitted, err := git.HasUncommittedChanges(*head.Worktree); err == nil {
-			uncommittedChanges = uncommitted
+		if summary, err := git.GetUncommittedSummary(*head.Worktree); err == nil {
+			uncommittedChanges = summary.TrackedCount > 0
+			uncommittedSummary = &api.UncommittedSummary{
+				TrackedCount:   summary.TrackedCount,
+				UntrackedCount: summary.UntrackedCount,
+			}
+		}
+	}
+
+	var conflictFiles *[]string
+	if mergeConflict && head.Branch != nil {
+		if files, err := git.GetConflictingFiles(projectRoot, head.BaseBranch, *head.Branch); err == nil && len(files) > 0 {
+			conflictFiles = &files
 		}
 	}
 
@@ -997,9 +1010,57 @@ func (s *Server) GetAgentDiff(ctx context.Context, request api.GetAgentDiffReque
 		BaseRef:            baseRef,
 		HeadRef:            headRef,
 		MergeConflict:      &mergeConflict,
+		ConflictFiles:      conflictFiles,
 		UncommittedChanges: &uncommittedChanges,
+		UncommittedSummary: uncommittedSummary,
 		BaseCommit:         baseCommitInfo,
 		HeadCommit:         headCommitInfo,
 	}
 	return api.GetAgentDiff200JSONResponse(resp), nil
+}
+
+func (s *Server) SendAgentInput(ctx context.Context, request api.SendAgentInputRequestObject) (api.SendAgentInputResponseObject, error) {
+	projectRoot := s.resolveProjectRoot(request.Params.ProjectId)
+	head, err := heads.GetHeadByID(ctx, s.DockerClient, s.DB, projectRoot, request.Id)
+	if err != nil {
+		return api.SendAgentInput500JSONResponse{
+			Code:    500,
+			Error:   "internal_error",
+			Details: err.Error(),
+		}, nil
+	}
+	if head == nil || head.ContainerID == "" {
+		return api.SendAgentInput404JSONResponse{
+			Code:    404,
+			Error:   "not_found",
+			Details: "agent not found or not running",
+		}, nil
+	}
+
+	text := request.Body.Text + "\n"
+
+	attach, err := s.DockerClient.ContainerAttach(ctx, head.ContainerID, container.AttachOptions{
+		Stream: true,
+		Stdin:  true,
+		Stdout: false,
+		Stderr: false,
+	})
+	if err != nil {
+		return api.SendAgentInput500JSONResponse{
+			Code:    500,
+			Error:   "internal_error",
+			Details: "failed to attach to container: " + err.Error(),
+		}, nil
+	}
+	defer attach.Close()
+
+	if _, err := attach.Conn.Write([]byte(text)); err != nil {
+		return api.SendAgentInput500JSONResponse{
+			Code:    500,
+			Error:   "internal_error",
+			Details: "failed to write to container stdin: " + err.Error(),
+		}, nil
+	}
+
+	return api.SendAgentInput200Response{}, nil
 }
