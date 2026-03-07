@@ -62,7 +62,7 @@ func (r *statusRecorder) Write(b []byte) (int, error) {
 	if r.statusCode >= 400 {
 		r.body.Write(b)
 	}
-	return r.ResponseWriter.Write(b)
+	return errtrace.Wrap2(r.ResponseWriter.Write(b))
 }
 
 // Unwrap returns the underlying ResponseWriter, allowing the standard library

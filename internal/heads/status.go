@@ -2,6 +2,7 @@ package heads
 
 import (
 	"encoding/json"
+	"log"
 	"os"
 	"path/filepath"
 
@@ -36,4 +37,28 @@ func WriteAgentStatus(projectDir, id string, status *api.AgentStatusInfo) error 
 		return errtrace.Wrap(err)
 	}
 	return errtrace.Wrap(os.WriteFile(path, data, 0644))
+}
+
+// RemoveAgentStatusFiles removes the status JSON, status log, and build log files for an agent.
+func RemoveAgentStatusFiles(projectRoot, id string) {
+	statusJson := paths.GetStatusJsonFromProjectRoot(projectRoot, id)
+	if _, err := os.Stat(statusJson); err == nil {
+		if err := os.Remove(statusJson); err != nil {
+			log.Printf("warn: heads: remove status json %s failed for %s: %v", statusJson, id, err)
+		}
+	}
+
+	statusLog := paths.GetStatusLogFromProjectRoot(projectRoot, id)
+	if _, err := os.Stat(statusLog); err == nil {
+		if err := os.Remove(statusLog); err != nil {
+			log.Printf("warn: heads: remove status log %s failed for %s: %v", statusLog, id, err)
+		}
+	}
+
+	buildLog := paths.GetBuildLogFromProjectRoot(projectRoot, id)
+	if _, err := os.Stat(buildLog); err == nil {
+		if err := os.Remove(buildLog); err != nil {
+			log.Printf("warn: heads: remove build log %s failed for %s: %v", buildLog, id, err)
+		}
+	}
 }
