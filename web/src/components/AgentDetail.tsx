@@ -4,7 +4,7 @@ import type { AgentResponse } from '../api'
 import { AgentTerminal } from './AgentTerminal'
 import { DiffViewer } from '../DiffViewer'
 import { formatStartedAgo } from './AgentComponents'
-import { SpinnerIcon, MergeIcon, UpdateFromBaseIcon, RefreshIcon, TrashIcon, BranchIcon } from './icons'
+import { LoaderCircle, Merge, GitMerge, RefreshCw, Trash2, GitBranchPlus } from 'lucide-react'
 
 export function AgentDetail({
   agent,
@@ -123,9 +123,9 @@ export function AgentDetail({
               title="Merge agent"
             >
               {merging ? (
-                <SpinnerIcon className="w-3 h-3 animate-spin" />
+                <LoaderCircle className="w-3 h-3 animate-spin" />
               ) : (
-                <MergeIcon className="w-3.5 h-3.5" />
+                <Merge className="w-3.5 h-3.5" />
               )}
             </button>
             <button
@@ -135,9 +135,9 @@ export function AgentDetail({
               title="Update from base branch"
             >
               {updating ? (
-                <SpinnerIcon className="w-3 h-3 animate-spin" />
+                <LoaderCircle className="w-3 h-3 animate-spin" />
               ) : (
-                <UpdateFromBaseIcon className="w-3.5 h-3.5" />
+                <GitMerge className="w-3.5 h-3.5 scale-x-[-1]" />
               )}
             </button>
             <button
@@ -147,9 +147,9 @@ export function AgentDetail({
               title="Restart agent"
             >
               {restarting ? (
-                <SpinnerIcon className="w-3 h-3 animate-spin" />
+                <LoaderCircle className="w-3 h-3 animate-spin" />
               ) : (
-                <RefreshIcon className="w-3.5 h-3.5" />
+                <RefreshCw className="w-3.5 h-3.5" />
               )}
             </button>
             <button
@@ -159,9 +159,9 @@ export function AgentDetail({
               title="Kill agent"
             >
               {killing ? (
-                <SpinnerIcon className="w-3 h-3 animate-spin" />
+                <LoaderCircle className="w-3 h-3 animate-spin" />
               ) : (
-                <TrashIcon className="w-3.5 h-3.5" />
+                <Trash2 className="w-3.5 h-3.5" />
               )}
             </button>
           </div>
@@ -174,7 +174,7 @@ export function AgentDetail({
             <span className="text-gray-300 dark:text-gray-600">|</span>
             {agent.branch_name && (
               <span className="text-xs font-mono text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
-                <BranchIcon className="w-3.5 h-3.5" />
+                <GitBranchPlus className="w-3.5 h-3.5" />
                 {agent.branch_name}
               </span>
             )}

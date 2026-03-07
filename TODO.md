@@ -6,6 +6,8 @@
 - Terminal sometimes has up to half a character mising at the bottom. Affected by resize-y, when resizing, this can get better / worse
 - Terminal should copy if there is text selected and if ctrl + c is pressed. This should copy the text, and clear the selection. Ctrl+C should still send Ctrl+C when there is no selection on the terminal. Ctrl+V should also paste, not Ctrl+Shift+V. Use Ctrl+Shift+V to actually send Ctrl+V to the term.
 
+- Add the ability to open a bash terminal for the container - new tab? in the agent mode. This job would be killed once the WebSocket connection was closed.
+
 - Syntax highlight Dockerfile as editing
 
 - System pre-prompt is filled out even if it is just the default - fix this

@@ -3,7 +3,7 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import { api } from '../stores/apiClient'
-import { RefreshIcon } from './icons'
+import { RefreshCw } from 'lucide-react'
 
 interface Props {
   agentId: string
@@ -160,7 +160,7 @@ export function AgentTerminal({ agentId, projectId, containerStatus, isEphemeral
           className="p-1 rounded hover:bg-gray-700 text-gray-400 hover:text-gray-200 transition-colors cursor-pointer"
           title="Refresh terminal"
         >
-          <RefreshIcon className="w-3.5 h-3.5" />
+          <RefreshCw className="w-3.5 h-3.5" />
         </button>
       </div>
       {/* xterm.js mount point */}

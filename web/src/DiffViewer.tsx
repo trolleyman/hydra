@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import hljs from 'highlight.js'
 import { api } from './stores/apiClient'
 import type { AgentResponse, CommitInfo, DiffFile, DiffResponse } from './api'
-import { FileAddedIcon, FileDeletedIcon, FileModifiedIcon, FileRenamedIcon, CalendarIcon, WarningIcon, ChevronDownIcon, ChevronRightIcon, ChevronLeftIcon, CheckIcon, SpinnerIcon } from './components/icons'
+import { Plus, Minus, SquareDot, Diff, Calendar, TriangleAlert, ChevronDown, ChevronRight, ChevronLeft, Check, LoaderCircle } from 'lucide-react'
 
 // ── Syntax highlighting helpers ───────────────────────────────────────────────
 
@@ -142,10 +142,10 @@ function buildSideBySide(hunkLines: DiffFile['hunks'][0]['lines']): SideBySideLi
 
 function ChangeTypeIcon({ type }: { type: string }) {
   switch (type) {
-    case 'added':   return <FileAddedIcon className="w-3.5 h-3.5 text-green-500 shrink-0" />
-    case 'deleted': return <FileDeletedIcon className="w-3.5 h-3.5 text-red-500 shrink-0" />
-    case 'renamed': return <FileRenamedIcon className="w-3.5 h-3.5 text-blue-500 shrink-0" />
-    default:        return <FileModifiedIcon className="w-3.5 h-3.5 text-yellow-500 shrink-0" />
+    case 'added':   return <Plus className="w-3.5 h-3.5 text-green-500 shrink-0" />
+    case 'deleted': return <Minus className="w-3.5 h-3.5 text-red-500 shrink-0" />
+    case 'renamed': return <Diff className="w-3.5 h-3.5 text-blue-500 shrink-0" />
+    default:        return <SquareDot className="w-3.5 h-3.5 text-yellow-500 shrink-0" />
   }
 }
 
@@ -475,12 +475,12 @@ function CommitSelector({
         onClick={() => setOpen((o) => !o)}
         className="flex items-center gap-1.5 h-7 px-2.5 rounded-md text-xs font-medium text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors cursor-pointer"
       >
-        <CalendarIcon className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+        <Calendar className="w-3.5 h-3.5 text-gray-400 shrink-0" />
         <span className="max-w-[180px] truncate">{label}</span>
         {hasUncommitted && (
-          <WarningIcon className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+          <TriangleAlert className="w-3.5 h-3.5 text-amber-500 shrink-0" />
         )}
-        <ChevronDownIcon className="w-3 h-3 text-gray-400 shrink-0" />
+        <ChevronDown className="w-3 h-3 text-gray-400 shrink-0" />
       </button>
 
       {open && (
@@ -493,11 +493,11 @@ function CommitSelector({
                 selected.type === 'full' ? 'bg-blue-50 dark:bg-blue-900/20' : ''
               }`}
             >
-              <ChevronRightIcon className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+              <ChevronRight className="w-3.5 h-3.5 text-gray-400 shrink-0" />
               <span className="font-medium text-gray-800 dark:text-gray-200">Full diff</span>
               <span className="text-gray-400 dark:text-gray-500 ml-auto">base → current</span>
               {selected.type === 'full' && (
-                <CheckIcon className="w-3 h-3 text-blue-500 shrink-0" />
+                <Check className="w-3 h-3 text-blue-500 shrink-0" />
               )}
             </button>
             <button
@@ -506,11 +506,11 @@ function CommitSelector({
                 selected.type === 'uncommitted' ? 'bg-blue-50 dark:bg-blue-900/20' : ''
               }`}
             >
-              <FileAddedIcon className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+              <Plus className="w-3.5 h-3.5 text-gray-400 shrink-0" />
               <span className="font-medium text-gray-800 dark:text-gray-200">Include uncommitted</span>
               <span className="text-gray-400 dark:text-gray-500 ml-auto">base → worktree</span>
               {selected.type === 'uncommitted' && (
-                <CheckIcon className="w-3 h-3 text-blue-500 shrink-0" />
+                <Check className="w-3 h-3 text-blue-500 shrink-0" />
               )}
             </button>
           </div>
@@ -534,7 +534,7 @@ function CommitSelector({
                   </span>
                   <span className="text-xs text-gray-700 dark:text-gray-300 leading-tight truncate">{c.message}</span>
                   {selected.type === 'commit' && selected.sha === c.sha && (
-                    <CheckIcon className="w-3 h-3 text-blue-500 shrink-0 mt-0.5" />
+                    <Check className="w-3 h-3 text-blue-500 shrink-0 mt-0.5" />
                   )}
                 </button>
               ))}
@@ -695,7 +695,7 @@ export function DiffViewer({
       {/* Conflict warning */}
       {diff?.merge_conflict && (
         <div className="mb-4 px-4 py-3 bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-900/50 rounded-lg flex items-start gap-3">
-          <WarningIcon className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
+          <TriangleAlert className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
           <div>
             <p className="text-sm font-semibold text-red-800 dark:text-red-400">Merge Conflict Detected</p>
             <p className="text-xs text-red-600 dark:text-red-500 mt-1">
@@ -708,7 +708,7 @@ export function DiffViewer({
       {/* Content */}
       {loadingDiff ? (
         <div className="flex items-center justify-center py-8 text-gray-400 dark:text-gray-500">
-          <SpinnerIcon className="w-4 h-4 animate-spin mr-2" />
+          <LoaderCircle className="w-4 h-4 animate-spin mr-2" />
           <span className="text-sm">Loading diff…</span>
         </div>
       ) : diffError ? (
@@ -765,7 +765,7 @@ export function DiffViewer({
                     disabled={singleFileIdx === 0}
                     className="flex items-center justify-center w-7 h-7 rounded-md border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors"
                   >
-                    <ChevronLeftIcon className="w-3.5 h-3.5" />
+                    <ChevronLeft className="w-3.5 h-3.5" />
                   </button>
                   <span className="text-xs text-gray-500 dark:text-gray-400">
                     {singleFileIdx + 1} / {diff.files.length}
@@ -775,7 +775,7 @@ export function DiffViewer({
                     disabled={singleFileIdx === diff.files.length - 1}
                     className="flex items-center justify-center w-7 h-7 rounded-md border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors"
                   >
-                    <ChevronRightIcon className="w-3.5 h-3.5" />
+                    <ChevronRight className="w-3.5 h-3.5" />
                   </button>
                 </div>
                 <FileDiff

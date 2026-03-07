@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { api } from '../stores/apiClient'
 import type { AgentResponse, SpawnAgentRequest } from '../api'
-import { BoltIcon, SpinnerIcon } from './icons'
+import { Zap, LoaderCircle } from 'lucide-react'
 
 type AgentTypeOption = 'claude' | 'gemini'
 
@@ -186,7 +186,7 @@ export function SpawnForm({
       <div className="w-full max-w-4xl">
         <div className="text-center mb-8">
           <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-gradient-to-br from-blue-500 to-purple-600 shadow-lg shadow-blue-500/30 mb-4">
-            <BoltIcon className="w-6 h-6 text-white" />
+            <Zap className="w-6 h-6 text-white" />
           </div>
           <h2 className="text-2xl font-bold bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 bg-clip-text text-transparent animate-gradient">
             Spawn an Agent
@@ -255,12 +255,12 @@ export function SpawnForm({
                   >
                     {loading ? (
                       <>
-                        <SpinnerIcon className="w-3.5 h-3.5 animate-spin" />
+                        <LoaderCircle className="w-3.5 h-3.5 animate-spin" />
                         Spawning…
                       </>
                     ) : (
                       <>
-                        <BoltIcon className="w-3.5 h-3.5" />
+                        <Zap className="w-3.5 h-3.5" />
                         Spawn Agent
                       </>
                     )}
