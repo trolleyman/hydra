@@ -359,7 +359,7 @@ func GetUncommittedSummary(projectRoot string) (*UncommittedSummary, error) {
 func HasUncommittedChanges(projectRoot string) (bool, error) {
 	s, err := GetUncommittedSummary(projectRoot)
 	if err != nil {
-		return false, err
+		return false, errtrace.Wrap(err)
 	}
 	return s.TrackedCount > 0, nil
 }
@@ -369,7 +369,7 @@ func HasUncommittedChanges(projectRoot string) (bool, error) {
 func GetConflictingFiles(projectRoot, baseRef, headRef string) ([]string, error) {
 	mergeBase, err := GetMergeBase(projectRoot, baseRef, headRef)
 	if err != nil {
-		return nil, err
+		return nil, errtrace.Wrap(err)
 	}
 
 	getNames := func(from, to string) (map[string]bool, error) {
@@ -388,11 +388,11 @@ func GetConflictingFiles(projectRoot, baseRef, headRef string) ([]string, error)
 
 	baseChanged, err := getNames(mergeBase, baseRef)
 	if err != nil {
-		return nil, err
+		return nil, errtrace.Wrap(err)
 	}
 	headChanged, err := getNames(mergeBase, headRef)
 	if err != nil {
-		return nil, err
+		return nil, errtrace.Wrap(err)
 	}
 
 	var conflicts []string
