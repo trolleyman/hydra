@@ -43,6 +43,14 @@ const (
 	NoNewline DiffLineType = "no_newline"
 )
 
+// Defines values for ErrorResponseError.
+const (
+	DockerConnect ErrorResponseError = "docker_connect"
+	InternalError ErrorResponseError = "internal_error"
+	NotFound      ErrorResponseError = "not_found"
+	Unauthorized  ErrorResponseError = "unauthorized"
+)
+
 // Defines values for MergeConflictErrorError.
 const (
 	MergeConflict MergeConflictErrorError = "merge_conflict"
@@ -247,9 +255,12 @@ type ErrorResponse struct {
 	// Details Human-readable error description
 	Details string `json:"details"`
 
-	// Error Machine-readable error type (e.g. internal_error, not_found, unauthorized)
-	Error string `json:"error"`
+	// Error Machine-readable error type (e.g. internal_error, not_found, unauthorized, docker_connect)
+	Error ErrorResponseError `json:"error"`
 }
+
+// ErrorResponseError Machine-readable error type (e.g. internal_error, not_found, unauthorized, docker_connect)
+type ErrorResponseError string
 
 // MergeConflictError defines model for MergeConflictError.
 type MergeConflictError struct {
@@ -301,6 +312,9 @@ type StatusResponse struct {
 
 	// DevRestartAvailable Whether /api/dev/restart is available (dev mode only)
 	DevRestartAvailable *bool `json:"dev_restart_available,omitempty"`
+
+	// DockerError Error message if there is an issue connecting to Docker
+	DockerError *string `json:"docker_error"`
 
 	// ProjectRoot Absolute path to the default project root (server CWD)
 	ProjectRoot *string `json:"project_root,omitempty"`

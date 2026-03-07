@@ -15,7 +15,7 @@ import (
 )
 
 // RunDockerPoller runs a polling loop that syncs Docker container state into the DB every 5 seconds.
-func RunDockerPoller(ctx context.Context, cli *dockerclient.Client, store *db.Store, projectRoot string) {
+func RunDockerPoller(ctx context.Context, cli *dockerclient.Client, store *db.Store, projectRoot string, onDockerError func(error)) {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 	for {
@@ -23,22 +23,28 @@ func RunDockerPoller(ctx context.Context, cli *dockerclient.Client, store *db.St
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			RunDockerPollerOnce(ctx, cli, store, projectRoot)
+			RunDockerPollerOnce(ctx, cli, store, projectRoot, onDockerError)
 		}
 	}
 }
 
 // RunDockerPollerOnce performs a single Docker polling cycle.
-func RunDockerPollerOnce(ctx context.Context, cli *dockerclient.Client, store *db.Store, projectRoot string) {
-	pollDockerOnce(ctx, cli, store, projectRoot)
+func RunDockerPollerOnce(ctx context.Context, cli *dockerclient.Client, store *db.Store, projectRoot string, onDockerError func(error)) {
+	pollDockerOnce(ctx, cli, store, projectRoot, onDockerError)
 }
 
-func pollDockerOnce(ctx context.Context, cli *dockerclient.Client, store *db.Store, projectRoot string) {
+func pollDockerOnce(ctx context.Context, cli *dockerclient.Client, store *db.Store, projectRoot string, onDockerError func(error)) {
 	// Get all running Docker containers.
 	dockerAgents, err := docker.ListAgents(ctx, cli)
 	if err != nil {
 		log.Printf("warn: docker poller: list agents: %v", err)
+		if onDockerError != nil {
+			onDockerError(err)
+		}
 		return
+	}
+	if onDockerError != nil {
+		onDockerError(nil)
 	}
 	dockerByID := make(map[string]docker.Agent, len(dockerAgents))
 	for _, a := range dockerAgents {
