@@ -59,14 +59,7 @@ func runServer(_ *cobra.Command, _ []string) error {
 	}
 	log.Printf("Default project: %s (%s)", defaultProject.Name, defaultProject.ID)
 
-	// Run immediate first cycles of both pollers before accepting HTTP requests.
 	ctx := context.Background()
-	heads.RunDockerPollerOnce(ctx, dockerClient, store, projectRoot)
-	heads.RunJSONStatusPollerOnce(store, projectRoot)
-
-	// Start background pollers.
-	go heads.RunDockerPoller(ctx, dockerClient, store, projectRoot)
-	go heads.RunJSONStatusPoller(ctx, store, projectRoot)
 
 	server := &httppkg.Server{
 		WorktreesDir:      worktreesDir,
@@ -78,6 +71,14 @@ func runServer(_ *cobra.Command, _ []string) error {
 		StartTime:         time.Now(),
 		DevRestartEnabled: os.Getenv("HYDRA_DEV_RESTART") == "1",
 	}
+
+	// Run immediate first cycles of both pollers before accepting HTTP requests.
+	heads.RunDockerPollerOnce(ctx, dockerClient, store, projectRoot, server.SetDockerError)
+	heads.RunJSONStatusPollerOnce(store, projectRoot)
+
+	// Start background pollers.
+	go heads.RunDockerPoller(ctx, dockerClient, store, projectRoot, server.SetDockerError)
+	go heads.RunJSONStatusPoller(ctx, store, projectRoot)
 
 	// Build the main mux
 	mux := http.NewServeMux()

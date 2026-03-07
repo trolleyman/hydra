@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	dockerclient "github.com/docker/docker/client"
@@ -38,6 +39,24 @@ type Server struct {
 	DB                *db.Store
 	StartTime         time.Time
 	DevRestartEnabled bool // set when running under mage dev / mage DevAutoReload
+
+	lastDockerError atomic.Value // holds string
+}
+
+func (s *Server) SetDockerError(err error) {
+	if err == nil {
+		s.lastDockerError.Store("")
+	} else {
+		s.lastDockerError.Store(err.Error())
+	}
+}
+
+func (s *Server) GetDockerError() string {
+	v := s.lastDockerError.Load()
+	if v == nil {
+		return ""
+	}
+	return v.(string)
 }
 
 // NewHandler creates a handler with routing matching the OpenAPI spec.
@@ -121,10 +140,17 @@ func (s *Server) ListAgents(ctx context.Context, request api.ListAgentsRequestOb
 	projectRoot := s.resolveProjectRoot(request.Params.ProjectId)
 	headList, err := heads.ListHeads(ctx, s.DockerClient, s.DB, projectRoot)
 	if err != nil {
+		errStr := err.Error()
+		errorType := api.InternalError
+		if dockerclient.IsErrConnectionFailed(err) || strings.Contains(errStr, "error during connect") {
+			errorType = api.DockerConnect
+			errStr = "Error connecting to Docker: " + errStr
+		}
+
 		return api.ListAgents500JSONResponse{
 			Code:    500,
-			Error:   "internal_error",
-			Details: err.Error(),
+			Error:   errorType,
+			Details: errStr,
 		}, nil
 	}
 	resp := make(api.ListAgents200JSONResponse, len(headList))
@@ -159,8 +185,19 @@ func (s *Server) GetStatus(_ context.Context, _ api.GetStatusRequestObject) (api
 	projectRoot := s.ProjectRoot
 	defaultProjectID := s.DefaultProject.ID
 	devRestartAvailable := s.DevRestartEnabled
+
+	var dockerErr *string
+	if lastErr := s.GetDockerError(); lastErr != "" {
+		errStr := lastErr
+		if strings.Contains(errStr, "error during connect") {
+			errStr = "Error connecting to Docker: " + errStr
+		}
+		dockerErr = &errStr
+	}
+
 	return api.GetStatus200JSONResponse(api.StatusResponse{
 		Status:              &status,
+		DockerError:         dockerErr,
 		Version:             &v,
 		UptimeSeconds:       &uptime,
 		ProjectRoot:         &projectRoot,

@@ -525,7 +525,8 @@ components:
       properties:
         error:
           type: string
-          description: "Machine-readable error type (e.g. internal_error, not_found, unauthorized)"
+          description: "Machine-readable error type (e.g. internal_error, not_found, unauthorized, docker_connect)"
+          enum: [not_found, unauthorized, internal_error, docker_connect]
         code:
           type: integer
           description: "HTTP status code"
@@ -548,6 +549,10 @@ components:
         status:
           type: string
           example: "OK"
+        docker_error:
+          type: string
+          nullable: true
+          description: "Error message if there is an issue connecting to Docker"
         version:
           type: string
           example: "1.0.0"
