@@ -1,5 +1,6 @@
 import { createFileRoute, Link } from '@tanstack/react-router'
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState, useRef, useMemo, useLayoutEffect } from 'react'
+import hljs from 'highlight.js'
 import { api } from '../stores/apiClient'
 import { useProjectStore } from '../stores/projectStore'
 import type { ConfigResponse, AgentConfig, AgentResponse } from '../api'
@@ -336,6 +337,53 @@ function SettingsPage() {
   )
 }
 
+function highlightDockerfile(code: string): string {
+  try {
+    return hljs.highlight(code, { language: 'dockerfile', ignoreIllegals: true }).value
+  } catch {
+    return code.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  }
+}
+
+function HighlightedDockerfileEditor({
+  value,
+  onChange,
+  placeholder,
+}: {
+  value: string
+  onChange: (val: string) => void
+  placeholder?: string
+}) {
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  useLayoutEffect(() => {
+    const ta = textareaRef.current
+    if (!ta) return
+    ta.style.height = 'auto'
+    ta.style.height = Math.max(300, ta.scrollHeight) + 'px'
+  }, [value])
+
+  const highlighted = useMemo(() => highlightDockerfile(value), [value])
+
+  return (
+    <div className="relative">
+      <pre
+        aria-hidden
+        className="absolute inset-0 m-0 pointer-events-none font-mono text-sm px-3 pb-3 leading-relaxed whitespace-pre-wrap break-words overflow-hidden bg-transparent hljs"
+        dangerouslySetInnerHTML={{ __html: highlighted + '\n' }}
+      />
+      <textarea
+        ref={textareaRef}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        className="relative w-full min-h-[300px] text-sm px-3 pb-3 bg-transparent text-transparent caret-gray-800 dark:caret-gray-100 font-mono leading-relaxed resize-none focus:outline-none placeholder-gray-300 dark:placeholder-gray-600"
+        spellCheck={false}
+      />
+    </div>
+  )
+}
+
 const DOCKERFILE_LABELS: Record<string, string> = {
   base: 'Base',
   claude: 'Claude',
@@ -368,9 +416,10 @@ function DefaultDockerfilesSection({ dockerfiles }: { dockerfiles: Record<string
           </div>
           <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 overflow-hidden shadow-inner">
             <div className="max-h-64 overflow-y-auto">
-              <pre className="px-4 py-3 text-xs font-mono text-gray-700 dark:text-gray-300 whitespace-pre leading-relaxed">
-                {dockerfiles[key]}
-              </pre>
+              <pre
+                className="px-4 py-3 text-xs font-mono whitespace-pre leading-relaxed hljs bg-transparent"
+                dangerouslySetInnerHTML={{ __html: highlightDockerfile(dockerfiles[key]) }}
+              />
             </div>
           </div>
         </div>
@@ -395,7 +444,6 @@ function ConfigForm({
   selectedProject?: ProjectInfo
 }) {
   const [template, setTemplate] = useState('none')
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   function handleTemplateChange(name: string) {
     setTemplate(name)
@@ -567,17 +615,14 @@ function ConfigForm({
             </select>
           </div>
         </div>
-        <div className="relative group rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 focus-within:ring-2 focus-within:ring-blue-500/20 focus-within:border-blue-500 transition-all shadow-inner">
+        <div className="relative group rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 focus-within:ring-2 focus-within:ring-blue-500/20 focus-within:border-blue-500 transition-all shadow-inner overflow-hidden">
           <div className="px-3 pt-3 text-blue-500 dark:text-blue-400 font-mono text-sm pointer-events-none opacity-60">
             FROM {baseImage}
           </div>
-          <textarea
-            ref={textareaRef}
+          <HighlightedDockerfileEditor
             value={value.dockerfile_contents || ''}
-            onChange={(e) => onChange({ ...value, dockerfile_contents: e.target.value || null })}
+            onChange={(val) => onChange({ ...value, dockerfile_contents: val || null })}
             placeholder={inherited?.dockerfile_contents || '# Add your custom Dockerfile instructions here\nRUN apt-get install -y ...'}
-            className="w-full min-h-[300px] text-sm px-3 pb-3 bg-transparent text-gray-800 dark:text-gray-100 placeholder-gray-300 dark:placeholder-gray-600 focus:outline-none font-mono leading-relaxed resize-y"
-            spellCheck={false}
           />
         </div>
       </div>
