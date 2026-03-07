@@ -576,7 +576,7 @@ func getAgentBinds(agentType AgentType, projectRoot, id, containerHome string, s
 		if data, err := os.ReadFile(claudeSettingsJson); err == nil {
 			existing = data
 		}
-		settingsData, err := buildClaudeSettings(existing, translateHostPathToContainer(worktreePath))
+		settingsData, err := buildClaudeSettings(existing)
 		if err != nil {
 			return nil, errtrace.Wrap(err)
 		}
@@ -585,10 +585,16 @@ func getAgentBinds(agentType AgentType, projectRoot, id, containerHome string, s
 		}
 
 		claudeJson := filepath.Join(cacheDir, ".claude.json")
-		if _, err := os.Stat(claudeJson); os.IsNotExist(err) {
-			if err = os.WriteFile(claudeJson, []byte("{}"), 0644); err != nil {
-				return nil, errtrace.Wrap(err)
-			}
+		var existingClaudeJson []byte
+		if data, err := os.ReadFile(claudeJson); err == nil {
+			existingClaudeJson = data
+		}
+		claudeJsonData, err := buildClaudeConfig(existingClaudeJson, translateHostPathToContainer(worktreePath))
+		if err != nil {
+			return nil, errtrace.Wrap(err)
+		}
+		if err = os.WriteFile(claudeJson, claudeJsonData, 0644); err != nil {
+			return nil, errtrace.Wrap(err)
 		}
 
 		for _, pair := range []struct{ host, container string }{
@@ -718,7 +724,7 @@ func buildHooksMap(cmd string, events []string) map[string]interface{} {
 }
 
 // buildClaudeSettings generates the settings.json content with hook configuration for Claude Code.
-func buildClaudeSettings(existing []byte, containerWorktreePath string) ([]byte, error) {
+func buildClaudeSettings(existing []byte) ([]byte, error) {
 	hooks := buildHooksMap("$HOME/.hydra/hydra trigger-hook claude", []string{
 		"SessionStart",
 		"UserPromptSubmit",
@@ -743,7 +749,23 @@ func buildClaudeSettings(existing []byte, containerWorktreePath string) ([]byte,
 	settings["skipDangerousModePermissionPrompt"] = true
 	settings["hooks"] = hooks
 
-	projects, _ := settings["projects"].(map[string]interface{})
+	data, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		return nil, errtrace.Wrap(fmt.Errorf("marshal claude settings: %w", err))
+	}
+	return data, nil
+}
+
+// buildClaudeConfig generates the .claude.json content with project trust settings.
+func buildClaudeConfig(existing []byte, containerWorktreePath string) ([]byte, error) {
+	config := make(map[string]interface{})
+	if len(existing) > 0 {
+		if err := json.Unmarshal(existing, &config); err != nil {
+			log.Printf("warn: failed to unmarshal existing claude config: %v", err)
+		}
+	}
+
+	projects, _ := config["projects"].(map[string]interface{})
 	if projects == nil {
 		projects = make(map[string]interface{})
 	}
@@ -753,11 +775,11 @@ func buildClaudeSettings(existing []byte, containerWorktreePath string) ([]byte,
 	}
 	project["hasTrustDialogAccepted"] = true
 	projects[containerWorktreePath] = project
-	settings["projects"] = projects
+	config["projects"] = projects
 
-	data, err := json.MarshalIndent(settings, "", "  ")
+	data, err := json.MarshalIndent(config, "", "  ")
 	if err != nil {
-		return nil, errtrace.Wrap(fmt.Errorf("marshal claude settings: %w", err))
+		return nil, errtrace.Wrap(fmt.Errorf("marshal claude config: %w", err))
 	}
 	return data, nil
 }

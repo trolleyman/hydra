@@ -67,7 +67,7 @@ func (m *Manager) load() error {
 		}
 	}
 	if changed {
-		return m.save()
+		return errtrace.Wrap(m.save())
 	}
 	return nil
 }
