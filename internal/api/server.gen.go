@@ -291,6 +291,9 @@ type ProjectInfo struct {
 
 	// Path Absolute filesystem path to the project root
 	Path string `json:"path"`
+
+	// Uuid Persistent project UUID
+	Uuid string `json:"uuid"`
 }
 
 // SpawnAgentRequest defines model for SpawnAgentRequest.
@@ -460,6 +463,9 @@ type AddProjectJSONRequestBody = AddProjectRequest
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
+	// Chrome DevTools workspace configuration
+	// (GET /.well-known/appspecific/com.chrome.devtools.json)
+	GetDevToolsConfig(w http.ResponseWriter, r *http.Request)
 	// Kill a Hydra agent by ID
 	// (DELETE /api/agent/{id})
 	KillAgent(w http.ResponseWriter, r *http.Request, id string, params KillAgentParams)
@@ -518,6 +524,20 @@ type ServerInterfaceWrapper struct {
 }
 
 type MiddlewareFunc func(http.Handler) http.Handler
+
+// GetDevToolsConfig operation middleware
+func (siw *ServerInterfaceWrapper) GetDevToolsConfig(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetDevToolsConfig(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
 
 // KillAgent operation middleware
 func (siw *ServerInterfaceWrapper) KillAgent(w http.ResponseWriter, r *http.Request) {
@@ -1117,6 +1137,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 		ErrorHandlerFunc:   options.ErrorHandlerFunc,
 	}
 
+	m.HandleFunc("GET "+options.BaseURL+"/.well-known/appspecific/com.chrome.devtools.json", wrapper.GetDevToolsConfig)
 	m.HandleFunc("DELETE "+options.BaseURL+"/api/agent/{id}", wrapper.KillAgent)
 	m.HandleFunc("GET "+options.BaseURL+"/api/agent/{id}", wrapper.GetAgent)
 	m.HandleFunc("GET "+options.BaseURL+"/api/agent/{id}/commits", wrapper.GetAgentCommits)
@@ -1135,6 +1156,36 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("GET "+options.BaseURL+"/health", wrapper.CheckHealth)
 
 	return m
+}
+
+type GetDevToolsConfigRequestObject struct {
+}
+
+type GetDevToolsConfigResponseObject interface {
+	VisitGetDevToolsConfigResponse(w http.ResponseWriter) error
+}
+
+type GetDevToolsConfig200JSONResponse struct {
+	Workspace *struct {
+		Root *string `json:"root,omitempty"`
+		Uuid *string `json:"uuid,omitempty"`
+	} `json:"workspace,omitempty"`
+}
+
+func (response GetDevToolsConfig200JSONResponse) VisitGetDevToolsConfigResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetDevToolsConfig403JSONResponse ErrorResponse
+
+func (response GetDevToolsConfig403JSONResponse) VisitGetDevToolsConfigResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+
+	return json.NewEncoder(w).Encode(response)
 }
 
 type KillAgentRequestObject struct {
@@ -1673,6 +1724,9 @@ func (response CheckHealth200TextResponse) VisitCheckHealthResponse(w http.Respo
 
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
+	// Chrome DevTools workspace configuration
+	// (GET /.well-known/appspecific/com.chrome.devtools.json)
+	GetDevToolsConfig(ctx context.Context, request GetDevToolsConfigRequestObject) (GetDevToolsConfigResponseObject, error)
 	// Kill a Hydra agent by ID
 	// (DELETE /api/agent/{id})
 	KillAgent(ctx context.Context, request KillAgentRequestObject) (KillAgentResponseObject, error)
@@ -1750,6 +1804,30 @@ type strictHandler struct {
 	ssi         StrictServerInterface
 	middlewares []StrictMiddlewareFunc
 	options     StrictHTTPServerOptions
+}
+
+// GetDevToolsConfig operation middleware
+func (sh *strictHandler) GetDevToolsConfig(w http.ResponseWriter, r *http.Request) {
+	var request GetDevToolsConfigRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetDevToolsConfig(ctx, request.(GetDevToolsConfigRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetDevToolsConfig")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetDevToolsConfigResponseObject); ok {
+		if err := validResponse.VisitGetDevToolsConfigResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
 }
 
 // KillAgent operation middleware

@@ -91,6 +91,9 @@ func runServer(_ *cobra.Command, _ []string) error {
 	// WebSocket terminal endpoint
 	mux.HandleFunc("/ws/agent/", server.HandleTerminalWS)
 
+	// API routes for well-known and specific paths
+	mux.Handle("/.well-known/", apiHandler)
+
 	registerFrontend(mux)
 
 	addr := "localhost:8080"
