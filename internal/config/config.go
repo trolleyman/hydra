@@ -236,6 +236,16 @@ func writeAgentConfigFields(buf *strings.Builder, cfg AgentConfig) {
 	if cfg.DockerfileContents != nil {
 		buf.WriteString("dockerfile_contents = " + tomlStringValue(*cfg.DockerfileContents) + "\n")
 	}
+	if cfg.DockerignoreContents != nil {
+		buf.WriteString("dockerignore_contents = " + tomlStringValue(*cfg.DockerignoreContents) + "\n")
+	}
+	if len(cfg.SharedMounts) > 0 {
+		parts := make([]string, len(cfg.SharedMounts))
+		for i, m := range cfg.SharedMounts {
+			parts[i] = tomlStringValue(m)
+		}
+		buf.WriteString("shared_mounts = [" + strings.Join(parts, ", ") + "]\n")
+	}
 	if cfg.Context != nil {
 		buf.WriteString("context = " + tomlStringValue(*cfg.Context) + "\n")
 	}
@@ -251,6 +261,8 @@ func marshalConfig(cfg Config) string {
 
 	defaultsEmpty := cfg.Defaults.Dockerfile == nil &&
 		cfg.Defaults.DockerfileContents == nil &&
+		cfg.Defaults.DockerignoreContents == nil &&
+		len(cfg.Defaults.SharedMounts) == 0 &&
 		cfg.Defaults.Context == nil &&
 		cfg.Defaults.PrePrompt == nil
 

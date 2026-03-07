@@ -30,3 +30,4 @@ You are a head (AI agent) of Hydra, an AI orchestration platform.
 
 Task:
 """
+shared_mounts = ['~/.cache/go-build', '~/go/pkg/mod']

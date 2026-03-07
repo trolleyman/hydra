@@ -4,7 +4,7 @@ import type { AgentResponse } from '../api'
 import { AgentTerminal } from './AgentTerminal'
 import { DiffViewer } from '../DiffViewer'
 import { formatStartedAgo } from './AgentComponents'
-import { LoaderCircle, Merge, GitMerge, RefreshCw, Trash2, GitBranchPlus } from 'lucide-react'
+import { LoaderCircle, Merge, Trash2, Tag, RotateCcw, RefreshCcw, FolderSync } from 'lucide-react'
 
 export function AgentDetail({
   agent,
@@ -137,7 +137,7 @@ export function AgentDetail({
               {updating ? (
                 <LoaderCircle className="w-3 h-3 animate-spin" />
               ) : (
-                <GitMerge className="w-3.5 h-3.5 scale-x-[-1]" />
+                <FolderSync className="w-3.5 h-3.5" />
               )}
             </button>
             <button
@@ -149,7 +149,7 @@ export function AgentDetail({
               {restarting ? (
                 <LoaderCircle className="w-3 h-3 animate-spin" />
               ) : (
-                <RefreshCw className="w-3.5 h-3.5" />
+                <RotateCcw className="w-3.5 h-3.5" />
               )}
             </button>
             <button
@@ -174,7 +174,7 @@ export function AgentDetail({
             <span className="text-gray-300 dark:text-gray-600">|</span>
             {agent.branch_name && (
               <span className="text-xs font-mono text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
-                <GitBranchPlus className="w-3.5 h-3.5" />
+                <Tag className="w-3.5 h-3.5" />
                 {agent.branch_name}
               </span>
             )}
