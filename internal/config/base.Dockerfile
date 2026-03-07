@@ -1,7 +1,8 @@
 # syntax=docker/dockerfile:1
-FROM debian:slim
+FROM debian:stable-slim
 
 # Install base utilities and helpful tools
+ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y \
         git \
         curl \
