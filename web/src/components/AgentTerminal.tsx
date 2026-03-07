@@ -95,7 +95,7 @@ export function AgentTerminal({ agentId, projectId, isEphemeral, onRefresh, onSt
           ws.send(JSON.stringify({ type: 'resize', cols, rows }))
           lastSentSize.current = { cols, rows }
         }
-      }, 50)
+      }, 1)
     }
 
     ws.onmessage = (e: MessageEvent) => {
