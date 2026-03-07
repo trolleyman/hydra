@@ -1,11 +1,11 @@
-import { createFileRoute, Link } from '@tanstack/react-router'
+import { createFileRoute, Link, useBlocker } from '@tanstack/react-router'
 import { useEffect, useState, useRef, useMemo, useLayoutEffect } from 'react'
 import hljs from 'highlight.js'
 import { api } from '../stores/apiClient'
 import { useProjectStore } from '../stores/projectStore'
 import type { ConfigResponse, AgentConfig, AgentResponse } from '../api'
 import { AgentTerminal } from '../components/AgentTerminal'
-import { X, Layers, Monitor, Sparkles, FileText, Plus, Trash2 } from 'lucide-react'
+import { X, Layers, Monitor, Sparkles, FileText, Plus, Trash2, AlertCircle, Save } from 'lucide-react'
 import { InfoTooltip } from '../components/InfoTooltip'
 import type { ProjectInfo } from '../api'
 
@@ -40,6 +40,7 @@ const DOCKERFILE_TEMPLATES: Record<string, { label: string; content: string; sha
 function SettingsPage() {
   const { selectedProjectId, projects } = useProjectStore()
   const [config, setConfig] = useState<ConfigResponse | null>(null)
+  const [baseConfig, setBaseConfig] = useState<string | null>(null)
   const [inheritedConfig, setInheritedConfig] = useState<ConfigResponse | null>(null)
   const [scope, setScope] = useState<ConfigScope>('project')
   const [activeSection, setActiveSection] = useState<SettingsSection>('all')
@@ -51,12 +52,41 @@ function SettingsPage() {
 
   const selectedProject = projects.find(p => p.id === selectedProjectId)
 
+  const hasUnsavedChanges = useMemo(() => {
+    if (!config || !baseConfig) return false
+    return JSON.stringify(config) !== baseConfig
+  }, [config, baseConfig])
+
+  // Block navigation if there are unsaved changes
+  useBlocker({
+    shouldBlockFn: () => {
+      if (hasUnsavedChanges) {
+        return !window.confirm('You have unsaved changes. Discard them?')
+      }
+      return false
+    },
+    enableBeforeUnload: true,
+  })
+
+  // Warn on browser reload/close
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (hasUnsavedChanges) {
+        e.preventDefault()
+        e.returnValue = ''
+      }
+    }
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+  }, [hasUnsavedChanges])
+
   useEffect(() => {
     async function fetchConfig() {
       setLoading(true)
       try {
         const editCfg = await api.default.getConfig(selectedProjectId ?? undefined, scope)
         setConfig(editCfg)
+        setBaseConfig(JSON.stringify(editCfg))
         if (scope === 'project') {
           const userCfg = await api.default.getConfig(selectedProjectId ?? undefined, 'user')
           setInheritedConfig(userCfg)
@@ -69,7 +99,14 @@ function SettingsPage() {
         setLoading(false)
       }
     }
-    fetchConfig()
+
+    if (hasUnsavedChanges) {
+      if (window.confirm('You have unsaved changes. Discard them?')) {
+        fetchConfig()
+      }
+    } else {
+      fetchConfig()
+    }
   }, [selectedProjectId, scope])
 
   async function handleSave() {
@@ -77,6 +114,7 @@ function SettingsPage() {
     setSaving(true)
     try {
       await api.default.saveConfig(config, selectedProjectId ?? undefined, scope)
+      setBaseConfig(JSON.stringify(config))
       alert(`Configuration saved to ${scope} successfully!`)
     } catch (err) {
       alert(`Failed to save configuration: ${err}`)
@@ -109,13 +147,26 @@ function SettingsPage() {
   return (
     <div className="flex-1 overflow-auto bg-gray-50 dark:bg-gray-900 p-8">
       <div className="max-w-4xl mx-auto">
-        <div className="flex items-center justify-between mb-8">
-          <div>
-            <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">Settings</h1>
-            <div className="flex items-center gap-4 mt-2">
+        <div className="flex items-start justify-between mb-8">
+          <div className="flex-1">
+            <div className="flex items-center gap-4 mb-2">
+              <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">Settings</h1>
+              {hasUnsavedChanges && (
+                <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400 text-xs font-bold border border-orange-200 dark:border-orange-800 animate-pulse">
+                  <AlertCircle className="w-3.5 h-3.5" />
+                  Unsaved Changes
+                </div>
+              )}
+            </div>
+            <div className="flex items-center gap-4">
               <div className="flex p-1 bg-gray-200 dark:bg-gray-800 rounded-lg shrink-0">
                 <button
-                  onClick={() => setScope('project')}
+                  onClick={() => {
+                    if (hasUnsavedChanges && !window.confirm('You have unsaved changes. Discard them?')) {
+                      return
+                    }
+                    setScope('project')
+                  }}
                   className={`px-3 py-1 text-xs font-medium rounded-md transition-all cursor-pointer ${scope === 'project'
                       ? 'bg-white dark:bg-gray-700 text-blue-600 dark:text-blue-400 shadow-sm'
                       : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
@@ -124,7 +175,12 @@ function SettingsPage() {
                   Project: {selectedProject?.name || 'Current'}
                 </button>
                 <button
-                  onClick={() => setScope('user')}
+                  onClick={() => {
+                    if (hasUnsavedChanges && !window.confirm('You have unsaved changes. Discard them?')) {
+                      return
+                    }
+                    setScope('user')
+                  }}
                   className={`px-3 py-1 text-xs font-medium rounded-md transition-all cursor-pointer ${scope === 'user'
                       ? 'bg-white dark:bg-gray-700 text-blue-600 dark:text-blue-400 shadow-sm'
                       : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
@@ -140,9 +196,23 @@ function SettingsPage() {
               </p>
             </div>
           </div>
-          <Link to="/" className="text-sm text-blue-500 hover:text-blue-700 font-medium shrink-0">
-            ← Back to Agents
-          </Link>
+          <div className="flex flex-col items-end gap-3">
+            <Link to="/" className="text-sm text-blue-500 hover:text-blue-700 font-medium shrink-0">
+              ← Back to Agents
+            </Link>
+            <button
+              onClick={handleSave}
+              disabled={saving || !hasUnsavedChanges}
+              className={`flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-bold transition-all shadow-lg active:scale-95 cursor-pointer ${
+                hasUnsavedChanges 
+                  ? 'bg-blue-600 text-white hover:bg-blue-700 shadow-blue-500/25' 
+                  : 'bg-gray-200 dark:bg-gray-700 text-gray-400 dark:text-gray-500 shadow-none cursor-not-allowed opacity-60'
+              }`}
+            >
+              <Save className="w-4 h-4" />
+              {saving ? 'Saving...' : 'Save'}
+            </button>
+          </div>
         </div>
 
         <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden flex flex-col">
@@ -327,17 +397,6 @@ function SettingsPage() {
               </div>
             )}
           </div>
-        </div>
-
-        {/* Action Bar */}
-        <div className="flex items-center justify-end gap-3 pt-6">
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            className="px-6 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-500/25 active:scale-95 disabled:opacity-50 cursor-pointer"
-          >
-            {saving ? 'Saving...' : 'Save'}
-          </button>
         </div>
 
         {/* Test Terminal Modal */}
