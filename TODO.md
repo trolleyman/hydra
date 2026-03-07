@@ -6,6 +6,7 @@
     - When loading, make the diffs become grayed out, not remove them altogether - as then there's less jumping around by a refresh. (refresh -> clear whole screen -> scroll move -> put diffs all back)
     - Organise changed files into folders, both in a tree structure and grouped by folder. Make this an option too - by default a tree. Also - for the other options - add them into a pop up settings (not dialog, don't freeze the whole screen). Add checkboxes for ignore whitespace, side by side, and one file at a time.
     - Add copy to clipboard function for paths.
+    - ^DONE^?
     - TODO
         - Commits aren't refreshed after first load, but should be if the refresh button is pressed (or if a refresh is triggered by another way)
         - Make sidebar and header of current file sticky to the top of the screen - when scrolling down it should stick to the top, and the changed files should therefore be scrollable
