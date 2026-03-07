@@ -20,6 +20,7 @@ export default defineConfig({
     react(),
     tailwindcss(),
   ],
+  clearScreen: false,
   server: {
     port: devPort,
     proxy: {
