@@ -2,7 +2,6 @@ package http
 
 import (
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -59,7 +58,7 @@ func (s *SimulationServer) AddProject(w http.ResponseWriter, r *http.Request) {
 	api.WriteError(w, http.StatusNotImplemented, "Not implemented in simulation mode")
 }
 
-func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, params api.ListAgentsParams) {
+func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, projectId string) {
 	createdAt1 := time.Now().Add(-1 * time.Hour).Unix()
 	createdAt2 := time.Now().Add(-2 * time.Hour).Unix()
 
@@ -97,7 +96,7 @@ func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, pa
 	api.WriteJSON(w, http.StatusOK, resp)
 }
 
-func (s *SimulationServer) GetAgent(w http.ResponseWriter, r *http.Request, id string, params api.GetAgentParams) {
+func (s *SimulationServer) GetAgent(w http.ResponseWriter, r *http.Request, projectId string, id string) {
 	if id == "agent-1" {
 		createdAt := time.Now().Add(-1 * time.Hour).Unix()
 		api.WriteJSON(w, http.StatusOK, api.AgentResponse{
@@ -118,27 +117,27 @@ func (s *SimulationServer) GetAgent(w http.ResponseWriter, r *http.Request, id s
 	api.WriteError(w, http.StatusNotFound, "Agent not found")
 }
 
-func (s *SimulationServer) SpawnAgent(w http.ResponseWriter, r *http.Request, params api.SpawnAgentParams) {
+func (s *SimulationServer) SpawnAgent(w http.ResponseWriter, r *http.Request, projectId string) {
 	api.WriteError(w, http.StatusNotImplemented, "Not implemented in simulation mode")
 }
 
-func (s *SimulationServer) KillAgent(w http.ResponseWriter, r *http.Request, id string, params api.KillAgentParams) {
+func (s *SimulationServer) KillAgent(w http.ResponseWriter, r *http.Request, projectId string, id string) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (s *SimulationServer) RestartAgent(w http.ResponseWriter, r *http.Request, id string, params api.RestartAgentParams) {
+func (s *SimulationServer) RestartAgent(w http.ResponseWriter, r *http.Request, projectId string, id string) {
 	api.WriteError(w, http.StatusNotImplemented, "Not implemented in simulation mode")
 }
 
-func (s *SimulationServer) MergeAgent(w http.ResponseWriter, r *http.Request, id string, params api.MergeAgentParams) {
+func (s *SimulationServer) MergeAgent(w http.ResponseWriter, r *http.Request, projectId string, id string) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (s *SimulationServer) UpdateAgentFromBase(w http.ResponseWriter, r *http.Request, id string, params api.UpdateAgentFromBaseParams) {
+func (s *SimulationServer) UpdateAgentFromBase(w http.ResponseWriter, r *http.Request, projectId string, id string) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (s *SimulationServer) GetAgentCommits(w http.ResponseWriter, r *http.Request, id string, params api.GetAgentCommitsParams) {
+func (s *SimulationServer) GetAgentCommits(w http.ResponseWriter, r *http.Request, projectId string, id string) {
 	if id == "agent-1" {
 		resp := api.GetAgentCommits200JSONResponse{
 			{
@@ -184,7 +183,7 @@ func (s *SimulationServer) GetAgentCommits(w http.ResponseWriter, r *http.Reques
 	api.WriteJSON(w, http.StatusOK, api.GetAgentCommits200JSONResponse{})
 }
 
-func (s *SimulationServer) GetAgentDiff(w http.ResponseWriter, r *http.Request, id string, params api.GetAgentDiffParams) {
+func (s *SimulationServer) GetAgentDiff(w http.ResponseWriter, r *http.Request, projectId string, id string, params api.GetAgentDiffParams) {
 	if id == "agent-2" {
 		// Mock uncommitted changes
 		uncommitted := true
@@ -345,7 +344,7 @@ func (s *SimulationServer) GetAgentDiff(w http.ResponseWriter, r *http.Request, 
 	api.WriteJSON(w, http.StatusOK, api.DiffResponse{Files: []api.DiffFile{}})
 }
 
-func (s *SimulationServer) GetAgentDiffFiles(w http.ResponseWriter, r *http.Request, id string, params api.GetAgentDiffFilesParams) {
+func (s *SimulationServer) GetAgentDiffFiles(w http.ResponseWriter, r *http.Request, projectId string, id string, params api.GetAgentDiffFilesParams) {
 	if id == "agent-1" {
 		resp := api.DiffResponse{
 			Files: []api.DiffFile{
@@ -361,11 +360,11 @@ func (s *SimulationServer) GetAgentDiffFiles(w http.ResponseWriter, r *http.Requ
 	api.WriteJSON(w, http.StatusOK, api.DiffResponse{Files: []api.DiffFile{}})
 }
 
-func (s *SimulationServer) SendAgentInput(w http.ResponseWriter, r *http.Request, id string, params api.SendAgentInputParams) {
+func (s *SimulationServer) SendAgentInput(w http.ResponseWriter, r *http.Request, projectId string, id string) {
 	w.WriteHeader(http.StatusOK)
 }
 
-func (s *SimulationServer) GetConfig(w http.ResponseWriter, r *http.Request, params api.GetConfigParams) {
+func (s *SimulationServer) GetConfig(w http.ResponseWriter, r *http.Request, projectId string, params api.GetConfigParams) {
 	resp := api.ConfigResponse{
 		Defaults: api.AgentConfig{
 			PrePrompt: ptr("Default pre-prompt"),
@@ -379,7 +378,7 @@ func (s *SimulationServer) GetConfig(w http.ResponseWriter, r *http.Request, par
 	api.WriteJSON(w, http.StatusOK, resp)
 }
 
-func (s *SimulationServer) SaveConfig(w http.ResponseWriter, r *http.Request, params api.SaveConfigParams) {
+func (s *SimulationServer) SaveConfig(w http.ResponseWriter, r *http.Request, projectId string, params api.SaveConfigParams) {
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -393,10 +392,8 @@ func (s *SimulationServer) GetDevToolsConfig(w http.ResponseWriter, r *http.Requ
 
 // HandleTerminalWS handles WebSocket connections for simulated agent terminal access.
 func (s *SimulationServer) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
-	// Extract agent ID from path: /ws/agent/{id}/terminal
-	path := strings.TrimPrefix(r.URL.Path, "/ws/agent/")
-	path = strings.TrimSuffix(path, "/terminal")
-	agentID := strings.Trim(path, "/")
+	// Extract agent ID from path: /ws/projects/{project_id}/agents/{id}/terminal
+	agentID := r.PathValue("id")
 
 	rawConn, err := wsUpgrader.Upgrade(w, r, nil)
 	if err != nil {

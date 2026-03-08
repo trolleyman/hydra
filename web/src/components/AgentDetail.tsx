@@ -92,7 +92,7 @@ export function AgentDetail({
       onConfirm: async () => {
         setKilling(true)
         try {
-          await api.default.killAgent(agent.id, projectId ?? undefined)
+          await api.default.killAgent(projectId ?? '', agent.id)
           onKilled(agent.id)
         } catch (err) {
           useDialogStore.getState().show({
@@ -115,7 +115,7 @@ export function AgentDetail({
       onConfirm: async () => {
         setMerging(true)
         try {
-          await api.default.mergeAgent(agent.id, projectId ?? undefined)
+          await api.default.mergeAgent(projectId ?? '', agent.id)
           onKilled(agent.id)
         } catch (err: any) {
           const errorData = await err.json?.().catch(() => null) || err
@@ -147,7 +147,7 @@ export function AgentDetail({
       onConfirm: async () => {
         setUpdating(true)
         try {
-          await api.default.updateAgentFromBase(agent.id, projectId ?? undefined)
+          await api.default.updateAgentFromBase(projectId ?? '', agent.id)
           if (onRefresh) onRefresh()
         } catch (err: any) {
           const errorData = await err.json?.().catch(() => null) || err
@@ -179,7 +179,7 @@ export function AgentDetail({
       onConfirm: async () => {
         setRestarting(true)
         try {
-          const newAgent = await api.default.restartAgent(agent.id, projectId ?? undefined)
+          const newAgent = await api.default.restartAgent(projectId ?? '', agent.id)
           onRestarted(newAgent)
         } catch (err) {
           useDialogStore.getState().show({

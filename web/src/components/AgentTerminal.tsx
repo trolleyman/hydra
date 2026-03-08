@@ -18,10 +18,10 @@ function getWsUrl(agentId: string, projectId: string | null, shell?: boolean): s
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
   const host = window.location.host
   const params = new URLSearchParams()
-  if (projectId) params.set('project_id', projectId)
   if (shell) params.set('shell', 'true')
   const qs = params.toString() ? `?${params.toString()}` : ''
-  return `${protocol}//${host}/ws/agent/${encodeURIComponent(agentId)}/terminal${qs}`
+  const pid = projectId ? encodeURIComponent(projectId) : '_'
+  return `${protocol}//${host}/ws/projects/${pid}/agents/${encodeURIComponent(agentId)}/terminal${qs}`
 }
 
 export function AgentTerminal({ agentId, projectId, isEphemeral, shell, onRefresh, onStatusUpdate }: Props) {

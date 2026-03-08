@@ -48,7 +48,7 @@ function AgentPage() {
 
   async function handleRefresh() {
     try {
-      const result = await api.default.listAgents(selectedProjectId ?? undefined)
+      const result = await api.default.listAgents(selectedProjectId ?? '')
       setAgents(result)
     } catch (e) {
       console.error('Failed to refresh agents:', e)

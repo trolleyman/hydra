@@ -109,68 +109,68 @@ export class DefaultService {
     }
     /**
      * List all Hydra agents (heads)
-     * @param projectId Project ID to scope the agent list (defaults to server CWD project)
+     * @param projectId Project ID to scope the agent list
      * @returns AgentResponse OK
      * @throws ApiError
      */
     public listAgents(
-        projectId?: string,
+        projectId: string,
     ): CancelablePromise<Array<AgentResponse>> {
         return this.httpRequest.request({
             method: 'GET',
-            url: '/api/agents',
-            query: {
+            url: '/api/projects/{project_id}/agents',
+            path: {
                 'project_id': projectId,
             },
             errors: {
+                404: `Project Not Found`,
                 500: `Internal Server Error`,
             },
         });
     }
     /**
      * Spawn a new Hydra agent
+     * @param projectId Project ID to spawn the agent in
      * @param requestBody
-     * @param projectId Project ID to spawn the agent in (defaults to server CWD project)
      * @returns AgentResponse Created
      * @throws ApiError
      */
     public spawnAgent(
+        projectId: string,
         requestBody: SpawnAgentRequest,
-        projectId?: string,
     ): CancelablePromise<AgentResponse> {
         return this.httpRequest.request({
             method: 'POST',
-            url: '/api/agents',
-            query: {
+            url: '/api/projects/{project_id}/agents',
+            path: {
                 'project_id': projectId,
             },
             body: requestBody,
             mediaType: 'application/json',
             errors: {
                 400: `Bad Request`,
+                404: `Project Not Found`,
                 500: `Internal Server Error`,
             },
         });
     }
     /**
      * Restart a Hydra agent (kill and respawn with the same prompt)
+     * @param projectId Project ID
      * @param id
-     * @param projectId Project ID to scope the lookup (defaults to server CWD project)
      * @returns AgentResponse OK (Agent restarted, new agent returned)
      * @throws ApiError
      */
     public restartAgent(
+        projectId: string,
         id: string,
-        projectId?: string,
     ): CancelablePromise<AgentResponse> {
         return this.httpRequest.request({
             method: 'POST',
-            url: '/api/agent/{id}/restart',
+            url: '/api/projects/{project_id}/agents/{id}/restart',
             path: {
-                'id': id,
-            },
-            query: {
                 'project_id': projectId,
+                'id': id,
             },
             errors: {
                 404: `Not Found`,
@@ -181,23 +181,21 @@ export class DefaultService {
     }
     /**
      * Merge a Hydra agent's branch into its base branch and kill it
+     * @param projectId Project ID
      * @param id
-     * @param projectId Project ID to scope the lookup (defaults to server CWD project)
      * @returns void
      * @throws ApiError
      */
     public mergeAgent(
+        projectId: string,
         id: string,
-        projectId?: string,
     ): CancelablePromise<void> {
         return this.httpRequest.request({
             method: 'POST',
-            url: '/api/agent/{id}/merge',
+            url: '/api/projects/{project_id}/agents/{id}/merge',
             path: {
-                'id': id,
-            },
-            query: {
                 'project_id': projectId,
+                'id': id,
             },
             errors: {
                 400: `Bad Request (e.g. no branch to merge)`,
@@ -209,23 +207,21 @@ export class DefaultService {
     }
     /**
      * Update a Hydra agent's branch from its base branch (merge base into head)
+     * @param projectId Project ID
      * @param id
-     * @param projectId Project ID to scope the lookup (defaults to server CWD project)
      * @returns void
      * @throws ApiError
      */
     public updateAgentFromBase(
+        projectId: string,
         id: string,
-        projectId?: string,
     ): CancelablePromise<void> {
         return this.httpRequest.request({
             method: 'POST',
-            url: '/api/agent/{id}/update-from-base',
+            url: '/api/projects/{project_id}/agents/{id}/update-from-base',
             path: {
-                'id': id,
-            },
-            query: {
                 'project_id': projectId,
+                'id': id,
             },
             errors: {
                 404: `Not Found`,
@@ -236,23 +232,21 @@ export class DefaultService {
     }
     /**
      * List commits on an agent's branch (between base branch and agent branch)
+     * @param projectId Project ID
      * @param id
-     * @param projectId Project ID to scope the lookup (defaults to server CWD project)
      * @returns CommitInfo OK
      * @throws ApiError
      */
     public getAgentCommits(
+        projectId: string,
         id: string,
-        projectId?: string,
     ): CancelablePromise<Array<CommitInfo>> {
         return this.httpRequest.request({
             method: 'GET',
-            url: '/api/agent/{id}/commits',
+            url: '/api/projects/{project_id}/agents/{id}/commits',
             path: {
-                'id': id,
-            },
-            query: {
                 'project_id': projectId,
+                'id': id,
             },
             errors: {
                 404: `Not Found`,
@@ -262,8 +256,8 @@ export class DefaultService {
     }
     /**
      * Get the diff for an agent's branch
+     * @param projectId Project ID
      * @param id
-     * @param projectId Project ID to scope the lookup (defaults to server CWD project)
      * @param baseRef Base commit SHA or ref. Defaults to the agent's base branch.
      * @param headRef Head commit SHA or ref. Defaults to the agent's branch.
      * @param ignoreWhitespace Ignore whitespace changes in the diff
@@ -274,8 +268,8 @@ export class DefaultService {
      * @throws ApiError
      */
     public getAgentDiff(
+        projectId: string,
         id: string,
-        projectId?: string,
         baseRef?: string,
         headRef?: string,
         ignoreWhitespace?: boolean,
@@ -285,12 +279,12 @@ export class DefaultService {
     ): CancelablePromise<DiffResponse> {
         return this.httpRequest.request({
             method: 'GET',
-            url: '/api/agent/{id}/diff',
+            url: '/api/projects/{project_id}/agents/{id}/diff',
             path: {
+                'project_id': projectId,
                 'id': id,
             },
             query: {
-                'project_id': projectId,
                 'base_ref': baseRef,
                 'head_ref': headRef,
                 'ignore_whitespace': ignoreWhitespace,
@@ -306,8 +300,8 @@ export class DefaultService {
     }
     /**
      * Get the list of changed files for an agent's branch
+     * @param projectId Project ID
      * @param id
-     * @param projectId Project ID to scope the lookup (defaults to server CWD project)
      * @param baseRef Base commit SHA or ref. Defaults to the agent's base branch.
      * @param headRef Head commit SHA or ref. Defaults to the agent's branch.
      * @param includeUncommitted Include uncommitted changes in the worktree
@@ -315,20 +309,20 @@ export class DefaultService {
      * @throws ApiError
      */
     public getAgentDiffFiles(
+        projectId: string,
         id: string,
-        projectId?: string,
         baseRef?: string,
         headRef?: string,
         includeUncommitted?: boolean,
     ): CancelablePromise<DiffResponse> {
         return this.httpRequest.request({
             method: 'GET',
-            url: '/api/agent/{id}/diff-files',
+            url: '/api/projects/{project_id}/agents/{id}/diff-files',
             path: {
+                'project_id': projectId,
                 'id': id,
             },
             query: {
-                'project_id': projectId,
                 'base_ref': baseRef,
                 'head_ref': headRef,
                 'include_uncommitted': includeUncommitted,
@@ -341,25 +335,23 @@ export class DefaultService {
     }
     /**
      * Send text input to an agent's terminal stdin
+     * @param projectId Project ID
      * @param id
      * @param requestBody
-     * @param projectId Project ID to scope the lookup (defaults to server CWD project)
      * @returns any OK
      * @throws ApiError
      */
     public sendAgentInput(
+        projectId: string,
         id: string,
         requestBody: AgentInputRequest,
-        projectId?: string,
     ): CancelablePromise<any> {
         return this.httpRequest.request({
             method: 'POST',
-            url: '/api/agent/{id}/input',
+            url: '/api/projects/{project_id}/agents/{id}/input',
             path: {
-                'id': id,
-            },
-            query: {
                 'project_id': projectId,
+                'id': id,
             },
             body: requestBody,
             mediaType: 'application/json',
@@ -371,73 +363,77 @@ export class DefaultService {
     }
     /**
      * Get the merged configuration
-     * @param projectId Project ID to scope the config (defaults to server CWD project)
+     * @param projectId Project ID
      * @param scope Load only a specific scope's raw config instead of the merged config
      * @returns ConfigResponse OK
      * @throws ApiError
      */
     public getConfig(
-        projectId?: string,
+        projectId: string,
         scope?: 'project' | 'user',
     ): CancelablePromise<ConfigResponse> {
         return this.httpRequest.request({
             method: 'GET',
-            url: '/api/config',
-            query: {
+            url: '/api/projects/{project_id}/config',
+            path: {
                 'project_id': projectId,
+            },
+            query: {
                 'scope': scope,
             },
             errors: {
+                404: `Project Not Found`,
                 500: `Internal Server Error`,
             },
         });
     }
     /**
      * Save configuration changes
+     * @param projectId Project ID
      * @param requestBody
-     * @param projectId Project ID to save the config to (defaults to server CWD project)
      * @param scope Whether to save to the project or user config file (defaults to project)
      * @returns any OK
      * @throws ApiError
      */
     public saveConfig(
+        projectId: string,
         requestBody: ConfigResponse,
-        projectId?: string,
         scope?: 'project' | 'user',
     ): CancelablePromise<any> {
         return this.httpRequest.request({
             method: 'POST',
-            url: '/api/config',
-            query: {
+            url: '/api/projects/{project_id}/config',
+            path: {
                 'project_id': projectId,
+            },
+            query: {
                 'scope': scope,
             },
             body: requestBody,
             mediaType: 'application/json',
             errors: {
+                404: `Project Not Found`,
                 500: `Internal Server Error`,
             },
         });
     }
     /**
      * Get a specific Hydra agent by ID
+     * @param projectId Project ID
      * @param id
-     * @param projectId Project ID to scope the lookup (defaults to server CWD project)
      * @returns AgentResponse OK
      * @throws ApiError
      */
     public getAgent(
+        projectId: string,
         id: string,
-        projectId?: string,
     ): CancelablePromise<AgentResponse> {
         return this.httpRequest.request({
             method: 'GET',
-            url: '/api/agent/{id}',
+            url: '/api/projects/{project_id}/agents/{id}',
             path: {
-                'id': id,
-            },
-            query: {
                 'project_id': projectId,
+                'id': id,
             },
             errors: {
                 404: `Not Found`,
@@ -447,23 +443,21 @@ export class DefaultService {
     }
     /**
      * Kill a Hydra agent by ID
+     * @param projectId Project ID
      * @param id
-     * @param projectId Project ID to scope the lookup (defaults to server CWD project)
      * @returns void
      * @throws ApiError
      */
     public killAgent(
+        projectId: string,
         id: string,
-        projectId?: string,
     ): CancelablePromise<void> {
         return this.httpRequest.request({
             method: 'DELETE',
-            url: '/api/agent/{id}',
+            url: '/api/projects/{project_id}/agents/{id}',
             path: {
-                'id': id,
-            },
-            query: {
                 'project_id': projectId,
+                'id': id,
             },
             errors: {
                 404: `Not Found`,
