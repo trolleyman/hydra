@@ -3,7 +3,7 @@ import hljs from 'highlight.js'
 import { api } from './stores/apiClient'
 import type { AgentResponse, CommitInfo, DiffFile, DiffResponse } from './api'
 import {
-  Plus, Minus, SquareDot, Diff, Calendar, TriangleAlert,
+  Plus, Calendar, TriangleAlert,
   ChevronDown, ChevronRight, ChevronLeft, Check, LoaderCircle, RefreshCw,
   Settings, Copy, Folder, FolderOpen, X, GitMerge, Bot,
   MoveRight,
@@ -91,6 +91,15 @@ interface SideBySideLine {
   newContent: string | null
 }
 
+function ChangeTypeIcon({ type }: { type: string }) {
+  switch (type) {
+    case 'added': return <Plus className="w-3.5 h-3.5 text-green-500 shrink-0" />
+    case 'deleted': return <div className="w-3.5 h-3.5 flex items-center justify-center shrink-0"><div className="w-2.5 h-0.5 bg-red-500 rounded-full" /></div>
+    case 'renamed': return <GitMerge className="w-3.5 h-3.5 text-blue-500 shrink-0" />
+    default: return <div className="w-3.5 h-3.5 rounded-full bg-yellow-500 shrink-0" />
+  }
+}
+
 function buildSideBySide(hunkLines: DiffFile['hunks'][0]['lines']): SideBySideLine[] {
   const result: SideBySideLine[] = []
   let i = 0
@@ -131,13 +140,101 @@ function buildSideBySide(hunkLines: DiffFile['hunks'][0]['lines']): SideBySideLi
   return result
 }
 
-function ChangeTypeIcon({ type }: { type: string }) {
-  switch (type) {
-    case 'added': return <Plus className="w-3.5 h-3.5 text-green-500 shrink-0" />
-    case 'deleted': return <Minus className="w-3.5 h-3.5 text-red-500 shrink-0" />
-    case 'renamed': return <Diff className="w-3.5 h-3.5 text-blue-500 shrink-0" />
-    default: return <SquareDot className="w-3.5 h-3.5 text-yellow-500 shrink-0" />
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false)
+  const handleCopy = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    navigator.clipboard.writeText(text).catch(() => { })
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1500)
   }
+  return (
+    <button
+      onClick={handleCopy}
+      className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 shrink-0 cursor-pointer transition-colors"
+      title="Copy path"
+    >
+      {copied ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5 text-gray-400" />}
+    </button>
+  )
+}
+
+function CommentButton({ onComment }: { onComment: (text: string) => void }) {
+  const [open, setOpen] = useState(false)
+  const [text, setText] = useState('')
+  const [sending, setSending] = useState(false)
+  const ref = useRef<HTMLTextAreaElement>(null)
+
+  useEffect(() => { if (open && ref.current) ref.current.focus() }, [open])
+
+  if (!open) {
+    return (
+      <button
+        onClick={() => setOpen(true)}
+        className="opacity-0 group-hover:opacity-100 p-0.5 rounded bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-sm hover:bg-gray-50 dark:hover:bg-gray-700 transition-all cursor-pointer absolute left-0 -ml-3 z-20"
+        title="Add comment"
+      >
+        <Plus className="w-3 h-3 text-blue-500" />
+      </button>
+    )
+  }
+
+  return (
+    <div className="absolute left-10 right-10 z-30 mt-1 p-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl">
+      <textarea
+        ref={ref}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        className="w-full h-20 p-2 text-xs font-sans bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded focus:ring-1 focus:ring-blue-500 outline-none resize-none"
+        placeholder="Write a comment..."
+      />
+      <div className="flex justify-end gap-2 mt-2">
+        <button
+          onClick={() => { setOpen(false); setText('') }}
+          className="px-2 py-1 text-[10px] font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors cursor-pointer"
+        >
+          Cancel
+        </button>
+        <button
+          disabled={!text.trim() || sending}
+          onClick={async () => {
+            setSending(true)
+            await onComment(text)
+            setSending(false)
+            setOpen(false)
+            setText('')
+          }}
+          className="px-2 py-1 text-[10px] font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded transition-colors cursor-pointer"
+        >
+          {sending ? 'Sending...' : 'Send'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function HunkHeader({ header, onExpandUp, onExpandBoth, onExpandDown }: {
+  header: string; onExpandUp?: () => void; onExpandBoth?: () => void; onExpandDown?: () => void
+}) {
+  return (
+    <div className="flex items-center bg-blue-50 dark:bg-blue-950/30 border-y border-blue-100 dark:border-blue-900/50 px-2 py-0.5 group/hunk">
+      <div className="flex items-center gap-0.5 mr-2 opacity-0 group-hover/hunk:opacity-100 transition-opacity">
+        <button onClick={onExpandUp} className="p-0.5 rounded hover:bg-blue-100 dark:hover:bg-blue-900/50 text-blue-500 cursor-pointer" title="Expand up 5 lines">
+          <ChevronDown className="w-3 h-3 rotate-180" />
+        </button>
+        <button onClick={onExpandBoth} className="p-0.5 rounded hover:bg-blue-100 dark:hover:bg-blue-900/50 text-blue-500 cursor-pointer" title="Expand 5 lines">
+          <div className="relative w-3 h-3 flex flex-col items-center justify-center">
+            <ChevronDown className="w-2 h-2 rotate-180 absolute top-0" />
+            <ChevronDown className="w-2 h-2 absolute bottom-0" />
+          </div>
+        </button>
+        <button onClick={onExpandDown} className="p-0.5 rounded hover:bg-blue-100 dark:hover:bg-blue-900/50 text-blue-500 cursor-pointer" title="Expand down 5 lines">
+          <ChevronDown className="w-3 h-3" />
+        </button>
+      </div>
+      <span className="font-mono text-xs text-blue-500 dark:text-blue-400">{header}</span>
+    </div>
+  )
 }
 
 // ── Diff Hunk rendering ───────────────────────────────────────────────────────
@@ -145,16 +242,16 @@ function ChangeTypeIcon({ type }: { type: string }) {
 const UNIFIED_LINE_NUM_CLASS = 'select-none text-right pr-2 text-gray-400 dark:text-gray-600 text-xs font-mono w-10 shrink-0 border-r border-gray-200 dark:border-gray-700 leading-5'
 const UNIFIED_CODE_CLASS = 'pl-2 font-mono text-xs leading-5 flex-1 whitespace-pre-wrap break-words overflow-hidden'
 
-function UnifiedHunk({ hunk, highlightedOld, highlightedNew }: {
+function UnifiedHunk({ hunk, highlightedOld, highlightedNew, onComment, expanders }: {
   hunk: DiffFile['hunks'][0]
   highlightedOld: Map<number, string>
   highlightedNew: Map<number, string>
+  onComment: (lineNum: number, isNew: boolean, text: string) => void
+  expanders: { up: () => void; both: () => void; down: () => void }
 }) {
   return (
     <div>
-      <div className="flex items-center bg-blue-50 dark:bg-blue-950/30 border-y border-blue-100 dark:border-blue-900/50 px-2 py-0.5">
-        <span className="font-mono text-xs text-blue-500 dark:text-blue-400">{hunk.header}</span>
-      </div>
+      <HunkHeader header={hunk.header} onExpandUp={expanders.up} onExpandBoth={expanders.both} onExpandDown={expanders.down} />
       {hunk.lines.map((line, idx) => {
         const isAdd = line.type === 'addition'
         const isDel = line.type === 'deletion'
@@ -164,13 +261,16 @@ function UnifiedHunk({ hunk, highlightedOld, highlightedNew }: {
           : (line.old_line_num != null ? highlightedOld.get(line.old_line_num) : undefined)
         const bgClass = isAdd ? 'bg-green-50 dark:bg-green-950/30' : isDel ? 'bg-red-50 dark:bg-red-950/30' : ''
         return (
-          <div key={idx} className={`flex items-stretch hover:brightness-95 dark:hover:brightness-110 ${bgClass}`}>
+          <div key={idx} className={`flex items-stretch hover:brightness-95 dark:hover:brightness-110 relative group ${bgClass}`}>
             <span className={UNIFIED_LINE_NUM_CLASS}>{line.old_line_num ?? ''}</span>
             <span className={UNIFIED_LINE_NUM_CLASS}>{line.new_line_num ?? ''}</span>
             <span className={`select-none font-mono text-xs leading-5 w-4 text-center shrink-0 ${isAdd ? 'text-green-600 dark:text-green-400' : isDel ? 'text-red-600 dark:text-red-400' : 'text-gray-300 dark:text-gray-700'
               }`}>
               {isAdd ? '+' : isDel ? '-' : isNoNewline ? '\\' : ' '}
             </span>
+            {!isNoNewline && (
+              <CommentButton onComment={(text) => onComment(isAdd ? line.new_line_num! : line.old_line_num!, isAdd || line.type === 'context', text)} />
+            )}
             {isNoNewline ? (
               <span className={`${UNIFIED_CODE_CLASS} text-gray-400 dark:text-gray-500 italic`}>{line.content}</span>
             ) : highlighted ? (
@@ -188,17 +288,17 @@ function UnifiedHunk({ hunk, highlightedOld, highlightedNew }: {
 const SBS_LINE_NUM = 'select-none text-right text-gray-400 dark:text-gray-600 text-xs font-mono w-8 shrink-0 pr-1 leading-5'
 const SBS_CODE = 'pl-1 font-mono text-xs leading-5 flex-1 whitespace-pre-wrap break-words overflow-hidden min-w-0'
 
-function SideBySideHunk({ hunk, highlightedOld, highlightedNew }: {
+function SideBySideHunk({ hunk, highlightedOld, highlightedNew, onComment, expanders }: {
   hunk: DiffFile['hunks'][0]
   highlightedOld: Map<number, string>
   highlightedNew: Map<number, string>
+  onComment: (lineNum: number, isNew: boolean, text: string) => void
+  expanders: { up: () => void; both: () => void; down: () => void }
 }) {
   const sbsLines = buildSideBySide(hunk.lines)
   return (
     <div>
-      <div className="flex items-center bg-blue-50 dark:bg-blue-950/30 border-y border-blue-100 dark:border-blue-900/50 px-2 py-0.5">
-        <span className="font-mono text-xs text-blue-500 dark:text-blue-400">{hunk.header}</span>
-      </div>
+      <HunkHeader header={hunk.header} onExpandUp={expanders.up} onExpandBoth={expanders.both} onExpandDown={expanders.down} />
       {sbsLines.map((line, idx) => {
         const oldHighlighted = line.oldLineNum != null ? highlightedOld.get(line.oldLineNum) : undefined
         const newHighlighted = line.newLineNum != null ? highlightedNew.get(line.newLineNum) : undefined
@@ -206,21 +306,23 @@ function SideBySideHunk({ hunk, highlightedOld, highlightedNew }: {
         const newBg = line.newType === 'addition' ? 'bg-green-50 dark:bg-green-950/30' : line.newType === 'empty' ? 'bg-gray-50 dark:bg-gray-900/50' : ''
         return (
           <div key={idx} className="flex items-stretch divide-x divide-gray-200 dark:divide-gray-700">
-            <div className={`flex items-start flex-1 min-w-0 ${oldBg}`}>
+            <div className={`flex items-start flex-1 min-w-0 group relative ${oldBg}`}>
               <span className={SBS_LINE_NUM}>{line.oldLineNum ?? ''}</span>
               <span className={`select-none font-mono text-xs w-3 shrink-0 text-center leading-5 ${line.oldType === 'deletion' ? 'text-red-500' : 'text-gray-300 dark:text-gray-700'}`}>
                 {line.oldType === 'deletion' ? '-' : line.oldType === 'empty' ? '' : ' '}
               </span>
+              {line.oldLineNum != null && <CommentButton onComment={(text) => onComment(line.oldLineNum!, false, text)} />}
               {line.oldContent != null && oldHighlighted
                 ? <span className={SBS_CODE} dangerouslySetInnerHTML={{ __html: oldHighlighted }} />
                 : <span className={SBS_CODE}>{line.oldContent ?? ''}</span>
               }
             </div>
-            <div className={`flex items-start flex-1 min-w-0 ${newBg}`}>
+            <div className={`flex items-start flex-1 min-w-0 group relative ${newBg}`}>
               <span className={SBS_LINE_NUM}>{line.newLineNum ?? ''}</span>
               <span className={`select-none font-mono text-xs w-3 shrink-0 text-center leading-5 ${line.newType === 'addition' ? 'text-green-500' : 'text-gray-300 dark:text-gray-700'}`}>
                 {line.newType === 'addition' ? '+' : line.newType === 'empty' ? '' : ' '}
               </span>
+              {line.newLineNum != null && <CommentButton onComment={(text) => onComment(line.newLineNum!, true, text)} />}
               {line.newContent != null && newHighlighted
                 ? <span className={SBS_CODE} dangerouslySetInnerHTML={{ __html: newHighlighted }} />
                 : <span className={SBS_CODE}>{line.newContent ?? ''}</span>
@@ -235,14 +337,20 @@ function SideBySideHunk({ hunk, highlightedOld, highlightedNew }: {
 
 // ── File diff card ────────────────────────────────────────────────────────────
 
-function FileDiff({ file, sideBySide, fileRef }: {
+function FileDiff({ file, sideBySide, fileRef, onComment, isCollapsed, onToggleCollapse, onExpand, stickyTop = 52 }: {
   file: DiffFile
   sideBySide: boolean
   fileRef?: (el: HTMLDivElement | null) => void
+  onComment: (path: string, lineNum: number, isNew: boolean, text: string) => void
+  isCollapsed: boolean
+  onToggleCollapse: () => void
+  onExpand: (path: string, context: number) => void
+  stickyTop?: number
 }) {
+  const [context, setContext] = useState(3)
   const lang = getLanguage(file.path)
   const { highlightedOld, highlightedNew } = (() => {
-    if (file.binary) return { highlightedOld: new Map<number, string>(), highlightedNew: new Map<number, string>() }
+    if (file.binary || !file.hunks) return { highlightedOld: new Map<number, string>(), highlightedNew: new Map<number, string>() }
     const oldLines: Array<{ lineNum: number; content: string }> = []
     const newLines: Array<{ lineNum: number; content: string }> = []
     for (const hunk of file.hunks) {
@@ -263,35 +371,71 @@ function FileDiff({ file, sideBySide, fileRef }: {
     return { highlightedOld: highlight(oldLines), highlightedNew: highlight(newLines) }
   })()
 
+  const handleExpand = (delta: number) => {
+    const next = context + delta
+    setContext(next)
+    onExpand(file.path, next)
+  }
+
   const displayPath = file.change_type === 'renamed' && file.old_path
     ? `${file.old_path} → ${file.path}` : file.path
 
   return (
-    <div ref={fileRef} className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden mb-4">
-      <div className="flex items-center gap-2 px-3 py-2 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 sticky top-0 z-10">
+    <div ref={fileRef} className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden mb-4 bg-white dark:bg-gray-900 shadow-sm">
+      <div
+        className="flex items-center gap-2 px-3 py-1.5 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 sticky z-20"
+        style={{ top: stickyTop }}
+      >
+        <button
+          onClick={onToggleCollapse}
+          className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-500 cursor-pointer transition-colors"
+        >
+          <ChevronDown className={`w-4 h-4 transition-transform ${isCollapsed ? '-rotate-90' : ''}`} />
+        </button>
         <ChangeTypeIcon type={file.change_type} />
-        <span className="font-mono text-xs text-gray-700 dark:text-gray-300 flex-1 min-w-0 truncate" title={displayPath}>
+        <span
+          className="font-mono text-xs text-gray-700 dark:text-gray-300 flex-1 min-w-0 truncate cursor-pointer hover:underline"
+          title={displayPath}
+          onClick={onToggleCollapse}
+        >
           {displayPath}
         </span>
+        <CopyButton text={file.path} />
         {!file.binary && (
-          <div className="flex items-center gap-1.5 shrink-0">
+          <div className="flex items-center gap-1.5 shrink-0 ml-1">
             {file.additions > 0 && <span className="text-xs text-green-600 dark:text-green-400 font-medium">+{file.additions}</span>}
             {file.deletions > 0 && <span className="text-xs text-red-600 dark:text-red-400 font-medium">−{file.deletions}</span>}
           </div>
         )}
       </div>
-      {file.binary ? (
-        <div className="px-4 py-3 text-xs text-gray-400 dark:text-gray-500 italic">Binary file changed</div>
-      ) : file.hunks.length === 0 ? (
-        <div className="px-4 py-3 text-xs text-gray-400 dark:text-gray-500 italic">No changes</div>
-      ) : (
-        <div className="overflow-hidden">
-          {file.hunks.map((hunk, idx) =>
-            sideBySide
-              ? <SideBySideHunk key={idx} hunk={hunk} highlightedOld={highlightedOld} highlightedNew={highlightedNew} />
-              : <UnifiedHunk key={idx} hunk={hunk} highlightedOld={highlightedOld} highlightedNew={highlightedNew} />
+      {!isCollapsed && (
+        <>
+          {file.binary ? (
+            <div className="px-4 py-3 text-xs text-gray-400 dark:text-gray-500 italic">Binary file changed</div>
+          ) : !file.hunks || file.hunks.length === 0 ? (
+            <div className="px-4 py-8 flex flex-col items-center justify-center text-gray-400 dark:text-gray-500 italic">
+              <div className="text-sm mb-2">No changes loaded</div>
+              <button
+                onClick={() => onExpand(file.path, 3)}
+                className="px-3 py-1.5 text-xs font-medium text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-md hover:bg-blue-100 dark:hover:bg-blue-900/40 cursor-pointer transition-colors"
+              >
+                Load diff
+              </button>
+            </div>
+          ) : (
+            <div className="overflow-hidden">
+              {file.hunks.map((hunk, idx) =>
+                sideBySide
+                  ? <SideBySideHunk key={idx} hunk={hunk} highlightedOld={highlightedOld} highlightedNew={highlightedNew}
+                    onComment={(ln, isNew, txt) => onComment(file.path, ln, isNew, txt)}
+                    expanders={{ up: () => handleExpand(5), both: () => handleExpand(5), down: () => handleExpand(5) }} />
+                  : <UnifiedHunk key={idx} hunk={hunk} highlightedOld={highlightedOld} highlightedNew={highlightedNew}
+                    onComment={(ln, isNew, txt) => onComment(file.path, ln, isNew, txt)}
+                    expanders={{ up: () => handleExpand(5), both: () => handleExpand(5), down: () => handleExpand(5) }} />
+              )}
+            </div>
           )}
-        </div>
+        </>
       )}
     </div>
   )
@@ -761,25 +905,6 @@ function getGroupedFiles(files: DiffFile[]): [string, DiffFile[]][] {
 
 // ── Sidebar components ────────────────────────────────────────────────────────
 
-function CopyButton({ text }: { text: string }) {
-  const [copied, setCopied] = useState(false)
-  const handleCopy = (e: React.MouseEvent) => {
-    e.stopPropagation()
-    navigator.clipboard.writeText(text).catch(() => { })
-    setCopied(true)
-    setTimeout(() => setCopied(false), 1500)
-  }
-  return (
-    <button
-      onClick={handleCopy}
-      className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded hover:bg-gray-200 dark:hover:bg-gray-600 shrink-0 cursor-pointer"
-      title="Copy path"
-    >
-      {copied ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3 text-gray-400" />}
-    </button>
-  )
-}
-
 function FileRow({ file, isActive, onClick, indent = 0 }: {
   file: DiffFile; isActive: boolean; onClick: () => void; indent?: number
 }) {
@@ -794,7 +919,6 @@ function FileRow({ file, isActive, onClick, indent = 0 }: {
       <span className="font-mono text-[10px] text-gray-700 dark:text-gray-300 truncate flex-1 min-w-0" title={file.path}>
         {file.path.split('/').pop()}
       </span>
-      <CopyButton text={file.path} />
       <div className="flex items-center gap-1 shrink-0">
         {file.additions > 0 && <span className="text-[10px] text-green-600 dark:text-green-400">+{file.additions}</span>}
         {file.deletions > 0 && <span className="text-[10px] text-red-600 dark:text-red-400">−{file.deletions}</span>}
@@ -822,7 +946,6 @@ function TreeNodeView({ node, depth, collapsedFolders, toggleFolder, onFileClick
             : <Folder className="w-3.5 h-3.5 text-blue-400 dark:text-blue-500 shrink-0" />
           }
           <span className="font-mono text-[10px] text-gray-600 dark:text-gray-400 flex-1 min-w-0 truncate">{node.name}</span>
-          <CopyButton text={node.path} />
           <ChevronDown className={`w-3 h-3 text-gray-400 shrink-0 transition-transform ${isOpen ? '' : '-rotate-90'}`} />
         </button>
         {isOpen && node.children.map((child) => (
@@ -937,17 +1060,36 @@ export function DiffViewer({ agent, projectId }: { agent: AgentResponse; project
     } catch { }
     return 'tree'
   })
+  const [sidebarWidth, setSidebarWidth] = useState(() => {
+    try {
+      const stored = localStorage.getItem('hydra-diff-sidebar-width')
+      if (stored) return parseInt(stored, 10)
+    } catch { }
+    return 220
+  })
+
   const [singleFileIdx, setSingleFileIdx] = useState(0)
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set())
+  const [collapsedFiles, setCollapsedFiles] = useState<Set<string>>(new Set())
   const fileRefs = useRef<Map<string, HTMLDivElement>>(new Map())
 
   useEffect(() => { try { localStorage.setItem('hydra-diff-side-by-side', String(sideBySide)) } catch { } }, [sideBySide])
   useEffect(() => { try { localStorage.setItem('hydra-diff-ignore-whitespace', String(ignoreWhitespace)) } catch { } }, [ignoreWhitespace])
   useEffect(() => { try { localStorage.setItem('hydra-diff-single-file', String(singleFile)) } catch { } }, [singleFile])
   useEffect(() => { try { localStorage.setItem('hydra-diff-file-view', fileView) } catch { } }, [fileView])
+  useEffect(() => { try { localStorage.setItem('hydra-diff-sidebar-width', String(sidebarWidth)) } catch { } }, [sidebarWidth])
 
   const toggleFolder = useCallback((path: string) => {
     setCollapsedFolders((prev) => {
+      const next = new Set(prev)
+      if (next.has(path)) next.delete(path)
+      else next.add(path)
+      return next
+    })
+  }, [])
+
+  const toggleFileCollapse = useCallback((path: string) => {
+    setCollapsedFiles((prev) => {
       const next = new Set(prev)
       if (next.has(path)) next.delete(path)
       else next.add(path)
@@ -959,13 +1101,10 @@ export function DiffViewer({ agent, projectId }: { agent: AgentResponse; project
     if (!agent.branch_name) return
     api.default.getAgentCommits(agent.id, projectId ?? undefined)
       .then(setCommits).catch(() => setCommits([]))
-  }, [agent.id, agent.branch_name, projectId])
+  }, [agent.id, agent.branch_name, projectId, refreshKey])
 
-  useEffect(() => {
-    if (!agent.branch_name) return
-    let cancelled = false
-    setLoadingDiff(true)
-    setDiffError(null)
+  const fetchFileDiff = useCallback(async (path: string, context: number = 3) => {
+    if (!agent.branch_name || !diff) return
 
     const params: { baseRef?: string; headRef?: string; ignoreWhitespace?: boolean; includeUncommitted?: boolean } = {}
     if (ignoreWhitespace) params.ignoreWhitespace = true
@@ -973,13 +1112,53 @@ export function DiffViewer({ agent, projectId }: { agent: AgentResponse; project
     if (rightSel.type === 'uncommitted') params.includeUncommitted = true
     else if (rightSel.type === 'commit') params.headRef = rightSel.sha
 
-    api.default.getAgentDiff(agent.id, projectId ?? undefined,
-      params.baseRef, params.headRef, params.ignoreWhitespace, params.includeUncommitted)
-      .then((d) => { if (!cancelled) { setDiff(d); setLoadingDiff(false) } })
+    try {
+      const fileDiff = await api.default.getAgentDiff(agent.id, projectId ?? undefined,
+        params.baseRef, params.headRef, params.ignoreWhitespace, params.includeUncommitted, path, context)
+
+      setDiff((prev) => {
+        if (!prev) return prev
+        const nextFiles = prev.files.map((f) => {
+          if (f.path === path) {
+            return { ...f, hunks: fileDiff.files[0]?.hunks ?? [] }
+          }
+          return f
+        })
+        return { ...prev, files: nextFiles }
+      })
+    } catch (e) {
+      console.error('Failed to fetch file diff:', e)
+    }
+  }, [agent.id, projectId, leftSel, rightSel, ignoreWhitespace, diff])
+
+  useEffect(() => {
+    if (!agent.branch_name) return
+    let cancelled = false
+    setLoadingDiff(true)
+    setDiffError(null)
+
+    const params: { baseRef?: string; headRef?: string; includeUncommitted?: boolean } = {}
+    if (leftSel.type === 'commit') params.baseRef = leftSel.sha
+    if (rightSel.type === 'uncommitted') params.includeUncommitted = true
+    else if (rightSel.type === 'commit') params.headRef = rightSel.sha
+
+    // First, just get the file list (performant)
+    api.default.getAgentDiffFiles(agent.id, projectId ?? undefined,
+      params.baseRef, params.headRef, params.includeUncommitted)
+      .then((d) => {
+        if (!cancelled) {
+          setDiff(d)
+          setLoadingDiff(false)
+          // If only a few files, load them all immediately
+          if (d.files.length > 0 && d.files.length <= 5) {
+            d.files.forEach((f) => fetchFileDiff(f.path))
+          }
+        }
+      })
       .catch((e) => { if (!cancelled) { setDiffError(String(e)); setLoadingDiff(false) } })
 
     return () => { cancelled = true }
-  }, [agent.id, agent.branch_name, projectId, leftSel, rightSel, ignoreWhitespace, refreshKey])
+  }, [agent.id, agent.branch_name, projectId, leftSel, rightSel, refreshKey, fetchFileDiff])
 
   const handleLeftChange = useCallback((newLeft: LeftSel) => {
     setLeftSel(newLeft)
@@ -999,20 +1178,66 @@ export function DiffViewer({ agent, projectId }: { agent: AgentResponse; project
   const handleFileClick = useCallback((path: string) => {
     if (singleFile && diff) {
       const idx = diff.files.findIndex((f) => f.path === path)
-      if (idx >= 0) setSingleFileIdx(idx)
+      if (idx >= 0) {
+        setSingleFileIdx(idx)
+        if (!diff.files[idx].hunks || diff.files[idx].hunks.length === 0) {
+          fetchFileDiff(path)
+        }
+      }
     } else {
-      scrollToFile(path)
+      if (collapsedFiles.has(path)) {
+        toggleFileCollapse(path)
+      }
+      const idx = diff?.files.findIndex(f => f.path === path)
+      if (idx !== undefined && idx >= 0 && (!diff?.files[idx].hunks || diff.files[idx].hunks.length === 0)) {
+        fetchFileDiff(path)
+      }
+      setTimeout(() => scrollToFile(path), 50)
     }
-  }, [singleFile, diff, scrollToFile])
+  }, [singleFile, diff, scrollToFile, fetchFileDiff, collapsedFiles, toggleFileCollapse])
 
   const handleSingleFileChange = useCallback((v: boolean) => {
     setSingleFile(v); setSingleFileIdx(0)
-  }, [])
+    if (v && diff && diff.files[0] && (!diff.files[0].hunks || diff.files[0].hunks.length === 0)) {
+      fetchFileDiff(diff.files[0].path)
+    }
+  }, [diff, fetchFileDiff])
 
   const handleJumpToUncommittedActual = useCallback(() => {
     setLeftSel({ type: 'base' })
     setRightSel({ type: 'uncommitted' })
   }, [])
+
+  const handleComment = useCallback(async (path: string, lineNum: number, isNew: boolean, text: string) => {
+    const side = isNew ? 'new' : 'old'
+    const msg = `Comment on ${path} line ${lineNum} (${side}):\n${text}`
+    try {
+      await api.default.sendAgentInput(agent.id, { text: msg }, projectId ?? undefined)
+    } catch (e) {
+      console.error('Failed to send comment:', e)
+    }
+  }, [agent.id, projectId])
+
+  const [isResizing, setIsResizing] = useState(false)
+  const startResizing = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    setIsResizing(true)
+  }, [])
+
+  useEffect(() => {
+    if (!isResizing) return
+    const handleMouseMove = (e: MouseEvent) => {
+      const newWidth = e.clientX - 16 // Adjust for container padding
+      if (newWidth > 100 && newWidth < 600) setSidebarWidth(newWidth)
+    }
+    const handleMouseUp = () => setIsResizing(false)
+    window.addEventListener('mousemove', handleMouseMove)
+    window.addEventListener('mouseup', handleMouseUp)
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove)
+      window.removeEventListener('mouseup', handleMouseUp)
+    }
+  }, [isResizing])
 
   const totalAdditions = diff?.files.reduce((s, f) => s + f.additions, 0) ?? 0
   const totalDeletions = diff?.files.reduce((s, f) => s + f.deletions, 0) ?? 0
@@ -1036,7 +1261,6 @@ export function DiffViewer({ agent, projectId }: { agent: AgentResponse; project
             <div className="flex items-center gap-1.5 px-2.5 py-1 bg-gray-50 dark:bg-gray-700/50 border-y border-gray-100 dark:border-gray-700/50 group">
               <Folder className="w-3 h-3 text-blue-400 dark:text-blue-500 shrink-0" />
               <span className="font-mono text-[9px] text-gray-500 dark:text-gray-400 truncate flex-1 min-w-0">{folder}</span>
-              <CopyButton text={folder} />
             </div>
           )}
           {groupFiles.map((f) => {
@@ -1058,7 +1282,7 @@ export function DiffViewer({ agent, projectId }: { agent: AgentResponse; project
   return (
     <div className="mt-4">
       {/* Section header */}
-      <div className="flex items-center gap-3 mb-3 flex-wrap">
+      <div className="flex items-center gap-3 mb-4 flex-wrap sticky top-0 z-30 bg-gray-50 dark:bg-gray-900 py-2 border-b border-gray-200 dark:border-gray-800 shadow-sm -mx-1 px-1">
         <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Changes</h2>
         {diff && (
           <div className="flex items-center gap-1.5">
@@ -1124,34 +1348,52 @@ export function DiffViewer({ agent, projectId }: { agent: AgentResponse; project
           No changes
         </div>
       ) : diff ? (
-        <div className={`flex gap-3 min-h-0 transition-opacity duration-150 ${loadingDiff ? 'opacity-40 pointer-events-none' : ''}`}>
+        <div className={`flex gap-4 min-h-0 transition-opacity duration-150 ${loadingDiff ? 'opacity-40 pointer-events-none' : ''}`}>
           {/* File list sidebar */}
-          <div className="w-52 shrink-0 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden bg-white dark:bg-gray-800 self-start sticky top-0 z-10">
-            <div className="px-2.5 py-2 border-b border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
-              <span className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">
-                Changed files ({diff.files.length})
+          <div
+            className="shrink-0 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden bg-white dark:bg-gray-800 self-start sticky top-[52px] z-20 flex flex-col shadow-sm"
+            style={{ width: sidebarWidth }}
+          >
+            <div className="px-2.5 py-2 border-b border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 flex items-center justify-between">
+              <span className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide truncate">
+                Files ({diff.files.length})
               </span>
             </div>
-            <div className="overflow-y-auto max-h-80">{renderSidebar(diff.files)}</div>
+            <div className="overflow-y-auto max-h-[calc(100vh-140px)]">{renderSidebar(diff.files)}</div>
+            {/* Resize handle */}
+            <div
+              onMouseDown={startResizing}
+              className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-500/30 transition-colors z-20"
+            />
           </div>
 
           {/* Diff content */}
           <div className="flex-1 min-w-0">
             {singleFile ? (
               <>
-                <div className="flex items-center gap-2 mb-3">
+                <div className="flex items-center gap-2 mb-3 sticky top-[52px] z-20">
                   <button
-                    onClick={() => setSingleFileIdx((i) => Math.max(0, i - 1))}
+                    onClick={() => {
+                      const nextIdx = Math.max(0, singleFileIdx - 1)
+                      setSingleFileIdx(nextIdx)
+                      if (!diff.files[nextIdx].hunks) fetchFileDiff(diff.files[nextIdx].path)
+                    }}
                     disabled={singleFileIdx === 0}
-                    className="flex items-center justify-center w-7 h-7 rounded-md border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors"
+                    className="flex items-center justify-center w-7 h-7 rounded-md border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors shadow-sm"
                   >
                     <ChevronLeft className="w-3.5 h-3.5" />
                   </button>
-                  <span className="text-xs text-gray-500 dark:text-gray-400">{singleFileIdx + 1} / {diff.files.length}</span>
+                  <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md px-2 py-1 text-xs text-gray-500 dark:text-gray-400 shadow-sm font-medium">
+                    {singleFileIdx + 1} / {diff.files.length}
+                  </div>
                   <button
-                    onClick={() => setSingleFileIdx((i) => Math.min(diff.files.length - 1, i + 1))}
+                    onClick={() => {
+                      const nextIdx = Math.min(diff.files.length - 1, singleFileIdx + 1)
+                      setSingleFileIdx(nextIdx)
+                      if (!diff.files[nextIdx].hunks) fetchFileDiff(diff.files[nextIdx].path)
+                    }}
                     disabled={singleFileIdx === diff.files.length - 1}
-                    className="flex items-center justify-center w-7 h-7 rounded-md border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors"
+                    className="flex items-center justify-center w-7 h-7 rounded-md border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors shadow-sm"
                   >
                     <ChevronRight className="w-3.5 h-3.5" />
                   </button>
@@ -1160,6 +1402,11 @@ export function DiffViewer({ agent, projectId }: { agent: AgentResponse; project
                   key={diff.files[singleFileIdx]?.path}
                   file={diff.files[singleFileIdx]!}
                   sideBySide={sideBySide}
+                  isCollapsed={collapsedFiles.has(diff.files[singleFileIdx].path)}
+                  onToggleCollapse={() => toggleFileCollapse(diff.files[singleFileIdx].path)}
+                  onComment={handleComment}
+                  onExpand={fetchFileDiff}
+                  stickyTop={100}
                   fileRef={(el) => {
                     const f = diff.files[singleFileIdx]
                     if (!f) return
@@ -1171,6 +1418,11 @@ export function DiffViewer({ agent, projectId }: { agent: AgentResponse; project
             ) : (
               diff.files.map((f) => (
                 <FileDiff key={f.path} file={f} sideBySide={sideBySide}
+                  isCollapsed={collapsedFiles.has(f.path)}
+                  onToggleCollapse={() => toggleFileCollapse(f.path)}
+                  onComment={handleComment}
+                  onExpand={fetchFileDiff}
+                  stickyTop={52}
                   fileRef={(el) => {
                     if (el) fileRefs.current.set(f.path, el)
                     else fileRefs.current.delete(f.path)
@@ -1181,6 +1433,7 @@ export function DiffViewer({ agent, projectId }: { agent: AgentResponse; project
           </div>
         </div>
       ) : null}
+      {isResizing && <div className="fixed inset-0 z-[100] cursor-col-resize" />}
     </div>
   )
 }
