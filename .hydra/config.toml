@@ -18,7 +18,7 @@ RUN go install github.com/magefile/mage@v1.15.0 && mv /root/go/bin/mage /usr/bin
 # Install bun
 RUN curl -fsSL https://bun.com/install | bash && mv /root/.bun/bin/bun /usr/bin/bun && ln -s /usr/bin/bun /usr/bin/bunx
 """
-shared_mounts = ["~/.cache/go-build", "~/go/pkg", "~/.bun/install/cache"]
+shared_mounts = ["~/.cache/go-build", "~/go/pkg", "~/.bun/install/cache", "~/.cache/goimports"]
 pre_prompt = """
 - Use bun instead of npm, and bun x instead of npx
 - Check using mage build before committing"""
