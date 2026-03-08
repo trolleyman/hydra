@@ -8,6 +8,7 @@ import {
   Settings, Copy, Folder, FolderOpen, X, GitMerge, Bot,
   MoveRight, MessageSquarePlus,
 } from 'lucide-react'
+import { Tooltip } from './components/Tooltip'
 
 // ── Syntax highlighting helpers ───────────────────────────────────────────────
 
@@ -441,7 +442,8 @@ const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onComment, 
   return (
     <div ref={fileRef} className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden mb-4 bg-white dark:bg-gray-900 shadow-sm">
       <div
-        className="flex items-center gap-2 px-3 py-1.5 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 z-20"
+        className="flex items-center gap-2 px-3 py-1.5 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 z-20 cursor-pointer"
+        onClick={() => onToggleCollapse(file.path)}
       >{/* TODO: Make `sticky` */}
         <button
           onClick={() => onToggleCollapse(file.path)}
@@ -450,14 +452,11 @@ const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onComment, 
           <ChevronDown className={`w-4 h-4 transition-transform ${isCollapsed ? '-rotate-90' : ''}`} />
         </button>
         <ChangeTypeIcon type={file.change_type} />
-        <Tooltip content={displayPath}>
-          <span
-            className="font-mono text-xs text-gray-700 dark:text-gray-300 flex-1 min-w-0 truncate cursor-pointer hover:underline"
-            onClick={() => onToggleCollapse(file.path)}
-          >
-            {displayPath}
-          </span>
-        </Tooltip>
+        <span
+          className="font-mono text-xs text-gray-700 dark:text-gray-300 flex-1 min-w-0 truncate cursor-pointer hover:underline"
+        >
+          {displayPath}
+        </span>
         <CopyButton text={file.path} />
         {!file.binary && (
           <div className="flex items-center gap-1.5 shrink-0 ml-1">
@@ -529,7 +528,7 @@ function formatCommitDate(iso: string): string {
 
 // ── Custom tooltip ────────────────────────────────────────────────────────────
 
-function Tooltip({ content, children, side = 'bottom', className = 'w-full' }: {
+function CustomTooltip({ content, children, side = 'bottom', className = 'w-full' }: {
   content: React.ReactNode
   children: React.ReactNode
   side?: 'bottom' | 'right' | 'top' | 'left'
@@ -660,7 +659,7 @@ function LeftSelector({ commits, selected, onChange, baseBranch, rightSel }: {
                 const commitValid = rightSel.type === 'uncommitted' || rightSel.type === 'latest'
                   || (rightIdx !== -1 && cIdx > rightIdx)
                 return (
-                  <Tooltip key={c.sha} side="right" content={<CommitTooltipContent commit={c} />}>
+                  <CustomTooltip key={c.sha} side="right" content={<CommitTooltipContent commit={c} />}>
                     <button
                       onClick={() => { if (commitValid) { onChange({ type: 'commit', sha: c.sha }); setOpen(false) } }}
                       disabled={!commitValid}
@@ -672,7 +671,7 @@ function LeftSelector({ commits, selected, onChange, baseBranch, rightSel }: {
                       <span className="text-xs text-gray-700 dark:text-gray-300 leading-tight truncate">{c.message}</span>
                       {selected.type === 'commit' && selected.sha === c.sha && <Check className="w-3 h-3 text-blue-500 shrink-0 mt-0.5" />}
                     </button>
-                  </Tooltip>
+                  </CustomTooltip>
                 )
               })}
             </div>
@@ -772,7 +771,7 @@ function RightSelector({ commits, selected, onChange, left, hasUncommitted }: {
                 Commits ({validCommits.length})
               </p>
               {validCommits.map((c) => (
-                <Tooltip key={c.sha} side="right" content={<CommitTooltipContent commit={c} />}>
+                <CustomTooltip key={c.sha} side="right" content={<CommitTooltipContent commit={c} />}>
                   <button
                     onClick={() => { onChange({ type: 'commit', sha: c.sha }); setOpen(false) }}
                     className={`w-full flex items-start gap-2 px-3 py-1.5 text-left hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer ${selected.type === 'commit' && selected.sha === c.sha ? 'bg-blue-50 dark:bg-blue-900/20' : ''
@@ -784,7 +783,7 @@ function RightSelector({ commits, selected, onChange, left, hasUncommitted }: {
                     <span className="text-xs text-gray-700 dark:text-gray-300 leading-tight truncate">{c.message}</span>
                     {selected.type === 'commit' && selected.sha === c.sha && <Check className="w-3 h-3 text-blue-500 shrink-0 mt-0.5" />}
                   </button>
-                </Tooltip>
+                </CustomTooltip>
               ))}
             </div>
           )}
@@ -1084,7 +1083,7 @@ function SettingsPopup({ fileView, onFileViewChange, sideBySide, onSideBySideCha
 
   return (
     <div ref={ref} className="relative">
-      <Tooltip content="Diff settings">
+      <Tooltip content="Settings">
         <button
           onClick={() => setOpen((o) => !o)}
           className={`flex items-center justify-center w-7 h-7 rounded-md border transition-colors cursor-pointer ${open ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800'
@@ -1434,7 +1433,7 @@ export function DiffViewer({ agent, projectId }: { agent: AgentResponse; project
             <LoaderCircle className="w-3.5 h-3.5 animate-spin text-gray-400 dark:text-gray-500 shrink-0" />
           )}
 
-          <Tooltip content="Refresh diff">
+          <Tooltip content="Refresh">
             <button
               onClick={() => setRefreshKey((k) => k + 1)}
               disabled={loadingDiff}

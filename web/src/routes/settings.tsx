@@ -7,7 +7,6 @@ import type { ConfigResponse, AgentConfig, AgentResponse } from '../api'
 import { AgentTerminal } from '../components/AgentTerminal'
 import { X, Layers, Monitor, Sparkles, FileText, Plus, Trash2, AlertCircle, Save } from 'lucide-react'
 import { InfoTooltip } from '../components/InfoTooltip'
-import { Tooltip } from '../components/Tooltip'
 import type { ProjectInfo } from '../api'
 
 import { useDialogStore } from '../stores/dialogStore'
