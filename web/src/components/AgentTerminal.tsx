@@ -357,7 +357,7 @@ export function AgentTerminal({ agentId, projectId, bashEnabled, onRefresh, onSt
         <span className={`ml-auto text-[10px] px-1.5 py-0.5 rounded font-medium ${isRunning ? 'text-green-400' : isWaiting ? 'text-yellow-400' : isLoading ? 'text-blue-400' : 'text-gray-500'}`}>
           {isRunning || isWaiting ? '● ' : '○ '}{status}
         </span>
-        <Tooltip content="Refresh terminal" side="bottom">
+        <Tooltip content="Refresh" side="bottom">
           <button
             onClick={reconnectActive}
             className="p-1 rounded hover:bg-gray-700 text-gray-400 hover:text-gray-200 transition-colors cursor-pointer"

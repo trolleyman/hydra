@@ -92,16 +92,14 @@ function ProjectDropdown({
 
   return (
     <div ref={dropdownRef} className="relative shrink-0">
-      <Tooltip content={selected?.path ?? 'Select project'}>
-        <button
-          onClick={() => { setOpen((o) => !o); setShowAddInput(false); setAddError(null) }}
-          className="flex items-center gap-1.5 h-8 px-2.5 rounded-md text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors max-w-xs cursor-pointer"
-        >
-          <Folder className="w-3.5 h-3.5" />
-          <span className="truncate max-w-[160px]">{selected?.name ?? 'Select project'}</span>
-          <ChevronDown className="w-3 h-3" />
-        </button>
-      </Tooltip>
+      <button
+        onClick={() => { setOpen((o) => !o); setShowAddInput(false); setAddError(null) }}
+        className="flex items-center gap-1.5 h-8 px-2.5 rounded-md text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors max-w-xs cursor-pointer"
+      >
+        <Folder className="w-3.5 h-3.5" />
+        <span className="truncate max-w-[160px]">{selected?.name ?? 'Select project'}</span>
+        <ChevronDown className="w-3 h-3" />
+      </button>
 
       {open && (
         <div className="absolute left-0 top-full mt-1 w-72 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50 overflow-hidden">
