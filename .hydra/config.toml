@@ -22,3 +22,6 @@ shared_mounts = ["~/.cache/go-build", "~/go/pkg", "~/.bun/install/cache", "~/.ca
 pre_prompt = """
 - Use bun instead of npm, and bun x instead of npx
 - Check using mage build before committing"""
+
+[features]
+terminal_bash = true
