@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/docker/docker/api/types/container"
@@ -49,7 +50,24 @@ type terminalStatusEvent struct {
 	Status string `json:"status"`
 }
 
-func sendStatusUpdate(conn *websocket.Conn, status string) {
+type safeConn struct {
+	*websocket.Conn
+	mu sync.Mutex
+}
+
+func (c *safeConn) WriteMessage(messageType int, data []byte) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.Conn.WriteMessage(messageType, data)
+}
+
+func (c *safeConn) WriteControl(messageType int, data []byte, deadline time.Time) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.Conn.WriteControl(messageType, data, deadline)
+}
+
+func sendStatusUpdate(conn *safeConn, status string) {
 	msg := terminalStatusEvent{
 		terminalEvent: terminalEvent{Type: "status"},
 		Status:        status,
@@ -58,7 +76,7 @@ func sendStatusUpdate(conn *websocket.Conn, status string) {
 	_ = conn.WriteMessage(websocket.TextMessage, data)
 }
 
-func sendTerminalEvent(conn *websocket.Conn, eventType string) {
+func sendTerminalEvent(conn *safeConn, eventType string) {
 	msg := terminalEvent{Type: eventType}
 	data, _ := json.Marshal(msg)
 	_ = conn.WriteMessage(websocket.TextMessage, data)
@@ -110,11 +128,12 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("terminal ws: found head: %s", head.ID)
 
-	conn, err := wsUpgrader.Upgrade(w, r, nil)
+	rawConn, err := wsUpgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("terminal ws: upgrade error for agent %q: %v", agentID, err)
 		return
 	}
+	conn := &safeConn{Conn: rawConn}
 	defer conn.Close()
 
 	log.Printf("terminal ws: upgraded connection for agent %q", agentID)
@@ -300,7 +319,7 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 }
 
 // streamBuildLog returns true if the build finished successfully and we should transition to attach.
-func (s *Server) streamBuildLog(ctx context.Context, conn *websocket.Conn, projectRoot, agentID, logPath string) bool {
+func (s *Server) streamBuildLog(ctx context.Context, conn *safeConn, projectRoot, agentID, logPath string) bool {
 	_ = conn.WriteMessage(websocket.BinaryMessage, []byte("\x1b[32mBuilding agent...\x1b[0m\r\n\r\n"))
 	sendStatusUpdate(conn, "building")
 
