@@ -420,14 +420,14 @@ func KillHead(ctx context.Context, cli *dockerclient.Client, store *db.Store, he
 func KillHeadNoLock(ctx context.Context, cli *dockerclient.Client, store *db.Store, head Head) error {
 	var killErr error
 
-	if head.ContainerID != "" {
-		log.Printf("heads: killing agent %s in container %s", head.ID, head.ContainerID[:12])
-		if err := docker.KillAgent(ctx, cli, head.ContainerID); err != nil {
-			log.Printf("warn: heads: kill container failed for %s: %v", head.ID, err)
-			killErr = errtrace.Wrap(err)
-		}
-	} else {
-		log.Printf("heads: agent %s has no container to kill", head.ID)
+	containerRef := head.ContainerID
+	if containerRef == "" {
+		containerRef = "hydra-agent-" + head.ID
+	}
+	log.Printf("heads: killing container %q for agent %s", containerRef, head.ID)
+	if err := docker.KillAgent(ctx, cli, containerRef); err != nil {
+		log.Printf("warn: heads: kill container failed for %s: %v", head.ID, err)
+		killErr = errtrace.Wrap(err)
 	}
 
 	if killErr == nil {
