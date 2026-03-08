@@ -51,6 +51,7 @@ function TerminalPane({ agentId, projectId, shell, active, reconnectAttempt, onS
   }, [active])
 
   useEffect(() => {
+    // If a kill was scheduled, cancel it because we are remounting
     if (killTimeoutRef.current) {
       clearTimeout(killTimeoutRef.current)
       killTimeoutRef.current = null
@@ -105,6 +106,8 @@ function TerminalPane({ agentId, projectId, shell, active, reconnectAttempt, onS
 
     ws.onopen = () => {
       const { cols, rows } = term
+      // Send a slightly smaller resize first, then the actual size.
+      // This forces SIGWINCH to fire twice, causing the terminal app to fully redraw.
       ws.send(JSON.stringify({ type: 'resize', cols: Math.max(1, cols - 1), rows: Math.max(1, rows - 1) }))
       setTimeout(() => {
         if (ws.readyState === WebSocket.OPEN) {
@@ -130,7 +133,7 @@ function TerminalPane({ agentId, projectId, shell, active, reconnectAttempt, onS
               return
             }
             case TerminalEvent.type.BUILD_FINISHED: {
-              term.write('\x1bc')
+              term.write('\x1bc') // RIS (Reset to Initial State) - clear screen
               term.writeln('\x1b[32mBuild finished. Starting agent...\x1b[0m\r\n')
               return
             }
@@ -159,6 +162,7 @@ function TerminalPane({ agentId, projectId, shell, active, reconnectAttempt, onS
 
     const isMac = /Mac/.test(navigator.platform)
 
+    // Custom key handler for clipboard operations
     term.attachCustomKeyEventHandler((e: KeyboardEvent) => {
       if (e.type !== 'keydown') return true
 
@@ -166,6 +170,7 @@ function TerminalPane({ agentId, projectId, shell, active, reconnectAttempt, onS
       const isPasteShortcut = (isMac ? e.metaKey : e.ctrlKey) && !e.shiftKey && e.code === 'KeyV'
       const isLiteralVShortcut = (isMac ? e.metaKey : e.ctrlKey) && e.shiftKey && e.code === 'KeyV'
 
+      // Copy with selection -> copy and clear selection (no ^C sent)
       if (isCopyShortcut) {
         const selection = term.getSelection()
         if (selection) {
@@ -176,10 +181,12 @@ function TerminalPane({ agentId, projectId, shell, active, reconnectAttempt, onS
         return true
       }
 
+      // Paste -> let browser handle it (triggers 'paste' event which xterm handles)
       if (isPasteShortcut) {
         return false
       }
 
+      // Send actual ^V (0x16) to terminal
       if (isLiteralVShortcut) {
         if (ws.readyState === WebSocket.OPEN) {
           ws.send(new Uint8Array([0x16]))
@@ -190,6 +197,7 @@ function TerminalPane({ agentId, projectId, shell, active, reconnectAttempt, onS
       return true
     })
 
+    // Forward keyboard input to the container
     const inputDisposable = term.onData((data) => {
       if (ws.readyState === WebSocket.OPEN) {
         const bytes = new TextEncoder().encode(data)
@@ -197,6 +205,10 @@ function TerminalPane({ agentId, projectId, shell, active, reconnectAttempt, onS
       }
     })
 
+    // Resize terminal when the container element resizes.
+    // Only send the resize signal when the column/row count actually changes to
+    // avoid spurious SIGWINCH signals (e.g. from layout shifts caused by the
+    // diff viewer loading content below the terminal).
     const observer = new ResizeObserver(() => {
       fitAddon.fit()
       const { cols, rows } = term
