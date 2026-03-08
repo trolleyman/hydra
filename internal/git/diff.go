@@ -139,11 +139,16 @@ func GetDiff(projectRoot, baseRef, headRef string, ignoreWhitespace, useTripleDo
 	if context > 0 {
 		args = append(args, fmt.Sprintf("-U%d", context))
 	}
-	separator := ".."
-	if useTripleDot {
-		separator = "..."
+	if headRef == "" {
+		// Empty headRef means "compare baseRef to working tree"
+		args = append(args, baseRef)
+	} else {
+		separator := ".."
+		if useTripleDot {
+			separator = "..."
+		}
+		args = append(args, baseRef+separator+headRef)
 	}
-	args = append(args, baseRef+separator+headRef)
 
 	if path != "" {
 		args = append(args, "--", path)
@@ -166,12 +171,19 @@ func GetDiff(projectRoot, baseRef, headRef string, ignoreWhitespace, useTripleDo
 // GetDiffFiles returns the list of files that changed between baseRef and headRef,
 // including addition and deletion counts.
 func GetDiffFiles(projectRoot, baseRef, headRef string, useTripleDot bool) ([]DiffFile, error) {
-	args := []string{"-C", projectRoot, "diff", "--numstat", "--no-color"}
-	separator := ".."
-	if useTripleDot {
-		separator = "..."
-	}
-	args = append(args, baseRef+separator+headRef)
+	rangeArg := func() string {
+		if headRef == "" {
+			// Empty headRef means "compare baseRef to working tree"
+			return baseRef
+		}
+		separator := ".."
+		if useTripleDot {
+			separator = "..."
+		}
+		return baseRef + separator + headRef
+	}()
+
+	args := []string{"-C", projectRoot, "diff", "--numstat", "--no-color", rangeArg}
 
 	out, err := exec.Command("git", args...).CombinedOutput()
 	if err != nil {
@@ -197,8 +209,7 @@ func GetDiffFiles(projectRoot, baseRef, headRef string, useTripleDot bool) ([]Di
 	}
 
 	// Now get the change types (--name-status)
-	args = []string{"-C", projectRoot, "diff", "--name-status", "--no-color"}
-	args = append(args, baseRef+separator+headRef)
+	args = []string{"-C", projectRoot, "diff", "--name-status", "--no-color", rangeArg}
 	out, err = exec.Command("git", args...).CombinedOutput()
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
