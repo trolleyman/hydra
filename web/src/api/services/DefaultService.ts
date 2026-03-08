@@ -268,6 +268,8 @@ export class DefaultService {
      * @param headRef Head commit SHA or ref. Defaults to the agent's branch.
      * @param ignoreWhitespace Ignore whitespace changes in the diff
      * @param includeUncommitted Include uncommitted changes in the worktree in the diff
+     * @param path Only return the diff for this specific file path
+     * @param context Number of lines of context to show (defaults to 3)
      * @returns DiffResponse OK
      * @throws ApiError
      */
@@ -278,6 +280,8 @@ export class DefaultService {
         headRef?: string,
         ignoreWhitespace?: boolean,
         includeUncommitted?: boolean,
+        path?: string,
+        context: number = 3,
     ): CancelablePromise<DiffResponse> {
         return this.httpRequest.request({
             method: 'GET',
@@ -290,6 +294,43 @@ export class DefaultService {
                 'base_ref': baseRef,
                 'head_ref': headRef,
                 'ignore_whitespace': ignoreWhitespace,
+                'include_uncommitted': includeUncommitted,
+                'path': path,
+                'context': context,
+            },
+            errors: {
+                404: `Not Found`,
+                500: `Internal Server Error`,
+            },
+        });
+    }
+    /**
+     * Get the list of changed files for an agent's branch
+     * @param id
+     * @param projectId Project ID to scope the lookup (defaults to server CWD project)
+     * @param baseRef Base commit SHA or ref. Defaults to the agent's base branch.
+     * @param headRef Head commit SHA or ref. Defaults to the agent's branch.
+     * @param includeUncommitted Include uncommitted changes in the worktree
+     * @returns DiffResponse OK
+     * @throws ApiError
+     */
+    public getAgentDiffFiles(
+        id: string,
+        projectId?: string,
+        baseRef?: string,
+        headRef?: string,
+        includeUncommitted?: boolean,
+    ): CancelablePromise<DiffResponse> {
+        return this.httpRequest.request({
+            method: 'GET',
+            url: '/api/agent/{id}/diff-files',
+            path: {
+                'id': id,
+            },
+            query: {
+                'project_id': projectId,
+                'base_ref': baseRef,
+                'head_ref': headRef,
                 'include_uncommitted': includeUncommitted,
             },
             errors: {

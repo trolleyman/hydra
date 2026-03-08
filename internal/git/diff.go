@@ -129,16 +129,25 @@ func GetCommitInfo(projectRoot, ref string) (*CommitInfo, error) {
 // GetDiff returns the parsed diff between baseRef and headRef.
 // If useTripleDot is true, uses "..." (merge-base diff, like a GitLab MR).
 // If ignoreWhitespace is true, passes -w to git diff.
-func GetDiff(projectRoot, baseRef, headRef string, ignoreWhitespace, useTripleDot bool) ([]DiffFile, error) {
+// If path is non-empty, only returns the diff for that file.
+// context specifies the number of context lines (-U<n>).
+func GetDiff(projectRoot, baseRef, headRef string, ignoreWhitespace, useTripleDot bool, path string, context int) ([]DiffFile, error) {
 	args := []string{"-C", projectRoot, "diff", "--no-color"}
 	if ignoreWhitespace {
 		args = append(args, "-w")
+	}
+	if context > 0 {
+		args = append(args, fmt.Sprintf("-U%d", context))
 	}
 	separator := ".."
 	if useTripleDot {
 		separator = "..."
 	}
 	args = append(args, baseRef+separator+headRef)
+
+	if path != "" {
+		args = append(args, "--", path)
+	}
 
 	out, err := exec.Command("git", args...).Output()
 	if err != nil {
@@ -152,6 +161,92 @@ func GetDiff(projectRoot, baseRef, headRef string, ignoreWhitespace, useTripleDo
 	}
 
 	return errtrace.Wrap2(parseDiff(string(out)))
+}
+
+// GetDiffFiles returns the list of files that changed between baseRef and headRef,
+// including addition and deletion counts.
+func GetDiffFiles(projectRoot, baseRef, headRef string, useTripleDot bool) ([]DiffFile, error) {
+	args := []string{"-C", projectRoot, "diff", "--numstat", "--no-color"}
+	separator := ".."
+	if useTripleDot {
+		separator = "..."
+	}
+	args = append(args, baseRef+separator+headRef)
+
+	out, err := exec.Command("git", args...).CombinedOutput()
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+			// fine
+		} else {
+			return nil, errtrace.Wrap(fmt.Errorf("git diff --numstat: %w (output: %q)", err, string(out)))
+		}
+	}
+
+	stats := make(map[string][2]int)
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if line = strings.TrimSpace(line); line == "" {
+			continue
+		}
+		parts := strings.Fields(line)
+		if len(parts) < 3 {
+			continue
+		}
+		add, _ := strconv.Atoi(parts[0])
+		del, _ := strconv.Atoi(parts[1])
+		stats[parts[2]] = [2]int{add, del}
+	}
+
+	// Now get the change types (--name-status)
+	args = []string{"-C", projectRoot, "diff", "--name-status", "--no-color"}
+	args = append(args, baseRef+separator+headRef)
+	out, err = exec.Command("git", args...).CombinedOutput()
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+			// fine
+		} else {
+			return nil, errtrace.Wrap(fmt.Errorf("git diff --name-status: %w (output: %q)", err, string(out)))
+		}
+	}
+
+	var files []DiffFile
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if line = strings.TrimSpace(line); line == "" {
+			continue
+		}
+		parts := strings.Fields(line)
+		if len(parts) < 2 {
+			continue
+		}
+		status := parts[0]
+		path := parts[1]
+		var oldPath *string
+		if strings.HasPrefix(status, "R") && len(parts) >= 3 {
+			old := parts[1]
+			oldPath = &old
+			path = parts[2]
+		}
+
+		changeType := "modified"
+		switch {
+		case strings.HasPrefix(status, "A"):
+			changeType = "added"
+		case strings.HasPrefix(status, "D"):
+			changeType = "deleted"
+		case strings.HasPrefix(status, "R"):
+			changeType = "renamed"
+		}
+
+		st := stats[path]
+		files = append(files, DiffFile{
+			Path:       path,
+			OldPath:    oldPath,
+			ChangeType: changeType,
+			Additions:  st[0],
+			Deletions:  st[1],
+		})
+	}
+
+	return files, nil
 }
 
 // parseDiff parses the output of `git diff --no-color` into a slice of DiffFile.
