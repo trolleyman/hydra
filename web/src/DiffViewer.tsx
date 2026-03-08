@@ -1073,6 +1073,7 @@ export function DiffViewer({ agent, projectId }: { agent: AgentResponse; project
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set())
   const [collapsedFiles, setCollapsedFiles] = useState<Set<string>>(new Set())
   const fileRefs = useRef<Map<string, HTMLDivElement>>(new Map())
+  const sidebarRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => { try { localStorage.setItem('hydra-diff-side-by-side', String(sideBySide)) } catch { } }, [sideBySide])
   useEffect(() => { try { localStorage.setItem('hydra-diff-ignore-whitespace', String(ignoreWhitespace)) } catch { } }, [ignoreWhitespace])
@@ -1228,7 +1229,9 @@ export function DiffViewer({ agent, projectId }: { agent: AgentResponse; project
   useEffect(() => {
     if (!isResizing) return
     const handleMouseMove = (e: MouseEvent) => {
-      const newWidth = e.clientX - 16 // Adjust for container padding
+      if (!sidebarRef.current) return
+      const rect = sidebarRef.current.getBoundingClientRect()
+      const newWidth = e.clientX - rect.left
       if (newWidth > 100 && newWidth < 600) setSidebarWidth(newWidth)
     }
     const handleMouseUp = () => setIsResizing(false)
@@ -1238,7 +1241,7 @@ export function DiffViewer({ agent, projectId }: { agent: AgentResponse; project
       window.removeEventListener('mousemove', handleMouseMove)
       window.removeEventListener('mouseup', handleMouseUp)
     }
-  }, [isResizing])
+  }, [isResizing, setSidebarWidth])
 
   const totalAdditions = diff?.files.reduce((s, f) => s + f.additions, 0) ?? 0
   const totalDeletions = diff?.files.reduce((s, f) => s + f.deletions, 0) ?? 0
@@ -1352,6 +1355,7 @@ export function DiffViewer({ agent, projectId }: { agent: AgentResponse; project
         <div className={`flex gap-4 min-h-0 transition-opacity duration-150 ${loadingDiff ? 'opacity-40 pointer-events-none' : ''}`}>
           {/* File list sidebar */}
           <div
+            ref={sidebarRef}
             className="shrink-0 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden bg-white dark:bg-gray-800 self-start sticky top-10 z-20 flex flex-col shadow-sm"
             style={{ width: sidebarWidth }}
           >
