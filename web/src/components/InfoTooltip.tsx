@@ -9,14 +9,16 @@ interface InfoTooltipProps {
 
 export function InfoTooltip({ title, children }: InfoTooltipProps) {
   const [isOpen, setIsOpen] = useState(false)
+  const [isTooltipHovered, setIsTooltipHovered] = useState(false)
   const [coords, setCoords] = useState({ top: 0, left: 0, arrowX: '50%' })
   const iconRef = useRef<SVGSVGElement>(null)
+  const closeTimeoutRef = useRef<number | null>(null)
 
   const updateCoords = () => {
     if (iconRef.current) {
       const rect = iconRef.current.getBoundingClientRect()
       const centerX = rect.left + rect.width / 2
-      const tooltipWidth = 320 // w-80
+      const tooltipWidth = 384 // w-96
       const padding = 16
       
       let left = centerX
@@ -26,10 +28,6 @@ export function InfoTooltip({ title, children }: InfoTooltipProps) {
         left = window.innerWidth - tooltipWidth / 2 - padding
       }
 
-      // Calculate arrow position relative to the tooltip center
-      // left is the center of the tooltip in viewport coords
-      // centerX is the center of the icon in viewport coords
-      // arrowOffset is how much the icon is offset from the tooltip center
       const arrowOffset = centerX - left
       
       setCoords({
@@ -52,21 +50,62 @@ export function InfoTooltip({ title, children }: InfoTooltipProps) {
     }
   }, [isOpen])
 
+  React.useEffect(() => {
+    return () => {
+      if (closeTimeoutRef.current) {
+        window.clearTimeout(closeTimeoutRef.current)
+      }
+    }
+  }, [])
+
+  const handleMouseEnterIcon = () => {
+    if (closeTimeoutRef.current) {
+      window.clearTimeout(closeTimeoutRef.current)
+      closeTimeoutRef.current = null
+    }
+    updateCoords()
+    setIsOpen(true)
+  }
+
+  const handleMouseLeaveIcon = () => {
+    closeTimeoutRef.current = window.setTimeout(() => {
+      if (!isTooltipHovered) {
+        setIsOpen(false)
+      }
+    }, 100)
+  }
+
+  const handleMouseEnterTooltip = () => {
+    if (closeTimeoutRef.current) {
+      window.clearTimeout(closeTimeoutRef.current)
+      closeTimeoutRef.current = null
+    }
+    setIsTooltipHovered(true)
+  }
+
+  const handleMouseLeaveTooltip = () => {
+    setIsTooltipHovered(false)
+    setIsOpen(false)
+  }
+
   return (
     <div className="inline-block ml-1 align-middle">
       <Info 
         ref={iconRef}
         className="w-3.5 h-3.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 cursor-help transition-colors" 
-        onMouseEnter={() => setIsOpen(true)}
-        onMouseLeave={() => setIsOpen(false)}
+        onMouseEnter={handleMouseEnterIcon}
+        onMouseLeave={handleMouseLeaveIcon}
       />
       {isOpen && createPortal(
         <div 
-          className="fixed z-[9999] -translate-x-1/2 -translate-y-full w-80 p-3 bg-gray-900 dark:bg-gray-800 text-white text-[11px] rounded-lg shadow-xl pointer-events-none animate-in fade-in zoom-in-95 duration-100 border border-gray-700"
+          className="fixed z-[9999] -translate-x-1/2 -translate-y-full w-96 p-3 bg-gray-900 dark:bg-gray-800 text-white text-[11px] rounded-lg shadow-xl animate-in fade-in zoom-in-95 duration-100 border border-gray-700"
           style={{ 
             top: coords.top - 8, 
-            left: coords.left 
+            left: coords.left,
+            visibility: coords.top === 0 ? 'hidden' : 'visible'
           }}
+          onMouseEnter={handleMouseEnterTooltip}
+          onMouseLeave={handleMouseLeaveTooltip}
         >
           <p className="font-bold mb-1.5 border-b border-gray-700 pb-1">{title}</p>
           <div className="text-gray-300 space-y-2">
