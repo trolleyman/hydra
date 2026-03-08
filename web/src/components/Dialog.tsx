@@ -5,16 +5,20 @@ import { useDialogStore } from '../stores/dialogStore'
 export const Dialog: React.FC = () => {
   const { isOpen, title, message, type, showCancel, hide, onConfirm, onCancel } = useDialogStore()
 
-  // Handle escape key to close the dialog
+  // Handle Escape (cancel) and Enter (confirm) keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && isOpen) {
+      if (!isOpen) return
+      if (e.key === 'Escape') {
         handleCancel()
+      } else if (e.key === 'Enter') {
+        e.preventDefault()
+        handleConfirm()
       }
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [isOpen, onCancel])
+  }, [isOpen, onConfirm, onCancel])
 
   if (!isOpen) return null
 
