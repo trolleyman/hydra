@@ -72,7 +72,7 @@ function AgentsLayout() {
         const result = await api.default.listAgents(selectedProjectId ?? undefined)
         if (cancelled) return
         setAgents(result)
-        
+
         // If we are at root and there are agents, we could auto-select the first one.
         // But the requirement is "/ be no agent selected".
         // So we don't auto-navigate here.

@@ -770,94 +770,96 @@ function MergeConflictButton({ diff, agent, projectId }: {
 
   return (
     <>
-      <Tooltip content={
-        <div>
-          <p className="font-semibold mb-1">Merge Conflict</p>
-          <p className="text-gray-300">{count} file{count !== 1 ? 's' : ''} conflict with <span className="font-mono">{baseBranch}</span></p>
-          <p className="text-gray-400 mt-1 text-[10px]">Click for resolution instructions</p>
-        </div>
-      }>
-        <button
-          onClick={() => setOpen(true)}
-          className="flex items-center gap-1 h-7 px-2 rounded-md text-xs font-medium text-red-700 dark:text-red-400 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 hover:bg-red-100 dark:hover:bg-red-900/40 transition-colors cursor-pointer"
-        >
-          <GitMerge className="w-3.5 h-3.5 shrink-0" />
-          <span>{count} conflict{count !== 1 ? 's' : ''}</span>
-        </button>
-      </Tooltip>
+      <div className="relative">
+        <Tooltip content={
+          <div>
+            <p className="font-semibold mb-1">Merge Conflict</p>
+            <p className="text-gray-300">{count} file{count !== 1 ? 's' : ''} conflict with <span className="font-mono">{baseBranch}</span></p>
+            <p className="text-gray-400 mt-1 text-[10px]">Click for resolution instructions</p>
+          </div>
+        }>
+          <button
+            onClick={() => setOpen(true)}
+            className="flex items-center gap-1 h-7 px-2 rounded-md text-xs font-medium text-red-700 dark:text-red-400 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 hover:bg-red-100 dark:hover:bg-red-900/40 transition-colors cursor-pointer"
+          >
+            <GitMerge className="w-3.5 h-3.5 shrink-0" />
+            <span>{count} conflict{count !== 1 ? 's' : ''}</span>
+          </button>
+        </Tooltip>
 
-      {open && (
-        <div className="fixed inset-0 z-[300] flex items-center justify-center p-4">
-          {/* Backdrop */}
-          <div className="absolute inset-0 bg-black/40" onClick={() => setOpen(false)} />
+        {open && (
+          <div className="fixed inset-0 z-[300] flex items-center justify-center p-4">
+            {/* Backdrop */}
+            <div className="absolute inset-0 bg-black/40" onClick={() => setOpen(false)} />
 
-          {/* Panel */}
-          <div className="relative bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl shadow-2xl w-full max-w-lg">
-            {/* Header */}
-            <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-200 dark:border-gray-700">
-              <GitMerge className="w-4 h-4 text-red-500 shrink-0" />
-              <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 flex-1">
-                Merge Conflict — {count} file{count !== 1 ? 's' : ''} conflict with <span className="font-mono text-red-600 dark:text-red-400">{baseBranch}</span>
-              </h3>
-              <button onClick={() => setOpen(false)} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 cursor-pointer">
-                <X className="w-4 h-4" />
-              </button>
-            </div>
+            {/* Panel */}
+            <div className="relative bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl shadow-2xl w-full max-w-lg">
+              {/* Header */}
+              <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-200 dark:border-gray-700">
+                <GitMerge className="w-4 h-4 text-red-500 shrink-0" />
+                <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 flex-1">
+                  Merge Conflict — {count} file{count !== 1 ? 's' : ''} conflict with <span className="font-mono text-red-600 dark:text-red-400">{baseBranch}</span>
+                </h3>
+                <button onClick={() => setOpen(false)} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 cursor-pointer">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
 
-            {/* Conflicting files */}
-            {conflictFiles.length > 0 && (
-              <div className="px-4 pt-3 pb-1">
-                <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">Conflicting files</p>
-                <div className="bg-gray-50 dark:bg-gray-800 rounded-lg overflow-hidden divide-y divide-gray-100 dark:divide-gray-700/50 max-h-32 overflow-y-auto">
-                  {conflictFiles.map((f) => (
-                    <div key={f} className="px-3 py-1.5 font-mono text-xs text-gray-700 dark:text-gray-300">{f}</div>
-                  ))}
+              {/* Conflicting files */}
+              {conflictFiles.length > 0 && (
+                <div className="px-4 pt-3 pb-1">
+                  <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">Conflicting files</p>
+                  <div className="bg-gray-50 dark:bg-gray-800 rounded-lg overflow-hidden divide-y divide-gray-100 dark:divide-gray-700/50 max-h-32 overflow-y-auto">
+                    {conflictFiles.map((f) => (
+                      <div key={f} className="px-3 py-1.5 font-mono text-xs text-gray-700 dark:text-gray-300">{f}</div>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
 
-            {/* Resolution instructions */}
-            <div className="px-4 py-3">
-              <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">Resolving locally</p>
-              <div className="bg-gray-900 dark:bg-gray-950 rounded-lg p-3 space-y-1.5 text-xs font-mono">
-                <p className="text-gray-400"># Navigate to the agent's worktree</p>
-                <p className="text-green-400">cd {worktreePath}</p>
-                <p className="text-gray-400 mt-2"># Merge the base branch (triggers conflict markers)</p>
-                <p className="text-green-400">git merge {baseBranch}</p>
-                <p className="text-gray-400 mt-2"># Edit conflicting files, then stage and commit</p>
-                <p className="text-green-400">git add {'<resolved-files>'}</p>
-                <p className="text-green-400">git commit</p>
+              {/* Resolution instructions */}
+              <div className="px-4 py-3">
+                <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">Resolving locally</p>
+                <div className="bg-gray-900 dark:bg-gray-950 rounded-lg p-3 space-y-1.5 text-xs font-mono">
+                  <p className="text-gray-400"># Navigate to the agent's worktree</p>
+                  <p className="text-green-400">cd {worktreePath}</p>
+                  <p className="text-gray-400 mt-2"># Merge the base branch (triggers conflict markers)</p>
+                  <p className="text-green-400">git merge {baseBranch}</p>
+                  <p className="text-gray-400 mt-2"># Edit conflicting files, then stage and commit</p>
+                  <p className="text-green-400">git add {'<resolved-files>'}</p>
+                  <p className="text-green-400">git commit</p>
+                </div>
+                <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-2">
+                  The worktree at <span className="font-mono">{worktreePath}</span> is isolated — changes only affect this agent's branch.
+                </p>
               </div>
-              <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-2">
-                The worktree at <span className="font-mono">{worktreePath}</span> is isolated — changes only affect this agent's branch.
-              </p>
-            </div>
 
-            {/* Footer */}
-            <div className="flex items-center gap-2 px-4 py-3 border-t border-gray-200 dark:border-gray-700">
-              <button
-                onClick={() => setOpen(false)}
-                className="flex items-center gap-1.5 h-7 px-3 rounded-md text-xs font-medium text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer"
-              >
-                Dismiss
-              </button>
-              <button
-                onClick={handleFixWithAgent}
-                disabled={sending || sent}
-                className="flex items-center gap-1.5 h-7 px-3 rounded-md text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-60 transition-colors cursor-pointer ml-auto"
-              >
-                {sent ? (
-                  <><Check className="w-3.5 h-3.5" /> Sent to agent</>
-                ) : sending ? (
-                  <><LoaderCircle className="w-3.5 h-3.5 animate-spin" /> Sending…</>
-                ) : (
-                  <><Bot className="w-3.5 h-3.5" /> Fix with agent</>
-                )}
-              </button>
+              {/* Footer */}
+              <div className="flex items-center gap-2 px-4 py-3 border-t border-gray-200 dark:border-gray-700">
+                <button
+                  onClick={() => setOpen(false)}
+                  className="flex items-center gap-1.5 h-7 px-3 rounded-md text-xs font-medium text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer"
+                >
+                  Dismiss
+                </button>
+                <button
+                  onClick={handleFixWithAgent}
+                  disabled={sending || sent}
+                  className="flex items-center gap-1.5 h-7 px-3 rounded-md text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-60 transition-colors cursor-pointer ml-auto"
+                >
+                  {sent ? (
+                    <><Check className="w-3.5 h-3.5" /> Sent to agent</>
+                  ) : sending ? (
+                    <><LoaderCircle className="w-3.5 h-3.5 animate-spin" /> Sending…</>
+                  ) : (
+                    <><Bot className="w-3.5 h-3.5" /> Fix with agent</>
+                  )}
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </>
   )
 }
@@ -1104,7 +1106,7 @@ export function DiffViewer({ agent, projectId }: { agent: AgentResponse; project
   }, [agent.id, agent.branch_name, projectId, refreshKey])
 
   const fetchFileDiff = useCallback(async (path: string, context: number = 3) => {
-    if (!agent.branch_name) return
+    if (!agent.branch_name || !diff) return
 
     const params: { baseRef?: string; headRef?: string; ignoreWhitespace?: boolean; includeUncommitted?: boolean } = {}
     if (ignoreWhitespace) params.ignoreWhitespace = true
@@ -1129,7 +1131,7 @@ export function DiffViewer({ agent, projectId }: { agent: AgentResponse; project
     } catch (e) {
       console.error('Failed to fetch file diff:', e)
     }
-  }, [agent.id, projectId, leftSel, rightSel, ignoreWhitespace])
+  }, [agent.id, projectId, leftSel, rightSel, ignoreWhitespace, diff])
 
   useEffect(() => {
     if (!agent.branch_name) return
