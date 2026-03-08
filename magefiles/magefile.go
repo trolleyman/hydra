@@ -412,9 +412,9 @@ func addGoBuildDeps() {
 
 // goBuildTags returns the extra go tool flags needed for the current platform.
 // On non-Linux hosts this activates embedding of the cross-compiled Linux binary.
-func goBuildTags(extra ...string) []string {
+func goBuildTags(forceIgnoreLinuxBinary bool, extra ...string) []string {
 	var tags []string
-	if runtime.GOOS != "linux" {
+	if !forceIgnoreLinuxBinary && runtime.GOOS != "linux" {
 		tags = append(tags, "hydra_embed_linux_binary")
 	}
 	tags = append(tags, extra...)
@@ -440,7 +440,7 @@ func BuildLinuxBinary() error {
 
 func Run() error {
 	addGoBuildDeps()
-	args := append([]string{"run"}, goBuildTags()...)
+	args := append([]string{"run"}, goBuildTags(false)...)
 	args = append(args, "./", "server")
 	return errtrace.Wrap(runV("go", args...))
 }
@@ -471,7 +471,7 @@ func BuildGoDownload() error {
 func BuildGo() error {
 	addGoBuildDeps()
 	mg.Deps(BuildGoDownload)
-	args := append([]string{"build"}, goBuildTags()...)
+	args := append([]string{"build"}, goBuildTags(false)...)
 	args = append(args, "./...")
 	return errtrace.Wrap(runV("go", args...))
 }
@@ -639,7 +639,7 @@ func Dev() error {
 		}
 
 		hydraOutputFile := getHydraOutputFile()
-		devBuildArgs := append([]string{"build"}, goBuildTags()...)
+		devBuildArgs := append([]string{"build"}, goBuildTags(false)...)
 		devBuildArgs = append(devBuildArgs, "-o", hydraOutputFile, "./")
 		if err := runV("go", devBuildArgs...); err != nil {
 			return errtrace.Wrap(err)
@@ -686,7 +686,7 @@ func DevFast() error {
 	hydraOutputFile := getHydraOutputFile()
 
 	buildBackend := func() error {
-		devBuildArgs := append([]string{"build"}, goBuildTags("hydra_no_frontend")...)
+		devBuildArgs := append([]string{"build"}, goBuildTags(false, "hydra_no_frontend")...)
 		devBuildArgs = append(devBuildArgs, "-o", hydraOutputFile, "./")
 		return errtrace.Wrap(runV("go", devBuildArgs...))
 	}
@@ -864,7 +864,7 @@ func DevAutoReload() error {
 			}
 			serverMu.Unlock()
 
-			devBuildArgs := append([]string{"build"}, goBuildTags()...)
+			devBuildArgs := append([]string{"build"}, goBuildTags(false)...)
 			devBuildArgs = append(devBuildArgs, "-o", hydraOutputFile, "./")
 			printCmdLine(append([]string{"go"}, devBuildArgs...))
 			buildCmd := exec.Command("go", devBuildArgs...)
@@ -922,7 +922,7 @@ func Preview() error {
 				cmd.Wait()
 			}
 
-			previewBuildArgs := append([]string{"build"}, goBuildTags()...)
+			previewBuildArgs := append([]string{"build"}, goBuildTags(false)...)
 			previewBuildArgs = append(previewBuildArgs, "-o", ".mage/server", "./")
 			buildCmd := exec.Command("go", previewBuildArgs...)
 			buildCmd.Stdout = os.Stdout
@@ -952,9 +952,10 @@ func Demo() error {
 	if err := GenerateGo(); err != nil {
 		return errtrace.Wrap(err)
 	}
-	if err := BuildLinuxBinary(); err != nil {
-		return errtrace.Wrap(err)
-	}
+	// We don't need to build the Linux binary
+	// if err := BuildLinuxBinary(); err != nil {
+	// 	return errtrace.Wrap(err)
+	// }
 	// Build the frontend once to ensure web/dist/ exists for Go compilation.
 	if err := BuildWeb(); err != nil {
 		return errtrace.Wrap(err)
@@ -977,7 +978,7 @@ func Demo() error {
 	}()
 
 	hydraOutputFile := getHydraOutputFile()
-	devBuildArgs := append([]string{"build"}, goBuildTags()...)
+	devBuildArgs := append([]string{"build"}, goBuildTags(true)...) // Don't embed Linux binary
 	devBuildArgs = append(devBuildArgs, "-o", hydraOutputFile, "./")
 	printCmdLine(append([]string{"go"}, devBuildArgs...))
 	buildCmd := exec.Command("go", devBuildArgs...)
