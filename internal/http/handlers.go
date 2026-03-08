@@ -1183,7 +1183,7 @@ func (s *Server) SendAgentInput(ctx context.Context, request api.SendAgentInputR
 		}, nil
 	}
 
-	text := request.Body.Text + "\n"
+	text := request.Body.Text + "\r"
 
 	attach, err := s.DockerClient.ContainerAttach(ctx, head.ContainerID, container.AttachOptions{
 		Stream: true,
