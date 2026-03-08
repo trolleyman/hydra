@@ -1,6 +1,4 @@
 # TODO
-- Add the ability to open a bash terminal for the container - new tab? in the agent mode. This job would be killed once the WebSocket connection was closed (when that terminal tab is closed).
-
 - [`diff-viewer-improvements`]
     - Make sure the warning about uncommitted changes is accurate - currently it is just always there if there are any changes, not just if there are uncommitted changes.
     - When loading, make the diffs become grayed out, not remove them altogether - as then there's less jumping around by a refresh. (refresh -> clear whole screen -> scroll move -> put diffs all back)
