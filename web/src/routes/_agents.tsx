@@ -71,7 +71,7 @@ function AgentsLayout() {
 
     async function fetchAgents() {
       try {
-        const result = await api.default.listAgents(selectedProjectId ?? undefined)
+        const result = await api.default.listAgents(selectedProjectId ?? '')
         if (cancelled) return
         setAgents(result)
 

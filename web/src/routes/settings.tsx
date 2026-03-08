@@ -87,11 +87,11 @@ function SettingsPage() {
     async function fetchConfig() {
       setLoading(true)
       try {
-        const editCfg = await api.default.getConfig(selectedProjectId ?? undefined, scope)
+        const editCfg = await api.default.getConfig(selectedProjectId ?? '', scope)
         setConfig(editCfg)
         setBaseConfig(JSON.stringify(editCfg))
         if (scope === 'project') {
-          const userCfg = await api.default.getConfig(selectedProjectId ?? undefined, 'user')
+          const userCfg = await api.default.getConfig(selectedProjectId ?? '', 'user')
           setInheritedConfig(userCfg)
         } else {
           setInheritedConfig(null)
@@ -116,7 +116,7 @@ function SettingsPage() {
     if (!config) return
     setSaving(true)
     try {
-      await api.default.saveConfig(config, selectedProjectId ?? undefined, scope)
+      await api.default.saveConfig(selectedProjectId ?? '', config, scope)
       setBaseConfig(JSON.stringify(config))
       useDialogStore.getState().show({
         title: 'Settings Saved',
@@ -137,12 +137,12 @@ function SettingsPage() {
   async function handleTest(agentType: string) {
     setTesting(true)
     try {
-      const resp = await api.default.spawnAgent({
+      const resp = await api.default.spawnAgent(selectedProjectId ?? '', {
         prompt: '',
         agent_type: agentType,
         id: `test-${agentType}-${Math.random().toString(36).slice(2, 6)}`,
         ephemeral: true,
-      }, selectedProjectId ?? undefined)
+      })
       setTestAgent(resp)
     } catch (err) {
       useDialogStore.getState().show({
@@ -473,7 +473,7 @@ function SettingsPage() {
                 <button
                   onClick={() => {
                     if (testAgent.ephemeral) {
-                      api.default.killAgent(testAgent.id, selectedProjectId ?? undefined).catch(() => { })
+                      api.default.killAgent(selectedProjectId ?? '', testAgent.id).catch(() => { })
                     }
                     setTestAgent(null)
                   }}

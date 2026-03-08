@@ -84,16 +84,15 @@ func sendTerminalEvent(conn *safeConn, eventType string) {
 }
 
 // HandleTerminalWS handles WebSocket connections for agent terminal access.
-// URL pattern: /ws/agent/{id}/terminal?project_id=...
+// URL pattern: /ws/projects/{project_id}/agents/{id}/terminal
 func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 	log.Printf("terminal ws: incoming request: %s", r.URL.Path)
 
-	// Extract agent ID from path: /ws/agent/{id}/terminal
-	path := strings.TrimPrefix(r.URL.Path, "/ws/agent/")
-	path = strings.TrimSuffix(path, "/terminal")
-	agentID := strings.Trim(path, "/")
+	// Extract project ID and agent ID from path params.
+	projectID := r.PathValue("project_id")
+	agentID := r.PathValue("id")
 
-	log.Printf("terminal ws: extracted agentID: %q from path %q", agentID, r.URL.Path)
+	log.Printf("terminal ws: projectID: %q, agentID: %q from path %q", projectID, agentID, r.URL.Path)
 
 	if agentID == "" {
 		log.Printf("terminal ws: agent ID missing in path %q", r.URL.Path)
@@ -101,9 +100,12 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	projectID := r.URL.Query().Get("project_id")
 	useShell := r.URL.Query().Get("shell") == "true"
-	projectRoot := s.resolveProjectRoot(&projectID)
+	projectRoot, err := s.resolveProjectRoot(projectID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
 	log.Printf("terminal ws: resolved projectRoot: %q, useShell: %v", projectRoot, useShell)
 
 	if useShell {

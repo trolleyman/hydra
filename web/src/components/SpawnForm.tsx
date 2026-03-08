@@ -124,7 +124,7 @@ export function SpawnForm({
         agent_type: agentType,
         id: finalId || generateId(prompt.trim()),
       }
-      const agent = await api.default.spawnAgent(req, projectId ?? undefined)
+      const agent = await api.default.spawnAgent(projectId ?? '', req)
       setPrompt('')
       setAgentId('')
       setIdManuallyEdited(false)

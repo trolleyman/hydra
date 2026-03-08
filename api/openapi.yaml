@@ -123,17 +123,17 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /api/agents:
+  /api/projects/{project_id}/agents:
     get:
       summary: List all Hydra agents (heads)
       operationId: listAgents
       parameters:
-        - in: query
+        - in: path
           name: project_id
-          required: false
+          required: true
           schema:
             type: string
-          description: Project ID to scope the agent list (defaults to server CWD project)
+          description: Project ID to scope the agent list
       responses:
         '200':
           description: OK
@@ -143,6 +143,12 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/AgentResponse'
+        '404':
+          description: Project Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '500':
           description: Internal Server Error
           content:
@@ -153,12 +159,12 @@ paths:
       summary: Spawn a new Hydra agent
       operationId: spawnAgent
       parameters:
-        - in: query
+        - in: path
           name: project_id
-          required: false
+          required: true
           schema:
             type: string
-          description: Project ID to spawn the agent in (defaults to server CWD project)
+          description: Project ID to spawn the agent in
       requestBody:
         required: true
         content:
@@ -178,6 +184,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Project Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '500':
           description: Internal Server Error
           content:
@@ -185,22 +197,22 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /api/agent/{id}/restart:
+  /api/projects/{project_id}/agents/{id}/restart:
     post:
       summary: Restart a Hydra agent (kill and respawn with the same prompt)
       operationId: restartAgent
       parameters:
         - in: path
+          name: project_id
+          required: true
+          schema:
+            type: string
+          description: Project ID
+        - in: path
           name: id
           required: true
           schema:
             type: string
-        - in: query
-          name: project_id
-          required: false
-          schema:
-            type: string
-          description: Project ID to scope the lookup (defaults to server CWD project)
       responses:
         '200':
           description: OK (Agent restarted, new agent returned)
@@ -227,22 +239,22 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /api/agent/{id}/merge:
+  /api/projects/{project_id}/agents/{id}/merge:
     post:
       summary: Merge a Hydra agent's branch into its base branch and kill it
       operationId: mergeAgent
       parameters:
         - in: path
+          name: project_id
+          required: true
+          schema:
+            type: string
+          description: Project ID
+        - in: path
           name: id
           required: true
           schema:
             type: string
-        - in: query
-          name: project_id
-          required: false
-          schema:
-            type: string
-          description: Project ID to scope the lookup (defaults to server CWD project)
       responses:
         '204':
           description: No Content (Agent merged and killed)
@@ -271,22 +283,22 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /api/agent/{id}/update-from-base:
+  /api/projects/{project_id}/agents/{id}/update-from-base:
     post:
       summary: Update a Hydra agent's branch from its base branch (merge base into head)
       operationId: updateAgentFromBase
       parameters:
         - in: path
+          name: project_id
+          required: true
+          schema:
+            type: string
+          description: Project ID
+        - in: path
           name: id
           required: true
           schema:
             type: string
-        - in: query
-          name: project_id
-          required: false
-          schema:
-            type: string
-          description: Project ID to scope the lookup (defaults to server CWD project)
       responses:
         '204':
           description: No Content (Updated from base)
@@ -309,22 +321,22 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /api/agent/{id}/commits:
+  /api/projects/{project_id}/agents/{id}/commits:
     get:
       summary: List commits on an agent's branch (between base branch and agent branch)
       operationId: getAgentCommits
       parameters:
         - in: path
+          name: project_id
+          required: true
+          schema:
+            type: string
+          description: Project ID
+        - in: path
           name: id
           required: true
           schema:
             type: string
-        - in: query
-          name: project_id
-          required: false
-          schema:
-            type: string
-          description: Project ID to scope the lookup (defaults to server CWD project)
       responses:
         '200':
           description: OK
@@ -347,22 +359,22 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /api/agent/{id}/diff:
+  /api/projects/{project_id}/agents/{id}/diff:
     get:
       summary: Get the diff for an agent's branch
       operationId: getAgentDiff
       parameters:
         - in: path
+          name: project_id
+          required: true
+          schema:
+            type: string
+          description: Project ID
+        - in: path
           name: id
           required: true
           schema:
             type: string
-        - in: query
-          name: project_id
-          required: false
-          schema:
-            type: string
-          description: Project ID to scope the lookup (defaults to server CWD project)
         - in: query
           name: base_ref
           required: false
@@ -420,22 +432,22 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /api/agent/{id}/diff-files:
+  /api/projects/{project_id}/agents/{id}/diff-files:
     get:
       summary: Get the list of changed files for an agent's branch
       operationId: getAgentDiffFiles
       parameters:
         - in: path
+          name: project_id
+          required: true
+          schema:
+            type: string
+          description: Project ID
+        - in: path
           name: id
           required: true
           schema:
             type: string
-        - in: query
-          name: project_id
-          required: false
-          schema:
-            type: string
-          description: Project ID to scope the lookup (defaults to server CWD project)
         - in: query
           name: base_ref
           required: false
@@ -474,22 +486,22 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /api/agent/{id}/input:
+  /api/projects/{project_id}/agents/{id}/input:
     post:
       summary: Send text input to an agent's terminal stdin
       operationId: sendAgentInput
       parameters:
         - in: path
+          name: project_id
+          required: true
+          schema:
+            type: string
+          description: Project ID
+        - in: path
           name: id
           required: true
           schema:
             type: string
-        - in: query
-          name: project_id
-          required: false
-          schema:
-            type: string
-          description: Project ID to scope the lookup (defaults to server CWD project)
       requestBody:
         required: true
         content:
@@ -512,17 +524,17 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /api/config:
+  /api/projects/{project_id}/config:
     get:
       summary: Get the merged configuration
       operationId: getConfig
       parameters:
-        - in: query
+        - in: path
           name: project_id
-          required: false
+          required: true
           schema:
             type: string
-          description: Project ID to scope the config (defaults to server CWD project)
+          description: Project ID
         - in: query
           name: scope
           required: false
@@ -537,6 +549,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ConfigResponse'
+        '404':
+          description: Project Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '500':
           description: Internal Server Error
           content:
@@ -547,12 +565,12 @@ paths:
       summary: Save configuration changes
       operationId: saveConfig
       parameters:
-        - in: query
+        - in: path
           name: project_id
-          required: false
+          required: true
           schema:
             type: string
-          description: Project ID to save the config to (defaults to server CWD project)
+          description: Project ID
         - in: query
           name: scope
           required: false
@@ -569,6 +587,12 @@ paths:
       responses:
         '200':
           description: OK
+        '404':
+          description: Project Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '500':
           description: Internal Server Error
           content:
@@ -576,22 +600,22 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /api/agent/{id}:
+  /api/projects/{project_id}/agents/{id}:
     get:
       summary: Get a specific Hydra agent by ID
       operationId: getAgent
       parameters:
         - in: path
+          name: project_id
+          required: true
+          schema:
+            type: string
+          description: Project ID
+        - in: path
           name: id
           required: true
           schema:
             type: string
-        - in: query
-          name: project_id
-          required: false
-          schema:
-            type: string
-          description: Project ID to scope the lookup (defaults to server CWD project)
       responses:
         '200':
           description: OK
@@ -616,16 +640,16 @@ paths:
       operationId: killAgent
       parameters:
         - in: path
+          name: project_id
+          required: true
+          schema:
+            type: string
+          description: Project ID
+        - in: path
           name: id
           required: true
           schema:
             type: string
-        - in: query
-          name: project_id
-          required: false
-          schema:
-            type: string
-          description: Project ID to scope the lookup (defaults to server CWD project)
       responses:
         '204':
           description: No Content (Agent killed)

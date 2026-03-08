@@ -757,7 +757,7 @@ function MergeConflictButton({ diff, agent, projectId }: {
   const handleFixWithAgent = async () => {
     setSending(true)
     try {
-      await api.default.sendAgentInput(agent.id, { text: `Fix the merge conflicts with branch ${baseBranch}` }, projectId ?? undefined)
+      await api.default.sendAgentInput(projectId ?? '', agent.id, { text: `Fix the merge conflicts with branch ${baseBranch}` })
       setSent(true)
       setTimeout(() => { setSent(false); setOpen(false) }, 2000)
     } catch {
@@ -1101,7 +1101,7 @@ export function DiffViewer({ agent, projectId }: { agent: AgentResponse; project
 
   useEffect(() => {
     if (!agent.branch_name) return
-    api.default.getAgentCommits(agent.id, projectId ?? undefined)
+    api.default.getAgentCommits(projectId ?? '', agent.id)
       .then(setCommits).catch(() => setCommits([]))
   }, [agent.id, agent.branch_name, projectId, refreshKey])
 
@@ -1115,7 +1115,7 @@ export function DiffViewer({ agent, projectId }: { agent: AgentResponse; project
     else if (rightSel.type === 'commit') params.headRef = rightSel.sha
 
     try {
-      const fileDiff = await api.default.getAgentDiff(agent.id, projectId ?? undefined,
+      const fileDiff = await api.default.getAgentDiff(projectId ?? '', agent.id,
         params.baseRef, params.headRef, params.ignoreWhitespace, params.includeUncommitted, path, context)
 
       setDiff((prev) => {
@@ -1145,7 +1145,7 @@ export function DiffViewer({ agent, projectId }: { agent: AgentResponse; project
     else if (rightSel.type === 'commit') params.headRef = rightSel.sha
 
     // First, just get the file list (performant)
-    api.default.getAgentDiffFiles(agent.id, projectId ?? undefined,
+    api.default.getAgentDiffFiles(projectId ?? '', agent.id,
       params.baseRef, params.headRef, params.includeUncommitted)
       .then((d) => {
         if (!cancelled) {
@@ -1214,7 +1214,7 @@ export function DiffViewer({ agent, projectId }: { agent: AgentResponse; project
     const side = isNew ? 'new' : 'old'
     const msg = `Comment on ${path} line ${lineNum} (${side}):\n${text}`
     try {
-      await api.default.sendAgentInput(agent.id, { text: msg }, projectId ?? undefined)
+      await api.default.sendAgentInput(projectId ?? '', agent.id, { text: msg })
     } catch (e) {
       console.error('Failed to send comment:', e)
     }
