@@ -862,16 +862,6 @@ func (s *Server) GetAgentDiff(ctx context.Context, request api.GetAgentDiffReque
 		includeUncommitted = *request.Params.IncludeUncommitted
 	}
 
-	path := ""
-	if request.Params.Path != nil {
-		path = *request.Params.Path
-	}
-
-	contextLines := 3
-	if request.Params.Context != nil {
-		contextLines = *request.Params.Context
-	}
-
 	// Use triple-dot (merge-base) diff when using default branch refs (whole MR view).
 	// Use double-dot when specific commits are given (commit-to-commit view).
 	useTripleDot := (request.Params.BaseRef == nil || *request.Params.BaseRef == "") &&
@@ -898,7 +888,7 @@ func (s *Server) GetAgentDiff(ctx context.Context, request api.GetAgentDiffReque
 		}
 	}
 
-	diffFiles, err := git.GetDiff(diffRoot, baseRef, headRef, ignoreWhitespace, useTripleDot, path, contextLines)
+	diffFiles, err := git.GetDiff(diffRoot, baseRef, headRef, ignoreWhitespace, useTripleDot)
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
@@ -1001,118 +991,6 @@ func (s *Server) GetAgentDiff(ctx context.Context, request api.GetAgentDiffReque
 		HeadCommit:         headCommitInfo,
 	}
 	return api.GetAgentDiff200JSONResponse(resp), nil
-}
-
-func (s *Server) GetAgentDiffFiles(ctx context.Context, request api.GetAgentDiffFilesRequestObject) (api.GetAgentDiffFilesResponseObject, error) {
-	projectRoot := s.resolveProjectRoot(request.Params.ProjectId)
-	head, err := heads.GetHeadByID(ctx, s.DockerClient, s.DB, projectRoot, request.Id)
-	if err != nil {
-		return nil, errtrace.Wrap(err)
-	}
-	if head == nil {
-		return api.GetAgentDiffFiles404JSONResponse{
-			Code:    404,
-			Error:   "not_found",
-			Details: "agent not found",
-		}, nil
-	}
-
-	headBranch := ""
-	if head.Branch != nil {
-		headBranch = *head.Branch
-	}
-	if headBranch == "" {
-		empty := api.DiffResponse{Files: []api.DiffFile{}, BaseRef: head.BaseBranch, HeadRef: ""}
-		return api.GetAgentDiffFiles200JSONResponse(empty), nil
-	}
-
-	// Resolve base and head refs.
-	baseRef := head.BaseBranch
-	headRef := headBranch
-	if request.Params.BaseRef != nil && *request.Params.BaseRef != "" {
-		baseRef = *request.Params.BaseRef
-	}
-	if request.Params.HeadRef != nil && *request.Params.HeadRef != "" {
-		headRef = *request.Params.HeadRef
-	}
-
-	includeUncommitted := false
-	if request.Params.IncludeUncommitted != nil {
-		includeUncommitted = *request.Params.IncludeUncommitted
-	}
-
-	useTripleDot := (request.Params.BaseRef == nil || *request.Params.BaseRef == "") &&
-		(request.Params.HeadRef == nil || *request.Params.HeadRef == "") &&
-		!includeUncommitted
-
-	diffRoot := projectRoot
-	if includeUncommitted && head.Worktree != nil {
-		diffRoot = *head.Worktree
-		if (request.Params.BaseRef == nil || *request.Params.BaseRef == "") &&
-			(request.Params.HeadRef == nil || *request.Params.HeadRef == "") {
-			if mb, err := git.GetMergeBase(diffRoot, baseRef, "HEAD"); err == nil {
-				baseRef = mb
-				headRef = ""
-				useTripleDot = false
-			}
-		} else if headRef == headBranch {
-			headRef = ""
-			useTripleDot = false
-		}
-	}
-
-	diffFiles, err := git.GetDiffFiles(diffRoot, baseRef, headRef, useTripleDot)
-	if err != nil {
-		return nil, errtrace.Wrap(err)
-	}
-
-	apiFiles := make([]api.DiffFile, len(diffFiles))
-	for i, f := range diffFiles {
-		apiFiles[i] = api.DiffFile{
-			Path:       f.Path,
-			OldPath:    f.OldPath,
-			ChangeType: api.DiffFileChangeType(f.ChangeType),
-			Additions:  f.Additions,
-			Deletions:  f.Deletions,
-		}
-	}
-
-	mergeConflict := false
-	if head.Branch != nil {
-		if conflicts, err := git.HasConflicts(projectRoot, head.BaseBranch, *head.Branch); err == nil {
-			mergeConflict = conflicts
-		}
-	}
-
-	uncommittedChanges := false
-	var uncommittedSummary *api.UncommittedSummary
-	if head.Worktree != nil {
-		if summary, err := git.GetUncommittedSummary(*head.Worktree); err == nil {
-			uncommittedChanges = summary.TrackedCount > 0
-			uncommittedSummary = &api.UncommittedSummary{
-				TrackedCount:   summary.TrackedCount,
-				UntrackedCount: summary.UntrackedCount,
-			}
-		}
-	}
-
-	var conflictFiles *[]string
-	if mergeConflict && head.Branch != nil {
-		if files, err := git.GetConflictingFiles(projectRoot, head.BaseBranch, *head.Branch); err == nil && len(files) > 0 {
-			conflictFiles = &files
-		}
-	}
-
-	resp := api.DiffResponse{
-		Files:              apiFiles,
-		BaseRef:            baseRef,
-		HeadRef:            headRef,
-		MergeConflict:      &mergeConflict,
-		ConflictFiles:      conflictFiles,
-		UncommittedChanges: &uncommittedChanges,
-		UncommittedSummary: uncommittedSummary,
-	}
-	return api.GetAgentDiffFiles200JSONResponse(resp), nil
 }
 
 func (s *Server) SendAgentInput(ctx context.Context, request api.SendAgentInputRequestObject) (api.SendAgentInputResponseObject, error) {

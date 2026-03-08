@@ -425,27 +425,6 @@ type GetAgentDiffParams struct {
 
 	// IncludeUncommitted Include uncommitted changes in the worktree in the diff
 	IncludeUncommitted *bool `form:"include_uncommitted,omitempty" json:"include_uncommitted,omitempty"`
-
-	// Path Only return the diff for this specific file path
-	Path *string `form:"path,omitempty" json:"path,omitempty"`
-
-	// Context Number of lines of context to show (defaults to 3)
-	Context *int `form:"context,omitempty" json:"context,omitempty"`
-}
-
-// GetAgentDiffFilesParams defines parameters for GetAgentDiffFiles.
-type GetAgentDiffFilesParams struct {
-	// ProjectId Project ID to scope the lookup (defaults to server CWD project)
-	ProjectId *string `form:"project_id,omitempty" json:"project_id,omitempty"`
-
-	// BaseRef Base commit SHA or ref. Defaults to the agent's base branch.
-	BaseRef *string `form:"base_ref,omitempty" json:"base_ref,omitempty"`
-
-	// HeadRef Head commit SHA or ref. Defaults to the agent's branch.
-	HeadRef *string `form:"head_ref,omitempty" json:"head_ref,omitempty"`
-
-	// IncludeUncommitted Include uncommitted changes in the worktree
-	IncludeUncommitted *bool `form:"include_uncommitted,omitempty" json:"include_uncommitted,omitempty"`
 }
 
 // SendAgentInputParams defines parameters for SendAgentInput.
@@ -537,9 +516,6 @@ type ServerInterface interface {
 	// Get the diff for an agent's branch
 	// (GET /api/agent/{id}/diff)
 	GetAgentDiff(w http.ResponseWriter, r *http.Request, id string, params GetAgentDiffParams)
-	// Get the list of changed files for an agent's branch
-	// (GET /api/agent/{id}/diff-files)
-	GetAgentDiffFiles(w http.ResponseWriter, r *http.Request, id string, params GetAgentDiffFilesParams)
 	// Send text input to an agent's terminal stdin
 	// (POST /api/agent/{id}/input)
 	SendAgentInput(w http.ResponseWriter, r *http.Request, id string, params SendAgentInputParams)
@@ -769,84 +745,8 @@ func (siw *ServerInterfaceWrapper) GetAgentDiff(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	// ------------- Optional query parameter "path" -------------
-
-	err = runtime.BindQueryParameter("form", true, false, "path", r.URL.Query(), &params.Path)
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "path", Err: err})
-		return
-	}
-
-	// ------------- Optional query parameter "context" -------------
-
-	err = runtime.BindQueryParameter("form", true, false, "context", r.URL.Query(), &params.Context)
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "context", Err: err})
-		return
-	}
-
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetAgentDiff(w, r, id, params)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
-// GetAgentDiffFiles operation middleware
-func (siw *ServerInterfaceWrapper) GetAgentDiffFiles(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-
-	// ------------- Path parameter "id" -------------
-	var id string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
-		return
-	}
-
-	// Parameter object where we will unmarshal all parameters from the context
-	var params GetAgentDiffFilesParams
-
-	// ------------- Optional query parameter "project_id" -------------
-
-	err = runtime.BindQueryParameter("form", true, false, "project_id", r.URL.Query(), &params.ProjectId)
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
-		return
-	}
-
-	// ------------- Optional query parameter "base_ref" -------------
-
-	err = runtime.BindQueryParameter("form", true, false, "base_ref", r.URL.Query(), &params.BaseRef)
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "base_ref", Err: err})
-		return
-	}
-
-	// ------------- Optional query parameter "head_ref" -------------
-
-	err = runtime.BindQueryParameter("form", true, false, "head_ref", r.URL.Query(), &params.HeadRef)
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "head_ref", Err: err})
-		return
-	}
-
-	// ------------- Optional query parameter "include_uncommitted" -------------
-
-	err = runtime.BindQueryParameter("form", true, false, "include_uncommitted", r.URL.Query(), &params.IncludeUncommitted)
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "include_uncommitted", Err: err})
-		return
-	}
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetAgentDiffFiles(w, r, id, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1319,7 +1219,6 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("GET "+options.BaseURL+"/api/agent/{id}", wrapper.GetAgent)
 	m.HandleFunc("GET "+options.BaseURL+"/api/agent/{id}/commits", wrapper.GetAgentCommits)
 	m.HandleFunc("GET "+options.BaseURL+"/api/agent/{id}/diff", wrapper.GetAgentDiff)
-	m.HandleFunc("GET "+options.BaseURL+"/api/agent/{id}/diff-files", wrapper.GetAgentDiffFiles)
 	m.HandleFunc("POST "+options.BaseURL+"/api/agent/{id}/input", wrapper.SendAgentInput)
 	m.HandleFunc("POST "+options.BaseURL+"/api/agent/{id}/merge", wrapper.MergeAgent)
 	m.HandleFunc("POST "+options.BaseURL+"/api/agent/{id}/restart", wrapper.RestartAgent)
@@ -1513,42 +1412,6 @@ func (response GetAgentDiff404JSONResponse) VisitGetAgentDiffResponse(w http.Res
 type GetAgentDiff500JSONResponse ErrorResponse
 
 func (response GetAgentDiff500JSONResponse) VisitGetAgentDiffResponse(w http.ResponseWriter) error {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(500)
-
-	return json.NewEncoder(w).Encode(response)
-}
-
-type GetAgentDiffFilesRequestObject struct {
-	Id     string `json:"id"`
-	Params GetAgentDiffFilesParams
-}
-
-type GetAgentDiffFilesResponseObject interface {
-	VisitGetAgentDiffFilesResponse(w http.ResponseWriter) error
-}
-
-type GetAgentDiffFiles200JSONResponse DiffResponse
-
-func (response GetAgentDiffFiles200JSONResponse) VisitGetAgentDiffFilesResponse(w http.ResponseWriter) error {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(200)
-
-	return json.NewEncoder(w).Encode(response)
-}
-
-type GetAgentDiffFiles404JSONResponse ErrorResponse
-
-func (response GetAgentDiffFiles404JSONResponse) VisitGetAgentDiffFilesResponse(w http.ResponseWriter) error {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(404)
-
-	return json.NewEncoder(w).Encode(response)
-}
-
-type GetAgentDiffFiles500JSONResponse ErrorResponse
-
-func (response GetAgentDiffFiles500JSONResponse) VisitGetAgentDiffFilesResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(500)
 
@@ -1990,9 +1853,6 @@ type StrictServerInterface interface {
 	// Get the diff for an agent's branch
 	// (GET /api/agent/{id}/diff)
 	GetAgentDiff(ctx context.Context, request GetAgentDiffRequestObject) (GetAgentDiffResponseObject, error)
-	// Get the list of changed files for an agent's branch
-	// (GET /api/agent/{id}/diff-files)
-	GetAgentDiffFiles(ctx context.Context, request GetAgentDiffFilesRequestObject) (GetAgentDiffFilesResponseObject, error)
 	// Send text input to an agent's terminal stdin
 	// (POST /api/agent/{id}/input)
 	SendAgentInput(ctx context.Context, request SendAgentInputRequestObject) (SendAgentInputResponseObject, error)
@@ -2188,33 +2048,6 @@ func (sh *strictHandler) GetAgentDiff(w http.ResponseWriter, r *http.Request, id
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetAgentDiffResponseObject); ok {
 		if err := validResponse.VisitGetAgentDiffResponse(w); err != nil {
-			sh.options.ResponseErrorHandlerFunc(w, r, err)
-		}
-	} else if response != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
-	}
-}
-
-// GetAgentDiffFiles operation middleware
-func (sh *strictHandler) GetAgentDiffFiles(w http.ResponseWriter, r *http.Request, id string, params GetAgentDiffFilesParams) {
-	var request GetAgentDiffFilesRequestObject
-
-	request.Id = id
-	request.Params = params
-
-	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.GetAgentDiffFiles(ctx, request.(GetAgentDiffFilesRequestObject))
-	}
-	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "GetAgentDiffFiles")
-	}
-
-	response, err := handler(r.Context(), w, r, request)
-
-	if err != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(GetAgentDiffFilesResponseObject); ok {
-		if err := validResponse.VisitGetAgentDiffFilesResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

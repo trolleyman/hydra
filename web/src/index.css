@@ -15,10 +15,6 @@ html.dark {
   color-scheme: dark;
 }
 
-html, body {
-  @apply h-full overflow-hidden;
-}
-
 body {
   @apply bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100;
 }
