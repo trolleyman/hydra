@@ -1338,17 +1338,18 @@ export function DiffViewer({ agent, projectId }: { agent: AgentResponse; project
       h.lines.some(l => isNew ? l.new_line_num === lineNum : l.old_line_num === lineNum)
     )
 
-    let msg = `Comment on \`${path}\` line ${lineNum} (diff: ${fromLabel} → ${toLabel})\n`
+    let msg = `Comment on \`${path}\` line ${lineNum} (marked with \`>\`) (diff: ${fromLabel} -> ${toLabel})\n`
     if (hunk) {
       const targetIdx = hunk.lines.findIndex(l => isNew ? l.new_line_num === lineNum : l.old_line_num === lineNum)
       if (targetIdx >= 0) {
         const start = Math.max(0, targetIdx - 3)
         const end = Math.min(hunk.lines.length, targetIdx + 4)
         const ctxLines = hunk.lines.slice(start, end)
-        msg += `\n\`\`\`diff\n${hunk.header}\n`
+        msg += `\n\`\`\`diff\n# ${path}\n${hunk.header}\n`
         msg += ctxLines.map((l, i) => {
-          const prefix = l.type === 'addition' ? '+' : l.type === 'deletion' ? '-' : ' '
-          return prefix + l.content + (start + i === targetIdx ? '  ← this line' : '')
+          if (start + i === targetIdx) return ' >' + l.content
+          const typeChar = l.type === 'addition' ? '+' : l.type === 'deletion' ? '-' : ' '
+          return typeChar + '|' + l.content
         }).join('\n')
         msg += `\n\`\`\`\n`
       }
