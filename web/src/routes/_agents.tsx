@@ -6,9 +6,11 @@ import { useProjectStore } from '../stores/projectStore'
 import { useAgentStore } from '../stores/agentStore'
 import { SpawnForm } from '../components/SpawnForm'
 import { AgentSidebarItem } from '../components/AgentComponents'
+import { NotFound } from '../components/NotFound'
 
 export const Route = createFileRoute('/_agents')({
   component: AgentsLayout,
+  notFoundComponent: () => <NotFound />,
 })
 
 const SIDEBAR_MIN = 160

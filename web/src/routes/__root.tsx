@@ -6,17 +6,11 @@ import type { ProjectInfo } from '../api'
 import { Sun, Moon, ChevronDown, Folder, Plus, Settings, Check } from 'lucide-react'
 
 import { Dialog } from '../components/Dialog'
+import { NotFound } from '../components/NotFound'
 
 export const Route = createRootRoute({
   component: RootLayout,
-  notFoundComponent: () => (
-    <div className="flex items-center justify-center min-h-screen">
-      <div className="text-center">
-        <h1 className="text-4xl font-bold text-gray-900 dark:text-gray-100 mb-2">404</h1>
-        <p className="text-gray-500 dark:text-gray-400">Page not found</p>
-      </div>
-    </div>
-  ),
+  notFoundComponent: () => <NotFound />,
 })
 
 import { useDialogStore } from '../stores/dialogStore'
