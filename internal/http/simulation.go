@@ -1,7 +1,9 @@
 package http
 
 import (
+	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -184,6 +186,7 @@ func (s *SimulationServer) GetAgentCommits(w http.ResponseWriter, r *http.Reques
 }
 
 func (s *SimulationServer) GetAgentDiff(w http.ResponseWriter, r *http.Request, projectId string, id string, params api.GetAgentDiffParams) {
+	ctx := simContext(params)
 	if id == "agent-2" {
 		// Mock uncommitted changes
 		uncommitted := true
@@ -234,6 +237,7 @@ func (s *SimulationServer) GetAgentDiff(w http.ResponseWriter, r *http.Request, 
 				},
 			},
 		}
+		resp.Files = expandDiffContext(resp.Files, ctx)
 		api.WriteJSON(w, http.StatusOK, resp)
 		return
 	}
@@ -600,11 +604,19 @@ func (s *SimulationServer) GetAgentDiff(w http.ResponseWriter, r *http.Request, 
 				},
 			},
 		}
+		resp.Files = expandDiffContext(resp.Files, ctx)
 		api.WriteJSON(w, http.StatusOK, resp)
 		return
 	}
 
 	api.WriteJSON(w, http.StatusOK, api.DiffResponse{Files: []api.DiffFile{}})
+}
+
+func simContext(params api.GetAgentDiffParams) int {
+	if params.Context != nil {
+		return *params.Context
+	}
+	return 3
 }
 
 func (s *SimulationServer) GetAgentDiffFiles(w http.ResponseWriter, r *http.Request, projectId string, id string, params api.GetAgentDiffFilesParams) {
@@ -699,6 +711,87 @@ func (s *SimulationServer) HandleTerminalWS(w http.ResponseWriter, r *http.Reque
 			}
 		}
 	}
+}
+
+// expandHunkContext adds extra context lines before/after a hunk's existing lines
+// when the requested context is greater than the default 3.
+func expandHunkContext(hunk api.DiffHunk, extraCtx int, fileExt string) api.DiffHunk {
+	if extraCtx <= 0 {
+		return hunk
+	}
+
+	comment := "//"
+	if fileExt == "tsx" || fileExt == "ts" || fileExt == "js" || fileExt == "jsx" {
+		comment = "//"
+	}
+
+	// Find the old/new line ranges in the hunk
+	firstOld, firstNew := hunk.OldStart, hunk.NewStart
+	lastOld, lastNew := firstOld, firstNew
+	for _, l := range hunk.Lines {
+		if l.OldLineNum != nil && *l.OldLineNum > lastOld {
+			lastOld = *l.OldLineNum
+		}
+		if l.NewLineNum != nil && *l.NewLineNum > lastNew {
+			lastNew = *l.NewLineNum
+		}
+	}
+
+	// Prepend context lines before the hunk
+	var prefix []api.DiffLine
+	for i := extraCtx; i > 0; i-- {
+		oldN := firstOld - i
+		newN := firstNew - i
+		if oldN < 1 || newN < 1 {
+			continue
+		}
+		prefix = append(prefix, api.DiffLine{
+			Type:       api.Context,
+			Content:    comment + fmt.Sprintf(" context line %d", oldN),
+			OldLineNum: ptr(oldN),
+			NewLineNum: ptr(newN),
+		})
+	}
+
+	// Append context lines after the hunk
+	var suffix []api.DiffLine
+	for i := 1; i <= extraCtx; i++ {
+		oldN := lastOld + i
+		newN := lastNew + i
+		suffix = append(suffix, api.DiffLine{
+			Type:       api.Context,
+			Content:    comment + fmt.Sprintf(" context line %d", oldN),
+			OldLineNum: ptr(oldN),
+			NewLineNum: ptr(newN),
+		})
+	}
+
+	newLines := append(prefix, hunk.Lines...)
+	newLines = append(newLines, suffix...)
+	hunk.Lines = newLines
+	return hunk
+}
+
+func expandDiffContext(files []api.DiffFile, context int) []api.DiffFile {
+	extra := context - 3
+	if extra <= 0 {
+		return files
+	}
+	result := make([]api.DiffFile, len(files))
+	for i, f := range files {
+		ext := ""
+		parts := strings.Split(f.Path, ".")
+		if len(parts) > 1 {
+			ext = parts[len(parts)-1]
+		}
+		hunks := make([]api.DiffHunk, len(f.Hunks))
+		for j, h := range f.Hunks {
+			hunks[j] = expandHunkContext(h, extra, ext)
+		}
+		f.Hunks = hunks
+		result[i] = f
+	}
+	return result
 }
 
 func ptr[T any](v T) *T {
