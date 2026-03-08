@@ -337,7 +337,7 @@ function SideBySideHunk({ hunk, highlightedOld, highlightedNew, onComment, expan
 
 // ── File diff card ────────────────────────────────────────────────────────────
 
-function FileDiff({ file, sideBySide, fileRef, onComment, isCollapsed, onToggleCollapse, onExpand, stickyTop = 52 }: {
+function FileDiff({ file, sideBySide, fileRef, onComment, isCollapsed, onToggleCollapse, onExpand }: {
   file: DiffFile
   sideBySide: boolean
   fileRef?: (el: HTMLDivElement | null) => void
@@ -383,9 +383,8 @@ function FileDiff({ file, sideBySide, fileRef, onComment, isCollapsed, onToggleC
   return (
     <div ref={fileRef} className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden mb-4 bg-white dark:bg-gray-900 shadow-sm">
       <div
-        className="flex items-center gap-2 px-3 py-1.5 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 sticky z-20"
-        style={{ top: stickyTop }}
-      >
+        className="flex items-center gap-2 px-3 py-1.5 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 z-20"
+      >{/* TODO: Make `sticky` */}
         <button
           onClick={onToggleCollapse}
           className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-500 cursor-pointer transition-colors"
@@ -1284,7 +1283,7 @@ export function DiffViewer({ agent, projectId }: { agent: AgentResponse; project
   return (
     <div className="mt-4">
       {/* Section header */}
-      <div className="flex items-center gap-3 mb-4 flex-wrap sticky top-0 z-30 bg-gray-50 dark:bg-gray-900 py-2 border-b border-gray-200 dark:border-gray-800 shadow-sm -mx-1 px-1">
+      <div className="flex items-center gap-3 mb-4 flex-wrap sticky -top-6 z-30 bg-gray-50 dark:bg-gray-900 py-2 border-b border-gray-200 dark:border-gray-800 shadow-sm -mx-1 px-1">
         <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Changes</h2>
         {diff && (
           <div className="flex items-center gap-1.5">
@@ -1353,7 +1352,7 @@ export function DiffViewer({ agent, projectId }: { agent: AgentResponse; project
         <div className={`flex gap-4 min-h-0 transition-opacity duration-150 ${loadingDiff ? 'opacity-40 pointer-events-none' : ''}`}>
           {/* File list sidebar */}
           <div
-            className="shrink-0 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden bg-white dark:bg-gray-800 self-start sticky top-[45px] z-20 flex flex-col shadow-sm"
+            className="shrink-0 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden bg-white dark:bg-gray-800 self-start sticky top-10 z-20 flex flex-col shadow-sm"
             style={{ width: sidebarWidth }}
           >
             <div className="px-2.5 py-2 border-b border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 flex items-center justify-between">
@@ -1373,7 +1372,7 @@ export function DiffViewer({ agent, projectId }: { agent: AgentResponse; project
           <div className="flex-1 min-w-0">
             {singleFile ? (
               <>
-                <div className="flex items-center gap-2 mb-3 sticky top-[45px] z-20">
+                <div className="flex items-center gap-2 mb-3 z-20">{/* For now, not `sticky top-10` - when making the file headers sticky, make this sticky too */}
                   <button
                     onClick={() => {
                       const nextIdx = Math.max(0, singleFileIdx - 1)
@@ -1408,7 +1407,6 @@ export function DiffViewer({ agent, projectId }: { agent: AgentResponse; project
                   onToggleCollapse={() => toggleFileCollapse(diff.files[singleFileIdx].path)}
                   onComment={handleComment}
                   onExpand={fetchFileDiff}
-                  stickyTop={73}
                   fileRef={(el) => {
                     const f = diff.files[singleFileIdx]
                     if (!f) return
@@ -1424,7 +1422,6 @@ export function DiffViewer({ agent, projectId }: { agent: AgentResponse; project
                   onToggleCollapse={() => toggleFileCollapse(f.path)}
                   onComment={handleComment}
                   onExpand={fetchFileDiff}
-                  stickyTop={45}
                   fileRef={(el) => {
                     if (el) fileRefs.current.set(f.path, el)
                     else fileRefs.current.delete(f.path)
