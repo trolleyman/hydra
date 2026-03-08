@@ -635,6 +635,25 @@ func (s *SimulationServer) GetAgentDiffFiles(w http.ResponseWriter, r *http.Requ
 		api.WriteJSON(w, http.StatusOK, resp)
 		return
 	}
+	if id == "agent-2" {
+		uncommitted := true
+		resp := api.DiffResponse{
+			UncommittedChanges: &uncommitted,
+			UncommittedSummary: &api.UncommittedSummary{
+				TrackedCount:   2,
+				UntrackedCount: 1,
+			},
+			Files: []api.DiffFile{},
+		}
+		if params.IncludeUncommitted != nil && *params.IncludeUncommitted {
+			resp.Files = []api.DiffFile{
+				{Path: "README.md", ChangeType: api.Modified, Additions: 2, Deletions: 1},
+				{Path: "new_file.txt", ChangeType: api.Added, Additions: 1, Deletions: 0},
+			}
+		}
+		api.WriteJSON(w, http.StatusOK, resp)
+		return
+	}
 	api.WriteJSON(w, http.StatusOK, api.DiffResponse{Files: []api.DiffFile{}})
 }
 
