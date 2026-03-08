@@ -1351,7 +1351,7 @@ export function DiffViewer({ agent, projectId }: { agent: AgentResponse; project
         <div className={`flex gap-4 min-h-0 transition-opacity duration-150 ${loadingDiff ? 'opacity-40 pointer-events-none' : ''}`}>
           {/* File list sidebar */}
           <div
-            className="shrink-0 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden bg-white dark:bg-gray-800 self-start sticky top-[52px] z-20 flex flex-col shadow-sm"
+            className="shrink-0 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden bg-white dark:bg-gray-800 self-start sticky top-[45px] z-20 flex flex-col shadow-sm"
             style={{ width: sidebarWidth }}
           >
             <div className="px-2.5 py-2 border-b border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 flex items-center justify-between">
@@ -1371,7 +1371,7 @@ export function DiffViewer({ agent, projectId }: { agent: AgentResponse; project
           <div className="flex-1 min-w-0">
             {singleFile ? (
               <>
-                <div className="flex items-center gap-2 mb-3 sticky top-[52px] z-20">
+                <div className="flex items-center gap-2 mb-3 sticky top-[45px] z-20">
                   <button
                     onClick={() => {
                       const nextIdx = Math.max(0, singleFileIdx - 1)
@@ -1406,7 +1406,7 @@ export function DiffViewer({ agent, projectId }: { agent: AgentResponse; project
                   onToggleCollapse={() => toggleFileCollapse(diff.files[singleFileIdx].path)}
                   onComment={handleComment}
                   onExpand={fetchFileDiff}
-                  stickyTop={100}
+                  stickyTop={73}
                   fileRef={(el) => {
                     const f = diff.files[singleFileIdx]
                     if (!f) return
@@ -1422,7 +1422,7 @@ export function DiffViewer({ agent, projectId }: { agent: AgentResponse; project
                   onToggleCollapse={() => toggleFileCollapse(f.path)}
                   onComment={handleComment}
                   onExpand={fetchFileDiff}
-                  stickyTop={52}
+                  stickyTop={45}
                   fileRef={(el) => {
                     if (el) fileRefs.current.set(f.path, el)
                     else fileRefs.current.delete(f.path)
