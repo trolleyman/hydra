@@ -945,6 +945,62 @@ func Preview() error {
 	}
 }
 
+// Demo runs the Hydra server in simulation mode with mock data.
+func Demo() error {
+	os.Setenv("HYDRA_DEV_BUILD", "1")
+	// Ensure generated Go code is up to date.
+	if err := GenerateGo(); err != nil {
+		return errtrace.Wrap(err)
+	}
+	if err := BuildLinuxBinary(); err != nil {
+		return errtrace.Wrap(err)
+	}
+	// Build the frontend once to ensure web/dist/ exists for Go compilation.
+	if err := BuildWeb(); err != nil {
+		return errtrace.Wrap(err)
+	}
+
+	// Start the Vite dev server (frontend with HMR on http://localhost:5173).
+	printCmdBackground("bun", "run", "dev")
+	viteCmd := exec.Command("bun", "run", "dev")
+	viteCmd.Dir = "web"
+	viteCmd.Stdout = os.Stdout
+	viteCmd.Stderr = os.Stderr
+	if err := viteCmd.Start(); err != nil {
+		return errtrace.Wrap(fmt.Errorf("failed to start Vite dev server: %w", err))
+	}
+	defer func() {
+		if viteCmd.Process != nil {
+			viteCmd.Process.Kill()
+			viteCmd.Wait()
+		}
+	}()
+
+	hydraOutputFile := getHydraOutputFile()
+	devBuildArgs := append([]string{"build"}, goBuildTags()...)
+	devBuildArgs = append(devBuildArgs, "-o", hydraOutputFile, "./")
+	printCmdLine(append([]string{"go"}, devBuildArgs...))
+	buildCmd := exec.Command("go", devBuildArgs...)
+	buildCmd.Stdout = os.Stdout
+	buildCmd.Stderr = os.Stderr
+	if err := buildCmd.Run(); err != nil {
+		return errtrace.Wrap(fmt.Errorf("build error: %w", err))
+	}
+
+	printCmd(hydraOutputFile, "server", "--simulation")
+	serverCmd := exec.Command(hydraOutputFile, "server", "--simulation")
+	serverCmd.Stdout = os.Stdout
+	serverCmd.Stderr = os.Stderr
+	// Use a different port if needed, but 8080 is default.
+	// Vite dev server proxies to 8080 by default.
+
+	if err := serverCmd.Run(); err != nil {
+		return errtrace.Wrap(err)
+	}
+
+	return nil
+}
+
 // Clean removes the build cache and build files
 func Clean() error {
 	if err := os.RemoveAll(".mage"); err != nil {

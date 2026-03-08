@@ -34,14 +34,14 @@ const devRestartExitCode = 42
 
 // Server implements StrictServerInterface.
 type Server struct {
-	WorktreesDir      string
-	ProjectRoot       string
-	DefaultProject    projects.ProjectInfo
-	ProjectsManager   *projects.Manager
-	DockerClient      *dockerclient.Client
-	DB                *db.Store
-	StartTime         time.Time
-	Development       bool // set when running under mage dev / mage DevAutoReload
+	WorktreesDir    string
+	ProjectRoot     string
+	DefaultProject  projects.ProjectInfo
+	ProjectsManager *projects.Manager
+	DockerClient    *dockerclient.Client
+	DB              *db.Store
+	StartTime       time.Time
+	Development     bool // set when running under mage dev / mage DevAutoReload
 
 	lastDockerError atomic.Value // holds string
 }

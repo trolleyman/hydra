@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"braces.dev/errtrace"
 	"github.com/docker/docker/api/types/container"
 	"github.com/gorilla/websocket"
 	"github.com/trolleyman/hydra/internal/config"
@@ -58,13 +59,13 @@ type safeConn struct {
 func (c *safeConn) WriteMessage(messageType int, data []byte) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.Conn.WriteMessage(messageType, data)
+	return errtrace.Wrap(c.Conn.WriteMessage(messageType, data))
 }
 
 func (c *safeConn) WriteControl(messageType int, data []byte, deadline time.Time) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.Conn.WriteControl(messageType, data, deadline)
+	return errtrace.Wrap(c.Conn.WriteControl(messageType, data, deadline))
 }
 
 func sendStatusUpdate(conn *safeConn, status string) {

@@ -9,6 +9,7 @@ import (
 
 	"braces.dev/errtrace"
 	"github.com/spf13/cobra"
+	"github.com/trolleyman/hydra/internal/api"
 	"github.com/trolleyman/hydra/internal/db"
 	"github.com/trolleyman/hydra/internal/docker"
 	"github.com/trolleyman/hydra/internal/heads"
@@ -17,7 +18,10 @@ import (
 	"github.com/trolleyman/hydra/internal/projects"
 )
 
+var simulationMode bool
+
 func init() {
+	serverCmd.Flags().BoolVar(&simulationMode, "simulation", false, "Run in simulation mode with mock data")
 	rootCmd.AddCommand(serverCmd)
 }
 
@@ -28,6 +32,10 @@ var serverCmd = &cobra.Command{
 }
 
 func runServer(_ *cobra.Command, _ []string) error {
+	if simulationMode {
+		return errtrace.Wrap(runSimulationServer())
+	}
+
 	projectRoot, err := paths.GetProjectRootFromCwd()
 	if err != nil {
 		log.Fatalf("Resolve project root: %v", err)
@@ -62,14 +70,14 @@ func runServer(_ *cobra.Command, _ []string) error {
 	ctx := context.Background()
 
 	server := &httppkg.Server{
-		WorktreesDir:      worktreesDir,
-		ProjectRoot:       projectRoot,
-		DefaultProject:    defaultProject,
-		ProjectsManager:   pm,
-		DockerClient:      dockerClient,
-		DB:                store,
-		StartTime:         time.Now(),
-		Development:       os.Getenv("HYDRA_DEV_RESTART") == "1",
+		WorktreesDir:    worktreesDir,
+		ProjectRoot:     projectRoot,
+		DefaultProject:  defaultProject,
+		ProjectsManager: pm,
+		DockerClient:    dockerClient,
+		DB:              store,
+		StartTime:       time.Now(),
+		Development:     os.Getenv("HYDRA_DEV_RESTART") == "1",
 	}
 
 	// Run immediate first cycles of both pollers before accepting HTTP requests.
@@ -101,6 +109,31 @@ func runServer(_ *cobra.Command, _ []string) error {
 		addr = envAddr
 	}
 	log.Printf("Server starting on http://%s", addr)
+	return errtrace.Wrap(http.ListenAndServe(addr, httppkg.LoggingMiddleware(mux)))
+}
+
+func runSimulationServer() error {
+	log.Printf("Starting Hydra in SIMULATION mode")
+
+	server := &httppkg.SimulationServer{
+		StartTime: time.Now(),
+	}
+
+	mux := http.NewServeMux()
+
+	// Register API routes (into mux)
+	api.HandlerFromMux(server, mux)
+
+	// Mock WebSocket terminal endpoint
+	mux.HandleFunc("/ws/agent/", server.HandleTerminalWS)
+
+	registerFrontend(mux)
+
+	addr := "localhost:8080"
+	if envAddr := os.Getenv("HYDRA_API_ADDR"); envAddr != "" {
+		addr = envAddr
+	}
+	log.Printf("Simulation Server starting on http://%s", addr)
 	return errtrace.Wrap(http.ListenAndServe(addr, httppkg.LoggingMiddleware(mux)))
 }
 
