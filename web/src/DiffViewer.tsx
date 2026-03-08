@@ -1104,7 +1104,7 @@ export function DiffViewer({ agent, projectId }: { agent: AgentResponse; project
   }, [agent.id, agent.branch_name, projectId, refreshKey])
 
   const fetchFileDiff = useCallback(async (path: string, context: number = 3) => {
-    if (!agent.branch_name || !diff) return
+    if (!agent.branch_name) return
 
     const params: { baseRef?: string; headRef?: string; ignoreWhitespace?: boolean; includeUncommitted?: boolean } = {}
     if (ignoreWhitespace) params.ignoreWhitespace = true
@@ -1129,7 +1129,7 @@ export function DiffViewer({ agent, projectId }: { agent: AgentResponse; project
     } catch (e) {
       console.error('Failed to fetch file diff:', e)
     }
-  }, [agent.id, projectId, leftSel, rightSel, ignoreWhitespace, diff])
+  }, [agent.id, projectId, leftSel, rightSel, ignoreWhitespace])
 
   useEffect(() => {
     if (!agent.branch_name) return
