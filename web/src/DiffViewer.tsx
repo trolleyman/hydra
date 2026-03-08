@@ -1320,15 +1320,49 @@ export function DiffViewer({ agent, projectId }: { agent: AgentResponse; project
     setRightSel({ type: 'uncommitted' })
   }, [])
 
+  const [commentSent, setCommentSent] = useState(false)
+
   const handleComment = useCallback(async (path: string, lineNum: number, isNew: boolean, text: string) => {
-    const side = isNew ? 'new' : 'old'
-    const msg = `Comment on ${path} line ${lineNum} (${side}):\n${text}`
+    const fromLabel = leftSel.type === 'base'
+      ? agent.base_branch
+      : leftSel.type === 'latest'
+      ? (commitsRef.current[0]?.short_sha ? `HEAD (${commitsRef.current[0].short_sha})` : 'HEAD')
+      : (commits.find(c => c.sha === leftSel.sha)?.short_sha ?? leftSel.sha.slice(0, 8))
+    const toLabel = rightSel.type === 'latest' ? 'latest commit'
+      : rightSel.type === 'uncommitted' ? 'uncommitted changes'
+      : (commits.find(c => c.sha === rightSel.sha)?.short_sha ?? rightSel.sha.slice(0, 8))
+
+    // Find hunk containing this line and build surrounding context
+    const file = diff?.files.find(f => f.path === path)
+    const hunk = file?.hunks?.find(h =>
+      h.lines.some(l => isNew ? l.new_line_num === lineNum : l.old_line_num === lineNum)
+    )
+
+    let msg = `Comment on \`${path}\` line ${lineNum} (diff: ${fromLabel} → ${toLabel})\n`
+    if (hunk) {
+      const targetIdx = hunk.lines.findIndex(l => isNew ? l.new_line_num === lineNum : l.old_line_num === lineNum)
+      if (targetIdx >= 0) {
+        const start = Math.max(0, targetIdx - 3)
+        const end = Math.min(hunk.lines.length, targetIdx + 4)
+        const ctxLines = hunk.lines.slice(start, end)
+        msg += `\n\`\`\`diff\n${hunk.header}\n`
+        msg += ctxLines.map((l, i) => {
+          const prefix = l.type === 'addition' ? '+' : l.type === 'deletion' ? '-' : ' '
+          return prefix + l.content + (start + i === targetIdx ? '  ← this line' : '')
+        }).join('\n')
+        msg += `\n\`\`\`\n`
+      }
+    }
+    msg += `\nComment:\n${text}`
+
     try {
       await api.default.sendAgentInput(projectId ?? '', agent.id, { text: msg })
+      setCommentSent(true)
+      setTimeout(() => setCommentSent(false), 3000)
     } catch (e) {
       console.error('Failed to send comment:', e)
     }
-  }, [agent.id, projectId])
+  }, [agent.id, agent.base_branch, projectId, leftSel, rightSel, commits, diff])
 
   const [isResizing, setIsResizing] = useState(false)
   const startResizing = useCallback((e: React.MouseEvent) => {
@@ -1551,6 +1585,12 @@ export function DiffViewer({ agent, projectId }: { agent: AgentResponse; project
         </div>
       ) : null}
       {isResizing && <div className="fixed inset-0 z-[100] cursor-col-resize" />}
+      {commentSent && (
+        <div className="fixed bottom-4 right-4 z-[500] flex items-center gap-2 px-3 py-2 bg-green-600 text-white text-xs font-semibold rounded-lg shadow-lg pointer-events-none">
+          <Check className="w-3.5 h-3.5" />
+          Comment sent to agent
+        </div>
+      )}
     </div>
   )
 }

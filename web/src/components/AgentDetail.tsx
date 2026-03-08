@@ -102,10 +102,22 @@ export function AgentDetail({
   }
 
   async function handleMerge() {
+    // Check for uncommitted changes before showing the confirm dialog.
+    let uncommittedWarning = ''
+    try {
+      const d = await api.default.getAgentDiffFiles(projectId ?? '', agent.id, undefined, undefined, true)
+      if (d.uncommitted_changes) {
+        const tracked = d.uncommitted_summary?.tracked_count ?? 0
+        const untracked = d.uncommitted_summary?.untracked_count ?? 0
+        const total = tracked + untracked
+        uncommittedWarning = `\n\n⚠️ This agent has ${total} uncommitted file change${total !== 1 ? 's' : ''} that will be lost when merging.`
+      }
+    } catch { /* ignore — proceed without warning */ }
+
     useDialogStore.getState().show({
       title: 'Merge Agent',
-      message: `Are you sure you want to merge agent "${agent.id}"?\n\nThis will merge the agent's branch into the base branch, then stop the container and clean up.`,
-      type: 'confirm',
+      message: `Are you sure you want to merge agent "${agent.id}"?${uncommittedWarning}\n\nThis will merge the agent's branch into the base branch, then stop the container and clean up.`,
+      type: uncommittedWarning ? 'warning' : 'confirm',
       onConfirm: async () => {
         setMerging(true)
         try {

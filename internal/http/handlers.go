@@ -933,6 +933,13 @@ func (s *Server) GetAgentDiff(ctx context.Context, request api.GetAgentDiffReque
 		return nil, errtrace.Wrap(err)
 	}
 
+	// Append untracked files when including uncommitted changes.
+	if includeUncommitted && head.Worktree != nil {
+		if untrackedDiffs, err := git.GetUntrackedDiff(*head.Worktree, path, contextLines); err == nil {
+			diffFiles = append(diffFiles, untrackedDiffs...)
+		}
+	}
+
 	// Fetch commit info for base and head if they look like SHAs.
 	var baseCommitInfo *api.CommitInfo
 	var headCommitInfo *api.CommitInfo
@@ -1004,7 +1011,7 @@ func (s *Server) GetAgentDiff(ctx context.Context, request api.GetAgentDiffReque
 	var uncommittedSummary *api.UncommittedSummary
 	if head.Worktree != nil {
 		if summary, err := git.GetUncommittedSummary(*head.Worktree); err == nil {
-			uncommittedChanges = summary.TrackedCount > 0
+			uncommittedChanges = summary.TrackedCount > 0 || summary.UntrackedCount > 0
 			uncommittedSummary = &api.UncommittedSummary{
 				TrackedCount:   summary.TrackedCount,
 				UntrackedCount: summary.UntrackedCount,
@@ -1099,6 +1106,13 @@ func (s *Server) GetAgentDiffFiles(ctx context.Context, request api.GetAgentDiff
 		return nil, errtrace.Wrap(err)
 	}
 
+	// Append untracked files when including uncommitted changes.
+	if includeUncommitted && head.Worktree != nil {
+		if untrackedFiles, err := git.GetUntrackedDiffFiles(*head.Worktree); err == nil {
+			diffFiles = append(diffFiles, untrackedFiles...)
+		}
+	}
+
 	apiFiles := make([]api.DiffFile, len(diffFiles))
 	for i, f := range diffFiles {
 		apiFiles[i] = api.DiffFile{
@@ -1121,7 +1135,7 @@ func (s *Server) GetAgentDiffFiles(ctx context.Context, request api.GetAgentDiff
 	var uncommittedSummary *api.UncommittedSummary
 	if head.Worktree != nil {
 		if summary, err := git.GetUncommittedSummary(*head.Worktree); err == nil {
-			uncommittedChanges = summary.TrackedCount > 0
+			uncommittedChanges = summary.TrackedCount > 0 || summary.UntrackedCount > 0
 			uncommittedSummary = &api.UncommittedSummary{
 				TrackedCount:   summary.TrackedCount,
 				UntrackedCount: summary.UntrackedCount,
