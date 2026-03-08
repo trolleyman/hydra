@@ -195,7 +195,7 @@ export function AgentDetail({
   }
 
   return (
-    <div className="flex-1 overflow-auto p-6">
+    <div className="flex-1 flex flex-col overflow-auto p-6 min-w-0 min-h-0">
       <div className="w-full">
         {/* Header */}
         <div className="mb-6">

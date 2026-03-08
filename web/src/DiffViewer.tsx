@@ -497,7 +497,7 @@ function Tooltip({ content, children, side = 'bottom' }: {
   }, [side])
 
   return (
-    <div ref={ref} className="relative inline-flex w-full" onMouseEnter={show} onMouseLeave={() => setVisible(false)}>
+    <div ref={ref} className="relative inline-flex" onMouseEnter={show} onMouseLeave={() => setVisible(false)}>
       {children}
       {visible && pos && (
         <div
