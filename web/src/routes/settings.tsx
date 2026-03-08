@@ -7,6 +7,7 @@ import type { ConfigResponse, AgentConfig, AgentResponse } from '../api'
 import { AgentTerminal } from '../components/AgentTerminal'
 import { X, Layers, Monitor, Sparkles, FileText, Plus, Trash2, AlertCircle, Save } from 'lucide-react'
 import { InfoTooltip } from '../components/InfoTooltip'
+import { Tooltip } from '../components/Tooltip'
 import type { ProjectInfo } from '../api'
 
 import { useDialogStore } from '../stores/dialogStore'
@@ -765,15 +766,19 @@ function ConfigForm({
               <div className="grid grid-cols-1 md:grid-cols-2 gap-2 px-1">
                 <div className="space-y-0.5">
                   <span className="text-[9px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider">In Container</span>
-                  <p className="text-[10px] font-mono text-blue-600 dark:text-blue-400 truncate" title={resolveContainerPathExample(mount)}>
-                    {resolveContainerPathExample(mount)}
-                  </p>
+                  <Tooltip content={resolveContainerPathExample(mount)}>
+                    <p className="text-[10px] font-mono text-blue-600 dark:text-blue-400 truncate">
+                      {resolveContainerPathExample(mount)}
+                    </p>
+                  </Tooltip>
                 </div>
                 <div className="space-y-0.5">
                   <span className="text-[9px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Host Storage</span>
-                  <p className="text-[10px] font-mono text-orange-600 dark:text-orange-400 truncate" title={resolvePathExample(mount)}>
-                    {resolvePathExample(mount)}
-                  </p>
+                  <Tooltip content={resolvePathExample(mount)}>
+                    <p className="text-[10px] font-mono text-orange-600 dark:text-orange-400 truncate">
+                      {resolvePathExample(mount)}
+                    </p>
+                  </Tooltip>
                 </div>
               </div>
             </div>

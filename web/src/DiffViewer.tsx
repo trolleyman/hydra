@@ -149,13 +149,14 @@ function CopyButton({ text }: { text: string }) {
     setTimeout(() => setCopied(false), 1500)
   }
   return (
-    <button
-      onClick={handleCopy}
-      className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 shrink-0 cursor-pointer transition-colors"
-      title="Copy path"
-    >
-      {copied ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5 text-gray-400" />}
-    </button>
+    <Tooltip content="Copy path">
+      <button
+        onClick={handleCopy}
+        className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 shrink-0 cursor-pointer transition-colors"
+      >
+        {copied ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5 text-gray-400" />}
+      </button>
+    </Tooltip>
   )
 }
 
@@ -213,18 +214,24 @@ function HunkHeader({ header, onExpandUp, onExpandBoth, onExpandDown }: {
   return (
     <div className="flex items-center bg-blue-50 dark:bg-blue-950/30 border-y border-blue-100 dark:border-blue-900/50 px-2 py-0.5 group/hunk">
       <div className="flex items-center gap-0.5 mr-2 opacity-0 group-hover/hunk:opacity-100 transition-opacity">
-        <button onClick={onExpandUp} className="p-0.5 rounded hover:bg-blue-100 dark:hover:bg-blue-900/50 text-blue-500 cursor-pointer" title="Expand up 5 lines">
-          <ChevronDown className="w-3 h-3 rotate-180" />
-        </button>
-        <button onClick={onExpandBoth} className="p-0.5 rounded hover:bg-blue-100 dark:hover:bg-blue-900/50 text-blue-500 cursor-pointer" title="Expand 5 lines">
-          <div className="relative w-3 h-3 flex flex-col items-center justify-center">
-            <ChevronDown className="w-2 h-2 rotate-180 absolute top-0" />
-            <ChevronDown className="w-2 h-2 absolute bottom-0" />
-          </div>
-        </button>
-        <button onClick={onExpandDown} className="p-0.5 rounded hover:bg-blue-100 dark:hover:bg-blue-900/50 text-blue-500 cursor-pointer" title="Expand down 5 lines">
-          <ChevronDown className="w-3 h-3" />
-        </button>
+        <Tooltip content="Expand up 5 lines">
+          <button onClick={onExpandUp} className="p-0.5 rounded hover:bg-blue-100 dark:hover:bg-blue-900/50 text-blue-500 cursor-pointer">
+            <ChevronDown className="w-3 h-3 rotate-180" />
+          </button>
+        </Tooltip>
+        <Tooltip content="Expand 5 lines">
+          <button onClick={onExpandBoth} className="p-0.5 rounded hover:bg-blue-100 dark:hover:bg-blue-900/50 text-blue-500 cursor-pointer">
+            <div className="relative w-3 h-3 flex flex-col items-center justify-center">
+              <ChevronDown className="w-2 h-2 rotate-180 absolute top-0" />
+              <ChevronDown className="w-2 h-2 absolute bottom-0" />
+            </div>
+          </button>
+        </Tooltip>
+        <Tooltip content="Expand down 5 lines">
+          <button onClick={onExpandDown} className="p-0.5 rounded hover:bg-blue-100 dark:hover:bg-blue-900/50 text-blue-500 cursor-pointer">
+            <ChevronDown className="w-3 h-3" />
+          </button>
+        </Tooltip>
       </div>
       <span className="font-mono text-xs text-blue-500 dark:text-blue-400">{header}</span>
     </div>
@@ -262,13 +269,14 @@ const UnifiedHunk = memo(function UnifiedHunk({ hunk, highlightedOld, highlighte
                 <span className={UNIFIED_LINE_NUM_CLASS}>{line.old_line_num ?? ''}</span>
                 <span className={UNIFIED_LINE_NUM_CLASS}>{line.new_line_num ?? ''}</span>
                 {!isNoNewline && (
-                  <button
-                    onClick={() => setOpenCommentIdx(openCommentIdx === idx ? null : idx)}
-                    className="absolute inset-0 opacity-0 group-hover:opacity-100 flex items-center justify-center cursor-pointer z-10 hover:bg-blue-500/10 transition-opacity"
-                    title="Add comment"
-                  >
-                    <MessageSquarePlus className="w-3 h-3 text-blue-500" />
-                  </button>
+                  <Tooltip content="Add comment">
+                    <button
+                      onClick={() => setOpenCommentIdx(openCommentIdx === idx ? null : idx)}
+                      className="absolute inset-0 opacity-0 group-hover:opacity-100 flex items-center justify-center cursor-pointer z-10 hover:bg-blue-500/10 transition-opacity"
+                    >
+                      <MessageSquarePlus className="w-3 h-3 text-blue-500" />
+                    </button>
+                  </Tooltip>
                 )}
               </div>
               <span className={`select-none font-mono text-xs leading-5 w-4 text-center shrink-0 ${isAdd ? 'text-green-600 dark:text-green-400' : isDel ? 'text-red-600 dark:text-red-400' : 'text-gray-300 dark:text-gray-700'
@@ -326,13 +334,14 @@ const SideBySideHunk = memo(function SideBySideHunk({ hunk, highlightedOld, high
                 <div className="relative flex shrink-0">
                   <span className={SBS_LINE_NUM}>{line.oldLineNum ?? ''}</span>
                   {line.oldLineNum != null && (
-                    <button
-                      onClick={() => setOpenCommentIdx(openCommentIdx === idx ? null : idx)}
-                      className="absolute inset-0 opacity-0 group-hover:opacity-100 flex items-center justify-center cursor-pointer z-10 hover:bg-blue-500/10 transition-opacity"
-                      title="Add comment"
-                    >
-                      <MessageSquarePlus className="w-3 h-3 text-blue-500" />
-                    </button>
+                    <Tooltip content="Add comment">
+                      <button
+                        onClick={() => setOpenCommentIdx(openCommentIdx === idx ? null : idx)}
+                        className="absolute inset-0 opacity-0 group-hover:opacity-100 flex items-center justify-center cursor-pointer z-10 hover:bg-blue-500/10 transition-opacity"
+                      >
+                        <MessageSquarePlus className="w-3 h-3 text-blue-500" />
+                      </button>
+                    </Tooltip>
                   )}
                 </div>
                 <span className={`select-none font-mono text-xs w-3 shrink-0 text-center leading-5 ${line.oldType === 'deletion' ? 'text-red-500' : 'text-gray-300 dark:text-gray-700'}`}>
@@ -347,13 +356,14 @@ const SideBySideHunk = memo(function SideBySideHunk({ hunk, highlightedOld, high
                 <div className="relative flex shrink-0">
                   <span className={SBS_LINE_NUM}>{line.newLineNum ?? ''}</span>
                   {line.newLineNum != null && (
-                    <button
-                      onClick={() => setOpenCommentIdx(openCommentIdx === idx ? null : idx)}
-                      className="absolute inset-0 opacity-0 group-hover:opacity-100 flex items-center justify-center cursor-pointer z-10 hover:bg-blue-500/10 transition-opacity"
-                      title="Add comment"
-                    >
-                      <MessageSquarePlus className="w-3 h-3 text-blue-500" />
-                    </button>
+                    <Tooltip content="Add comment">
+                      <button
+                        onClick={() => setOpenCommentIdx(openCommentIdx === idx ? null : idx)}
+                        className="absolute inset-0 opacity-0 group-hover:opacity-100 flex items-center justify-center cursor-pointer z-10 hover:bg-blue-500/10 transition-opacity"
+                      >
+                        <MessageSquarePlus className="w-3 h-3 text-blue-500" />
+                      </button>
+                    </Tooltip>
                   )}
                 </div>
                 <span className={`select-none font-mono text-xs w-3 shrink-0 text-center leading-5 ${line.newType === 'addition' ? 'text-green-500' : 'text-gray-300 dark:text-gray-700'}`}>
@@ -440,13 +450,14 @@ const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onComment, 
           <ChevronDown className={`w-4 h-4 transition-transform ${isCollapsed ? '-rotate-90' : ''}`} />
         </button>
         <ChangeTypeIcon type={file.change_type} />
-        <span
-          className="font-mono text-xs text-gray-700 dark:text-gray-300 flex-1 min-w-0 truncate cursor-pointer hover:underline"
-          title={displayPath}
-          onClick={() => onToggleCollapse(file.path)}
-        >
-          {displayPath}
-        </span>
+        <Tooltip content={displayPath}>
+          <span
+            className="font-mono text-xs text-gray-700 dark:text-gray-300 flex-1 min-w-0 truncate cursor-pointer hover:underline"
+            onClick={() => onToggleCollapse(file.path)}
+          >
+            {displayPath}
+          </span>
+        </Tooltip>
         <CopyButton text={file.path} />
         {!file.binary && (
           <div className="flex items-center gap-1.5 shrink-0 ml-1">
@@ -996,9 +1007,11 @@ function FileRow({ file, isActive, onClick, indent = 0 }: {
       style={{ paddingLeft: `${10 + indent}px`, paddingRight: '10px' }}
     >
       <ChangeTypeIcon type={file.change_type} />
-      <span className="font-mono text-[10px] text-gray-700 dark:text-gray-300 truncate flex-1 min-w-0" title={file.path}>
-        {file.path.split('/').pop()}
-      </span>
+      <Tooltip content={file.path}>
+        <span className="font-mono text-[10px] text-gray-700 dark:text-gray-300 truncate flex-1 min-w-0">
+          {file.path.split('/').pop()}
+        </span>
+      </Tooltip>
       <div className="flex items-center gap-1 shrink-0">
         {file.additions > 0 && <span className="text-[10px] text-green-600 dark:text-green-400">+{file.additions}</span>}
         {file.deletions > 0 && <span className="text-[10px] text-red-600 dark:text-red-400">−{file.deletions}</span>}
@@ -1071,15 +1084,16 @@ function SettingsPopup({ fileView, onFileViewChange, sideBySide, onSideBySideCha
 
   return (
     <div ref={ref} className="relative">
-      <button
-        onClick={() => setOpen((o) => !o)}
-        className={`flex items-center justify-center w-7 h-7 rounded-md border transition-colors cursor-pointer ${open ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800'
-          : 'text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
-          }`}
-        title="Diff settings"
-      >
-        <Settings className="w-3.5 h-3.5" />
-      </button>
+      <Tooltip content="Diff settings">
+        <button
+          onClick={() => setOpen((o) => !o)}
+          className={`flex items-center justify-center w-7 h-7 rounded-md border transition-colors cursor-pointer ${open ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800'
+            : 'text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
+            }`}
+        >
+          <Settings className="w-3.5 h-3.5" />
+        </button>
+      </Tooltip>
 
       {open && (
         <div className="absolute right-0 top-full mt-1 w-52 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50 p-3">
@@ -1399,13 +1413,14 @@ export function DiffViewer({ agent, projectId }: { agent: AgentResponse; project
           left={leftSel} hasUncommitted={diff?.uncommitted_changes} />
 
         {!(leftSel.type === 'base' && rightSel.type === 'latest') && (
-          <button
-            onClick={() => { setLeftSel({ type: 'base' }); setRightSel({ type: 'latest' }) }}
-            className="flex items-center justify-center w-7 h-7 rounded-md text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors cursor-pointer"
-            title="Reset to base → latest"
-          >
-            <RotateCcw className="w-3.5 h-3.5" />
-          </button>
+          <Tooltip content="Reset to base → latest">
+            <button
+              onClick={() => { setLeftSel({ type: 'base' }); setRightSel({ type: 'latest' }) }}
+              className="flex items-center justify-center w-7 h-7 rounded-md text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors cursor-pointer"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+            </button>
+          </Tooltip>
         )}
 
         {/* Uncommitted changes warning button */}
@@ -1419,14 +1434,15 @@ export function DiffViewer({ agent, projectId }: { agent: AgentResponse; project
             <LoaderCircle className="w-3.5 h-3.5 animate-spin text-gray-400 dark:text-gray-500 shrink-0" />
           )}
 
-          <button
-            onClick={() => setRefreshKey((k) => k + 1)}
-            disabled={loadingDiff}
-            className="flex items-center justify-center w-7 h-7 rounded-md text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50 transition-colors cursor-pointer"
-            title="Refresh diff"
-          >
-            <RefreshCw className="w-3.5 h-3.5" />
-          </button>
+          <Tooltip content="Refresh diff">
+            <button
+              onClick={() => setRefreshKey((k) => k + 1)}
+              disabled={loadingDiff}
+              className="flex items-center justify-center w-7 h-7 rounded-md text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50 transition-colors cursor-pointer"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+            </button>
+          </Tooltip>
 
           <SettingsPopup
             fileView={fileView} onFileViewChange={setFileView}

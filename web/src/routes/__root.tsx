@@ -7,6 +7,7 @@ import { Sun, Moon, ChevronDown, Folder, Plus, Settings, Check } from 'lucide-re
 
 import { Dialog } from '../components/Dialog'
 import { NotFound } from '../components/NotFound'
+import { Tooltip } from '../components/Tooltip'
 
 export const Route = createRootRoute({
   component: RootLayout,
@@ -91,15 +92,16 @@ function ProjectDropdown({
 
   return (
     <div ref={dropdownRef} className="relative shrink-0">
-      <button
-        onClick={() => { setOpen((o) => !o); setShowAddInput(false); setAddError(null) }}
-        className="flex items-center gap-1.5 h-8 px-2.5 rounded-md text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors max-w-xs cursor-pointer"
-        title={selected?.path ?? 'Select project'}
-      >
-        <Folder className="w-3.5 h-3.5" />
-        <span className="truncate max-w-[160px]">{selected?.name ?? 'Select project'}</span>
-        <ChevronDown className="w-3 h-3" />
-      </button>
+      <Tooltip content={selected?.path ?? 'Select project'}>
+        <button
+          onClick={() => { setOpen((o) => !o); setShowAddInput(false); setAddError(null) }}
+          className="flex items-center gap-1.5 h-8 px-2.5 rounded-md text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors max-w-xs cursor-pointer"
+        >
+          <Folder className="w-3.5 h-3.5" />
+          <span className="truncate max-w-[160px]">{selected?.name ?? 'Select project'}</span>
+          <ChevronDown className="w-3 h-3" />
+        </button>
+      </Tooltip>
 
       {open && (
         <div className="absolute left-0 top-full mt-1 w-72 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50 overflow-hidden">
@@ -329,37 +331,41 @@ function RootLayout() {
 
         <div className="ml-auto flex items-center gap-3 shrink-0 self-center">
           {spawnedAt.current !== null && (
-            <span
-              className="text-xs text-gray-400 dark:text-gray-500 cursor-default hidden md:block"
-              title={`Spawned at ${new Date(spawnedAt.current).toUTCString()}`}
-            >
-              {formatSpawnedAgo(Date.now() - spawnedAt.current)}
-            </span>
+            <Tooltip content={`Spawned at ${new Date(spawnedAt.current).toUTCString()}`}>
+              <span
+                className="text-xs text-gray-400 dark:text-gray-500 cursor-default hidden md:block"
+              >
+                {formatSpawnedAgo(Date.now() - spawnedAt.current)}
+              </span>
+            </Tooltip>
           )}
           {development && (
-            <button
-              onClick={handleRestart}
-              disabled={restarting}
-              className="text-xs px-2 py-0.5 rounded bg-amber-100 cursor-pointer dark:bg-amber-900 text-amber-700 dark:text-amber-300 hover:bg-amber-200 dark:hover:bg-amber-800 disabled:opacity-50 transition-colors hidden md:block"
-              title="Rebuild and restart the server"
-            >
-              {restarting ? 'Restarting…' : 'Restart'}
-            </button>
+            <Tooltip content="Rebuild and restart the server">
+              <button
+                onClick={handleRestart}
+                disabled={restarting}
+                className="text-xs px-2 py-0.5 rounded bg-amber-100 cursor-pointer dark:bg-amber-900 text-amber-700 dark:text-amber-300 hover:bg-amber-200 dark:hover:bg-amber-800 disabled:opacity-50 transition-colors hidden md:block"
+              >
+                {restarting ? 'Restarting…' : 'Restart'}
+              </button>
+            </Tooltip>
           )}
-          <button
-            onClick={() => setDark((d) => !d)}
-            className="w-7 h-7 flex items-center justify-center rounded-md cursor-pointer text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-            title={dark ? 'Switch to light mode' : 'Switch to dark mode'}
-          >
-            {dark ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
-          </button>
-          <Link
-            to="/settings"
-            className="w-7 h-7 flex items-center justify-center rounded-md cursor-pointer text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-            title="Settings"
-          >
-            <Settings className="w-5 h-5" />
-          </Link>
+          <Tooltip content={dark ? 'Switch to light mode' : 'Switch to dark mode'}>
+            <button
+              onClick={() => setDark((d) => !d)}
+              className="w-7 h-7 flex items-center justify-center rounded-md cursor-pointer text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+            >
+              {dark ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+            </button>
+          </Tooltip>
+          <Tooltip content="Settings">
+            <Link
+              to="/settings"
+              className="w-7 h-7 flex items-center justify-center rounded-md cursor-pointer text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+            >
+              <Settings className="w-5 h-5" />
+            </Link>
+          </Tooltip>
         </div>
       </header>
       <div className="flex flex-1 overflow-hidden">

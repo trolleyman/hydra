@@ -4,6 +4,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import { TerminalEvent, type TerminalStatusEvent, type TerminalDataEvent, AgentStatus } from '../api'
 import { RefreshCw, Plus, X } from 'lucide-react'
+import { Tooltip } from './Tooltip'
 
 interface PaneProps {
   agentId: string
@@ -329,24 +330,26 @@ export function AgentTerminal({ agentId, projectId, bashEnabled, onRefresh, onSt
                 {tab.label}
               </button>
               {tab.shell && (
-                <button
-                  onClick={() => closeTab(tab.id)}
-                  className="ml-0.5 p-0.5 rounded text-gray-600 hover:text-gray-300 hover:bg-gray-700 transition-colors cursor-pointer"
-                  title="Close tab"
-                >
-                  <X className="w-2.5 h-2.5" />
-                </button>
+                <Tooltip content="Close tab" side="bottom">
+                  <button
+                    onClick={() => closeTab(tab.id)}
+                    className="ml-0.5 p-0.5 rounded text-gray-600 hover:text-gray-300 hover:bg-gray-700 transition-colors cursor-pointer"
+                  >
+                    <X className="w-2.5 h-2.5" />
+                  </button>
+                </Tooltip>
               )}
             </div>
           ))}
           {bashEnabled && (
-            <button
-              onClick={addBashTab}
-              className="ml-1 p-0.5 rounded text-gray-500 hover:text-gray-300 hover:bg-gray-700 transition-colors cursor-pointer"
-              title="New bash terminal"
-            >
-              <Plus className="w-3 h-3" />
-            </button>
+            <Tooltip content="New bash terminal" side="bottom">
+              <button
+                onClick={addBashTab}
+                className="ml-1 p-0.5 rounded text-gray-500 hover:text-gray-300 hover:bg-gray-700 transition-colors cursor-pointer"
+              >
+                <Plus className="w-3 h-3" />
+              </button>
+            </Tooltip>
           )}
         </div>
 
@@ -354,13 +357,14 @@ export function AgentTerminal({ agentId, projectId, bashEnabled, onRefresh, onSt
         <span className={`ml-auto text-[10px] px-1.5 py-0.5 rounded font-medium ${isRunning ? 'text-green-400' : isWaiting ? 'text-yellow-400' : isLoading ? 'text-blue-400' : 'text-gray-500'}`}>
           {isRunning || isWaiting ? '● ' : '○ '}{status}
         </span>
-        <button
-          onClick={reconnectActive}
-          className="p-1 rounded hover:bg-gray-700 text-gray-400 hover:text-gray-200 transition-colors cursor-pointer"
-          title="Refresh terminal"
-        >
-          <RefreshCw className="w-3.5 h-3.5" />
-        </button>
+        <Tooltip content="Refresh terminal" side="bottom">
+          <button
+            onClick={reconnectActive}
+            className="p-1 rounded hover:bg-gray-700 text-gray-400 hover:text-gray-200 transition-colors cursor-pointer"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+          </button>
+        </Tooltip>
       </div>
 
       {/* Terminal panes - all mounted, show/hide via CSS */}
