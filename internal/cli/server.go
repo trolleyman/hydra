@@ -96,8 +96,8 @@ func runServer(_ *cobra.Command, _ []string) error {
 	// Build the main mux
 	mux := http.NewServeMux()
 
-	// Register API routes
-	apiHandler := httppkg.NewHandler(server)
+	// Register API routes (body capped at 10 MB to prevent abuse)
+	apiHandler := httppkg.RequestBodyLimitMiddleware(10 * 1024 * 1024)(httppkg.NewHandler(server))
 	mux.Handle("/api/", apiHandler)
 	mux.Handle("/health", apiHandler)
 
@@ -114,7 +114,12 @@ func runServer(_ *cobra.Command, _ []string) error {
 		addr = envAddr
 	}
 	log.Printf("Server starting on http://%s", addr)
-	return errtrace.Wrap(http.ListenAndServe(addr, httppkg.LoggingMiddleware(mux)))
+	srv := &http.Server{
+		Addr:           addr,
+		Handler:        httppkg.LoggingMiddleware(mux),
+		MaxHeaderBytes: 1 << 20, // 1 MB
+	}
+	return errtrace.Wrap(srv.ListenAndServe())
 }
 
 func runSimulationServer() error {
