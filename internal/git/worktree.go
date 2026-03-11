@@ -12,6 +12,19 @@ import (
 	"github.com/trolleyman/hydra/internal/paths"
 )
 
+// ValidateRef checks that a git ref name cannot be mistaken for a command-line
+// flag, which would allow option injection into git even when using exec.Command
+// with separate arguments.
+func ValidateRef(ref string) error {
+	if ref == "" {
+		return fmt.Errorf("empty ref name")
+	}
+	if strings.HasPrefix(ref, "-") {
+		return fmt.Errorf("invalid ref name %q: must not start with '-'", ref)
+	}
+	return nil
+}
+
 // GetCurrentBranch returns the name of the currently checked-out branch.
 func GetCurrentBranch(projectRoot string) (string, error) {
 	out, err := exec.Command("git", "-C", projectRoot, "rev-parse", "--abbrev-ref", "HEAD").Output()
@@ -39,6 +52,12 @@ func ListHydraBranches(projectRoot string) ([]string, error) {
 
 // CreateWorktree runs `git worktree add -b <branchName> <path> <baseBranch>`.
 func CreateWorktree(projectRoot, worktreePath, branchName, baseBranch string) error {
+	if err := ValidateRef(branchName); err != nil {
+		return errtrace.Wrap(fmt.Errorf("branch name: %w", err))
+	}
+	if err := ValidateRef(baseBranch); err != nil {
+		return errtrace.Wrap(fmt.Errorf("base branch: %w", err))
+	}
 	worktreesDir := filepath.Dir(worktreePath)
 	if err := paths.CreateGitignoreAllInDir(worktreesDir); err != nil {
 		return errtrace.Wrap(err)
@@ -70,6 +89,9 @@ func RemoveWorktree(projectRoot, worktreePath string) error {
 
 // DeleteBranch runs `git branch -D <branchName>`.
 func DeleteBranch(projectRoot, branchName string) error {
+	if err := ValidateRef(branchName); err != nil {
+		return errtrace.Wrap(fmt.Errorf("branch name: %w", err))
+	}
 	cmd := exec.Command("git", "-C", projectRoot, "branch", "-D", branchName)
 	common.PrintExecCmd(cmd)
 	cmd.Stdout = os.Stdout

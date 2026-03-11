@@ -580,6 +580,10 @@ func (s *Server) MergeAgent(ctx context.Context, request api.MergeAgentRequestOb
 		}
 	}
 
+	if err := git.ValidateRef(branchName); err != nil {
+		return nil, errtrace.Wrap(&apiError{Code: 400, Type: "bad_request", Err: err})
+	}
+
 	var stderr bytes.Buffer
 	gitMergeCmd := exec.CommandContext(ctx, "git", "-C", projectRoot, "merge", branchName)
 	gitMergeCmd.Stderr = &stderr
@@ -631,6 +635,10 @@ func (s *Server) UpdateAgentFromBase(ctx context.Context, request api.UpdateAgen
 	mergeDir := projectRoot
 	if head.Worktree != nil {
 		mergeDir = *head.Worktree
+	}
+
+	if err := git.ValidateRef(head.BaseBranch); err != nil {
+		return nil, errtrace.Wrap(&apiError{Code: 400, Type: "bad_request", Err: err})
 	}
 
 	// Attempt merge (base branch into current branch)
