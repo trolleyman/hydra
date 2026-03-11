@@ -80,6 +80,11 @@ func runServer(_ *cobra.Command, _ []string) error {
 		Development:     os.Getenv("HYDRA_DEV_RESTART") == "1",
 	}
 
+	// Prune stale soft-deleted agent records (older than 30 days) at startup.
+	if err := store.PruneDeletedAgents(30 * 24 * time.Hour); err != nil {
+		log.Printf("warn: prune deleted agents: %v", err)
+	}
+
 	// Run immediate first cycles of both pollers before accepting HTTP requests.
 	heads.RunDockerPollerOnce(ctx, dockerClient, store, projectRoot, server.SetDockerError)
 	heads.RunJSONStatusPollerOnce(store, projectRoot)
