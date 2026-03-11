@@ -4,6 +4,7 @@ import { useProjectStore } from '../../stores/projectStore'
 import { useAgentStore } from '../../stores/agentStore'
 import { api } from '../../stores/apiClient'
 import { AgentDetail } from '../../components/AgentDetail'
+import { NotFound } from '../../components/NotFound'
 import type { AgentResponse } from '../../api'
 
 export const Route = createFileRoute('/_agents/agent/$agentId')({
@@ -48,7 +49,7 @@ function AgentPage() {
 
   async function handleRefresh() {
     try {
-      const result = await api.default.listAgents(selectedProjectId ?? undefined)
+      const result = await api.default.listAgents(selectedProjectId ?? '')
       setAgents(result)
     } catch (e) {
       console.error('Failed to refresh agents:', e)
@@ -57,17 +58,11 @@ function AgentPage() {
 
   if (!agent) {
     return (
-      <div className="flex-1 flex items-center justify-center text-gray-400">
-        <div className="text-center">
-          <p className="text-sm">Agent not found</p>
-          <button
-            onClick={() => navigate({ to: '/' })}
-            className="mt-2 text-xs text-blue-500 hover:text-blue-700 transition-colors cursor-pointer"
-          >
-            Go back to home
-          </button>
-        </div>
-      </div>
+      <NotFound
+        title="Agent Not Found"
+        message={`We couldn't find an agent with ID "${agentId}". It may have been killed or expired.`}
+        errorCode="AGENT_404"
+      />
     )
   }
 

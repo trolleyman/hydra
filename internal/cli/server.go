@@ -102,7 +102,7 @@ func runServer(_ *cobra.Command, _ []string) error {
 	mux.Handle("/health", apiHandler)
 
 	// WebSocket terminal endpoint
-	mux.HandleFunc("/ws/agent/", server.HandleTerminalWS)
+	mux.HandleFunc("/ws/projects/{project_id}/agents/{id}/terminal", server.HandleTerminalWS)
 
 	// API routes for well-known and specific paths
 	mux.Handle("/.well-known/", apiHandler)
@@ -135,7 +135,7 @@ func runSimulationServer() error {
 	api.HandlerFromMux(server, mux)
 
 	// Mock WebSocket terminal endpoint
-	mux.HandleFunc("/ws/agent/", server.HandleTerminalWS)
+	mux.HandleFunc("/ws/projects/{project_id}/agents/{id}/terminal", server.HandleTerminalWS)
 
 	registerFrontend(mux)
 

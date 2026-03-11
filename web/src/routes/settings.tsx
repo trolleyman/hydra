@@ -87,11 +87,11 @@ function SettingsPage() {
     async function fetchConfig() {
       setLoading(true)
       try {
-        const editCfg = await api.default.getConfig(selectedProjectId ?? undefined, scope)
+        const editCfg = await api.default.getConfig(selectedProjectId ?? '', scope)
         setConfig(editCfg)
         setBaseConfig(JSON.stringify(editCfg))
         if (scope === 'project') {
-          const userCfg = await api.default.getConfig(selectedProjectId ?? undefined, 'user')
+          const userCfg = await api.default.getConfig(selectedProjectId ?? '', 'user')
           setInheritedConfig(userCfg)
         } else {
           setInheritedConfig(null)
@@ -116,7 +116,7 @@ function SettingsPage() {
     if (!config) return
     setSaving(true)
     try {
-      await api.default.saveConfig(config, selectedProjectId ?? undefined, scope)
+      await api.default.saveConfig(selectedProjectId ?? '', config, scope)
       setBaseConfig(JSON.stringify(config))
       useDialogStore.getState().show({
         title: 'Settings Saved',
@@ -137,12 +137,12 @@ function SettingsPage() {
   async function handleTest(agentType: string) {
     setTesting(true)
     try {
-      const resp = await api.default.spawnAgent({
+      const resp = await api.default.spawnAgent(selectedProjectId ?? '', {
         prompt: '',
         agent_type: agentType,
         id: `test-${agentType}-${Math.random().toString(36).slice(2, 6)}`,
         ephemeral: true,
-      }, selectedProjectId ?? undefined)
+      })
       setTestAgent(resp)
     } catch (err) {
       useDialogStore.getState().show({
@@ -183,8 +183,8 @@ function SettingsPage() {
                     setScope('project')
                   }}
                   className={`px-3 py-1 text-xs font-medium rounded-md transition-all cursor-pointer ${scope === 'project'
-                      ? 'bg-white dark:bg-gray-700 text-blue-600 dark:text-blue-400 shadow-sm'
-                      : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+                    ? 'bg-white dark:bg-gray-700 text-blue-600 dark:text-blue-400 shadow-sm'
+                    : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
                     }`}
                 >
                   Project: {selectedProject?.name || 'Current'}
@@ -197,8 +197,8 @@ function SettingsPage() {
                     setScope('user')
                   }}
                   className={`px-3 py-1 text-xs font-medium rounded-md transition-all cursor-pointer ${scope === 'user'
-                      ? 'bg-white dark:bg-gray-700 text-blue-600 dark:text-blue-400 shadow-sm'
-                      : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+                    ? 'bg-white dark:bg-gray-700 text-blue-600 dark:text-blue-400 shadow-sm'
+                    : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
                     }`}
                 >
                   User (Global)
@@ -218,11 +218,10 @@ function SettingsPage() {
             <button
               onClick={handleSave}
               disabled={saving || !hasUnsavedChanges}
-              className={`flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-bold transition-all shadow-lg active:scale-95 cursor-pointer ${
-                hasUnsavedChanges
-                  ? 'bg-blue-600 text-white hover:bg-blue-700 shadow-blue-500/25'
-                  : 'bg-gray-200 dark:bg-gray-700 text-gray-400 dark:text-gray-500 shadow-none cursor-not-allowed opacity-60'
-              }`}
+              className={`flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-bold transition-all shadow-lg active:scale-95 cursor-pointer ${hasUnsavedChanges
+                ? 'bg-blue-600 text-white hover:bg-blue-700 shadow-blue-500/25'
+                : 'bg-gray-200 dark:bg-gray-700 text-gray-400 dark:text-gray-500 shadow-none cursor-not-allowed opacity-60'
+                }`}
             >
               <Save className="w-4 h-4" />
               {saving ? 'Saving...' : 'Save'}
@@ -236,8 +235,8 @@ function SettingsPage() {
             <button
               onClick={() => setActiveSection('all')}
               className={`px-4 py-3 text-sm font-semibold transition-all border-b-2 cursor-pointer ${activeSection === 'all'
-                  ? 'border-blue-500 text-blue-600 dark:text-blue-400'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+                ? 'border-blue-500 text-blue-600 dark:text-blue-400'
+                : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
                 }`}
             >
               All Agents
@@ -245,8 +244,8 @@ function SettingsPage() {
             <button
               onClick={() => setActiveSection('claude')}
               className={`px-4 py-3 text-sm font-semibold transition-all border-b-2 cursor-pointer ${activeSection === 'claude'
-                  ? 'border-purple-500 text-purple-600 dark:text-purple-400'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+                ? 'border-purple-500 text-purple-600 dark:text-purple-400'
+                : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
                 }`}
             >
               Claude
@@ -254,8 +253,8 @@ function SettingsPage() {
             <button
               onClick={() => setActiveSection('gemini')}
               className={`px-4 py-3 text-sm font-semibold transition-all border-b-2 cursor-pointer ${activeSection === 'gemini'
-                  ? 'border-teal-500 text-teal-600 dark:text-teal-400'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+                ? 'border-teal-500 text-teal-600 dark:text-teal-400'
+                : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
                 }`}
             >
               Gemini
@@ -263,8 +262,8 @@ function SettingsPage() {
             <button
               onClick={() => setActiveSection('copilot')}
               className={`px-4 py-3 text-sm font-semibold transition-all border-b-2 cursor-pointer ${activeSection === 'copilot'
-                  ? 'border-blue-500 text-blue-600 dark:text-blue-400'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+                ? 'border-blue-500 text-blue-600 dark:text-blue-400'
+                : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
                 }`}
             >
               Copilot
@@ -272,8 +271,8 @@ function SettingsPage() {
             <button
               onClick={() => setActiveSection('defaults')}
               className={`px-4 py-3 text-sm font-semibold transition-all border-b-2 cursor-pointer ${activeSection === 'defaults'
-                  ? 'border-orange-500 text-orange-600 dark:text-orange-400'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+                ? 'border-orange-500 text-orange-600 dark:text-orange-400'
+                : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
                 }`}
             >
               Built-in Defaults
@@ -282,8 +281,8 @@ function SettingsPage() {
               <button
                 onClick={() => setActiveSection('features')}
                 className={`px-4 py-3 text-sm font-semibold transition-all border-b-2 cursor-pointer ${activeSection === 'features'
-                    ? 'border-pink-500 text-pink-600 dark:text-pink-400'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+                  ? 'border-pink-500 text-pink-600 dark:text-pink-400'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
                   }`}
               >
                 Feature Flags
@@ -473,7 +472,7 @@ function SettingsPage() {
                 <button
                   onClick={() => {
                     if (testAgent.ephemeral) {
-                      api.default.killAgent(testAgent.id, selectedProjectId ?? undefined).catch(() => { })
+                      api.default.killAgent(selectedProjectId ?? '', testAgent.id).catch(() => { })
                     }
                     setTestAgent(null)
                   }}
@@ -739,7 +738,7 @@ function ConfigForm({
         </div>
         <div className="space-y-2 pt-0.5">
           {(value.shared_mounts || []).map((mount, index) => (
-            <div key={index} className="flex flex-col gap-1.5 p-3 rounded-xl border border-gray-100 dark:border-gray-700/50 bg-gray-50/50 dark:bg-gray-800/30">
+            <div key={index} className="flex flex-col">
               <div className="flex items-center gap-2">
                 <input
                   type="text"
@@ -752,29 +751,37 @@ function ConfigForm({
                   placeholder="e.g. ~/.cache/go-build"
                   className="flex-1 text-sm px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-100 font-mono shadow-inner focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
                 />
+                <InfoTooltip>
+                  <div className="min-w-[200px] overflow-hidden rounded-lg border border-gray-700 bg-gray-900 shadow-xl">
+                    <table className="w-full text-[10px] border-collapse">
+                      {/* <thead>
+                        <tr className="border-b border-gray-700 bg-gray-800/50">
+                          <th className="px-2 py-1 text-left font-bold text-gray-400 uppercase tracking-wider">Target</th>
+                          <th className="px-2 py-1 text-left font-bold text-gray-400 uppercase tracking-wider">Resolved Path</th>
+                        </tr>
+                      </thead> */}
+                      <tbody className="divide-y divide-gray-800">
+                        <tr>
+                          <td className="px-2 py-1.5 font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Container</td>
+                          <td className="px-2 py-1.5 font-mono text-gray-300 break-all">{resolveContainerPathExample(mount)}</td>
+                        </tr>
+                        <tr>
+                          <td className="px-2 py-1.5 font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Host</td>
+                          <td className="px-2 py-1.5 font-mono text-gray-300 break-all">{resolvePathExample(mount)}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </InfoTooltip>
                 <button
                   onClick={() => {
                     const newMounts = (value.shared_mounts || []).filter((_, i) => i !== index)
                     onChange({ ...value, shared_mounts: newMounts.length > 0 ? newMounts : null })
                   }}
-                  className="p-2 text-gray-400 hover:text-red-500 transition-colors"
+                  className={`flex items-center justify-center w-7 h-7 rounded-md text-gray-400 hover:text-red-500 transition-colors cursor-pointer`}
                 >
                   <Trash2 className="w-4 h-4" />
                 </button>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-2 px-1">
-                <div className="space-y-0.5">
-                  <span className="text-[9px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider">In Container</span>
-                  <p className="text-[10px] font-mono text-blue-600 dark:text-blue-400 truncate" title={resolveContainerPathExample(mount)}>
-                    {resolveContainerPathExample(mount)}
-                  </p>
-                </div>
-                <div className="space-y-0.5">
-                  <span className="text-[9px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Host Storage</span>
-                  <p className="text-[10px] font-mono text-orange-600 dark:text-orange-400 truncate" title={resolvePathExample(mount)}>
-                    {resolvePathExample(mount)}
-                  </p>
-                </div>
               </div>
             </div>
           ))}
@@ -862,4 +869,3 @@ function ConfigForm({
     </div>
   )
 }
-

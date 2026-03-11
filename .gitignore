@@ -33,6 +33,7 @@ go.work.sum
 
 # Mage timestamp files
 .mage
+mage/mage_output_file.go
 
 # Core dumps
 core

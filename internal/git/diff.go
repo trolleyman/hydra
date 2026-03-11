@@ -139,11 +139,16 @@ func GetDiff(projectRoot, baseRef, headRef string, ignoreWhitespace, useTripleDo
 	if context > 0 {
 		args = append(args, fmt.Sprintf("-U%d", context))
 	}
-	separator := ".."
-	if useTripleDot {
-		separator = "..."
+	if headRef == "" {
+		// Empty headRef means "compare baseRef to working tree"
+		args = append(args, baseRef)
+	} else {
+		separator := ".."
+		if useTripleDot {
+			separator = "..."
+		}
+		args = append(args, baseRef+separator+headRef)
 	}
-	args = append(args, baseRef+separator+headRef)
 
 	if path != "" {
 		args = append(args, "--", path)
@@ -166,12 +171,19 @@ func GetDiff(projectRoot, baseRef, headRef string, ignoreWhitespace, useTripleDo
 // GetDiffFiles returns the list of files that changed between baseRef and headRef,
 // including addition and deletion counts.
 func GetDiffFiles(projectRoot, baseRef, headRef string, useTripleDot bool) ([]DiffFile, error) {
-	args := []string{"-C", projectRoot, "diff", "--numstat", "--no-color"}
-	separator := ".."
-	if useTripleDot {
-		separator = "..."
-	}
-	args = append(args, baseRef+separator+headRef)
+	rangeArg := func() string {
+		if headRef == "" {
+			// Empty headRef means "compare baseRef to working tree"
+			return baseRef
+		}
+		separator := ".."
+		if useTripleDot {
+			separator = "..."
+		}
+		return baseRef + separator + headRef
+	}()
+
+	args := []string{"-C", projectRoot, "diff", "--numstat", "--no-color", rangeArg}
 
 	out, err := exec.Command("git", args...).CombinedOutput()
 	if err != nil {
@@ -197,8 +209,7 @@ func GetDiffFiles(projectRoot, baseRef, headRef string, useTripleDot bool) ([]Di
 	}
 
 	// Now get the change types (--name-status)
-	args = []string{"-C", projectRoot, "diff", "--name-status", "--no-color"}
-	args = append(args, baseRef+separator+headRef)
+	args = []string{"-C", projectRoot, "diff", "--name-status", "--no-color", rangeArg}
 	out, err = exec.Command("git", args...).CombinedOutput()
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
@@ -246,6 +257,71 @@ func GetDiffFiles(projectRoot, baseRef, headRef string, useTripleDot bool) ([]Di
 		})
 	}
 
+	return files, nil
+}
+
+// GetUntrackedDiffFiles returns DiffFile summary entries (no hunks) for all untracked
+// files in projectRoot. These are files reported by `git ls-files --others`.
+func GetUntrackedDiffFiles(projectRoot string) ([]DiffFile, error) {
+	out, err := exec.Command("git", "-C", projectRoot, "ls-files", "--others", "--exclude-standard").Output()
+	if err != nil {
+		return nil, errtrace.Wrap(fmt.Errorf("git ls-files: %w", err))
+	}
+	var files []DiffFile
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if line = strings.TrimSpace(line); line == "" {
+			continue
+		}
+		// Count additions via --numstat diff --no-index /dev/null <file>
+		numOut, _ := exec.Command("git", "-C", projectRoot, "diff", "--numstat", "--no-color", "--no-index", "/dev/null", line).Output()
+		additions := 0
+		for _, l := range strings.Split(strings.TrimSpace(string(numOut)), "\n") {
+			if l = strings.TrimSpace(l); l == "" {
+				continue
+			}
+			if parts := strings.Fields(l); len(parts) >= 1 {
+				additions, _ = strconv.Atoi(parts[0])
+			}
+			break
+		}
+		files = append(files, DiffFile{Path: line, ChangeType: "added", Additions: additions})
+	}
+	return files, nil
+}
+
+// GetUntrackedDiff returns full parsed diffs for untracked files using
+// `git diff --no-index /dev/null <file>`. If path is non-empty, only that file
+// is returned. context controls the number of context lines.
+func GetUntrackedDiff(projectRoot, path string, context int) ([]DiffFile, error) {
+	out, err := exec.Command("git", "-C", projectRoot, "ls-files", "--others", "--exclude-standard").Output()
+	if err != nil {
+		return nil, errtrace.Wrap(fmt.Errorf("git ls-files: %w", err))
+	}
+	var files []DiffFile
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if line = strings.TrimSpace(line); line == "" {
+			continue
+		}
+		if path != "" && line != path {
+			continue
+		}
+		args := []string{"-C", projectRoot, "diff", "--no-color", "--no-index"}
+		if context > 0 {
+			args = append(args, fmt.Sprintf("-U%d", context))
+		}
+		args = append(args, "/dev/null", line)
+		diffOut, _ := exec.Command("git", args...).Output()
+		parsed, err := parseDiff(string(diffOut))
+		if err != nil {
+			continue
+		}
+		// parseDiff extracts the path from "diff --git a/... b/<path>"; fix it up.
+		for i := range parsed {
+			parsed[i].Path = line
+			parsed[i].ChangeType = "added"
+		}
+		files = append(files, parsed...)
+	}
 	return files, nil
 }
 

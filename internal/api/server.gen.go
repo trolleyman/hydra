@@ -391,29 +391,8 @@ type UncommittedSummary struct {
 	UntrackedCount int `json:"untracked_count"`
 }
 
-// KillAgentParams defines parameters for KillAgent.
-type KillAgentParams struct {
-	// ProjectId Project ID to scope the lookup (defaults to server CWD project)
-	ProjectId *string `form:"project_id,omitempty" json:"project_id,omitempty"`
-}
-
-// GetAgentParams defines parameters for GetAgent.
-type GetAgentParams struct {
-	// ProjectId Project ID to scope the lookup (defaults to server CWD project)
-	ProjectId *string `form:"project_id,omitempty" json:"project_id,omitempty"`
-}
-
-// GetAgentCommitsParams defines parameters for GetAgentCommits.
-type GetAgentCommitsParams struct {
-	// ProjectId Project ID to scope the lookup (defaults to server CWD project)
-	ProjectId *string `form:"project_id,omitempty" json:"project_id,omitempty"`
-}
-
 // GetAgentDiffParams defines parameters for GetAgentDiff.
 type GetAgentDiffParams struct {
-	// ProjectId Project ID to scope the lookup (defaults to server CWD project)
-	ProjectId *string `form:"project_id,omitempty" json:"project_id,omitempty"`
-
 	// BaseRef Base commit SHA or ref. Defaults to the agent's base branch.
 	BaseRef *string `form:"base_ref,omitempty" json:"base_ref,omitempty"`
 
@@ -435,9 +414,6 @@ type GetAgentDiffParams struct {
 
 // GetAgentDiffFilesParams defines parameters for GetAgentDiffFiles.
 type GetAgentDiffFilesParams struct {
-	// ProjectId Project ID to scope the lookup (defaults to server CWD project)
-	ProjectId *string `form:"project_id,omitempty" json:"project_id,omitempty"`
-
 	// BaseRef Base commit SHA or ref. Defaults to the agent's base branch.
 	BaseRef *string `form:"base_ref,omitempty" json:"base_ref,omitempty"`
 
@@ -448,47 +424,8 @@ type GetAgentDiffFilesParams struct {
 	IncludeUncommitted *bool `form:"include_uncommitted,omitempty" json:"include_uncommitted,omitempty"`
 }
 
-// SendAgentInputParams defines parameters for SendAgentInput.
-type SendAgentInputParams struct {
-	// ProjectId Project ID to scope the lookup (defaults to server CWD project)
-	ProjectId *string `form:"project_id,omitempty" json:"project_id,omitempty"`
-}
-
-// MergeAgentParams defines parameters for MergeAgent.
-type MergeAgentParams struct {
-	// ProjectId Project ID to scope the lookup (defaults to server CWD project)
-	ProjectId *string `form:"project_id,omitempty" json:"project_id,omitempty"`
-}
-
-// RestartAgentParams defines parameters for RestartAgent.
-type RestartAgentParams struct {
-	// ProjectId Project ID to scope the lookup (defaults to server CWD project)
-	ProjectId *string `form:"project_id,omitempty" json:"project_id,omitempty"`
-}
-
-// UpdateAgentFromBaseParams defines parameters for UpdateAgentFromBase.
-type UpdateAgentFromBaseParams struct {
-	// ProjectId Project ID to scope the lookup (defaults to server CWD project)
-	ProjectId *string `form:"project_id,omitempty" json:"project_id,omitempty"`
-}
-
-// ListAgentsParams defines parameters for ListAgents.
-type ListAgentsParams struct {
-	// ProjectId Project ID to scope the agent list (defaults to server CWD project)
-	ProjectId *string `form:"project_id,omitempty" json:"project_id,omitempty"`
-}
-
-// SpawnAgentParams defines parameters for SpawnAgent.
-type SpawnAgentParams struct {
-	// ProjectId Project ID to spawn the agent in (defaults to server CWD project)
-	ProjectId *string `form:"project_id,omitempty" json:"project_id,omitempty"`
-}
-
 // GetConfigParams defines parameters for GetConfig.
 type GetConfigParams struct {
-	// ProjectId Project ID to scope the config (defaults to server CWD project)
-	ProjectId *string `form:"project_id,omitempty" json:"project_id,omitempty"`
-
 	// Scope Load only a specific scope's raw config instead of the merged config
 	Scope *GetConfigParamsScope `form:"scope,omitempty" json:"scope,omitempty"`
 }
@@ -498,9 +435,6 @@ type GetConfigParamsScope string
 
 // SaveConfigParams defines parameters for SaveConfig.
 type SaveConfigParams struct {
-	// ProjectId Project ID to save the config to (defaults to server CWD project)
-	ProjectId *string `form:"project_id,omitempty" json:"project_id,omitempty"`
-
 	// Scope Whether to save to the project or user config file (defaults to project)
 	Scope *SaveConfigParamsScope `form:"scope,omitempty" json:"scope,omitempty"`
 }
@@ -508,62 +442,23 @@ type SaveConfigParams struct {
 // SaveConfigParamsScope defines parameters for SaveConfig.
 type SaveConfigParamsScope string
 
-// SendAgentInputJSONRequestBody defines body for SendAgentInput for application/json ContentType.
-type SendAgentInputJSONRequestBody = AgentInputRequest
+// AddProjectJSONRequestBody defines body for AddProject for application/json ContentType.
+type AddProjectJSONRequestBody = AddProjectRequest
 
 // SpawnAgentJSONRequestBody defines body for SpawnAgent for application/json ContentType.
 type SpawnAgentJSONRequestBody = SpawnAgentRequest
 
+// SendAgentInputJSONRequestBody defines body for SendAgentInput for application/json ContentType.
+type SendAgentInputJSONRequestBody = AgentInputRequest
+
 // SaveConfigJSONRequestBody defines body for SaveConfig for application/json ContentType.
 type SaveConfigJSONRequestBody = ConfigResponse
-
-// AddProjectJSONRequestBody defines body for AddProject for application/json ContentType.
-type AddProjectJSONRequestBody = AddProjectRequest
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
 	// Chrome DevTools workspace configuration
 	// (GET /.well-known/appspecific/com.chrome.devtools.json)
 	GetDevToolsConfig(w http.ResponseWriter, r *http.Request)
-	// Kill a Hydra agent by ID
-	// (DELETE /api/agent/{id})
-	KillAgent(w http.ResponseWriter, r *http.Request, id string, params KillAgentParams)
-	// Get a specific Hydra agent by ID
-	// (GET /api/agent/{id})
-	GetAgent(w http.ResponseWriter, r *http.Request, id string, params GetAgentParams)
-	// List commits on an agent's branch (between base branch and agent branch)
-	// (GET /api/agent/{id}/commits)
-	GetAgentCommits(w http.ResponseWriter, r *http.Request, id string, params GetAgentCommitsParams)
-	// Get the diff for an agent's branch
-	// (GET /api/agent/{id}/diff)
-	GetAgentDiff(w http.ResponseWriter, r *http.Request, id string, params GetAgentDiffParams)
-	// Get the list of changed files for an agent's branch
-	// (GET /api/agent/{id}/diff-files)
-	GetAgentDiffFiles(w http.ResponseWriter, r *http.Request, id string, params GetAgentDiffFilesParams)
-	// Send text input to an agent's terminal stdin
-	// (POST /api/agent/{id}/input)
-	SendAgentInput(w http.ResponseWriter, r *http.Request, id string, params SendAgentInputParams)
-	// Merge a Hydra agent's branch into its base branch and kill it
-	// (POST /api/agent/{id}/merge)
-	MergeAgent(w http.ResponseWriter, r *http.Request, id string, params MergeAgentParams)
-	// Restart a Hydra agent (kill and respawn with the same prompt)
-	// (POST /api/agent/{id}/restart)
-	RestartAgent(w http.ResponseWriter, r *http.Request, id string, params RestartAgentParams)
-	// Update a Hydra agent's branch from its base branch (merge base into head)
-	// (POST /api/agent/{id}/update-from-base)
-	UpdateAgentFromBase(w http.ResponseWriter, r *http.Request, id string, params UpdateAgentFromBaseParams)
-	// List all Hydra agents (heads)
-	// (GET /api/agents)
-	ListAgents(w http.ResponseWriter, r *http.Request, params ListAgentsParams)
-	// Spawn a new Hydra agent
-	// (POST /api/agents)
-	SpawnAgent(w http.ResponseWriter, r *http.Request, params SpawnAgentParams)
-	// Get the merged configuration
-	// (GET /api/config)
-	GetConfig(w http.ResponseWriter, r *http.Request, params GetConfigParams)
-	// Save configuration changes
-	// (POST /api/config)
-	SaveConfig(w http.ResponseWriter, r *http.Request, params SaveConfigParams)
 	// Trigger a server rebuild and restart (dev mode only)
 	// (POST /api/dev/restart)
 	DevRestart(w http.ResponseWriter, r *http.Request)
@@ -573,6 +468,45 @@ type ServerInterface interface {
 	// Add a new project by folder path
 	// (POST /api/projects)
 	AddProject(w http.ResponseWriter, r *http.Request)
+	// List all Hydra agents (heads)
+	// (GET /api/projects/{project_id}/agents)
+	ListAgents(w http.ResponseWriter, r *http.Request, projectId string)
+	// Spawn a new Hydra agent
+	// (POST /api/projects/{project_id}/agents)
+	SpawnAgent(w http.ResponseWriter, r *http.Request, projectId string)
+	// Kill a Hydra agent by ID
+	// (DELETE /api/projects/{project_id}/agents/{id})
+	KillAgent(w http.ResponseWriter, r *http.Request, projectId string, id string)
+	// Get a specific Hydra agent by ID
+	// (GET /api/projects/{project_id}/agents/{id})
+	GetAgent(w http.ResponseWriter, r *http.Request, projectId string, id string)
+	// List commits on an agent's branch (between base branch and agent branch)
+	// (GET /api/projects/{project_id}/agents/{id}/commits)
+	GetAgentCommits(w http.ResponseWriter, r *http.Request, projectId string, id string)
+	// Get the diff for an agent's branch
+	// (GET /api/projects/{project_id}/agents/{id}/diff)
+	GetAgentDiff(w http.ResponseWriter, r *http.Request, projectId string, id string, params GetAgentDiffParams)
+	// Get the list of changed files for an agent's branch
+	// (GET /api/projects/{project_id}/agents/{id}/diff-files)
+	GetAgentDiffFiles(w http.ResponseWriter, r *http.Request, projectId string, id string, params GetAgentDiffFilesParams)
+	// Send text input to an agent's terminal stdin
+	// (POST /api/projects/{project_id}/agents/{id}/input)
+	SendAgentInput(w http.ResponseWriter, r *http.Request, projectId string, id string)
+	// Merge a Hydra agent's branch into its base branch and kill it
+	// (POST /api/projects/{project_id}/agents/{id}/merge)
+	MergeAgent(w http.ResponseWriter, r *http.Request, projectId string, id string)
+	// Restart a Hydra agent (kill and respawn with the same prompt)
+	// (POST /api/projects/{project_id}/agents/{id}/restart)
+	RestartAgent(w http.ResponseWriter, r *http.Request, projectId string, id string)
+	// Update a Hydra agent's branch from its base branch (merge base into head)
+	// (POST /api/projects/{project_id}/agents/{id}/update-from-base)
+	UpdateAgentFromBase(w http.ResponseWriter, r *http.Request, projectId string, id string)
+	// Get the merged configuration
+	// (GET /api/projects/{project_id}/config)
+	GetConfig(w http.ResponseWriter, r *http.Request, projectId string, params GetConfigParams)
+	// Save configuration changes
+	// (POST /api/projects/{project_id}/config)
+	SaveConfig(w http.ResponseWriter, r *http.Request, projectId string, params SaveConfigParams)
 	// Get system status
 	// (GET /api/status)
 	GetStatus(w http.ResponseWriter, r *http.Request)
@@ -604,10 +538,111 @@ func (siw *ServerInterfaceWrapper) GetDevToolsConfig(w http.ResponseWriter, r *h
 	handler.ServeHTTP(w, r)
 }
 
+// DevRestart operation middleware
+func (siw *ServerInterfaceWrapper) DevRestart(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DevRestart(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListProjects operation middleware
+func (siw *ServerInterfaceWrapper) ListProjects(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListProjects(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AddProject operation middleware
+func (siw *ServerInterfaceWrapper) AddProject(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AddProject(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListAgents operation middleware
+func (siw *ServerInterfaceWrapper) ListAgents(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListAgents(w, r, projectId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SpawnAgent operation middleware
+func (siw *ServerInterfaceWrapper) SpawnAgent(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SpawnAgent(w, r, projectId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // KillAgent operation middleware
 func (siw *ServerInterfaceWrapper) KillAgent(w http.ResponseWriter, r *http.Request) {
 
 	var err error
+
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
 
 	// ------------- Path parameter "id" -------------
 	var id string
@@ -618,19 +653,8 @@ func (siw *ServerInterfaceWrapper) KillAgent(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// Parameter object where we will unmarshal all parameters from the context
-	var params KillAgentParams
-
-	// ------------- Optional query parameter "project_id" -------------
-
-	err = runtime.BindQueryParameter("form", true, false, "project_id", r.URL.Query(), &params.ProjectId)
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
-		return
-	}
-
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.KillAgent(w, r, id, params)
+		siw.Handler.KillAgent(w, r, projectId, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -645,6 +669,15 @@ func (siw *ServerInterfaceWrapper) GetAgent(w http.ResponseWriter, r *http.Reque
 
 	var err error
 
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
 	// ------------- Path parameter "id" -------------
 	var id string
 
@@ -654,19 +687,8 @@ func (siw *ServerInterfaceWrapper) GetAgent(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// Parameter object where we will unmarshal all parameters from the context
-	var params GetAgentParams
-
-	// ------------- Optional query parameter "project_id" -------------
-
-	err = runtime.BindQueryParameter("form", true, false, "project_id", r.URL.Query(), &params.ProjectId)
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
-		return
-	}
-
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetAgent(w, r, id, params)
+		siw.Handler.GetAgent(w, r, projectId, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -681,6 +703,15 @@ func (siw *ServerInterfaceWrapper) GetAgentCommits(w http.ResponseWriter, r *htt
 
 	var err error
 
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
 	// ------------- Path parameter "id" -------------
 	var id string
 
@@ -690,19 +721,8 @@ func (siw *ServerInterfaceWrapper) GetAgentCommits(w http.ResponseWriter, r *htt
 		return
 	}
 
-	// Parameter object where we will unmarshal all parameters from the context
-	var params GetAgentCommitsParams
-
-	// ------------- Optional query parameter "project_id" -------------
-
-	err = runtime.BindQueryParameter("form", true, false, "project_id", r.URL.Query(), &params.ProjectId)
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
-		return
-	}
-
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetAgentCommits(w, r, id, params)
+		siw.Handler.GetAgentCommits(w, r, projectId, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -717,6 +737,15 @@ func (siw *ServerInterfaceWrapper) GetAgentDiff(w http.ResponseWriter, r *http.R
 
 	var err error
 
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
 	// ------------- Path parameter "id" -------------
 	var id string
 
@@ -728,14 +757,6 @@ func (siw *ServerInterfaceWrapper) GetAgentDiff(w http.ResponseWriter, r *http.R
 
 	// Parameter object where we will unmarshal all parameters from the context
 	var params GetAgentDiffParams
-
-	// ------------- Optional query parameter "project_id" -------------
-
-	err = runtime.BindQueryParameter("form", true, false, "project_id", r.URL.Query(), &params.ProjectId)
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
-		return
-	}
 
 	// ------------- Optional query parameter "base_ref" -------------
 
@@ -786,7 +807,7 @@ func (siw *ServerInterfaceWrapper) GetAgentDiff(w http.ResponseWriter, r *http.R
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetAgentDiff(w, r, id, params)
+		siw.Handler.GetAgentDiff(w, r, projectId, id, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -801,6 +822,15 @@ func (siw *ServerInterfaceWrapper) GetAgentDiffFiles(w http.ResponseWriter, r *h
 
 	var err error
 
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
 	// ------------- Path parameter "id" -------------
 	var id string
 
@@ -812,14 +842,6 @@ func (siw *ServerInterfaceWrapper) GetAgentDiffFiles(w http.ResponseWriter, r *h
 
 	// Parameter object where we will unmarshal all parameters from the context
 	var params GetAgentDiffFilesParams
-
-	// ------------- Optional query parameter "project_id" -------------
-
-	err = runtime.BindQueryParameter("form", true, false, "project_id", r.URL.Query(), &params.ProjectId)
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
-		return
-	}
 
 	// ------------- Optional query parameter "base_ref" -------------
 
@@ -846,7 +868,7 @@ func (siw *ServerInterfaceWrapper) GetAgentDiffFiles(w http.ResponseWriter, r *h
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetAgentDiffFiles(w, r, id, params)
+		siw.Handler.GetAgentDiffFiles(w, r, projectId, id, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -861,6 +883,15 @@ func (siw *ServerInterfaceWrapper) SendAgentInput(w http.ResponseWriter, r *http
 
 	var err error
 
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
 	// ------------- Path parameter "id" -------------
 	var id string
 
@@ -870,19 +901,8 @@ func (siw *ServerInterfaceWrapper) SendAgentInput(w http.ResponseWriter, r *http
 		return
 	}
 
-	// Parameter object where we will unmarshal all parameters from the context
-	var params SendAgentInputParams
-
-	// ------------- Optional query parameter "project_id" -------------
-
-	err = runtime.BindQueryParameter("form", true, false, "project_id", r.URL.Query(), &params.ProjectId)
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
-		return
-	}
-
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.SendAgentInput(w, r, id, params)
+		siw.Handler.SendAgentInput(w, r, projectId, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -897,6 +917,15 @@ func (siw *ServerInterfaceWrapper) MergeAgent(w http.ResponseWriter, r *http.Req
 
 	var err error
 
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
 	// ------------- Path parameter "id" -------------
 	var id string
 
@@ -906,19 +935,8 @@ func (siw *ServerInterfaceWrapper) MergeAgent(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	// Parameter object where we will unmarshal all parameters from the context
-	var params MergeAgentParams
-
-	// ------------- Optional query parameter "project_id" -------------
-
-	err = runtime.BindQueryParameter("form", true, false, "project_id", r.URL.Query(), &params.ProjectId)
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
-		return
-	}
-
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.MergeAgent(w, r, id, params)
+		siw.Handler.MergeAgent(w, r, projectId, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -933,6 +951,15 @@ func (siw *ServerInterfaceWrapper) RestartAgent(w http.ResponseWriter, r *http.R
 
 	var err error
 
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
 	// ------------- Path parameter "id" -------------
 	var id string
 
@@ -942,19 +969,8 @@ func (siw *ServerInterfaceWrapper) RestartAgent(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	// Parameter object where we will unmarshal all parameters from the context
-	var params RestartAgentParams
-
-	// ------------- Optional query parameter "project_id" -------------
-
-	err = runtime.BindQueryParameter("form", true, false, "project_id", r.URL.Query(), &params.ProjectId)
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
-		return
-	}
-
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.RestartAgent(w, r, id, params)
+		siw.Handler.RestartAgent(w, r, projectId, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -969,6 +985,15 @@ func (siw *ServerInterfaceWrapper) UpdateAgentFromBase(w http.ResponseWriter, r 
 
 	var err error
 
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
 	// ------------- Path parameter "id" -------------
 	var id string
 
@@ -978,73 +1003,8 @@ func (siw *ServerInterfaceWrapper) UpdateAgentFromBase(w http.ResponseWriter, r 
 		return
 	}
 
-	// Parameter object where we will unmarshal all parameters from the context
-	var params UpdateAgentFromBaseParams
-
-	// ------------- Optional query parameter "project_id" -------------
-
-	err = runtime.BindQueryParameter("form", true, false, "project_id", r.URL.Query(), &params.ProjectId)
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
-		return
-	}
-
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.UpdateAgentFromBase(w, r, id, params)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
-// ListAgents operation middleware
-func (siw *ServerInterfaceWrapper) ListAgents(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-
-	// Parameter object where we will unmarshal all parameters from the context
-	var params ListAgentsParams
-
-	// ------------- Optional query parameter "project_id" -------------
-
-	err = runtime.BindQueryParameter("form", true, false, "project_id", r.URL.Query(), &params.ProjectId)
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
-		return
-	}
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.ListAgents(w, r, params)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
-// SpawnAgent operation middleware
-func (siw *ServerInterfaceWrapper) SpawnAgent(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-
-	// Parameter object where we will unmarshal all parameters from the context
-	var params SpawnAgentParams
-
-	// ------------- Optional query parameter "project_id" -------------
-
-	err = runtime.BindQueryParameter("form", true, false, "project_id", r.URL.Query(), &params.ProjectId)
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
-		return
-	}
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.SpawnAgent(w, r, params)
+		siw.Handler.UpdateAgentFromBase(w, r, projectId, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1059,16 +1019,17 @@ func (siw *ServerInterfaceWrapper) GetConfig(w http.ResponseWriter, r *http.Requ
 
 	var err error
 
-	// Parameter object where we will unmarshal all parameters from the context
-	var params GetConfigParams
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
 
-	// ------------- Optional query parameter "project_id" -------------
-
-	err = runtime.BindQueryParameter("form", true, false, "project_id", r.URL.Query(), &params.ProjectId)
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
 	if err != nil {
 		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
 		return
 	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetConfigParams
 
 	// ------------- Optional query parameter "scope" -------------
 
@@ -1079,7 +1040,7 @@ func (siw *ServerInterfaceWrapper) GetConfig(w http.ResponseWriter, r *http.Requ
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetConfig(w, r, params)
+		siw.Handler.GetConfig(w, r, projectId, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1094,16 +1055,17 @@ func (siw *ServerInterfaceWrapper) SaveConfig(w http.ResponseWriter, r *http.Req
 
 	var err error
 
-	// Parameter object where we will unmarshal all parameters from the context
-	var params SaveConfigParams
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
 
-	// ------------- Optional query parameter "project_id" -------------
-
-	err = runtime.BindQueryParameter("form", true, false, "project_id", r.URL.Query(), &params.ProjectId)
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
 	if err != nil {
 		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
 		return
 	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params SaveConfigParams
 
 	// ------------- Optional query parameter "scope" -------------
 
@@ -1114,49 +1076,7 @@ func (siw *ServerInterfaceWrapper) SaveConfig(w http.ResponseWriter, r *http.Req
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.SaveConfig(w, r, params)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
-// DevRestart operation middleware
-func (siw *ServerInterfaceWrapper) DevRestart(w http.ResponseWriter, r *http.Request) {
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.DevRestart(w, r)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
-// ListProjects operation middleware
-func (siw *ServerInterfaceWrapper) ListProjects(w http.ResponseWriter, r *http.Request) {
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.ListProjects(w, r)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
-// AddProject operation middleware
-func (siw *ServerInterfaceWrapper) AddProject(w http.ResponseWriter, r *http.Request) {
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.AddProject(w, r)
+		siw.Handler.SaveConfig(w, r, projectId, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1315,22 +1235,22 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	}
 
 	m.HandleFunc("GET "+options.BaseURL+"/.well-known/appspecific/com.chrome.devtools.json", wrapper.GetDevToolsConfig)
-	m.HandleFunc("DELETE "+options.BaseURL+"/api/agent/{id}", wrapper.KillAgent)
-	m.HandleFunc("GET "+options.BaseURL+"/api/agent/{id}", wrapper.GetAgent)
-	m.HandleFunc("GET "+options.BaseURL+"/api/agent/{id}/commits", wrapper.GetAgentCommits)
-	m.HandleFunc("GET "+options.BaseURL+"/api/agent/{id}/diff", wrapper.GetAgentDiff)
-	m.HandleFunc("GET "+options.BaseURL+"/api/agent/{id}/diff-files", wrapper.GetAgentDiffFiles)
-	m.HandleFunc("POST "+options.BaseURL+"/api/agent/{id}/input", wrapper.SendAgentInput)
-	m.HandleFunc("POST "+options.BaseURL+"/api/agent/{id}/merge", wrapper.MergeAgent)
-	m.HandleFunc("POST "+options.BaseURL+"/api/agent/{id}/restart", wrapper.RestartAgent)
-	m.HandleFunc("POST "+options.BaseURL+"/api/agent/{id}/update-from-base", wrapper.UpdateAgentFromBase)
-	m.HandleFunc("GET "+options.BaseURL+"/api/agents", wrapper.ListAgents)
-	m.HandleFunc("POST "+options.BaseURL+"/api/agents", wrapper.SpawnAgent)
-	m.HandleFunc("GET "+options.BaseURL+"/api/config", wrapper.GetConfig)
-	m.HandleFunc("POST "+options.BaseURL+"/api/config", wrapper.SaveConfig)
 	m.HandleFunc("POST "+options.BaseURL+"/api/dev/restart", wrapper.DevRestart)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects", wrapper.ListProjects)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects", wrapper.AddProject)
+	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents", wrapper.ListAgents)
+	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents", wrapper.SpawnAgent)
+	m.HandleFunc("DELETE "+options.BaseURL+"/api/projects/{project_id}/agents/{id}", wrapper.KillAgent)
+	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/{id}", wrapper.GetAgent)
+	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/commits", wrapper.GetAgentCommits)
+	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/diff", wrapper.GetAgentDiff)
+	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/diff-files", wrapper.GetAgentDiffFiles)
+	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/input", wrapper.SendAgentInput)
+	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/merge", wrapper.MergeAgent)
+	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/restart", wrapper.RestartAgent)
+	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/update-from-base", wrapper.UpdateAgentFromBase)
+	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/config", wrapper.GetConfig)
+	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/config", wrapper.SaveConfig)
 	m.HandleFunc("GET "+options.BaseURL+"/api/status", wrapper.GetStatus)
 	m.HandleFunc("GET "+options.BaseURL+"/health", wrapper.CheckHealth)
 
@@ -1363,486 +1283,6 @@ type GetDevToolsConfig403JSONResponse ErrorResponse
 func (response GetDevToolsConfig403JSONResponse) VisitGetDevToolsConfigResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(403)
-
-	return json.NewEncoder(w).Encode(response)
-}
-
-type KillAgentRequestObject struct {
-	Id     string `json:"id"`
-	Params KillAgentParams
-}
-
-type KillAgentResponseObject interface {
-	VisitKillAgentResponse(w http.ResponseWriter) error
-}
-
-type KillAgent204Response struct {
-}
-
-func (response KillAgent204Response) VisitKillAgentResponse(w http.ResponseWriter) error {
-	w.WriteHeader(204)
-	return nil
-}
-
-type KillAgent404JSONResponse ErrorResponse
-
-func (response KillAgent404JSONResponse) VisitKillAgentResponse(w http.ResponseWriter) error {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(404)
-
-	return json.NewEncoder(w).Encode(response)
-}
-
-type KillAgent409JSONResponse ErrorResponse
-
-func (response KillAgent409JSONResponse) VisitKillAgentResponse(w http.ResponseWriter) error {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(409)
-
-	return json.NewEncoder(w).Encode(response)
-}
-
-type KillAgent500JSONResponse ErrorResponse
-
-func (response KillAgent500JSONResponse) VisitKillAgentResponse(w http.ResponseWriter) error {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(500)
-
-	return json.NewEncoder(w).Encode(response)
-}
-
-type GetAgentRequestObject struct {
-	Id     string `json:"id"`
-	Params GetAgentParams
-}
-
-type GetAgentResponseObject interface {
-	VisitGetAgentResponse(w http.ResponseWriter) error
-}
-
-type GetAgent200JSONResponse AgentResponse
-
-func (response GetAgent200JSONResponse) VisitGetAgentResponse(w http.ResponseWriter) error {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(200)
-
-	return json.NewEncoder(w).Encode(response)
-}
-
-type GetAgent404JSONResponse ErrorResponse
-
-func (response GetAgent404JSONResponse) VisitGetAgentResponse(w http.ResponseWriter) error {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(404)
-
-	return json.NewEncoder(w).Encode(response)
-}
-
-type GetAgent500JSONResponse ErrorResponse
-
-func (response GetAgent500JSONResponse) VisitGetAgentResponse(w http.ResponseWriter) error {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(500)
-
-	return json.NewEncoder(w).Encode(response)
-}
-
-type GetAgentCommitsRequestObject struct {
-	Id     string `json:"id"`
-	Params GetAgentCommitsParams
-}
-
-type GetAgentCommitsResponseObject interface {
-	VisitGetAgentCommitsResponse(w http.ResponseWriter) error
-}
-
-type GetAgentCommits200JSONResponse []CommitInfo
-
-func (response GetAgentCommits200JSONResponse) VisitGetAgentCommitsResponse(w http.ResponseWriter) error {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(200)
-
-	return json.NewEncoder(w).Encode(response)
-}
-
-type GetAgentCommits404JSONResponse ErrorResponse
-
-func (response GetAgentCommits404JSONResponse) VisitGetAgentCommitsResponse(w http.ResponseWriter) error {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(404)
-
-	return json.NewEncoder(w).Encode(response)
-}
-
-type GetAgentCommits500JSONResponse ErrorResponse
-
-func (response GetAgentCommits500JSONResponse) VisitGetAgentCommitsResponse(w http.ResponseWriter) error {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(500)
-
-	return json.NewEncoder(w).Encode(response)
-}
-
-type GetAgentDiffRequestObject struct {
-	Id     string `json:"id"`
-	Params GetAgentDiffParams
-}
-
-type GetAgentDiffResponseObject interface {
-	VisitGetAgentDiffResponse(w http.ResponseWriter) error
-}
-
-type GetAgentDiff200JSONResponse DiffResponse
-
-func (response GetAgentDiff200JSONResponse) VisitGetAgentDiffResponse(w http.ResponseWriter) error {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(200)
-
-	return json.NewEncoder(w).Encode(response)
-}
-
-type GetAgentDiff404JSONResponse ErrorResponse
-
-func (response GetAgentDiff404JSONResponse) VisitGetAgentDiffResponse(w http.ResponseWriter) error {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(404)
-
-	return json.NewEncoder(w).Encode(response)
-}
-
-type GetAgentDiff500JSONResponse ErrorResponse
-
-func (response GetAgentDiff500JSONResponse) VisitGetAgentDiffResponse(w http.ResponseWriter) error {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(500)
-
-	return json.NewEncoder(w).Encode(response)
-}
-
-type GetAgentDiffFilesRequestObject struct {
-	Id     string `json:"id"`
-	Params GetAgentDiffFilesParams
-}
-
-type GetAgentDiffFilesResponseObject interface {
-	VisitGetAgentDiffFilesResponse(w http.ResponseWriter) error
-}
-
-type GetAgentDiffFiles200JSONResponse DiffResponse
-
-func (response GetAgentDiffFiles200JSONResponse) VisitGetAgentDiffFilesResponse(w http.ResponseWriter) error {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(200)
-
-	return json.NewEncoder(w).Encode(response)
-}
-
-type GetAgentDiffFiles404JSONResponse ErrorResponse
-
-func (response GetAgentDiffFiles404JSONResponse) VisitGetAgentDiffFilesResponse(w http.ResponseWriter) error {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(404)
-
-	return json.NewEncoder(w).Encode(response)
-}
-
-type GetAgentDiffFiles500JSONResponse ErrorResponse
-
-func (response GetAgentDiffFiles500JSONResponse) VisitGetAgentDiffFilesResponse(w http.ResponseWriter) error {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(500)
-
-	return json.NewEncoder(w).Encode(response)
-}
-
-type SendAgentInputRequestObject struct {
-	Id     string `json:"id"`
-	Params SendAgentInputParams
-	Body   *SendAgentInputJSONRequestBody
-}
-
-type SendAgentInputResponseObject interface {
-	VisitSendAgentInputResponse(w http.ResponseWriter) error
-}
-
-type SendAgentInput200Response struct {
-}
-
-func (response SendAgentInput200Response) VisitSendAgentInputResponse(w http.ResponseWriter) error {
-	w.WriteHeader(200)
-	return nil
-}
-
-type SendAgentInput404JSONResponse ErrorResponse
-
-func (response SendAgentInput404JSONResponse) VisitSendAgentInputResponse(w http.ResponseWriter) error {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(404)
-
-	return json.NewEncoder(w).Encode(response)
-}
-
-type SendAgentInput500JSONResponse ErrorResponse
-
-func (response SendAgentInput500JSONResponse) VisitSendAgentInputResponse(w http.ResponseWriter) error {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(500)
-
-	return json.NewEncoder(w).Encode(response)
-}
-
-type MergeAgentRequestObject struct {
-	Id     string `json:"id"`
-	Params MergeAgentParams
-}
-
-type MergeAgentResponseObject interface {
-	VisitMergeAgentResponse(w http.ResponseWriter) error
-}
-
-type MergeAgent204Response struct {
-}
-
-func (response MergeAgent204Response) VisitMergeAgentResponse(w http.ResponseWriter) error {
-	w.WriteHeader(204)
-	return nil
-}
-
-type MergeAgent400JSONResponse ErrorResponse
-
-func (response MergeAgent400JSONResponse) VisitMergeAgentResponse(w http.ResponseWriter) error {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(400)
-
-	return json.NewEncoder(w).Encode(response)
-}
-
-type MergeAgent404JSONResponse ErrorResponse
-
-func (response MergeAgent404JSONResponse) VisitMergeAgentResponse(w http.ResponseWriter) error {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(404)
-
-	return json.NewEncoder(w).Encode(response)
-}
-
-type MergeAgent409JSONResponse MergeConflictError
-
-func (response MergeAgent409JSONResponse) VisitMergeAgentResponse(w http.ResponseWriter) error {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(409)
-
-	return json.NewEncoder(w).Encode(response)
-}
-
-type MergeAgent500JSONResponse ErrorResponse
-
-func (response MergeAgent500JSONResponse) VisitMergeAgentResponse(w http.ResponseWriter) error {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(500)
-
-	return json.NewEncoder(w).Encode(response)
-}
-
-type RestartAgentRequestObject struct {
-	Id     string `json:"id"`
-	Params RestartAgentParams
-}
-
-type RestartAgentResponseObject interface {
-	VisitRestartAgentResponse(w http.ResponseWriter) error
-}
-
-type RestartAgent200JSONResponse AgentResponse
-
-func (response RestartAgent200JSONResponse) VisitRestartAgentResponse(w http.ResponseWriter) error {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(200)
-
-	return json.NewEncoder(w).Encode(response)
-}
-
-type RestartAgent404JSONResponse ErrorResponse
-
-func (response RestartAgent404JSONResponse) VisitRestartAgentResponse(w http.ResponseWriter) error {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(404)
-
-	return json.NewEncoder(w).Encode(response)
-}
-
-type RestartAgent409JSONResponse ErrorResponse
-
-func (response RestartAgent409JSONResponse) VisitRestartAgentResponse(w http.ResponseWriter) error {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(409)
-
-	return json.NewEncoder(w).Encode(response)
-}
-
-type RestartAgent500JSONResponse ErrorResponse
-
-func (response RestartAgent500JSONResponse) VisitRestartAgentResponse(w http.ResponseWriter) error {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(500)
-
-	return json.NewEncoder(w).Encode(response)
-}
-
-type UpdateAgentFromBaseRequestObject struct {
-	Id     string `json:"id"`
-	Params UpdateAgentFromBaseParams
-}
-
-type UpdateAgentFromBaseResponseObject interface {
-	VisitUpdateAgentFromBaseResponse(w http.ResponseWriter) error
-}
-
-type UpdateAgentFromBase204Response struct {
-}
-
-func (response UpdateAgentFromBase204Response) VisitUpdateAgentFromBaseResponse(w http.ResponseWriter) error {
-	w.WriteHeader(204)
-	return nil
-}
-
-type UpdateAgentFromBase404JSONResponse ErrorResponse
-
-func (response UpdateAgentFromBase404JSONResponse) VisitUpdateAgentFromBaseResponse(w http.ResponseWriter) error {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(404)
-
-	return json.NewEncoder(w).Encode(response)
-}
-
-type UpdateAgentFromBase409JSONResponse MergeConflictError
-
-func (response UpdateAgentFromBase409JSONResponse) VisitUpdateAgentFromBaseResponse(w http.ResponseWriter) error {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(409)
-
-	return json.NewEncoder(w).Encode(response)
-}
-
-type UpdateAgentFromBase500JSONResponse ErrorResponse
-
-func (response UpdateAgentFromBase500JSONResponse) VisitUpdateAgentFromBaseResponse(w http.ResponseWriter) error {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(500)
-
-	return json.NewEncoder(w).Encode(response)
-}
-
-type ListAgentsRequestObject struct {
-	Params ListAgentsParams
-}
-
-type ListAgentsResponseObject interface {
-	VisitListAgentsResponse(w http.ResponseWriter) error
-}
-
-type ListAgents200JSONResponse []AgentResponse
-
-func (response ListAgents200JSONResponse) VisitListAgentsResponse(w http.ResponseWriter) error {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(200)
-
-	return json.NewEncoder(w).Encode(response)
-}
-
-type ListAgents500JSONResponse ErrorResponse
-
-func (response ListAgents500JSONResponse) VisitListAgentsResponse(w http.ResponseWriter) error {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(500)
-
-	return json.NewEncoder(w).Encode(response)
-}
-
-type SpawnAgentRequestObject struct {
-	Params SpawnAgentParams
-	Body   *SpawnAgentJSONRequestBody
-}
-
-type SpawnAgentResponseObject interface {
-	VisitSpawnAgentResponse(w http.ResponseWriter) error
-}
-
-type SpawnAgent201JSONResponse AgentResponse
-
-func (response SpawnAgent201JSONResponse) VisitSpawnAgentResponse(w http.ResponseWriter) error {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(201)
-
-	return json.NewEncoder(w).Encode(response)
-}
-
-type SpawnAgent400JSONResponse ErrorResponse
-
-func (response SpawnAgent400JSONResponse) VisitSpawnAgentResponse(w http.ResponseWriter) error {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(400)
-
-	return json.NewEncoder(w).Encode(response)
-}
-
-type SpawnAgent500JSONResponse ErrorResponse
-
-func (response SpawnAgent500JSONResponse) VisitSpawnAgentResponse(w http.ResponseWriter) error {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(500)
-
-	return json.NewEncoder(w).Encode(response)
-}
-
-type GetConfigRequestObject struct {
-	Params GetConfigParams
-}
-
-type GetConfigResponseObject interface {
-	VisitGetConfigResponse(w http.ResponseWriter) error
-}
-
-type GetConfig200JSONResponse ConfigResponse
-
-func (response GetConfig200JSONResponse) VisitGetConfigResponse(w http.ResponseWriter) error {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(200)
-
-	return json.NewEncoder(w).Encode(response)
-}
-
-type GetConfig500JSONResponse ErrorResponse
-
-func (response GetConfig500JSONResponse) VisitGetConfigResponse(w http.ResponseWriter) error {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(500)
-
-	return json.NewEncoder(w).Encode(response)
-}
-
-type SaveConfigRequestObject struct {
-	Params SaveConfigParams
-	Body   *SaveConfigJSONRequestBody
-}
-
-type SaveConfigResponseObject interface {
-	VisitSaveConfigResponse(w http.ResponseWriter) error
-}
-
-type SaveConfig200Response struct {
-}
-
-func (response SaveConfig200Response) VisitSaveConfigResponse(w http.ResponseWriter) error {
-	w.WriteHeader(200)
-	return nil
-}
-
-type SaveConfig500JSONResponse ErrorResponse
-
-func (response SaveConfig500JSONResponse) VisitSaveConfigResponse(w http.ResponseWriter) error {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(500)
 
 	return json.NewEncoder(w).Encode(response)
 }
@@ -1931,6 +1371,526 @@ func (response AddProject500JSONResponse) VisitAddProjectResponse(w http.Respons
 	return json.NewEncoder(w).Encode(response)
 }
 
+type ListAgentsRequestObject struct {
+	ProjectId string `json:"project_id"`
+}
+
+type ListAgentsResponseObject interface {
+	VisitListAgentsResponse(w http.ResponseWriter) error
+}
+
+type ListAgents200JSONResponse []AgentResponse
+
+func (response ListAgents200JSONResponse) VisitListAgentsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ListAgents404JSONResponse ErrorResponse
+
+func (response ListAgents404JSONResponse) VisitListAgentsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ListAgents500JSONResponse ErrorResponse
+
+func (response ListAgents500JSONResponse) VisitListAgentsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type SpawnAgentRequestObject struct {
+	ProjectId string `json:"project_id"`
+	Body      *SpawnAgentJSONRequestBody
+}
+
+type SpawnAgentResponseObject interface {
+	VisitSpawnAgentResponse(w http.ResponseWriter) error
+}
+
+type SpawnAgent201JSONResponse AgentResponse
+
+func (response SpawnAgent201JSONResponse) VisitSpawnAgentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type SpawnAgent400JSONResponse ErrorResponse
+
+func (response SpawnAgent400JSONResponse) VisitSpawnAgentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type SpawnAgent404JSONResponse ErrorResponse
+
+func (response SpawnAgent404JSONResponse) VisitSpawnAgentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type SpawnAgent500JSONResponse ErrorResponse
+
+func (response SpawnAgent500JSONResponse) VisitSpawnAgentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type KillAgentRequestObject struct {
+	ProjectId string `json:"project_id"`
+	Id        string `json:"id"`
+}
+
+type KillAgentResponseObject interface {
+	VisitKillAgentResponse(w http.ResponseWriter) error
+}
+
+type KillAgent204Response struct {
+}
+
+func (response KillAgent204Response) VisitKillAgentResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type KillAgent404JSONResponse ErrorResponse
+
+func (response KillAgent404JSONResponse) VisitKillAgentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type KillAgent409JSONResponse ErrorResponse
+
+func (response KillAgent409JSONResponse) VisitKillAgentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type KillAgent500JSONResponse ErrorResponse
+
+func (response KillAgent500JSONResponse) VisitKillAgentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetAgentRequestObject struct {
+	ProjectId string `json:"project_id"`
+	Id        string `json:"id"`
+}
+
+type GetAgentResponseObject interface {
+	VisitGetAgentResponse(w http.ResponseWriter) error
+}
+
+type GetAgent200JSONResponse AgentResponse
+
+func (response GetAgent200JSONResponse) VisitGetAgentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetAgent404JSONResponse ErrorResponse
+
+func (response GetAgent404JSONResponse) VisitGetAgentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetAgent500JSONResponse ErrorResponse
+
+func (response GetAgent500JSONResponse) VisitGetAgentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetAgentCommitsRequestObject struct {
+	ProjectId string `json:"project_id"`
+	Id        string `json:"id"`
+}
+
+type GetAgentCommitsResponseObject interface {
+	VisitGetAgentCommitsResponse(w http.ResponseWriter) error
+}
+
+type GetAgentCommits200JSONResponse []CommitInfo
+
+func (response GetAgentCommits200JSONResponse) VisitGetAgentCommitsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetAgentCommits404JSONResponse ErrorResponse
+
+func (response GetAgentCommits404JSONResponse) VisitGetAgentCommitsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetAgentCommits500JSONResponse ErrorResponse
+
+func (response GetAgentCommits500JSONResponse) VisitGetAgentCommitsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetAgentDiffRequestObject struct {
+	ProjectId string `json:"project_id"`
+	Id        string `json:"id"`
+	Params    GetAgentDiffParams
+}
+
+type GetAgentDiffResponseObject interface {
+	VisitGetAgentDiffResponse(w http.ResponseWriter) error
+}
+
+type GetAgentDiff200JSONResponse DiffResponse
+
+func (response GetAgentDiff200JSONResponse) VisitGetAgentDiffResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetAgentDiff404JSONResponse ErrorResponse
+
+func (response GetAgentDiff404JSONResponse) VisitGetAgentDiffResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetAgentDiff500JSONResponse ErrorResponse
+
+func (response GetAgentDiff500JSONResponse) VisitGetAgentDiffResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetAgentDiffFilesRequestObject struct {
+	ProjectId string `json:"project_id"`
+	Id        string `json:"id"`
+	Params    GetAgentDiffFilesParams
+}
+
+type GetAgentDiffFilesResponseObject interface {
+	VisitGetAgentDiffFilesResponse(w http.ResponseWriter) error
+}
+
+type GetAgentDiffFiles200JSONResponse DiffResponse
+
+func (response GetAgentDiffFiles200JSONResponse) VisitGetAgentDiffFilesResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetAgentDiffFiles404JSONResponse ErrorResponse
+
+func (response GetAgentDiffFiles404JSONResponse) VisitGetAgentDiffFilesResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetAgentDiffFiles500JSONResponse ErrorResponse
+
+func (response GetAgentDiffFiles500JSONResponse) VisitGetAgentDiffFilesResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type SendAgentInputRequestObject struct {
+	ProjectId string `json:"project_id"`
+	Id        string `json:"id"`
+	Body      *SendAgentInputJSONRequestBody
+}
+
+type SendAgentInputResponseObject interface {
+	VisitSendAgentInputResponse(w http.ResponseWriter) error
+}
+
+type SendAgentInput200Response struct {
+}
+
+func (response SendAgentInput200Response) VisitSendAgentInputResponse(w http.ResponseWriter) error {
+	w.WriteHeader(200)
+	return nil
+}
+
+type SendAgentInput404JSONResponse ErrorResponse
+
+func (response SendAgentInput404JSONResponse) VisitSendAgentInputResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type SendAgentInput500JSONResponse ErrorResponse
+
+func (response SendAgentInput500JSONResponse) VisitSendAgentInputResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type MergeAgentRequestObject struct {
+	ProjectId string `json:"project_id"`
+	Id        string `json:"id"`
+}
+
+type MergeAgentResponseObject interface {
+	VisitMergeAgentResponse(w http.ResponseWriter) error
+}
+
+type MergeAgent204Response struct {
+}
+
+func (response MergeAgent204Response) VisitMergeAgentResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type MergeAgent400JSONResponse ErrorResponse
+
+func (response MergeAgent400JSONResponse) VisitMergeAgentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type MergeAgent404JSONResponse ErrorResponse
+
+func (response MergeAgent404JSONResponse) VisitMergeAgentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type MergeAgent409JSONResponse MergeConflictError
+
+func (response MergeAgent409JSONResponse) VisitMergeAgentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type MergeAgent500JSONResponse ErrorResponse
+
+func (response MergeAgent500JSONResponse) VisitMergeAgentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type RestartAgentRequestObject struct {
+	ProjectId string `json:"project_id"`
+	Id        string `json:"id"`
+}
+
+type RestartAgentResponseObject interface {
+	VisitRestartAgentResponse(w http.ResponseWriter) error
+}
+
+type RestartAgent200JSONResponse AgentResponse
+
+func (response RestartAgent200JSONResponse) VisitRestartAgentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type RestartAgent404JSONResponse ErrorResponse
+
+func (response RestartAgent404JSONResponse) VisitRestartAgentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type RestartAgent409JSONResponse ErrorResponse
+
+func (response RestartAgent409JSONResponse) VisitRestartAgentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type RestartAgent500JSONResponse ErrorResponse
+
+func (response RestartAgent500JSONResponse) VisitRestartAgentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type UpdateAgentFromBaseRequestObject struct {
+	ProjectId string `json:"project_id"`
+	Id        string `json:"id"`
+}
+
+type UpdateAgentFromBaseResponseObject interface {
+	VisitUpdateAgentFromBaseResponse(w http.ResponseWriter) error
+}
+
+type UpdateAgentFromBase204Response struct {
+}
+
+func (response UpdateAgentFromBase204Response) VisitUpdateAgentFromBaseResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type UpdateAgentFromBase404JSONResponse ErrorResponse
+
+func (response UpdateAgentFromBase404JSONResponse) VisitUpdateAgentFromBaseResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type UpdateAgentFromBase409JSONResponse MergeConflictError
+
+func (response UpdateAgentFromBase409JSONResponse) VisitUpdateAgentFromBaseResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type UpdateAgentFromBase500JSONResponse ErrorResponse
+
+func (response UpdateAgentFromBase500JSONResponse) VisitUpdateAgentFromBaseResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetConfigRequestObject struct {
+	ProjectId string `json:"project_id"`
+	Params    GetConfigParams
+}
+
+type GetConfigResponseObject interface {
+	VisitGetConfigResponse(w http.ResponseWriter) error
+}
+
+type GetConfig200JSONResponse ConfigResponse
+
+func (response GetConfig200JSONResponse) VisitGetConfigResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetConfig404JSONResponse ErrorResponse
+
+func (response GetConfig404JSONResponse) VisitGetConfigResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetConfig500JSONResponse ErrorResponse
+
+func (response GetConfig500JSONResponse) VisitGetConfigResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type SaveConfigRequestObject struct {
+	ProjectId string `json:"project_id"`
+	Params    SaveConfigParams
+	Body      *SaveConfigJSONRequestBody
+}
+
+type SaveConfigResponseObject interface {
+	VisitSaveConfigResponse(w http.ResponseWriter) error
+}
+
+type SaveConfig200Response struct {
+}
+
+func (response SaveConfig200Response) VisitSaveConfigResponse(w http.ResponseWriter) error {
+	w.WriteHeader(200)
+	return nil
+}
+
+type SaveConfig404JSONResponse ErrorResponse
+
+func (response SaveConfig404JSONResponse) VisitSaveConfigResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type SaveConfig500JSONResponse ErrorResponse
+
+func (response SaveConfig500JSONResponse) VisitSaveConfigResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 type GetStatusRequestObject struct {
 }
 
@@ -1978,45 +1938,6 @@ type StrictServerInterface interface {
 	// Chrome DevTools workspace configuration
 	// (GET /.well-known/appspecific/com.chrome.devtools.json)
 	GetDevToolsConfig(ctx context.Context, request GetDevToolsConfigRequestObject) (GetDevToolsConfigResponseObject, error)
-	// Kill a Hydra agent by ID
-	// (DELETE /api/agent/{id})
-	KillAgent(ctx context.Context, request KillAgentRequestObject) (KillAgentResponseObject, error)
-	// Get a specific Hydra agent by ID
-	// (GET /api/agent/{id})
-	GetAgent(ctx context.Context, request GetAgentRequestObject) (GetAgentResponseObject, error)
-	// List commits on an agent's branch (between base branch and agent branch)
-	// (GET /api/agent/{id}/commits)
-	GetAgentCommits(ctx context.Context, request GetAgentCommitsRequestObject) (GetAgentCommitsResponseObject, error)
-	// Get the diff for an agent's branch
-	// (GET /api/agent/{id}/diff)
-	GetAgentDiff(ctx context.Context, request GetAgentDiffRequestObject) (GetAgentDiffResponseObject, error)
-	// Get the list of changed files for an agent's branch
-	// (GET /api/agent/{id}/diff-files)
-	GetAgentDiffFiles(ctx context.Context, request GetAgentDiffFilesRequestObject) (GetAgentDiffFilesResponseObject, error)
-	// Send text input to an agent's terminal stdin
-	// (POST /api/agent/{id}/input)
-	SendAgentInput(ctx context.Context, request SendAgentInputRequestObject) (SendAgentInputResponseObject, error)
-	// Merge a Hydra agent's branch into its base branch and kill it
-	// (POST /api/agent/{id}/merge)
-	MergeAgent(ctx context.Context, request MergeAgentRequestObject) (MergeAgentResponseObject, error)
-	// Restart a Hydra agent (kill and respawn with the same prompt)
-	// (POST /api/agent/{id}/restart)
-	RestartAgent(ctx context.Context, request RestartAgentRequestObject) (RestartAgentResponseObject, error)
-	// Update a Hydra agent's branch from its base branch (merge base into head)
-	// (POST /api/agent/{id}/update-from-base)
-	UpdateAgentFromBase(ctx context.Context, request UpdateAgentFromBaseRequestObject) (UpdateAgentFromBaseResponseObject, error)
-	// List all Hydra agents (heads)
-	// (GET /api/agents)
-	ListAgents(ctx context.Context, request ListAgentsRequestObject) (ListAgentsResponseObject, error)
-	// Spawn a new Hydra agent
-	// (POST /api/agents)
-	SpawnAgent(ctx context.Context, request SpawnAgentRequestObject) (SpawnAgentResponseObject, error)
-	// Get the merged configuration
-	// (GET /api/config)
-	GetConfig(ctx context.Context, request GetConfigRequestObject) (GetConfigResponseObject, error)
-	// Save configuration changes
-	// (POST /api/config)
-	SaveConfig(ctx context.Context, request SaveConfigRequestObject) (SaveConfigResponseObject, error)
 	// Trigger a server rebuild and restart (dev mode only)
 	// (POST /api/dev/restart)
 	DevRestart(ctx context.Context, request DevRestartRequestObject) (DevRestartResponseObject, error)
@@ -2026,6 +1947,45 @@ type StrictServerInterface interface {
 	// Add a new project by folder path
 	// (POST /api/projects)
 	AddProject(ctx context.Context, request AddProjectRequestObject) (AddProjectResponseObject, error)
+	// List all Hydra agents (heads)
+	// (GET /api/projects/{project_id}/agents)
+	ListAgents(ctx context.Context, request ListAgentsRequestObject) (ListAgentsResponseObject, error)
+	// Spawn a new Hydra agent
+	// (POST /api/projects/{project_id}/agents)
+	SpawnAgent(ctx context.Context, request SpawnAgentRequestObject) (SpawnAgentResponseObject, error)
+	// Kill a Hydra agent by ID
+	// (DELETE /api/projects/{project_id}/agents/{id})
+	KillAgent(ctx context.Context, request KillAgentRequestObject) (KillAgentResponseObject, error)
+	// Get a specific Hydra agent by ID
+	// (GET /api/projects/{project_id}/agents/{id})
+	GetAgent(ctx context.Context, request GetAgentRequestObject) (GetAgentResponseObject, error)
+	// List commits on an agent's branch (between base branch and agent branch)
+	// (GET /api/projects/{project_id}/agents/{id}/commits)
+	GetAgentCommits(ctx context.Context, request GetAgentCommitsRequestObject) (GetAgentCommitsResponseObject, error)
+	// Get the diff for an agent's branch
+	// (GET /api/projects/{project_id}/agents/{id}/diff)
+	GetAgentDiff(ctx context.Context, request GetAgentDiffRequestObject) (GetAgentDiffResponseObject, error)
+	// Get the list of changed files for an agent's branch
+	// (GET /api/projects/{project_id}/agents/{id}/diff-files)
+	GetAgentDiffFiles(ctx context.Context, request GetAgentDiffFilesRequestObject) (GetAgentDiffFilesResponseObject, error)
+	// Send text input to an agent's terminal stdin
+	// (POST /api/projects/{project_id}/agents/{id}/input)
+	SendAgentInput(ctx context.Context, request SendAgentInputRequestObject) (SendAgentInputResponseObject, error)
+	// Merge a Hydra agent's branch into its base branch and kill it
+	// (POST /api/projects/{project_id}/agents/{id}/merge)
+	MergeAgent(ctx context.Context, request MergeAgentRequestObject) (MergeAgentResponseObject, error)
+	// Restart a Hydra agent (kill and respawn with the same prompt)
+	// (POST /api/projects/{project_id}/agents/{id}/restart)
+	RestartAgent(ctx context.Context, request RestartAgentRequestObject) (RestartAgentResponseObject, error)
+	// Update a Hydra agent's branch from its base branch (merge base into head)
+	// (POST /api/projects/{project_id}/agents/{id}/update-from-base)
+	UpdateAgentFromBase(ctx context.Context, request UpdateAgentFromBaseRequestObject) (UpdateAgentFromBaseResponseObject, error)
+	// Get the merged configuration
+	// (GET /api/projects/{project_id}/config)
+	GetConfig(ctx context.Context, request GetConfigRequestObject) (GetConfigResponseObject, error)
+	// Save configuration changes
+	// (POST /api/projects/{project_id}/config)
+	SaveConfig(ctx context.Context, request SaveConfigRequestObject) (SaveConfigResponseObject, error)
 	// Get system status
 	// (GET /api/status)
 	GetStatus(ctx context.Context, request GetStatusRequestObject) (GetStatusResponseObject, error)
@@ -2080,374 +2040,6 @@ func (sh *strictHandler) GetDevToolsConfig(w http.ResponseWriter, r *http.Reques
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetDevToolsConfigResponseObject); ok {
 		if err := validResponse.VisitGetDevToolsConfigResponse(w); err != nil {
-			sh.options.ResponseErrorHandlerFunc(w, r, err)
-		}
-	} else if response != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
-	}
-}
-
-// KillAgent operation middleware
-func (sh *strictHandler) KillAgent(w http.ResponseWriter, r *http.Request, id string, params KillAgentParams) {
-	var request KillAgentRequestObject
-
-	request.Id = id
-	request.Params = params
-
-	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.KillAgent(ctx, request.(KillAgentRequestObject))
-	}
-	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "KillAgent")
-	}
-
-	response, err := handler(r.Context(), w, r, request)
-
-	if err != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(KillAgentResponseObject); ok {
-		if err := validResponse.VisitKillAgentResponse(w); err != nil {
-			sh.options.ResponseErrorHandlerFunc(w, r, err)
-		}
-	} else if response != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
-	}
-}
-
-// GetAgent operation middleware
-func (sh *strictHandler) GetAgent(w http.ResponseWriter, r *http.Request, id string, params GetAgentParams) {
-	var request GetAgentRequestObject
-
-	request.Id = id
-	request.Params = params
-
-	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.GetAgent(ctx, request.(GetAgentRequestObject))
-	}
-	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "GetAgent")
-	}
-
-	response, err := handler(r.Context(), w, r, request)
-
-	if err != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(GetAgentResponseObject); ok {
-		if err := validResponse.VisitGetAgentResponse(w); err != nil {
-			sh.options.ResponseErrorHandlerFunc(w, r, err)
-		}
-	} else if response != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
-	}
-}
-
-// GetAgentCommits operation middleware
-func (sh *strictHandler) GetAgentCommits(w http.ResponseWriter, r *http.Request, id string, params GetAgentCommitsParams) {
-	var request GetAgentCommitsRequestObject
-
-	request.Id = id
-	request.Params = params
-
-	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.GetAgentCommits(ctx, request.(GetAgentCommitsRequestObject))
-	}
-	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "GetAgentCommits")
-	}
-
-	response, err := handler(r.Context(), w, r, request)
-
-	if err != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(GetAgentCommitsResponseObject); ok {
-		if err := validResponse.VisitGetAgentCommitsResponse(w); err != nil {
-			sh.options.ResponseErrorHandlerFunc(w, r, err)
-		}
-	} else if response != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
-	}
-}
-
-// GetAgentDiff operation middleware
-func (sh *strictHandler) GetAgentDiff(w http.ResponseWriter, r *http.Request, id string, params GetAgentDiffParams) {
-	var request GetAgentDiffRequestObject
-
-	request.Id = id
-	request.Params = params
-
-	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.GetAgentDiff(ctx, request.(GetAgentDiffRequestObject))
-	}
-	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "GetAgentDiff")
-	}
-
-	response, err := handler(r.Context(), w, r, request)
-
-	if err != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(GetAgentDiffResponseObject); ok {
-		if err := validResponse.VisitGetAgentDiffResponse(w); err != nil {
-			sh.options.ResponseErrorHandlerFunc(w, r, err)
-		}
-	} else if response != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
-	}
-}
-
-// GetAgentDiffFiles operation middleware
-func (sh *strictHandler) GetAgentDiffFiles(w http.ResponseWriter, r *http.Request, id string, params GetAgentDiffFilesParams) {
-	var request GetAgentDiffFilesRequestObject
-
-	request.Id = id
-	request.Params = params
-
-	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.GetAgentDiffFiles(ctx, request.(GetAgentDiffFilesRequestObject))
-	}
-	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "GetAgentDiffFiles")
-	}
-
-	response, err := handler(r.Context(), w, r, request)
-
-	if err != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(GetAgentDiffFilesResponseObject); ok {
-		if err := validResponse.VisitGetAgentDiffFilesResponse(w); err != nil {
-			sh.options.ResponseErrorHandlerFunc(w, r, err)
-		}
-	} else if response != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
-	}
-}
-
-// SendAgentInput operation middleware
-func (sh *strictHandler) SendAgentInput(w http.ResponseWriter, r *http.Request, id string, params SendAgentInputParams) {
-	var request SendAgentInputRequestObject
-
-	request.Id = id
-	request.Params = params
-
-	var body SendAgentInputJSONRequestBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
-		return
-	}
-	request.Body = &body
-
-	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.SendAgentInput(ctx, request.(SendAgentInputRequestObject))
-	}
-	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "SendAgentInput")
-	}
-
-	response, err := handler(r.Context(), w, r, request)
-
-	if err != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(SendAgentInputResponseObject); ok {
-		if err := validResponse.VisitSendAgentInputResponse(w); err != nil {
-			sh.options.ResponseErrorHandlerFunc(w, r, err)
-		}
-	} else if response != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
-	}
-}
-
-// MergeAgent operation middleware
-func (sh *strictHandler) MergeAgent(w http.ResponseWriter, r *http.Request, id string, params MergeAgentParams) {
-	var request MergeAgentRequestObject
-
-	request.Id = id
-	request.Params = params
-
-	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.MergeAgent(ctx, request.(MergeAgentRequestObject))
-	}
-	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "MergeAgent")
-	}
-
-	response, err := handler(r.Context(), w, r, request)
-
-	if err != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(MergeAgentResponseObject); ok {
-		if err := validResponse.VisitMergeAgentResponse(w); err != nil {
-			sh.options.ResponseErrorHandlerFunc(w, r, err)
-		}
-	} else if response != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
-	}
-}
-
-// RestartAgent operation middleware
-func (sh *strictHandler) RestartAgent(w http.ResponseWriter, r *http.Request, id string, params RestartAgentParams) {
-	var request RestartAgentRequestObject
-
-	request.Id = id
-	request.Params = params
-
-	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.RestartAgent(ctx, request.(RestartAgentRequestObject))
-	}
-	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "RestartAgent")
-	}
-
-	response, err := handler(r.Context(), w, r, request)
-
-	if err != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(RestartAgentResponseObject); ok {
-		if err := validResponse.VisitRestartAgentResponse(w); err != nil {
-			sh.options.ResponseErrorHandlerFunc(w, r, err)
-		}
-	} else if response != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
-	}
-}
-
-// UpdateAgentFromBase operation middleware
-func (sh *strictHandler) UpdateAgentFromBase(w http.ResponseWriter, r *http.Request, id string, params UpdateAgentFromBaseParams) {
-	var request UpdateAgentFromBaseRequestObject
-
-	request.Id = id
-	request.Params = params
-
-	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.UpdateAgentFromBase(ctx, request.(UpdateAgentFromBaseRequestObject))
-	}
-	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "UpdateAgentFromBase")
-	}
-
-	response, err := handler(r.Context(), w, r, request)
-
-	if err != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(UpdateAgentFromBaseResponseObject); ok {
-		if err := validResponse.VisitUpdateAgentFromBaseResponse(w); err != nil {
-			sh.options.ResponseErrorHandlerFunc(w, r, err)
-		}
-	} else if response != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
-	}
-}
-
-// ListAgents operation middleware
-func (sh *strictHandler) ListAgents(w http.ResponseWriter, r *http.Request, params ListAgentsParams) {
-	var request ListAgentsRequestObject
-
-	request.Params = params
-
-	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.ListAgents(ctx, request.(ListAgentsRequestObject))
-	}
-	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "ListAgents")
-	}
-
-	response, err := handler(r.Context(), w, r, request)
-
-	if err != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(ListAgentsResponseObject); ok {
-		if err := validResponse.VisitListAgentsResponse(w); err != nil {
-			sh.options.ResponseErrorHandlerFunc(w, r, err)
-		}
-	} else if response != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
-	}
-}
-
-// SpawnAgent operation middleware
-func (sh *strictHandler) SpawnAgent(w http.ResponseWriter, r *http.Request, params SpawnAgentParams) {
-	var request SpawnAgentRequestObject
-
-	request.Params = params
-
-	var body SpawnAgentJSONRequestBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
-		return
-	}
-	request.Body = &body
-
-	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.SpawnAgent(ctx, request.(SpawnAgentRequestObject))
-	}
-	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "SpawnAgent")
-	}
-
-	response, err := handler(r.Context(), w, r, request)
-
-	if err != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(SpawnAgentResponseObject); ok {
-		if err := validResponse.VisitSpawnAgentResponse(w); err != nil {
-			sh.options.ResponseErrorHandlerFunc(w, r, err)
-		}
-	} else if response != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
-	}
-}
-
-// GetConfig operation middleware
-func (sh *strictHandler) GetConfig(w http.ResponseWriter, r *http.Request, params GetConfigParams) {
-	var request GetConfigRequestObject
-
-	request.Params = params
-
-	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.GetConfig(ctx, request.(GetConfigRequestObject))
-	}
-	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "GetConfig")
-	}
-
-	response, err := handler(r.Context(), w, r, request)
-
-	if err != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(GetConfigResponseObject); ok {
-		if err := validResponse.VisitGetConfigResponse(w); err != nil {
-			sh.options.ResponseErrorHandlerFunc(w, r, err)
-		}
-	} else if response != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
-	}
-}
-
-// SaveConfig operation middleware
-func (sh *strictHandler) SaveConfig(w http.ResponseWriter, r *http.Request, params SaveConfigParams) {
-	var request SaveConfigRequestObject
-
-	request.Params = params
-
-	var body SaveConfigJSONRequestBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
-		return
-	}
-	request.Body = &body
-
-	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.SaveConfig(ctx, request.(SaveConfigRequestObject))
-	}
-	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "SaveConfig")
-	}
-
-	response, err := handler(r.Context(), w, r, request)
-
-	if err != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(SaveConfigResponseObject); ok {
-		if err := validResponse.VisitSaveConfigResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -2527,6 +2119,378 @@ func (sh *strictHandler) AddProject(w http.ResponseWriter, r *http.Request) {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(AddProjectResponseObject); ok {
 		if err := validResponse.VisitAddProjectResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListAgents operation middleware
+func (sh *strictHandler) ListAgents(w http.ResponseWriter, r *http.Request, projectId string) {
+	var request ListAgentsRequestObject
+
+	request.ProjectId = projectId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListAgents(ctx, request.(ListAgentsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListAgents")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListAgentsResponseObject); ok {
+		if err := validResponse.VisitListAgentsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SpawnAgent operation middleware
+func (sh *strictHandler) SpawnAgent(w http.ResponseWriter, r *http.Request, projectId string) {
+	var request SpawnAgentRequestObject
+
+	request.ProjectId = projectId
+
+	var body SpawnAgentJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SpawnAgent(ctx, request.(SpawnAgentRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SpawnAgent")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SpawnAgentResponseObject); ok {
+		if err := validResponse.VisitSpawnAgentResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// KillAgent operation middleware
+func (sh *strictHandler) KillAgent(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+	var request KillAgentRequestObject
+
+	request.ProjectId = projectId
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.KillAgent(ctx, request.(KillAgentRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "KillAgent")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(KillAgentResponseObject); ok {
+		if err := validResponse.VisitKillAgentResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetAgent operation middleware
+func (sh *strictHandler) GetAgent(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+	var request GetAgentRequestObject
+
+	request.ProjectId = projectId
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetAgent(ctx, request.(GetAgentRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetAgent")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetAgentResponseObject); ok {
+		if err := validResponse.VisitGetAgentResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetAgentCommits operation middleware
+func (sh *strictHandler) GetAgentCommits(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+	var request GetAgentCommitsRequestObject
+
+	request.ProjectId = projectId
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetAgentCommits(ctx, request.(GetAgentCommitsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetAgentCommits")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetAgentCommitsResponseObject); ok {
+		if err := validResponse.VisitGetAgentCommitsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetAgentDiff operation middleware
+func (sh *strictHandler) GetAgentDiff(w http.ResponseWriter, r *http.Request, projectId string, id string, params GetAgentDiffParams) {
+	var request GetAgentDiffRequestObject
+
+	request.ProjectId = projectId
+	request.Id = id
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetAgentDiff(ctx, request.(GetAgentDiffRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetAgentDiff")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetAgentDiffResponseObject); ok {
+		if err := validResponse.VisitGetAgentDiffResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetAgentDiffFiles operation middleware
+func (sh *strictHandler) GetAgentDiffFiles(w http.ResponseWriter, r *http.Request, projectId string, id string, params GetAgentDiffFilesParams) {
+	var request GetAgentDiffFilesRequestObject
+
+	request.ProjectId = projectId
+	request.Id = id
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetAgentDiffFiles(ctx, request.(GetAgentDiffFilesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetAgentDiffFiles")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetAgentDiffFilesResponseObject); ok {
+		if err := validResponse.VisitGetAgentDiffFilesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SendAgentInput operation middleware
+func (sh *strictHandler) SendAgentInput(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+	var request SendAgentInputRequestObject
+
+	request.ProjectId = projectId
+	request.Id = id
+
+	var body SendAgentInputJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SendAgentInput(ctx, request.(SendAgentInputRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SendAgentInput")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SendAgentInputResponseObject); ok {
+		if err := validResponse.VisitSendAgentInputResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// MergeAgent operation middleware
+func (sh *strictHandler) MergeAgent(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+	var request MergeAgentRequestObject
+
+	request.ProjectId = projectId
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.MergeAgent(ctx, request.(MergeAgentRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "MergeAgent")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(MergeAgentResponseObject); ok {
+		if err := validResponse.VisitMergeAgentResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RestartAgent operation middleware
+func (sh *strictHandler) RestartAgent(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+	var request RestartAgentRequestObject
+
+	request.ProjectId = projectId
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RestartAgent(ctx, request.(RestartAgentRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RestartAgent")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RestartAgentResponseObject); ok {
+		if err := validResponse.VisitRestartAgentResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdateAgentFromBase operation middleware
+func (sh *strictHandler) UpdateAgentFromBase(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+	var request UpdateAgentFromBaseRequestObject
+
+	request.ProjectId = projectId
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateAgentFromBase(ctx, request.(UpdateAgentFromBaseRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateAgentFromBase")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdateAgentFromBaseResponseObject); ok {
+		if err := validResponse.VisitUpdateAgentFromBaseResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetConfig operation middleware
+func (sh *strictHandler) GetConfig(w http.ResponseWriter, r *http.Request, projectId string, params GetConfigParams) {
+	var request GetConfigRequestObject
+
+	request.ProjectId = projectId
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetConfig(ctx, request.(GetConfigRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetConfig")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetConfigResponseObject); ok {
+		if err := validResponse.VisitGetConfigResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SaveConfig operation middleware
+func (sh *strictHandler) SaveConfig(w http.ResponseWriter, r *http.Request, projectId string, params SaveConfigParams) {
+	var request SaveConfigRequestObject
+
+	request.ProjectId = projectId
+	request.Params = params
+
+	var body SaveConfigJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SaveConfig(ctx, request.(SaveConfigRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SaveConfig")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SaveConfigResponseObject); ok {
+		if err := validResponse.VisitSaveConfigResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

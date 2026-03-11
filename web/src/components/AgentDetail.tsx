@@ -5,7 +5,8 @@ import type { AgentResponse } from '../api'
 import { AgentTerminal } from './AgentTerminal'
 import { DiffViewer } from '../DiffViewer'
 import { formatStartedAgo } from './AgentComponents'
-import { LoaderCircle, Merge, Trash2, Tag, RotateCcw, FolderSync, Copy, Check, Terminal, Shell } from 'lucide-react'
+import { LoaderCircle, Merge, Trash2, Tag, RotateCcw, FolderSync, Copy, Check } from 'lucide-react'
+import { Tooltip } from './Tooltip'
 
 import { useDialogStore } from '../stores/dialogStore'
 
@@ -57,17 +58,10 @@ export function AgentDetail({
   const [updating, setUpdating] = useState(false)
   const [restarting, setRestarting] = useState(false)
   const [copied, setCopied] = useState(false)
-  const [activeTab, setActiveTab] = useState<'terminal' | 'bash'>('terminal')
   const [, setTick] = useState(0)
 
   const systemStatus = useProjectStore(state => state.systemStatus)
   const terminalBashEnabled = systemStatus?.features?.terminal_bash ?? false
-
-  useEffect(() => {
-    if (!terminalBashEnabled && activeTab === 'bash') {
-      setActiveTab('terminal')
-    }
-  }, [terminalBashEnabled, activeTab])
 
   useEffect(() => {
     if (agent.created_at == null) return
@@ -92,7 +86,7 @@ export function AgentDetail({
       onConfirm: async () => {
         setKilling(true)
         try {
-          await api.default.killAgent(agent.id, projectId ?? undefined)
+          await api.default.killAgent(projectId ?? '', agent.id)
           onKilled(agent.id)
         } catch (err) {
           useDialogStore.getState().show({
@@ -108,14 +102,26 @@ export function AgentDetail({
   }
 
   async function handleMerge() {
+    // Check for uncommitted changes before showing the confirm dialog.
+    let uncommittedWarning = ''
+    try {
+      const d = await api.default.getAgentDiffFiles(projectId ?? '', agent.id, undefined, undefined, true)
+      if (d.uncommitted_changes) {
+        const tracked = d.uncommitted_summary?.tracked_count ?? 0
+        const untracked = d.uncommitted_summary?.untracked_count ?? 0
+        const total = tracked + untracked
+        uncommittedWarning = `\n\n⚠️ This agent has ${total} uncommitted file change${total !== 1 ? 's' : ''} that will be lost when merging.`
+      }
+    } catch { /* ignore — proceed without warning */ }
+
     useDialogStore.getState().show({
       title: 'Merge Agent',
-      message: `Are you sure you want to merge agent "${agent.id}"?\n\nThis will merge the agent's branch into the base branch, then stop the container and clean up.`,
-      type: 'confirm',
+      message: `Are you sure you want to merge agent "${agent.id}"?${uncommittedWarning}\n\nThis will merge the agent's branch into the base branch, then stop the container and clean up.`,
+      type: uncommittedWarning ? 'warning' : 'confirm',
       onConfirm: async () => {
         setMerging(true)
         try {
-          await api.default.mergeAgent(agent.id, projectId ?? undefined)
+          await api.default.mergeAgent(projectId ?? '', agent.id)
           onKilled(agent.id)
         } catch (err: any) {
           const errorData = await err.json?.().catch(() => null) || err
@@ -147,7 +153,7 @@ export function AgentDetail({
       onConfirm: async () => {
         setUpdating(true)
         try {
-          await api.default.updateAgentFromBase(agent.id, projectId ?? undefined)
+          await api.default.updateAgentFromBase(projectId ?? '', agent.id)
           if (onRefresh) onRefresh()
         } catch (err: any) {
           const errorData = await err.json?.().catch(() => null) || err
@@ -179,7 +185,7 @@ export function AgentDetail({
       onConfirm: async () => {
         setRestarting(true)
         try {
-          const newAgent = await api.default.restartAgent(agent.id, projectId ?? undefined)
+          const newAgent = await api.default.restartAgent(projectId ?? '', agent.id)
           onRestarted(newAgent)
         } catch (err) {
           useDialogStore.getState().show({
@@ -202,65 +208,70 @@ export function AgentDetail({
           {/* Title row */}
           <div className="flex items-center gap-2 mb-2">
             <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">{agent.id}</h1>
-            <button
-              onClick={() => {
-                navigator.clipboard.writeText(agent.id)
-                setCopied(true)
-                setTimeout(() => setCopied(false), 2000)
-              }}
-              className="w-6 h-6 flex items-center justify-center rounded-md border border-gray-200 text-gray-400 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-500 dark:hover:bg-gray-700 transition-colors cursor-pointer shrink-0"
-              title="Copy ID"
-            >
-              {copied ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3 h-3" />}
-            </button>
-            <button
-              onClick={handleMerge}
-              disabled={merging || killing || restarting || updating}
-              className="ml-2 w-6 h-6 flex items-center justify-center rounded-md border border-green-200 text-green-600 hover:bg-green-50 dark:border-green-900/30 dark:text-green-400 dark:hover:bg-green-900/20 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
-              title="Merge agent"
-            >
-              {merging ? (
-                <LoaderCircle className="w-3 h-3 animate-spin" />
-              ) : (
-                <Merge className="w-3.5 h-3.5" />
-              )}
-            </button>
-            <button
-              onClick={handleUpdateFromBase}
-              disabled={merging || killing || restarting || updating}
-              className="w-6 h-6 flex items-center justify-center rounded-md border border-amber-200 text-amber-600 hover:bg-amber-50 dark:border-amber-900/30 dark:text-amber-400 dark:hover:bg-amber-900/20 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
-              title="Update from base branch"
-            >
-              {updating ? (
-                <LoaderCircle className="w-3 h-3 animate-spin" />
-              ) : (
-                <FolderSync className="w-3.5 h-3.5" />
-              )}
-            </button>
-            <button
-              onClick={handleRestart}
-              disabled={merging || killing || restarting || updating}
-              className="w-6 h-6 flex items-center justify-center rounded-md border border-blue-200 text-blue-600 hover:bg-blue-50 dark:border-blue-900/30 dark:text-blue-400 dark:hover:bg-blue-900/20 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
-              title="Restart agent"
-            >
-              {restarting ? (
-                <LoaderCircle className="w-3 h-3 animate-spin" />
-              ) : (
-                <RotateCcw className="w-3.5 h-3.5" />
-              )}
-            </button>
-            <button
-              onClick={handleKill}
-              disabled={merging || killing || restarting}
-              className="w-6 h-6 flex items-center justify-center rounded-md border border-red-200 text-red-600 hover:bg-red-50 dark:border-red-900/30 dark:text-red-400 dark:hover:bg-red-900/20 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
-              title="Kill agent"
-            >
-              {killing ? (
-                <LoaderCircle className="w-3 h-3 animate-spin" />
-              ) : (
-                <Trash2 className="w-3.5 h-3.5" />
-              )}
-            </button>
+            <Tooltip content="Copy ID">
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(agent.id)
+                  setCopied(true)
+                  setTimeout(() => setCopied(false), 2000)
+                }}
+                className="w-6 h-6 flex items-center justify-center rounded-md border border-gray-200 text-gray-400 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-500 dark:hover:bg-gray-700 transition-colors cursor-pointer shrink-0"
+              >
+                {copied ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3 h-3" />}
+              </button>
+            </Tooltip>
+            <Tooltip content="Merge agent">
+              <button
+                onClick={handleMerge}
+                disabled={merging || killing || restarting || updating}
+                className="ml-2 w-6 h-6 flex items-center justify-center rounded-md border border-green-200 text-green-600 hover:bg-green-50 dark:border-green-900/30 dark:text-green-400 dark:hover:bg-green-900/20 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+              >
+                {merging ? (
+                  <LoaderCircle className="w-3 h-3 animate-spin" />
+                ) : (
+                  <Merge className="w-3.5 h-3.5" />
+                )}
+              </button>
+            </Tooltip>
+            <Tooltip content="Update from base branch">
+              <button
+                onClick={handleUpdateFromBase}
+                disabled={merging || killing || restarting || updating}
+                className="w-6 h-6 flex items-center justify-center rounded-md border border-amber-200 text-amber-600 hover:bg-amber-50 dark:border-amber-900/30 dark:text-amber-400 dark:hover:bg-amber-900/20 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+              >
+                {updating ? (
+                  <LoaderCircle className="w-3 h-3 animate-spin" />
+                ) : (
+                  <FolderSync className="w-3.5 h-3.5" />
+                )}
+              </button>
+            </Tooltip>
+            <Tooltip content="Restart agent">
+              <button
+                onClick={handleRestart}
+                disabled={merging || killing || restarting || updating}
+                className="w-6 h-6 flex items-center justify-center rounded-md border border-blue-200 text-blue-600 hover:bg-blue-50 dark:border-blue-900/30 dark:text-blue-400 dark:hover:bg-blue-900/20 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+              >
+                {restarting ? (
+                  <LoaderCircle className="w-3 h-3 animate-spin" />
+                ) : (
+                  <RotateCcw className="w-3.5 h-3.5" />
+                )}
+              </button>
+            </Tooltip>
+            <Tooltip content="Kill agent">
+              <button
+                onClick={handleKill}
+                disabled={merging || killing || restarting}
+                className="w-6 h-6 flex items-center justify-center rounded-md border border-red-200 text-red-600 hover:bg-red-50 dark:border-red-900/30 dark:text-red-400 dark:hover:bg-red-900/20 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+              >
+                {killing ? (
+                  <LoaderCircle className="w-3 h-3 animate-spin" />
+                ) : (
+                  <Trash2 className="w-3.5 h-3.5" />
+                )}
+              </button>
+            </Tooltip>
           </div>
 
           {/* Metadata row */}
@@ -287,44 +298,14 @@ export function AgentDetail({
         {/* Prompt */}
         {agent.prompt && <PromptBlock key={agent.id} prompt={agent.prompt} />}
 
-        {/* Terminal Tabs */}
-        {terminalBashEnabled && (
-          <div className="mb-4">
-            <div className="flex border-b border-gray-200 dark:border-gray-700">
-              <button
-                onClick={() => setActiveTab('terminal')}
-                className={`px-4 py-2 text-sm font-medium flex items-center gap-2 transition-colors cursor-pointer ${activeTab === 'terminal'
-                    ? 'border-b-2 border-blue-500 text-blue-600 dark:text-blue-400'
-                    : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
-                  }`}
-              >
-                <Terminal className="w-4 h-4" />
-                Terminal
-              </button>
-              <button
-                onClick={() => setActiveTab('bash')}
-                className={`px-4 py-2 text-sm font-medium flex items-center gap-2 transition-colors cursor-pointer ${activeTab === 'bash'
-                    ? 'border-b-2 border-blue-500 text-blue-600 dark:text-blue-400'
-                    : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
-                  }`}
-              >
-                <Shell className="w-4 h-4" />
-                Bash
-              </button>
-            </div>
-          </div>
-        )}
-
         {/* Terminal */}
-        <div key={activeTab}>
-          <AgentTerminal
-            agentId={agent.id}
-            projectId={projectId}
-            isEphemeral={agent.ephemeral}
-            shell={activeTab === 'bash'}
-            onRefresh={onRefresh}
-          />
-        </div>
+        <AgentTerminal
+          agentId={agent.id}
+          projectId={projectId}
+          isEphemeral={agent.ephemeral}
+          bashEnabled={terminalBashEnabled}
+          onRefresh={onRefresh}
+        />
 
         {/* Diff viewer */}
         <DiffViewer agent={agent} projectId={projectId} />

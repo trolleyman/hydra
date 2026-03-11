@@ -104,21 +104,18 @@ func (s *Server) GetDevToolsConfig(_ context.Context, _ api.GetDevToolsConfigReq
 	}, nil
 }
 
-// resolveProjectRoot returns the project root for the given project_id query param.
-// Falls back to the server's default project root when project_id is absent or unknown.
-func (s *Server) resolveProjectRoot(projectID *string) string {
-	path := s.ProjectRoot
-	if projectID != nil && *projectID != "" {
-		p := s.ProjectsManager.GetByID(*projectID)
-		if p != nil {
-			path = p.Path
-		}
+// resolveProjectRoot returns the project root for the given project_id path param.
+// Returns a 404 apiError if the project is not found.
+func (s *Server) resolveProjectRoot(projectID string) (string, error) {
+	p := s.ProjectsManager.GetByID(projectID)
+	if p == nil {
+		return "", &apiError{Code: 404, Type: api.NotFound, Err: fmt.Errorf("project not found: %s", projectID)}
 	}
-	norm, err := paths.NormalizePath(path)
+	norm, err := paths.NormalizePath(p.Path)
 	if err != nil {
-		return path // fallback to unnormalized if error
+		return p.Path, nil
 	}
-	return norm
+	return norm, nil
 }
 
 // --- StrictServerInterface implementations ---
@@ -174,7 +171,10 @@ func (s *Server) AddProject(_ context.Context, request api.AddProjectRequestObje
 }
 
 func (s *Server) ListAgents(ctx context.Context, request api.ListAgentsRequestObject) (api.ListAgentsResponseObject, error) {
-	projectRoot := s.resolveProjectRoot(request.Params.ProjectId)
+	projectRoot, err := s.resolveProjectRoot(request.ProjectId)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
 	headList, err := heads.ListHeads(ctx, s.DockerClient, s.DB, projectRoot)
 	if err != nil {
 		errStr := err.Error()
@@ -254,7 +254,10 @@ func (s *Server) GetStatus(_ context.Context, _ api.GetStatusRequestObject) (api
 }
 
 func (s *Server) GetConfig(_ context.Context, request api.GetConfigRequestObject) (api.GetConfigResponseObject, error) {
-	projectRoot := s.resolveProjectRoot(request.Params.ProjectId)
+	projectRoot, err := s.resolveProjectRoot(request.ProjectId)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
 
 	var cfg config.Config
 	if request.Params.Scope != nil {
@@ -327,7 +330,10 @@ func (s *Server) GetConfig(_ context.Context, request api.GetConfigRequestObject
 }
 
 func (s *Server) SaveConfig(_ context.Context, request api.SaveConfigRequestObject) (api.SaveConfigResponseObject, error) {
-	projectRoot := s.resolveProjectRoot(request.Params.ProjectId)
+	projectRoot, err := s.resolveProjectRoot(request.ProjectId)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
 
 	var defaultSm []string
 	if request.Body.Defaults.SharedMounts != nil {
@@ -411,7 +417,10 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 		}, nil
 	}
 
-	projectRoot := s.resolveProjectRoot(request.Params.ProjectId)
+	projectRoot, err := s.resolveProjectRoot(request.ProjectId)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
 	log.Printf("api: spawn agent request: id=%q, type=%v, project=%q", request.Body.Id, request.Body.AgentType, projectRoot)
 	var agentType docker.AgentType
 	if request.Body.AgentType != nil && *request.Body.AgentType != "" {
@@ -509,7 +518,10 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 }
 
 func (s *Server) GetAgent(ctx context.Context, request api.GetAgentRequestObject) (api.GetAgentResponseObject, error) {
-	projectRoot := s.resolveProjectRoot(request.Params.ProjectId)
+	projectRoot, err := s.resolveProjectRoot(request.ProjectId)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
 	head, err := heads.GetHeadByID(ctx, s.DockerClient, s.DB, projectRoot, request.Id)
 	if err != nil {
 		return nil, errtrace.Wrap(err)
@@ -543,7 +555,10 @@ func (s *Server) GetAgent(ctx context.Context, request api.GetAgentRequestObject
 }
 
 func (s *Server) MergeAgent(ctx context.Context, request api.MergeAgentRequestObject) (api.MergeAgentResponseObject, error) {
-	projectRoot := s.resolveProjectRoot(request.Params.ProjectId)
+	projectRoot, err := s.resolveProjectRoot(request.ProjectId)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
 	head, err := heads.GetHeadByID(ctx, s.DockerClient, s.DB, projectRoot, request.Id)
 	if err != nil {
 		return nil, errtrace.Wrap(err)
@@ -611,7 +626,10 @@ func (s *Server) MergeAgent(ctx context.Context, request api.MergeAgentRequestOb
 }
 
 func (s *Server) UpdateAgentFromBase(ctx context.Context, request api.UpdateAgentFromBaseRequestObject) (api.UpdateAgentFromBaseResponseObject, error) {
-	projectRoot := s.resolveProjectRoot(request.Params.ProjectId)
+	projectRoot, err := s.resolveProjectRoot(request.ProjectId)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
 	head, err := heads.GetHeadByID(ctx, s.DockerClient, s.DB, projectRoot, request.Id)
 	if err != nil {
 		return nil, errtrace.Wrap(err)
@@ -661,7 +679,10 @@ func (s *Server) UpdateAgentFromBase(ctx context.Context, request api.UpdateAgen
 }
 
 func (s *Server) RestartAgent(ctx context.Context, request api.RestartAgentRequestObject) (api.RestartAgentResponseObject, error) {
-	projectRoot := s.resolveProjectRoot(request.Params.ProjectId)
+	projectRoot, err := s.resolveProjectRoot(request.ProjectId)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
 	head, err := heads.GetHeadByID(ctx, s.DockerClient, s.DB, projectRoot, request.Id)
 	if err != nil {
 		return nil, errtrace.Wrap(err)
@@ -755,7 +776,10 @@ func (s *Server) RestartAgent(ctx context.Context, request api.RestartAgentReque
 }
 
 func (s *Server) KillAgent(ctx context.Context, request api.KillAgentRequestObject) (api.KillAgentResponseObject, error) {
-	projectRoot := s.resolveProjectRoot(request.Params.ProjectId)
+	projectRoot, err := s.resolveProjectRoot(request.ProjectId)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
 	log.Printf("api: kill agent request: id=%q, project=%q", request.Id, projectRoot)
 	head, err := heads.GetHeadByID(ctx, s.DockerClient, s.DB, projectRoot, request.Id)
 	if err != nil {
@@ -784,7 +808,10 @@ func (s *Server) KillAgent(ctx context.Context, request api.KillAgentRequestObje
 }
 
 func (s *Server) GetAgentCommits(ctx context.Context, request api.GetAgentCommitsRequestObject) (api.GetAgentCommitsResponseObject, error) {
-	projectRoot := s.resolveProjectRoot(request.Params.ProjectId)
+	projectRoot, err := s.resolveProjectRoot(request.ProjectId)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
 	head, err := heads.GetHeadByID(ctx, s.DockerClient, s.DB, projectRoot, request.Id)
 	if err != nil {
 		return nil, errtrace.Wrap(err)
@@ -828,7 +855,10 @@ func (s *Server) GetAgentCommits(ctx context.Context, request api.GetAgentCommit
 }
 
 func (s *Server) GetAgentDiff(ctx context.Context, request api.GetAgentDiffRequestObject) (api.GetAgentDiffResponseObject, error) {
-	projectRoot := s.resolveProjectRoot(request.Params.ProjectId)
+	projectRoot, err := s.resolveProjectRoot(request.ProjectId)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
 	head, err := heads.GetHeadByID(ctx, s.DockerClient, s.DB, projectRoot, request.Id)
 	if err != nil {
 		return nil, errtrace.Wrap(err)
@@ -911,6 +941,13 @@ func (s *Server) GetAgentDiff(ctx context.Context, request api.GetAgentDiffReque
 		return nil, errtrace.Wrap(err)
 	}
 
+	// Append untracked files when including uncommitted changes.
+	if includeUncommitted && head.Worktree != nil {
+		if untrackedDiffs, err := git.GetUntrackedDiff(*head.Worktree, path, contextLines); err == nil {
+			diffFiles = append(diffFiles, untrackedDiffs...)
+		}
+	}
+
 	// Fetch commit info for base and head if they look like SHAs.
 	var baseCommitInfo *api.CommitInfo
 	var headCommitInfo *api.CommitInfo
@@ -982,7 +1019,7 @@ func (s *Server) GetAgentDiff(ctx context.Context, request api.GetAgentDiffReque
 	var uncommittedSummary *api.UncommittedSummary
 	if head.Worktree != nil {
 		if summary, err := git.GetUncommittedSummary(*head.Worktree); err == nil {
-			uncommittedChanges = summary.TrackedCount > 0
+			uncommittedChanges = summary.TrackedCount > 0 || summary.UntrackedCount > 0
 			uncommittedSummary = &api.UncommittedSummary{
 				TrackedCount:   summary.TrackedCount,
 				UntrackedCount: summary.UntrackedCount,
@@ -1012,7 +1049,10 @@ func (s *Server) GetAgentDiff(ctx context.Context, request api.GetAgentDiffReque
 }
 
 func (s *Server) GetAgentDiffFiles(ctx context.Context, request api.GetAgentDiffFilesRequestObject) (api.GetAgentDiffFilesResponseObject, error) {
-	projectRoot := s.resolveProjectRoot(request.Params.ProjectId)
+	projectRoot, err := s.resolveProjectRoot(request.ProjectId)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
 	head, err := heads.GetHeadByID(ctx, s.DockerClient, s.DB, projectRoot, request.Id)
 	if err != nil {
 		return nil, errtrace.Wrap(err)
@@ -1074,6 +1114,13 @@ func (s *Server) GetAgentDiffFiles(ctx context.Context, request api.GetAgentDiff
 		return nil, errtrace.Wrap(err)
 	}
 
+	// Append untracked files when including uncommitted changes.
+	if includeUncommitted && head.Worktree != nil {
+		if untrackedFiles, err := git.GetUntrackedDiffFiles(*head.Worktree); err == nil {
+			diffFiles = append(diffFiles, untrackedFiles...)
+		}
+	}
+
 	apiFiles := make([]api.DiffFile, len(diffFiles))
 	for i, f := range diffFiles {
 		apiFiles[i] = api.DiffFile{
@@ -1096,7 +1143,7 @@ func (s *Server) GetAgentDiffFiles(ctx context.Context, request api.GetAgentDiff
 	var uncommittedSummary *api.UncommittedSummary
 	if head.Worktree != nil {
 		if summary, err := git.GetUncommittedSummary(*head.Worktree); err == nil {
-			uncommittedChanges = summary.TrackedCount > 0
+			uncommittedChanges = summary.TrackedCount > 0 || summary.UntrackedCount > 0
 			uncommittedSummary = &api.UncommittedSummary{
 				TrackedCount:   summary.TrackedCount,
 				UntrackedCount: summary.UntrackedCount,
@@ -1124,7 +1171,10 @@ func (s *Server) GetAgentDiffFiles(ctx context.Context, request api.GetAgentDiff
 }
 
 func (s *Server) SendAgentInput(ctx context.Context, request api.SendAgentInputRequestObject) (api.SendAgentInputResponseObject, error) {
-	projectRoot := s.resolveProjectRoot(request.Params.ProjectId)
+	projectRoot, err := s.resolveProjectRoot(request.ProjectId)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
 	head, err := heads.GetHeadByID(ctx, s.DockerClient, s.DB, projectRoot, request.Id)
 	if err != nil {
 		return api.SendAgentInput500JSONResponse{
@@ -1141,7 +1191,7 @@ func (s *Server) SendAgentInput(ctx context.Context, request api.SendAgentInputR
 		}, nil
 	}
 
-	text := request.Body.Text + "\n"
+	text := request.Body.Text + "\r"
 
 	attach, err := s.DockerClient.ContainerAttach(ctx, head.ContainerID, container.AttachOptions{
 		Stream: true,

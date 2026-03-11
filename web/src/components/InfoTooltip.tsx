@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { Info } from 'lucide-react'
 
 interface InfoTooltipProps {
-  title: string
+  title?: string
   children: React.ReactNode
 }
 
@@ -20,7 +20,7 @@ export function InfoTooltip({ title, children }: InfoTooltipProps) {
       const centerX = rect.left + rect.width / 2
       const tooltipWidth = 384 // w-96
       const padding = 16
-      
+
       let left = centerX
       if (left - tooltipWidth / 2 < padding) {
         left = tooltipWidth / 2 + padding
@@ -29,7 +29,7 @@ export function InfoTooltip({ title, children }: InfoTooltipProps) {
       }
 
       const arrowOffset = centerX - left
-      
+
       setCoords({
         top: rect.top,
         left: left,
@@ -90,30 +90,30 @@ export function InfoTooltip({ title, children }: InfoTooltipProps) {
 
   return (
     <div className="inline-block ml-1 align-middle">
-      <Info 
+      <Info
         ref={iconRef}
-        className="w-3.5 h-3.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 cursor-help transition-colors" 
+        className="w-3.5 h-3.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 cursor-help transition-colors"
         onMouseEnter={handleMouseEnterIcon}
         onMouseLeave={handleMouseLeaveIcon}
       />
       {isOpen && createPortal(
-        <div 
+        <div
           className="fixed z-[9999] -translate-x-1/2 -translate-y-full w-96 p-3 bg-gray-900 dark:bg-gray-800 text-white text-[11px] rounded-lg shadow-xl animate-in fade-in zoom-in-95 duration-100 border border-gray-700"
-          style={{ 
-            top: coords.top - 8, 
+          style={{
+            top: coords.top - 8,
             left: coords.left,
             visibility: coords.top === 0 ? 'hidden' : 'visible'
           }}
           onMouseEnter={handleMouseEnterTooltip}
           onMouseLeave={handleMouseLeaveTooltip}
         >
-          <p className="font-bold mb-1.5 border-b border-gray-700 pb-1">{title}</p>
+          {title && <p className="font-bold mb-1.5 border-b border-gray-700 pb-1">{title}</p>}
           <div className="text-gray-300 space-y-2">
             {children}
           </div>
           {/* Arrow */}
-          <div 
-            className="absolute top-full -translate-x-1/2 border-8 border-transparent border-t-gray-900 dark:border-t-gray-800" 
+          <div
+            className="absolute top-full -translate-x-1/2 border-8 border-transparent border-t-gray-900 dark:border-t-gray-800"
             style={{ left: coords.arrowX }}
           />
         </div>,

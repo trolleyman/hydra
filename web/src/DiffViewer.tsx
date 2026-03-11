@@ -1,13 +1,14 @@
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback, Fragment, useMemo, memo } from 'react'
 import hljs from 'highlight.js'
 import { api } from './stores/apiClient'
 import type { AgentResponse, CommitInfo, DiffFile, DiffResponse } from './api'
 import {
   Plus, Calendar, TriangleAlert,
-  ChevronDown, ChevronRight, ChevronLeft, Check, LoaderCircle, RefreshCw,
+  ChevronDown, ChevronRight, ChevronLeft, Check, LoaderCircle, RefreshCw, RotateCcw,
   Settings, Copy, Folder, FolderOpen, X, GitMerge, Bot,
-  MoveRight,
+  MoveRight, MessageSquarePlus,
 } from 'lucide-react'
+import { Tooltip } from './components/Tooltip'
 
 // ── Syntax highlighting helpers ───────────────────────────────────────────────
 
@@ -149,64 +150,59 @@ function CopyButton({ text }: { text: string }) {
     setTimeout(() => setCopied(false), 1500)
   }
   return (
-    <button
-      onClick={handleCopy}
-      className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 shrink-0 cursor-pointer transition-colors"
-      title="Copy path"
-    >
-      {copied ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5 text-gray-400" />}
-    </button>
+    <Tooltip content="Copy path">
+      <button
+        onClick={handleCopy}
+        className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 shrink-0 cursor-pointer transition-colors"
+      >
+        {copied ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5 text-gray-400" />}
+      </button>
+    </Tooltip>
   )
 }
 
-function CommentButton({ onComment }: { onComment: (text: string) => void }) {
-  const [open, setOpen] = useState(false)
+
+function CommentRow({ onSubmit, onCancel }: { onSubmit: (text: string) => Promise<void>; onCancel: () => void }) {
   const [text, setText] = useState('')
   const [sending, setSending] = useState(false)
   const ref = useRef<HTMLTextAreaElement>(null)
+  useEffect(() => { ref.current?.focus() }, [])
 
-  useEffect(() => { if (open && ref.current) ref.current.focus() }, [open])
+  const handleSubmit = async () => {
+    if (!text.trim() || sending) return
+    setSending(true)
+    await onSubmit(text)
+    setSending(false)
+  }
 
-  if (!open) {
-    return (
-      <button
-        onClick={() => setOpen(true)}
-        className="opacity-0 group-hover:opacity-100 p-0.5 rounded bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-sm hover:bg-gray-50 dark:hover:bg-gray-700 transition-all cursor-pointer absolute left-0 -ml-3 z-20"
-        title="Add comment"
-      >
-        <Plus className="w-3 h-3 text-blue-500" />
-      </button>
-    )
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); handleSubmit() }
+    else if (e.key === 'Escape') onCancel()
   }
 
   return (
-    <div className="absolute left-10 right-10 z-30 mt-1 p-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl">
+    <div className="border-y border-blue-200 dark:border-blue-800 bg-blue-50/30 dark:bg-blue-950/10 px-4 py-3">
       <textarea
         ref={ref}
         value={text}
         onChange={(e) => setText(e.target.value)}
-        className="w-full h-20 p-2 text-xs font-sans bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded focus:ring-1 focus:ring-blue-500 outline-none resize-none"
-        placeholder="Write a comment..."
+        onKeyDown={handleKeyDown}
+        className="w-full h-20 p-2 text-xs font-sans bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded focus:ring-1 focus:ring-blue-500 outline-none resize-none"
+        placeholder="Write a comment… (Ctrl+Enter to submit)"
       />
       <div className="flex justify-end gap-2 mt-2">
         <button
-          onClick={() => { setOpen(false); setText('') }}
+          onClick={onCancel}
           className="px-2 py-1 text-[10px] font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors cursor-pointer"
         >
           Cancel
         </button>
         <button
           disabled={!text.trim() || sending}
-          onClick={async () => {
-            setSending(true)
-            await onComment(text)
-            setSending(false)
-            setOpen(false)
-            setText('')
-          }}
+          onClick={handleSubmit}
           className="px-2 py-1 text-[10px] font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded transition-colors cursor-pointer"
         >
-          {sending ? 'Sending...' : 'Send'}
+          {sending ? 'Sending…' : 'Send'}
         </button>
       </div>
     </div>
@@ -219,18 +215,24 @@ function HunkHeader({ header, onExpandUp, onExpandBoth, onExpandDown }: {
   return (
     <div className="flex items-center bg-blue-50 dark:bg-blue-950/30 border-y border-blue-100 dark:border-blue-900/50 px-2 py-0.5 group/hunk">
       <div className="flex items-center gap-0.5 mr-2 opacity-0 group-hover/hunk:opacity-100 transition-opacity">
-        <button onClick={onExpandUp} className="p-0.5 rounded hover:bg-blue-100 dark:hover:bg-blue-900/50 text-blue-500 cursor-pointer" title="Expand up 5 lines">
-          <ChevronDown className="w-3 h-3 rotate-180" />
-        </button>
-        <button onClick={onExpandBoth} className="p-0.5 rounded hover:bg-blue-100 dark:hover:bg-blue-900/50 text-blue-500 cursor-pointer" title="Expand 5 lines">
-          <div className="relative w-3 h-3 flex flex-col items-center justify-center">
-            <ChevronDown className="w-2 h-2 rotate-180 absolute top-0" />
-            <ChevronDown className="w-2 h-2 absolute bottom-0" />
-          </div>
-        </button>
-        <button onClick={onExpandDown} className="p-0.5 rounded hover:bg-blue-100 dark:hover:bg-blue-900/50 text-blue-500 cursor-pointer" title="Expand down 5 lines">
-          <ChevronDown className="w-3 h-3" />
-        </button>
+        <Tooltip content="Expand up 5 lines">
+          <button onClick={onExpandUp} className="p-0.5 rounded hover:bg-blue-100 dark:hover:bg-blue-900/50 text-blue-500 cursor-pointer">
+            <ChevronDown className="w-3 h-3 rotate-180" />
+          </button>
+        </Tooltip>
+        <Tooltip content="Expand 5 lines">
+          <button onClick={onExpandBoth} className="p-0.5 rounded hover:bg-blue-100 dark:hover:bg-blue-900/50 text-blue-500 cursor-pointer">
+            <div className="relative w-3 h-3 flex flex-col items-center justify-center">
+              <ChevronDown className="w-2 h-2 rotate-180 absolute top-0" />
+              <ChevronDown className="w-2 h-2 absolute bottom-0" />
+            </div>
+          </button>
+        </Tooltip>
+        <Tooltip content="Expand down 5 lines">
+          <button onClick={onExpandDown} className="p-0.5 rounded hover:bg-blue-100 dark:hover:bg-blue-900/50 text-blue-500 cursor-pointer">
+            <ChevronDown className="w-3 h-3" />
+          </button>
+        </Tooltip>
       </div>
       <span className="font-mono text-xs text-blue-500 dark:text-blue-400">{header}</span>
     </div>
@@ -242,13 +244,14 @@ function HunkHeader({ header, onExpandUp, onExpandBoth, onExpandDown }: {
 const UNIFIED_LINE_NUM_CLASS = 'select-none text-right pr-2 text-gray-400 dark:text-gray-600 text-xs font-mono w-10 shrink-0 border-r border-gray-200 dark:border-gray-700 leading-5'
 const UNIFIED_CODE_CLASS = 'pl-2 font-mono text-xs leading-5 flex-1 whitespace-pre-wrap break-words overflow-hidden'
 
-function UnifiedHunk({ hunk, highlightedOld, highlightedNew, onComment, expanders }: {
+const UnifiedHunk = memo(function UnifiedHunk({ hunk, highlightedOld, highlightedNew, onComment, expanders }: {
   hunk: DiffFile['hunks'][0]
   highlightedOld: Map<number, string>
   highlightedNew: Map<number, string>
   onComment: (lineNum: number, isNew: boolean, text: string) => void
   expanders: { up: () => void; both: () => void; down: () => void }
 }) {
+  const [openCommentIdx, setOpenCommentIdx] = useState<number | null>(null)
   return (
     <div>
       <HunkHeader header={hunk.header} onExpandUp={expanders.up} onExpandBoth={expanders.both} onExpandDown={expanders.down} />
@@ -261,40 +264,61 @@ function UnifiedHunk({ hunk, highlightedOld, highlightedNew, onComment, expander
           : (line.old_line_num != null ? highlightedOld.get(line.old_line_num) : undefined)
         const bgClass = isAdd ? 'bg-green-50 dark:bg-green-950/30' : isDel ? 'bg-red-50 dark:bg-red-950/30' : ''
         return (
-          <div key={idx} className={`flex items-stretch hover:brightness-95 dark:hover:brightness-110 relative group ${bgClass}`}>
-            <span className={UNIFIED_LINE_NUM_CLASS}>{line.old_line_num ?? ''}</span>
-            <span className={UNIFIED_LINE_NUM_CLASS}>{line.new_line_num ?? ''}</span>
-            <span className={`select-none font-mono text-xs leading-5 w-4 text-center shrink-0 ${isAdd ? 'text-green-600 dark:text-green-400' : isDel ? 'text-red-600 dark:text-red-400' : 'text-gray-300 dark:text-gray-700'
-              }`}>
-              {isAdd ? '+' : isDel ? '-' : isNoNewline ? '\\' : ' '}
-            </span>
-            {!isNoNewline && (
-              <CommentButton onComment={(text) => onComment(isAdd ? line.new_line_num! : line.old_line_num!, isAdd || line.type === 'context', text)} />
+          <Fragment key={idx}>
+            <div className={`flex items-stretch hover:brightness-95 dark:hover:brightness-110 relative group ${bgClass}`}>
+              <div className="relative flex shrink-0">
+                <span className={UNIFIED_LINE_NUM_CLASS}>{line.old_line_num ?? ''}</span>
+                <span className={UNIFIED_LINE_NUM_CLASS}>{line.new_line_num ?? ''}</span>
+                {!isNoNewline && (
+                  <Tooltip content="Add comment">
+                    <button
+                      onClick={() => setOpenCommentIdx(openCommentIdx === idx ? null : idx)}
+                      className="absolute inset-0 opacity-0 group-hover:opacity-100 flex items-center justify-center cursor-pointer z-10 hover:bg-blue-500/10 transition-opacity"
+                    >
+                      <MessageSquarePlus className="w-3 h-3 text-blue-500" />
+                    </button>
+                  </Tooltip>
+                )}
+              </div>
+              <span className={`select-none font-mono text-xs leading-5 w-4 text-center shrink-0 ${isAdd ? 'text-green-600 dark:text-green-400' : isDel ? 'text-red-600 dark:text-red-400' : 'text-gray-300 dark:text-gray-700'
+                }`}>
+                {isAdd ? '+' : isDel ? '-' : isNoNewline ? '\\' : ' '}
+              </span>
+              {isNoNewline ? (
+                <span className={`${UNIFIED_CODE_CLASS} text-gray-400 dark:text-gray-500 italic`}>{line.content}</span>
+              ) : highlighted ? (
+                <span className={UNIFIED_CODE_CLASS} dangerouslySetInnerHTML={{ __html: highlighted }} />
+              ) : (
+                <span className={UNIFIED_CODE_CLASS}>{line.content}</span>
+              )}
+            </div>
+            {openCommentIdx === idx && (
+              <CommentRow
+                onSubmit={async (text) => {
+                  await onComment(isAdd ? line.new_line_num! : line.old_line_num!, isAdd || line.type === 'context', text)
+                  setOpenCommentIdx(null)
+                }}
+                onCancel={() => setOpenCommentIdx(null)}
+              />
             )}
-            {isNoNewline ? (
-              <span className={`${UNIFIED_CODE_CLASS} text-gray-400 dark:text-gray-500 italic`}>{line.content}</span>
-            ) : highlighted ? (
-              <span className={UNIFIED_CODE_CLASS} dangerouslySetInnerHTML={{ __html: highlighted }} />
-            ) : (
-              <span className={UNIFIED_CODE_CLASS}>{line.content}</span>
-            )}
-          </div>
+          </Fragment>
         )
       })}
     </div>
   )
-}
+})
 
 const SBS_LINE_NUM = 'select-none text-right text-gray-400 dark:text-gray-600 text-xs font-mono w-8 shrink-0 pr-1 leading-5'
 const SBS_CODE = 'pl-1 font-mono text-xs leading-5 flex-1 whitespace-pre-wrap break-words overflow-hidden min-w-0'
 
-function SideBySideHunk({ hunk, highlightedOld, highlightedNew, onComment, expanders }: {
+const SideBySideHunk = memo(function SideBySideHunk({ hunk, highlightedOld, highlightedNew, onComment, expanders }: {
   hunk: DiffFile['hunks'][0]
   highlightedOld: Map<number, string>
   highlightedNew: Map<number, string>
   onComment: (lineNum: number, isNew: boolean, text: string) => void
   expanders: { up: () => void; both: () => void; down: () => void }
 }) {
+  const [openCommentIdx, setOpenCommentIdx] = useState<number | null>(null)
   const sbsLines = buildSideBySide(hunk.lines)
   return (
     <div>
@@ -305,51 +329,86 @@ function SideBySideHunk({ hunk, highlightedOld, highlightedNew, onComment, expan
         const oldBg = line.oldType === 'deletion' ? 'bg-red-50 dark:bg-red-950/30' : line.oldType === 'empty' ? 'bg-gray-50 dark:bg-gray-900/50' : ''
         const newBg = line.newType === 'addition' ? 'bg-green-50 dark:bg-green-950/30' : line.newType === 'empty' ? 'bg-gray-50 dark:bg-gray-900/50' : ''
         return (
-          <div key={idx} className="flex items-stretch divide-x divide-gray-200 dark:divide-gray-700">
-            <div className={`flex items-start flex-1 min-w-0 group relative ${oldBg}`}>
-              <span className={SBS_LINE_NUM}>{line.oldLineNum ?? ''}</span>
-              <span className={`select-none font-mono text-xs w-3 shrink-0 text-center leading-5 ${line.oldType === 'deletion' ? 'text-red-500' : 'text-gray-300 dark:text-gray-700'}`}>
-                {line.oldType === 'deletion' ? '-' : line.oldType === 'empty' ? '' : ' '}
-              </span>
-              {line.oldLineNum != null && <CommentButton onComment={(text) => onComment(line.oldLineNum!, false, text)} />}
-              {line.oldContent != null && oldHighlighted
-                ? <span className={SBS_CODE} dangerouslySetInnerHTML={{ __html: oldHighlighted }} />
-                : <span className={SBS_CODE}>{line.oldContent ?? ''}</span>
-              }
+          <Fragment key={idx}>
+            <div className="flex items-stretch divide-x divide-gray-200 dark:divide-gray-700">
+              <div className={`flex items-start flex-1 min-w-0 group relative ${oldBg}`}>
+                <div className="relative flex shrink-0">
+                  <span className={SBS_LINE_NUM}>{line.oldLineNum ?? ''}</span>
+                  {line.oldLineNum != null && (
+                    <Tooltip content="Add comment">
+                      <button
+                        onClick={() => setOpenCommentIdx(openCommentIdx === idx ? null : idx)}
+                        className="absolute inset-0 opacity-0 group-hover:opacity-100 flex items-center justify-center cursor-pointer z-10 hover:bg-blue-500/10 transition-opacity"
+                      >
+                        <MessageSquarePlus className="w-3 h-3 text-blue-500" />
+                      </button>
+                    </Tooltip>
+                  )}
+                </div>
+                <span className={`select-none font-mono text-xs w-3 shrink-0 text-center leading-5 ${line.oldType === 'deletion' ? 'text-red-500' : 'text-gray-300 dark:text-gray-700'}`}>
+                  {line.oldType === 'deletion' ? '-' : line.oldType === 'empty' ? '' : ' '}
+                </span>
+                {line.oldContent != null && oldHighlighted
+                  ? <span className={SBS_CODE} dangerouslySetInnerHTML={{ __html: oldHighlighted }} />
+                  : <span className={SBS_CODE}>{line.oldContent ?? ''}</span>
+                }
+              </div>
+              <div className={`flex items-start flex-1 min-w-0 group relative ${newBg}`}>
+                <div className="relative flex shrink-0">
+                  <span className={SBS_LINE_NUM}>{line.newLineNum ?? ''}</span>
+                  {line.newLineNum != null && (
+                    <Tooltip content="Add comment">
+                      <button
+                        onClick={() => setOpenCommentIdx(openCommentIdx === idx ? null : idx)}
+                        className="absolute inset-0 opacity-0 group-hover:opacity-100 flex items-center justify-center cursor-pointer z-10 hover:bg-blue-500/10 transition-opacity"
+                      >
+                        <MessageSquarePlus className="w-3 h-3 text-blue-500" />
+                      </button>
+                    </Tooltip>
+                  )}
+                </div>
+                <span className={`select-none font-mono text-xs w-3 shrink-0 text-center leading-5 ${line.newType === 'addition' ? 'text-green-500' : 'text-gray-300 dark:text-gray-700'}`}>
+                  {line.newType === 'addition' ? '+' : line.newType === 'empty' ? '' : ' '}
+                </span>
+                {line.newContent != null && newHighlighted
+                  ? <span className={SBS_CODE} dangerouslySetInnerHTML={{ __html: newHighlighted }} />
+                  : <span className={SBS_CODE}>{line.newContent ?? ''}</span>
+                }
+              </div>
             </div>
-            <div className={`flex items-start flex-1 min-w-0 group relative ${newBg}`}>
-              <span className={SBS_LINE_NUM}>{line.newLineNum ?? ''}</span>
-              <span className={`select-none font-mono text-xs w-3 shrink-0 text-center leading-5 ${line.newType === 'addition' ? 'text-green-500' : 'text-gray-300 dark:text-gray-700'}`}>
-                {line.newType === 'addition' ? '+' : line.newType === 'empty' ? '' : ' '}
-              </span>
-              {line.newLineNum != null && <CommentButton onComment={(text) => onComment(line.newLineNum!, true, text)} />}
-              {line.newContent != null && newHighlighted
-                ? <span className={SBS_CODE} dangerouslySetInnerHTML={{ __html: newHighlighted }} />
-                : <span className={SBS_CODE}>{line.newContent ?? ''}</span>
-              }
-            </div>
-          </div>
+            {openCommentIdx === idx && (
+              <CommentRow
+                onSubmit={async (text) => {
+                  const lineNum = line.newLineNum ?? line.oldLineNum!
+                  const isNew = line.newLineNum != null
+                  await onComment(lineNum, isNew, text)
+                  setOpenCommentIdx(null)
+                }}
+                onCancel={() => setOpenCommentIdx(null)}
+              />
+            )}
+          </Fragment>
         )
       })}
     </div>
   )
-}
+})
 
 // ── File diff card ────────────────────────────────────────────────────────────
 
-function FileDiff({ file, sideBySide, fileRef, onComment, isCollapsed, onToggleCollapse, onExpand }: {
+const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onComment, isCollapsed, onToggleCollapse, onExpand }: {
   file: DiffFile
   sideBySide: boolean
   fileRef?: (el: HTMLDivElement | null) => void
   onComment: (path: string, lineNum: number, isNew: boolean, text: string) => void
   isCollapsed: boolean
-  onToggleCollapse: () => void
+  onToggleCollapse: (path: string) => void
   onExpand: (path: string, context: number) => void
   stickyTop?: number
 }) {
   const [context, setContext] = useState(3)
   const lang = getLanguage(file.path)
-  const { highlightedOld, highlightedNew } = (() => {
+  const { highlightedOld, highlightedNew } = useMemo(() => {
     if (file.binary || !file.hunks) return { highlightedOld: new Map<number, string>(), highlightedNew: new Map<number, string>() }
     const oldLines: Array<{ lineNum: number; content: string }> = []
     const newLines: Array<{ lineNum: number; content: string }> = []
@@ -369,7 +428,7 @@ function FileDiff({ file, sideBySide, fileRef, onComment, isCollapsed, onToggleC
       return map
     }
     return { highlightedOld: highlight(oldLines), highlightedNew: highlight(newLines) }
-  })()
+  }, [file.hunks, file.binary, lang])
 
   const handleExpand = (delta: number) => {
     const next = context + delta
@@ -383,10 +442,11 @@ function FileDiff({ file, sideBySide, fileRef, onComment, isCollapsed, onToggleC
   return (
     <div ref={fileRef} className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden mb-4 bg-white dark:bg-gray-900 shadow-sm">
       <div
-        className="flex items-center gap-2 px-3 py-1.5 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 z-20"
+        className="flex items-center gap-2 px-3 py-1.5 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 z-20 cursor-pointer"
+        onClick={() => onToggleCollapse(file.path)}
       >{/* TODO: Make `sticky` */}
         <button
-          onClick={onToggleCollapse}
+          onClick={() => onToggleCollapse(file.path)}
           className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-500 cursor-pointer transition-colors"
         >
           <ChevronDown className={`w-4 h-4 transition-transform ${isCollapsed ? '-rotate-90' : ''}`} />
@@ -394,8 +454,6 @@ function FileDiff({ file, sideBySide, fileRef, onComment, isCollapsed, onToggleC
         <ChangeTypeIcon type={file.change_type} />
         <span
           className="font-mono text-xs text-gray-700 dark:text-gray-300 flex-1 min-w-0 truncate cursor-pointer hover:underline"
-          title={displayPath}
-          onClick={onToggleCollapse}
         >
           {displayPath}
         </span>
@@ -438,11 +496,11 @@ function FileDiff({ file, sideBySide, fileRef, onComment, isCollapsed, onToggleC
       )}
     </div>
   )
-}
+})
 
 // ── Commit selector types & helpers ───────────────────────────────────────────
 
-type LeftSel = { type: 'base' } | { type: 'commit'; sha: string }
+type LeftSel = { type: 'base' } | { type: 'latest' } | { type: 'commit'; sha: string }
 type RightSel = { type: 'uncommitted' } | { type: 'latest' } | { type: 'commit'; sha: string }
 
 function commitIdx(sha: string, commits: CommitInfo[]): number {
@@ -470,10 +528,11 @@ function formatCommitDate(iso: string): string {
 
 // ── Custom tooltip ────────────────────────────────────────────────────────────
 
-function Tooltip({ content, children, side = 'bottom' }: {
+function CustomTooltip({ content, children, side = 'bottom', className = 'w-full' }: {
   content: React.ReactNode
   children: React.ReactNode
   side?: 'bottom' | 'right' | 'top' | 'left'
+  className?: string
 }) {
   const [visible, setVisible] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -496,7 +555,7 @@ function Tooltip({ content, children, side = 'bottom' }: {
   }, [side])
 
   return (
-    <div ref={ref} className="relative inline-flex w-full" onMouseEnter={show} onMouseLeave={() => setVisible(false)}>
+    <div ref={ref} className={`relative inline-flex ${className}`} onMouseEnter={show} onMouseLeave={() => setVisible(false)}>
       {children}
       {visible && pos && (
         <div
@@ -532,11 +591,12 @@ function CommitTooltipContent({ commit }: { commit: CommitInfo }) {
 
 // ── Left commit selector ──────────────────────────────────────────────────────
 
-function LeftSelector({ commits, selected, onChange, baseBranch }: {
+function LeftSelector({ commits, selected, onChange, baseBranch, rightSel }: {
   commits: CommitInfo[]
   selected: LeftSel
   onChange: (v: LeftSel) => void
   baseBranch: string
+  rightSel: RightSel
 }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -552,7 +612,13 @@ function LeftSelector({ commits, selected, onChange, baseBranch }: {
 
   const label = selected.type === 'base'
     ? baseBranch
-    : formatShortLabel(commits.find((c) => c.sha === selected.sha), selected.sha)
+    : selected.type === 'latest'
+      ? 'Latest commit'
+      : formatShortLabel(commits.find((c) => c.sha === selected.sha), selected.sha)
+
+  // Determine which commits are valid for the left selector (must be older than right)
+  const rightIdx = rightSel.type === 'commit' ? commitIdx(rightSel.sha, commits) : -1
+  const latestValid = rightSel.type === 'uncommitted'
 
   return (
     <div ref={ref} className="relative">
@@ -567,11 +633,54 @@ function LeftSelector({ commits, selected, onChange, baseBranch }: {
 
       {open && (
         <div className="absolute left-0 top-full mt-1 w-64 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50 overflow-hidden">
-          <div className="py-1 border-b border-gray-100 dark:border-gray-700">
+          {/* Latest commit at top */}
+          {commits.length > 0 && (
+            <div className="py-1 border-b border-gray-100 dark:border-gray-700">
+              <button
+                onClick={() => { if (latestValid) { onChange({ type: 'latest' }); setOpen(false) } }}
+                disabled={!latestValid}
+                className={`w-full flex items-center gap-2 px-3 py-2 text-left text-xs transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${selected.type === 'latest' ? 'bg-blue-50 dark:bg-blue-900/20' : latestValid ? 'hover:bg-gray-50 dark:hover:bg-gray-700' : ''}`}
+              >
+                <ChevronRight className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+                <span className="font-medium text-gray-800 dark:text-gray-200">Latest commit</span>
+                <span className="text-gray-400 dark:text-gray-500 ml-auto text-[10px]">HEAD</span>
+                {selected.type === 'latest' && <Check className="w-3 h-3 text-blue-500 shrink-0" />}
+              </button>
+            </div>
+          )}
+          {/* Commits in the middle */}
+          {commits.length > 0 && (
+            <div className="max-h-64 overflow-y-auto py-1">
+              <p className="px-3 py-1 text-[10px] text-gray-400 dark:text-gray-500 uppercase tracking-wide font-medium">
+                Commits ({commits.length})
+              </p>
+              {commits.map((c, cIdx) => {
+                // Commit is valid if right is not a specific commit, or right commit is newer (lower idx)
+                const commitValid = rightSel.type === 'uncommitted' || rightSel.type === 'latest'
+                  || (rightIdx !== -1 && cIdx > rightIdx)
+                return (
+                  <CustomTooltip key={c.sha} side="right" content={<CommitTooltipContent commit={c} />}>
+                    <button
+                      onClick={() => { if (commitValid) { onChange({ type: 'commit', sha: c.sha }); setOpen(false) } }}
+                      disabled={!commitValid}
+                      className={`w-full flex items-start gap-2 px-3 py-1.5 text-left transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${selected.type === 'commit' && selected.sha === c.sha ? 'bg-blue-50 dark:bg-blue-900/20' : commitValid ? 'hover:bg-gray-50 dark:hover:bg-gray-700' : ''}`}
+                    >
+                      <span className="font-mono text-[10px] text-gray-400 dark:text-gray-500 bg-gray-100 dark:bg-gray-700 px-1 py-0.5 rounded shrink-0 mt-0.5">
+                        {c.short_sha}
+                      </span>
+                      <span className="text-xs text-gray-700 dark:text-gray-300 leading-tight truncate">{c.message}</span>
+                      {selected.type === 'commit' && selected.sha === c.sha && <Check className="w-3 h-3 text-blue-500 shrink-0 mt-0.5" />}
+                    </button>
+                  </CustomTooltip>
+                )
+              })}
+            </div>
+          )}
+          {/* Base branch at the bottom */}
+          <div className="py-1 border-t border-gray-100 dark:border-gray-700">
             <button
               onClick={() => { onChange({ type: 'base' }); setOpen(false) }}
-              className={`w-full flex items-center gap-2 px-3 py-2 text-left text-xs hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer ${selected.type === 'base' ? 'bg-blue-50 dark:bg-blue-900/20' : ''
-                }`}
+              className={`w-full flex items-center gap-2 px-3 py-2 text-left text-xs hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer ${selected.type === 'base' ? 'bg-blue-50 dark:bg-blue-900/20' : ''}`}
             >
               <ChevronRight className="w-3.5 h-3.5 text-gray-400 shrink-0" />
               <span className="font-medium text-gray-800 dark:text-gray-200">{baseBranch}</span>
@@ -579,28 +688,6 @@ function LeftSelector({ commits, selected, onChange, baseBranch }: {
               {selected.type === 'base' && <Check className="w-3 h-3 text-blue-500 shrink-0" />}
             </button>
           </div>
-          {commits.length > 0 && (
-            <div className="max-h-64 overflow-y-auto py-1">
-              <p className="px-3 py-1 text-[10px] text-gray-400 dark:text-gray-500 uppercase tracking-wide font-medium">
-                Commits ({commits.length})
-              </p>
-              {commits.map((c) => (
-                <Tooltip key={c.sha} side="right" content={<CommitTooltipContent commit={c} />}>
-                  <button
-                    onClick={() => { onChange({ type: 'commit', sha: c.sha }); setOpen(false) }}
-                    className={`w-full flex items-start gap-2 px-3 py-1.5 text-left hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer ${selected.type === 'commit' && selected.sha === c.sha ? 'bg-blue-50 dark:bg-blue-900/20' : ''
-                      }`}
-                  >
-                    <span className="font-mono text-[10px] text-gray-400 dark:text-gray-500 bg-gray-100 dark:bg-gray-700 px-1 py-0.5 rounded shrink-0 mt-0.5">
-                      {c.short_sha}
-                    </span>
-                    <span className="text-xs text-gray-700 dark:text-gray-300 leading-tight truncate">{c.message}</span>
-                    {selected.type === 'commit' && selected.sha === c.sha && <Check className="w-3 h-3 text-blue-500 shrink-0 mt-0.5" />}
-                  </button>
-                </Tooltip>
-              ))}
-            </div>
-          )}
         </div>
       )}
     </div>
@@ -634,9 +721,11 @@ function RightSelector({ commits, selected, onChange, left, hasUncommitted }: {
 
   const validCommits = commits.filter((_, idx) => {
     if (left.type === 'base') return true
+    if (left.type === 'latest') return false // all commits are before 'latest'
     const li = commitIdx(left.sha, commits)
     return li === -1 || idx < li
   })
+  const latestCommitValid = left.type !== 'latest'
 
   return (
     <div ref={ref} className="relative">
@@ -666,9 +755,9 @@ function RightSelector({ commits, selected, onChange, left, hasUncommitted }: {
               {selected.type === 'uncommitted' && <Check className="w-3 h-3 text-blue-500 shrink-0" />}
             </button>
             <button
-              onClick={() => { onChange({ type: 'latest' }); setOpen(false) }}
-              className={`w-full flex items-center gap-2 px-3 py-2 text-left text-xs hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer ${selected.type === 'latest' ? 'bg-blue-50 dark:bg-blue-900/20' : ''
-                }`}
+              onClick={() => { if (latestCommitValid) { onChange({ type: 'latest' }); setOpen(false) } }}
+              disabled={!latestCommitValid}
+              className={`w-full flex items-center gap-2 px-3 py-2 text-left text-xs transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${selected.type === 'latest' ? 'bg-blue-50 dark:bg-blue-900/20' : latestCommitValid ? 'hover:bg-gray-50 dark:hover:bg-gray-700' : ''}`}
             >
               <ChevronRight className="w-3.5 h-3.5 text-gray-400 shrink-0" />
               <span className="font-medium text-gray-800 dark:text-gray-200">Latest commit</span>
@@ -682,7 +771,7 @@ function RightSelector({ commits, selected, onChange, left, hasUncommitted }: {
                 Commits ({validCommits.length})
               </p>
               {validCommits.map((c) => (
-                <Tooltip key={c.sha} side="right" content={<CommitTooltipContent commit={c} />}>
+                <CustomTooltip key={c.sha} side="right" content={<CommitTooltipContent commit={c} />}>
                   <button
                     onClick={() => { onChange({ type: 'commit', sha: c.sha }); setOpen(false) }}
                     className={`w-full flex items-start gap-2 px-3 py-1.5 text-left hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer ${selected.type === 'commit' && selected.sha === c.sha ? 'bg-blue-50 dark:bg-blue-900/20' : ''
@@ -694,7 +783,7 @@ function RightSelector({ commits, selected, onChange, left, hasUncommitted }: {
                     <span className="text-xs text-gray-700 dark:text-gray-300 leading-tight truncate">{c.message}</span>
                     {selected.type === 'commit' && selected.sha === c.sha && <Check className="w-3 h-3 text-blue-500 shrink-0 mt-0.5" />}
                   </button>
-                </Tooltip>
+                </CustomTooltip>
               ))}
             </div>
           )}
@@ -718,7 +807,7 @@ function UncommittedButton({ diff, onJumpToUncommitted }: {
   if (summary.untracked_count > 0) lines.push(`${summary.untracked_count} untracked file${summary.untracked_count !== 1 ? 's' : ''}`)
 
   return (
-    <Tooltip content={
+    <Tooltip className="shrink-0" content={
       <div>
         <p className="font-semibold mb-1">Uncommitted changes</p>
         {lines.map((l) => <p key={l} className="text-gray-300">{l}</p>)}
@@ -757,7 +846,7 @@ function MergeConflictButton({ diff, agent, projectId }: {
   const handleFixWithAgent = async () => {
     setSending(true)
     try {
-      await api.default.sendAgentInput(agent.id, { text: `Fix the merge conflicts with branch ${baseBranch}` }, projectId ?? undefined)
+      await api.default.sendAgentInput(projectId ?? '', agent.id, { text: `Fix the merge conflicts with branch ${baseBranch}` })
       setSent(true)
       setTimeout(() => { setSent(false); setOpen(false) }, 2000)
     } catch {
@@ -770,7 +859,7 @@ function MergeConflictButton({ diff, agent, projectId }: {
   return (
     <>
       <div className="relative">
-        <Tooltip content={
+        <Tooltip className="shrink-0" content={
           <div>
             <p className="font-semibold mb-1">Merge Conflict</p>
             <p className="text-gray-300">{count} file{count !== 1 ? 's' : ''} conflict with <span className="font-mono">{baseBranch}</span></p>
@@ -917,9 +1006,11 @@ function FileRow({ file, isActive, onClick, indent = 0 }: {
       style={{ paddingLeft: `${10 + indent}px`, paddingRight: '10px' }}
     >
       <ChangeTypeIcon type={file.change_type} />
-      <span className="font-mono text-[10px] text-gray-700 dark:text-gray-300 truncate flex-1 min-w-0" title={file.path}>
-        {file.path.split('/').pop()}
-      </span>
+      <Tooltip content={file.path}>
+        <span className="font-mono text-[10px] text-gray-700 dark:text-gray-300 truncate flex-1 min-w-0">
+          {file.path.split('/').pop()}
+        </span>
+      </Tooltip>
       <div className="flex items-center gap-1 shrink-0">
         {file.additions > 0 && <span className="text-[10px] text-green-600 dark:text-green-400">+{file.additions}</span>}
         {file.deletions > 0 && <span className="text-[10px] text-red-600 dark:text-red-400">−{file.deletions}</span>}
@@ -992,15 +1083,16 @@ function SettingsPopup({ fileView, onFileViewChange, sideBySide, onSideBySideCha
 
   return (
     <div ref={ref} className="relative">
-      <button
-        onClick={() => setOpen((o) => !o)}
-        className={`flex items-center justify-center w-7 h-7 rounded-md border transition-colors cursor-pointer ${open ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800'
-          : 'text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
-          }`}
-        title="Diff settings"
-      >
-        <Settings className="w-3.5 h-3.5" />
-      </button>
+      <Tooltip content="Settings">
+        <button
+          onClick={() => setOpen((o) => !o)}
+          className={`flex items-center justify-center w-7 h-7 rounded-md border transition-colors cursor-pointer ${open ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800'
+            : 'text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
+            }`}
+        >
+          <Settings className="w-3.5 h-3.5" />
+        </button>
+      </Tooltip>
 
       {open && (
         <div className="absolute right-0 top-full mt-1 w-52 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50 p-3">
@@ -1073,7 +1165,9 @@ export function DiffViewer({ agent, projectId }: { agent: AgentResponse; project
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set())
   const [collapsedFiles, setCollapsedFiles] = useState<Set<string>>(new Set())
   const fileRefs = useRef<Map<string, HTMLDivElement>>(new Map())
+  const fileRefCallbacksRef = useRef<Map<string, (el: HTMLDivElement | null) => void>>(new Map())
   const sidebarRef = useRef<HTMLDivElement>(null)
+  const commitsRef = useRef<CommitInfo[]>([])
 
   useEffect(() => { try { localStorage.setItem('hydra-diff-side-by-side', String(sideBySide)) } catch { } }, [sideBySide])
   useEffect(() => { try { localStorage.setItem('hydra-diff-ignore-whitespace', String(ignoreWhitespace)) } catch { } }, [ignoreWhitespace])
@@ -1101,8 +1195,8 @@ export function DiffViewer({ agent, projectId }: { agent: AgentResponse; project
 
   useEffect(() => {
     if (!agent.branch_name) return
-    api.default.getAgentCommits(agent.id, projectId ?? undefined)
-      .then(setCommits).catch(() => setCommits([]))
+    api.default.getAgentCommits(projectId ?? '', agent.id)
+      .then((c) => { setCommits(c); commitsRef.current = c }).catch(() => setCommits([]))
   }, [agent.id, agent.branch_name, projectId, refreshKey])
 
   const fetchFileDiff = useCallback(async (path: string, context: number = 3) => {
@@ -1111,11 +1205,12 @@ export function DiffViewer({ agent, projectId }: { agent: AgentResponse; project
     const params: { baseRef?: string; headRef?: string; ignoreWhitespace?: boolean; includeUncommitted?: boolean } = {}
     if (ignoreWhitespace) params.ignoreWhitespace = true
     if (leftSel.type === 'commit') params.baseRef = leftSel.sha
+    else if (leftSel.type === 'latest' && commitsRef.current.length > 0) params.baseRef = commitsRef.current[0].sha
     if (rightSel.type === 'uncommitted') params.includeUncommitted = true
     else if (rightSel.type === 'commit') params.headRef = rightSel.sha
 
     try {
-      const fileDiff = await api.default.getAgentDiff(agent.id, projectId ?? undefined,
+      const fileDiff = await api.default.getAgentDiff(projectId ?? '', agent.id,
         params.baseRef, params.headRef, params.ignoreWhitespace, params.includeUncommitted, path, context)
 
       setDiff((prev) => {
@@ -1141,20 +1236,21 @@ export function DiffViewer({ agent, projectId }: { agent: AgentResponse; project
 
     const params: { baseRef?: string; headRef?: string; includeUncommitted?: boolean } = {}
     if (leftSel.type === 'commit') params.baseRef = leftSel.sha
+    else if (leftSel.type === 'latest' && commitsRef.current.length > 0) params.baseRef = commitsRef.current[0].sha
     if (rightSel.type === 'uncommitted') params.includeUncommitted = true
     else if (rightSel.type === 'commit') params.headRef = rightSel.sha
 
     // First, just get the file list (performant)
-    api.default.getAgentDiffFiles(agent.id, projectId ?? undefined,
+    api.default.getAgentDiffFiles(projectId ?? '', agent.id,
       params.baseRef, params.headRef, params.includeUncommitted)
       .then((d) => {
         if (!cancelled) {
           setDiff(d)
           setLoadingDiff(false)
-          // If only a few files, load them all immediately
-          if (d.files.length > 0 && d.files.length <= 5) {
-            d.files.forEach((f) => fetchFileDiff(f.path))
-          }
+          // Auto-load files with fewer than 1000 changed lines
+          d.files.forEach((f) => {
+            if (f.additions + f.deletions < 1000) fetchFileDiff(f.path)
+          })
         }
       })
       .catch((e) => { if (!cancelled) { setDiffError(String(e)); setLoadingDiff(false) } })
@@ -1167,11 +1263,25 @@ export function DiffViewer({ agent, projectId }: { agent: AgentResponse; project
   }, [])
 
   useEffect(() => {
+    // left='latest' and right='latest' is invalid — switch right to uncommitted
+    if (leftSel.type === 'latest' && rightSel.type === 'latest') {
+      setRightSel({ type: 'uncommitted' }); return
+    }
     if (leftSel.type !== 'commit' || rightSel.type !== 'commit') return
     const li = commitIdx(leftSel.sha, commits)
     const ri = commitIdx(rightSel.sha, commits)
     if (li !== -1 && ri !== -1 && li <= ri) setRightSel({ type: 'latest' })
   }, [leftSel, rightSel, commits])
+
+  const getFileRef = useCallback((path: string) => {
+    if (!fileRefCallbacksRef.current.has(path)) {
+      fileRefCallbacksRef.current.set(path, (el: HTMLDivElement | null) => {
+        if (el) fileRefs.current.set(path, el)
+        else fileRefs.current.delete(path)
+      })
+    }
+    return fileRefCallbacksRef.current.get(path)!
+  }, [])
 
   const scrollToFile = useCallback((path: string) => {
     fileRefs.current.get(path)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
@@ -1206,19 +1316,54 @@ export function DiffViewer({ agent, projectId }: { agent: AgentResponse; project
   }, [diff, fetchFileDiff])
 
   const handleJumpToUncommittedActual = useCallback(() => {
-    setLeftSel({ type: 'base' })
+    setLeftSel({ type: 'latest' })
     setRightSel({ type: 'uncommitted' })
   }, [])
 
+  const [commentSent, setCommentSent] = useState(false)
+
   const handleComment = useCallback(async (path: string, lineNum: number, isNew: boolean, text: string) => {
-    const side = isNew ? 'new' : 'old'
-    const msg = `Comment on ${path} line ${lineNum} (${side}):\n${text}`
+    const fromLabel = leftSel.type === 'base'
+      ? agent.base_branch
+      : leftSel.type === 'latest'
+      ? (commitsRef.current[0]?.short_sha ? `HEAD (${commitsRef.current[0].short_sha})` : 'HEAD')
+      : (commits.find(c => c.sha === leftSel.sha)?.short_sha ?? leftSel.sha.slice(0, 8))
+    const toLabel = rightSel.type === 'latest' ? 'latest commit'
+      : rightSel.type === 'uncommitted' ? 'uncommitted changes'
+      : (commits.find(c => c.sha === rightSel.sha)?.short_sha ?? rightSel.sha.slice(0, 8))
+
+    // Find hunk containing this line and build surrounding context
+    const file = diff?.files.find(f => f.path === path)
+    const hunk = file?.hunks?.find(h =>
+      h.lines.some(l => isNew ? l.new_line_num === lineNum : l.old_line_num === lineNum)
+    )
+
+    let msg = `Comment on \`${path}\` line ${lineNum} (marked with \`>\`) (diff: ${fromLabel} -> ${toLabel})\n`
+    if (hunk) {
+      const targetIdx = hunk.lines.findIndex(l => isNew ? l.new_line_num === lineNum : l.old_line_num === lineNum)
+      if (targetIdx >= 0) {
+        const start = Math.max(0, targetIdx - 3)
+        const end = Math.min(hunk.lines.length, targetIdx + 4)
+        const ctxLines = hunk.lines.slice(start, end)
+        msg += `\n\`\`\`diff\n# ${path}\n${hunk.header}\n`
+        msg += ctxLines.map((l, i) => {
+          if (start + i === targetIdx) return ' >' + l.content
+          const typeChar = l.type === 'addition' ? '+' : l.type === 'deletion' ? '-' : ' '
+          return typeChar + '|' + l.content
+        }).join('\n')
+        msg += `\n\`\`\`\n`
+      }
+    }
+    msg += `\nComment:\n${text}`
+
     try {
-      await api.default.sendAgentInput(agent.id, { text: msg }, projectId ?? undefined)
+      await api.default.sendAgentInput(projectId ?? '', agent.id, { text: msg })
+      setCommentSent(true)
+      setTimeout(() => setCommentSent(false), 3000)
     } catch (e) {
       console.error('Failed to send comment:', e)
     }
-  }, [agent.id, projectId])
+  }, [agent.id, agent.base_branch, projectId, leftSel, rightSel, commits, diff])
 
   const [isResizing, setIsResizing] = useState(false)
   const startResizing = useCallback((e: React.MouseEvent) => {
@@ -1296,19 +1441,21 @@ export function DiffViewer({ agent, projectId }: { agent: AgentResponse; project
           </div>
         )}
 
-        <LeftSelector commits={commits} selected={leftSel} onChange={handleLeftChange} baseBranch={agent.base_branch} />
+        <LeftSelector commits={commits} selected={leftSel} onChange={handleLeftChange} baseBranch={agent.base_branch} rightSel={rightSel} />
         <span className="text-gray-400 dark:text-gray-500 text-xs select-none"><MoveRight className='w-6 h-6' strokeWidth='1.5' /></span>
         <RightSelector commits={commits} selected={rightSel} onChange={setRightSel}
           left={leftSel} hasUncommitted={diff?.uncommitted_changes} />
 
-        <button
-          onClick={() => setRefreshKey((k) => k + 1)}
-          disabled={loadingDiff}
-          className="flex items-center justify-center w-7 h-7 rounded-md text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50 transition-colors cursor-pointer"
-          title="Refresh diff"
-        >
-          <RefreshCw className="w-3.5 h-3.5" />
-        </button>
+        {!(leftSel.type === 'base' && rightSel.type === 'latest') && (
+          <Tooltip content="Reset to base → latest">
+            <button
+              onClick={() => { setLeftSel({ type: 'base' }); setRightSel({ type: 'latest' }) }}
+              className="flex items-center justify-center w-7 h-7 rounded-md text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors cursor-pointer"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+            </button>
+          </Tooltip>
+        )}
 
         {/* Uncommitted changes warning button */}
         <UncommittedButton diff={diff} onJumpToUncommitted={handleJumpToUncommittedActual} />
@@ -1316,10 +1463,20 @@ export function DiffViewer({ agent, projectId }: { agent: AgentResponse; project
         {/* Merge conflict button */}
         <MergeConflictButton diff={diff} agent={agent} projectId={projectId} />
 
-        <div className="flex items-center gap-2 ml-auto flex-wrap">
+        <div className="flex items-center gap-2 ml-auto shrink-0">
           {loadingDiff && hasExistingDiff && (
             <LoaderCircle className="w-3.5 h-3.5 animate-spin text-gray-400 dark:text-gray-500 shrink-0" />
           )}
+
+          <Tooltip content="Refresh">
+            <button
+              onClick={() => setRefreshKey((k) => k + 1)}
+              disabled={loadingDiff}
+              className="flex items-center justify-center w-7 h-7 rounded-md text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50 transition-colors cursor-pointer"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+            </button>
+          </Tooltip>
 
           <SettingsPopup
             fileView={fileView} onFileViewChange={setFileView}
@@ -1356,7 +1513,7 @@ export function DiffViewer({ agent, projectId }: { agent: AgentResponse; project
           {/* File list sidebar */}
           <div
             ref={sidebarRef}
-            className="shrink-0 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden bg-white dark:bg-gray-800 self-start sticky top-10 z-20 flex flex-col shadow-sm"
+            className="shrink-0 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden bg-white dark:bg-gray-800 self-start sticky top-9 z-20 flex flex-col shadow-sm"
             style={{ width: sidebarWidth }}
           >
             <div className="px-2.5 py-2 border-b border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 flex items-center justify-between">
@@ -1408,28 +1565,20 @@ export function DiffViewer({ agent, projectId }: { agent: AgentResponse; project
                   file={diff.files[singleFileIdx]!}
                   sideBySide={sideBySide}
                   isCollapsed={collapsedFiles.has(diff.files[singleFileIdx].path)}
-                  onToggleCollapse={() => toggleFileCollapse(diff.files[singleFileIdx].path)}
+                  onToggleCollapse={toggleFileCollapse}
                   onComment={handleComment}
                   onExpand={fetchFileDiff}
-                  fileRef={(el) => {
-                    const f = diff.files[singleFileIdx]
-                    if (!f) return
-                    if (el) fileRefs.current.set(f.path, el)
-                    else fileRefs.current.delete(f.path)
-                  }}
+                  fileRef={getFileRef(diff.files[singleFileIdx].path)}
                 />
               </>
             ) : (
               diff.files.map((f) => (
                 <FileDiff key={f.path} file={f} sideBySide={sideBySide}
                   isCollapsed={collapsedFiles.has(f.path)}
-                  onToggleCollapse={() => toggleFileCollapse(f.path)}
+                  onToggleCollapse={toggleFileCollapse}
                   onComment={handleComment}
                   onExpand={fetchFileDiff}
-                  fileRef={(el) => {
-                    if (el) fileRefs.current.set(f.path, el)
-                    else fileRefs.current.delete(f.path)
-                  }}
+                  fileRef={getFileRef(f.path)}
                 />
               ))
             )}
@@ -1437,6 +1586,12 @@ export function DiffViewer({ agent, projectId }: { agent: AgentResponse; project
         </div>
       ) : null}
       {isResizing && <div className="fixed inset-0 z-[100] cursor-col-resize" />}
+      {commentSent && (
+        <div className="fixed bottom-4 right-4 z-[500] flex items-center gap-2 px-3 py-2 bg-green-600 text-white text-xs font-semibold rounded-lg shadow-lg pointer-events-none">
+          <Check className="w-3.5 h-3.5" />
+          Comment sent to agent
+        </div>
+      )}
     </div>
   )
 }
