@@ -166,6 +166,11 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 	ticker := time.NewTicker(pingPeriod)
 	defer ticker.Stop()
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("terminal ws: panic in ping goroutine for agent %q: %v", agentID, r)
+			}
+		}()
 		for range ticker.C {
 			if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
 				return
@@ -268,6 +273,11 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 	// WebSocket → container stdin (reads from ws, writes to docker attach)
 	go func() {
 		defer close(done)
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("terminal ws: panic in stdin goroutine for agent %q: %v", agentID, r)
+			}
+		}()
 		for {
 			msgType, data, err := conn.ReadMessage()
 			if err != nil {
@@ -299,6 +309,11 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 
 	// Container stdout → WebSocket
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("terminal ws: panic in stdout goroutine for agent %q: %v", agentID, r)
+			}
+		}()
 		defer func() {
 			log.Printf("terminal ws: stdout goroutine exiting for agent %q", agentID)
 			if !useShell {
