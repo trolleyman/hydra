@@ -89,6 +89,17 @@ func (r *statusRecorder) Flush() {
 	}
 }
 
+// RequestBodyLimitMiddleware rejects request bodies larger than maxBytes.
+// This prevents unbounded memory consumption from oversized JSON payloads.
+func RequestBodyLimitMiddleware(maxBytes int64) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
 // LoggingMiddleware logs each HTTP request with method, path, status code, and duration.
 func LoggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
