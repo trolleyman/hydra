@@ -9,7 +9,7 @@
             "type": "go",
             "request": "launch",
             "mode": "auto",
-            "program": "${workspaceFolder}/cmd/hydra",
+            "program": "${workspaceFolder}",
             "args": [
                 "tui",
             ],
@@ -20,7 +20,7 @@
             "type": "go",
             "request": "launch",
             "mode": "auto",
-            "program": "${workspaceFolder}/cmd/hydra",
+            "program": "${workspaceFolder}",
             "args": [
                 "server"
             ]
@@ -30,7 +30,7 @@
             "type": "go",
             "request": "launch",
             "mode": "auto",
-            "program": "${workspaceFolder}/cmd/hydra",
+            "program": "${workspaceFolder}",
             "args": [
                 "--debug",
                 "spawn",
