@@ -3,6 +3,7 @@ package db
 import (
 	"errors"
 	"fmt"
+	"time"
 
 	"braces.dev/errtrace"
 	"gorm.io/gorm"
@@ -91,6 +92,14 @@ func (s *Store) TrySetHeadStatus(id, from, to string) (bool, error) {
 		return false, errtrace.Wrap(fmt.Errorf("set head status: %w", result.Error))
 	}
 	return result.RowsAffected > 0, nil
+}
+
+// PruneDeletedAgents hard-deletes soft-deleted agent records older than the
+// given duration, preventing unbounded table growth over time.
+func (s *Store) PruneDeletedAgents(olderThan time.Duration) error {
+	cutoff := time.Now().Add(-olderThan)
+	result := s.db.Unscoped().Where("deleted_at IS NOT NULL AND deleted_at < ?", cutoff).Delete(&Agent{})
+	return errtrace.Wrap(result.Error)
 }
 
 // ClearHeadStatus resets head_status to "idle" and optionally records a lastError.
