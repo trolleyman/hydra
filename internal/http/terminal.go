@@ -361,13 +361,14 @@ func (s *Server) streamBuildLog(ctx context.Context, conn *safeConn, projectRoot
 
 	lastCheck := time.Now()
 
+	buf := make([]byte, 4096)
+
 	// Simple tail: read current content, then poll for more.
 	for {
 		select {
 		case <-ctx.Done():
 			return false
 		default:
-			buf := make([]byte, 4096)
 			n, err := f.Read(buf)
 			if n > 0 {
 				// Convert newlines to \r\n for the terminal (Xterm.js expects \r\n)
