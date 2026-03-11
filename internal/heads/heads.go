@@ -286,9 +286,12 @@ func SpawnHead(ctx context.Context, cli *dockerclient.Client, store *db.Store, p
 		log.Printf("warn: write initial agent status: %v", err)
 	}
 
-	// Launch background spawn.
+	// Launch background spawn. Use a detached context so the spawn is not
+	// cancelled when the HTTP request context ends, but cap it so a stalled
+	// Docker build cannot run forever.
 	go func() {
-		bgCtx := context.Background()
+		bgCtx, cancel := context.WithTimeout(context.Background(), 2*time.Hour)
+		defer cancel()
 
 		if store != nil {
 			if err := store.UpdateContainerInfo(opts.ID, "", "building"); err != nil {
