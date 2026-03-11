@@ -1206,6 +1206,9 @@ func buildDockerImage(ctx context.Context, cli *dockerclient.Client, tag, docker
 		Dockerfile: relDockerfile, // Use the relative, slash-converted path here
 	})
 	if err != nil {
+		// Close the read end so the tar-writer goroutine unblocks and exits.
+		_ = pr.CloseWithError(err)
+		<-errChan
 		return errtrace.Wrap(fmt.Errorf("build image: %w", err))
 	}
 	defer resp.Body.Close()
