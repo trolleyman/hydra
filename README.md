@@ -60,6 +60,6 @@ Run the production server:
 mage run
 ```
 
-See `GEMINI.md`/`CLAUDE.md` for more developer instructions.
+See `GEMINI.md`/`CLAUDE.md` for more instructions.
 
 See `TODO.md` for limitations and a TODO list.
