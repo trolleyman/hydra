@@ -25,6 +25,10 @@ export namespace ErrorResponse {
         UNAUTHORIZED = 'unauthorized',
         INTERNAL_ERROR = 'internal_error',
         DOCKER_CONNECT = 'docker_connect',
+        PATH_NOT_FOUND = 'path_not_found',
+        NOT_A_GIT_REPO = 'not_a_git_repo',
+        BAD_REQUEST = 'bad_request',
+        CONFLICT = 'conflict',
     }
 }
 

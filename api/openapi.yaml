@@ -681,7 +681,7 @@ components:
         error:
           type: string
           description: "Machine-readable error type (e.g. internal_error, not_found, unauthorized, docker_connect)"
-          enum: [not_found, unauthorized, internal_error, docker_connect]
+          enum: [not_found, unauthorized, internal_error, docker_connect, path_not_found, not_a_git_repo, bad_request, conflict]
         code:
           type: integer
           description: "HTTP status code"
@@ -696,7 +696,7 @@ components:
           properties:
             error:
               type: string
-              enum: [merge_conflict]
+              enum: [merge_conflict, conflict]
 
     StatusResponse:
       type: object

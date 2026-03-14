@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import { api } from '../stores/apiClient'
 import { useProjectStore } from '../stores/projectStore'
 import type { ProjectInfo } from '../api'
-import { ApiError } from '../api'
+import { ApiError, ErrorResponse } from '../api'
 import { formatError } from '../api/format_error'
 import { Sun, Moon, ChevronDown, Folder, Plus, Settings, Check } from 'lucide-react'
 
@@ -299,9 +299,9 @@ function RootLayout() {
       setSelectedProjectId(p.id)
     } catch (err) {
       if (err instanceof ApiError && err.status === 400) {
-        const details = err.body?.details?.toLowerCase() || ''
-        const isNotFound = details.includes('no such file') || details.includes('does not exist')
-        const isNotGit = details.includes('not a git repository')
+        const errorType = err.body?.error
+        const isNotFound = errorType === ErrorResponse.error.PATH_NOT_FOUND
+        const isNotGit = errorType === ErrorResponse.error.NOT_A_GIT_REPO
 
         if (isNotFound || isNotGit) {
           return new Promise<void>((resolve, reject) => {
