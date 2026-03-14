@@ -29,6 +29,7 @@ export default defineConfig(({ mode }) => {
       proxy: {
         '/api': apiBase,
         '/health': apiBase,
+        '/.well-known': apiBase,
         '/ws': { target: `ws://localhost:${apiPort}`, ws: true },
       },
     },

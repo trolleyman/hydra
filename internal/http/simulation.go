@@ -684,7 +684,23 @@ func (s *SimulationServer) DevRestart(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *SimulationServer) GetDevToolsConfig(w http.ResponseWriter, r *http.Request) {
-	api.WriteError(w, http.StatusForbidden, "Not available in simulation mode")
+	root := "/simulated/project"
+	uuid := "sim-uuid-1"
+
+	api.WriteJSON(w, http.StatusOK, struct {
+		Workspace *struct {
+			Root *string `json:"root,omitempty"`
+			Uuid *string `json:"uuid,omitempty"`
+		} `json:"workspace,omitempty"`
+	}{
+		Workspace: &struct {
+			Root *string `json:"root,omitempty"`
+			Uuid *string `json:"uuid,omitempty"`
+		}{
+			Root: &root,
+			Uuid: &uuid,
+		},
+	})
 }
 
 // HandleTerminalWS handles WebSocket connections for simulated agent terminal access.
