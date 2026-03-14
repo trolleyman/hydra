@@ -149,6 +149,35 @@ func (s *Server) AddProject(_ context.Context, request api.AddProjectRequestObje
 
 	projectPath := strings.TrimSpace(request.Body.Path)
 
+	// Handle create_if_missing
+	if request.Body.CreateIfMissing != nil && *request.Body.CreateIfMissing {
+		if _, err := os.Stat(projectPath); os.IsNotExist(err) {
+			if err := os.MkdirAll(projectPath, 0755); err != nil {
+				return api.AddProject500JSONResponse{
+					Code:    500,
+					Error:   "internal_error",
+					Details: "failed to create directory: " + err.Error(),
+				}, nil
+			}
+		}
+	}
+
+	// Handle init_git
+	if request.Body.InitGit != nil && *request.Body.InitGit {
+		// Only init if it's not already a git repo.
+		if _, err := paths.GetProjectRoot(projectPath); err != nil {
+			// Not a git repo or directory doesn't exist (but we might have just created it)
+			out, err := exec.Command("git", "-C", projectPath, "init").CombinedOutput()
+			if err != nil {
+				return api.AddProject500JSONResponse{
+					Code:    500,
+					Error:   "internal_error",
+					Details: "git init failed: " + string(out),
+				}, nil
+			}
+		}
+	}
+
 	// Validate it's a git repository.
 	if _, err := paths.GetProjectRoot(projectPath); err != nil {
 		return api.AddProject400JSONResponse{

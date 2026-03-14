@@ -91,6 +91,12 @@ const (
 
 // AddProjectRequest defines model for AddProjectRequest.
 type AddProjectRequest struct {
+	// CreateIfMissing Whether to create the directory if it doesn't exist.
+	CreateIfMissing *bool `json:"create_if_missing,omitempty"`
+
+	// InitGit Whether to initialize a git repository if it's not already one.
+	InitGit *bool `json:"init_git,omitempty"`
+
 	// Path Absolute filesystem path to the project root (must be a git repository)
 	Path string `json:"path"`
 }
