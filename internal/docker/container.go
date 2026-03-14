@@ -239,6 +239,12 @@ func SpawnAgent(ctx context.Context, cli *dockerclient.Client, opts SpawnOptions
 		"TERM=xterm-256color",
 		"COLORTERM=truecolor",
 	}
+	// On Windows, Git's untracked cache feature is often unsupported on mounted
+	// filesystems (like WSL or Docker Desktop) and results in persistent
+	// "untracked cache is disabled" warnings in every Git command.
+	if runtime.GOOS == "windows" {
+		env = append(env, "GIT_DISABLE_UNTRACKED_CACHE=1")
+	}
 	if opts.GitAuthorName != "" {
 		env = append(env,
 			"GIT_AUTHOR_NAME="+opts.GitAuthorName,

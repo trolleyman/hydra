@@ -12,7 +12,8 @@ import (
 
 // SimulationServer implements api.ServerInterface with mock data.
 type SimulationServer struct {
-	StartTime time.Time
+	StartTime   time.Time
+	Development bool
 }
 
 func (s *SimulationServer) CheckHealth(w http.ResponseWriter, r *http.Request) {
@@ -26,7 +27,7 @@ func (s *SimulationServer) GetStatus(w http.ResponseWriter, r *http.Request) {
 	uptime := float32(time.Since(s.StartTime).Seconds())
 	projectRoot := "/simulated/project"
 	defaultProjectID := "sim-project"
-	development := true
+	development := s.Development
 	terminalBashEnabled := true
 
 	api.WriteJSON(w, http.StatusOK, api.StatusResponse{
@@ -688,7 +689,28 @@ func (s *SimulationServer) DevRestart(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *SimulationServer) GetDevToolsConfig(w http.ResponseWriter, r *http.Request) {
-	api.WriteError(w, http.StatusForbidden, "Not available in simulation mode")
+	if !s.Development {
+		api.WriteError(w, http.StatusForbidden, "not in dev mode")
+		return
+	}
+
+	root := "/simulated/project"
+	uuid := "sim-uuid-1"
+
+	api.WriteJSON(w, http.StatusOK, struct {
+		Workspace *struct {
+			Root *string `json:"root,omitempty"`
+			Uuid *string `json:"uuid,omitempty"`
+		} `json:"workspace,omitempty"`
+	}{
+		Workspace: &struct {
+			Root *string `json:"root,omitempty"`
+			Uuid *string `json:"uuid,omitempty"`
+		}{
+			Root: &root,
+			Uuid: &uuid,
+		},
+	})
 }
 
 // HandleTerminalWS handles WebSocket connections for simulated agent terminal access.
