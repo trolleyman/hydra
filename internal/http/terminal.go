@@ -16,6 +16,7 @@ import (
 	"github.com/docker/docker/api/types/container"
 	"github.com/gorilla/websocket"
 	"github.com/trolleyman/hydra/internal/config"
+	"github.com/trolleyman/hydra/internal/docker"
 	"github.com/trolleyman/hydra/internal/heads"
 	"github.com/trolleyman/hydra/internal/paths"
 )
@@ -287,7 +288,13 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 			}
 			switch msgType {
 			case websocket.BinaryMessage:
-				if _, err := attachConn.Write(data); err != nil {
+				input := data
+				if !useShell && head.AgentType == docker.AgentTypeGemini {
+					// Escape ! as !! to avoid triggering gemini-cli's shell mode
+					s := strings.ReplaceAll(string(data), "!", "!!")
+					input = []byte(s)
+				}
+				if _, err := attachConn.Write(input); err != nil {
 					return
 				}
 			case websocket.TextMessage:

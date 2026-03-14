@@ -109,7 +109,7 @@ func (s *Server) GetDevToolsConfig(_ context.Context, _ api.GetDevToolsConfigReq
 func (s *Server) resolveProjectRoot(projectID string) (string, error) {
 	p := s.ProjectsManager.GetByID(projectID)
 	if p == nil {
-		return "", errtrace.Wrap(&apiError{Code: 404, Type: api.NotFound, Err: fmt.Errorf("project not found: %s", projectID)})
+		return "", &apiError{Code: 404, Type: api.NotFound, Err: fmt.Errorf("project not found: %s", projectID)}
 	}
 	norm, err := paths.NormalizePath(p.Path)
 	if err != nil {
@@ -184,11 +184,11 @@ func (s *Server) ListAgents(ctx context.Context, request api.ListAgentsRequestOb
 			err = fmt.Errorf("Error connecting to Docker: %w", err)
 		}
 
-		return nil, errtrace.Wrap(&apiError{
+		return nil, &apiError{
 			Code: 500,
 			Type: errorType,
 			Err:  err,
-		})
+		}
 	}
 	resp := make(api.ListAgents200JSONResponse, len(headList))
 	for i, h := range headList {
@@ -596,7 +596,7 @@ func (s *Server) MergeAgent(ctx context.Context, request api.MergeAgentRequestOb
 	}
 
 	if err := git.ValidateRef(branchName); err != nil {
-		return nil, errtrace.Wrap(&apiError{Code: 400, Type: "bad_request", Err: err})
+		return nil, &apiError{Code: 400, Type: "bad_request", Err: err}
 	}
 
 	var stderr bytes.Buffer
@@ -643,11 +643,11 @@ func (s *Server) UpdateAgentFromBase(ctx context.Context, request api.UpdateAgen
 	}
 
 	if head.Branch == nil {
-		return nil, errtrace.Wrap(&apiError{
+		return nil, &apiError{
 			Code: 500,
 			Type: "bad_request",
 			Err:  errors.New("agent has no git branch to update"),
-		})
+		}
 	}
 
 	mergeDir := projectRoot
@@ -656,7 +656,7 @@ func (s *Server) UpdateAgentFromBase(ctx context.Context, request api.UpdateAgen
 	}
 
 	if err := git.ValidateRef(head.BaseBranch); err != nil {
-		return nil, errtrace.Wrap(&apiError{Code: 400, Type: "bad_request", Err: err})
+		return nil, &apiError{Code: 400, Type: "bad_request", Err: err}
 	}
 
 	// Attempt merge (base branch into current branch)
@@ -1209,7 +1209,13 @@ func (s *Server) SendAgentInput(ctx context.Context, request api.SendAgentInputR
 		}, nil
 	}
 
-	text := request.Body.Text + "\r"
+	text := request.Body.Text
+	if head.AgentType == docker.AgentTypeGemini {
+		// Escape ! as !! to avoid triggering gemini-cli's shell mode
+		// (which ignores everything before the ! and executes the rest as a command)
+		text = strings.ReplaceAll(text, "!", "!!")
+	}
+	text += "\r"
 
 	attach, err := s.DockerClient.ContainerAttach(ctx, head.ContainerID, container.AttachOptions{
 		Stream: true,
