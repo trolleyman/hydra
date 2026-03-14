@@ -222,11 +222,11 @@ func (s *Server) ListAgents(ctx context.Context, request api.ListAgentsRequestOb
 			err = fmt.Errorf("Error connecting to Docker: %w", err)
 		}
 
-		return nil, errtrace.Wrap(&apiError{
+		return nil, &apiError{
 			Code: 500,
 			Type: errorType,
 			Err:  err,
-		})
+		}
 	}
 	resp := make(api.ListAgents200JSONResponse, len(headList))
 	for i, h := range headList {
@@ -681,11 +681,11 @@ func (s *Server) UpdateAgentFromBase(ctx context.Context, request api.UpdateAgen
 	}
 
 	if head.Branch == nil {
-		return nil, errtrace.Wrap(&apiError{
+		return nil, &apiError{
 			Code: 500,
 			Type: api.ErrorResponseErrorBadRequest,
 			Err:  errors.New("agent has no git branch to update"),
-		})
+		}
 	}
 
 	mergeDir := projectRoot
@@ -1208,6 +1208,24 @@ func (s *Server) GetAgentDiffFiles(ctx context.Context, request api.GetAgentDiff
 	return api.GetAgentDiffFiles200JSONResponse(resp), nil
 }
 
+func (s *Server) CleanBuildCache(ctx context.Context, request api.CleanBuildCacheRequestObject) (api.CleanBuildCacheResponseObject, error) {
+	_, err := s.resolveProjectRoot(request.ProjectId)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+
+	var agentType docker.AgentType
+	if request.Params.AgentType != nil && *request.Params.AgentType != "" {
+		agentType = docker.AgentType(*request.Params.AgentType)
+	}
+
+	if err := docker.CleanBuildCache(ctx, s.DockerClient, agentType); err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+
+	return api.CleanBuildCache204Response{}, nil
+}
+
 func (s *Server) SendAgentInput(ctx context.Context, request api.SendAgentInputRequestObject) (api.SendAgentInputResponseObject, error) {
 	projectRoot, err := s.resolveProjectRoot(request.ProjectId)
 	if err != nil {
@@ -1229,7 +1247,13 @@ func (s *Server) SendAgentInput(ctx context.Context, request api.SendAgentInputR
 		}, nil
 	}
 
-	text := request.Body.Text + "\r"
+	text := request.Body.Text
+	if head.AgentType == docker.AgentTypeGemini {
+		// Escape ! as !! to avoid triggering gemini-cli's shell mode
+		// (which ignores everything before the ! and executes the rest as a command)
+		text = strings.ReplaceAll(text, "!", "!!")
+	}
+	text += "\r"
 
 	attach, err := s.DockerClient.ContainerAttach(ctx, head.ContainerID, container.AttachOptions{
 		Stream: true,

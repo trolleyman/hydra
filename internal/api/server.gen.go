@@ -435,6 +435,12 @@ type GetAgentDiffFilesParams struct {
 	IncludeUncommitted *bool `form:"include_uncommitted,omitempty" json:"include_uncommitted,omitempty"`
 }
 
+// CleanBuildCacheParams defines parameters for CleanBuildCache.
+type CleanBuildCacheParams struct {
+	// AgentType Agent type to clean (claude, gemini, copilot, bash). If omitted, cleans all.
+	AgentType *string `form:"agent_type,omitempty" json:"agent_type,omitempty"`
+}
+
 // GetConfigParams defines parameters for GetConfig.
 type GetConfigParams struct {
 	// Scope Load only a specific scope's raw config instead of the merged config
@@ -512,6 +518,9 @@ type ServerInterface interface {
 	// Update a Hydra agent's branch from its base branch (merge base into head)
 	// (POST /api/projects/{project_id}/agents/{id}/update-from-base)
 	UpdateAgentFromBase(w http.ResponseWriter, r *http.Request, projectId string, id string)
+	// Clean the Docker build cache for agents
+	// (POST /api/projects/{project_id}/clean-build-cache)
+	CleanBuildCache(w http.ResponseWriter, r *http.Request, projectId string, params CleanBuildCacheParams)
 	// Get the merged configuration
 	// (GET /api/projects/{project_id}/config)
 	GetConfig(w http.ResponseWriter, r *http.Request, projectId string, params GetConfigParams)
@@ -1025,6 +1034,42 @@ func (siw *ServerInterfaceWrapper) UpdateAgentFromBase(w http.ResponseWriter, r 
 	handler.ServeHTTP(w, r)
 }
 
+// CleanBuildCache operation middleware
+func (siw *ServerInterfaceWrapper) CleanBuildCache(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params CleanBuildCacheParams
+
+	// ------------- Optional query parameter "agent_type" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "agent_type", r.URL.Query(), &params.AgentType)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "agent_type", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CleanBuildCache(w, r, projectId, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetConfig operation middleware
 func (siw *ServerInterfaceWrapper) GetConfig(w http.ResponseWriter, r *http.Request) {
 
@@ -1260,6 +1305,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/merge", wrapper.MergeAgent)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/restart", wrapper.RestartAgent)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/update-from-base", wrapper.UpdateAgentFromBase)
+	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/clean-build-cache", wrapper.CleanBuildCache)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/config", wrapper.GetConfig)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/config", wrapper.SaveConfig)
 	m.HandleFunc("GET "+options.BaseURL+"/api/status", wrapper.GetStatus)
@@ -1830,6 +1876,41 @@ func (response UpdateAgentFromBase500JSONResponse) VisitUpdateAgentFromBaseRespo
 	return json.NewEncoder(w).Encode(response)
 }
 
+type CleanBuildCacheRequestObject struct {
+	ProjectId string `json:"project_id"`
+	Params    CleanBuildCacheParams
+}
+
+type CleanBuildCacheResponseObject interface {
+	VisitCleanBuildCacheResponse(w http.ResponseWriter) error
+}
+
+type CleanBuildCache204Response struct {
+}
+
+func (response CleanBuildCache204Response) VisitCleanBuildCacheResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type CleanBuildCache404JSONResponse ErrorResponse
+
+func (response CleanBuildCache404JSONResponse) VisitCleanBuildCacheResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type CleanBuildCache500JSONResponse ErrorResponse
+
+func (response CleanBuildCache500JSONResponse) VisitCleanBuildCacheResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 type GetConfigRequestObject struct {
 	ProjectId string `json:"project_id"`
 	Params    GetConfigParams
@@ -1991,6 +2072,9 @@ type StrictServerInterface interface {
 	// Update a Hydra agent's branch from its base branch (merge base into head)
 	// (POST /api/projects/{project_id}/agents/{id}/update-from-base)
 	UpdateAgentFromBase(ctx context.Context, request UpdateAgentFromBaseRequestObject) (UpdateAgentFromBaseResponseObject, error)
+	// Clean the Docker build cache for agents
+	// (POST /api/projects/{project_id}/clean-build-cache)
+	CleanBuildCache(ctx context.Context, request CleanBuildCacheRequestObject) (CleanBuildCacheResponseObject, error)
 	// Get the merged configuration
 	// (GET /api/projects/{project_id}/config)
 	GetConfig(ctx context.Context, request GetConfigRequestObject) (GetConfigResponseObject, error)
@@ -2441,6 +2525,33 @@ func (sh *strictHandler) UpdateAgentFromBase(w http.ResponseWriter, r *http.Requ
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(UpdateAgentFromBaseResponseObject); ok {
 		if err := validResponse.VisitUpdateAgentFromBaseResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CleanBuildCache operation middleware
+func (sh *strictHandler) CleanBuildCache(w http.ResponseWriter, r *http.Request, projectId string, params CleanBuildCacheParams) {
+	var request CleanBuildCacheRequestObject
+
+	request.ProjectId = projectId
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CleanBuildCache(ctx, request.(CleanBuildCacheRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CleanBuildCache")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CleanBuildCacheResponseObject); ok {
+		if err := validResponse.VisitCleanBuildCacheResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

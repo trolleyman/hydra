@@ -418,6 +418,32 @@ export class DefaultService {
         });
     }
     /**
+     * Clean the Docker build cache for agents
+     * @param projectId Project ID
+     * @param agentType Agent type to clean (claude, gemini, copilot, bash). If omitted, cleans all.
+     * @returns void
+     * @throws ApiError
+     */
+    public cleanBuildCache(
+        projectId: string,
+        agentType?: string,
+    ): CancelablePromise<void> {
+        return this.httpRequest.request({
+            method: 'POST',
+            url: '/api/projects/{project_id}/clean-build-cache',
+            path: {
+                'project_id': projectId,
+            },
+            query: {
+                'agent_type': agentType,
+            },
+            errors: {
+                404: `Project Not Found`,
+                500: `Internal Server Error`,
+            },
+        });
+    }
+    /**
      * Get a specific Hydra agent by ID
      * @param projectId Project ID
      * @param id
