@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback, Fragment, useMemo, memo } from 'react'
 import hljs from 'highlight.js'
 import { api } from './stores/apiClient'
+import { formatError } from './api/format_error'
 import type { AgentResponse, CommitInfo, DiffFile, DiffResponse } from './api'
 import {
   Plus, Calendar, TriangleAlert,
@@ -1253,7 +1254,7 @@ export function DiffViewer({ agent, projectId }: { agent: AgentResponse; project
           })
         }
       })
-      .catch((e) => { if (!cancelled) { setDiffError(String(e)); setLoadingDiff(false) } })
+      .catch((e) => { if (!cancelled) { setDiffError(formatError(e)); setLoadingDiff(false) } })
 
     return () => { cancelled = true }
   }, [agent.id, agent.branch_name, projectId, leftSel, rightSel, refreshKey, fetchFileDiff])

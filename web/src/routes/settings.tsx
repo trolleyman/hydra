@@ -2,6 +2,7 @@ import { createFileRoute, Link, useBlocker } from '@tanstack/react-router'
 import { useEffect, useState, useRef, useMemo, useLayoutEffect } from 'react'
 import hljs from 'highlight.js'
 import { api } from '../stores/apiClient'
+import { formatError } from '../api/format_error'
 import { useProjectStore } from '../stores/projectStore'
 import type { ConfigResponse, AgentConfig, AgentResponse } from '../api'
 import { AgentTerminal } from '../components/AgentTerminal'
@@ -97,7 +98,7 @@ function SettingsPage() {
           setInheritedConfig(null)
         }
       } catch (err) {
-        setError(String(err))
+        setError(formatError(err))
       } finally {
         setLoading(false)
       }
@@ -126,7 +127,7 @@ function SettingsPage() {
     } catch (err) {
       useDialogStore.getState().show({
         title: 'Save Failed',
-        message: `Failed to save configuration: ${err}`,
+        message: `Failed to save configuration: ${formatError(err)}`,
         type: 'error'
       })
     } finally {
@@ -147,7 +148,7 @@ function SettingsPage() {
     } catch (err) {
       useDialogStore.getState().show({
         title: 'Test Failed',
-        message: `Failed to spawn test agent: ${err}`,
+        message: `Failed to spawn test agent: ${formatError(err)}`,
         type: 'error'
       })
     } finally {

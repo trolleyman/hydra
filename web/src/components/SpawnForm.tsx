@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { api } from '../stores/apiClient'
 import type { AgentResponse, SpawnAgentRequest } from '../api'
+import { formatError } from '../api/format_error'
 import { Zap, LoaderCircle } from 'lucide-react'
 
 type AgentTypeOption = 'claude' | 'gemini' | 'copilot'
@@ -130,7 +131,7 @@ export function SpawnForm({
       setIdManuallyEdited(false)
       onSpawned?.(agent)
     } catch (err) {
-      setError(String(err))
+      setError(formatError(err))
     } finally {
       setLoading(false)
     }
