@@ -3,6 +3,8 @@ import { useEffect, useRef, useState } from 'react'
 import { api } from '../stores/apiClient'
 import { useProjectStore } from '../stores/projectStore'
 import type { ProjectInfo } from '../api'
+import { ApiError, ErrorResponse } from '../api'
+import { formatError } from '../api/format_error'
 import { Sun, Moon, ChevronDown, Folder, Plus, Settings, Check } from 'lucide-react'
 
 import { Dialog } from '../components/Dialog'
@@ -84,7 +86,7 @@ function ProjectDropdown({
       setShowAddInput(false)
       setOpen(false)
     } catch (err) {
-      setAddError(String(err))
+      setAddError(formatError(err))
     } finally {
       setAdding(false)
     }
@@ -190,6 +192,7 @@ function RootLayout() {
   })
 
   const { projects, selectedProjectId, setProjects, setSelectedProjectId, setSystemStatus } = useProjectStore()
+  const dialog = useDialogStore()
 
   useEffect(() => {
     localStorage.setItem('hydra-dark-mode', String(dark))
@@ -286,13 +289,55 @@ function RootLayout() {
   }
 
   async function handleAddProject(path: string) {
-    const p = await api.default.addProject({ path })
-    // Merge: add only if not already present.
-    const exists = projects.some((existing) => existing.id === p.id)
-    if (!exists) {
-      setProjects([...projects, p])
+    try {
+      const p = await api.default.addProject({ path })
+      // Merge: add only if not already present.
+      const exists = projects.some((existing) => existing.id === p.id)
+      if (!exists) {
+        setProjects([...projects, p])
+      }
+      setSelectedProjectId(p.id)
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 400) {
+        const errorType = err.body?.error
+        const isNotFound = errorType === ErrorResponse.error.PATH_NOT_FOUND
+        const isNotGit = errorType === ErrorResponse.error.NOT_A_GIT_REPO
+
+        if (isNotFound || isNotGit) {
+          return new Promise<void>((resolve, reject) => {
+            dialog.show({
+              title: isNotFound ? 'Directory Not Found' : 'Not a Git Repository',
+              message: isNotFound
+                ? `The directory "${path}" does not exist. Do you want to create it and initialize a git repository?`
+                : `The directory "${path}" is not a git repository. Do you want to initialize one?`,
+              type: 'confirm',
+              showCancel: true,
+              onConfirm: async () => {
+                try {
+                  const p = await api.default.addProject({
+                    path,
+                    create_if_missing: isNotFound,
+                    init_git: true,
+                  })
+                  const exists = projects.some((existing) => existing.id === p.id)
+                  if (!exists) {
+                    setProjects([...projects, p])
+                  }
+                  setSelectedProjectId(p.id)
+                  resolve()
+                } catch (e) {
+                  reject(e)
+                }
+              },
+              onCancel: () => {
+                reject(err)
+              },
+            })
+          })
+        }
+      }
+      throw err
     }
-    setSelectedProjectId(p.id)
   }
 
   const selectedProject = projects.find((p) => p.id === selectedProjectId) ?? null

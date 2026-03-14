@@ -9,6 +9,7 @@ export type MergeConflictError = (ErrorResponse & {
 export namespace MergeConflictError {
     export enum error {
         MERGE_CONFLICT = 'merge_conflict',
+        CONFLICT = 'conflict',
     }
 }
 

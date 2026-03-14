@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { api } from '../stores/apiClient'
+import { formatError } from '../api/format_error'
 import { useProjectStore } from '../stores/projectStore'
 import type { AgentResponse } from '../api'
 import { AgentTerminal } from './AgentTerminal'
@@ -91,7 +92,7 @@ export function AgentDetail({
         } catch (err) {
           useDialogStore.getState().show({
             title: 'Kill Failed',
-            message: `Failed to kill agent: ${err}`,
+            message: `Failed to kill agent: ${formatError(err)}`,
             type: 'error'
           })
         } finally {
@@ -124,7 +125,7 @@ export function AgentDetail({
           await api.default.mergeAgent(projectId ?? '', agent.id)
           onKilled(agent.id)
         } catch (err: any) {
-          const errorData = await err.json?.().catch(() => null) || err
+          const errorData = (err.body && typeof err.body === 'object') ? err.body : err
           if (errorData.error === 'merge_conflict') {
             useDialogStore.getState().show({
               title: 'Merge Conflict',
@@ -134,7 +135,7 @@ export function AgentDetail({
           } else {
             useDialogStore.getState().show({
               title: 'Merge Failed',
-              message: `Failed to merge agent: ${errorData.details || errorData.error || err}`,
+              message: `Failed to merge agent: ${formatError(err)}`,
               type: 'error'
             })
           }
@@ -156,7 +157,7 @@ export function AgentDetail({
           await api.default.updateAgentFromBase(projectId ?? '', agent.id)
           if (onRefresh) onRefresh()
         } catch (err: any) {
-          const errorData = await err.json?.().catch(() => null) || err
+          const errorData = (err.body && typeof err.body === 'object') ? err.body : err
           if (errorData.error === 'merge_conflict') {
             useDialogStore.getState().show({
               title: 'Update Conflict',
@@ -166,7 +167,7 @@ export function AgentDetail({
           } else {
             useDialogStore.getState().show({
               title: 'Update Failed',
-              message: `Failed to update from base: ${errorData.details || errorData.error || err}`,
+              message: `Failed to update from base: ${formatError(err)}`,
               type: 'error'
             })
           }
@@ -190,7 +191,7 @@ export function AgentDetail({
         } catch (err) {
           useDialogStore.getState().show({
             title: 'Restart Failed',
-            message: `Failed to restart agent: ${err}`,
+            message: `Failed to restart agent: ${formatError(err)}`,
             type: 'error'
           })
         } finally {

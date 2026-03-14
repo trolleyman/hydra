@@ -2,6 +2,7 @@ import { createFileRoute, Outlet, useNavigate, useParams } from '@tanstack/react
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { api } from '../stores/apiClient'
 import type { AgentResponse } from '../api'
+import { formatError } from '../api/format_error'
 import { useProjectStore } from '../stores/projectStore'
 import { useAgentStore } from '../stores/agentStore'
 import { SpawnForm } from '../components/SpawnForm'
@@ -79,7 +80,7 @@ function AgentsLayout() {
         // But the requirement is "/ be no agent selected".
         // So we don't auto-navigate here.
       } catch (e) {
-        if (!cancelled) setError(String(e))
+        if (!cancelled) setError(formatError(e))
       } finally {
         if (!cancelled) setLoading(false)
       }

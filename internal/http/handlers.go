@@ -68,7 +68,7 @@ func NewHandler(s *Server) http.Handler {
 		ResponseErrorHandlerFunc: func(w http.ResponseWriter, r *http.Request, err error) {
 			RecordError(r, err)
 			code := http.StatusInternalServerError
-			errType := api.InternalError
+			errType := api.ErrorResponseErrorInternalError
 			var apiErr *apiError
 			if errors.As(err, &apiErr) {
 				code = apiErr.Code
@@ -85,7 +85,7 @@ func (s *Server) GetDevToolsConfig(_ context.Context, _ api.GetDevToolsConfigReq
 	if !s.Development {
 		return api.GetDevToolsConfig403JSONResponse{
 			Code:    403,
-			Error:   "unauthorized",
+			Error:   api.ErrorResponseErrorUnauthorized,
 			Details: "not in dev mode",
 		}, nil
 	}
@@ -109,7 +109,7 @@ func (s *Server) GetDevToolsConfig(_ context.Context, _ api.GetDevToolsConfigReq
 func (s *Server) resolveProjectRoot(projectID string) (string, error) {
 	p := s.ProjectsManager.GetByID(projectID)
 	if p == nil {
-		return "", &apiError{Code: 404, Type: api.NotFound, Err: fmt.Errorf("project not found: %s", projectID)}
+		return "", &apiError{Code: 404, Type: api.ErrorResponseErrorNotFound, Err: fmt.Errorf("project not found: %s", projectID)}
 	}
 	norm, err := paths.NormalizePath(p.Path)
 	if err != nil {
@@ -142,18 +142,56 @@ func (s *Server) AddProject(_ context.Context, request api.AddProjectRequestObje
 	if request.Body == nil || strings.TrimSpace(request.Body.Path) == "" {
 		return api.AddProject400JSONResponse{
 			Code:    400,
-			Error:   "bad_request",
+			Error:   api.ErrorResponseErrorBadRequest,
 			Details: "path is required",
 		}, nil
 	}
 
 	projectPath := strings.TrimSpace(request.Body.Path)
 
+	// Handle create_if_missing
+	if request.Body.CreateIfMissing != nil && *request.Body.CreateIfMissing {
+		if _, err := os.Stat(projectPath); os.IsNotExist(err) {
+			if err := os.MkdirAll(projectPath, 0755); err != nil {
+				return api.AddProject500JSONResponse{
+					Code:    500,
+					Error:   api.ErrorResponseErrorInternalError,
+					Details: "failed to create directory: " + err.Error(),
+				}, nil
+			}
+		}
+	} else {
+		// If create_if_missing is not set, check if the directory exists.
+		if _, err := os.Stat(projectPath); os.IsNotExist(err) {
+			return api.AddProject400JSONResponse{
+				Code:    400,
+				Error:   api.ErrorResponseErrorPathNotFound,
+				Details: "directory does not exist: " + projectPath,
+			}, nil
+		}
+	}
+
+	// Handle init_git
+	if request.Body.InitGit != nil && *request.Body.InitGit {
+		// Only init if it's not already a git repo.
+		if _, err := paths.GetProjectRoot(projectPath); err != nil {
+			// Not a git repo or directory doesn't exist (but we might have just created it)
+			out, err := exec.Command("git", "-C", projectPath, "init").CombinedOutput()
+			if err != nil {
+				return api.AddProject500JSONResponse{
+					Code:    500,
+					Error:   api.ErrorResponseErrorInternalError,
+					Details: "git init failed: " + string(out),
+				}, nil
+			}
+		}
+	}
+
 	// Validate it's a git repository.
 	if _, err := paths.GetProjectRoot(projectPath); err != nil {
 		return api.AddProject400JSONResponse{
 			Code:    400,
-			Error:   "bad_request",
+			Error:   api.ErrorResponseErrorNotAGitRepo,
 			Details: "path is not a git repository: " + err.Error(),
 		}, nil
 	}
@@ -178,9 +216,9 @@ func (s *Server) ListAgents(ctx context.Context, request api.ListAgentsRequestOb
 	headList, err := heads.ListHeads(ctx, s.DockerClient, s.DB, projectRoot)
 	if err != nil {
 		errStr := err.Error()
-		errorType := api.InternalError
+		errorType := api.ErrorResponseErrorInternalError
 		if dockerclient.IsErrConnectionFailed(err) || strings.Contains(errStr, "error during connect") {
-			errorType = api.DockerConnect
+			errorType = api.ErrorResponseErrorDockerConnect
 			err = fmt.Errorf("Error connecting to Docker: %w", err)
 		}
 
@@ -396,7 +434,7 @@ func (s *Server) DevRestart(_ context.Context, _ api.DevRestartRequestObject) (a
 	if !s.Development {
 		return api.DevRestart403JSONResponse{
 			Code:    403,
-			Error:   "unauthorized",
+			Error:   api.ErrorResponseErrorUnauthorized,
 			Details: "not in dev mode",
 		}, nil
 	}
@@ -412,7 +450,7 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 	if request.Body == nil {
 		return api.SpawnAgent400JSONResponse{
 			Code:    400,
-			Error:   "bad_request",
+			Error:   api.ErrorResponseErrorBadRequest,
 			Details: "request body is required",
 		}, nil
 	}
@@ -429,7 +467,7 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 	if agentType != docker.AgentTypeClaude && agentType != docker.AgentTypeGemini && agentType != docker.AgentTypeBash && agentType != docker.AgentTypeCopilot {
 		return api.SpawnAgent400JSONResponse{
 			Code:    400,
-			Error:   "bad_request",
+			Error:   api.ErrorResponseErrorBadRequest,
 			Details: "unknown agent_type; supported: claude, gemini, copilot, bash",
 		}, nil
 	}
@@ -529,7 +567,7 @@ func (s *Server) GetAgent(ctx context.Context, request api.GetAgentRequestObject
 	if head == nil {
 		return api.GetAgent404JSONResponse{
 			Code:    404,
-			Error:   "not_found",
+			Error:   api.ErrorResponseErrorNotFound,
 			Details: "agent not found",
 		}, nil
 	}
@@ -565,7 +603,7 @@ func (s *Server) MergeAgent(ctx context.Context, request api.MergeAgentRequestOb
 	}
 	if head == nil {
 		return api.MergeAgent404JSONResponse{
-			Error:   "not_found",
+			Error:   api.ErrorResponseErrorNotFound,
 			Code:    404,
 			Details: "agent not found",
 		}, nil
@@ -573,7 +611,7 @@ func (s *Server) MergeAgent(ctx context.Context, request api.MergeAgentRequestOb
 
 	if head.Branch == nil {
 		return api.MergeAgent400JSONResponse{
-			Error:   "bad_request",
+			Error:   api.ErrorResponseErrorBadRequest,
 			Code:    400,
 			Details: "agent has no git branch to merge",
 		}, nil
@@ -588,7 +626,7 @@ func (s *Server) MergeAgent(ctx context.Context, request api.MergeAgentRequestOb
 		}
 		if !ok {
 			return api.MergeAgent409JSONResponse{
-				Error:   "conflict",
+				Error:   api.MergeConflictErrorErrorConflict,
 				Code:    409,
 				Details: "operation already in progress",
 			}, nil
@@ -596,7 +634,7 @@ func (s *Server) MergeAgent(ctx context.Context, request api.MergeAgentRequestOb
 	}
 
 	if err := git.ValidateRef(branchName); err != nil {
-		return nil, &apiError{Code: 400, Type: "bad_request", Err: err}
+		return nil, errtrace.Wrap(&apiError{Code: 400, Type: api.ErrorResponseErrorBadRequest, Err: err})
 	}
 
 	var stderr bytes.Buffer
@@ -611,7 +649,7 @@ func (s *Server) MergeAgent(ctx context.Context, request api.MergeAgentRequestOb
 			_ = s.DB.ClearHeadStatus(head.ID, &errMsg)
 		}
 		return api.MergeAgent409JSONResponse(api.MergeConflictError{
-			Error:   api.MergeConflict,
+			Error:   api.MergeConflictErrorErrorMergeConflict,
 			Code:    409,
 			Details: errMsg,
 		}), nil
@@ -636,7 +674,7 @@ func (s *Server) UpdateAgentFromBase(ctx context.Context, request api.UpdateAgen
 	}
 	if head == nil {
 		return api.UpdateAgentFromBase404JSONResponse{
-			Error:   "not_found",
+			Error:   api.ErrorResponseErrorNotFound,
 			Code:    404,
 			Details: "agent not found",
 		}, nil
@@ -645,7 +683,7 @@ func (s *Server) UpdateAgentFromBase(ctx context.Context, request api.UpdateAgen
 	if head.Branch == nil {
 		return nil, &apiError{
 			Code: 500,
-			Type: "bad_request",
+			Type: api.ErrorResponseErrorBadRequest,
 			Err:  errors.New("agent has no git branch to update"),
 		}
 	}
@@ -656,7 +694,7 @@ func (s *Server) UpdateAgentFromBase(ctx context.Context, request api.UpdateAgen
 	}
 
 	if err := git.ValidateRef(head.BaseBranch); err != nil {
-		return nil, &apiError{Code: 400, Type: "bad_request", Err: err}
+		return nil, errtrace.Wrap(&apiError{Code: 400, Type: api.ErrorResponseErrorBadRequest, Err: err})
 	}
 
 	// Attempt merge (base branch into current branch)
@@ -669,7 +707,7 @@ func (s *Server) UpdateAgentFromBase(ctx context.Context, request api.UpdateAgen
 
 		errMsg := fmt.Sprintf("git merge failed: %s", strings.TrimSpace(stderr.String()))
 		return api.UpdateAgentFromBase409JSONResponse(api.MergeConflictError{
-			Error:   api.MergeConflict,
+			Error:   api.MergeConflictErrorErrorMergeConflict,
 			Code:    409,
 			Details: errMsg,
 		}), nil
@@ -690,7 +728,7 @@ func (s *Server) RestartAgent(ctx context.Context, request api.RestartAgentReque
 	if head == nil {
 		return api.RestartAgent404JSONResponse{
 			Code:    404,
-			Error:   "not_found",
+			Error:   api.ErrorResponseErrorNotFound,
 			Details: "agent not found",
 		}, nil
 	}
@@ -707,7 +745,7 @@ func (s *Server) RestartAgent(ctx context.Context, request api.RestartAgentReque
 		if errors.Is(err, db.ErrOperationInProgress) {
 			return api.RestartAgent409JSONResponse{
 				Code:    409,
-				Error:   "conflict",
+				Error:   api.ErrorResponseErrorConflict,
 				Details: "operation already in progress",
 			}, nil
 		}
@@ -788,7 +826,7 @@ func (s *Server) KillAgent(ctx context.Context, request api.KillAgentRequestObje
 	if head == nil {
 		return api.KillAgent404JSONResponse{
 			Code:    404,
-			Error:   "not_found",
+			Error:   api.ErrorResponseErrorNotFound,
 			Details: "agent not found",
 		}, nil
 	}
@@ -797,7 +835,7 @@ func (s *Server) KillAgent(ctx context.Context, request api.KillAgentRequestObje
 		if errors.Is(err, db.ErrOperationInProgress) {
 			return api.KillAgent409JSONResponse{
 				Code:    409,
-				Error:   "conflict",
+				Error:   api.ErrorResponseErrorConflict,
 				Details: "operation already in progress",
 			}, nil
 		}
@@ -819,7 +857,7 @@ func (s *Server) GetAgentCommits(ctx context.Context, request api.GetAgentCommit
 	if head == nil {
 		return api.GetAgentCommits404JSONResponse{
 			Code:    404,
-			Error:   "not_found",
+			Error:   api.ErrorResponseErrorNotFound,
 			Details: "agent not found",
 		}, nil
 	}
@@ -866,7 +904,7 @@ func (s *Server) GetAgentDiff(ctx context.Context, request api.GetAgentDiffReque
 	if head == nil {
 		return api.GetAgentDiff404JSONResponse{
 			Code:    404,
-			Error:   "not_found",
+			Error:   api.ErrorResponseErrorNotFound,
 			Details: "agent not found",
 		}, nil
 	}
@@ -1060,7 +1098,7 @@ func (s *Server) GetAgentDiffFiles(ctx context.Context, request api.GetAgentDiff
 	if head == nil {
 		return api.GetAgentDiffFiles404JSONResponse{
 			Code:    404,
-			Error:   "not_found",
+			Error:   api.ErrorResponseErrorNotFound,
 			Details: "agent not found",
 		}, nil
 	}
@@ -1197,14 +1235,14 @@ func (s *Server) SendAgentInput(ctx context.Context, request api.SendAgentInputR
 	if err != nil {
 		return api.SendAgentInput500JSONResponse{
 			Code:    500,
-			Error:   "internal_error",
+			Error:   api.ErrorResponseErrorInternalError,
 			Details: err.Error(),
 		}, nil
 	}
 	if head == nil || head.ContainerID == "" {
 		return api.SendAgentInput404JSONResponse{
 			Code:    404,
-			Error:   "not_found",
+			Error:   api.ErrorResponseErrorNotFound,
 			Details: "agent not found or not running",
 		}, nil
 	}
@@ -1226,7 +1264,7 @@ func (s *Server) SendAgentInput(ctx context.Context, request api.SendAgentInputR
 	if err != nil {
 		return api.SendAgentInput500JSONResponse{
 			Code:    500,
-			Error:   "internal_error",
+			Error:   api.ErrorResponseErrorInternalError,
 			Details: "failed to attach to container: " + err.Error(),
 		}, nil
 	}
@@ -1235,7 +1273,7 @@ func (s *Server) SendAgentInput(ctx context.Context, request api.SendAgentInputR
 	if _, err := attach.Conn.Write([]byte(text)); err != nil {
 		return api.SendAgentInput500JSONResponse{
 			Code:    500,
-			Error:   "internal_error",
+			Error:   api.ErrorResponseErrorInternalError,
 			Details: "failed to write to container stdin: " + err.Error(),
 		}, nil
 	}

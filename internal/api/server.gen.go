@@ -45,15 +45,20 @@ const (
 
 // Defines values for ErrorResponseError.
 const (
-	DockerConnect ErrorResponseError = "docker_connect"
-	InternalError ErrorResponseError = "internal_error"
-	NotFound      ErrorResponseError = "not_found"
-	Unauthorized  ErrorResponseError = "unauthorized"
+	ErrorResponseErrorBadRequest    ErrorResponseError = "bad_request"
+	ErrorResponseErrorConflict      ErrorResponseError = "conflict"
+	ErrorResponseErrorDockerConnect ErrorResponseError = "docker_connect"
+	ErrorResponseErrorInternalError ErrorResponseError = "internal_error"
+	ErrorResponseErrorNotAGitRepo   ErrorResponseError = "not_a_git_repo"
+	ErrorResponseErrorNotFound      ErrorResponseError = "not_found"
+	ErrorResponseErrorPathNotFound  ErrorResponseError = "path_not_found"
+	ErrorResponseErrorUnauthorized  ErrorResponseError = "unauthorized"
 )
 
 // Defines values for MergeConflictErrorError.
 const (
-	MergeConflict MergeConflictErrorError = "merge_conflict"
+	MergeConflictErrorErrorConflict      MergeConflictErrorError = "conflict"
+	MergeConflictErrorErrorMergeConflict MergeConflictErrorError = "merge_conflict"
 )
 
 // Defines values for TerminalDataEventType.
@@ -91,6 +96,12 @@ const (
 
 // AddProjectRequest defines model for AddProjectRequest.
 type AddProjectRequest struct {
+	// CreateIfMissing Whether to create the directory if it doesn't exist.
+	CreateIfMissing *bool `json:"create_if_missing,omitempty"`
+
+	// InitGit Whether to initialize a git repository if it's not already one.
+	InitGit *bool `json:"init_git,omitempty"`
+
 	// Path Absolute filesystem path to the project root (must be a git repository)
 	Path string `json:"path"`
 }
