@@ -22,6 +22,7 @@ import (
 	"github.com/docker/docker/api/types/build"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
+	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/api/types/network"
 	dockerclient "github.com/docker/docker/client"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
@@ -1241,6 +1242,52 @@ func buildDockerImage(ctx context.Context, cli *dockerclient.Client, tag, docker
 	}
 
 	log.Printf("Built Docker image: %s (from %s in %s)", tag, dockerfilePath, buildContext)
+	return nil
+}
+
+// CleanBuildCache removes agent-related Docker images to force rebuilds.
+// It removes images matching hydra-agent-<agentType>-* and hydra-agent-<agentType>:latest.
+// It also removes the hydra-agent-default image if it exists.
+// Existing containers using these images are not affected (ImageRemove will skip if in use).
+func CleanBuildCache(ctx context.Context, cli *dockerclient.Client, agentType AgentType) error {
+	images, err := cli.ImageList(ctx, image.ListOptions{All: true})
+	if err != nil {
+		return errtrace.Wrap(fmt.Errorf("list images: %w", err))
+	}
+
+	patterns := []string{"hydra-agent-default"}
+	if agentType == "" {
+		patterns = append(patterns, "hydra-agent-")
+	} else {
+		prefix := "hydra-agent-" + string(agentType)
+		patterns = append(patterns, prefix+":latest", prefix+"-extended:", prefix+"-custom:")
+	}
+
+	for _, img := range images {
+		shouldRemove := false
+		for _, tag := range img.RepoTags {
+			for _, p := range patterns {
+				if strings.HasPrefix(tag, p) {
+					shouldRemove = true
+					break
+				}
+			}
+			if shouldRemove {
+				break
+			}
+		}
+
+		if shouldRemove {
+			log.Printf("Removing image %s (%v)...", img.ID[:12], img.RepoTags)
+			_, err := cli.ImageRemove(ctx, img.ID, image.RemoveOptions{PruneChildren: true})
+			if err != nil {
+				// Skip if in use or other non-critical error
+				log.Printf("info: could not remove image %s: %v", img.ID[:12], err)
+				continue
+			}
+		}
+	}
+
 	return nil
 }
 

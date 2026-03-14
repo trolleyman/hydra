@@ -17,10 +17,10 @@ import (
 // with separate arguments.
 func ValidateRef(ref string) error {
 	if ref == "" {
-		return fmt.Errorf("empty ref name")
+		return errtrace.Wrap(fmt.Errorf("empty ref name"))
 	}
 	if strings.HasPrefix(ref, "-") {
-		return fmt.Errorf("invalid ref name %q: must not start with '-'", ref)
+		return errtrace.Wrap(fmt.Errorf("invalid ref name %q: must not start with '-'", ref))
 	}
 	return nil
 }

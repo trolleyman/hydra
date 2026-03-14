@@ -5,7 +5,7 @@ import { api } from '../stores/apiClient'
 import { useProjectStore } from '../stores/projectStore'
 import type { ConfigResponse, AgentConfig, AgentResponse } from '../api'
 import { AgentTerminal } from '../components/AgentTerminal'
-import { X, Layers, Monitor, Sparkles, FileText, Plus, Trash2, AlertCircle, Save } from 'lucide-react'
+import { X, Layers, Monitor, Sparkles, FileText, Plus, Trash2, AlertCircle, Save, Eraser } from 'lucide-react'
 import { InfoTooltip } from '../components/InfoTooltip'
 import type { ProjectInfo } from '../api'
 
@@ -611,6 +611,30 @@ function ConfigForm({
   allAgentsPrePrompt?: string | null
 }) {
   const [template, setTemplate] = useState('none')
+  const [cleaning, setCleaning] = useState(false)
+
+  async function handleCleanCache() {
+    if (!window.confirm('This will remove agent-related Docker images to force a rebuild. Existing containers will not be affected. Continue?')) {
+      return
+    }
+    setCleaning(true)
+    try {
+      await api.default.cleanBuildCache(selectedProject?.id ?? '', agentType === 'default' ? undefined : agentType)
+      useDialogStore.getState().show({
+        title: 'Cache Cleaned',
+        message: 'Agent Docker images removed successfully.',
+        type: 'info'
+      })
+    } catch (err) {
+      useDialogStore.getState().show({
+        title: 'Clean Failed',
+        message: `Failed to clean build cache: ${err}`,
+        type: 'error'
+      })
+    } finally {
+      setCleaning(false)
+    }
+  }
 
   function handleTemplateChange(name: string) {
     setTemplate(name)
@@ -801,19 +825,32 @@ function ConfigForm({
       <div className="space-y-2">
         <div className="flex items-center justify-between">
           <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">
-            Dockerfile (Extends Base)
+            Dockerfile
           </label>
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] text-gray-400 dark:text-gray-500">Add Template:</span>
-            <select
-              value={template}
-              onChange={(e) => handleTemplateChange(e.target.value)}
-              className="text-[10px] bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded px-1 py-0.5 focus:outline-none cursor-pointer"
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] text-gray-400 dark:text-gray-500">Add Template:</span>
+              <select
+                value={template}
+                onChange={(e) => handleTemplateChange(e.target.value)}
+                className="text-[10px] bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded px-1 py-0.5 focus:outline-none cursor-pointer"
+              >
+                {Object.entries(DOCKERFILE_TEMPLATES).map(([id, t]) => (
+                  <option key={id} value={id}>{t.label}</option>
+                ))}
+              </select>
+            </div>
+            <button
+              onClick={handleCleanCache}
+              disabled={cleaning}
+              className={`flex items-center gap-1.5 px-2 py-1 rounded text-[10px] font-bold transition-all border shadow-sm cursor-pointer ${cleaning
+                ? 'bg-gray-100 dark:bg-gray-800 text-gray-400 border-gray-200 dark:border-gray-700 cursor-not-allowed'
+                : 'bg-white dark:bg-gray-800 text-red-600 dark:text-red-400 border-red-200 dark:border-red-900/50 hover:bg-red-50 dark:hover:bg-red-900/20 shadow-red-500/5'
+                }`}
             >
-              {Object.entries(DOCKERFILE_TEMPLATES).map(([id, t]) => (
-                <option key={id} value={id}>{t.label}</option>
-              ))}
-            </select>
+              <Eraser className="w-3 h-3" />
+              {cleaning ? 'Cleaning...' : 'Clean Build Cache'}
+            </button>
           </div>
         </div>
         <div className="relative group rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 focus-within:ring-2 focus-within:ring-blue-500/20 focus-within:border-blue-500 transition-all shadow-inner overflow-hidden">

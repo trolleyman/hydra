@@ -109,7 +109,7 @@ func (s *Server) GetDevToolsConfig(_ context.Context, _ api.GetDevToolsConfigReq
 func (s *Server) resolveProjectRoot(projectID string) (string, error) {
 	p := s.ProjectsManager.GetByID(projectID)
 	if p == nil {
-		return "", &apiError{Code: 404, Type: api.NotFound, Err: fmt.Errorf("project not found: %s", projectID)}
+		return "", errtrace.Wrap(&apiError{Code: 404, Type: api.NotFound, Err: fmt.Errorf("project not found: %s", projectID)})
 	}
 	norm, err := paths.NormalizePath(p.Path)
 	if err != nil {
@@ -1168,6 +1168,24 @@ func (s *Server) GetAgentDiffFiles(ctx context.Context, request api.GetAgentDiff
 		UncommittedSummary: uncommittedSummary,
 	}
 	return api.GetAgentDiffFiles200JSONResponse(resp), nil
+}
+
+func (s *Server) CleanBuildCache(ctx context.Context, request api.CleanBuildCacheRequestObject) (api.CleanBuildCacheResponseObject, error) {
+	_, err := s.resolveProjectRoot(request.ProjectId)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+
+	var agentType docker.AgentType
+	if request.Params.AgentType != nil && *request.Params.AgentType != "" {
+		agentType = docker.AgentType(*request.Params.AgentType)
+	}
+
+	if err := docker.CleanBuildCache(ctx, s.DockerClient, agentType); err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+
+	return api.CleanBuildCache204Response{}, nil
 }
 
 func (s *Server) SendAgentInput(ctx context.Context, request api.SendAgentInputRequestObject) (api.SendAgentInputResponseObject, error) {

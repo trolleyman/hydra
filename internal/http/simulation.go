@@ -657,6 +657,10 @@ func (s *SimulationServer) GetAgentDiffFiles(w http.ResponseWriter, r *http.Requ
 	api.WriteJSON(w, http.StatusOK, api.DiffResponse{Files: []api.DiffFile{}})
 }
 
+func (s *SimulationServer) CleanBuildCache(w http.ResponseWriter, r *http.Request, projectId string, params api.CleanBuildCacheParams) {
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (s *SimulationServer) SendAgentInput(w http.ResponseWriter, r *http.Request, projectId string, id string) {
 	w.WriteHeader(http.StatusOK)
 }

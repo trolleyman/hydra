@@ -600,6 +600,39 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /api/projects/{project_id}/clean-build-cache:
+    post:
+      summary: Clean the Docker build cache for agents
+      operationId: cleanBuildCache
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            type: string
+          description: Project ID
+        - in: query
+          name: agent_type
+          required: false
+          schema:
+            type: string
+          description: Agent type to clean (claude, gemini, copilot, bash). If omitted, cleans all.
+      responses:
+        '204':
+          description: No Content (Cache cleaned)
+        '404':
+          description: Project Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /api/projects/{project_id}/agents/{id}:
     get:
       summary: Get a specific Hydra agent by ID
