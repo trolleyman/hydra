@@ -12,6 +12,7 @@ import (
 
 func TestGetDevToolsConfig(t *testing.T) {
 	s := &Server{
+		Development: true,
 		ProjectRoot: "/tmp/test-project",
 		DefaultProject: projects.ProjectInfo{
 			UUID: "test-uuid",
@@ -43,6 +44,22 @@ func TestGetDevToolsConfig(t *testing.T) {
 	}
 	if resp.Workspace.Uuid != "test-uuid" {
 		t.Errorf("expected uuid test-uuid, got %s", resp.Workspace.Uuid)
+	}
+}
+
+func TestGetDevToolsConfigUnauthorized(t *testing.T) {
+	s := &Server{
+		Development: false,
+	}
+
+	handler := NewHandler(s)
+	req := httptest.NewRequest(http.MethodGet, "/.well-known/appspecific/com.chrome.devtools.json", nil)
+	rr := httptest.NewRecorder()
+
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("expected status 403, got %d", rr.Code)
 	}
 }
 

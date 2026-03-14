@@ -82,6 +82,14 @@ func NewHandler(s *Server) http.Handler {
 }
 
 func (s *Server) GetDevToolsConfig(_ context.Context, _ api.GetDevToolsConfigRequestObject) (api.GetDevToolsConfigResponseObject, error) {
+	if !s.Development {
+		return api.GetDevToolsConfig403JSONResponse{
+			Code:    403,
+			Error:   "unauthorized",
+			Details: "not in dev mode",
+		}, nil
+	}
+
 	root := s.ProjectRoot
 	uid := s.DefaultProject.UUID
 
