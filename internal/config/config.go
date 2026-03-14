@@ -41,7 +41,8 @@ const DefaultPrePrompt = "You are a head (AI agent) of Hydra, an AI orchestratio
 	"- Once you have finished the task, make a final git commit with all remaining changes.\n" +
 	"- Do *not* use git push or git pull.\n" +
 	"- Try not to bother the user with requests unless necessary.\n" +
-	"- If there are any design decisions made without user input, document them in each commit."
+	"- If there are any design decisions made without user input, document them in each commit.\n" +
+	"- Use rg (ripgrep) instead of grep."
 
 // AgentConfig holds per-agent-type configuration.
 type AgentConfig struct {
