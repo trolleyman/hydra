@@ -443,9 +443,9 @@ const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onComment, 
   return (
     <div ref={fileRef} className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden mb-4 bg-white dark:bg-gray-900 shadow-sm">
       <div
-        className="flex items-center gap-2 px-3 py-1.5 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 sticky top-9 z-10 cursor-pointer"
+        className="flex items-center gap-2 px-3 py-1.5 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 z-20 cursor-pointer"
         onClick={() => onToggleCollapse(file.path)}
-      >
+      >{/* TODO: Make `sticky` */}
         <button
           onClick={() => onToggleCollapse(file.path)}
           className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-500 cursor-pointer transition-colors"
@@ -1570,7 +1570,7 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger }: { agent
           <div className="flex-1 min-w-0">
             {singleFile ? (
               <>
-                <div className="flex items-center gap-2 mb-3 sticky top-9 z-20 bg-gray-50 dark:bg-gray-900 py-1 -mx-1 px-1">
+                <div className="flex items-center gap-2 mb-3 z-20">{/* For now, not `sticky top-10` - when making the file headers sticky, make this sticky too */}
                   <button
                     onClick={() => {
                       const nextIdx = Math.max(0, singleFileIdx - 1)
