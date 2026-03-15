@@ -119,7 +119,7 @@ func Merge(projectRoot, srcRef string, authorName, authorEmail string) error {
 		authorName = "Hydra Agent"
 	}
 	if authorEmail == "" {
-		authorEmail = "hydra@hydra.ai"
+		authorEmail = "hydra@trolleyman.org"
 	}
 
 	msg := fmt.Sprintf("Merge branch '%s'", srcRef)
