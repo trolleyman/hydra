@@ -1294,6 +1294,24 @@ func CleanBuildCache(ctx context.Context, cli *dockerclient.Client, agentType Ag
 		}
 	}
 
+	// Also prune dangling images (intermediate images)
+	prReport, err := cli.ImagesPrune(ctx, filters.NewArgs(filters.Arg("dangling", "true")))
+	if err != nil {
+		log.Printf("info: could not prune dangling images: %v", err)
+	} else if prReport.SpaceReclaimed > 0 {
+		log.Printf("Pruned dangling images, reclaimed %d bytes", prReport.SpaceReclaimed)
+	}
+
+	// Also prune BuildKit build cache
+	// Note: BuildCachePrune is global, it doesn't support filtering by agentType easily
+	// but since the user wants to "clean the whole build cache", this is appropriate.
+	bcReport, err := cli.BuildCachePrune(ctx, build.CachePruneOptions{All: true})
+	if err != nil {
+		log.Printf("info: could not prune build cache: %v", err)
+	} else if bcReport.SpaceReclaimed > 0 {
+		log.Printf("Pruned build cache, reclaimed %d bytes", bcReport.SpaceReclaimed)
+	}
+
 	return nil
 }
 
