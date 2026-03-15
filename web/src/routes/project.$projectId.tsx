@@ -9,8 +9,8 @@ import { SpawnForm } from '../components/SpawnForm'
 import { AgentSidebarItem } from '../components/AgentComponents'
 import { NotFound } from '../components/NotFound'
 
-export const Route = createFileRoute('/_agents')({
-  component: AgentsLayout,
+export const Route = createFileRoute('/project/$projectId')({
+  component: ProjectLayout,
   notFoundComponent: () => <NotFound />,
 })
 
@@ -18,12 +18,18 @@ const SIDEBAR_MIN = 160
 const SIDEBAR_MAX = 600
 const SIDEBAR_DEFAULT = 224 // w-56
 
-function AgentsLayout() {
-  const { selectedProjectId } = useProjectStore()
+function ProjectLayout() {
+  const { projectId } = useParams({ from: '/project/$projectId' })
+  const { setSelectedProjectId } = useProjectStore()
   const { agents, setAgents, setLoading, setError, loading, error, addAgent } = useAgentStore()
   const navigate = useNavigate()
   const params = useParams({ strict: false }) as { agentId?: string }
-  const selectedId = params.agentId
+  const selectedAgentId = params.agentId
+
+  // Sync URL projectId to store so other components can read it.
+  useEffect(() => {
+    setSelectedProjectId(projectId)
+  }, [projectId, setSelectedProjectId])
 
   const filteredAgents = agents.filter((a) => !a.ephemeral)
 
@@ -60,25 +66,21 @@ function AgentsLayout() {
     document.addEventListener('mouseup', onUp)
   }, [])
 
-  // Reset agent selection when project changes.
+  // Reset agents when project changes.
   useEffect(() => {
     setAgents([])
     setLoading(true)
     setError(null)
-  }, [selectedProjectId, setAgents, setLoading, setError])
+  }, [projectId, setAgents, setLoading, setError])
 
   useEffect(() => {
     let cancelled = false
 
     async function fetchAgents() {
       try {
-        const result = await api.default.listAgents(selectedProjectId ?? '')
+        const result = await api.default.listAgents(projectId)
         if (cancelled) return
         setAgents(result)
-
-        // If we are at root and there are agents, we could auto-select the first one.
-        // But the requirement is "/ be no agent selected".
-        // So we don't auto-navigate here.
       } catch (e) {
         if (!cancelled) setError(formatError(e))
       } finally {
@@ -92,11 +94,11 @@ function AgentsLayout() {
       cancelled = true
       clearInterval(interval)
     }
-  }, [selectedProjectId, setAgents, setError, setLoading])
+  }, [projectId, setAgents, setError, setLoading])
 
   function handleSpawned(agent: AgentResponse) {
     addAgent(agent)
-    navigate({ to: '/agent/$agentId', params: { agentId: agent.id } })
+    navigate({ to: '/project/$projectId/agent/$agentId', params: { projectId, agentId: agent.id } })
   }
 
   if (loading && filteredAgents.length === 0) {
@@ -126,7 +128,7 @@ function AgentsLayout() {
         className="relative bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex flex-col shrink-0"
       >
         {/* Spawn form (compact) */}
-        <SpawnForm compact projectId={selectedProjectId} onSpawned={handleSpawned} />
+        <SpawnForm compact projectId={projectId} onSpawned={handleSpawned} />
 
         <div className="px-3 py-3 border-b border-gray-100 dark:border-gray-700">
           <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">
@@ -139,8 +141,8 @@ function AgentsLayout() {
             <AgentSidebarItem
               key={agent.id}
               agent={agent}
-              selected={agent.id === selectedId}
-              onClick={() => { navigate({ to: '/agent/$agentId', params: { agentId: agent.id } }) }}
+              selected={agent.id === selectedAgentId}
+              onClick={() => { navigate({ to: '/project/$projectId/agent/$agentId', params: { projectId, agentId: agent.id } }) }}
             />
           ))}
         </div>

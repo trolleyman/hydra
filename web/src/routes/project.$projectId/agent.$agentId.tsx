@@ -1,21 +1,19 @@
 import { useRef, useEffect } from 'react'
 import { createFileRoute, useNavigate, useParams } from '@tanstack/react-router'
-import { useProjectStore } from '../../stores/projectStore'
 import { useAgentStore } from '../../stores/agentStore'
 import { api } from '../../stores/apiClient'
 import { AgentDetail } from '../../components/AgentDetail'
 import { NotFound } from '../../components/NotFound'
 import type { AgentResponse } from '../../api'
 
-export const Route = createFileRoute('/_agents/agent/$agentId')({
+export const Route = createFileRoute('/project/$projectId/agent/$agentId')({
   component: AgentPage,
 })
 
 function AgentPage() {
-  const { selectedProjectId } = useProjectStore()
+  const { projectId, agentId } = useParams({ from: '/project/$projectId/agent/$agentId' })
   const { agents, removeAgent, updateAgent, setAgents } = useAgentStore()
   const navigate = useNavigate()
-  const { agentId } = useParams({ from: '/_agents/agent/$agentId' })
 
   const isMounted = useRef(true)
   const agentIdRef = useRef(agentId)
@@ -36,20 +34,20 @@ function AgentPage() {
   function handleKilled(id: string) {
     removeAgent(id)
     if (isMounted.current && id === agentIdRef.current) {
-      navigate({ to: '/' })
+      navigate({ to: '/project/$projectId', params: { projectId } })
     }
   }
 
   function handleRestarted(newAgent: AgentResponse) {
     updateAgent(newAgent)
     if (isMounted.current && newAgent.id === agentIdRef.current) {
-      navigate({ to: '/agent/$agentId', params: { agentId: newAgent.id } })
+      navigate({ to: '/project/$projectId/agent/$agentId', params: { projectId, agentId: newAgent.id } })
     }
   }
 
   async function handleRefresh() {
     try {
-      const result = await api.default.listAgents(selectedProjectId ?? '')
+      const result = await api.default.listAgents(projectId)
       setAgents(result)
     } catch (e) {
       console.error('Failed to refresh agents:', e)
@@ -69,7 +67,7 @@ function AgentPage() {
   return (
     <AgentDetail
       agent={agent}
-      projectId={selectedProjectId}
+      projectId={projectId}
       onKilled={handleKilled}
       onRestarted={handleRestarted}
       onRefresh={handleRefresh}

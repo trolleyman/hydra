@@ -1,12 +1,11 @@
-import { createFileRoute, useNavigate } from '@tanstack/react-router'
+import { createFileRoute, useNavigate, useParams } from '@tanstack/react-router'
 import { useState } from 'react'
-import { useProjectStore } from '../../stores/projectStore'
 import { useAgentStore } from '../../stores/agentStore'
 import { SpawnForm } from '../../components/SpawnForm'
 import type { AgentResponse } from '../../api'
 
-export const Route = createFileRoute('/_agents/')({
-  component: HomePage,
+export const Route = createFileRoute('/project/$projectId/')({
+  component: ProjectHomePage,
 })
 
 function EmptyDetail({ onSpawn }: { onSpawn?: () => void }) {
@@ -27,8 +26,8 @@ function EmptyDetail({ onSpawn }: { onSpawn?: () => void }) {
   )
 }
 
-function HomePage() {
-  const { selectedProjectId } = useProjectStore()
+function ProjectHomePage() {
+  const { projectId } = useParams({ from: '/project/$projectId/' })
   const { agents, addAgent } = useAgentStore()
   const [showSpawn, setShowSpawn] = useState(false)
   const navigate = useNavigate()
@@ -37,11 +36,11 @@ function HomePage() {
 
   function handleSpawned(agent: AgentResponse) {
     addAgent(agent)
-    navigate({ to: '/agent/$agentId', params: { agentId: agent.id } })
+    navigate({ to: '/project/$projectId/agent/$agentId', params: { projectId, agentId: agent.id } })
   }
 
   if (filteredAgents.length === 0 || showSpawn) {
-    return <SpawnForm projectId={selectedProjectId} onSpawned={handleSpawned} />
+    return <SpawnForm projectId={projectId} onSpawned={handleSpawned} />
   }
 
   return <EmptyDetail onSpawn={() => setShowSpawn(true)} />

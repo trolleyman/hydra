@@ -6,14 +6,21 @@ import fs from 'fs/promises'
 
 const source = await fs.readFile('src/routeTree.gen.ts', 'utf-8')
 
-// Extract path: '...' strings from the route tree file
-const pathMatches = [...source.matchAll(/path:\s*'([^']+)'/g)]
-const rawPaths = pathMatches.map((m) => m[1])
-
-// Deduplicate and filter internal paths
-const validPaths = [...new Set(rawPaths)].filter(
-  (p) => p !== '__root__' && !p.startsWith('/_'),
-)
+// Extract full paths from FileRoutesByFullPath interface keys.
+// These are the canonical full URL paths (not relative child paths).
+const fullPathBlock = source.match(/export interface FileRoutesByFullPath \{([^}]+)\}/s)
+let validPaths: string[] = []
+if (fullPathBlock) {
+  const keyMatches = [...fullPathBlock[1].matchAll(/'([^']+)':/g)]
+  validPaths = [...new Set(keyMatches.map((m) => m[1]))]
+} else {
+  // Fallback: extract path: '...' strings and deduplicate
+  const pathMatches = [...source.matchAll(/path:\s*'([^']+)'/g)]
+  const rawPaths = pathMatches.map((m) => m[1])
+  validPaths = [...new Set(rawPaths)].filter(
+    (p) => p !== '__root__' && !p.startsWith('/_'),
+  )
+}
 
 console.log('--- Generating path patterns ---')
 const pathPatterns = validPaths.map((p) => {

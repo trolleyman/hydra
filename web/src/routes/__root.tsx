@@ -1,4 +1,4 @@
-import { createRootRoute, Link, Outlet } from '@tanstack/react-router'
+import { createRootRoute, Link, Outlet, useNavigate, useParams } from '@tanstack/react-router'
 import { useEffect, useRef, useState } from 'react'
 import { api } from '../stores/apiClient'
 import { useProjectStore } from '../stores/projectStore'
@@ -193,6 +193,10 @@ function RootLayout() {
 
   const { projects, selectedProjectId, setProjects, setSelectedProjectId, setSystemStatus } = useProjectStore()
   const dialog = useDialogStore()
+  const navigate = useNavigate()
+  // Get projectId from current URL if available (e.g. /project/:projectId/...)
+  const routeParams = useParams({ strict: false }) as { projectId?: string }
+  const currentProjectId = routeParams.projectId ?? selectedProjectId
 
   useEffect(() => {
     localStorage.setItem('hydra-dark-mode', String(dark))
@@ -231,10 +235,18 @@ function RootLayout() {
           const currentId = useProjectStore.getState().selectedProjectId
           if (currentId == null || !ps.some((p) => p.id === currentId)) {
             // Fall back to the server's default project id.
+            let newId: string | null = null
             if (status.default_project_id != null && ps.some((p) => p.id === status.default_project_id)) {
-              setSelectedProjectId(status.default_project_id)
+              newId = status.default_project_id
             } else if (ps.length > 0) {
-              setSelectedProjectId(ps[0].id)
+              newId = ps[0].id
+            }
+            if (newId != null) {
+              setSelectedProjectId(newId)
+              // Navigate to the project if we're at the root.
+              if (window.location.pathname === '/') {
+                navigate({ to: '/project/$projectId', params: { projectId: newId }, replace: true })
+              }
             }
           }
         } catch {
@@ -297,6 +309,7 @@ function RootLayout() {
         setProjects([...projects, p])
       }
       setSelectedProjectId(p.id)
+      navigate({ to: '/project/$projectId', params: { projectId: p.id } })
     } catch (err) {
       if (err instanceof ApiError && err.status === 400) {
         const errorType = err.body?.error
@@ -324,6 +337,7 @@ function RootLayout() {
                     setProjects([...projects, p])
                   }
                   setSelectedProjectId(p.id)
+                  navigate({ to: '/project/$projectId', params: { projectId: p.id } })
                   resolve()
                 } catch (e) {
                   reject(e)
@@ -340,13 +354,17 @@ function RootLayout() {
     }
   }
 
-  const selectedProject = projects.find((p) => p.id === selectedProjectId) ?? null
+  const selectedProject = projects.find((p) => p.id === currentProjectId) ?? null
 
   return (
     <div className="h-full bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 flex flex-col">
       <header className="h-12 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex items-center px-4 gap-3 shrink-0">
-        {/* Logo */}
-        <Link to="/" className="flex items-center gap-2 shrink-0">
+        {/* Logo — navigate to current project if one is selected, otherwise root */}
+        <Link
+          to={currentProjectId ? '/project/$projectId' : '/'}
+          params={currentProjectId ? { projectId: currentProjectId } : {}}
+          className="flex items-center gap-2 shrink-0"
+        >
           <div className="w-6 h-6 flex items-center justify-center overflow-hidden rounded-sm">
             <img
               className='w-full h-full object-cover object-center'
@@ -360,8 +378,11 @@ function RootLayout() {
         {/* Project selector dropdown */}
         <ProjectDropdown
           projects={projects}
-          selectedId={selectedProjectId}
-          onSelect={setSelectedProjectId}
+          selectedId={currentProjectId}
+          onSelect={(id) => {
+            setSelectedProjectId(id)
+            navigate({ to: '/project/$projectId', params: { projectId: id } })
+          }}
           onAddProject={handleAddProject}
         />
 
@@ -402,12 +423,22 @@ function RootLayout() {
             </button>
           </Tooltip>
           <Tooltip content="Settings">
-            <Link
-              to="/settings"
-              className="w-7 h-7 flex items-center justify-center rounded-md cursor-pointer text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-            >
-              <Settings className="w-5 h-5" />
-            </Link>
+            {currentProjectId ? (
+              <Link
+                to="/project/$projectId/settings"
+                params={{ projectId: currentProjectId }}
+                className="w-7 h-7 flex items-center justify-center rounded-md cursor-pointer text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+              >
+                <Settings className="w-5 h-5" />
+              </Link>
+            ) : (
+              <Link
+                to="/settings"
+                className="w-7 h-7 flex items-center justify-center rounded-md cursor-pointer text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+              >
+                <Settings className="w-5 h-5" />
+              </Link>
+            )}
           </Tooltip>
         </div>
       </header>

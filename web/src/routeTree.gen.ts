@@ -10,63 +10,99 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as SettingsRouteImport } from './routes/settings'
-import { Route as AgentsRouteImport } from './routes/_agents'
-import { Route as AgentsIndexRouteImport } from './routes/_agents/index'
-import { Route as AgentsAgentAgentIdRouteImport } from './routes/_agents/agent.$agentId'
+import { Route as IndexRouteImport } from './routes/index'
+import { Route as ProjectProjectIdRouteImport } from './routes/project.$projectId'
+import { Route as ProjectProjectIdIndexRouteImport } from './routes/project.$projectId/index'
+import { Route as ProjectProjectIdSettingsRouteImport } from './routes/project.$projectId/settings'
+import { Route as ProjectProjectIdAgentAgentIdRouteImport } from './routes/project.$projectId/agent.$agentId'
 
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AgentsRoute = AgentsRouteImport.update({
-  id: '/_agents',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AgentsIndexRoute = AgentsIndexRouteImport.update({
+const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
-  getParentRoute: () => AgentsRoute,
+  getParentRoute: () => rootRouteImport,
 } as any)
-const AgentsAgentAgentIdRoute = AgentsAgentAgentIdRouteImport.update({
-  id: '/agent/$agentId',
-  path: '/agent/$agentId',
-  getParentRoute: () => AgentsRoute,
+const ProjectProjectIdRoute = ProjectProjectIdRouteImport.update({
+  id: '/project/$projectId',
+  path: '/project/$projectId',
+  getParentRoute: () => rootRouteImport,
 } as any)
+const ProjectProjectIdIndexRoute = ProjectProjectIdIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => ProjectProjectIdRoute,
+} as any)
+const ProjectProjectIdSettingsRoute =
+  ProjectProjectIdSettingsRouteImport.update({
+    id: '/settings',
+    path: '/settings',
+    getParentRoute: () => ProjectProjectIdRoute,
+  } as any)
+const ProjectProjectIdAgentAgentIdRoute =
+  ProjectProjectIdAgentAgentIdRouteImport.update({
+    id: '/agent/$agentId',
+    path: '/agent/$agentId',
+    getParentRoute: () => ProjectProjectIdRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
-  '/': typeof AgentsIndexRoute
+  '/': typeof IndexRoute
   '/settings': typeof SettingsRoute
-  '/agent/$agentId': typeof AgentsAgentAgentIdRoute
+  '/project/$projectId': typeof ProjectProjectIdRouteWithChildren
+  '/project/$projectId/settings': typeof ProjectProjectIdSettingsRoute
+  '/project/$projectId/': typeof ProjectProjectIdIndexRoute
+  '/project/$projectId/agent/$agentId': typeof ProjectProjectIdAgentAgentIdRoute
 }
 export interface FileRoutesByTo {
+  '/': typeof IndexRoute
   '/settings': typeof SettingsRoute
-  '/': typeof AgentsIndexRoute
-  '/agent/$agentId': typeof AgentsAgentAgentIdRoute
+  '/project/$projectId/settings': typeof ProjectProjectIdSettingsRoute
+  '/project/$projectId': typeof ProjectProjectIdIndexRoute
+  '/project/$projectId/agent/$agentId': typeof ProjectProjectIdAgentAgentIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
-  '/_agents': typeof AgentsRouteWithChildren
+  '/': typeof IndexRoute
   '/settings': typeof SettingsRoute
-  '/_agents/': typeof AgentsIndexRoute
-  '/_agents/agent/$agentId': typeof AgentsAgentAgentIdRoute
+  '/project/$projectId': typeof ProjectProjectIdRouteWithChildren
+  '/project/$projectId/settings': typeof ProjectProjectIdSettingsRoute
+  '/project/$projectId/': typeof ProjectProjectIdIndexRoute
+  '/project/$projectId/agent/$agentId': typeof ProjectProjectIdAgentAgentIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/settings' | '/agent/$agentId'
+  fullPaths:
+    | '/'
+    | '/settings'
+    | '/project/$projectId'
+    | '/project/$projectId/settings'
+    | '/project/$projectId/'
+    | '/project/$projectId/agent/$agentId'
   fileRoutesByTo: FileRoutesByTo
-  to: '/settings' | '/' | '/agent/$agentId'
+  to:
+    | '/'
+    | '/settings'
+    | '/project/$projectId/settings'
+    | '/project/$projectId'
+    | '/project/$projectId/agent/$agentId'
   id:
     | '__root__'
-    | '/_agents'
+    | '/'
     | '/settings'
-    | '/_agents/'
-    | '/_agents/agent/$agentId'
+    | '/project/$projectId'
+    | '/project/$projectId/settings'
+    | '/project/$projectId/'
+    | '/project/$projectId/agent/$agentId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
-  AgentsRoute: typeof AgentsRouteWithChildren
+  IndexRoute: typeof IndexRoute
   SettingsRoute: typeof SettingsRoute
+  ProjectProjectIdRoute: typeof ProjectProjectIdRouteWithChildren
 }
 
 declare module '@tanstack/react-router' {
@@ -78,46 +114,63 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/_agents': {
-      id: '/_agents'
-      path: ''
-      fullPath: '/'
-      preLoaderRoute: typeof AgentsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/_agents/': {
-      id: '/_agents/'
+    '/': {
+      id: '/'
       path: '/'
       fullPath: '/'
-      preLoaderRoute: typeof AgentsIndexRouteImport
-      parentRoute: typeof AgentsRoute
+      preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
     }
-    '/_agents/agent/$agentId': {
-      id: '/_agents/agent/$agentId'
+    '/project/$projectId': {
+      id: '/project/$projectId'
+      path: '/project/$projectId'
+      fullPath: '/project/$projectId'
+      preLoaderRoute: typeof ProjectProjectIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/project/$projectId/': {
+      id: '/project/$projectId/'
+      path: '/'
+      fullPath: '/project/$projectId/'
+      preLoaderRoute: typeof ProjectProjectIdIndexRouteImport
+      parentRoute: typeof ProjectProjectIdRoute
+    }
+    '/project/$projectId/settings': {
+      id: '/project/$projectId/settings'
+      path: '/settings'
+      fullPath: '/project/$projectId/settings'
+      preLoaderRoute: typeof ProjectProjectIdSettingsRouteImport
+      parentRoute: typeof ProjectProjectIdRoute
+    }
+    '/project/$projectId/agent/$agentId': {
+      id: '/project/$projectId/agent/$agentId'
       path: '/agent/$agentId'
-      fullPath: '/agent/$agentId'
-      preLoaderRoute: typeof AgentsAgentAgentIdRouteImport
-      parentRoute: typeof AgentsRoute
+      fullPath: '/project/$projectId/agent/$agentId'
+      preLoaderRoute: typeof ProjectProjectIdAgentAgentIdRouteImport
+      parentRoute: typeof ProjectProjectIdRoute
     }
   }
 }
 
-interface AgentsRouteChildren {
-  AgentsIndexRoute: typeof AgentsIndexRoute
-  AgentsAgentAgentIdRoute: typeof AgentsAgentAgentIdRoute
+interface ProjectProjectIdRouteChildren {
+  ProjectProjectIdSettingsRoute: typeof ProjectProjectIdSettingsRoute
+  ProjectProjectIdIndexRoute: typeof ProjectProjectIdIndexRoute
+  ProjectProjectIdAgentAgentIdRoute: typeof ProjectProjectIdAgentAgentIdRoute
 }
 
-const AgentsRouteChildren: AgentsRouteChildren = {
-  AgentsIndexRoute: AgentsIndexRoute,
-  AgentsAgentAgentIdRoute: AgentsAgentAgentIdRoute,
+const ProjectProjectIdRouteChildren: ProjectProjectIdRouteChildren = {
+  ProjectProjectIdSettingsRoute: ProjectProjectIdSettingsRoute,
+  ProjectProjectIdIndexRoute: ProjectProjectIdIndexRoute,
+  ProjectProjectIdAgentAgentIdRoute: ProjectProjectIdAgentAgentIdRoute,
 }
 
-const AgentsRouteWithChildren =
-  AgentsRoute._addFileChildren(AgentsRouteChildren)
+const ProjectProjectIdRouteWithChildren =
+  ProjectProjectIdRoute._addFileChildren(ProjectProjectIdRouteChildren)
 
 const rootRouteChildren: RootRouteChildren = {
-  AgentsRoute: AgentsRouteWithChildren,
+  IndexRoute: IndexRoute,
   SettingsRoute: SettingsRoute,
+  ProjectProjectIdRoute: ProjectProjectIdRouteWithChildren,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

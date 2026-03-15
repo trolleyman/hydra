@@ -1,19 +1,19 @@
-import { createFileRoute, useBlocker, useNavigate } from '@tanstack/react-router'
+import { createFileRoute, Link, useBlocker, useNavigate, useParams } from '@tanstack/react-router'
 import { useEffect, useState, useRef, useMemo, useLayoutEffect } from 'react'
 import hljs from 'highlight.js'
-import { api } from '../stores/apiClient'
-import { formatError } from '../api/format_error'
-import { useProjectStore } from '../stores/projectStore'
-import type { ConfigResponse, AgentConfig, AgentResponse } from '../api'
-import { AgentTerminal } from '../components/AgentTerminal'
+import { api } from '../../stores/apiClient'
+import { formatError } from '../../api/format_error'
+import { useProjectStore } from '../../stores/projectStore'
+import type { ConfigResponse, AgentConfig, AgentResponse } from '../../api'
+import { AgentTerminal } from '../../components/AgentTerminal'
 import { X, Layers, Monitor, Sparkles, FileText, Plus, Trash2, AlertCircle, Save, Eraser } from 'lucide-react'
-import { InfoTooltip } from '../components/InfoTooltip'
-import type { ProjectInfo } from '../api'
+import { InfoTooltip } from '../../components/InfoTooltip'
+import type { ProjectInfo } from '../../api'
 
-import { useDialogStore } from '../stores/dialogStore'
+import { useDialogStore } from '../../stores/dialogStore'
 
-export const Route = createFileRoute('/settings')({
-  component: SettingsPage,
+export const Route = createFileRoute('/project/$projectId/settings')({
+  component: ProjectSettingsPage,
 })
 
 type SettingsSection = 'all' | 'claude' | 'gemini' | 'copilot' | 'defaults' | 'features'
@@ -39,11 +39,13 @@ const DOCKERFILE_TEMPLATES: Record<string, { label: string; content: string; sha
   }
 }
 
-function SettingsPage() {
-  const { selectedProjectId, projects, systemStatus } = useProjectStore()
+function ProjectSettingsPage() {
+  const { projectId } = useParams({ from: '/project/$projectId/settings' })
+  const { projects, systemStatus } = useProjectStore()
   const navigate = useNavigate()
   const [config, setConfig] = useState<ConfigResponse | null>(null)
   const [baseConfig, setBaseConfig] = useState<string | null>(null)
+  const [inheritedConfig, setInheritedConfig] = useState<ConfigResponse | null>(null)
   const [activeSection, setActiveSection] = useState<SettingsSection>('all')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -52,7 +54,7 @@ function SettingsPage() {
   const [testing, setTesting] = useState(false)
 
   const development = systemStatus?.development ?? false
-  const selectedProject = projects.find(p => p.id === selectedProjectId)
+  const selectedProject = projects.find(p => p.id === projectId)
 
   const hasUnsavedChanges = useMemo(() => {
     if (!config || !baseConfig) return false
@@ -86,9 +88,11 @@ function SettingsPage() {
     async function fetchConfig() {
       setLoading(true)
       try {
-        const editCfg = await api.default.getConfig(selectedProjectId ?? '', 'user')
+        const editCfg = await api.default.getConfig(projectId, 'project')
         setConfig(editCfg)
         setBaseConfig(JSON.stringify(editCfg))
+        const userCfg = await api.default.getConfig(projectId, 'user')
+        setInheritedConfig(userCfg)
       } catch (err) {
         setError(formatError(err))
       } finally {
@@ -103,17 +107,17 @@ function SettingsPage() {
     } else {
       fetchConfig()
     }
-  }, [selectedProjectId])
+  }, [projectId])
 
   async function handleSave() {
     if (!config) return
     setSaving(true)
     try {
-      await api.default.saveConfig(selectedProjectId ?? '', config, 'user')
+      await api.default.saveConfig(projectId, config, 'project')
       setBaseConfig(JSON.stringify(config))
       useDialogStore.getState().show({
         title: 'Settings Saved',
-        message: 'Configuration saved to user successfully!',
+        message: 'Configuration saved to project successfully!',
         type: 'info'
       })
     } catch (err) {
@@ -130,7 +134,7 @@ function SettingsPage() {
   async function handleTest(agentType: string) {
     setTesting(true)
     try {
-      const resp = await api.default.spawnAgent(selectedProjectId ?? '', {
+      const resp = await api.default.spawnAgent(projectId, {
         prompt: '',
         agent_type: agentType,
         id: `test-${agentType}-${Math.random().toString(36).slice(2, 6)}`,
@@ -168,46 +172,32 @@ function SettingsPage() {
             </div>
             <div className="flex items-center gap-4">
               <div className="flex p-1 bg-gray-200 dark:bg-gray-800 rounded-lg shrink-0">
-                {selectedProjectId && (
-                  <button
-                    onClick={() => {
-                      if (hasUnsavedChanges && !window.confirm('You have unsaved changes. Discard them?')) {
-                        return
-                      }
-                      navigate({ to: '/project/$projectId/settings', params: { projectId: selectedProjectId } })
-                    }}
-                    className="px-3 py-1 text-xs font-medium rounded-md transition-all cursor-pointer text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
-                  >
-                    Project: {selectedProject?.name || 'Current'}
-                  </button>
-                )}
                 <button
                   className="px-3 py-1 text-xs font-medium rounded-md transition-all cursor-default bg-white dark:bg-gray-700 text-blue-600 dark:text-blue-400 shadow-sm"
+                >
+                  Project: {selectedProject?.name || 'Current'}
+                </button>
+                <button
+                  onClick={() => {
+                    if (hasUnsavedChanges && !window.confirm('You have unsaved changes. Discard them?')) {
+                      return
+                    }
+                    navigate({ to: '/settings' })
+                  }}
+                  className="px-3 py-1 text-xs font-medium rounded-md transition-all cursor-pointer text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
                 >
                   User (Global)
                 </button>
               </div>
               <p className="text-xs text-gray-500 dark:text-gray-400">
-                Settings stored in ~/.config/hydra/config.toml for all projects.
+                Settings stored in .hydra/config.toml within the project root.
               </p>
             </div>
           </div>
           <div className="flex flex-col items-end gap-3">
-            {selectedProjectId ? (
-              <button
-                onClick={() => navigate({ to: '/project/$projectId', params: { projectId: selectedProjectId } })}
-                className="text-sm text-blue-500 hover:text-blue-700 font-medium shrink-0 cursor-pointer"
-              >
-                ← Back to Agents
-              </button>
-            ) : (
-              <button
-                onClick={() => navigate({ to: '/' })}
-                className="text-sm text-blue-500 hover:text-blue-700 font-medium shrink-0 cursor-pointer"
-              >
-                ← Back
-              </button>
-            )}
+            <Link to="/project/$projectId" params={{ projectId }} className="text-sm text-blue-500 hover:text-blue-700 font-medium shrink-0">
+              ← Back to Agents
+            </Link>
             <button
               onClick={handleSave}
               disabled={saving || !hasUnsavedChanges}
@@ -304,7 +294,7 @@ function SettingsPage() {
                 <ConfigForm
                   value={config.defaults}
                   onChange={(defaults) => setConfig({ ...config, defaults })}
-                  inherited={null}
+                  inherited={inheritedConfig?.defaults ?? null}
                   agentType="default"
                   selectedProject={selectedProject}
                   defaultPrePrompt={config.default_pre_prompt}
@@ -407,7 +397,7 @@ function SettingsPage() {
                     <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">These are the base Dockerfiles embedded in Hydra. They are read-only and serve as the foundation for agent containers.</p>
                   </div>
                 </div>
-                <DefaultDockerfilesSection dockerfiles={config.default_dockerfiles ?? {}} />
+                <DefaultDockerfilesSection dockerfiles={config.default_dockerfiles ?? inheritedConfig?.default_dockerfiles ?? {}} />
               </div>
             )}
 
@@ -461,7 +451,7 @@ function SettingsPage() {
                 <button
                   onClick={() => {
                     if (testAgent.ephemeral) {
-                      api.default.killAgent(selectedProjectId ?? '', testAgent.id).catch(() => { })
+                      api.default.killAgent(projectId, testAgent.id).catch(() => { })
                     }
                     setTestAgent(null)
                   }}
@@ -477,7 +467,7 @@ function SettingsPage() {
                 </p>
                 <AgentTerminal
                   agentId={testAgent.id}
-                  projectId={selectedProjectId}
+                  projectId={projectId}
                   isEphemeral={testAgent.ephemeral}
                 />
               </div>
@@ -648,7 +638,7 @@ function ConfigForm({
 
   const baseImage = `hydra-agent-${agentType === 'default' ? '<type>' : agentType}`
 
-  const projectDir = selectedProject?.path || '/home/<user>/project'
+  const projectDir = selectedProject?.path || '/project'
 
   function resolvePathExample(path: string) {
     if (!path) return '...'
