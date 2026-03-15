@@ -615,7 +615,7 @@ function ConfigForm({
   const [cleaning, setCleaning] = useState(false)
 
   async function handleCleanCache() {
-    if (!window.confirm('This will remove agent-related Docker images to force a rebuild. Existing containers will not be affected. Continue?')) {
+    if (!window.confirm('This will remove agent-related Docker images and build cache to force a rebuild. Existing containers will not be affected. Continue?')) {
       return
     }
     setCleaning(true)
@@ -623,7 +623,7 @@ function ConfigForm({
       await api.default.cleanBuildCache(selectedProject?.id ?? '', agentType === 'default' ? undefined : agentType)
       useDialogStore.getState().show({
         title: 'Cache Cleaned',
-        message: 'Agent Docker images removed successfully.',
+        message: 'Agent Docker images and build cache removed successfully.',
         type: 'info'
       })
     } catch (err) {
