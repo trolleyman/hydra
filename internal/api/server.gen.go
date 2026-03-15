@@ -164,6 +164,15 @@ type AgentStatusInfo struct {
 	Timestamp string `json:"timestamp"`
 }
 
+// CleanCacheResponse defines model for CleanCacheResponse.
+type CleanCacheResponse struct {
+	// ImagesRemoved Number of Hydra-specific images removed
+	ImagesRemoved int `json:"images_removed"`
+
+	// SpaceReclaimed Total space reclaimed in bytes (images + build cache)
+	SpaceReclaimed int64 `json:"space_reclaimed"`
+}
+
 // CommitInfo defines model for CommitInfo.
 type CommitInfo struct {
 	AuthorEmail string `json:"author_email"`
@@ -1885,12 +1894,13 @@ type CleanBuildCacheResponseObject interface {
 	VisitCleanBuildCacheResponse(w http.ResponseWriter) error
 }
 
-type CleanBuildCache204Response struct {
-}
+type CleanBuildCache200JSONResponse CleanCacheResponse
 
-func (response CleanBuildCache204Response) VisitCleanBuildCacheResponse(w http.ResponseWriter) error {
-	w.WriteHeader(204)
-	return nil
+func (response CleanBuildCache200JSONResponse) VisitCleanBuildCacheResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
 }
 
 type CleanBuildCache404JSONResponse ErrorResponse

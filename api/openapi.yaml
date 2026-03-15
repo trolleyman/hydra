@@ -618,8 +618,12 @@ paths:
             type: string
           description: Agent type to clean (claude, gemini, copilot, bash). If omitted, cleans all.
       responses:
-        '204':
-          description: No Content (Cache cleaned)
+        '200':
+          description: OK (Cache cleaned)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CleanCacheResponse'
         '404':
           description: Project Not Found
           content:
@@ -1109,3 +1113,15 @@ components:
             data:
               type: string
               description: Base64 encoded binary data or plain string
+
+    CleanCacheResponse:
+      type: object
+      required: [images_removed, space_reclaimed]
+      properties:
+        images_removed:
+          type: integer
+          description: Number of Hydra-specific images removed
+        space_reclaimed:
+          type: integer
+          format: int64
+          description: Total space reclaimed in bytes (images + build cache)

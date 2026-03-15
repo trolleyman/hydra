@@ -16,6 +16,7 @@ export type { AgentInputRequest } from './models/AgentInputRequest';
 export type { AgentResponse } from './models/AgentResponse';
 export { AgentStatus } from './models/AgentStatus';
 export type { AgentStatusInfo } from './models/AgentStatusInfo';
+export type { CleanCacheResponse } from './models/CleanCacheResponse';
 export type { CommitInfo } from './models/CommitInfo';
 export type { ConfigResponse } from './models/ConfigResponse';
 export { DiffFile } from './models/DiffFile';

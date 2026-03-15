@@ -1219,11 +1219,15 @@ func (s *Server) CleanBuildCache(ctx context.Context, request api.CleanBuildCach
 		agentType = docker.AgentType(*request.Params.AgentType)
 	}
 
-	if err := docker.CleanBuildCache(ctx, s.DockerClient, agentType); err != nil {
+	res, err := docker.CleanBuildCache(ctx, s.DockerClient, agentType)
+	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
 
-	return api.CleanBuildCache204Response{}, nil
+	return api.CleanBuildCache200JSONResponse{
+		ImagesRemoved:  res.ImagesRemoved,
+		SpaceReclaimed: res.SpaceReclaimed,
+	}, nil
 }
 
 func (s *Server) SendAgentInput(ctx context.Context, request api.SendAgentInputRequestObject) (api.SendAgentInputResponseObject, error) {

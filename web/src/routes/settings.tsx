@@ -620,10 +620,11 @@ function ConfigForm({
     }
     setCleaning(true)
     try {
-      await api.default.cleanBuildCache(selectedProject?.id ?? '', agentType === 'default' ? undefined : agentType)
+      const res = await api.default.cleanBuildCache(selectedProject?.id ?? '', agentType === 'default' ? undefined : agentType)
+      const reclaimedMB = (res.space_reclaimed / (1024 * 1024)).toFixed(1)
       useDialogStore.getState().show({
         title: 'Cache Cleaned',
-        message: 'Agent Docker images and build cache removed successfully.',
+        message: `Removed ${res.images_removed} images. Total space reclaimed: ${reclaimedMB} MB.`,
         type: 'info'
       })
     } catch (err) {
