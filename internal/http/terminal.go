@@ -1,6 +1,7 @@
 package http
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"io"
@@ -16,7 +17,6 @@ import (
 	"github.com/docker/docker/api/types/container"
 	"github.com/gorilla/websocket"
 	"github.com/trolleyman/hydra/internal/config"
-	"github.com/trolleyman/hydra/internal/docker"
 	"github.com/trolleyman/hydra/internal/heads"
 	"github.com/trolleyman/hydra/internal/paths"
 )
@@ -288,13 +288,7 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 			}
 			switch msgType {
 			case websocket.BinaryMessage:
-				input := data
-				if !useShell && head.AgentType == docker.AgentTypeGemini {
-					// Escape ! as !! to avoid triggering gemini-cli's shell mode
-					s := strings.ReplaceAll(string(data), "!", "!!")
-					input = []byte(s)
-				}
-				if _, err := attachConn.Write(input); err != nil {
+				if _, err := attachConn.Write(data); err != nil {
 					return
 				}
 			case websocket.TextMessage:
@@ -351,9 +345,78 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 		_ = attachConn.Close()
 	}()
 
+	// Tail the status log and send diff_refresh events when git commands are detected,
+	// and also on a 20-second periodic timer.
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("terminal ws: panic in diff-refresh goroutine for agent %q: %v", agentID, r)
+			}
+		}()
+		statusLogPath := paths.GetStatusLogFromProjectRoot(projectRoot, agentID)
+		ticker := time.NewTicker(20 * time.Second)
+		defer ticker.Stop()
+
+		var scanner *bufio.Scanner
+		f, err := os.Open(statusLogPath)
+		if err == nil {
+			defer f.Close()
+			// Seek to end so we only tail new entries.
+			_, _ = f.Seek(0, io.SeekEnd)
+			scanner = bufio.NewScanner(f)
+			// Allow large lines (e.g. tool output containing large diffs)
+			scanner.Buffer(make([]byte, 256*1024), 256*1024)
+		}
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				sendTerminalEvent(conn, "diff_refresh")
+			default:
+				if scanner != nil && scanner.Scan() {
+					if looksLikeGitCommand(scanner.Text()) {
+						sendTerminalEvent(conn, "diff_refresh")
+					}
+				} else {
+					time.Sleep(200 * time.Millisecond)
+				}
+			}
+		}
+	}()
+
 	// Wait for connection to close or container to stop
 	<-done
 	log.Printf("terminal ws: handler finished for agent %q", agentID)
+}
+
+// looksLikeGitCommand returns true if the JSONL hook line contains a git command invocation.
+// It handles both Claude (PostToolUse / Bash) and Gemini (postToolUse / bash) formats.
+func looksLikeGitCommand(line string) bool {
+	var entry struct {
+		Hook map[string]interface{} `json:"hook"`
+	}
+	if err := json.Unmarshal([]byte(line), &entry); err != nil || entry.Hook == nil {
+		return false
+	}
+	hook := entry.Hook
+
+	// Check tool_name field (Claude: "Bash", Gemini: "bash", others: "shell", "run_command", etc.)
+	toolName, _ := hook["tool_name"].(string)
+	toolNameLower := strings.ToLower(toolName)
+	isBashTool := toolNameLower == "bash" || toolNameLower == "shell" || toolNameLower == "run_command" || toolNameLower == "execute_command"
+	if !isBashTool {
+		return false
+	}
+
+	// Check tool_input.command for "git " prefix or substring
+	if toolInput, ok := hook["tool_input"].(map[string]interface{}); ok {
+		if cmd, ok := toolInput["command"].(string); ok {
+			return strings.Contains(cmd, "git ") || strings.HasPrefix(strings.TrimSpace(cmd), "git")
+		}
+	}
+	return false
 }
 
 // streamBuildLog returns true if the build finished successfully and we should transition to attach.

@@ -1251,14 +1251,22 @@ func buildDockerImage(ctx context.Context, cli *dockerclient.Client, tag, docker
 	return nil
 }
 
+// CleanCacheResult holds details about the build cache cleanup operation.
+type CleanCacheResult struct {
+	ImagesRemoved  int   `json:"images_removed"`
+	SpaceReclaimed int64 `json:"space_reclaimed"`
+}
+
 // CleanBuildCache removes agent-related Docker images to force rebuilds.
 // It removes images matching hydra-agent-<agentType>-* and hydra-agent-<agentType>:latest.
 // It also removes the hydra-agent-default image if it exists.
 // Existing containers using these images are not affected (ImageRemove will skip if in use).
-func CleanBuildCache(ctx context.Context, cli *dockerclient.Client, agentType AgentType) error {
+func CleanBuildCache(ctx context.Context, cli *dockerclient.Client, agentType AgentType) (*CleanCacheResult, error) {
+	result := &CleanCacheResult{}
+
 	images, err := cli.ImageList(ctx, image.ListOptions{All: true})
 	if err != nil {
-		return errtrace.Wrap(fmt.Errorf("list images: %w", err))
+		return nil, errtrace.Wrap(fmt.Errorf("list images: %w", err))
 	}
 
 	patterns := []string{"hydra-agent-default"}
@@ -1285,16 +1293,40 @@ func CleanBuildCache(ctx context.Context, cli *dockerclient.Client, agentType Ag
 
 		if shouldRemove {
 			log.Printf("Removing image %s (%v)...", img.ID[:12], img.RepoTags)
+			// ImageRemove returns a list of items removed, but we'll just count the image itself for simplicity.
+			// Reclaiming space from ImageRemove is tricky to calculate accurately without more calls,
+			// so we mainly rely on the Prune calls for space reclaimed.
 			_, err := cli.ImageRemove(ctx, img.ID, image.RemoveOptions{PruneChildren: true})
 			if err != nil {
 				// Skip if in use or other non-critical error
 				log.Printf("info: could not remove image %s: %v", img.ID[:12], err)
 				continue
 			}
+			result.ImagesRemoved++
 		}
 	}
 
-	return nil
+	// Also prune dangling images (intermediate images)
+	prReport, err := cli.ImagesPrune(ctx, filters.NewArgs(filters.Arg("dangling", "true")))
+	if err != nil {
+		log.Printf("info: could not prune dangling images: %v", err)
+	} else if prReport.SpaceReclaimed > 0 {
+		log.Printf("Pruned dangling images, reclaimed %d bytes", prReport.SpaceReclaimed)
+		result.SpaceReclaimed += int64(prReport.SpaceReclaimed)
+	}
+
+	// Also prune BuildKit build cache
+	// Note: BuildCachePrune is global, it doesn't support filtering by agentType easily
+	// but since the user wants to "clean the whole build cache", this is appropriate.
+	bcReport, err := cli.BuildCachePrune(ctx, build.CachePruneOptions{All: true})
+	if err != nil {
+		log.Printf("info: could not prune build cache: %v", err)
+	} else if bcReport.SpaceReclaimed > 0 {
+		log.Printf("Pruned build cache, reclaimed %d bytes", bcReport.SpaceReclaimed)
+		result.SpaceReclaimed += int64(bcReport.SpaceReclaimed)
+	}
+
+	return result, nil
 }
 
 // resolveContainerHydraBin returns the path to a hydra binary that can run

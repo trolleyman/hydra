@@ -602,15 +602,16 @@ function ConfigForm({
   const [cleaning, setCleaning] = useState(false)
 
   async function handleCleanCache() {
-    if (!window.confirm('This will remove agent-related Docker images to force a rebuild. Existing containers will not be affected. Continue?')) {
+    if (!window.confirm('This will remove agent-related Docker images and build cache to force a rebuild. Existing containers will not be affected. Continue?')) {
       return
     }
     setCleaning(true)
     try {
-      await api.default.cleanBuildCache(selectedProject?.id ?? '', agentType === 'default' ? undefined : agentType)
+      const res = await api.default.cleanBuildCache(selectedProject?.id ?? '', agentType === 'default' ? undefined : agentType)
+      const reclaimedMB = (res.space_reclaimed / (1024 * 1024)).toFixed(1)
       useDialogStore.getState().show({
         title: 'Cache Cleaned',
-        message: 'Agent Docker images removed successfully.',
+        message: `Removed ${res.images_removed} images. Total space reclaimed: ${reclaimedMB} MB.`,
         type: 'info'
       })
     } catch (err) {

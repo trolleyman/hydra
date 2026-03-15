@@ -60,6 +60,7 @@ export function AgentDetail({
   const [restarting, setRestarting] = useState(false)
   const [copied, setCopied] = useState(false)
   const [, setTick] = useState(0)
+  const [diffRefreshTrigger, setDiffRefreshTrigger] = useState(0)
 
   const systemStatus = useProjectStore(state => state.systemStatus)
   const terminalBashEnabled = systemStatus?.features?.terminal_bash ?? false
@@ -306,10 +307,11 @@ export function AgentDetail({
           isEphemeral={agent.ephemeral}
           bashEnabled={terminalBashEnabled}
           onRefresh={onRefresh}
+          onDiffRefresh={() => setDiffRefreshTrigger((t) => t + 1)}
         />
 
         {/* Diff viewer */}
-        <DiffViewer agent={agent} projectId={projectId} />
+        <DiffViewer agent={agent} projectId={projectId} externalRefreshTrigger={diffRefreshTrigger} />
       </div>
     </div>
   )

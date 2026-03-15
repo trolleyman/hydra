@@ -1,6 +1,7 @@
 package http
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -659,7 +660,12 @@ func (s *SimulationServer) GetAgentDiffFiles(w http.ResponseWriter, r *http.Requ
 }
 
 func (s *SimulationServer) CleanBuildCache(w http.ResponseWriter, r *http.Request, projectId string, params api.CleanBuildCacheParams) {
-	w.WriteHeader(http.StatusNoContent)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(api.CleanCacheResponse{
+		ImagesRemoved:  2,
+		SpaceReclaimed: 1024 * 1024 * 50, // 50 MB
+	})
 }
 
 func (s *SimulationServer) SendAgentInput(w http.ResponseWriter, r *http.Request, projectId string, id string) {

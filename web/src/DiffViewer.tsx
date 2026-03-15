@@ -1129,7 +1129,7 @@ function SettingsPopup({ fileView, onFileViewChange, sideBySide, onSideBySideCha
 
 // ── Main DiffViewer component ─────────────────────────────────────────────────
 
-export function DiffViewer({ agent, projectId }: { agent: AgentResponse; projectId: string | null }) {
+export function DiffViewer({ agent, projectId, externalRefreshTrigger }: { agent: AgentResponse; projectId: string | null; externalRefreshTrigger?: number }) {
   const [commits, setCommits] = useState<CommitInfo[]>([])
   const [leftSel, setLeftSel] = useState<LeftSel>({ type: 'base' })
   const [rightSel, setRightSel] = useState<RightSel>({ type: 'latest' })
@@ -1258,6 +1258,42 @@ export function DiffViewer({ agent, projectId }: { agent: AgentResponse; project
 
     return () => { cancelled = true }
   }, [agent.id, agent.branch_name, projectId, leftSel, rightSel, refreshKey, fetchFileDiff])
+
+  // Background (silent) refresh when triggered externally (e.g. git command detected via WS).
+  const silentRefreshRef = useRef(false)
+  useEffect(() => {
+    if (!externalRefreshTrigger || !agent.branch_name) return
+    if (silentRefreshRef.current) return
+    silentRefreshRef.current = true
+
+    const params: { baseRef?: string; headRef?: string; includeUncommitted?: boolean } = {}
+    if (leftSel.type === 'commit') params.baseRef = leftSel.sha
+    else if (leftSel.type === 'latest' && commitsRef.current.length > 0) params.baseRef = commitsRef.current[0].sha
+    if (rightSel.type === 'uncommitted') params.includeUncommitted = true
+    else if (rightSel.type === 'commit') params.headRef = rightSel.sha
+
+    // Refresh commits list silently
+    api.default.getAgentCommits(projectId ?? '', agent.id)
+      .then((c) => { setCommits(c); commitsRef.current = c }).catch(() => { })
+
+    api.default.getAgentDiffFiles(projectId ?? '', agent.id,
+      params.baseRef, params.headRef, params.includeUncommitted)
+      .then((d) => {
+        setDiff((prev) => {
+          if (!prev) return d
+          // Re-fetch diffs for files that were already loaded
+          d.files.forEach((f) => {
+            const existing = prev.files.find((pf) => pf.path === f.path)
+            if (existing?.hunks && existing.hunks.length > 0) fetchFileDiff(f.path)
+            else if (f.additions + f.deletions < 1000) fetchFileDiff(f.path)
+          })
+          return d
+        })
+      })
+      .catch(() => { })
+      .finally(() => { silentRefreshRef.current = false })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [externalRefreshTrigger])
 
   const handleLeftChange = useCallback((newLeft: LeftSel) => {
     setLeftSel(newLeft)

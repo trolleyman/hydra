@@ -5,6 +5,7 @@
 import type { AddProjectRequest } from '../models/AddProjectRequest';
 import type { AgentInputRequest } from '../models/AgentInputRequest';
 import type { AgentResponse } from '../models/AgentResponse';
+import type { CleanCacheResponse } from '../models/CleanCacheResponse';
 import type { CommitInfo } from '../models/CommitInfo';
 import type { ConfigResponse } from '../models/ConfigResponse';
 import type { DiffResponse } from '../models/DiffResponse';
@@ -421,13 +422,13 @@ export class DefaultService {
      * Clean the Docker build cache for agents
      * @param projectId Project ID
      * @param agentType Agent type to clean (claude, gemini, copilot, bash). If omitted, cleans all.
-     * @returns void
+     * @returns CleanCacheResponse OK (Cache cleaned)
      * @throws ApiError
      */
     public cleanBuildCache(
         projectId: string,
         agentType?: string,
-    ): CancelablePromise<void> {
+    ): CancelablePromise<CleanCacheResponse> {
         return this.httpRequest.request({
             method: 'POST',
             url: '/api/projects/{project_id}/clean-build-cache',

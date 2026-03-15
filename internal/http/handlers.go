@@ -1,14 +1,12 @@
 package http
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
-	"os/exec"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -17,6 +15,7 @@ import (
 
 	"braces.dev/errtrace"
 	dockerclient "github.com/docker/docker/client"
+	gogit "github.com/go-git/go-git/v5"
 	"github.com/trolleyman/hydra/internal/api"
 	"github.com/trolleyman/hydra/internal/config"
 	"github.com/trolleyman/hydra/internal/db"
@@ -109,7 +108,7 @@ func (s *Server) GetDevToolsConfig(_ context.Context, _ api.GetDevToolsConfigReq
 func (s *Server) resolveProjectRoot(projectID string) (string, error) {
 	p := s.ProjectsManager.GetByID(projectID)
 	if p == nil {
-		return "", &apiError{Code: 404, Type: api.ErrorResponseErrorNotFound, Err: fmt.Errorf("project not found: %s", projectID)}
+		return "", &apiError{Code: 404, Type: api.ErrorResponseErrorNotFound, Err: fmt.Errorf("project not found: %s", projectID)} //errtrace:skip
 	}
 	norm, err := paths.NormalizePath(p.Path)
 	if err != nil {
@@ -176,12 +175,12 @@ func (s *Server) AddProject(_ context.Context, request api.AddProjectRequestObje
 		// Only init if it's not already a git repo.
 		if _, err := paths.GetProjectRoot(projectPath); err != nil {
 			// Not a git repo or directory doesn't exist (but we might have just created it)
-			out, err := exec.Command("git", "-C", projectPath, "init").CombinedOutput()
+			_, err := gogit.PlainInit(projectPath, false)
 			if err != nil {
 				return api.AddProject500JSONResponse{
 					Code:    500,
 					Error:   api.ErrorResponseErrorInternalError,
-					Details: "git init failed: " + string(out),
+					Details: "git init failed: " + err.Error(),
 				}, nil
 			}
 		}
@@ -222,7 +221,7 @@ func (s *Server) ListAgents(ctx context.Context, request api.ListAgentsRequestOb
 			err = fmt.Errorf("Error connecting to Docker: %w", err)
 		}
 
-		return nil, &apiError{
+		return nil, &apiError{ //errtrace:skip
 			Code: 500,
 			Type: errorType,
 			Err:  err,
@@ -634,17 +633,21 @@ func (s *Server) MergeAgent(ctx context.Context, request api.MergeAgentRequestOb
 	}
 
 	if err := git.ValidateRef(branchName); err != nil {
-		return nil, errtrace.Wrap(&apiError{Code: 400, Type: api.ErrorResponseErrorBadRequest, Err: err})
+		return nil, &apiError{Code: 400, Type: api.ErrorResponseErrorBadRequest, Err: err} //errtrace:skip
 	}
 
-	var stderr bytes.Buffer
-	gitMergeCmd := exec.CommandContext(ctx, "git", "-C", projectRoot, "merge", branchName)
-	gitMergeCmd.Stderr = &stderr
-	if err := gitMergeCmd.Run(); err != nil {
-		// If merge fails, abort it to keep the base branch clean.
-		exec.CommandContext(ctx, "git", "-C", projectRoot, "merge", "--abort").Run()
+	// Get author info from git config
+	authorName := ""
+	authorEmail := ""
+	if repo, err := gogit.PlainOpen(projectRoot); err == nil {
+		if cfg, err := repo.Config(); err == nil {
+			authorName = cfg.Author.Name
+			authorEmail = cfg.Author.Email
+		}
+	}
 
-		errMsg := fmt.Sprintf("git merge failed: %s", strings.TrimSpace(stderr.String()))
+	if err := git.Merge(projectRoot, branchName, authorName, authorEmail); err != nil {
+		errMsg := fmt.Sprintf("merge failed: %v", err)
 		if s.DB != nil {
 			_ = s.DB.ClearHeadStatus(head.ID, &errMsg)
 		}
@@ -681,7 +684,7 @@ func (s *Server) UpdateAgentFromBase(ctx context.Context, request api.UpdateAgen
 	}
 
 	if head.Branch == nil {
-		return nil, &apiError{
+		return nil, &apiError{ //errtrace:skip
 			Code: 500,
 			Type: api.ErrorResponseErrorBadRequest,
 			Err:  errors.New("agent has no git branch to update"),
@@ -694,18 +697,20 @@ func (s *Server) UpdateAgentFromBase(ctx context.Context, request api.UpdateAgen
 	}
 
 	if err := git.ValidateRef(head.BaseBranch); err != nil {
-		return nil, errtrace.Wrap(&apiError{Code: 400, Type: api.ErrorResponseErrorBadRequest, Err: err})
+		return nil, &apiError{Code: 400, Type: api.ErrorResponseErrorBadRequest, Err: err} //errtrace:skip
 	}
 
 	// Attempt merge (base branch into current branch)
-	var stderr bytes.Buffer
-	gitMergeCmd := exec.CommandContext(ctx, "git", "-C", mergeDir, "merge", head.BaseBranch)
-	gitMergeCmd.Stderr = &stderr
-	if err := gitMergeCmd.Run(); err != nil {
-		// If merge fails, abort it to keep worktree clean
-		exec.CommandContext(ctx, "git", "-C", mergeDir, "merge", "--abort").Run()
+	authorName, authorEmail := "", ""
+	if repo, err := gogit.PlainOpen(mergeDir); err == nil {
+		if cfg, err := repo.Config(); err == nil {
+			authorName = cfg.Author.Name
+			authorEmail = cfg.Author.Email
+		}
+	}
 
-		errMsg := fmt.Sprintf("git merge failed: %s", strings.TrimSpace(stderr.String()))
+	if err := git.Merge(mergeDir, head.BaseBranch, authorName, authorEmail); err != nil {
+		errMsg := fmt.Sprintf("merge failed: %v", err)
 		return api.UpdateAgentFromBase409JSONResponse(api.MergeConflictError{
 			Error:   api.MergeConflictErrorErrorMergeConflict,
 			Code:    409,
@@ -1219,11 +1224,15 @@ func (s *Server) CleanBuildCache(ctx context.Context, request api.CleanBuildCach
 		agentType = docker.AgentType(*request.Params.AgentType)
 	}
 
-	if err := docker.CleanBuildCache(ctx, s.DockerClient, agentType); err != nil {
+	res, err := docker.CleanBuildCache(ctx, s.DockerClient, agentType)
+	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
 
-	return api.CleanBuildCache204Response{}, nil
+	return api.CleanBuildCache200JSONResponse{
+		ImagesRemoved:  res.ImagesRemoved,
+		SpaceReclaimed: res.SpaceReclaimed,
+	}, nil
 }
 
 func (s *Server) SendAgentInput(ctx context.Context, request api.SendAgentInputRequestObject) (api.SendAgentInputResponseObject, error) {
@@ -1249,9 +1258,8 @@ func (s *Server) SendAgentInput(ctx context.Context, request api.SendAgentInputR
 
 	text := request.Body.Text
 	if head.AgentType == docker.AgentTypeGemini {
-		// Escape ! as !! to avoid triggering gemini-cli's shell mode
-		// (which ignores everything before the ! and executes the rest as a command)
-		text = strings.ReplaceAll(text, "!", "!!")
+		// Use bracketed paste mode to prevent gemini-cli from interpreting ! as a shell command
+		text = "\x1b[200~" + text + "\x1b[201~"
 	}
 	text += "\r"
 

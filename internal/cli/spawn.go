@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"os/exec"
 	"strings"
 	"text/tabwriter"
 
 	"braces.dev/errtrace"
+	gogit "github.com/go-git/go-git/v5"
 	"github.com/spf13/cobra"
 	"github.com/trolleyman/hydra/internal/config"
 	"github.com/trolleyman/hydra/internal/db"
@@ -154,11 +154,24 @@ var spawnCmd = &cobra.Command{
 	},
 }
 
-// readGitConfig reads a single git config value via the git binary.
+// readGitConfig reads a single git config value.
 func readGitConfig(projectRoot, key string) string {
-	out, err := exec.Command("git", "-C", projectRoot, "config", key).Output()
+	repo, err := gogit.PlainOpen(projectRoot)
 	if err != nil {
 		return ""
 	}
-	return strings.TrimSpace(string(out))
+	cfg, err := repo.Config()
+	if err != nil {
+		return ""
+	}
+	// Key is like "user.name"
+	parts := strings.Split(key, ".")
+	if len(parts) != 2 {
+		return ""
+	}
+	section := cfg.Raw.Section(parts[0])
+	if section == nil {
+		return ""
+	}
+	return section.Option(parts[1])
 }
