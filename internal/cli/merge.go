@@ -4,13 +4,14 @@ import (
 	"bufio"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 
 	"braces.dev/errtrace"
+	gogit "github.com/go-git/go-git/v5"
 	"github.com/spf13/cobra"
 	"github.com/trolleyman/hydra/internal/db"
 	"github.com/trolleyman/hydra/internal/docker"
+	"github.com/trolleyman/hydra/internal/git"
 	"github.com/trolleyman/hydra/internal/heads"
 	"github.com/trolleyman/hydra/internal/paths"
 )
@@ -62,12 +63,29 @@ var mergeCmd = &cobra.Command{
 		branchName := *head.Branch
 
 		if mergeFlags.preview {
-			diffCmd := exec.CommandContext(ctx, "git", "-C", projectRoot, "diff", "HEAD..."+branchName)
-			diffCmd.Stdin = os.Stdin
-			diffCmd.Stdout = os.Stdout
-			diffCmd.Stderr = os.Stderr
-			if err := diffCmd.Run(); err != nil {
+			diffFiles, err := git.GetDiff(projectRoot, "HEAD", branchName, false, true, "", 3)
+			if err != nil {
 				return errtrace.Wrap(fmt.Errorf("git diff: %w", err))
+			}
+
+			for _, f := range diffFiles {
+				if f.Binary {
+					fmt.Printf("Binary file %s changed\n", f.Path)
+					continue
+				}
+				for _, h := range f.Hunks {
+					fmt.Println(h.Header)
+					for _, l := range h.Lines {
+						prefix := " "
+						switch l.Type {
+						case git.DiffLineAddition:
+							prefix = "+"
+						case git.DiffLineDeletion:
+							prefix = "-"
+						}
+						fmt.Printf("%s%s\n", prefix, l.Content)
+					}
+				}
 			}
 
 			fmt.Fprint(os.Stderr, "\nProceed with merge? [y/N]: ")
@@ -83,11 +101,16 @@ var mergeCmd = &cobra.Command{
 			}
 		}
 
-		gitMergeCmd := exec.CommandContext(ctx, "git", "-C", projectRoot, "merge", branchName)
-		gitMergeCmd.Stdin = os.Stdin
-		gitMergeCmd.Stdout = os.Stdout
-		gitMergeCmd.Stderr = os.Stderr
-		if err := gitMergeCmd.Run(); err != nil {
+		// Get author info from git config
+		authorName, authorEmail := "", ""
+		if repo, err := gogit.PlainOpen(projectRoot); err == nil {
+			if cfg, err := repo.Config(); err == nil {
+				authorName = cfg.Author.Name
+				authorEmail = cfg.Author.Email
+			}
+		}
+
+		if err := git.Merge(projectRoot, branchName, authorName, authorEmail); err != nil {
 			return errtrace.Wrap(fmt.Errorf("merge failed (resolve conflicts then run 'hydra kill %s'): %w", id, err))
 		}
 

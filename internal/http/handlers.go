@@ -1,14 +1,12 @@
 package http
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
-	"os/exec"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -638,14 +636,18 @@ func (s *Server) MergeAgent(ctx context.Context, request api.MergeAgentRequestOb
 		return nil, errtrace.Wrap(&apiError{Code: 400, Type: api.ErrorResponseErrorBadRequest, Err: err})
 	}
 
-	var stderr bytes.Buffer
-	gitMergeCmd := exec.CommandContext(ctx, "git", "-C", projectRoot, "merge", branchName)
-	gitMergeCmd.Stderr = &stderr
-	if err := gitMergeCmd.Run(); err != nil {
-		// If merge fails, abort it to keep the base branch clean.
-		exec.CommandContext(ctx, "git", "-C", projectRoot, "merge", "--abort").Run()
+	// Get author info from git config
+	authorName := ""
+	authorEmail := ""
+	if repo, err := gogit.PlainOpen(projectRoot); err == nil {
+		if cfg, err := repo.Config(); err == nil {
+			authorName = cfg.Author.Name
+			authorEmail = cfg.Author.Email
+		}
+	}
 
-		errMsg := fmt.Sprintf("git merge failed: %s", strings.TrimSpace(stderr.String()))
+	if err := git.Merge(projectRoot, branchName, authorName, authorEmail); err != nil {
+		errMsg := fmt.Sprintf("merge failed: %v", err)
 		if s.DB != nil {
 			_ = s.DB.ClearHeadStatus(head.ID, &errMsg)
 		}
@@ -699,14 +701,16 @@ func (s *Server) UpdateAgentFromBase(ctx context.Context, request api.UpdateAgen
 	}
 
 	// Attempt merge (base branch into current branch)
-	var stderr bytes.Buffer
-	gitMergeCmd := exec.CommandContext(ctx, "git", "-C", mergeDir, "merge", head.BaseBranch)
-	gitMergeCmd.Stderr = &stderr
-	if err := gitMergeCmd.Run(); err != nil {
-		// If merge fails, abort it to keep worktree clean
-		exec.CommandContext(ctx, "git", "-C", mergeDir, "merge", "--abort").Run()
+	authorName, authorEmail := "", ""
+	if repo, err := gogit.PlainOpen(mergeDir); err == nil {
+		if cfg, err := repo.Config(); err == nil {
+			authorName = cfg.Author.Name
+			authorEmail = cfg.Author.Email
+		}
+	}
 
-		errMsg := fmt.Sprintf("git merge failed: %s", strings.TrimSpace(stderr.String()))
+	if err := git.Merge(mergeDir, head.BaseBranch, authorName, authorEmail); err != nil {
+		errMsg := fmt.Sprintf("merge failed: %v", err)
 		return api.UpdateAgentFromBase409JSONResponse(api.MergeConflictError{
 			Error:   api.MergeConflictErrorErrorMergeConflict,
 			Code:    409,
