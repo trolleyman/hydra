@@ -1253,9 +1253,8 @@ func (s *Server) SendAgentInput(ctx context.Context, request api.SendAgentInputR
 
 	text := request.Body.Text
 	if head.AgentType == docker.AgentTypeGemini {
-		// Escape ! as !! to avoid triggering gemini-cli's shell mode
-		// (which ignores everything before the ! and executes the rest as a command)
-		text = strings.ReplaceAll(text, "!", "!!")
+		// Use bracketed paste mode to prevent gemini-cli from interpreting ! as a shell command
+		text = "\x1b[200~" + text + "\x1b[201~"
 	}
 	text += "\r"
 

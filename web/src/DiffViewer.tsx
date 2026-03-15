@@ -443,9 +443,9 @@ const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onComment, 
   return (
     <div ref={fileRef} className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden mb-4 bg-white dark:bg-gray-900 shadow-sm">
       <div
-        className="flex items-center gap-2 px-3 py-1.5 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 z-20 cursor-pointer"
+        className="flex items-center gap-2 px-3 py-1.5 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 sticky top-9 z-10 cursor-pointer"
         onClick={() => onToggleCollapse(file.path)}
-      >{/* TODO: Make `sticky` */}
+      >
         <button
           onClick={() => onToggleCollapse(file.path)}
           className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-500 cursor-pointer transition-colors"
@@ -1129,7 +1129,7 @@ function SettingsPopup({ fileView, onFileViewChange, sideBySide, onSideBySideCha
 
 // ── Main DiffViewer component ─────────────────────────────────────────────────
 
-export function DiffViewer({ agent, projectId }: { agent: AgentResponse; projectId: string | null }) {
+export function DiffViewer({ agent, projectId, externalRefreshTrigger }: { agent: AgentResponse; projectId: string | null; externalRefreshTrigger?: number }) {
   const [commits, setCommits] = useState<CommitInfo[]>([])
   const [leftSel, setLeftSel] = useState<LeftSel>({ type: 'base' })
   const [rightSel, setRightSel] = useState<RightSel>({ type: 'latest' })
@@ -1258,6 +1258,42 @@ export function DiffViewer({ agent, projectId }: { agent: AgentResponse; project
 
     return () => { cancelled = true }
   }, [agent.id, agent.branch_name, projectId, leftSel, rightSel, refreshKey, fetchFileDiff])
+
+  // Background (silent) refresh when triggered externally (e.g. git command detected via WS).
+  const silentRefreshRef = useRef(false)
+  useEffect(() => {
+    if (!externalRefreshTrigger || !agent.branch_name) return
+    if (silentRefreshRef.current) return
+    silentRefreshRef.current = true
+
+    const params: { baseRef?: string; headRef?: string; includeUncommitted?: boolean } = {}
+    if (leftSel.type === 'commit') params.baseRef = leftSel.sha
+    else if (leftSel.type === 'latest' && commitsRef.current.length > 0) params.baseRef = commitsRef.current[0].sha
+    if (rightSel.type === 'uncommitted') params.includeUncommitted = true
+    else if (rightSel.type === 'commit') params.headRef = rightSel.sha
+
+    // Refresh commits list silently
+    api.default.getAgentCommits(projectId ?? '', agent.id)
+      .then((c) => { setCommits(c); commitsRef.current = c }).catch(() => { })
+
+    api.default.getAgentDiffFiles(projectId ?? '', agent.id,
+      params.baseRef, params.headRef, params.includeUncommitted)
+      .then((d) => {
+        setDiff((prev) => {
+          if (!prev) return d
+          // Re-fetch diffs for files that were already loaded
+          d.files.forEach((f) => {
+            const existing = prev.files.find((pf) => pf.path === f.path)
+            if (existing?.hunks && existing.hunks.length > 0) fetchFileDiff(f.path)
+            else if (f.additions + f.deletions < 1000) fetchFileDiff(f.path)
+          })
+          return d
+        })
+      })
+      .catch(() => { })
+      .finally(() => { silentRefreshRef.current = false })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [externalRefreshTrigger])
 
   const handleLeftChange = useCallback((newLeft: LeftSel) => {
     setLeftSel(newLeft)
@@ -1534,7 +1570,7 @@ export function DiffViewer({ agent, projectId }: { agent: AgentResponse; project
           <div className="flex-1 min-w-0">
             {singleFile ? (
               <>
-                <div className="flex items-center gap-2 mb-3 z-20">{/* For now, not `sticky top-10` - when making the file headers sticky, make this sticky too */}
+                <div className="flex items-center gap-2 mb-3 sticky top-9 z-20 bg-gray-50 dark:bg-gray-900 py-1 -mx-1 px-1">
                   <button
                     onClick={() => {
                       const nextIdx = Math.max(0, singleFileIdx - 1)
