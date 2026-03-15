@@ -108,7 +108,7 @@ func (s *Server) GetDevToolsConfig(_ context.Context, _ api.GetDevToolsConfigReq
 func (s *Server) resolveProjectRoot(projectID string) (string, error) {
 	p := s.ProjectsManager.GetByID(projectID)
 	if p == nil {
-		return "", errtrace.Wrap(&apiError{Code: 404, Type: api.ErrorResponseErrorNotFound, Err: fmt.Errorf("project not found: %s", projectID)})
+		return "", &apiError{Code: 404, Type: api.ErrorResponseErrorNotFound, Err: fmt.Errorf("project not found: %s", projectID)} //errtrace:skip
 	}
 	norm, err := paths.NormalizePath(p.Path)
 	if err != nil {
@@ -221,11 +221,11 @@ func (s *Server) ListAgents(ctx context.Context, request api.ListAgentsRequestOb
 			err = fmt.Errorf("Error connecting to Docker: %w", err)
 		}
 
-		return nil, errtrace.Wrap(&apiError{
+		return nil, &apiError{ //errtrace:skip
 			Code: 500,
 			Type: errorType,
 			Err:  err,
-		})
+		}
 	}
 	resp := make(api.ListAgents200JSONResponse, len(headList))
 	for i, h := range headList {
@@ -633,7 +633,7 @@ func (s *Server) MergeAgent(ctx context.Context, request api.MergeAgentRequestOb
 	}
 
 	if err := git.ValidateRef(branchName); err != nil {
-		return nil, errtrace.Wrap(&apiError{Code: 400, Type: api.ErrorResponseErrorBadRequest, Err: err})
+		return nil, &apiError{Code: 400, Type: api.ErrorResponseErrorBadRequest, Err: err} //errtrace:skip
 	}
 
 	// Get author info from git config
@@ -684,11 +684,11 @@ func (s *Server) UpdateAgentFromBase(ctx context.Context, request api.UpdateAgen
 	}
 
 	if head.Branch == nil {
-		return nil, errtrace.Wrap(&apiError{
+		return nil, &apiError{ //errtrace:skip
 			Code: 500,
 			Type: api.ErrorResponseErrorBadRequest,
 			Err:  errors.New("agent has no git branch to update"),
-		})
+		}
 	}
 
 	mergeDir := projectRoot
@@ -697,7 +697,7 @@ func (s *Server) UpdateAgentFromBase(ctx context.Context, request api.UpdateAgen
 	}
 
 	if err := git.ValidateRef(head.BaseBranch); err != nil {
-		return nil, errtrace.Wrap(&apiError{Code: 400, Type: api.ErrorResponseErrorBadRequest, Err: err})
+		return nil, &apiError{Code: 400, Type: api.ErrorResponseErrorBadRequest, Err: err} //errtrace:skip
 	}
 
 	// Attempt merge (base branch into current branch)
