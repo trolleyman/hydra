@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"braces.dev/errtrace"
+	"github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/trolleyman/hydra/internal/common"
 	"github.com/trolleyman/hydra/internal/paths"
 )
@@ -27,26 +29,47 @@ func ValidateRef(ref string) error {
 
 // GetCurrentBranch returns the name of the currently checked-out branch.
 func GetCurrentBranch(projectRoot string) (string, error) {
-	out, err := exec.Command("git", "-C", projectRoot, "rev-parse", "--abbrev-ref", "HEAD").Output()
+	repo, err := git.PlainOpen(projectRoot)
 	if err != nil {
-		return "", errtrace.Wrap(fmt.Errorf("git rev-parse: %w", err))
+		return "", errtrace.Wrap(err)
 	}
-	return strings.TrimSpace(string(out)), nil
+
+	head, err := repo.Head()
+	if err != nil {
+		return "", errtrace.Wrap(err)
+	}
+
+	if head.Name().IsBranch() {
+		return head.Name().Short(), nil
+	}
+
+	return head.Hash().String(), nil
 }
 
 // ListHydraBranches returns all branches matching hydra/*.
 func ListHydraBranches(projectRoot string) ([]string, error) {
-	out, err := exec.Command("git", "-C", projectRoot, "branch", "--list", "hydra/*", "--format=%(refname:short)").Output()
+	repo, err := git.PlainOpen(projectRoot)
 	if err != nil {
-		return nil, errtrace.Wrap(fmt.Errorf("git branch --list: %w", err))
+		return nil, errtrace.Wrap(err)
 	}
+
+	iter, err := repo.Branches()
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+
 	var branches []string
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		line = strings.TrimSpace(line)
-		if line != "" {
-			branches = append(branches, line)
+	err = iter.ForEach(func(ref *plumbing.Reference) error {
+		name := ref.Name().Short()
+		if strings.HasPrefix(name, "hydra/") {
+			branches = append(branches, name)
 		}
+		return nil
+	})
+	if err != nil {
+		return nil, errtrace.Wrap(err)
 	}
+
 	return branches, nil
 }
 
@@ -87,16 +110,19 @@ func RemoveWorktree(projectRoot, worktreePath string) error {
 	return nil
 }
 
-// DeleteBranch runs `git branch -D <branchName>`.
+// DeleteBranch deletes a git branch.
 func DeleteBranch(projectRoot, branchName string) error {
 	if err := ValidateRef(branchName); err != nil {
 		return errtrace.Wrap(fmt.Errorf("branch name: %w", err))
 	}
-	cmd := exec.Command("git", "-C", projectRoot, "branch", "-D", branchName)
-	common.PrintExecCmd(cmd)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
+
+	repo, err := git.PlainOpen(projectRoot)
+	if err != nil {
+		return errtrace.Wrap(err)
+	}
+
+	err = repo.Storer.RemoveReference(plumbing.NewBranchReferenceName(branchName))
+	if err != nil {
 		return errtrace.Wrap(fmt.Errorf("git branch -D: %w", err))
 	}
 	return nil

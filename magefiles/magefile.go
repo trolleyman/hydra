@@ -19,16 +19,13 @@ import (
 	"github.com/magefile/mage/mg"
 	"github.com/magefile/mage/sh"
 	"github.com/magefile/mage/target"
+	"github.com/trolleyman/hydra/internal/git"
 )
 
 // getVersion returns the version from git describe.
 func getVersion() string {
-	out, err := sh.Output("git", "describe", "--tags", "--always", "--dirty")
+	v, err := git.Describe(".")
 	if err != nil {
-		return "dev"
-	}
-	v := strings.TrimSpace(out)
-	if v == "" {
 		return "dev"
 	}
 	return v
