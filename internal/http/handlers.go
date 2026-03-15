@@ -17,6 +17,7 @@ import (
 
 	"braces.dev/errtrace"
 	dockerclient "github.com/docker/docker/client"
+	gogit "github.com/go-git/go-git/v5"
 	"github.com/trolleyman/hydra/internal/api"
 	"github.com/trolleyman/hydra/internal/config"
 	"github.com/trolleyman/hydra/internal/db"
@@ -109,7 +110,7 @@ func (s *Server) GetDevToolsConfig(_ context.Context, _ api.GetDevToolsConfigReq
 func (s *Server) resolveProjectRoot(projectID string) (string, error) {
 	p := s.ProjectsManager.GetByID(projectID)
 	if p == nil {
-		return "", &apiError{Code: 404, Type: api.ErrorResponseErrorNotFound, Err: fmt.Errorf("project not found: %s", projectID)}
+		return "", errtrace.Wrap(&apiError{Code: 404, Type: api.ErrorResponseErrorNotFound, Err: fmt.Errorf("project not found: %s", projectID)})
 	}
 	norm, err := paths.NormalizePath(p.Path)
 	if err != nil {
@@ -176,12 +177,12 @@ func (s *Server) AddProject(_ context.Context, request api.AddProjectRequestObje
 		// Only init if it's not already a git repo.
 		if _, err := paths.GetProjectRoot(projectPath); err != nil {
 			// Not a git repo or directory doesn't exist (but we might have just created it)
-			out, err := exec.Command("git", "-C", projectPath, "init").CombinedOutput()
+			_, err := gogit.PlainInit(projectPath, false)
 			if err != nil {
 				return api.AddProject500JSONResponse{
 					Code:    500,
 					Error:   api.ErrorResponseErrorInternalError,
-					Details: "git init failed: " + string(out),
+					Details: "git init failed: " + err.Error(),
 				}, nil
 			}
 		}
@@ -222,11 +223,11 @@ func (s *Server) ListAgents(ctx context.Context, request api.ListAgentsRequestOb
 			err = fmt.Errorf("Error connecting to Docker: %w", err)
 		}
 
-		return nil, &apiError{
+		return nil, errtrace.Wrap(&apiError{
 			Code: 500,
 			Type: errorType,
 			Err:  err,
-		}
+		})
 	}
 	resp := make(api.ListAgents200JSONResponse, len(headList))
 	for i, h := range headList {
@@ -681,11 +682,11 @@ func (s *Server) UpdateAgentFromBase(ctx context.Context, request api.UpdateAgen
 	}
 
 	if head.Branch == nil {
-		return nil, &apiError{
+		return nil, errtrace.Wrap(&apiError{
 			Code: 500,
 			Type: api.ErrorResponseErrorBadRequest,
 			Err:  errors.New("agent has no git branch to update"),
-		}
+		})
 	}
 
 	mergeDir := projectRoot

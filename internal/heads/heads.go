@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"os/exec"
 	"os/user"
 	"path/filepath"
 	"sort"
@@ -16,6 +15,7 @@ import (
 
 	"braces.dev/errtrace"
 	dockerclient "github.com/docker/docker/client"
+	gogit "github.com/go-git/go-git/v5"
 	"github.com/trolleyman/hydra/internal/api"
 	"github.com/trolleyman/hydra/internal/common"
 	"github.com/trolleyman/hydra/internal/config"
@@ -394,11 +394,23 @@ func SpawnHead(ctx context.Context, cli *dockerclient.Client, store *db.Store, p
 
 // readGitConfigVal reads a single git config value.
 func readGitConfigVal(projectRoot, key string) string {
-	out, err := exec.Command("git", "-C", projectRoot, "config", key).Output()
+	repo, err := gogit.PlainOpen(projectRoot)
 	if err != nil {
 		return ""
 	}
-	return strings.TrimSpace(string(out))
+	cfg, err := repo.Config()
+	if err != nil {
+		return ""
+	}
+	parts := strings.Split(key, ".")
+	if len(parts) != 2 {
+		return ""
+	}
+	section := cfg.Raw.Section(parts[0])
+	if section == nil {
+		return ""
+	}
+	return section.Option(parts[1])
 }
 
 // KillHead removes a Hydra head in safe order: container -> worktree -> branch.
