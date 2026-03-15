@@ -13,6 +13,7 @@ interface PaneProps {
   active: boolean
   reconnectAttempt: number
   onStatusUpdate?: (status: string) => void
+  onDiffRefresh?: () => void
 }
 
 function getWsUrl(agentId: string, projectId: string | null, shell?: boolean): string {
@@ -25,7 +26,7 @@ function getWsUrl(agentId: string, projectId: string | null, shell?: boolean): s
   return `${protocol}//${host}/ws/projects/${pid}/agents/${encodeURIComponent(agentId)}/terminal${qs}`
 }
 
-function TerminalPane({ agentId, projectId, shell, active, reconnectAttempt, onStatusUpdate }: PaneProps) {
+function TerminalPane({ agentId, projectId, shell, active, reconnectAttempt, onStatusUpdate, onDiffRefresh }: PaneProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<Terminal | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
@@ -136,6 +137,10 @@ function TerminalPane({ agentId, projectId, shell, active, reconnectAttempt, onS
             case TerminalEvent.type.BUILD_FINISHED: {
               term.write('\x1bc') // RIS (Reset to Initial State) - clear screen
               term.writeln('\x1b[32mBuild finished. Starting agent...\x1b[0m\r\n')
+              return
+            }
+            case TerminalEvent.type.DIFF_REFRESH: {
+              onDiffRefresh?.()
               return
             }
             case TerminalEvent.type.DATA: {
@@ -256,9 +261,10 @@ interface Props {
   bashEnabled?: boolean
   onRefresh?: () => void
   onStatusUpdate?: (status: string) => void
+  onDiffRefresh?: () => void
 }
 
-export function AgentTerminal({ agentId, projectId, bashEnabled, onRefresh, onStatusUpdate }: Props) {
+export function AgentTerminal({ agentId, projectId, bashEnabled, onRefresh, onStatusUpdate, onDiffRefresh }: Props) {
   const [tabs, setTabs] = useState<TabConfig[]>([{ id: 'terminal', label: 'Terminal', shell: false }])
   const [activeTabId, setActiveTabId] = useState('terminal')
   const [reconnectKeys, setReconnectKeys] = useState<Record<string, number>>({})
@@ -381,6 +387,7 @@ export function AgentTerminal({ agentId, projectId, bashEnabled, onRefresh, onSt
             active={activeTabId === tab.id}
             reconnectAttempt={reconnectKeys[tab.id] ?? 0}
             onStatusUpdate={tab.id === 'terminal' ? handleStatusUpdate : undefined}
+            onDiffRefresh={tab.id === 'terminal' ? onDiffRefresh : undefined}
           />
         </div>
       ))}

@@ -1088,10 +1088,11 @@ components:
           status: '#/components/schemas/TerminalStatusEvent'
           data: '#/components/schemas/TerminalDataEvent'
           build_finished: '#/components/schemas/TerminalEvent'
+          diff_refresh: '#/components/schemas/TerminalEvent'
       properties:
         type:
           type: string
-          enum: [status, data, build_finished]
+          enum: [status, data, build_finished, diff_refresh]
 
     TerminalStatusEvent:
       allOf:

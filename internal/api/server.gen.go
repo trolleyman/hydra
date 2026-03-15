@@ -65,6 +65,7 @@ const (
 const (
 	TerminalDataEventTypeBuildFinished TerminalDataEventType = "build_finished"
 	TerminalDataEventTypeData          TerminalDataEventType = "data"
+	TerminalDataEventTypeDiffRefresh   TerminalDataEventType = "diff_refresh"
 	TerminalDataEventTypeStatus        TerminalDataEventType = "status"
 )
 
@@ -72,6 +73,7 @@ const (
 const (
 	TerminalEventTypeBuildFinished TerminalEventType = "build_finished"
 	TerminalEventTypeData          TerminalEventType = "data"
+	TerminalEventTypeDiffRefresh   TerminalEventType = "diff_refresh"
 	TerminalEventTypeStatus        TerminalEventType = "status"
 )
 
@@ -79,6 +81,7 @@ const (
 const (
 	BuildFinished TerminalStatusEventType = "build_finished"
 	Data          TerminalStatusEventType = "data"
+	DiffRefresh   TerminalStatusEventType = "diff_refresh"
 	Status        TerminalStatusEventType = "status"
 )
 
