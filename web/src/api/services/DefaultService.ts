@@ -111,6 +111,7 @@ export class DefaultService {
     /**
      * Remove a project from Hydra (does not delete files on disk)
      * @param projectId
+     * @returns void
      * @throws ApiError
      */
     public removeProject(

@@ -97,10 +97,12 @@ export function SpawnForm({
   projectId,
   onSpawned,
   compact = false,
+  disabled = false,
 }: {
   projectId: string | null
   onSpawned?: (agent: AgentResponse) => void
   compact?: boolean
+  disabled?: boolean
 }) {
   const [prompt, setPrompt] = useState('')
   const [agentId, setAgentId] = useState('')
@@ -211,16 +213,16 @@ export function SpawnForm({
   if (compact) {
     return (
       <form onSubmit={handleSubmit} className="px-3 py-3 border-b border-gray-100 dark:border-gray-700">
-        <div className="relative rounded-xl p-[1.5px] bg-gray-200 dark:bg-gray-600 focus-within:bg-gradient-to-br focus-within:from-blue-500 focus-within:via-indigo-500 focus-within:to-purple-600 transition-colors duration-200 focus-within:shadow-md focus-within:shadow-blue-500/20">
+        <div className={`relative rounded-xl p-[1.5px] transition-colors duration-200 ${disabled ? 'bg-gray-100 dark:bg-gray-700' : 'bg-gray-200 dark:bg-gray-600 focus-within:bg-gradient-to-br focus-within:from-blue-500 focus-within:via-indigo-500 focus-within:to-purple-600 focus-within:shadow-md focus-within:shadow-blue-500/20'}`}>
           <div className="rounded-[10px] bg-white dark:bg-gray-800 overflow-hidden">
             <textarea
               ref={textareaRef}
               value={prompt}
               onChange={(e) => handlePromptChange(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder={prompt ? 'Describe a task…' : animatedPlaceholder}
+              placeholder={disabled ? 'Select a project first…' : (prompt ? 'Describe a task…' : animatedPlaceholder)}
               rows={2}
-              disabled={loading}
+              disabled={loading || disabled}
               className="w-full px-3 pt-2.5 pb-1 text-xs text-gray-800 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 bg-transparent resize-y focus:outline-none leading-relaxed disabled:opacity-50 min-h-[48px]"
             />
             <div className="flex items-center justify-between px-2 pb-2 gap-2">
@@ -243,7 +245,7 @@ export function SpawnForm({
               </div>
               <button
                 type="submit"
-                disabled={!prompt.trim() || loading}
+                disabled={!prompt.trim() || loading || disabled}
                 className="relative overflow-hidden text-[10px] font-semibold px-2.5 py-1 rounded-lg text-white bg-gradient-to-r from-blue-600 to-purple-600 animate-gradient shadow-sm cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed transition-opacity hover:opacity-90 shrink-0"
               >
                 {loading ? '…' : 'Spawn'}

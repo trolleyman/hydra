@@ -1,11 +1,14 @@
 import { createRootRoute, Link, Outlet, useNavigate, useParams } from '@tanstack/react-router'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import { api } from '../stores/apiClient'
 import { useProjectStore } from '../stores/projectStore'
-import type { ProjectInfo } from '../api'
+import { useAgentStore } from '../stores/agentStore'
+import type { ProjectInfo, AgentResponse } from '../api'
 import { ApiError, ErrorResponse } from '../api'
 import { formatError } from '../api/format_error'
-import { Sun, Moon, ChevronDown, Folder, Plus, Settings, Check } from 'lucide-react'
+import { Sun, Moon, ChevronDown, Folder, Plus, Settings, Check, X } from 'lucide-react'
+import { AgentSidebarItem } from '../components/AgentComponents'
+import { SpawnForm } from '../components/SpawnForm'
 
 import { Dialog } from '../components/Dialog'
 import { NotFound } from '../components/NotFound'
@@ -31,30 +34,38 @@ function formatSpawnedAgo(ms: number): string {
   return `Spawned ${days} days ago`
 }
 
+const SIDEBAR_MIN = 160
+const SIDEBAR_MAX = 600
+const SIDEBAR_DEFAULT = 224
+
 // ── Project Dropdown ───────────────────────────────────────────────────────────
 
 function ProjectDropdown({
   projects,
   selectedId,
   onSelect,
+  onDeselect,
   onAddProject,
+  onRemoveProject,
 }: {
   projects: ProjectInfo[]
   selectedId: string | null
   onSelect: (id: string) => void
+  onDeselect: () => void
   onAddProject: (path: string) => Promise<void>
+  onRemoveProject: (id: string) => Promise<void>
 }) {
   const [open, setOpen] = useState(false)
   const [showAddInput, setShowAddInput] = useState(false)
   const [newPath, setNewPath] = useState('')
   const [adding, setAdding] = useState(false)
   const [addError, setAddError] = useState<string | null>(null)
+  const [hoveredId, setHoveredId] = useState<string | null>(null)
   const dropdownRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
   const selected = projects.find((p) => p.id === selectedId)
 
-  // Close dropdown on outside click.
   useEffect(() => {
     if (!open) return
     function handleClick(e: MouseEvent) {
@@ -92,6 +103,27 @@ function ProjectDropdown({
     }
   }
 
+  function handleRemove(e: React.MouseEvent, projectId: string, projectName: string) {
+    e.stopPropagation()
+    useDialogStore.getState().show({
+      title: 'Remove Project',
+      message: `Remove "${projectName}" from Hydra? This will not delete any files on disk.`,
+      type: 'confirm',
+      showCancel: true,
+      onConfirm: async () => {
+        try {
+          await onRemoveProject(projectId)
+        } catch (err) {
+          useDialogStore.getState().show({
+            title: 'Remove Failed',
+            message: `Failed to remove project: ${formatError(err)}`,
+            type: 'error',
+          })
+        }
+      },
+    })
+  }
+
   return (
     <div ref={dropdownRef} className="relative shrink-0">
       <button
@@ -108,27 +140,43 @@ function ProjectDropdown({
           {projects.length > 0 && (
             <div className="py-1 border-b border-gray-100 dark:border-gray-700">
               {projects.map((p) => (
-                <button
+                <div
                   key={p.id}
-                  onClick={() => { onSelect(p.id); setOpen(false) }}
-                  className={`w-full flex items-start gap-2.5 px-3 py-2 text-left cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors ${
+                  className={`relative flex items-start gap-2.5 px-3 py-2 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors ${
                     p.id === selectedId ? 'bg-blue-50 dark:bg-blue-900/20' : ''
                   }`}
+                  onMouseEnter={() => setHoveredId(p.id)}
+                  onMouseLeave={() => setHoveredId(null)}
+                  onClick={() => {
+                    if (p.id === selectedId) {
+                      onDeselect()
+                    } else {
+                      onSelect(p.id)
+                    }
+                    setOpen(false)
+                  }}
                 >
-                  <Folder className="w-3.5 h-3.5" />
+                  <Folder className="w-3.5 h-3.5 mt-0.5 shrink-0 text-gray-400" />
                   <div className="min-w-0 flex-1">
                     <div className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{p.name}</div>
                     <div className="text-xs font-mono text-gray-400 dark:text-gray-500 truncate">{p.path}</div>
                   </div>
-                  {p.id === selectedId && (
+                  {p.id === selectedId && hoveredId !== p.id && (
                     <Check className="w-3.5 h-3.5 text-blue-500 shrink-0 mt-0.5" />
                   )}
-                </button>
+                  {hoveredId === p.id && (
+                    <button
+                      onClick={(e) => handleRemove(e, p.id, p.name)}
+                      className="shrink-0 mt-0.5 p-0.5 rounded text-gray-400 hover:text-red-500 transition-colors cursor-pointer"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
               ))}
             </div>
           )}
 
-          {/* Add project section */}
           <div className="py-1">
             {!showAddInput ? (
               <button
@@ -192,11 +240,45 @@ function RootLayout() {
   })
 
   const { projects, selectedProjectId, setProjects, setSelectedProjectId, setSystemStatus } = useProjectStore()
+  const { agents, setAgents, addAgent } = useAgentStore()
   const dialog = useDialogStore()
   const navigate = useNavigate()
-  // Get projectId from current URL if available (e.g. /project/:projectId/...)
-  const routeParams = useParams({ strict: false }) as { projectId?: string }
+  const routeParams = useParams({ strict: false }) as { projectId?: string; agentId?: string }
   const currentProjectId = routeParams.projectId ?? selectedProjectId
+  const selectedAgentId = routeParams.agentId
+
+  const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem('hydra-sidebar-width')
+      if (saved) return Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, parseInt(saved, 10)))
+    } catch { /* ignore */ }
+    return SIDEBAR_DEFAULT
+  })
+  const sidebarWidthRef = useRef(sidebarWidth)
+
+  const handleSidebarResizeStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    const startX = e.clientX
+    const startWidth = sidebarWidthRef.current
+
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+
+    function onMove(ev: MouseEvent) {
+      const newWidth = Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, startWidth + ev.clientX - startX))
+      sidebarWidthRef.current = newWidth
+      setSidebarWidth(newWidth)
+    }
+    function onUp() {
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+      try { localStorage.setItem('hydra-sidebar-width', String(sidebarWidthRef.current)) } catch { /* ignore */ }
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+    }
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+  }, [])
 
   useEffect(() => {
     localStorage.setItem('hydra-dark-mode', String(dark))
@@ -206,6 +288,37 @@ function RootLayout() {
       document.documentElement.classList.remove('dark')
     }
   }, [dark])
+
+  // Poll agents for selected project
+  useEffect(() => {
+    if (!currentProjectId) {
+      setAgents([])
+      return
+    }
+
+    let cancelled = false
+
+    async function fetchAgents() {
+      try {
+        const result = await api.default.listAgents(currentProjectId!)
+        if (!cancelled) setAgents(result)
+      } catch {
+        // ignore silently
+      }
+    }
+
+    fetchAgents()
+    const interval = setInterval(fetchAgents, 5_000)
+    return () => {
+      cancelled = true
+      clearInterval(interval)
+    }
+  }, [currentProjectId, setAgents])
+
+  // Clear agents when project deselected
+  useEffect(() => {
+    if (!currentProjectId) setAgents([])
+  }, [currentProjectId, setAgents])
 
   useEffect(() => {
     let cancelled = false
@@ -226,15 +339,12 @@ function RootLayout() {
             ticker = setInterval(() => setTick((n) => n + 1), 1000)
           }
         }
-        // Load projects list and ensure the default project is selected if nothing is chosen yet.
         try {
           const ps = await api.default.listProjects()
           if (cancelled) return
           setProjects(ps)
-          // Auto-select default project if current selection is absent.
           const currentId = useProjectStore.getState().selectedProjectId
           if (currentId == null || !ps.some((p) => p.id === currentId)) {
-            // Fall back to the server's default project id.
             let newId: string | null = null
             if (status.default_project_id != null && ps.some((p) => p.id === status.default_project_id)) {
               newId = status.default_project_id
@@ -243,10 +353,7 @@ function RootLayout() {
             }
             if (newId != null) {
               setSelectedProjectId(newId)
-              // Navigate to the project if we're at the root.
-              if (window.location.pathname === '/') {
-                navigate({ to: '/project/$projectId', params: { projectId: newId }, replace: true })
-              }
+              // Do NOT auto-navigate — just set the selected project
             }
           }
         } catch {
@@ -271,7 +378,6 @@ function RootLayout() {
     try {
       await api.default.devRestart()
     } catch (err: any) {
-      // If 403, we're not in dev mode, so stop.
       if (err?.status === 403) {
         useDialogStore.getState().show({
           title: 'Dev Mode Required',
@@ -281,19 +387,15 @@ function RootLayout() {
         setRestarting(false)
         return
       }
-      // Other errors (like network error) are expected as the server exits.
     }
 
-    // Wait for the server to come back online.
-    for (let i = 0; i < 60; i++) { // Max 30 seconds
+    for (let i = 0; i < 60; i++) {
       await new Promise<void>((r) => setTimeout(r, 500))
       try {
         const resp = await fetch('/health')
         if (resp.ok) {
           const text = await resp.text()
-          if (text.trim() === 'OK') {
-            break
-          }
+          if (text.trim() === 'OK') break
         }
       } catch { /* still restarting */ }
     }
@@ -303,13 +405,13 @@ function RootLayout() {
   async function handleAddProject(path: string) {
     try {
       const p = await api.default.addProject({ path })
-      // Merge: add only if not already present.
       const exists = projects.some((existing) => existing.id === p.id)
       if (!exists) {
         setProjects([...projects, p])
       }
       setSelectedProjectId(p.id)
-      navigate({ to: '/project/$projectId', params: { projectId: p.id } })
+      const isOnSettings = window.location.pathname.endsWith('/settings')
+      navigate({ to: isOnSettings ? '/project/$projectId/settings' : '/project/$projectId', params: { projectId: p.id } })
     } catch (err) {
       if (err instanceof ApiError && err.status === 400) {
         const errorType = err.body?.error
@@ -337,7 +439,8 @@ function RootLayout() {
                     setProjects([...projects, p])
                   }
                   setSelectedProjectId(p.id)
-                  navigate({ to: '/project/$projectId', params: { projectId: p.id } })
+                  const isOnSettings = window.location.pathname.endsWith('/settings')
+                  navigate({ to: isOnSettings ? '/project/$projectId/settings' : '/project/$projectId', params: { projectId: p.id } })
                   resolve()
                 } catch (e) {
                   reject(e)
@@ -354,12 +457,30 @@ function RootLayout() {
     }
   }
 
+  async function handleRemoveProject(id: string) {
+    await api.default.removeProject(id)
+    const updated = projects.filter(p => p.id !== id)
+    setProjects(updated)
+    if (selectedProjectId === id || currentProjectId === id) {
+      setSelectedProjectId(null)
+      setAgents([])
+      navigate({ to: '/' })
+    }
+  }
+
+  function handleSpawned(agent: AgentResponse) {
+    addAgent(agent)
+    if (currentProjectId) {
+      navigate({ to: '/project/$projectId/agent/$agentId', params: { projectId: currentProjectId, agentId: agent.id } })
+    }
+  }
+
+  const filteredAgents = agents.filter((a) => !a.ephemeral)
   const selectedProject = projects.find((p) => p.id === currentProjectId) ?? null
 
   return (
     <div className="h-full bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 flex flex-col">
       <header className="h-12 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex items-center px-4 gap-3 shrink-0">
-        {/* Logo — navigate to current project if one is selected, otherwise root */}
         <Link
           to={currentProjectId ? '/project/$projectId' : '/'}
           params={currentProjectId ? { projectId: currentProjectId } : {}}
@@ -375,18 +496,22 @@ function RootLayout() {
           <span className="text-2xl font-bold font-serif tracking-[-0.05em] dark:text-gray-100">Hydra</span>
         </Link>
 
-        {/* Project selector dropdown */}
         <ProjectDropdown
           projects={projects}
           selectedId={currentProjectId}
           onSelect={(id) => {
             setSelectedProjectId(id)
-            navigate({ to: '/project/$projectId', params: { projectId: id } })
+            const isOnSettings = window.location.pathname.endsWith('/settings')
+            navigate({ to: isOnSettings ? '/project/$projectId/settings' : '/project/$projectId', params: { projectId: id } })
+          }}
+          onDeselect={() => {
+            setSelectedProjectId(null)
+            navigate({ to: '/' })
           }}
           onAddProject={handleAddProject}
+          onRemoveProject={handleRemoveProject}
         />
 
-        {/* Current project path (monospace, truncated) */}
         {selectedProject && (
           <span className="text-xs font-mono text-gray-400 dark:text-gray-500 truncate min-w-0 mt-1 hidden sm:block">
             {selectedProject.path}
@@ -396,9 +521,7 @@ function RootLayout() {
         <div className="ml-auto flex items-center gap-3 shrink-0 self-center">
           {spawnedAt.current !== null && (
             <Tooltip content={`Spawned at ${new Date(spawnedAt.current).toUTCString()}`}>
-              <span
-                className="text-xs text-gray-400 dark:text-gray-500 cursor-default hidden md:block"
-              >
+              <span className="text-xs text-gray-400 dark:text-gray-500 cursor-default hidden md:block">
                 {formatSpawnedAgo(Date.now() - spawnedAt.current)}
               </span>
             </Tooltip>
@@ -442,7 +565,58 @@ function RootLayout() {
           </Tooltip>
         </div>
       </header>
+
       <div className="flex flex-1 overflow-hidden">
+        {/* Persistent sidebar */}
+        <aside
+          style={{ width: sidebarWidth }}
+          className="relative bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex flex-col shrink-0"
+        >
+          <SpawnForm compact projectId={currentProjectId} onSpawned={handleSpawned} disabled={!currentProjectId} />
+
+          <div className="px-3 py-3 border-b border-gray-100 dark:border-gray-700">
+            <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">
+              Agents
+            </span>
+            <span className="ml-2 text-xs text-gray-400 dark:text-gray-500">({filteredAgents.length})</span>
+          </div>
+
+          <div className="flex-1 overflow-y-auto p-2 space-y-0.5">
+            {filteredAgents.length === 0 ? (
+              <div className="px-3 py-4 text-xs text-gray-400 dark:text-gray-500 text-center">
+                {!currentProjectId
+                  ? 'Select a project to view agents'
+                  : 'Spawn an agent to get started'}
+              </div>
+            ) : (
+              filteredAgents.map((agent) => (
+                <AgentSidebarItem
+                  key={agent.id}
+                  agent={agent}
+                  selected={agent.id === selectedAgentId}
+                  onClick={() => {
+                    if (!currentProjectId) return
+                    if (agent.id === selectedAgentId) {
+                      navigate({ to: '/project/$projectId', params: { projectId: currentProjectId } })
+                    } else {
+                      navigate({ to: '/project/$projectId/agent/$agentId', params: { projectId: currentProjectId, agentId: agent.id } })
+                    }
+                  }}
+                />
+              ))
+            )}
+          </div>
+
+          {/* Resize handle */}
+          <div
+            onMouseDown={handleSidebarResizeStart}
+            className="absolute right-0 top-0 bottom-0 w-3 -mr-1 cursor-col-resize z-10 group flex items-stretch justify-center"
+          >
+            <div className="w-px group-hover:bg-blue-400/60 group-active:bg-blue-500 transition-colors" />
+          </div>
+        </aside>
+
+        {/* Main content */}
         <Outlet />
       </div>
       <Dialog />
