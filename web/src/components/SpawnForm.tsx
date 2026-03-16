@@ -8,6 +8,66 @@ type AgentTypeOption = 'claude' | 'gemini' | 'copilot'
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/i.test(navigator.platform)
 
+const PLACEHOLDERS = [
+  'Add a dark mode toggle to the settings page',
+  'Refactor the authentication middleware',
+  'Create a unit test for the Docker module',
+  'Implement a new API endpoint for user profiles',
+  'Fix the memory leak in the terminal component',
+  'Update the README with installation instructions',
+  'Migrate the database to use PostgreSQL',
+  'Add a search bar to the project list',
+  'Optimize the image loading performance',
+  'Integrate Sentry for error tracking',
+  'Build a custom dashboard for agent metrics',
+  'Implement role-based access control',
+  'Add support for multiple languages',
+  'Refactor the CSS using Tailwind',
+  'Create a CI/CD pipeline with GitHub Actions',
+  'Implement a real-time notification system',
+  'Add a copy to clipboard button',
+  'Fix the layout issues on mobile',
+  'Update the OpenAPI documentation',
+  'Implement a file upload feature',
+  'Add a progress bar to the build step',
+  'Dockerize the backend service',
+]
+
+function useTypewriter(phrases: string[], typingSpeed = 60, deletingSpeed = 30, pauseTime = 2500) {
+  const [shuffledPhrases] = useState(() => [...phrases].sort(() => Math.random() - 0.5))
+  const [index, setIndex] = useState(0)
+  const [subIndex, setSubIndex] = useState(0)
+  const [reverse, setReverse] = useState(false)
+  const [isPaused, setIsPaused] = useState(false)
+
+  useEffect(() => {
+    if (isPaused) return
+
+    if (subIndex === shuffledPhrases[index].length + 1 && !reverse) {
+      setIsPaused(true)
+      const timeout = setTimeout(() => {
+        setReverse(true)
+        setIsPaused(false)
+      }, pauseTime)
+      return () => clearTimeout(timeout)
+    }
+
+    if (subIndex === 0 && reverse) {
+      setReverse(false)
+      setIndex((prev) => (prev + 1) % shuffledPhrases.length)
+      return
+    }
+
+    const timeout = setTimeout(() => {
+      setSubIndex((prev) => prev + (reverse ? -1 : 1))
+    }, reverse ? deletingSpeed : typingSpeed)
+
+    return () => clearTimeout(timeout)
+  }, [subIndex, index, reverse, shuffledPhrases, typingSpeed, deletingSpeed, pauseTime, isPaused])
+
+  return shuffledPhrases[index].substring(0, subIndex)
+}
+
 function slugify(text: string, maxLength = 40, allowTrailingHyphen = false): string {
   let slug = text
     .toLowerCase()
@@ -56,6 +116,7 @@ export function SpawnForm({
   })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const animatedPlaceholder = useTypewriter(PLACEHOLDERS)
 
   useEffect(() => {
     try {
@@ -157,7 +218,7 @@ export function SpawnForm({
               value={prompt}
               onChange={(e) => handlePromptChange(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Describe a task…"
+              placeholder={prompt ? 'Describe a task…' : animatedPlaceholder}
               rows={2}
               disabled={loading}
               className="w-full px-3 pt-2.5 pb-1 text-xs text-gray-800 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 bg-transparent resize-y focus:outline-none leading-relaxed disabled:opacity-50 min-h-[48px]"
@@ -221,7 +282,7 @@ export function SpawnForm({
                 value={prompt}
                 onChange={(e) => handlePromptChange(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder="e.g. Add a dark mode toggle to the settings page…"
+                placeholder={prompt ? 'Describe what you need…' : animatedPlaceholder}
                 rows={6}
                 disabled={loading}
                 className="w-full px-4 pt-4 pb-2 text-sm text-gray-800 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 bg-transparent resize-y focus:outline-none leading-relaxed disabled:opacity-50 min-h-[120px]"
