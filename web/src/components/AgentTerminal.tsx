@@ -34,6 +34,8 @@ function TerminalPane({ agentId, projectId, shell, active, reconnectAttempt, onS
   const isRefreshing = useRef(false)
   const killTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastSentSize = useRef({ cols: 0, rows: 0 })
+  const [showCopiedAt, setShowCopiedAt] = useState(0)
+  const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Re-fit when tab becomes visible (after display:none -> display:block)
   useEffect(() => {
@@ -180,7 +182,11 @@ function TerminalPane({ agentId, projectId, shell, active, reconnectAttempt, onS
       if (isCopyShortcut) {
         const selection = term.getSelection()
         if (selection) {
-          navigator.clipboard.writeText(selection).catch(() => {})
+          navigator.clipboard.writeText(selection).then(() => {
+            if (copyTimeoutRef.current) clearTimeout(copyTimeoutRef.current)
+            setShowCopiedAt(Date.now())
+            copyTimeoutRef.current = setTimeout(() => setShowCopiedAt(0), 2000)
+          }).catch(() => {})
           term.clearSelection()
           return false
         }
@@ -234,6 +240,7 @@ function TerminalPane({ agentId, projectId, shell, active, reconnectAttempt, onS
       inputDisposable.dispose()
       ws.close()
       term.dispose()
+      if (copyTimeoutRef.current) clearTimeout(copyTimeoutRef.current)
       termRef.current = null
       wsRef.current = null
       fitAddonRef.current = null
@@ -241,10 +248,17 @@ function TerminalPane({ agentId, projectId, shell, active, reconnectAttempt, onS
   }, [agentId, projectId, reconnectAttempt])
 
   return (
-    <div
-      ref={containerRef}
-      className="flex-1 min-h-0 overflow-hidden"
-    />
+    <div className="relative flex-1 min-h-0 overflow-hidden">
+      <div
+        ref={containerRef}
+        className="flex-1 min-h-0 overflow-hidden"
+      />
+      {showCopiedAt > 0 && (
+        <div key={showCopiedAt} className="absolute top-2 right-2 px-2 py-1 bg-gray-800/90 text-gray-200 text-[10px] rounded border border-gray-700 shadow-lg pointer-events-none animate-fade-in-out z-10">
+          Copied to clipboard
+        </div>
+      )}
+    </div>
   )
 }
 
