@@ -368,8 +368,8 @@ function RootLayout() {
           <div className="w-6 h-6 flex items-center justify-center overflow-hidden rounded-sm">
             <img
               className='w-full h-full object-cover object-center'
-              srcSet="icon.png, icon.avif"
-              src="icon.png"
+              srcSet="/icon.png, /icon.avif"
+              src="/icon.png"
               alt="Hydra icon" />
           </div>
           <span className="text-2xl font-bold font-serif tracking-[-0.05em] dark:text-gray-100">Hydra</span>
