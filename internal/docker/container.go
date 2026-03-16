@@ -236,6 +236,9 @@ func SpawnAgent(ctx context.Context, cli *dockerclient.Client, opts SpawnOptions
 		"AGENT_USER=" + opts.Username,
 		"AGENT_GROUP=" + opts.GroupName,
 		"AGENT_HOME=" + containerHome,
+		"HOME=" + containerHome,
+		"USER=" + opts.Username,
+		"LANG=C.UTF-8",
 		"TERM=xterm-256color",
 		"COLORTERM=truecolor",
 	}
