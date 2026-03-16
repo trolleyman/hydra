@@ -365,19 +365,26 @@ func SpawnAgent(ctx context.Context, cli *dockerclient.Client, opts SpawnOptions
 
 // KillAgent stops and removes a container.
 func KillAgent(ctx context.Context, cli *dockerclient.Client, containerID string) error {
+	if cli == nil {
+		return nil
+	}
 	timeout := 10
-	log.Printf("Stopping container %s...", containerID[:12])
+	displayID := containerID
+	if len(displayID) > 12 {
+		displayID = displayID[:12]
+	}
+	log.Printf("Stopping container %s...", displayID)
 	if err := cli.ContainerStop(ctx, containerID, container.StopOptions{Timeout: &timeout}); err != nil {
 		if !dockerclient.IsErrNotFound(err) {
-			log.Printf("warn: stop container %s: %v", containerID[:12], err)
+			log.Printf("warn: stop container %s: %v", displayID, err)
 		}
 	}
-	log.Printf("Removing container %s...", containerID[:12])
+	log.Printf("Removing container %s...", displayID)
 	if err := cli.ContainerRemove(ctx, containerID, container.RemoveOptions{Force: true}); err != nil {
 		if !dockerclient.IsErrNotFound(err) {
 			return errtrace.Wrap(fmt.Errorf("remove container: %w", err))
 		}
-		log.Printf("info: container %s already removed", containerID[:12])
+		log.Printf("info: container %s already removed", displayID)
 	}
 	return nil
 }
