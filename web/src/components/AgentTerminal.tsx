@@ -248,7 +248,7 @@ function TerminalPane({ agentId, projectId, shell, active, reconnectAttempt, onS
   }, [agentId, projectId, reconnectAttempt])
 
   return (
-    <div className="relative flex-1 min-h-0 overflow-hidden">
+    <div className="relative flex-1 min-h-0 overflow-hidden flex flex-col">
       <div
         ref={containerRef}
         className="flex-1 min-h-0 overflow-hidden"
