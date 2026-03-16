@@ -497,6 +497,9 @@ type ServerInterface interface {
 	// Add a new project by folder path
 	// (POST /api/projects)
 	AddProject(w http.ResponseWriter, r *http.Request)
+	// Remove a project from Hydra (does not delete files on disk)
+	// (DELETE /api/projects/{project_id})
+	RemoveProject(w http.ResponseWriter, r *http.Request, projectId string)
 	// List all Hydra agents (heads)
 	// (GET /api/projects/{project_id}/agents)
 	ListAgents(w http.ResponseWriter, r *http.Request, projectId string)
@@ -603,6 +606,31 @@ func (siw *ServerInterfaceWrapper) AddProject(w http.ResponseWriter, r *http.Req
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.AddProject(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RemoveProject operation middleware
+func (siw *ServerInterfaceWrapper) RemoveProject(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RemoveProject(w, r, projectId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1306,6 +1334,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("POST "+options.BaseURL+"/api/dev/restart", wrapper.DevRestart)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects", wrapper.ListProjects)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects", wrapper.AddProject)
+	m.HandleFunc("DELETE "+options.BaseURL+"/api/projects/{project_id}", wrapper.RemoveProject)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents", wrapper.ListAgents)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents", wrapper.SpawnAgent)
 	m.HandleFunc("DELETE "+options.BaseURL+"/api/projects/{project_id}/agents/{id}", wrapper.KillAgent)
@@ -1434,6 +1463,40 @@ func (response AddProject400JSONResponse) VisitAddProjectResponse(w http.Respons
 type AddProject500JSONResponse ErrorResponse
 
 func (response AddProject500JSONResponse) VisitAddProjectResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type RemoveProjectRequestObject struct {
+	ProjectId string `json:"project_id"`
+}
+
+type RemoveProjectResponseObject interface {
+	VisitRemoveProjectResponse(w http.ResponseWriter) error
+}
+
+type RemoveProject204Response struct {
+}
+
+func (response RemoveProject204Response) VisitRemoveProjectResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type RemoveProject404JSONResponse ErrorResponse
+
+func (response RemoveProject404JSONResponse) VisitRemoveProjectResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type RemoveProject500JSONResponse ErrorResponse
+
+func (response RemoveProject500JSONResponse) VisitRemoveProjectResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(500)
 
@@ -2052,6 +2115,9 @@ type StrictServerInterface interface {
 	// Add a new project by folder path
 	// (POST /api/projects)
 	AddProject(ctx context.Context, request AddProjectRequestObject) (AddProjectResponseObject, error)
+	// Remove a project from Hydra (does not delete files on disk)
+	// (DELETE /api/projects/{project_id})
+	RemoveProject(ctx context.Context, request RemoveProjectRequestObject) (RemoveProjectResponseObject, error)
 	// List all Hydra agents (heads)
 	// (GET /api/projects/{project_id}/agents)
 	ListAgents(ctx context.Context, request ListAgentsRequestObject) (ListAgentsResponseObject, error)
@@ -2227,6 +2293,32 @@ func (sh *strictHandler) AddProject(w http.ResponseWriter, r *http.Request) {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(AddProjectResponseObject); ok {
 		if err := validResponse.VisitAddProjectResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RemoveProject operation middleware
+func (sh *strictHandler) RemoveProject(w http.ResponseWriter, r *http.Request, projectId string) {
+	var request RemoveProjectRequestObject
+
+	request.ProjectId = projectId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RemoveProject(ctx, request.(RemoveProjectRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RemoveProject")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RemoveProjectResponseObject); ok {
+		if err := validResponse.VisitRemoveProjectResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

@@ -62,6 +62,10 @@ func (s *SimulationServer) AddProject(w http.ResponseWriter, r *http.Request) {
 	api.WriteError(w, http.StatusNotImplemented, "Not implemented in simulation mode")
 }
 
+func (s *SimulationServer) RemoveProject(w http.ResponseWriter, r *http.Request, projectId string) {
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, projectId string) {
 	createdAt1 := time.Now().Add(-1 * time.Hour).Unix()
 	createdAt2 := time.Now().Add(-2 * time.Hour).Unix()

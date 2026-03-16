@@ -109,6 +109,26 @@ export class DefaultService {
         });
     }
     /**
+     * Remove a project from Hydra (does not delete files on disk)
+     * @param projectId
+     * @throws ApiError
+     */
+    public removeProject(
+        projectId: string,
+    ): CancelablePromise<void> {
+        return this.httpRequest.request({
+            method: 'DELETE',
+            url: '/api/projects/{project_id}',
+            path: {
+                'project_id': projectId,
+            },
+            errors: {
+                404: `Not Found`,
+                500: `Internal Server Error`,
+            },
+        });
+    }
+    /**
      * List all Hydra agents (heads)
      * @param projectId Project ID to scope the agent list
      * @returns AgentResponse OK

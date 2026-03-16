@@ -207,6 +207,25 @@ func (s *Server) AddProject(_ context.Context, request api.AddProjectRequestObje
 	}), nil
 }
 
+func (s *Server) RemoveProject(_ context.Context, request api.RemoveProjectRequestObject) (api.RemoveProjectResponseObject, error) {
+	found, err := s.ProjectsManager.RemoveProject(request.ProjectId)
+	if err != nil {
+		return api.RemoveProject500JSONResponse{
+			Code:    500,
+			Error:   api.ErrorResponseErrorInternalError,
+			Details: err.Error(),
+		}, nil
+	}
+	if !found {
+		return api.RemoveProject404JSONResponse{
+			Code:    404,
+			Error:   api.ErrorResponseErrorNotFound,
+			Details: "project not found",
+		}, nil
+	}
+	return api.RemoveProject204Response{}, nil
+}
+
 func (s *Server) ListAgents(ctx context.Context, request api.ListAgentsRequestObject) (api.ListAgentsResponseObject, error) {
 	projectRoot, err := s.resolveProjectRoot(request.ProjectId)
 	if err != nil {

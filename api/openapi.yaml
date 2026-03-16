@@ -123,6 +123,32 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /api/projects/{project_id}:
+    delete:
+      summary: Remove a project from Hydra (does not delete files on disk)
+      operationId: removeProject
+      parameters:
+        - name: project_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: No Content
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /api/projects/{project_id}/agents:
     get:
       summary: List all Hydra agents (heads)

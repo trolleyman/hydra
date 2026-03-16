@@ -119,6 +119,24 @@ func (m *Manager) GetByPath(path string) *ProjectInfo {
 	return nil
 }
 
+// RemoveProject removes the project with the given ID from the persisted list.
+// It does not delete any files. Returns false if not found.
+func (m *Manager) RemoveProject(id string) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for i, p := range m.projects {
+		if p.ID == id {
+			m.projects = append(m.projects[:i], m.projects[i+1:]...)
+			if err := m.save(); err != nil {
+				m.projects = append(m.projects[:i], append([]ProjectInfo{p}, m.projects[i:]...)...)
+				return false, errtrace.Wrap(err)
+			}
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // AddProject registers the given absolute path as a project (idempotent by path).
 // Returns the ProjectInfo (existing or newly created).
 func (m *Manager) AddProject(path string) (ProjectInfo, error) {
