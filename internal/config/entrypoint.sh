@@ -13,9 +13,6 @@ useradd -u "$AGENT_UID" -g "$AGENT_GID" -m -d "$AGENT_HOME" -s /bin/bash "$AGENT
     || true
 
 chown "$AGENT_UID:$AGENT_GID" "$AGENT_HOME"
-# Ensure any root-owned directories created by Docker mounts (e.g. ~/.bun/install/cache)
-# are owned by the agent user so they are writable.
-find "$AGENT_HOME" -maxdepth 3 -user root -exec chown "$AGENT_UID:$AGENT_GID" {} + 2>/dev/null || true
 
 # Add the user to the sudo group and allow passwordless sudo.
 usermod -aG sudo "$AGENT_USER"
