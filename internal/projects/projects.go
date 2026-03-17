@@ -13,12 +13,36 @@ import (
 	"github.com/trolleyman/hydra/internal/paths"
 )
 
+// GetOrCreateInstanceUUID returns the persistent UUID for this Hydra instance,
+// stored at ~/.config/hydra/uuid.txt. Creates a new UUID if not present.
+func GetOrCreateInstanceUUID() (string, error) {
+	configDir, err := os.UserConfigDir()
+	if err != nil {
+		return "", errtrace.Wrap(fmt.Errorf("get user config dir: %w", err))
+	}
+	dir := filepath.Join(configDir, "hydra")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return "", errtrace.Wrap(fmt.Errorf("create config dir: %w", err))
+	}
+	uuidFile := filepath.Join(dir, "uuid.txt")
+	data, err := os.ReadFile(uuidFile)
+	if err == nil {
+		if u := strings.TrimSpace(string(data)); u != "" {
+			return u, nil
+		}
+	}
+	u := uuid.New().String()
+	if err := os.WriteFile(uuidFile, []byte(u+"\n"), 0644); err != nil {
+		return "", errtrace.Wrap(fmt.Errorf("write uuid file: %w", err))
+	}
+	return u, nil
+}
+
 // ProjectInfo describes a registered Hydra project.
 type ProjectInfo struct {
 	ID   string `json:"id"`
 	Path string `json:"path"`
 	Name string `json:"name"`
-	UUID string `json:"uuid"`
 }
 
 // Manager persists the list of known projects to ~/.config/hydra/projects.json.
@@ -58,17 +82,6 @@ func (m *Manager) load() error {
 		return errtrace.Wrap(err)
 	}
 
-	// Migrate: ensure all projects have a UUID.
-	changed := false
-	for i := range m.projects {
-		if m.projects[i].UUID == "" {
-			m.projects[i].UUID = uuid.New().String()
-			changed = true
-		}
-	}
-	if changed {
-		return errtrace.Wrap(m.save())
-	}
 	return nil
 }
 
@@ -157,7 +170,7 @@ func (m *Manager) AddProject(path string) (ProjectInfo, error) {
 
 	id := m.generateID(path)
 	name := filepath.Base(path)
-	p := ProjectInfo{ID: id, Path: path, Name: name, UUID: uuid.New().String()}
+	p := ProjectInfo{ID: id, Path: path, Name: name}
 	m.projects = append(m.projects, p)
 	if err := m.save(); err != nil {
 		// Rollback in-memory addition.

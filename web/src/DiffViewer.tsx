@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback, Fragment, useMemo, memo } fro
 import hljs from 'highlight.js'
 import { api } from './stores/apiClient'
 import { formatError } from './api/format_error'
-import type { AgentResponse, CommitInfo, DiffFile, DiffResponse } from './api'
+import type { AgentResponse, CommitInfo, DiffFile, DiffHunk, DiffResponse } from './api'
 import {
   Plus, Calendar, TriangleAlert,
   ChevronDown, ChevronRight, ChevronLeft, Check, LoaderCircle, RefreshCw, RotateCcw,
@@ -102,7 +102,7 @@ function ChangeTypeIcon({ type }: { type: string }) {
   }
 }
 
-function buildSideBySide(hunkLines: DiffFile['hunks'][0]['lines']): SideBySideLine[] {
+function buildSideBySide(hunkLines: DiffHunk['lines']): SideBySideLine[] {
   const result: SideBySideLine[] = []
   let i = 0
   while (i < hunkLines.length) {
@@ -210,34 +210,17 @@ function CommentRow({ onSubmit, onCancel }: { onSubmit: (text: string) => Promis
   )
 }
 
-function HunkHeader({ header, onExpandUp, onExpandBoth, onExpandDown }: {
-  header: string; onExpandUp?: () => void; onExpandBoth?: () => void; onExpandDown?: () => void
-}) {
-  return (
-    <div className="flex items-center bg-blue-50 dark:bg-blue-950/30 border-y border-blue-100 dark:border-blue-900/50 px-2 py-0.5 group/hunk">
-      <div className="flex items-center gap-0.5 mr-2 opacity-0 group-hover/hunk:opacity-100 transition-opacity">
-        <Tooltip content="Expand up 5 lines">
-          <button onClick={onExpandUp} className="p-0.5 rounded hover:bg-blue-100 dark:hover:bg-blue-900/50 text-blue-500 cursor-pointer">
-            <ChevronDown className="w-3 h-3 rotate-180" />
-          </button>
-        </Tooltip>
-        <Tooltip content="Expand 5 lines">
-          <button onClick={onExpandBoth} className="p-0.5 rounded hover:bg-blue-100 dark:hover:bg-blue-900/50 text-blue-500 cursor-pointer">
-            <div className="relative w-3 h-3 flex flex-col items-center justify-center">
-              <ChevronDown className="w-2 h-2 rotate-180 absolute top-0" />
-              <ChevronDown className="w-2 h-2 absolute bottom-0" />
-            </div>
-          </button>
-        </Tooltip>
-        <Tooltip content="Expand down 5 lines">
-          <button onClick={onExpandDown} className="p-0.5 rounded hover:bg-blue-100 dark:hover:bg-blue-900/50 text-blue-500 cursor-pointer">
-            <ChevronDown className="w-3 h-3" />
-          </button>
-        </Tooltip>
-      </div>
-      <span className="font-mono text-xs text-blue-500 dark:text-blue-400">{header}</span>
-    </div>
-  )
+// Computes the number of lines hidden between two adjacent hunks.
+function computeGap(prevHunk: DiffHunk, nextHunk: DiffHunk): number {
+  let lastNewLine = 0
+  let lastOldLine = 0
+  for (const l of prevHunk.lines) {
+    if (l.new_line_num != null) lastNewLine = l.new_line_num
+    if (l.old_line_num != null) lastOldLine = l.old_line_num
+  }
+  const lastLine = lastNewLine > 0 ? lastNewLine : lastOldLine
+  const nextStart = nextHunk.new_start > 0 ? nextHunk.new_start : nextHunk.old_start
+  return Math.max(0, nextStart - lastLine - 1)
 }
 
 // ── Diff Hunk rendering ───────────────────────────────────────────────────────
@@ -245,17 +228,15 @@ function HunkHeader({ header, onExpandUp, onExpandBoth, onExpandDown }: {
 const UNIFIED_LINE_NUM_CLASS = 'select-none text-right pr-2 text-gray-400 dark:text-gray-600 text-xs font-mono w-10 shrink-0 border-r border-gray-200 dark:border-gray-700 leading-5'
 const UNIFIED_CODE_CLASS = 'pl-2 font-mono text-xs leading-5 flex-1 whitespace-pre-wrap break-words overflow-hidden'
 
-const UnifiedHunk = memo(function UnifiedHunk({ hunk, highlightedOld, highlightedNew, onComment, expanders }: {
-  hunk: DiffFile['hunks'][0]
+const UnifiedHunk = memo(function UnifiedHunk({ hunk, highlightedOld, highlightedNew, onComment }: {
+  hunk: DiffHunk
   highlightedOld: Map<number, string>
   highlightedNew: Map<number, string>
   onComment: (lineNum: number, isNew: boolean, text: string) => void
-  expanders: { up: () => void; both: () => void; down: () => void }
 }) {
   const [openCommentIdx, setOpenCommentIdx] = useState<number | null>(null)
   return (
     <div>
-      <HunkHeader header={hunk.header} onExpandUp={expanders.up} onExpandBoth={expanders.both} onExpandDown={expanders.down} />
       {hunk.lines.map((line, idx) => {
         const isAdd = line.type === 'addition'
         const isDel = line.type === 'deletion'
@@ -312,18 +293,16 @@ const UnifiedHunk = memo(function UnifiedHunk({ hunk, highlightedOld, highlighte
 const SBS_LINE_NUM = 'select-none text-right text-gray-400 dark:text-gray-600 text-xs font-mono w-8 shrink-0 pr-1 leading-5'
 const SBS_CODE = 'pl-1 font-mono text-xs leading-5 flex-1 whitespace-pre-wrap break-words overflow-hidden min-w-0'
 
-const SideBySideHunk = memo(function SideBySideHunk({ hunk, highlightedOld, highlightedNew, onComment, expanders }: {
-  hunk: DiffFile['hunks'][0]
+const SideBySideHunk = memo(function SideBySideHunk({ hunk, highlightedOld, highlightedNew, onComment }: {
+  hunk: DiffHunk
   highlightedOld: Map<number, string>
   highlightedNew: Map<number, string>
   onComment: (lineNum: number, isNew: boolean, text: string) => void
-  expanders: { up: () => void; both: () => void; down: () => void }
 }) {
   const [openCommentIdx, setOpenCommentIdx] = useState<number | null>(null)
   const sbsLines = buildSideBySide(hunk.lines)
   return (
     <div>
-      <HunkHeader header={hunk.header} onExpandUp={expanders.up} onExpandBoth={expanders.both} onExpandDown={expanders.down} />
       {sbsLines.map((line, idx) => {
         const oldHighlighted = line.oldLineNum != null ? highlightedOld.get(line.oldLineNum) : undefined
         const newHighlighted = line.newLineNum != null ? highlightedNew.get(line.newLineNum) : undefined
@@ -397,7 +376,10 @@ const SideBySideHunk = memo(function SideBySideHunk({ hunk, highlightedOld, high
 
 // ── File diff card ────────────────────────────────────────────────────────────
 
-const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onComment, isCollapsed, onToggleCollapse, onExpand }: {
+const EXPANDER_ROW = 'flex items-center bg-blue-50 dark:bg-blue-950/30 border-y border-blue-100 dark:border-blue-900/50 px-2 py-0.5'
+const EXPANDER_BTN = 'p-0.5 rounded hover:bg-blue-100 dark:hover:bg-blue-900/50 text-blue-500 cursor-pointer'
+
+const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onComment, isCollapsed, onToggleCollapse, onExpand, isHidden, onShow, currentContext }: {
   file: DiffFile
   sideBySide: boolean
   fileRef?: (el: HTMLDivElement | null) => void
@@ -405,9 +387,10 @@ const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onComment, 
   isCollapsed: boolean
   onToggleCollapse: (path: string) => void
   onExpand: (path: string, context: number) => void
-  stickyTop?: number
+  isHidden?: boolean
+  onShow?: () => void
+  currentContext: number
 }) {
-  const [context, setContext] = useState(3)
   const lang = getLanguage(file.path)
   const { highlightedOld, highlightedNew } = useMemo(() => {
     if (file.binary || !file.hunks) return { highlightedOld: new Map<number, string>(), highlightedNew: new Map<number, string>() }
@@ -431,11 +414,7 @@ const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onComment, 
     return { highlightedOld: highlight(oldLines), highlightedNew: highlight(newLines) }
   }, [file.hunks, file.binary, lang])
 
-  const handleExpand = (delta: number) => {
-    const next = context + delta
-    setContext(next)
-    onExpand(file.path, next)
-  }
+  const expand = (newCtx: number) => onExpand(file.path, newCtx)
 
   const displayPath = file.change_type === 'renamed' && file.old_path
     ? `${file.old_path} → ${file.path}` : file.path
@@ -470,27 +449,70 @@ const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onComment, 
         <>
           {file.binary ? (
             <div className="px-4 py-3 text-xs text-gray-400 dark:text-gray-500 italic">Binary file changed</div>
-          ) : !file.hunks || file.hunks.length === 0 ? (
+          ) : isHidden ? (
             <div className="px-4 py-8 flex flex-col items-center justify-center text-gray-400 dark:text-gray-500 italic">
-              <div className="text-sm mb-2">No changes loaded</div>
+              <div className="text-sm mb-2">{file.additions + file.deletions} lines changed</div>
               <button
-                onClick={() => onExpand(file.path, 3)}
+                onClick={onShow}
                 className="px-3 py-1.5 text-xs font-medium text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-md hover:bg-blue-100 dark:hover:bg-blue-900/40 cursor-pointer transition-colors"
               >
                 Load diff
               </button>
             </div>
+          ) : !file.hunks || file.hunks.length === 0 ? (
+            <div className="px-4 py-3 text-xs text-gray-400 dark:text-gray-500 italic">No changes</div>
           ) : (
             <div className="overflow-hidden">
-              {file.hunks.map((hunk, idx) =>
-                sideBySide
-                  ? <SideBySideHunk key={idx} hunk={hunk} highlightedOld={highlightedOld} highlightedNew={highlightedNew}
-                    onComment={(ln, isNew, txt) => onComment(file.path, ln, isNew, txt)}
-                    expanders={{ up: () => handleExpand(5), both: () => handleExpand(5), down: () => handleExpand(5) }} />
-                  : <UnifiedHunk key={idx} hunk={hunk} highlightedOld={highlightedOld} highlightedNew={highlightedNew}
-                    onComment={(ln, isNew, txt) => onComment(file.path, ln, isNew, txt)}
-                    expanders={{ up: () => handleExpand(5), both: () => handleExpand(5), down: () => handleExpand(5) }} />
-              )}
+              {file.hunks.map((hunk, i) => {
+                const isFirst = i === 0
+                const isLast = i === file.hunks.length - 1
+                const prevHunk = isFirst ? null : file.hunks[i - 1]
+                const gapSize = prevHunk ? computeGap(prevHunk, hunk) : 0
+                const atTopOfFile = isFirst && hunk.new_start <= 1 && hunk.old_start <= 1
+                return (
+                  <Fragment key={hunk.header}>
+                    {/* Expander above first hunk (only if not at start of file) */}
+                    {isFirst && !atTopOfFile && (
+                      <div className={`${EXPANDER_ROW} justify-center cursor-pointer`} onClick={() => expand(currentContext + 5)}>
+                        <ChevronDown className="w-3 h-3 text-blue-400 rotate-180" />
+                      </div>
+                    )}
+                    {/* Gap expander between hunks */}
+                    {!isFirst && gapSize > 0 && (
+                      <div className={EXPANDER_ROW}>
+                        <Tooltip content="Expand upper hunk down 5 lines">
+                          <button onClick={() => expand(currentContext + 5)} className={EXPANDER_BTN}>
+                            <ChevronDown className="w-3 h-3" />
+                          </button>
+                        </Tooltip>
+                        <button
+                          onClick={() => expand(Math.max(currentContext, Math.ceil(gapSize / 2) + 1))}
+                          className="flex-1 text-center text-xs text-blue-400 dark:text-blue-500 font-mono py-0.5 hover:bg-blue-100/50 dark:hover:bg-blue-900/30 rounded cursor-pointer"
+                        >
+                          ···  {gapSize} line{gapSize !== 1 ? 's' : ''}  ···
+                        </button>
+                        <Tooltip content="Expand lower hunk up 5 lines">
+                          <button onClick={() => expand(currentContext + 5)} className={EXPANDER_BTN}>
+                            <ChevronDown className="w-3 h-3 rotate-180" />
+                          </button>
+                        </Tooltip>
+                      </div>
+                    )}
+                    {sideBySide
+                      ? <SideBySideHunk hunk={hunk} highlightedOld={highlightedOld} highlightedNew={highlightedNew}
+                        onComment={(ln, isNew, txt) => onComment(file.path, ln, isNew, txt)} />
+                      : <UnifiedHunk hunk={hunk} highlightedOld={highlightedOld} highlightedNew={highlightedNew}
+                        onComment={(ln, isNew, txt) => onComment(file.path, ln, isNew, txt)} />
+                    }
+                    {/* Expander below last hunk */}
+                    {isLast && (
+                      <div className={`${EXPANDER_ROW} justify-center cursor-pointer`} onClick={() => expand(currentContext + 5)}>
+                        <ChevronDown className="w-3 h-3 text-blue-400" />
+                      </div>
+                    )}
+                  </Fragment>
+                )
+              })}
             </div>
           )}
         </>
@@ -1165,6 +1187,11 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger }: { agent
   const [singleFileIdx, setSingleFileIdx] = useState(0)
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set())
   const [collapsedFiles, setCollapsedFiles] = useState<Set<string>>(new Set())
+  const [hiddenFiles, setHiddenFiles] = useState<Set<string>>(new Set())
+  const userShownFilesRef = useRef<Set<string>>(new Set())
+  // Per-file context (number of surrounding lines). Persists across polling refreshes.
+  const [fileContexts, setFileContexts] = useState<Map<string, number>>(new Map())
+  const fileContextsRef = useRef<Map<string, number>>(new Map())
   const fileRefs = useRef<Map<string, HTMLDivElement>>(new Map())
   const fileRefCallbacksRef = useRef<Map<string, (el: HTMLDivElement | null) => void>>(new Map())
   const sidebarRef = useRef<HTMLDivElement>(null)
@@ -1200,8 +1227,13 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger }: { agent
       .then((c) => { setCommits(c); commitsRef.current = c }).catch(() => setCommits([]))
   }, [agent.id, agent.branch_name, projectId, refreshKey])
 
-  const fetchFileDiff = useCallback(async (path: string, context: number = 3) => {
+  // expandFileDiff: fetches a single file's diff with a given context (for context expansion only).
+  const expandFileDiff = useCallback(async (path: string, context: number = 3) => {
     if (!agent.branch_name) return
+
+    // Record this context for use across polling refreshes
+    fileContextsRef.current.set(path, context)
+    setFileContexts(new Map(fileContextsRef.current))
 
     const params: { baseRef?: string; headRef?: string; ignoreWhitespace?: boolean; includeUncommitted?: boolean } = {}
     if (ignoreWhitespace) params.ignoreWhitespace = true
@@ -1229,35 +1261,59 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger }: { agent
     }
   }, [agent.id, projectId, leftSel, rightSel, ignoreWhitespace])
 
+  // Compute hidden-file state from a fresh diff response.
+  // Files > 1000 changed lines start hidden, unless the user has explicitly shown them.
+  const applyHiddenFiles = useCallback((files: DiffFile[]) => {
+    setHiddenFiles(() => {
+      const next = new Set<string>()
+      for (const f of files) {
+        if (!userShownFilesRef.current.has(f.path) && f.additions + f.deletions >= 1000) {
+          next.add(f.path)
+        }
+      }
+      return next
+    })
+  }, [])
+
+  const handleShowFile = useCallback((path: string) => {
+    userShownFilesRef.current.add(path)
+    setHiddenFiles((prev) => { const next = new Set(prev); next.delete(path); return next })
+  }, [])
+
   useEffect(() => {
     if (!agent.branch_name) return
     let cancelled = false
     setLoadingDiff(true)
     setDiffError(null)
+    // Reset per-file context expansions when diff params change
+    fileContextsRef.current = new Map()
+    setFileContexts(new Map())
 
-    const params: { baseRef?: string; headRef?: string; includeUncommitted?: boolean } = {}
+    const params: { baseRef?: string; headRef?: string; ignoreWhitespace?: boolean; includeUncommitted?: boolean } = {}
+    if (ignoreWhitespace) params.ignoreWhitespace = true
     if (leftSel.type === 'commit') params.baseRef = leftSel.sha
     else if (leftSel.type === 'latest' && commitsRef.current.length > 0) params.baseRef = commitsRef.current[0].sha
     if (rightSel.type === 'uncommitted') params.includeUncommitted = true
     else if (rightSel.type === 'commit') params.headRef = rightSel.sha
 
-    // First, just get the file list (performant)
-    api.default.getAgentDiffFiles(projectId ?? '', agent.id,
-      params.baseRef, params.headRef, params.includeUncommitted)
+    // Fetch the full diff in one request (all files, all hunks).
+    api.default.getAgentDiff(projectId ?? '', agent.id,
+      params.baseRef, params.headRef, params.ignoreWhitespace, params.includeUncommitted, undefined, 3)
       .then((d) => {
         if (!cancelled) {
           setDiff(d)
+          applyHiddenFiles(d.files)
           setLoadingDiff(false)
-          // Auto-load files with fewer than 1000 changed lines
-          d.files.forEach((f) => {
-            if (f.additions + f.deletions < 1000) fetchFileDiff(f.path)
-          })
         }
       })
       .catch((e) => { if (!cancelled) { setDiffError(formatError(e)); setLoadingDiff(false) } })
 
     return () => { cancelled = true }
-  }, [agent.id, agent.branch_name, projectId, leftSel, rightSel, refreshKey, fetchFileDiff])
+  }, [agent.id, agent.branch_name, projectId, leftSel, rightSel, refreshKey, ignoreWhitespace, applyHiddenFiles])
+
+  // Keep a ref to expandFileDiff so the silent refresh can call it without stale closures.
+  const expandFileDiffRef = useRef(expandFileDiff)
+  useEffect(() => { expandFileDiffRef.current = expandFileDiff }, [expandFileDiff])
 
   // Background (silent) refresh when triggered externally (e.g. git command detected via WS).
   const silentRefreshRef = useRef(false)
@@ -1266,33 +1322,34 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger }: { agent
     if (silentRefreshRef.current) return
     silentRefreshRef.current = true
 
-    const params: { baseRef?: string; headRef?: string; includeUncommitted?: boolean } = {}
+    const params: { baseRef?: string; headRef?: string; ignoreWhitespace?: boolean; includeUncommitted?: boolean } = {}
+    if (ignoreWhitespace) params.ignoreWhitespace = true
     if (leftSel.type === 'commit') params.baseRef = leftSel.sha
     else if (leftSel.type === 'latest' && commitsRef.current.length > 0) params.baseRef = commitsRef.current[0].sha
     if (rightSel.type === 'uncommitted') params.includeUncommitted = true
     else if (rightSel.type === 'commit') params.headRef = rightSel.sha
 
+    // Snapshot current per-file contexts before async work
+    const contextsSnap = new Map(fileContextsRef.current)
+
     // Refresh commits list silently
     api.default.getAgentCommits(projectId ?? '', agent.id)
       .then((c) => { setCommits(c); commitsRef.current = c }).catch(() => { })
 
-    api.default.getAgentDiffFiles(projectId ?? '', agent.id,
-      params.baseRef, params.headRef, params.includeUncommitted)
+    // Fetch full diff silently — preserves open comments since we diff against previous state.
+    api.default.getAgentDiff(projectId ?? '', agent.id,
+      params.baseRef, params.headRef, params.ignoreWhitespace, params.includeUncommitted, undefined, 3)
       .then((d) => {
-        setDiff((prev) => {
-          if (!prev) return d
-          // Re-fetch diffs for files that were already loaded
-          d.files.forEach((f) => {
-            const existing = prev.files.find((pf) => pf.path === f.path)
-            if (existing?.hunks && existing.hunks.length > 0) fetchFileDiff(f.path)
-            else if (f.additions + f.deletions < 1000) fetchFileDiff(f.path)
-          })
-          return d
-        })
+        setDiff(d)
+        applyHiddenFiles(d.files)
+        // Re-apply any per-file context expansions the user had set
+        for (const [path, ctx] of contextsSnap) {
+          if (ctx > 3) expandFileDiffRef.current(path, ctx).catch(() => { })
+        }
       })
       .catch(() => { })
       .finally(() => { silentRefreshRef.current = false })
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [externalRefreshTrigger])
 
   const handleLeftChange = useCallback((newLeft: LeftSel) => {
@@ -1327,30 +1384,16 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger }: { agent
   const handleFileClick = useCallback((path: string) => {
     if (singleFile && diff) {
       const idx = diff.files.findIndex((f) => f.path === path)
-      if (idx >= 0) {
-        setSingleFileIdx(idx)
-        if (!diff.files[idx].hunks || diff.files[idx].hunks.length === 0) {
-          fetchFileDiff(path)
-        }
-      }
+      if (idx >= 0) setSingleFileIdx(idx)
     } else {
-      if (collapsedFiles.has(path)) {
-        toggleFileCollapse(path)
-      }
-      const idx = diff?.files.findIndex(f => f.path === path)
-      if (idx !== undefined && idx >= 0 && (!diff?.files[idx].hunks || diff.files[idx].hunks.length === 0)) {
-        fetchFileDiff(path)
-      }
+      if (collapsedFiles.has(path)) toggleFileCollapse(path)
       setTimeout(() => scrollToFile(path), 50)
     }
-  }, [singleFile, diff, scrollToFile, fetchFileDiff, collapsedFiles, toggleFileCollapse])
+  }, [singleFile, diff, scrollToFile, collapsedFiles, toggleFileCollapse])
 
   const handleSingleFileChange = useCallback((v: boolean) => {
     setSingleFile(v); setSingleFileIdx(0)
-    if (v && diff && diff.files[0] && (!diff.files[0].hunks || diff.files[0].hunks.length === 0)) {
-      fetchFileDiff(diff.files[0].path)
-    }
-  }, [diff, fetchFileDiff])
+  }, [])
 
   const handleJumpToUncommittedActual = useCallback(() => {
     setLeftSel({ type: 'latest' })
@@ -1363,11 +1406,11 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger }: { agent
     const fromLabel = leftSel.type === 'base'
       ? agent.base_branch
       : leftSel.type === 'latest'
-      ? (commitsRef.current[0]?.short_sha ? `HEAD (${commitsRef.current[0].short_sha})` : 'HEAD')
-      : (commits.find(c => c.sha === leftSel.sha)?.short_sha ?? leftSel.sha.slice(0, 8))
+        ? (commitsRef.current[0]?.short_sha ? `HEAD (${commitsRef.current[0].short_sha})` : 'HEAD')
+        : (commits.find(c => c.sha === leftSel.sha)?.short_sha ?? leftSel.sha.slice(0, 8))
     const toLabel = rightSel.type === 'latest' ? 'latest commit'
       : rightSel.type === 'uncommitted' ? 'uncommitted changes'
-      : (commits.find(c => c.sha === rightSel.sha)?.short_sha ?? rightSel.sha.slice(0, 8))
+        : (commits.find(c => c.sha === rightSel.sha)?.short_sha ?? rightSel.sha.slice(0, 8))
 
     // Find hunk containing this line and build surrounding context
     const file = diff?.files.find(f => f.path === path)
@@ -1572,11 +1615,7 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger }: { agent
               <>
                 <div className="flex items-center gap-2 mb-3 z-20">{/* For now, not `sticky top-10` - when making the file headers sticky, make this sticky too */}
                   <button
-                    onClick={() => {
-                      const nextIdx = Math.max(0, singleFileIdx - 1)
-                      setSingleFileIdx(nextIdx)
-                      if (!diff.files[nextIdx].hunks) fetchFileDiff(diff.files[nextIdx].path)
-                    }}
+                    onClick={() => setSingleFileIdx(Math.max(0, singleFileIdx - 1))}
                     disabled={singleFileIdx === 0}
                     className="flex items-center justify-center w-7 h-7 rounded-md border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors shadow-sm"
                   >
@@ -1586,11 +1625,7 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger }: { agent
                     {singleFileIdx + 1} / {diff.files.length}
                   </div>
                   <button
-                    onClick={() => {
-                      const nextIdx = Math.min(diff.files.length - 1, singleFileIdx + 1)
-                      setSingleFileIdx(nextIdx)
-                      if (!diff.files[nextIdx].hunks) fetchFileDiff(diff.files[nextIdx].path)
-                    }}
+                    onClick={() => setSingleFileIdx(Math.min(diff.files.length - 1, singleFileIdx + 1))}
                     disabled={singleFileIdx === diff.files.length - 1}
                     className="flex items-center justify-center w-7 h-7 rounded-md border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors shadow-sm"
                   >
@@ -1604,8 +1639,11 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger }: { agent
                   isCollapsed={collapsedFiles.has(diff.files[singleFileIdx].path)}
                   onToggleCollapse={toggleFileCollapse}
                   onComment={handleComment}
-                  onExpand={fetchFileDiff}
+                  onExpand={expandFileDiff}
+                  isHidden={hiddenFiles.has(diff.files[singleFileIdx].path)}
+                  onShow={() => handleShowFile(diff.files[singleFileIdx].path)}
                   fileRef={getFileRef(diff.files[singleFileIdx].path)}
+                  currentContext={fileContexts.get(diff.files[singleFileIdx].path) ?? 3}
                 />
               </>
             ) : (
@@ -1614,8 +1652,11 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger }: { agent
                   isCollapsed={collapsedFiles.has(f.path)}
                   onToggleCollapse={toggleFileCollapse}
                   onComment={handleComment}
-                  onExpand={fetchFileDiff}
+                  onExpand={expandFileDiff}
+                  isHidden={hiddenFiles.has(f.path)}
+                  onShow={() => handleShowFile(f.path)}
                   fileRef={getFileRef(f.path)}
+                  currentContext={fileContexts.get(f.path) ?? 3}
                 />
               ))
             )}

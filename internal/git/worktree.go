@@ -8,8 +8,6 @@ import (
 	"strings"
 
 	"braces.dev/errtrace"
-	"github.com/go-git/go-git/v5"
-	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/trolleyman/hydra/internal/common"
 	"github.com/trolleyman/hydra/internal/paths"
 )
@@ -28,48 +26,23 @@ func ValidateRef(ref string) error {
 }
 
 // GetCurrentBranch returns the name of the currently checked-out branch.
+// Returns the commit hash if in detached HEAD state.
 func GetCurrentBranch(projectRoot string) (string, error) {
-	repo, err := git.PlainOpen(projectRoot)
-	if err != nil {
-		return "", errtrace.Wrap(err)
-	}
-
-	head, err := repo.Head()
-	if err != nil {
-		return "", errtrace.Wrap(err)
-	}
-
-	if head.Name().IsBranch() {
-		return head.Name().Short(), nil
-	}
-
-	return head.Hash().String(), nil
+	return gitOutput(projectRoot, "rev-parse", "--abbrev-ref", "HEAD")
 }
 
 // ListHydraBranches returns all branches matching hydra/*.
 func ListHydraBranches(projectRoot string) ([]string, error) {
-	repo, err := git.PlainOpen(projectRoot)
+	out, err := gitOutput(projectRoot, "branch", "--list", "hydra/*", "--format=%(refname:short)")
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
-
-	iter, err := repo.Branches()
-	if err != nil {
-		return nil, errtrace.Wrap(err)
-	}
-
 	var branches []string
-	err = iter.ForEach(func(ref *plumbing.Reference) error {
-		name := ref.Name().Short()
-		if strings.HasPrefix(name, "hydra/") {
-			branches = append(branches, name)
+	for _, b := range strings.Split(out, "\n") {
+		if b != "" {
+			branches = append(branches, b)
 		}
-		return nil
-	})
-	if err != nil {
-		return nil, errtrace.Wrap(err)
 	}
-
 	return branches, nil
 }
 
@@ -115,15 +88,6 @@ func DeleteBranch(projectRoot, branchName string) error {
 	if err := ValidateRef(branchName); err != nil {
 		return errtrace.Wrap(fmt.Errorf("branch name: %w", err))
 	}
-
-	repo, err := git.PlainOpen(projectRoot)
-	if err != nil {
-		return errtrace.Wrap(err)
-	}
-
-	err = repo.Storer.RemoveReference(plumbing.NewBranchReferenceName(branchName))
-	if err != nil {
-		return errtrace.Wrap(fmt.Errorf("git branch -D: %w", err))
-	}
-	return nil
+	_, err := gitOutput(projectRoot, "branch", "-D", branchName)
+	return errtrace.Wrap(err)
 }

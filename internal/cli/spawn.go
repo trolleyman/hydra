@@ -7,8 +7,9 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"os/exec"
+
 	"braces.dev/errtrace"
-	gogit "github.com/go-git/go-git/v5"
 	"github.com/spf13/cobra"
 	"github.com/trolleyman/hydra/internal/config"
 	"github.com/trolleyman/hydra/internal/db"
@@ -156,22 +157,9 @@ var spawnCmd = &cobra.Command{
 
 // readGitConfig reads a single git config value.
 func readGitConfig(projectRoot, key string) string {
-	repo, err := gogit.PlainOpen(projectRoot)
+	out, err := exec.Command("git", "-C", projectRoot, "config", "--get", key).Output()
 	if err != nil {
 		return ""
 	}
-	cfg, err := repo.Config()
-	if err != nil {
-		return ""
-	}
-	// Key is like "user.name"
-	parts := strings.Split(key, ".")
-	if len(parts) != 2 {
-		return ""
-	}
-	section := cfg.Raw.Section(parts[0])
-	if section == nil {
-		return ""
-	}
-	return section.Option(parts[1])
+	return strings.TrimRight(string(out), "\n")
 }

@@ -23,6 +23,15 @@ func WriteError(w http.ResponseWriter, status int, message string) {
 	})
 }
 
+// WriteErrorDetails writes a JSON error response with a details string.
+func WriteErrorDetails(w http.ResponseWriter, status int, message, details string) {
+	WriteJSON(w, status, ErrorResponse{
+		Code:    status,
+		Error:   ErrorResponseError(message),
+		Details: details,
+	})
+}
+
 // ReadJSON reads JSON from a request body
 func ReadJSON(r *http.Request, v interface{}) error {
 	return errtrace.Wrap(json.NewDecoder(r.Body).Decode(v))

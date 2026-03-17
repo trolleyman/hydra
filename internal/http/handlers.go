@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -15,7 +16,6 @@ import (
 
 	"braces.dev/errtrace"
 	dockerclient "github.com/docker/docker/client"
-	gogit "github.com/go-git/go-git/v5"
 	"github.com/trolleyman/hydra/internal/api"
 	"github.com/trolleyman/hydra/internal/config"
 	"github.com/trolleyman/hydra/internal/db"
@@ -27,6 +27,15 @@ import (
 )
 
 const version = "0.1.0"
+
+// gitConfigVal reads a single git config value for the repo at dir.
+func gitConfigVal(dir, key string) string {
+	out, err := exec.Command("git", "-C", dir, "config", "--get", key).Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimRight(string(out), "\n")
+}
 
 // devRestartExitCode is the process exit code that signals mage to rebuild and restart.
 const devRestartExitCode = 42
@@ -68,12 +77,14 @@ func NewHandler(s *Server) http.Handler {
 			RecordError(r, err)
 			code := http.StatusInternalServerError
 			errType := api.ErrorResponseErrorInternalError
+			details := err.Error()
 			var apiErr *apiError
 			if errors.As(err, &apiErr) {
 				code = apiErr.Code
 				errType = apiErr.Type
+				details = apiErr.Err.Error()
 			}
-			api.WriteError(w, code, string(errType))
+			api.WriteErrorDetails(w, code, string(errType), details)
 		},
 	}
 	strict := api.NewStrictHandlerWithOptions(s, nil, opts)
@@ -90,7 +101,10 @@ func (s *Server) GetDevToolsConfig(_ context.Context, _ api.GetDevToolsConfigReq
 	}
 
 	root := s.ProjectRoot
-	uid := s.DefaultProject.UUID
+	uid, err := projects.GetOrCreateInstanceUUID()
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
 
 	return api.GetDevToolsConfig200JSONResponse{
 		Workspace: &struct {
@@ -131,7 +145,6 @@ func (s *Server) ListProjects(_ context.Context, _ api.ListProjectsRequestObject
 			Id:   p.ID,
 			Path: p.Path,
 			Name: p.Name,
-			Uuid: p.UUID,
 		}
 	}
 	return resp, nil
@@ -175,7 +188,7 @@ func (s *Server) AddProject(_ context.Context, request api.AddProjectRequestObje
 		// Only init if it's not already a git repo.
 		if _, err := paths.GetProjectRoot(projectPath); err != nil {
 			// Not a git repo or directory doesn't exist (but we might have just created it)
-			_, err := gogit.PlainInit(projectPath, false)
+			err := exec.Command("git", "init", projectPath).Run()
 			if err != nil {
 				return api.AddProject500JSONResponse{
 					Code:    500,
@@ -203,7 +216,6 @@ func (s *Server) AddProject(_ context.Context, request api.AddProjectRequestObje
 		Id:   p.ID,
 		Path: p.Path,
 		Name: p.Name,
-		Uuid: p.UUID,
 	}), nil
 }
 
@@ -656,14 +668,7 @@ func (s *Server) MergeAgent(ctx context.Context, request api.MergeAgentRequestOb
 	}
 
 	// Get author info from git config
-	authorName := ""
-	authorEmail := ""
-	if repo, err := gogit.PlainOpen(projectRoot); err == nil {
-		if cfg, err := repo.Config(); err == nil {
-			authorName = cfg.Author.Name
-			authorEmail = cfg.Author.Email
-		}
-	}
+	authorName, authorEmail := gitConfigVal(projectRoot, "user.name"), gitConfigVal(projectRoot, "user.email")
 
 	if err := git.Merge(projectRoot, branchName, authorName, authorEmail); err != nil {
 		errMsg := fmt.Sprintf("merge failed: %v", err)
@@ -720,13 +725,7 @@ func (s *Server) UpdateAgentFromBase(ctx context.Context, request api.UpdateAgen
 	}
 
 	// Attempt merge (base branch into current branch)
-	authorName, authorEmail := "", ""
-	if repo, err := gogit.PlainOpen(mergeDir); err == nil {
-		if cfg, err := repo.Config(); err == nil {
-			authorName = cfg.Author.Name
-			authorEmail = cfg.Author.Email
-		}
-	}
+	authorName, authorEmail := gitConfigVal(mergeDir, "user.name"), gitConfigVal(mergeDir, "user.email")
 
 	if err := git.Merge(mergeDir, head.BaseBranch, authorName, authorEmail); err != nil {
 		errMsg := fmt.Sprintf("merge failed: %v", err)

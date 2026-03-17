@@ -14,9 +14,7 @@ func TestGetDevToolsConfig(t *testing.T) {
 	s := &Server{
 		Development: true,
 		ProjectRoot: "/tmp/test-project",
-		DefaultProject: projects.ProjectInfo{
-			UUID: "test-uuid",
-		},
+		DefaultProject: projects.ProjectInfo{},
 	}
 
 	handler := NewHandler(s)

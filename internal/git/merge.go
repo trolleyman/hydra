@@ -2,61 +2,38 @@ package git
 
 import (
 	"fmt"
-	"time"
+	"os"
+	"os/exec"
+	"strings"
 
 	"braces.dev/errtrace"
-	gogit "github.com/go-git/go-git/v5"
-	"github.com/go-git/go-git/v5/plumbing"
-	"github.com/go-git/go-git/v5/plumbing/object"
-	"github.com/go-git/go-git/v5/utils/merkletrie"
 )
 
 // Merge performs a git merge of srcRef into the current HEAD.
+// Uses fast-forward when possible, otherwise performs a --no-ff merge commit.
+// Returns an error if there are conflicting files.
 func Merge(projectRoot, srcRef string, authorName, authorEmail string) error {
-	repo, err := gogit.PlainOpen(projectRoot)
+	// Already merged: srcRef is an ancestor of HEAD.
+	alreadyMerged, err := gitIsAncestor(projectRoot, srcRef, "HEAD")
 	if err != nil {
 		return errtrace.Wrap(err)
 	}
-
-	headRef, err := repo.Head()
-	if err != nil {
-		return errtrace.Wrap(err)
-	}
-
-	srcH, err := repo.ResolveRevision(plumbing.Revision(srcRef))
-	if err != nil {
-		return errtrace.Wrap(err)
-	}
-
-	srcCommit, err := repo.CommitObject(*srcH)
-	if err != nil {
-		return errtrace.Wrap(err)
-	}
-
-	headCommit, err := repo.CommitObject(headRef.Hash())
-	if err != nil {
-		return errtrace.Wrap(err)
-	}
-
-	// Check for fast-forward
-	isAncestor, err := headCommit.IsAncestor(srcCommit)
-	if err == nil && isAncestor {
-		w, err := repo.Worktree()
-		if err != nil {
-			return errtrace.Wrap(err)
-		}
-		err = w.Reset(&gogit.ResetOptions{
-			Mode:   gogit.HardReset,
-			Commit: srcCommit.Hash,
-		})
-		if err != nil {
-			return errtrace.Wrap(err)
-		}
+	if alreadyMerged {
 		return nil
 	}
 
-	// Not a fast-forward, check for conflicts
-	conflicts, err := GetConflictingFiles(projectRoot, headRef.Hash().String(), srcCommit.Hash.String())
+	// Fast-forward: HEAD is an ancestor of srcRef.
+	canFF, err := gitIsAncestor(projectRoot, "HEAD", srcRef)
+	if err != nil {
+		return errtrace.Wrap(err)
+	}
+	if canFF {
+		_, err = gitOutput(projectRoot, "reset", "--hard", srcRef)
+		return errtrace.Wrap(err)
+	}
+
+	// Check for conflicting files before attempting the merge.
+	conflicts, err := GetConflictingFiles(projectRoot, "HEAD", srcRef)
 	if err != nil {
 		return errtrace.Wrap(err)
 	}
@@ -64,57 +41,6 @@ func Merge(projectRoot, srcRef string, authorName, authorEmail string) error {
 		return errtrace.Wrap(fmt.Errorf("merge conflict in files: %v", conflicts))
 	}
 
-	// Simple merge: no files overlap in changes
-	mb, err := headCommit.MergeBase(srcCommit)
-	if err != nil || len(mb) == 0 {
-		return errtrace.Wrap(fmt.Errorf("no merge base found"))
-	}
-	baseCommit := mb[0]
-
-	baseTree, _ := baseCommit.Tree()
-	srcTree, _ := srcCommit.Tree()
-
-	// Find changes from base to src
-	changes, err := baseTree.Diff(srcTree)
-	if err != nil {
-		return errtrace.Wrap(err)
-	}
-
-	// Apply changes to head worktree
-	w, err := repo.Worktree()
-	if err != nil {
-		return errtrace.Wrap(err)
-	}
-
-	for _, change := range changes {
-		action, _ := change.Action()
-		switch action {
-		case merkletrie.Insert, merkletrie.Modify:
-			name := change.To.Name
-			file, err := srcTree.File(name)
-			if err != nil {
-				return errtrace.Wrap(err)
-			}
-			content, err := file.Contents()
-			if err != nil {
-				return errtrace.Wrap(err)
-			}
-
-			f, err := w.Filesystem.Create(name)
-			if err != nil {
-				return errtrace.Wrap(err)
-			}
-			f.Write([]byte(content))
-			f.Close()
-			w.Add(name)
-
-		case merkletrie.Delete:
-			name := change.From.Name
-			w.Remove(name)
-		}
-	}
-
-	// Create merge commit
 	if authorName == "" {
 		authorName = "Hydra Agent"
 	}
@@ -123,18 +49,16 @@ func Merge(projectRoot, srcRef string, authorName, authorEmail string) error {
 	}
 
 	msg := fmt.Sprintf("Merge branch '%s'", srcRef)
-	commitHash, err := w.Commit(msg, &gogit.CommitOptions{
-		Author: &object.Signature{
-			Name:  authorName,
-			Email: authorEmail,
-			When:  time.Now(),
-		},
-		Parents: []plumbing.Hash{headCommit.Hash, srcCommit.Hash},
-	})
+	cmd := exec.Command("git", "-C", projectRoot, "merge", "--no-ff", "-m", msg, srcRef)
+	cmd.Env = append(os.Environ(),
+		"GIT_AUTHOR_NAME="+authorName,
+		"GIT_AUTHOR_EMAIL="+authorEmail,
+		"GIT_COMMITTER_NAME="+authorName,
+		"GIT_COMMITTER_EMAIL="+authorEmail,
+	)
+	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return errtrace.Wrap(err)
+		return errtrace.Wrap(fmt.Errorf("git merge: %w: %s", err, strings.TrimSpace(string(out))))
 	}
-
-	fmt.Printf("Created merge commit %s\n", commitHash)
 	return nil
 }

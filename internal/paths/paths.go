@@ -3,12 +3,12 @@ package paths
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 
 	"braces.dev/errtrace"
-	"github.com/go-git/go-git/v5"
 )
 
 var cwdProjectRoot *string
@@ -63,15 +63,11 @@ func GetProjectRootFromCwd() (string, error) {
 
 // GetProjectRoot returns the root of the git repository containing dir.
 func GetProjectRoot(dir string) (string, error) {
-	repo, err := git.PlainOpenWithOptions(dir, &git.PlainOpenOptions{DetectDotGit: true})
+	out, err := exec.Command("git", "-C", dir, "rev-parse", "--show-toplevel").Output()
 	if err != nil {
-		return "", errtrace.Wrap(fmt.Errorf("git open: %w", err))
+		return "", errtrace.Wrap(fmt.Errorf("git open: not a git repository"))
 	}
-	wt, err := repo.Worktree()
-	if err != nil {
-		return "", errtrace.Wrap(err)
-	}
-	return errtrace.Wrap2(NormalizePath(wt.Filesystem.Root()))
+	return NormalizePath(strings.TrimRight(string(out), "\n"))
 }
 
 func GetHydraDirFromProjectRoot(projectRoot string) string {

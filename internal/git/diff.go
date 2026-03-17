@@ -1,19 +1,15 @@
 package git
 
 import (
+	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 
 	"braces.dev/errtrace"
-	"github.com/go-git/go-git/v5"
-	"github.com/go-git/go-git/v5/plumbing"
-	"github.com/go-git/go-git/v5/plumbing/format/diff"
-	"github.com/go-git/go-git/v5/plumbing/object"
-	"github.com/go-git/go-git/v5/plumbing/storer"
-	"github.com/go-git/go-git/v5/utils/merkletrie"
 )
 
 // CommitInfo contains information about a single git commit.
@@ -64,394 +60,248 @@ type DiffFile struct {
 	Hunks      []DiffHunk
 }
 
-// ListCommits returns the commits reachable from headBranch but not from baseBranch.
-// Results are ordered newest-first.
+// UncommittedSummary holds counts of uncommitted changes.
+type UncommittedSummary struct {
+	TrackedCount   int
+	UntrackedCount int
+}
+
+// gitLogFormat uses ASCII control characters as separators to avoid collisions
+// with commit message content. %x1e = record separator, %x1f = field separator.
+const gitLogFormat = "--format=%x1e%H%x1f%aN%x1f%aE%x1f%aI%x1f%B"
+
+func parseCommitRecord(record string) (CommitInfo, bool) {
+	record = strings.TrimRight(record, "\n")
+	if record == "" {
+		return CommitInfo{}, false
+	}
+	parts := strings.SplitN(record, "\x1f", 5)
+	if len(parts) < 5 {
+		return CommitInfo{}, false
+	}
+	hash := strings.TrimSpace(parts[0])
+	if len(hash) < 7 {
+		return CommitInfo{}, false
+	}
+	body := strings.TrimRight(parts[4], "\n")
+	subject := strings.SplitN(body, "\n", 2)[0]
+	return CommitInfo{
+		SHA:         hash,
+		ShortSHA:    hash[:7],
+		Message:     body,
+		Subject:     subject,
+		AuthorName:  parts[1],
+		AuthorEmail: parts[2],
+		Timestamp:   parts[3],
+	}, true
+}
+
+// ListCommits returns commits reachable from headBranch but not baseBranch, newest first.
 func ListCommits(projectRoot, baseBranch, headBranch string) ([]CommitInfo, error) {
-	repo, err := git.PlainOpen(projectRoot)
+	out, err := gitOutput(projectRoot, "log", baseBranch+".."+headBranch, gitLogFormat)
 	if err != nil {
-		return nil, errtrace.Wrap(err)
+		return []CommitInfo{}, nil // branch doesn't exist or no commits
 	}
-
-	headRef, err := repo.ResolveRevision(plumbing.Revision(headBranch))
-	if err != nil {
-		return nil, nil // Return empty list if headBranch doesn't exist
-	}
-
-	baseRef, err := repo.ResolveRevision(plumbing.Revision(baseBranch))
-	if err != nil {
-		return nil, nil // Return empty list if baseBranch doesn't exist
-	}
-
-	iter, err := repo.Log(&git.LogOptions{
-		From:  *headRef,
-		Order: git.LogOrderDefault,
-	})
-	if err != nil {
-		return nil, errtrace.Wrap(err)
-	}
-
 	var commits []CommitInfo
-	err = iter.ForEach(func(c *object.Commit) error {
-		// Stop when we reach baseRef
-		if c.Hash == *baseRef {
-			return errtrace.Wrap(storer.ErrStop)
+	for _, record := range strings.Split(out, "\x1e") {
+		if c, ok := parseCommitRecord(record); ok {
+			commits = append(commits, c)
 		}
-
-		commits = append(commits, CommitInfo{
-			SHA:         c.Hash.String(),
-			ShortSHA:    c.Hash.String()[:7],
-			Message:     c.Message,
-			Subject:     strings.SplitN(c.Message, "\n", 2)[0],
-			AuthorName:  c.Author.Name,
-			AuthorEmail: c.Author.Email,
-			Timestamp:   c.Author.When.Format("2006-01-02T15:04:05Z07:00"),
-		})
-		return nil
-	})
-	if err != nil && err != storer.ErrStop {
-		return nil, errtrace.Wrap(err)
 	}
-
-	// Filter out commits that are reachable from baseBranch
-	finalCommits := []CommitInfo{}
-	for _, ci := range commits {
-		h := plumbing.NewHash(ci.SHA)
-		reachable, _ := isReachable(repo, *baseRef, h)
-		if reachable {
-			continue
-		}
-		finalCommits = append(finalCommits, ci)
-	}
-
-	return finalCommits, nil
-}
-
-func isAncestor(repo *git.Repository, ancestor, descendant plumbing.Hash) (bool, error) {
-	descCommit, err := repo.CommitObject(descendant)
-	if err != nil {
-		return false, errtrace.Wrap(err)
-	}
-	ancCommit, err := repo.CommitObject(ancestor)
-	if err != nil {
-		return false, errtrace.Wrap(err)
-	}
-	return errtrace.Wrap2(descCommit.IsAncestor(ancCommit))
-}
-
-func isReachable(repo *git.Repository, from, to plumbing.Hash) (bool, error) {
-	fromCommit, err := repo.CommitObject(from)
-	if err != nil {
-		return false, errtrace.Wrap(err)
-	}
-	toCommit, err := repo.CommitObject(to)
-	if err != nil {
-		return false, errtrace.Wrap(err)
-	}
-	return errtrace.Wrap2(fromCommit.IsAncestor(toCommit))
+	return commits, nil
 }
 
 // GetCommitInfo retrieves information about a single commit by ref.
 func GetCommitInfo(projectRoot, ref string) (*CommitInfo, error) {
-	repo, err := git.PlainOpen(projectRoot)
-	if err != nil {
-		return nil, errtrace.Wrap(err)
-	}
-
-	h, err := repo.ResolveRevision(plumbing.Revision(ref))
+	out, err := gitOutput(projectRoot, "show", "--no-patch", gitLogFormat, ref)
 	if err != nil {
 		return nil, errtrace.Wrap(fmt.Errorf("resolve revision: %w", err))
 	}
-
-	c, err := repo.CommitObject(*h)
-	if err != nil {
-		return nil, errtrace.Wrap(fmt.Errorf("commit object: %w", err))
+	// show output may have extra headers before the format; find the record separator.
+	idx := strings.Index(out, "\x1e")
+	if idx >= 0 {
+		out = out[idx:]
 	}
-
-	subject := strings.SplitN(c.Message, "\n", 2)[0]
-	return &CommitInfo{
-		SHA:         c.Hash.String(),
-		ShortSHA:    c.Hash.String()[:7],
-		Message:     c.Message,
-		Subject:     subject,
-		AuthorName:  c.Author.Name,
-		AuthorEmail: c.Author.Email,
-		Timestamp:   c.Author.When.Format("2006-01-02T15:04:05Z07:00"),
-	}, nil
+	c, ok := parseCommitRecord(strings.TrimPrefix(out, "\x1e"))
+	if !ok {
+		return nil, errtrace.Wrap(fmt.Errorf("unexpected git show output"))
+	}
+	return &c, nil
 }
 
 // GetDiff returns the parsed diff between baseRef and headRef.
+// If headRef is empty, diffs baseRef against the working tree (uncommitted changes).
 func GetDiff(projectRoot, baseRef, headRef string, ignoreWhitespace, useTripleDot bool, path string, context int) ([]DiffFile, error) {
-	repo, err := git.PlainOpen(projectRoot)
-	if err != nil {
-		return nil, errtrace.Wrap(err)
+	args := []string{"diff", fmt.Sprintf("-U%d", context)}
+	if ignoreWhitespace {
+		args = append(args, "--ignore-space-change")
 	}
-
-	baseH, err := repo.ResolveRevision(plumbing.Revision(baseRef))
-	if err != nil {
-		return nil, errtrace.Wrap(err)
-	}
-	baseCommit, err := repo.CommitObject(*baseH)
-	if err != nil {
-		return nil, errtrace.Wrap(err)
-	}
-	baseTree, err := baseCommit.Tree()
-	if err != nil {
-		return nil, errtrace.Wrap(err)
-	}
-
-	var headTree *object.Tree
 	if headRef == "" {
-		return nil, errtrace.Wrap(fmt.Errorf("diff against worktree not yet implemented via go-git"))
+		args = append(args, baseRef)
+	} else if useTripleDot {
+		args = append(args, baseRef+"..."+headRef)
 	} else {
-		hH, err := repo.ResolveRevision(plumbing.Revision(headRef))
-		if err != nil {
-			return nil, errtrace.Wrap(err)
-		}
-
-		headCommit, err := repo.CommitObject(*hH)
-		if err != nil {
-			return nil, errtrace.Wrap(err)
-		}
-
-		if useTripleDot {
-			res, err := baseCommit.MergeBase(headCommit)
-			if err != nil || len(res) == 0 {
-				return nil, errtrace.Wrap(fmt.Errorf("could not find merge base"))
-			}
-			baseTree, err = res[0].Tree()
-			if err != nil {
-				return nil, errtrace.Wrap(err)
-			}
-		}
-		headTree, err = headCommit.Tree()
-		if err != nil {
-			return nil, errtrace.Wrap(err)
-		}
+		args = append(args, baseRef, headRef)
+	}
+	if path != "" {
+		args = append(args, "--", path)
 	}
 
-	changes, err := baseTree.Diff(headTree)
+	out, err := gitOutput(projectRoot, args...)
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
-
-	patch, err := changes.Patch()
-	if err != nil {
-		return nil, errtrace.Wrap(err)
-	}
-
-	buf := new(strings.Builder)
-	encoder := diff.NewUnifiedEncoder(buf, 0)
-	err = encoder.Encode(patch)
-	if err != nil {
-		return nil, errtrace.Wrap(err)
-	}
-
-	return errtrace.Wrap2(parseDiff(buf.String()))
+	return parseDiff(out)
 }
 
-// GetDiffFiles returns the list of files that changed between baseRef and headRef.
+// GetDiffFiles returns summary info (no hunks) for files changed between baseRef and headRef.
 func GetDiffFiles(projectRoot, baseRef, headRef string, useTripleDot bool) ([]DiffFile, error) {
-	repo, err := git.PlainOpen(projectRoot)
+	files, err := GetDiff(projectRoot, baseRef, headRef, false, useTripleDot, "", 0)
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
-
-	baseH, err := repo.ResolveRevision(plumbing.Revision(baseRef))
-	if err != nil {
-		return nil, errtrace.Wrap(err)
+	for i := range files {
+		files[i].Hunks = nil
 	}
-	baseCommit, err := repo.CommitObject(*baseH)
-	if err != nil {
-		return nil, errtrace.Wrap(err)
-	}
-	baseTree, err := baseCommit.Tree()
-	if err != nil {
-		return nil, errtrace.Wrap(err)
-	}
-
-	var headTree *object.Tree
-	if headRef == "" {
-		return nil, errtrace.Wrap(fmt.Errorf("diff against worktree not yet implemented via go-git"))
-	} else {
-		hH, err := repo.ResolveRevision(plumbing.Revision(headRef))
-		if err != nil {
-			return nil, errtrace.Wrap(err)
-		}
-		headCommit, err := repo.CommitObject(*hH)
-		if err != nil {
-			return nil, errtrace.Wrap(err)
-		}
-
-		if useTripleDot {
-			res, err := baseCommit.MergeBase(headCommit)
-			if err != nil || len(res) == 0 {
-				return nil, errtrace.Wrap(fmt.Errorf("could not find merge base"))
-			}
-			baseTree, err = res[0].Tree()
-			if err != nil {
-				return nil, errtrace.Wrap(err)
-			}
-		}
-		headTree, err = headCommit.Tree()
-		if err != nil {
-			return nil, errtrace.Wrap(err)
-		}
-	}
-
-	changes, err := baseTree.Diff(headTree)
-	if err != nil {
-		return nil, errtrace.Wrap(err)
-	}
-
-	patch, err := changes.Patch()
-	if err != nil {
-		return nil, errtrace.Wrap(err)
-	}
-
-	var files []DiffFile
-	for _, fp := range patch.FilePatches() {
-		from, to := fp.Files()
-		path := ""
-		var oldPath *string
-		changeType := "modified"
-		if from == nil && to != nil {
-			path = to.Path()
-			changeType = "added"
-		} else if from != nil && to == nil {
-			path = from.Path()
-			changeType = "deleted"
-		} else if from != nil && to != nil {
-			path = to.Path()
-			if from.Path() != to.Path() {
-				changeType = "renamed"
-				op := from.Path()
-				oldPath = &op
-			}
-		}
-
-		add, del := 0, 0
-		for _, chunk := range fp.Chunks() {
-			switch chunk.Type() {
-			case diff.Add:
-				add += strings.Count(chunk.Content(), "\n")
-				if !strings.HasSuffix(chunk.Content(), "\n") && chunk.Content() != "" {
-					add++
-				}
-			case diff.Delete:
-				del += strings.Count(chunk.Content(), "\n")
-				if !strings.HasSuffix(chunk.Content(), "\n") && chunk.Content() != "" {
-					del++
-				}
-			}
-		}
-
-		files = append(files, DiffFile{
-			Path:       path,
-			OldPath:    oldPath,
-			ChangeType: changeType,
-			Additions:  add,
-			Deletions:  del,
-			Binary:     fp.IsBinary(),
-		})
-	}
-
 	return files, nil
 }
 
-// GetUntrackedDiffFiles returns DiffFile summary entries for all untracked files.
+// GetUntrackedDiffFiles returns DiffFile summary entries for untracked files.
 func GetUntrackedDiffFiles(projectRoot string) ([]DiffFile, error) {
-	repo, err := git.PlainOpen(projectRoot)
+	out, err := gitOutput(projectRoot, "ls-files", "--others", "--exclude-standard")
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
-
-	w, err := repo.Worktree()
-	if err != nil {
-		return nil, errtrace.Wrap(err)
-	}
-
-	status, err := w.Status()
-	if err != nil {
-		return nil, errtrace.Wrap(err)
-	}
-
 	var files []DiffFile
-	for path, stat := range status {
-		if stat.Staging == git.Untracked && stat.Worktree == git.Untracked {
-			content, err := os.ReadFile(filepath.Join(projectRoot, path))
-			additions := 0
-			if err == nil {
-				additions = strings.Count(string(content), "\n")
-				if len(content) > 0 && !strings.HasSuffix(string(content), "\n") {
-					additions++
-				}
-			}
-			files = append(files, DiffFile{Path: path, ChangeType: "added", Additions: additions})
+	for _, p := range strings.Split(out, "\n") {
+		if p == "" {
+			continue
 		}
+		content, err := os.ReadFile(filepath.Join(projectRoot, p))
+		additions := 0
+		if err == nil {
+			additions = strings.Count(string(content), "\n")
+			if len(content) > 0 && !strings.HasSuffix(string(content), "\n") {
+				additions++
+			}
+		}
+		files = append(files, DiffFile{Path: p, ChangeType: "added", Additions: additions})
 	}
 	return files, nil
 }
 
 // GetUntrackedDiff returns full parsed diffs for untracked files.
 func GetUntrackedDiff(projectRoot, path string, context int) ([]DiffFile, error) {
-	repo, err := git.PlainOpen(projectRoot)
+	out, err := gitOutput(projectRoot, "ls-files", "--others", "--exclude-standard")
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
-
-	w, err := repo.Worktree()
-	if err != nil {
-		return nil, errtrace.Wrap(err)
-	}
-
-	status, err := w.Status()
-	if err != nil {
-		return nil, errtrace.Wrap(err)
-	}
-
 	var files []DiffFile
-	for p, stat := range status {
-		if stat.Staging == git.Untracked && stat.Worktree == git.Untracked {
-			if path != "" && p != path {
-				continue
-			}
-
-			content, err := os.ReadFile(filepath.Join(projectRoot, p))
-			if err != nil {
-				continue
-			}
-
-			lines := strings.Split(string(content), "\n")
-			if len(lines) > 0 && lines[len(lines)-1] == "" {
-				lines = lines[:len(lines)-1]
-			}
-
-			hunk := DiffHunk{
-				Header:   fmt.Sprintf("@@ -0,0 +1,%d @@", len(lines)),
-				OldStart: 0,
-				NewStart: 1,
-			}
-			for i, line := range lines {
-				lineNum := i + 1
-				hunk.Lines = append(hunk.Lines, DiffLine{
-					Type:       DiffLineAddition,
-					Content:    line,
-					NewLineNum: &lineNum,
-				})
-			}
-
-			files = append(files, DiffFile{
-				Path:       p,
-				ChangeType: "added",
-				Additions:  len(lines),
-				Hunks:      []DiffHunk{hunk},
-			})
+	for _, p := range strings.Split(out, "\n") {
+		if p == "" || (path != "" && p != path) {
+			continue
 		}
+		cmd := exec.Command("git", "-C", projectRoot, "diff", "--no-index",
+			fmt.Sprintf("-U%d", context), "/dev/null", p)
+		diffOut, err := cmd.Output()
+		if err != nil {
+			var exitErr *exec.ExitError
+			if !errors.As(err, &exitErr) || exitErr.ExitCode() != 1 {
+				continue // skip file on unexpected error
+			}
+			// exit code 1 = files differ, expected for --no-index
+		}
+		diffs, err := parseDiff(string(diffOut))
+		if err != nil {
+			continue
+		}
+		files = append(files, diffs...)
 	}
 	return files, nil
 }
 
-// parseDiff parses raw diff output.
+// GetMergeBase returns the merge-base commit hash between two refs.
+func GetMergeBase(projectRoot, baseRef, headRef string) (string, error) {
+	return gitOutput(projectRoot, "merge-base", baseRef, headRef)
+}
+
+// HasConflicts returns true if merging headRef into baseRef would conflict.
+func HasConflicts(projectRoot, baseRef, headRef string) (bool, error) {
+	conflicts, err := GetConflictingFiles(projectRoot, baseRef, headRef)
+	if err != nil {
+		return false, errtrace.Wrap(err)
+	}
+	return len(conflicts) > 0, nil
+}
+
+// GetConflictingFiles returns files modified in both branches since their common ancestor.
+func GetConflictingFiles(projectRoot, baseRef, headRef string) ([]string, error) {
+	mergeBase, err := GetMergeBase(projectRoot, baseRef, headRef)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	baseChangedOut, err := gitOutput(projectRoot, "diff", "--name-only", mergeBase, baseRef)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	headChangedOut, err := gitOutput(projectRoot, "diff", "--name-only", mergeBase, headRef)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+
+	baseSet := make(map[string]bool)
+	for _, f := range strings.Split(baseChangedOut, "\n") {
+		if f != "" {
+			baseSet[f] = true
+		}
+	}
+	var conflicts []string
+	for _, f := range strings.Split(headChangedOut, "\n") {
+		if f != "" && baseSet[f] {
+			conflicts = append(conflicts, f)
+		}
+	}
+	return conflicts, nil
+}
+
+// GetUncommittedSummary returns counts of tracked and untracked changes.
+func GetUncommittedSummary(projectRoot string) (*UncommittedSummary, error) {
+	out, err := gitOutput(projectRoot, "status", "--porcelain=v1")
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	s := &UncommittedSummary{}
+	for _, line := range strings.Split(out, "\n") {
+		if len(line) < 2 {
+			continue
+		}
+		if line[0] == '?' && line[1] == '?' {
+			s.UntrackedCount++
+		} else {
+			s.TrackedCount++
+		}
+	}
+	return s, nil
+}
+
+// HasUncommittedChanges returns true if there are uncommitted changes to tracked files.
+func HasUncommittedChanges(projectRoot string) (bool, error) {
+	out, err := gitOutput(projectRoot, "status", "--porcelain=v1")
+	if err != nil {
+		return false, errtrace.Wrap(err)
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if len(line) < 2 {
+			continue
+		}
+		if !(line[0] == '?' && line[1] == '?') {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// parseDiff parses raw unified diff output.
 func parseDiff(rawDiff string) ([]DiffFile, error) {
 	var files []DiffFile
 	var cur *DiffFile
@@ -475,8 +325,8 @@ func parseDiff(rawDiff string) ([]DiffFile, error) {
 		}
 	}
 
-	lines := strings.Split(rawDiff, "\n")
-	for _, line := range lines {
+	lines := strings.SplitSeq(rawDiff, "\n")
+	for line := range lines {
 		switch {
 		case strings.HasPrefix(line, "diff --git ") || strings.HasPrefix(line, "diff "):
 			finishFile()
@@ -488,11 +338,8 @@ func parseDiff(rawDiff string) ([]DiffFile, error) {
 			}
 		case cur == nil && (strings.HasPrefix(line, "--- ") || strings.HasPrefix(line, "+++ ")):
 			cur = &DiffFile{}
-			if strings.HasPrefix(line, "+++ ") {
-				cur.Path = strings.TrimPrefix(line, "+++ ")
-				if strings.HasPrefix(cur.Path, "b/") {
-					cur.Path = cur.Path[2:]
-				}
+			if after, ok := strings.CutPrefix(line, "+++ "); ok {
+				cur.Path = strings.TrimPrefix(after, "b/")
 			}
 		case cur == nil:
 			continue
@@ -517,14 +364,12 @@ func parseDiff(rawDiff string) ([]DiffFile, error) {
 			}
 			if cur.Path == "" && strings.HasPrefix(line, "+++ ") {
 				cur.Path = strings.TrimPrefix(line, "+++ ")
-				if strings.HasPrefix(cur.Path, "b/") {
-					cur.Path = cur.Path[2:]
-				}
+				cur.Path = strings.TrimPrefix(cur.Path, "b/")
 			}
 		case strings.HasPrefix(line, "@@ "):
 			finishHunk()
-			curHunk = &DiffHunk{Header: line}
 			oldLineNum, newLineNum = parseHunkHeader(line)
+			curHunk = &DiffHunk{Header: line, OldStart: oldLineNum, NewStart: newLineNum}
 		case curHunk != nil:
 			switch {
 			case strings.HasPrefix(line, "+"):
@@ -568,132 +413,4 @@ func parseHunkHeader(header string) (oldStart, newStart int) {
 		return n
 	}
 	return parseStart(old), parseStart(newS)
-}
-
-// GetMergeBase returns the merge-base between two refs.
-func GetMergeBase(projectRoot, baseRef, headRef string) (string, error) {
-	repo, err := git.PlainOpen(projectRoot)
-	if err != nil {
-		return "", errtrace.Wrap(err)
-	}
-	bH, err := repo.ResolveRevision(plumbing.Revision(baseRef))
-	if err != nil {
-		return "", errtrace.Wrap(err)
-	}
-	hH, err := repo.ResolveRevision(plumbing.Revision(headRef))
-	if err != nil {
-		return "", errtrace.Wrap(err)
-	}
-	baseCommit, err := repo.CommitObject(*bH)
-	if err != nil {
-		return "", errtrace.Wrap(err)
-	}
-	headCommit, err := repo.CommitObject(*hH)
-	if err != nil {
-		return "", errtrace.Wrap(err)
-	}
-	res, err := baseCommit.MergeBase(headCommit)
-	if err != nil || len(res) == 0 {
-		return "", errtrace.Wrap(fmt.Errorf("no merge base found"))
-	}
-	return res[0].Hash.String(), nil
-}
-
-// HasConflicts returns true if merging headRef into baseRef would conflict.
-func HasConflicts(projectRoot, baseRef, headRef string) (bool, error) {
-	conflicts, err := GetConflictingFiles(projectRoot, baseRef, headRef)
-	if err != nil {
-		return false, errtrace.Wrap(err)
-	}
-	return len(conflicts) > 0, nil
-}
-
-// UncommittedSummary holds counts of uncommitted changes.
-type UncommittedSummary struct {
-	TrackedCount   int
-	UntrackedCount int
-}
-
-// GetUncommittedSummary returns counts of tracked and untracked changes.
-func GetUncommittedSummary(projectRoot string) (*UncommittedSummary, error) {
-	repo, err := git.PlainOpen(projectRoot)
-	if err != nil {
-		return nil, errtrace.Wrap(err)
-	}
-	w, err := repo.Worktree()
-	if err != nil {
-		return nil, errtrace.Wrap(err)
-	}
-	status, err := w.Status()
-	if err != nil {
-		return nil, errtrace.Wrap(err)
-	}
-	s := &UncommittedSummary{}
-	for _, stat := range status {
-		if stat.Staging == git.Untracked && stat.Worktree == git.Untracked {
-			s.UntrackedCount++
-		} else {
-			s.TrackedCount++
-		}
-	}
-	return s, nil
-}
-
-// HasUncommittedChanges returns true if there are uncommitted changes to tracked files.
-func HasUncommittedChanges(projectRoot string) (bool, error) {
-	s, err := GetUncommittedSummary(projectRoot)
-	if err != nil {
-		return false, errtrace.Wrap(err)
-	}
-	return s.TrackedCount > 0, nil
-}
-
-// GetConflictingFiles returns the list of files that would conflict during a merge.
-func GetConflictingFiles(projectRoot, baseRef, headRef string) ([]string, error) {
-	repo, err := git.PlainOpen(projectRoot)
-	if err != nil {
-		return nil, errtrace.Wrap(err)
-	}
-	mergeBase, err := GetMergeBase(projectRoot, baseRef, headRef)
-	if err != nil {
-		return nil, errtrace.Wrap(err)
-	}
-	getNames := func(from, to string) (map[string]bool, error) {
-		fromH, _ := repo.ResolveRevision(plumbing.Revision(from))
-		toH, _ := repo.ResolveRevision(plumbing.Revision(to))
-		fromCommit, _ := repo.CommitObject(*fromH)
-		toCommit, _ := repo.CommitObject(*toH)
-		fromTree, _ := fromCommit.Tree()
-		toTree, _ := toCommit.Tree()
-		changes, err := fromTree.Diff(toTree)
-		if err != nil {
-			return nil, errtrace.Wrap(err)
-		}
-		m := make(map[string]bool)
-		for _, change := range changes {
-			action, _ := change.Action()
-			switch action {
-			case merkletrie.Modify, merkletrie.Delete:
-				m[change.From.Name] = true
-			case merkletrie.Insert:
-				m[change.To.Name] = true
-			}
-		}
-		return m, nil
-	}
-	baseChanged, err := getNames(mergeBase, baseRef)
-	if err != nil {
-		return nil, errtrace.Wrap(err)
-	}
-	headChanged, err := getNames(mergeBase, headRef)
-	if err != nil {
-		return nil, errtrace.Wrap(err)
-	}
-	var conflicts []string
-	for f := range headChanged {
-		if baseChanged[f] {
-			conflicts = append(conflicts, f)
-		}
-	}
-	return conflicts, nil
 }

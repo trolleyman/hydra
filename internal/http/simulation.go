@@ -52,7 +52,6 @@ func (s *SimulationServer) ListProjects(w http.ResponseWriter, r *http.Request) 
 			Id:   "sim-project",
 			Path: "/simulated/project",
 			Name: "simulated-project",
-			Uuid: "sim-uuid-1",
 		},
 	}
 	api.WriteJSON(w, http.StatusOK, resp)

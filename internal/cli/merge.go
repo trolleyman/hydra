@@ -4,10 +4,10 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 
 	"braces.dev/errtrace"
-	gogit "github.com/go-git/go-git/v5"
 	"github.com/spf13/cobra"
 	"github.com/trolleyman/hydra/internal/db"
 	"github.com/trolleyman/hydra/internal/docker"
@@ -103,11 +103,11 @@ var mergeCmd = &cobra.Command{
 
 		// Get author info from git config
 		authorName, authorEmail := "", ""
-		if repo, err := gogit.PlainOpen(projectRoot); err == nil {
-			if cfg, err := repo.Config(); err == nil {
-				authorName = cfg.Author.Name
-				authorEmail = cfg.Author.Email
-			}
+		if out, err := exec.Command("git", "-C", projectRoot, "config", "--get", "user.name").Output(); err == nil {
+			authorName = strings.TrimRight(string(out), "\n")
+		}
+		if out, err := exec.Command("git", "-C", projectRoot, "config", "--get", "user.email").Output(); err == nil {
+			authorEmail = strings.TrimRight(string(out), "\n")
 		}
 
 		if err := git.Merge(projectRoot, branchName, authorName, authorEmail); err != nil {

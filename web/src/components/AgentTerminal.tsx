@@ -254,8 +254,8 @@ function TerminalPane({ agentId, projectId, shell, active, reconnectAttempt, onS
         className="flex-1 min-h-0 overflow-hidden"
       />
       {showCopiedAt > 0 && (
-        <div key={showCopiedAt} className="absolute top-2 right-2 px-2 py-1 bg-gray-800/90 text-gray-200 text-[10px] rounded border border-gray-700 shadow-lg pointer-events-none animate-fade-in-out z-10">
-          Copied to clipboard
+        <div key={showCopiedAt} className="absolute top-2 right-2 px-2 py-1 bg-green-800/90 text-gray-200 text-[10px] rounded border border-green-700 shadow-lg pointer-events-none animate-fade-in-out z-10">
+          Copied to clipboard!
         </div>
       )}
     </div>
