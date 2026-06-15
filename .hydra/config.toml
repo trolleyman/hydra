@@ -4,7 +4,7 @@ pre_prompt = """
 - Check using mage build before committing"""
 
 [defaults.sandbox]
-writable_paths = ["~/.cache/go-build", "~/go/pkg", "~/.bun/install/cache", "~/.cache/goimports", "~/.magefile"]
+writable_paths = ["~/.cache/go-build", "~/.go/pkg", "~/.bun/install/cache", "~/.cache/goimports", "~/.magefile"]
 
 [features]
 terminal_bash = true

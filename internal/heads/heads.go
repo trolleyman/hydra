@@ -282,7 +282,7 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 
 	// Build the sandbox launch options.
 	cfg, _ := config.Load(projectRoot)
-	writable, masked, restore, net := cfg.ResolveSandboxOptions(string(opts.AgentType))
+	writable, masked, restore, net, preSpawn := cfg.ResolveSandboxOptions(string(opts.AgentType))
 
 	seed, err := seedHead(projectRoot, opts.ID, opts.AgentType, worktreePath, home, opts.PrePrompt)
 	if err != nil {
@@ -312,11 +312,12 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 			MaskedPaths:   masked,
 			RestoreRO:     restore,
 			Network:       net,
-			Binds:         seed.Binds,
-			Env:           env,
-			Argv:          argv,
-			HardenGUI:     true,
-			Seccomp:       true,
+			Binds:          seed.Binds,
+			Env:            env,
+			Argv:           argv,
+			PreSpawnScript: preSpawn,
+			HardenGUI:      true,
+			Seccomp:        true,
 		},
 	})
 	if err != nil {
@@ -423,27 +424,28 @@ func StartShellSession(reg *session.Registry, projectRoot string, head Head, row
 	var sb sandbox.Options
 	if sandboxed {
 		cfg, _ := config.Load(projectRoot)
-		writable, masked, restore, net := cfg.ResolveSandboxOptions("bash")
+		writable, masked, restore, net, preSpawn := cfg.ResolveSandboxOptions("bash")
 		// Bash is an interactive shell, not an agent — no system prompt to inject.
 		seed, err := seedHead(projectRoot, shellID, sandbox.AgentTypeBash, worktreePath, home, "")
 		if err != nil {
 			return "", errtrace.Wrap(err)
 		}
 		sb = sandbox.Options{
-			AgentType:     sandbox.AgentTypeBash,
-			WorktreePath:  worktreePath,
-			GitCommonDir:  gitCommonDir(projectRoot),
-			Home:          home,
-			WritablePaths: append(writable, seed.WritablePaths...),
-			MaskedPaths:   masked,
-			RestoreRO:     restore,
-			Network:       net,
-			Binds:         seed.Binds,
-			Env:           append(env, seed.Env...),
-			Argv:          []string{"/bin/bash"},
-			HardenGUI:     true,
-			Seccomp:       true,
-			Interactive:   true,
+			AgentType:      sandbox.AgentTypeBash,
+			WorktreePath:   worktreePath,
+			GitCommonDir:   gitCommonDir(projectRoot),
+			Home:           home,
+			WritablePaths:  append(writable, seed.WritablePaths...),
+			MaskedPaths:    masked,
+			RestoreRO:      restore,
+			Network:        net,
+			Binds:          seed.Binds,
+			Env:            append(env, seed.Env...),
+			Argv:           []string{"/bin/bash"},
+			PreSpawnScript: preSpawn,
+			HardenGUI:      true,
+			Seccomp:        true,
+			Interactive:    true,
 		}
 	} else {
 		// Regular shell: plain host bash in the worktree, no confinement.
@@ -479,7 +481,7 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 	home := currentUser.HomeDir
 
 	cfg, _ := config.Load(projectRoot)
-	writable, masked, restore, net := cfg.ResolveSandboxOptions(string(head.AgentType))
+	writable, masked, restore, net, preSpawn := cfg.ResolveSandboxOptions(string(head.AgentType))
 	seed, err := seedHead(projectRoot, head.ID, head.AgentType, worktreePath, home, head.PrePrompt)
 	if err != nil {
 		return errtrace.Wrap(err)
@@ -497,19 +499,20 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 		Rows: rows,
 		Cols: cols,
 		Sandbox: sandbox.Options{
-			AgentType:     head.AgentType,
-			WorktreePath:  worktreePath,
-			GitCommonDir:  gitCommonDir(projectRoot),
-			Home:          home,
-			WritablePaths: append(writable, seed.WritablePaths...),
-			MaskedPaths:   masked,
-			RestoreRO:     restore,
-			Network:       net,
-			Binds:         seed.Binds,
-			Env:           env,
-			Argv:          argv,
-			HardenGUI:     true,
-			Seccomp:       true,
+			AgentType:      head.AgentType,
+			WorktreePath:   worktreePath,
+			GitCommonDir:   gitCommonDir(projectRoot),
+			Home:           home,
+			WritablePaths:  append(writable, seed.WritablePaths...),
+			MaskedPaths:    masked,
+			RestoreRO:      restore,
+			Network:        net,
+			Binds:          seed.Binds,
+			Env:            env,
+			Argv:           argv,
+			PreSpawnScript: preSpawn,
+			HardenGUI:      true,
+			Seccomp:        true,
 		},
 	})
 	if err != nil {

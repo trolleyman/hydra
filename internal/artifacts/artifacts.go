@@ -477,7 +477,9 @@ func (m *Manager) buildCommandSpec(spec config.ArtifactScript, runDir, outputDir
 
 	if !spec.UnsafeHost {
 		cfg, _ := config.Load(m.projectRoot)
-		writable, masked, restore, _ := cfg.ResolveSandboxOptions("")
+		// The pre-spawn script is intentionally ignored: artifact generation is a
+		// plain command, not an agent spawn.
+		writable, masked, restore, _, _ := cfg.ResolveSandboxOptions("")
 		// The artifact output dir lives outside the checkout, so make it writable
 		// explicitly (the checkout itself is covered by WorktreePath).
 		writable = append(writable, outputDir)

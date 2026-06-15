@@ -78,6 +78,11 @@ type Options struct {
 	Env []string
 	// Argv is the command to run inside the sandbox (e.g. claude --resume).
 	Argv []string
+	// PreSpawnScript is an optional shell script run inside the sandbox via
+	// /bin/sh immediately before Argv (same worktree, env and confinement). The
+	// real command execs after it returns; an explicit non-zero `exit` in the
+	// script aborts the launch. Empty to skip. Ignored when NoSandbox is set.
+	PreSpawnScript string
 
 	// HardenGUI hides the per-user runtime dir and unsets DISPLAY/WAYLAND/etc
 	// so the agent cannot drive the desktop session. Default true.
@@ -93,6 +98,19 @@ type Options struct {
 	// host access). Used only for the user-opted-in "regular shell"; never for
 	// agents. All other sandbox fields are ignored when set.
 	NoSandbox bool
+}
+
+// withPreSpawn wraps argv so that script runs inside the sandbox (via /bin/sh)
+// before the real command. The script shares the agent's shell: falling through
+// it execs argv, while an explicit `exit N` aborts the launch. Returns argv
+// unchanged when no script is configured. Used by the platform BuildSpec impls.
+func withPreSpawn(script string, argv []string) []string {
+	if strings.TrimSpace(script) == "" || len(argv) == 0 {
+		return argv
+	}
+	// $0 is the wrapper name; $@ is the original argv, exec'd after the script.
+	wrapper := script + "\nexec \"$@\""
+	return append([]string{"/bin/sh", "-c", wrapper, "hydra-pre-spawn"}, argv...)
 }
 
 // rawSpec builds a launch spec that runs opts.Argv directly on the host with no

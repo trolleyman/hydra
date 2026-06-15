@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import type { AgentConfig, AgentResponse, ConfigResponse, NetworkConfig, ProjectInfo, SandboxConfig } from '../api'
-import { X, Plus, Globe, FolderOpen, EyeOff, Eye, Layers, Monitor, Sparkles } from 'lucide-react'
+import { X, Plus, Globe, FolderOpen, EyeOff, Eye, Layers, Monitor, Sparkles, Terminal } from 'lucide-react'
 import { InfoTooltip } from './InfoTooltip'
 import { AgentTerminal } from './AgentTerminal'
 
@@ -124,6 +124,7 @@ export function ConfigForm({
       !next.writable_paths?.length &&
       !next.masked_paths?.length &&
       !next.restore_ro?.length &&
+      !next.pre_spawn_script &&
       !next.network
     onChange({ ...value, sandbox: empty ? null : next })
   }
@@ -255,6 +256,33 @@ export function ConfigForm({
           onChange={(restore_ro) => updateSandbox({ restore_ro })}
           placeholder="e.g. ~/.config/git"
         />
+
+        {/* Pre-spawn script */}
+        <div className="space-y-1.5">
+          <div className="flex items-center gap-1.5">
+            <Terminal className="w-3.5 h-3.5 text-indigo-500 dark:text-indigo-400" />
+            <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">
+              Pre-Spawn Script
+            </label>
+            <InfoTooltip title="Pre-Spawn Script">
+              <p>A shell script run <strong>inside the sandbox</strong> via <code className="text-blue-300">/bin/sh</code> immediately before each agent starts, in its worktree with the same environment and confinement.</p>
+              <p className="mt-1.5">Useful for per-spawn setup such as <code className="text-blue-300">mise trust</code>. The agent launches after the script falls through; an explicit <code className="text-blue-300">exit 1</code> aborts the launch.</p>
+            </InfoTooltip>
+          </div>
+          {inheritedSandbox?.pre_spawn_script && (
+            <p className="text-[11px] text-gray-400 dark:text-gray-500 italic ml-0.5">
+              Inherited: <span className="font-mono">{inheritedSandbox.pre_spawn_script}</span>
+            </p>
+          )}
+          <textarea
+            value={sandbox.pre_spawn_script ?? ''}
+            onChange={(e) => updateSandbox({ pre_spawn_script: e.target.value || null })}
+            placeholder={'# e.g.\nmise trust'}
+            spellCheck={false}
+            rows={3}
+            className="w-full text-sm px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-100 placeholder-gray-300 dark:placeholder-gray-600 font-mono shadow-inner focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 resize-y transition-all"
+          />
+        </div>
       </div>
     </div>
   )

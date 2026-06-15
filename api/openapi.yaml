@@ -1119,6 +1119,10 @@ components:
           items:
             type: string
           nullable: true
+        pre_spawn_script:
+          type: string
+          nullable: true
+          description: Shell script run inside the sandbox immediately before each agent is launched (e.g. `mise trust`)
         network:
           $ref: '#/components/schemas/NetworkConfig'
           nullable: true

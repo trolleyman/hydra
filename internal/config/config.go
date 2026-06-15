@@ -34,6 +34,7 @@ const DefaultPrePrompt = "You are a head (AI agent) of Hydra, an AI orchestratio
 	"- `masked_paths` — extra paths hidden inside the sandbox.\n" +
 	"- `restore_ro` — paths re-exposed read-only after a parent was masked.\n" +
 	"- `network.enabled` / `network.allowed_hosts` — outbound network access and its host allow-list.\n" +
+	"- `pre_spawn_script` — a shell script run inside the sandbox before each agent starts (e.g. `mise trust`).\n" +
 	"- `pre_prompt` — the standing instructions you are reading now.\n" +
 	"\n" +
 	"## Workflow\n" +
@@ -62,6 +63,11 @@ type SandboxConfig struct {
 	RestoreRO []string `toml:"restore_ro"`
 	// Network is the network policy.
 	Network *NetworkConfig `toml:"network"`
+	// PreSpawnScript is an optional shell script run inside the sandbox
+	// immediately before each agent is launched (e.g. `mise trust` or other
+	// arbitrary setup). It runs via /bin/sh in the agent's worktree with the
+	// same environment and confinement as the agent. nil/empty = no script.
+	PreSpawnScript *string `toml:"pre_spawn_script"`
 }
 
 // AgentConfig holds per-agent-type configuration.
@@ -191,6 +197,23 @@ func (c *Config) Merge(other Config) {
 	}
 }
 
+// clone returns a deep-enough copy of the AgentConfig that Merge can mutate it
+// without touching the original's nested Sandbox/Network structs. (Merge replaces
+// slices and the PrePrompt/PreSpawnScript pointers wholesale, so only the Sandbox
+// and Network structs need fresh copies.)
+func (a AgentConfig) clone() AgentConfig {
+	out := a
+	if a.Sandbox != nil {
+		sb := *a.Sandbox
+		if a.Sandbox.Network != nil {
+			n := *a.Sandbox.Network
+			sb.Network = &n
+		}
+		out.Sandbox = &sb
+	}
+	return out
+}
+
 // Merge merges another AgentConfig into this one.
 func (a *AgentConfig) Merge(other AgentConfig) {
 	if other.Sandbox != nil {
@@ -227,6 +250,9 @@ func (s *SandboxConfig) Merge(other SandboxConfig) {
 			s.Network.AllowedHosts = other.Network.AllowedHosts
 		}
 	}
+	if other.PreSpawnScript != nil {
+		s.PreSpawnScript = other.PreSpawnScript
+	}
 }
 
 // Load loads the merged configuration for a project.
@@ -259,7 +285,7 @@ func Load(projectRoot string) (Config, error) {
 
 // GetResolvedConfig returns the fully resolved AgentConfig for a specific agent type.
 func (c Config) GetResolvedConfig(agentType string) AgentConfig {
-	resolved := c.Defaults
+	resolved := c.Defaults.clone()
 
 	if agentCfg, ok := c.Agents[agentType]; ok {
 		resolved.Merge(agentCfg)
@@ -271,7 +297,7 @@ func (c Config) GetResolvedConfig(agentType string) AgentConfig {
 // ResolveSandboxOptions merges the baked-in sandbox defaults with the resolved
 // per-agent config into concrete path lists + network policy. User config is
 // additive for the path lists.
-func (c Config) ResolveSandboxOptions(agentType string) (writable, masked, restore []string, net sandbox.NetworkPolicy) {
+func (c Config) ResolveSandboxOptions(agentType string) (writable, masked, restore []string, net sandbox.NetworkPolicy, preSpawn string) {
 	def := sandbox.Defaults()
 	writable = append([]string{}, def.WritablePaths...)
 	masked = append([]string{}, def.MaskedPaths...)
@@ -289,8 +315,11 @@ func (c Config) ResolveSandboxOptions(agentType string) (writable, masked, resto
 			}
 			net.AllowedHosts = sb.Network.AllowedHosts
 		}
+		if sb.PreSpawnScript != nil {
+			preSpawn = *sb.PreSpawnScript
+		}
 	}
-	return writable, masked, restore, net
+	return writable, masked, restore, net, preSpawn
 }
 
 // Save saves a configuration to the project-specific configuration file.
@@ -348,6 +377,9 @@ func writeAgentConfigFields(buf *strings.Builder, table string, cfg AgentConfig)
 		}
 		if len(sb.RestoreRO) > 0 {
 			buf.WriteString("restore_ro = " + tomlStringArray(sb.RestoreRO) + "\n")
+		}
+		if sb.PreSpawnScript != nil && *sb.PreSpawnScript != "" {
+			buf.WriteString("pre_spawn_script = " + tomlStringValue(*sb.PreSpawnScript) + "\n")
 		}
 		if sb.Network != nil {
 			buf.WriteString("\n[" + table + ".sandbox.network]\n")
