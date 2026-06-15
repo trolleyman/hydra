@@ -1343,7 +1343,11 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger }: { agent
   useEffect(() => {
     if (!agent.branch_name) return
     api.default.getAgentCommits(projectId ?? '', agent.id)
-      .then((c) => { setCommits(c); commitsRef.current = c }).catch(() => setCommits([]))
+      .then((c) => {
+        setCommits(c)
+        commitsRef.current = c
+        lastCommitsSigRef.current = JSON.stringify(c.map((x) => x.sha))
+      }).catch(() => setCommits([]))
   }, [agent.id, agent.branch_name, projectId, refreshKey])
 
   // expandFileDiff: fetches a single file's diff with a given context (for context expansion only).
@@ -1465,6 +1469,11 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger }: { agent
   // text selection (and discards their per-file context expansions) for no reason.
   const lastDiffSigRef = useRef<string | null>(null)
 
+  // Signature of the last-applied commits list. A silent refresh must not call
+  // setCommits with an identical list: that re-renders DiffViewer for nothing, and a
+  // re-render is enough to disturb an in-progress text selection (issue #34).
+  const lastCommitsSigRef = useRef<string | null>(null)
+
   // Apply a silently-fetched diff and re-apply the user's per-file context expansions.
   // No-ops when the content is byte-identical to what's already shown.
   const applySilentDiff = useCallback((d: DiffResponse, contexts: Map<string, number>) => {
@@ -1509,9 +1518,18 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger }: { agent
     // Snapshot current per-file contexts before async work
     const contextsSnap = new Map(fileContextsRef.current)
 
-    // Refresh commits list silently
+    // Refresh commits list silently — but only push it into state when it actually
+    // changed, so an idle/no-op refresh never re-renders (and never disturbs a
+    // text selection the user has in the diff).
     api.default.getAgentCommits(projectId ?? '', agent.id)
-      .then((c) => { setCommits(c); commitsRef.current = c }).catch(() => { })
+      .then((c) => {
+        commitsRef.current = c
+        const sig = JSON.stringify(c.map((x) => x.sha))
+        if (sig !== lastCommitsSigRef.current) {
+          lastCommitsSigRef.current = sig
+          setCommits(c)
+        }
+      }).catch(() => { })
 
     // Fetch full diff silently — preserves open comments since we diff against previous state.
     api.default.getAgentDiff(projectId ?? '', agent.id,
