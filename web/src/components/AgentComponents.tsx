@@ -17,6 +17,14 @@ export function statusDotClass(status: string): string {
   }
 }
 
+// agentDotClass picks the sidebar status dot color. A finished head's session
+// is already stopped (gray), but we want it to read as "done" at a distance, so
+// the agent status takes priority over the raw session status for that case.
+export function agentDotClass(agent: AgentResponse): string {
+  if (agent.agent_status?.status === 'finished') return 'bg-violet-500'
+  return statusDotClass(agent.session_status)
+}
+
 export function formatStartedAgo(createdAt: number): string {
   const seconds = Math.floor((Date.now() - createdAt * 1000) / 1000)
   if (seconds < 5) return 'just now'
@@ -48,7 +56,7 @@ export function agentStatusBadge(status: string | undefined): { label: string; c
     case 'running':   return { label: 'running',   className: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' }
     case 'starting':  return { label: 'starting',  className: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' }
     case 'waiting':   return { label: 'waiting',   className: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400' }
-    case 'finished':  return { label: 'finished',  className: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400' }
+    case 'finished':  return { label: 'finished',  className: 'bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400' }
     case 'merging':   return { label: 'merging',   className: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' }
     case 'ended':     return { label: 'ended',     className: 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400' }
     case 'exited':    return { label: 'exited',    className: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' }
@@ -85,7 +93,7 @@ export function AgentSidebarItem({
     >
       <div className="flex items-center gap-2 min-w-0">
         <span
-          className={`w-2 h-2 rounded-full shrink-0 ${statusDotClass(agent.session_status)}`}
+          className={`w-2 h-2 rounded-full shrink-0 ${agentDotClass(agent)}`}
         />
         <span className="font-medium text-sm text-gray-900 dark:text-gray-100 truncate">{agent.id}</span>
       </div>
