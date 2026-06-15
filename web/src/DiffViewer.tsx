@@ -879,7 +879,6 @@ function MergeConflictButton({ diff, agent, projectId }: {
 }) {
   const [open, setOpen] = useState(false)
   const [sending, setSending] = useState(false)
-  const [sent, setSent] = useState(false)
 
   if (!diff?.merge_conflict) return null
 
@@ -892,8 +891,7 @@ function MergeConflictButton({ diff, agent, projectId }: {
     setSending(true)
     try {
       await api.default.sendAgentInput(projectId ?? '', agent.id, { text: `Fix the merge conflicts with branch ${baseBranch}` })
-      setSent(true)
-      setTimeout(() => { setSent(false); setOpen(false) }, 2000)
+      setOpen(false)
     } catch {
       // silently ignore
     } finally {
@@ -977,12 +975,10 @@ function MergeConflictButton({ diff, agent, projectId }: {
                 </button>
                 <button
                   onClick={handleFixWithAgent}
-                  disabled={sending || sent}
+                  disabled={sending}
                   className="flex items-center gap-1.5 h-7 px-3 rounded-md text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-60 transition-colors cursor-pointer ml-auto"
                 >
-                  {sent ? (
-                    <><Check className="w-3.5 h-3.5" /> Sent to agent</>
-                  ) : sending ? (
+                  {sending ? (
                     <><LoaderCircle className="w-3.5 h-3.5 animate-spin" /> Sending…</>
                   ) : (
                     <><Bot className="w-3.5 h-3.5" /> Fix with agent</>
