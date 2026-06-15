@@ -14,6 +14,7 @@ import (
 
 	"braces.dev/errtrace"
 	"github.com/gorilla/websocket"
+	"github.com/trolleyman/hydra/internal/git"
 	"github.com/trolleyman/hydra/internal/heads"
 	"github.com/trolleyman/hydra/internal/paths"
 )
@@ -267,8 +268,16 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	// Tail the status log and send diff_refresh events when git commands are detected,
-	// and also on a 20-second periodic timer.
+	// Send diff_refresh events only when the worktree content actually changes.
+	//
+	// We poll a cheap content fingerprint of the worktree (git.WorktreeStateHash —
+	// HEAD + porcelain status + tracked diff + untracked sizes) on a short timer and
+	// emit only when it differs from what we last reported. A git command detected in
+	// the agent's status log triggers an immediate re-check so commits/checkouts show
+	// up faster than the poll interval. This replaces the previous unconditional
+	// 20-second ticker (issue #35), which forced every attached client to re-fetch the
+	// full diff on every idle tick — wasted work, and the trigger behind issue #34
+	// (the re-fetch periodically reset the user's in-progress text selection).
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
@@ -276,7 +285,39 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 			}
 		}()
 		statusLogPath := paths.GetStatusLogFromProjectRoot(projectRoot, agentID)
-		ticker := time.NewTicker(20 * time.Second)
+
+		// Worktree path captured at attach time; nil if the head has no worktree
+		// (e.g. host shell), in which case we never emit content-driven refreshes.
+		var worktree string
+		if head.Worktree != nil {
+			worktree = *head.Worktree
+		}
+
+		// lastHash starts at the current state so attaching never fires a spurious
+		// initial refresh — the client already fetched the diff on mount.
+		var lastHash string
+		if worktree != "" {
+			if h, err := git.WorktreeStateHash(worktree); err == nil {
+				lastHash = h
+			}
+		}
+
+		// checkAndEmit recomputes the worktree fingerprint and emits diff_refresh only
+		// when it has changed since the last emit. Read-only git commands (status, log,
+		// diff) and idle ticks therefore never trigger a client re-fetch.
+		checkAndEmit := func() {
+			if worktree == "" {
+				return
+			}
+			h, err := git.WorktreeStateHash(worktree)
+			if err != nil || h == lastHash {
+				return
+			}
+			lastHash = h
+			sendTerminalEvent(conn, "diff_refresh")
+		}
+
+		ticker := time.NewTicker(3 * time.Second)
 		defer ticker.Stop()
 
 		var scanner *bufio.Scanner
@@ -295,11 +336,11 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				sendTerminalEvent(conn, "diff_refresh")
+				checkAndEmit()
 			default:
 				if scanner != nil && scanner.Scan() {
 					if looksLikeGitCommand(scanner.Text()) {
-						sendTerminalEvent(conn, "diff_refresh")
+						checkAndEmit()
 					}
 				} else {
 					time.Sleep(200 * time.Millisecond)
