@@ -10,13 +10,20 @@
 // of the working-tree state), so repeat views are free.
 //
 // Generation runs in the background: Get returns immediately with a
-// "generating" status while a goroutine does the (potentially slow) work, and a
-// per-entry lock collapses duplicate concurrent requests for the same version.
+// "generating" status while a goroutine does the (potentially slow) work, a
+// per-entry lock collapses duplicate concurrent requests for the same version,
+// and a semaphore bounds how many generations run at once.
 //
-// Design note: scripts run on the host as the invoking user (the project config
-// is trusted, like pre_prompt and shared_mounts), with the checkout as their
-// working directory and a wall-clock timeout. Running them inside the sandbox
-// is a follow-up.
+// Security note: scripts run *inside the OS sandbox* (the same bubblewrap /
+// sandbox-exec confinement agents get), not on the host. The command string is
+// trusted (it comes from the project's live config, not the checked-out ref),
+// but it executes against an attacker-controllable checkout — build tooling and
+// package lifecycle scripts run the diffed ref's own code — so confining it is
+// what keeps a malicious branch from escaping onto the host. The checkout dir,
+// the artifact output dir, the dev caches and the git common dir are writable;
+// credentials are masked; network is on (cold installs need it). A script can
+// opt out with `unsafe_host = true` in config, which runs it unconfined on the
+// host — only safe for self-contained, audited commands. See buildCommandSpec.
 package artifacts
 
 import (
@@ -26,6 +33,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"image"
+	_ "image/gif"  // register GIF decoder for pixel comparison
+	_ "image/jpeg" // register JPEG decoder for pixel comparison
+	_ "image/png"  // register PNG decoder for pixel comparison
 	"io"
 	"io/fs"
 	"os"
@@ -41,6 +52,7 @@ import (
 	"github.com/trolleyman/hydra/internal/config"
 	"github.com/trolleyman/hydra/internal/git"
 	"github.com/trolleyman/hydra/internal/paths"
+	"github.com/trolleyman/hydra/internal/sandbox"
 )
 
 const (
@@ -49,6 +61,11 @@ const (
 	// DefaultMaxAge and DefaultMaxBytes bound the on-disk artifact cache.
 	DefaultMaxAge   = 7 * 24 * time.Hour
 	DefaultMaxBytes = int64(2) << 30 // 2 GiB
+	// maxConcurrentGen caps how many generations run at once. Generations are
+	// heavy (a full build per ref) and run untrusted ref code, so distinct refs
+	// must not fan out without bound. A normal diff view (left+right of one
+	// script) saturates this; further requests queue behind the per-entry lock.
+	maxConcurrentGen = 2
 )
 
 // imageExts maps collectible output extensions to their content types.
@@ -160,6 +177,99 @@ func AnyChanged(deltas []FileDelta) bool {
 	return false
 }
 
+// Compare classifies artifact files across two cache entries like the package
+// [Compare], but refines the byte-hash verdict with a pixel-level check: a file
+// flagged ChangeModified is downgraded to ChangeUnchanged when both sides decode
+// to images with identical dimensions and pixels. This keeps cosmetic
+// re-encodings (different compression level, added metadata/EXIF, timestamp
+// chunks) from surfacing as visual changes while still catching any real pixel
+// difference.
+//
+// Only formats the standard library can decode (PNG, JPEG, GIF) get the pixel
+// check; other types — and any file that fails to decode — keep the byte-hash
+// verdict.
+func (m *Manager) Compare(left, right Meta) []FileDelta {
+	deltas := Compare(left.Files, right.Files)
+	for i := range deltas {
+		d := &deltas[i]
+		if d.Change != ChangeModified {
+			continue
+		}
+		lp := filepath.Join(m.entryDir(left.Script, left.Key), filepath.FromSlash(d.Name))
+		rp := filepath.Join(m.entryDir(right.Script, right.Key), filepath.FromSlash(d.Name))
+		if equal, err := imagesPixelEqual(lp, rp); err == nil && equal {
+			d.Change = ChangeUnchanged
+		}
+	}
+	return deltas
+}
+
+// imagesPixelEqual reports whether two image files decode to the same dimensions
+// and pixels. A decode failure (unsupported format, corrupt file) returns an
+// error so the caller can fall back to the byte-hash verdict.
+func imagesPixelEqual(leftPath, rightPath string) (bool, error) {
+	la, err := decodeImage(leftPath)
+	if err != nil {
+		return false, errtrace.Wrap(err)
+	}
+	ra, err := decodeImage(rightPath)
+	if err != nil {
+		return false, errtrace.Wrap(err)
+	}
+	lb, rb := la.Bounds(), ra.Bounds()
+	if lb.Dx() != rb.Dx() || lb.Dy() != rb.Dy() {
+		return false, nil
+	}
+	// Fast path: same concrete type with byte-identical pixel buffers.
+	if equalRawPix(la, ra) {
+		return true, nil
+	}
+	// General path: compare pixel-by-pixel in RGBA space, aligning the two
+	// (possibly differently-originated) coordinate systems.
+	ox, oy := rb.Min.X-lb.Min.X, rb.Min.Y-lb.Min.Y
+	for y := lb.Min.Y; y < lb.Max.Y; y++ {
+		for x := lb.Min.X; x < lb.Max.X; x++ {
+			lr, lg, lbl, laa := la.At(x, y).RGBA()
+			rr, rg, rbl, raa := ra.At(x+ox, y+oy).RGBA()
+			if lr != rr || lg != rg || lbl != rbl || laa != raa {
+				return false, nil
+			}
+		}
+	}
+	return true, nil
+}
+
+func decodeImage(path string) (image.Image, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	defer f.Close()
+	img, _, err := image.Decode(f)
+	return img, errtrace.Wrap(err)
+}
+
+// equalRawPix is a fast path that reports true only when two images share the
+// same concrete pixel type and byte-identical pixel buffers. A false result
+// means "unknown" — the caller falls back to the general per-pixel comparison.
+func equalRawPix(a, b image.Image) bool {
+	switch av := a.(type) {
+	case *image.RGBA:
+		if bv, ok := b.(*image.RGBA); ok {
+			return av.Stride == bv.Stride && av.Rect == bv.Rect && bytes.Equal(av.Pix, bv.Pix)
+		}
+	case *image.NRGBA:
+		if bv, ok := b.(*image.NRGBA); ok {
+			return av.Stride == bv.Stride && av.Rect == bv.Rect && bytes.Equal(av.Pix, bv.Pix)
+		}
+	case *image.Gray:
+		if bv, ok := b.(*image.Gray); ok {
+			return av.Stride == bv.Stride && av.Rect == bv.Rect && bytes.Equal(av.Pix, bv.Pix)
+		}
+	}
+	return false
+}
+
 // Version identifies one side of a comparison: either a committed ref (checked
 // out into an ephemeral worktree) or an existing working-tree directory (run in
 // place, for uncommitted changes).
@@ -174,11 +284,16 @@ type Manager struct {
 
 	mu   sync.Mutex
 	gens map[string]struct{} // entry dirs with an in-flight generation
+	sem  chan struct{}       // bounds concurrent generations (maxConcurrentGen)
 }
 
 // NewManager returns a Manager for the given project root.
 func NewManager(projectRoot string) *Manager {
-	m := &Manager{projectRoot: projectRoot, gens: map[string]struct{}{}}
+	m := &Manager{
+		projectRoot: projectRoot,
+		gens:        map[string]struct{}{},
+		sem:         make(chan struct{}, maxConcurrentGen),
+	}
 	_ = paths.CreateGitignoreAllInDir(m.root())
 	return m
 }
@@ -231,6 +346,12 @@ func (m *Manager) Get(spec config.ArtifactScript, v Version) (Meta, error) {
 	m.mu.Unlock()
 
 	go func() {
+		// Bound concurrent generations. The entry stays marked in-flight while
+		// queued, so duplicate requests keep getting StatusGenerating instead of
+		// piling up more builds.
+		m.sem <- struct{}{}
+		defer func() { <-m.sem }()
+
 		meta := m.generate(spec, v, key, ref)
 		if err := writeMeta(dir, meta); err != nil {
 			// Best-effort: a failed write just means the next request regenerates.
@@ -283,13 +404,17 @@ func (m *Manager) generate(spec config.ArtifactScript, v Version, key, ref strin
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "sh", "-c", spec.Command)
-	cmd.Dir = runDir
-	cmd.Env = append(os.Environ(),
-		"HYDRA_ARTIFACT_OUTPUT="+dir,
-		"HYDRA_ARTIFACT_SOURCE="+runDir,
-		"HYDRA_ARTIFACT_REF="+ref,
-	)
+	launch, err := m.buildCommandSpec(spec, runDir, dir, ref)
+	if err != nil {
+		meta.Status, meta.Error = StatusError, err.Error()
+		return meta
+	}
+	defer launch.Cleanup()
+
+	cmd := exec.CommandContext(ctx, launch.Path, launch.Args[1:]...) //errtrace:skip
+	cmd.Dir = launch.Dir
+	cmd.Env = launch.Env
+	cmd.ExtraFiles = launch.ExtraFiles
 	var stderr bytes.Buffer
 	cmd.Stdout = io.Discard
 	cmd.Stderr = &stderr
@@ -314,6 +439,62 @@ func (m *Manager) generate(spec config.ArtifactScript, v Version, key, ref strin
 	meta.Status = StatusReady
 	meta.UpdatedAt = time.Now().Unix()
 	return meta
+}
+
+// buildCommandSpec resolves the script command into a launch spec. By default
+// it runs inside the OS sandbox (the same confinement agents get), because the
+// command executes against an attacker-controllable checkout — the diffed ref's
+// build tooling and package lifecycle scripts run its code. runDir (the
+// checkout/working tree) and outputDir (HYDRA_ARTIFACT_OUTPUT) are writable
+// along with the dev caches and the git common dir; credentials are masked; the
+// network is on (cold `bun install`/`go mod download` need it, warm caches stay
+// mostly offline) — matching the agent default. When spec.UnsafeHost is set the
+// command runs unconfined on the host instead (sandbox.Options.NoSandbox).
+func (m *Manager) buildCommandSpec(spec config.ArtifactScript, runDir, outputDir, ref string) (*sandbox.Spec, error) {
+	home, _ := os.UserHomeDir()
+
+	env := append([]string{}, os.Environ()...)
+	if home != "" {
+		env = append(env, "HOME="+home)
+	}
+	env = append(env,
+		"HYDRA_ARTIFACT_OUTPUT="+outputDir,
+		"HYDRA_ARTIFACT_SOURCE="+runDir,
+		"HYDRA_ARTIFACT_REF="+ref,
+	)
+	// Trust the checkout's copied mise config when the host trusts the project's,
+	// so mise-managed toolchains (go, bun, …) resolve inside the run dir.
+	env = append(env, sandbox.MiseTrustEnv(m.projectRoot, runDir)...)
+
+	opts := sandbox.Options{
+		AgentType:    sandbox.AgentTypeBash, // a plain command, not an agent
+		WorktreePath: runDir,                // always writable + chdir target
+		Home:         home,
+		Env:          env,
+		Argv:         []string{"sh", "-c", spec.Command},
+		NoSandbox:    spec.UnsafeHost,
+	}
+
+	if !spec.UnsafeHost {
+		cfg, _ := config.Load(m.projectRoot)
+		// The pre-spawn script is intentionally ignored: artifact generation is a
+		// plain command, not an agent spawn.
+		writable, masked, restore, _, _ := cfg.ResolveSandboxOptions("")
+		// The artifact output dir lives outside the checkout, so make it writable
+		// explicitly (the checkout itself is covered by WorktreePath).
+		writable = append(writable, outputDir)
+		if gcd, err := git.GetCommonDir(m.projectRoot); err == nil {
+			opts.GitCommonDir = gcd // ephemeral worktree git metadata lives here
+		}
+		opts.WritablePaths = writable
+		opts.MaskedPaths = masked
+		opts.RestoreRO = restore
+		opts.Network = sandbox.NetworkPolicy{Enabled: true}
+		opts.HardenGUI = true
+		opts.Seccomp = true
+	}
+
+	return errtrace.Wrap2(sandbox.BuildSpec(opts))
 }
 
 // keyRe matches valid cache keys produced by versionKey.

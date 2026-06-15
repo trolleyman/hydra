@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"os/exec"
 	"os/user"
 	"sort"
 	"strings"
@@ -298,7 +297,7 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 	}
 
 	env := append(agentEnv(home, username, gitAuthorName, gitAuthorEmail), seed.Env...)
-	env = append(env, miseTrustEnv(projectRoot, worktreePath)...)
+	env = append(env, sandbox.MiseTrustEnv(projectRoot, worktreePath)...)
 
 	sess, err := reg.Start(session.StartOptions{
 		ID:   opts.ID,
@@ -395,50 +394,6 @@ func gitCommonDir(projectRoot string) string {
 	return dir
 }
 
-// miseTrustEnv returns a MISE_TRUSTED_CONFIG_PATHS override that trusts the
-// worktree's copied mise config — but only when the host already trusts the
-// project's mise config. (mise trust is path-based, so the copy at the worktree
-// path would otherwise prompt or error.) Returns nil when there's nothing to do.
-func miseTrustEnv(projectRoot, worktreePath string) []string {
-	if worktreePath == "" || worktreePath == projectRoot {
-		return nil // no separate worktree: the project path is already trusted
-	}
-	if !hostTrustsMiseConfig(projectRoot) {
-		return nil
-	}
-	val := worktreePath
-	if existing := os.Getenv("MISE_TRUSTED_CONFIG_PATHS"); existing != "" {
-		val = existing + string(os.PathListSeparator) + worktreePath
-	}
-	return []string{"MISE_TRUSTED_CONFIG_PATHS=" + val}
-}
-
-// hostTrustsMiseConfig reports whether the host user trusts projectRoot's mise
-// config, via `mise trust --show` (which prints "<path>: <status>" for each
-// config in the dir hierarchy). False if mise is absent or the project is untrusted.
-func hostTrustsMiseConfig(projectRoot string) bool {
-	out, err := exec.Command("mise", "trust", "--show", "-C", projectRoot).Output()
-	if err != nil {
-		return false
-	}
-	home, _ := os.UserHomeDir()
-	for _, line := range strings.Split(string(out), "\n") {
-		idx := strings.LastIndex(line, ": ")
-		if idx < 0 {
-			continue
-		}
-		p := strings.TrimSpace(line[:idx])
-		status := strings.TrimSpace(line[idx+2:])
-		if home != "" && strings.HasPrefix(p, "~") {
-			p = home + p[len("~"):]
-		}
-		if p == projectRoot {
-			return status == "trusted"
-		}
-	}
-	return false
-}
-
 // StartShellSession opens an interactive bash session sharing the head's
 // worktree. When sandboxed is true the shell runs inside the same OS sandbox as
 // the agent; when false it runs directly on the host with no confinement (an
@@ -464,7 +419,7 @@ func StartShellSession(reg *session.Registry, projectRoot string, head Head, row
 	}
 	home := currentUser.HomeDir
 	env := agentEnv(home, currentUser.Username, readGitConfigVal(projectRoot, "user.name"), readGitConfigVal(projectRoot, "user.email"))
-	env = append(env, miseTrustEnv(projectRoot, worktreePath)...)
+	env = append(env, sandbox.MiseTrustEnv(projectRoot, worktreePath)...)
 
 	var sb sandbox.Options
 	if sandboxed {
@@ -537,7 +492,7 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 	}
 
 	env := append(agentEnv(home, currentUser.Username, readGitConfigVal(projectRoot, "user.name"), readGitConfigVal(projectRoot, "user.email")), seed.Env...)
-	env = append(env, miseTrustEnv(projectRoot, worktreePath)...)
+	env = append(env, sandbox.MiseTrustEnv(projectRoot, worktreePath)...)
 
 	sess, err := reg.Start(session.StartOptions{
 		ID:   head.ID,

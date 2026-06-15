@@ -1045,6 +1045,15 @@ func (s *Server) GetAgentDiff(ctx context.Context, request api.GetAgentDiffReque
 		}
 	}
 
+	// How far the branch trails its base: commits on the base branch not yet in
+	// the branch. Surfaced so the UI can warn the branch is out of date.
+	behindCount := 0
+	if head.Branch != nil {
+		if commits, err := git.ListCommits(projectRoot, *head.Branch, head.BaseBranch); err == nil {
+			behindCount = len(commits)
+		}
+	}
+
 	resp := api.DiffResponse{
 		Files:              apiFiles,
 		BaseRef:            baseRef,
@@ -1055,6 +1064,7 @@ func (s *Server) GetAgentDiff(ctx context.Context, request api.GetAgentDiffReque
 		UncommittedSummary: uncommittedSummary,
 		BaseCommit:         baseCommitInfo,
 		HeadCommit:         headCommitInfo,
+		BehindCount:        &behindCount,
 	}
 	return api.GetAgentDiff200JSONResponse(resp), nil
 }

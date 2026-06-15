@@ -19,6 +19,7 @@ const DefaultPrePrompt = "You are a head (AI agent) of Hydra, an AI orchestratio
 	"\n" +
 	"## Environment\n" +
 	"- You are running inside a locked-down OS sandbox on a dedicated git worktree, as the host user.\n" +
+	"- You MUST work in this worktree, not the main repository.\n" +
 	"- You have read access to the host, write access to your worktree and the developer caches; credential locations are masked.\n" +
 	"- The current branch is `<branch>` and it targets `<base-branch>`.\n" +
 	"\n" +
@@ -98,6 +99,16 @@ type ArtifactScript struct {
 	Command string `toml:"command"`
 	// TimeoutSec bounds how long the command may run (0 = default, see artifacts).
 	TimeoutSec int `toml:"timeout_sec"`
+	// UnsafeHost, when true, runs the command directly on the host with NO
+	// sandbox — full access to the user's credentials, network, and machine.
+	// Default false (the command is confined like an agent). Only enable for a
+	// self-contained, audited command when you trust every ref you will ever
+	// compare: the command executes the *diffed ref's* code (build tooling,
+	// package lifecycle scripts, the script file itself), and "trusted config"
+	// authorizes only which command runs — not the contents of the checkout it
+	// runs against. Heavy build scripts are the most tempted to set this and the
+	// ones running the most untrusted code; prefer leaving it off.
+	UnsafeHost bool `toml:"unsafe_host"`
 }
 
 type Config struct {
@@ -430,6 +441,9 @@ func marshalConfig(cfg Config) string {
 		buf.WriteString("command = " + tomlStringValue(a.Command) + "\n")
 		if a.TimeoutSec > 0 {
 			buf.WriteString(fmt.Sprintf("timeout_sec = %d\n", a.TimeoutSec))
+		}
+		if a.UnsafeHost {
+			buf.WriteString("unsafe_host = true\n")
 		}
 	}
 
