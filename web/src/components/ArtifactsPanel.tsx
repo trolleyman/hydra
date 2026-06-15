@@ -72,6 +72,19 @@ function ArtifactSetCard({ set }: { set: ArtifactSet }) {
   const changedFiles = set.files.filter((f) => f.change_type !== 'unchanged')
   const unchangedFiles = set.files.filter((f) => f.change_type === 'unchanged')
 
+  // While generating, show the same compact single line we use for the
+  // "no visual changes" case. The common outcome is no changes, so matching
+  // that layout means the transition doesn't shift the diffs below.
+  if (status === 'generating') {
+    return (
+      <div className="px-3 py-2 text-xs text-gray-400 dark:text-gray-500 flex items-center gap-2">
+        <LoaderCircle className="w-3.5 h-3.5 shrink-0 animate-spin" />
+        <span className="font-medium text-gray-500 dark:text-gray-400">{set.name}</span>
+        <span>· generating…</span>
+      </div>
+    )
+  }
+
   // Hide artifact sets with no visual changes behind a single muted line.
   if (status === 'ready' && !set.changed) {
     return (
@@ -92,11 +105,6 @@ function ArtifactSetCard({ set }: { set: ArtifactSet }) {
         {collapsed ? <ChevronRight className="w-3.5 h-3.5 text-gray-400" /> : <ChevronDown className="w-3.5 h-3.5 text-gray-400" />}
         <ImageIcon className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400 shrink-0" />
         <span className="text-sm font-medium text-gray-700 dark:text-gray-300">{set.name}</span>
-        {status === 'generating' && (
-          <span className="flex items-center gap-1 text-xs text-blue-500 dark:text-blue-400">
-            <LoaderCircle className="w-3 h-3 animate-spin" /> generating…
-          </span>
-        )}
         {status === 'error' && (
           <span className="flex items-center gap-1 text-xs text-red-500 dark:text-red-400">
             <TriangleAlert className="w-3 h-3" /> failed
@@ -111,11 +119,6 @@ function ArtifactSetCard({ set }: { set: ArtifactSet }) {
 
       {!collapsed && (
         <div className="px-3 pb-2">
-          {status === 'generating' && (
-            <div className="py-6 flex items-center justify-center text-xs text-gray-400 dark:text-gray-500 gap-2">
-              <LoaderCircle className="w-4 h-4 animate-spin" /> Running artifact script…
-            </div>
-          )}
           {status === 'error' && (
             <div className="my-2 px-3 py-2 rounded-md bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-xs text-red-600 dark:text-red-400 whitespace-pre-wrap break-words">
               {set.error || 'Artifact generation failed.'}
