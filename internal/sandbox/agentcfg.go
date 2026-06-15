@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 
 	"braces.dev/errtrace"
 )
@@ -35,14 +36,20 @@ func buildHooksMap(cmd string, events []string) map[string]interface{} {
 }
 
 // HookCommand returns the shell command a hook runs to report status back to
-// Hydra. The hydra binary is bound into the sandbox at $HOME/.hydra/hydra.
-func HookCommand(agent string) string {
-	return "$HOME/.hydra/hydra trigger-hook " + agent
+// Hydra, invoking the hydra binary at hydraBin (its real host path, visible
+// inside the sandbox via the read-only root bind).
+func HookCommand(hydraBin, agent string) string {
+	return shellQuote(hydraBin) + " trigger-hook " + agent
+}
+
+// shellQuote single-quotes s for safe embedding in a hook command string.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // BuildClaudeSettings generates the settings.json content with hook configuration for Claude Code.
-func BuildClaudeSettings(existing []byte) ([]byte, error) {
-	hooks := buildHooksMap(HookCommand("claude"), []string{
+func BuildClaudeSettings(existing []byte, hydraBin string) ([]byte, error) {
+	hooks := buildHooksMap(HookCommand(hydraBin, "claude"), []string{
 		"SessionStart",
 		"UserPromptSubmit",
 		"PreToolUse",
@@ -102,8 +109,8 @@ func BuildClaudeConfig(existing []byte, worktreePath string) ([]byte, error) {
 }
 
 // BuildGeminiSettings generates the settings.json content with hook configuration for Gemini CLI.
-func BuildGeminiSettings(existing []byte) ([]byte, error) {
-	hooks := buildHooksMap(HookCommand("gemini"), []string{
+func BuildGeminiSettings(existing []byte, hydraBin string) ([]byte, error) {
+	hooks := buildHooksMap(HookCommand(hydraBin, "gemini"), []string{
 		"SessionStart",
 		"BeforeAgent",
 		"AfterAgent",
@@ -133,7 +140,7 @@ func BuildGeminiSettings(existing []byte) ([]byte, error) {
 // BuildCopilotHooks generates a hooks JSON file for GitHub Copilot CLI.
 // Copilot CLI loads hooks from .github/hooks/*.json in the working directory.
 // The format differs from Claude/Gemini: it uses {"version":1,"hooks":{...}}.
-func BuildCopilotHooks() ([]byte, error) {
+func BuildCopilotHooks(hydraBin string) ([]byte, error) {
 	type hookEntry struct {
 		Type string `json:"type"`
 		Bash string `json:"bash"`
@@ -143,7 +150,7 @@ func BuildCopilotHooks() ([]byte, error) {
 		Hooks   map[string][]hookEntry `json:"hooks"`
 	}
 
-	cmd := "\"$HOME/.hydra/hydra\" trigger-hook copilot"
+	cmd := shellQuote(hydraBin) + " trigger-hook copilot"
 	hf := hooksFile{
 		Version: 1,
 		Hooks: map[string][]hookEntry{

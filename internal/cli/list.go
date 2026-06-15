@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"text/tabwriter"
 
 	"braces.dev/errtrace"
@@ -73,11 +74,11 @@ var listCmd = &cobra.Command{
 			if a.WorktreePath != nil {
 				worktree = "yes"
 			}
-			pid := a.ContainerId
-			if pid == "" {
-				pid = "-"
+			pid := "-"
+			if a.SessionPid != 0 {
+				pid = strconv.Itoa(a.SessionPid)
 			}
-			status := a.ContainerStatus
+			status := a.SessionStatus
 			if status == "" {
 				status = "-"
 			}

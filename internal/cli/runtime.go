@@ -44,7 +44,7 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 
 	reg := session.NewRegistry()
 	reg.SetOnExit(func(info session.Info) {
-		if err := store.UpdateContainerInfo(info.ID, "", "stopped"); err != nil {
+		if err := store.UpdateSessionInfo(info.ID, 0, "stopped"); err != nil {
 			log.Printf("warn: mark session %s stopped: %v", info.ID, err)
 		}
 	})
@@ -151,7 +151,7 @@ func resumeHeadsOnBoot(reg *session.Registry, store *db.Store, projectRoot strin
 		return
 	}
 	for _, h := range hs {
-		if h.Ephemeral || h.ContainerStatus != "running" {
+		if h.Ephemeral || h.SessionStatus != "running" {
 			continue
 		}
 		if _, live := reg.Get(h.ID); live {
@@ -162,7 +162,7 @@ func resumeHeadsOnBoot(reg *session.Registry, store *db.Store, projectRoot strin
 			log.Printf("warn: resume head %s: %v", h.ID, err)
 			errMsg := err.Error()
 			_ = store.ClearHeadStatus(h.ID, &errMsg)
-			_ = store.UpdateContainerInfo(h.ID, "", "stopped")
+			_ = store.UpdateSessionInfo(h.ID, 0, "stopped")
 		}
 	}
 }

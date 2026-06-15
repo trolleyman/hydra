@@ -134,23 +134,27 @@ type AgentInputRequest struct {
 
 // AgentResponse defines model for AgentResponse.
 type AgentResponse struct {
-	AgentStatus     *AgentStatusInfo `json:"agent_status,omitempty"`
-	AgentType       string           `json:"agent_type"`
-	BaseBranch      string           `json:"base_branch"`
-	BranchName      *string          `json:"branch_name"`
-	ContainerId     string           `json:"container_id"`
-	ContainerStatus string           `json:"container_status"`
+	AgentStatus *AgentStatusInfo `json:"agent_status,omitempty"`
+	AgentType   string           `json:"agent_type"`
+	BaseBranch  string           `json:"base_branch"`
+	BranchName  *string          `json:"branch_name"`
 
-	// CreatedAt Unix timestamp (seconds) when the container was created/started; 0 if no container
+	// CreatedAt Unix timestamp (seconds) when the session was started; 0 if not started
 	CreatedAt *int64 `json:"created_at,omitempty"`
 
-	// Ephemeral If true, the agent is temporary and its container will be removed on stop.
-	Ephemeral    *bool   `json:"ephemeral,omitempty"`
-	Id           string  `json:"id"`
-	PrePrompt    string  `json:"pre_prompt"`
-	ProjectPath  string  `json:"project_path"`
-	Prompt       string  `json:"prompt"`
-	WorktreePath *string `json:"worktree_path"`
+	// Ephemeral If true, the agent is temporary (runs in the project root, no dedicated branch).
+	Ephemeral   *bool  `json:"ephemeral,omitempty"`
+	Id          string `json:"id"`
+	PrePrompt   string `json:"pre_prompt"`
+	ProjectPath string `json:"project_path"`
+	Prompt      string `json:"prompt"`
+
+	// SessionPid PID of the running sandbox session, or 0 if not running
+	SessionPid int `json:"session_pid"`
+
+	// SessionStatus Sandbox session status (pending|starting|running|stopped)
+	SessionStatus string  `json:"session_status"`
+	WorktreePath  *string `json:"worktree_path"`
 }
 
 // AgentStatus The computed status of the agent (derived from container, agent, and head status)

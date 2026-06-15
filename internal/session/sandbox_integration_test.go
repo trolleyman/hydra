@@ -83,11 +83,11 @@ func TestSandboxedSessionEndToEnd(t *testing.T) {
 	}
 }
 
-// TestSandboxStatusBind reproduces the bug where a per-head file is bind-mounted
-// into $HOME/.hydra, which is read-only under `--ro-bind / /`. The fix overlays
-// $HOME/.hydra with a writable tmpfs (Options.TmpfsDirs) so the bind target can
-// be created; writes still reach the host bind source. Skipped without bwrap.
-func TestSandboxStatusBind(t *testing.T) {
+// TestSandboxTmpfsBind exercises the Options.TmpfsDirs primitive: a directory
+// under the read-only root (`--ro-bind / /`) is overlaid with a writable tmpfs
+// so a per-head file can be bind-mounted into it, while writes still reach the
+// host bind source. Skipped without bwrap.
+func TestSandboxTmpfsBind(t *testing.T) {
 	if ok, reason := sandbox.Available(); !ok {
 		t.Skipf("OS sandbox unavailable: %s", reason)
 	}

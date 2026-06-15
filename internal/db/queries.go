@@ -54,13 +54,11 @@ func (s *Store) ListAgents(projectRoot string) ([]Agent, error) {
 	return agents, nil
 }
 
-// UpdateContainerInfo updates the container ID and status for an agent.
-func (s *Store) UpdateContainerInfo(id, containerID, containerStatus string) error {
+// UpdateSessionInfo updates the session PID and status for an agent.
+func (s *Store) UpdateSessionInfo(id string, pid int, status string) error {
 	updates := map[string]interface{}{
-		"container_status": containerStatus,
-	}
-	if containerID != "" {
-		updates["container_id"] = containerID
+		"session_status": status,
+		"session_pid":    pid,
 	}
 	result := s.db.Model(&Agent{}).Where("id = ?", id).Updates(updates)
 	return errtrace.Wrap(result.Error)

@@ -17,12 +17,38 @@ func init() {
 	rootCmd.AddCommand(triggerHookCmd)
 }
 
-func openStatusLog() (*os.File, error) {
+// statusFilePath returns the per-head status.json path. Hydra sets
+// HYDRA_STATUS_PATH inside the sandbox (the host's real per-head file, made
+// writable); otherwise we fall back to $HOME/.hydra/status.json.
+func statusFilePath() (string, error) {
+	if p := os.Getenv("HYDRA_STATUS_PATH"); p != "" {
+		return p, nil
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return nil, errtrace.Wrap(fmt.Errorf("get home dir: %w", err))
+		return "", errtrace.Wrap(fmt.Errorf("get home dir: %w", err))
 	}
-	statusLogPath := filepath.Join(home, ".hydra", "status_log.jsonl")
+	return filepath.Join(home, ".hydra", "status.json"), nil
+}
+
+// statusLogFilePath returns the per-head status_log.jsonl path, honoring
+// HYDRA_STATUS_LOG_PATH with the same fallback as statusFilePath.
+func statusLogFilePath() (string, error) {
+	if p := os.Getenv("HYDRA_STATUS_LOG_PATH"); p != "" {
+		return p, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", errtrace.Wrap(fmt.Errorf("get home dir: %w", err))
+	}
+	return filepath.Join(home, ".hydra", "status_log.jsonl"), nil
+}
+
+func openStatusLog() (*os.File, error) {
+	statusLogPath, err := statusLogFilePath()
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
 	if err := os.MkdirAll(filepath.Dir(statusLogPath), 0755); err != nil {
 		return nil, errtrace.Wrap(fmt.Errorf("create status dir: %w", err))
 	}
@@ -163,12 +189,10 @@ func runTriggerHook(agentType string, eventOverride string, logFile *os.File) er
 		}
 	}
 
-	home, err := os.UserHomeDir()
+	statusPath, err := statusFilePath()
 	if err != nil {
-		return errtrace.Wrap(fmt.Errorf("get home dir: %w", err))
+		return errtrace.Wrap(err)
 	}
-
-	statusPath := filepath.Join(home, ".hydra", "status.json")
 	if err := os.MkdirAll(filepath.Dir(statusPath), 0755); err != nil {
 		return errtrace.Wrap(fmt.Errorf("create status dir: %w", err))
 	}

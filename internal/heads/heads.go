@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/user"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -31,16 +30,15 @@ type Head struct {
 	Branch      *string // "hydra/<id>", nil if the git branch does not exist
 	Worktree    *string // path to the worktree directory, nil if it does not exist
 	ProjectPath string
-	// ContainerID / ContainerStatus retain their names for API compatibility but
-	// now describe the sandbox session: ContainerID holds the process PID (as a
-	// string), ContainerStatus the session status (running|exited|stopped|...).
-	ContainerID     string
-	ContainerStatus string
-	AgentType       sandbox.AgentType
-	PrePrompt       string
-	Prompt          string
-	BaseBranch      string
-	Ephemeral       bool
+	// SessionPID is the running sandbox process PID (0 if not running);
+	// SessionStatus is the session status (running|exited|stopped|...).
+	SessionPID    int
+	SessionStatus string
+	AgentType     sandbox.AgentType
+	PrePrompt     string
+	Prompt        string
+	BaseBranch    string
+	Ephemeral     bool
 	// AgentStatus holds the computed status for display.
 	AgentStatus *api.AgentStatusInfo
 	CreatedAt   int64 // Unix timestamp; 0 if not started
@@ -75,27 +73,27 @@ func ListHeads(ctx context.Context, reg *session.Registry, store *db.Store, proj
 			branch = &b
 		}
 
-		containerID := a.ContainerID
-		containerStatus := a.ContainerStatus
+		sessionPID := a.SessionPID
+		sessionStatus := a.SessionStatus
 		if info, ok := live[a.ID]; ok {
-			containerID = strconv.Itoa(info.PID)
-			containerStatus = sessionStatusToDB(info.Status)
+			sessionPID = info.PID
+			sessionStatus = sessionStatusToDB(info.Status)
 		}
 
 		h := Head{
-			ID:              a.ID,
-			Branch:          branch,
-			Worktree:        worktree,
-			ProjectPath:     a.ProjectPath,
-			ContainerID:     containerID,
-			ContainerStatus: containerStatus,
-			AgentType:       sandbox.AgentType(a.AgentType),
-			PrePrompt:       a.PrePrompt,
-			Prompt:          a.Prompt,
-			BaseBranch:      a.BaseBranch,
-			Ephemeral:       a.Ephemeral,
-			CreatedAt:       a.CreatedAt.Unix(),
-			AgentStatus:     computeAgentStatus(&a),
+			ID:            a.ID,
+			Branch:        branch,
+			Worktree:      worktree,
+			ProjectPath:   a.ProjectPath,
+			SessionPID:    sessionPID,
+			SessionStatus: sessionStatus,
+			AgentType:     sandbox.AgentType(a.AgentType),
+			PrePrompt:     a.PrePrompt,
+			Prompt:        a.Prompt,
+			BaseBranch:    a.BaseBranch,
+			Ephemeral:     a.Ephemeral,
+			CreatedAt:     a.CreatedAt.Unix(),
+			AgentStatus:   computeAgentStatus(&a),
 		}
 		result = append(result, h)
 	}
@@ -110,7 +108,7 @@ func ListHeads(ctx context.Context, reg *session.Registry, store *db.Store, proj
 	return result, nil
 }
 
-// sessionStatusToDB maps a session status to the DB container_status string.
+// sessionStatusToDB maps a session status to the DB session_status string.
 func sessionStatusToDB(s session.Status) string {
 	switch s {
 	case session.StatusRunning, session.StatusStarting:
@@ -129,14 +127,14 @@ func computeAgentStatus(a *db.Agent) *api.AgentStatusInfo {
 	switch {
 	case a.HeadStatus != "idle":
 		status = api.AgentStatus(a.HeadStatus)
-	case a.ContainerStatus == "running":
+	case a.SessionStatus == "running":
 		if a.AgentStatus != nil {
 			status = api.AgentStatus(*a.AgentStatus)
 		} else {
 			status = api.Starting
 		}
 	default:
-		status = api.AgentStatus(a.ContainerStatus)
+		status = api.AgentStatus(a.SessionStatus)
 	}
 
 	ts := now
@@ -224,18 +222,18 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 
 	if store != nil {
 		agent := &db.Agent{
-			ID:              opts.ID,
-			ProjectPath:     projectRoot,
-			ContainerName:   "hydra-agent-" + opts.ID,
-			BranchName:      branchName,
-			BaseBranch:      baseBranch,
-			AgentType:       string(opts.AgentType),
-			PrePrompt:       opts.PrePrompt,
-			Prompt:          opts.Prompt,
-			Ephemeral:       opts.Ephemeral,
-			ContainerStatus: "pending",
-			HeadStatus:      "idle",
-			CreatedAt:       now,
+			ID:            opts.ID,
+			ProjectPath:   projectRoot,
+			ContainerName: "hydra-agent-" + opts.ID,
+			BranchName:    branchName,
+			BaseBranch:    baseBranch,
+			AgentType:     string(opts.AgentType),
+			PrePrompt:     opts.PrePrompt,
+			Prompt:        opts.Prompt,
+			Ephemeral:     opts.Ephemeral,
+			SessionStatus: "pending",
+			HeadStatus:    "idle",
+			CreatedAt:     now,
 		}
 		if err := store.UpsertAgent(agent); err != nil {
 			return nil, errtrace.Wrap(fmt.Errorf("upsert agent: %w", err))
@@ -287,7 +285,7 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 	cfg, _ := config.Load(projectRoot)
 	writable, masked, restore, net := cfg.ResolveSandboxOptions(string(opts.AgentType))
 
-	binds, tmpfsDirs, err := seedHead(projectRoot, opts.ID, opts.AgentType, worktreePath, home)
+	seed, err := seedHead(projectRoot, opts.ID, opts.AgentType, worktreePath, home)
 	if err != nil {
 		spawnFail(store, projectRoot, opts.ID, setStatus, fmt.Errorf("seed head: %w", err))
 		return nil, errtrace.Wrap(err)
@@ -307,13 +305,12 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 			AgentType:     opts.AgentType,
 			WorktreePath:  worktreePath,
 			Home:          home,
-			WritablePaths: writable,
+			WritablePaths: append(writable, seed.WritablePaths...),
 			MaskedPaths:   masked,
 			RestoreRO:     restore,
 			Network:       net,
-			Binds:         binds,
-			TmpfsDirs:     tmpfsDirs,
-			Env:           agentEnv(home, username, gitAuthorName, gitAuthorEmail),
+			Binds:         seed.Binds,
+			Env:           append(agentEnv(home, username, gitAuthorName, gitAuthorEmail), seed.Env...),
 			Argv:          argv,
 			HardenGUI:     true,
 			Seccomp:       true,
@@ -324,10 +321,10 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 		return nil, errtrace.Wrap(err)
 	}
 
-	pid := strconv.Itoa(sess.PID())
+	pid := sess.PID()
 	if store != nil {
-		if err := store.UpdateContainerInfo(opts.ID, pid, "running"); err != nil {
-			log.Printf("warn: update container status to running for %s: %v", opts.ID, err)
+		if err := store.UpdateSessionInfo(opts.ID, pid, "running"); err != nil {
+			log.Printf("warn: update session status to running for %s: %v", opts.ID, err)
 		}
 	}
 	if opts.AgentType == sandbox.AgentTypeBash || opts.AgentType == sandbox.AgentTypeCopilot {
@@ -342,19 +339,19 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 	}
 
 	return &Head{
-		ID:              opts.ID,
-		Branch:          hBranch,
-		Worktree:        hWorktree,
-		ProjectPath:     projectRoot,
-		ContainerID:     pid,
-		ContainerStatus: "running",
-		AgentType:       opts.AgentType,
-		PrePrompt:       opts.PrePrompt,
-		Prompt:          opts.Prompt,
-		BaseBranch:      baseBranch,
-		Ephemeral:       opts.Ephemeral,
-		AgentStatus:     initialStatus,
-		CreatedAt:       now.Unix(),
+		ID:            opts.ID,
+		Branch:        hBranch,
+		Worktree:      hWorktree,
+		ProjectPath:   projectRoot,
+		SessionPID:    pid,
+		SessionStatus: "running",
+		AgentType:     opts.AgentType,
+		PrePrompt:     opts.PrePrompt,
+		Prompt:        opts.Prompt,
+		BaseBranch:    baseBranch,
+		Ephemeral:     opts.Ephemeral,
+		AgentStatus:   initialStatus,
+		CreatedAt:     now.Unix(),
 	}, nil
 }
 
@@ -375,8 +372,8 @@ func spawnFail(store *db.Store, projectRoot, id string, setStatus func(api.Agent
 	log.Printf("error: spawn agent %s: %v", id, cause)
 	setStatus(api.Stopped)
 	if store != nil {
-		if err := store.UpdateContainerInfo(id, "", "stopped"); err != nil {
-			log.Printf("warn: update container status to stopped for %s: %v", id, err)
+		if err := store.UpdateSessionInfo(id, 0, "stopped"); err != nil {
+			log.Printf("warn: update session status to stopped for %s: %v", id, err)
 		}
 	}
 }
@@ -403,7 +400,7 @@ func StartShellSession(reg *session.Registry, projectRoot string, head Head, row
 
 	cfg, _ := config.Load(projectRoot)
 	writable, masked, restore, net := cfg.ResolveSandboxOptions("bash")
-	binds, tmpfsDirs, err := seedHead(projectRoot, shellID, sandbox.AgentTypeBash, worktreePath, home)
+	seed, err := seedHead(projectRoot, shellID, sandbox.AgentTypeBash, worktreePath, home)
 	if err != nil {
 		return "", errtrace.Wrap(err)
 	}
@@ -416,13 +413,12 @@ func StartShellSession(reg *session.Registry, projectRoot string, head Head, row
 			AgentType:     sandbox.AgentTypeBash,
 			WorktreePath:  worktreePath,
 			Home:          home,
-			WritablePaths: writable,
+			WritablePaths: append(writable, seed.WritablePaths...),
 			MaskedPaths:   masked,
 			RestoreRO:     restore,
 			Network:       net,
-			Binds:         binds,
-			TmpfsDirs:     tmpfsDirs,
-			Env:           agentEnv(home, currentUser.Username, readGitConfigVal(projectRoot, "user.name"), readGitConfigVal(projectRoot, "user.email")),
+			Binds:         seed.Binds,
+			Env:           append(agentEnv(home, currentUser.Username, readGitConfigVal(projectRoot, "user.name"), readGitConfigVal(projectRoot, "user.email")), seed.Env...),
 			Argv:          []string{"/bin/bash"},
 			HardenGUI:     true,
 			Seccomp:       true,
@@ -451,7 +447,7 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 
 	cfg, _ := config.Load(projectRoot)
 	writable, masked, restore, net := cfg.ResolveSandboxOptions(string(head.AgentType))
-	binds, tmpfsDirs, err := seedHead(projectRoot, head.ID, head.AgentType, worktreePath, home)
+	seed, err := seedHead(projectRoot, head.ID, head.AgentType, worktreePath, home)
 	if err != nil {
 		return errtrace.Wrap(err)
 	}
@@ -468,13 +464,12 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 			AgentType:     head.AgentType,
 			WorktreePath:  worktreePath,
 			Home:          home,
-			WritablePaths: writable,
+			WritablePaths: append(writable, seed.WritablePaths...),
 			MaskedPaths:   masked,
 			RestoreRO:     restore,
 			Network:       net,
-			Binds:         binds,
-			TmpfsDirs:     tmpfsDirs,
-			Env:           agentEnv(home, currentUser.Username, readGitConfigVal(projectRoot, "user.name"), readGitConfigVal(projectRoot, "user.email")),
+			Binds:         seed.Binds,
+			Env:           append(agentEnv(home, currentUser.Username, readGitConfigVal(projectRoot, "user.name"), readGitConfigVal(projectRoot, "user.email")), seed.Env...),
 			Argv:          argv,
 			HardenGUI:     true,
 			Seccomp:       true,
@@ -484,7 +479,7 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 		return errtrace.Wrap(err)
 	}
 	if store != nil {
-		_ = store.UpdateContainerInfo(head.ID, strconv.Itoa(sess.PID()), "running")
+		_ = store.UpdateSessionInfo(head.ID, sess.PID(), "running")
 	}
 	return nil
 }

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"log"
 	"os"
-	"strconv"
 	"time"
 
 	"github.com/trolleyman/hydra/internal/api"
@@ -49,12 +48,12 @@ func ReconcileLivenessOnce(reg *session.Registry, store *db.Store, projectRoot s
 		info, ok := live[a.ID]
 		switch {
 		case ok && (info.Status == session.StatusRunning || info.Status == session.StatusStarting):
-			if err := store.UpdateContainerInfo(a.ID, strconv.Itoa(info.PID), "running"); err != nil {
+			if err := store.UpdateSessionInfo(a.ID, info.PID, "running"); err != nil {
 				log.Printf("warn: liveness reconciler: update %s: %v", a.ID, err)
 			}
-		case a.ContainerStatus == "running":
+		case a.SessionStatus == "running":
 			// Was running but the session is gone (exited or daemon restarted).
-			if err := store.UpdateContainerInfo(a.ID, a.ContainerID, "stopped"); err != nil {
+			if err := store.UpdateSessionInfo(a.ID, 0, "stopped"); err != nil {
 				log.Printf("warn: liveness reconciler: mark stopped %s: %v", a.ID, err)
 			}
 		}
@@ -88,7 +87,7 @@ func pollJSONStatusOnce(store *db.Store, projectRoot string) {
 	}
 
 	for _, a := range agents {
-		if a.ContainerStatus != "running" {
+		if a.SessionStatus != "running" {
 			continue
 		}
 		info := readStatusJSON(projectRoot, a.ID)

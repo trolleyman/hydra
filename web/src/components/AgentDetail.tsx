@@ -83,7 +83,7 @@ export function AgentDetail({
   async function handleKill() {
     useDialogStore.getState().show({
       title: 'Kill Agent',
-      message: `Are you sure you want to kill agent "${agent.id}"?\n\nThis will permanently stop the container, remove the git worktree, and delete the branch.`,
+      message: `Are you sure you want to kill agent "${agent.id}"?\n\nThis will permanently stop the sandbox session, remove the git worktree, and delete the branch.`,
       type: 'confirm',
       onConfirm: async () => {
         setKilling(true)
@@ -118,7 +118,7 @@ export function AgentDetail({
 
     useDialogStore.getState().show({
       title: 'Merge Agent',
-      message: `Are you sure you want to merge agent "${agent.id}"?${uncommittedWarning}\n\nThis will merge the agent's branch into the base branch, then stop the container and clean up.`,
+      message: `Are you sure you want to merge agent "${agent.id}"?${uncommittedWarning}\n\nThis will merge the agent's branch into the base branch, then stop the sandbox session and clean up.`,
       type: uncommittedWarning ? 'warning' : 'confirm',
       onConfirm: async () => {
         setMerging(true)
@@ -182,7 +182,7 @@ export function AgentDetail({
   async function handleRestart() {
     useDialogStore.getState().show({
       title: 'Restart Agent',
-      message: `Are you sure you want to restart agent "${agent.id}"?\n\nThis will discard all progress (container, worktree, branch) and restart with the same prompt.`,
+      message: `Are you sure you want to restart agent "${agent.id}"?\n\nThis will discard all progress (session, worktree, branch) and restart with the same prompt.`,
       type: 'confirm',
       onConfirm: async () => {
         setRestarting(true)

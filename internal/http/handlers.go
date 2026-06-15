@@ -258,19 +258,19 @@ func (s *Server) ListAgents(ctx context.Context, request api.ListAgentsRequestOb
 			createdAt = &h.CreatedAt
 		}
 		resp[i] = api.AgentResponse{
-			Id:              h.ID,
-			BranchName:      h.Branch,
-			WorktreePath:    h.Worktree,
-			ProjectPath:     h.ProjectPath,
-			ContainerId:     h.ContainerID,
-			ContainerStatus: h.ContainerStatus,
-			AgentType:       string(h.AgentType),
-			PrePrompt:       h.PrePrompt,
-			Prompt:          h.Prompt,
-			BaseBranch:      h.BaseBranch,
-			Ephemeral:       &h.Ephemeral,
-			CreatedAt:       createdAt,
-			AgentStatus:     h.AgentStatus,
+			Id:            h.ID,
+			BranchName:    h.Branch,
+			WorktreePath:  h.Worktree,
+			ProjectPath:   h.ProjectPath,
+			SessionPid:    h.SessionPID,
+			SessionStatus: h.SessionStatus,
+			AgentType:     string(h.AgentType),
+			PrePrompt:     h.PrePrompt,
+			Prompt:        h.Prompt,
+			BaseBranch:    h.BaseBranch,
+			Ephemeral:     &h.Ephemeral,
+			CreatedAt:     createdAt,
+			AgentStatus:   h.AgentStatus,
 		}
 	}
 	return resp, nil
@@ -539,19 +539,19 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 		spawnCreatedAt = &head.CreatedAt
 	}
 	return api.SpawnAgent201JSONResponse(api.AgentResponse{
-		Id:              head.ID,
-		BranchName:      head.Branch,
-		WorktreePath:    head.Worktree,
-		ProjectPath:     head.ProjectPath,
-		ContainerId:     head.ContainerID,
-		ContainerStatus: head.ContainerStatus,
-		AgentType:       string(head.AgentType),
-		PrePrompt:       head.PrePrompt,
-		Prompt:          head.Prompt,
-		BaseBranch:      head.BaseBranch,
-		Ephemeral:       &head.Ephemeral,
-		CreatedAt:       spawnCreatedAt,
-		AgentStatus:     head.AgentStatus,
+		Id:            head.ID,
+		BranchName:    head.Branch,
+		WorktreePath:  head.Worktree,
+		ProjectPath:   head.ProjectPath,
+		SessionPid:    head.SessionPID,
+		SessionStatus: head.SessionStatus,
+		AgentType:     string(head.AgentType),
+		PrePrompt:     head.PrePrompt,
+		Prompt:        head.Prompt,
+		BaseBranch:    head.BaseBranch,
+		Ephemeral:     &head.Ephemeral,
+		CreatedAt:     spawnCreatedAt,
+		AgentStatus:   head.AgentStatus,
 	}), nil
 }
 
@@ -576,19 +576,19 @@ func (s *Server) GetAgent(ctx context.Context, request api.GetAgentRequestObject
 		getCreatedAt = &head.CreatedAt
 	}
 	return api.GetAgent200JSONResponse(api.AgentResponse{
-		Id:              head.ID,
-		BranchName:      head.Branch,
-		WorktreePath:    head.Worktree,
-		ProjectPath:     head.ProjectPath,
-		ContainerId:     head.ContainerID,
-		ContainerStatus: head.ContainerStatus,
-		AgentType:       string(head.AgentType),
-		PrePrompt:       head.PrePrompt,
-		Prompt:          head.Prompt,
-		BaseBranch:      head.BaseBranch,
-		Ephemeral:       &head.Ephemeral,
-		CreatedAt:       getCreatedAt,
-		AgentStatus:     head.AgentStatus,
+		Id:            head.ID,
+		BranchName:    head.Branch,
+		WorktreePath:  head.Worktree,
+		ProjectPath:   head.ProjectPath,
+		SessionPid:    head.SessionPID,
+		SessionStatus: head.SessionStatus,
+		AgentType:     string(head.AgentType),
+		PrePrompt:     head.PrePrompt,
+		Prompt:        head.Prompt,
+		BaseBranch:    head.BaseBranch,
+		Ephemeral:     &head.Ephemeral,
+		CreatedAt:     getCreatedAt,
+		AgentStatus:   head.AgentStatus,
 	}), nil
 }
 
@@ -771,19 +771,19 @@ func (s *Server) RestartAgent(ctx context.Context, request api.RestartAgentReque
 		restartCreatedAt = &newHead.CreatedAt
 	}
 	return api.RestartAgent200JSONResponse(api.AgentResponse{
-		Id:              newHead.ID,
-		BranchName:      newHead.Branch,
-		WorktreePath:    newHead.Worktree,
-		ProjectPath:     newHead.ProjectPath,
-		ContainerId:     newHead.ContainerID,
-		ContainerStatus: newHead.ContainerStatus,
-		AgentType:       string(newHead.AgentType),
-		PrePrompt:       newHead.PrePrompt,
-		Prompt:          newHead.Prompt,
-		BaseBranch:      newHead.BaseBranch,
-		Ephemeral:       &newHead.Ephemeral,
-		CreatedAt:       restartCreatedAt,
-		AgentStatus:     newHead.AgentStatus,
+		Id:            newHead.ID,
+		BranchName:    newHead.Branch,
+		WorktreePath:  newHead.Worktree,
+		ProjectPath:   newHead.ProjectPath,
+		SessionPid:    newHead.SessionPID,
+		SessionStatus: newHead.SessionStatus,
+		AgentType:     string(newHead.AgentType),
+		PrePrompt:     newHead.PrePrompt,
+		Prompt:        newHead.Prompt,
+		BaseBranch:    newHead.BaseBranch,
+		Ephemeral:     &newHead.Ephemeral,
+		CreatedAt:     restartCreatedAt,
+		AgentStatus:   newHead.AgentStatus,
 	}), nil
 }
 
@@ -1209,7 +1209,7 @@ func (s *Server) SendAgentInput(ctx context.Context, request api.SendAgentInputR
 			Details: err.Error(),
 		}, nil
 	}
-	if head == nil || head.ContainerID == "" {
+	if head == nil || head.SessionPID == 0 {
 		return api.SendAgentInput404JSONResponse{
 			Code:    404,
 			Error:   api.ErrorResponseErrorNotFound,

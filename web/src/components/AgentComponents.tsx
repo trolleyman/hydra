@@ -75,7 +75,7 @@ export function AgentSidebarItem({
     >
       <div className="flex items-center gap-2 min-w-0">
         <span
-          className={`w-2 h-2 rounded-full shrink-0 ${statusDotClass(agent.container_status)}`}
+          className={`w-2 h-2 rounded-full shrink-0 ${statusDotClass(agent.session_status)}`}
         />
         <span className="font-medium text-sm text-gray-900 dark:text-gray-100 truncate">{agent.id}</span>
       </div>

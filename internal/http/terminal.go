@@ -154,7 +154,7 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 	log.Printf("terminal ws: upgraded connection for agent %q", agentID)
 
 	// Send initial status
-	sendStatusUpdate(conn, head.ContainerStatus)
+	sendStatusUpdate(conn, head.SessionStatus)
 
 	// Configure heartbeat
 	_ = conn.SetReadDeadline(time.Now().Add(pongWait))

@@ -4,13 +4,35 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/trolleyman/hydra/internal/api"
 	"github.com/trolleyman/hydra/internal/projects"
 )
 
+// seedInstanceUUID points the user config dir at a temp location seeded with a
+// known instance UUID, so tests that read it are deterministic.
+func seedInstanceUUID(t *testing.T, uuid string) {
+	t.Helper()
+	configHome := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", configHome) // Linux
+	t.Setenv("HOME", configHome)            // macOS (and Linux fallback)
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		t.Fatalf("UserConfigDir: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "hydra"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "hydra", "uuid.txt"), []byte(uuid+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestGetDevToolsConfig(t *testing.T) {
+	seedInstanceUUID(t, "test-uuid")
 	s := &Server{
 		Development:    true,
 		ProjectRoot:    "/tmp/test-project",

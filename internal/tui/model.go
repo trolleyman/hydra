@@ -47,10 +47,10 @@ type Model struct {
 	// Log streaming
 	logViewport viewport.Model
 	logLines    []string // accumulated (ANSI-stripped) log lines
-	logForID    string   // container ID of the active log stream
+	logForID    string   // head ID of the active log stream
 	logCancel   context.CancelFunc
 	logChan     <-chan string
-	logDone     bool // true when the stream has ended (container stopped)
+	logDone     bool // true when the stream has ended (session stopped)
 
 	// Spawn form
 	spawning  bool
@@ -248,9 +248,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.id == m.logForID {
 			m.logDone = true
 			// Append a stopped hint if the head is not running
-			if head := m.selectedHead(); head != nil && !isContainerRunning(head.ContainerStatus) {
+			if head := m.selectedHead(); head != nil && !isSessionRunning(head.SessionStatus) {
 				m.logLines = append(m.logLines, "")
-				m.logLines = append(m.logLines, dimStyle.Render("─── container stopped — press [r] to resume ───"))
+				m.logLines = append(m.logLines, dimStyle.Render("─── session stopped — press [r] to resume ───"))
 				m.logViewport.SetContent(strings.Join(m.logLines, "\n"))
 				m.logViewport.GotoBottom()
 			}
@@ -349,7 +349,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m Model) resumeSelected() (tea.Model, tea.Cmd) {
 	head := m.selectedHead()
-	if head == nil || head.ContainerID == "" || isContainerRunning(head.ContainerStatus) {
+	if head == nil || head.SessionPID == 0 || isSessionRunning(head.SessionStatus) {
 		return m, nil
 	}
 
@@ -549,7 +549,7 @@ func (m Model) viewInfo(w int) string {
 		return strings.Join(lines, "\n")
 	}
 
-	containerStatus := head.ContainerStatus
+	containerStatus := head.SessionStatus
 	if containerStatus == "" {
 		containerStatus = "no container"
 	}
@@ -611,7 +611,7 @@ func (m Model) viewFooter() string {
 		}
 	} else {
 		resumeHint := "[r] refresh"
-		if head := m.selectedHead(); head != nil && head.ContainerID != "" && !isContainerRunning(head.ContainerStatus) {
+		if head := m.selectedHead(); head != nil && head.SessionPID != 0 && !isSessionRunning(head.SessionStatus) {
 			resumeHint = "[r] resume"
 		}
 		helpParts = []string{
@@ -724,7 +724,7 @@ func syncLogStream(m Model) (Model, tea.Cmd) {
 	running := false
 	if head != nil {
 		id = head.ID
-		running = isContainerRunning(head.ContainerStatus)
+		running = isSessionRunning(head.SessionStatus)
 	}
 	if id == "" || !running {
 		if m.logCancel != nil {
@@ -841,7 +841,7 @@ func (m Model) selectedHead() *heads.Head {
 	return &m.heads[m.sidebarIdx]
 }
 
-func isContainerRunning(status string) bool {
+func isSessionRunning(status string) bool {
 	s := strings.ToLower(status)
 	return strings.HasPrefix(s, "up") || s == "running"
 }

@@ -24,9 +24,9 @@ type Agent struct {
 	Prompt    string
 	Ephemeral bool `gorm:"default:false"`
 
-	// Docker — updated by Docker poller
-	ContainerID     string
-	ContainerStatus string `gorm:"default:pending"` // pending|building|starting|running|stopped
+	// Session — updated by the liveness reconciler
+	SessionPID    int    // PID of the running sandbox session, 0 if not running
+	SessionStatus string `gorm:"default:pending"` // pending|building|starting|running|stopped
 
 	// Agent — updated by JSON poller reading .hydra/status/<id>.json
 	AgentStatus     *string // starting|running|waiting|stopped (nil = not yet reported)

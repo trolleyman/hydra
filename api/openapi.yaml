@@ -876,7 +876,7 @@ components:
 
     AgentResponse:
       type: object
-      required: [id, project_path, container_id, container_status, agent_type, pre_prompt, prompt, base_branch]
+      required: [id, project_path, session_pid, session_status, agent_type, pre_prompt, prompt, base_branch]
       properties:
         id:
           type: string
@@ -888,10 +888,12 @@ components:
           nullable: true
         project_path:
           type: string
-        container_id:
+        session_pid:
+          type: integer
+          description: PID of the running sandbox session, or 0 if not running
+        session_status:
           type: string
-        container_status:
-          type: string
+          description: Sandbox session status (pending|starting|running|stopped)
         agent_type:
           type: string
         pre_prompt:
@@ -902,11 +904,11 @@ components:
           type: string
         ephemeral:
           type: boolean
-          description: If true, the agent is temporary and its container will be removed on stop.
+          description: If true, the agent is temporary (runs in the project root, no dedicated branch).
         created_at:
           type: integer
           format: int64
-          description: Unix timestamp (seconds) when the container was created/started; 0 if no container
+          description: Unix timestamp (seconds) when the session was started; 0 if not started
         agent_status:
           $ref: '#/components/schemas/AgentStatusInfo'
 
