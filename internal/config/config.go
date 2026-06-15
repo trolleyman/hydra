@@ -19,6 +19,7 @@ const DefaultPrePrompt = "You are a head (AI agent) of Hydra, an AI orchestratio
 	"\n" +
 	"## Environment\n" +
 	"- You are running inside a locked-down OS sandbox on a dedicated git worktree, as the host user.\n" +
+	"- You MUST work in this worktree, not the main repository.\n" +
 	"- You have read access to the host, write access to your worktree and the developer caches; credential locations are masked.\n" +
 	"- The current branch is `<branch>` and it targets `<base-branch>`.\n" +
 	"\n" +
