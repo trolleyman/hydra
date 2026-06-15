@@ -313,6 +313,9 @@ type DiffResponse struct {
 	// BaseRef The base ref used for this diff
 	BaseRef string `json:"base_ref"`
 
+	// BehindCount Number of commits on the base branch not yet merged into the agent branch (how far behind the base the branch is)
+	BehindCount *int `json:"behind_count,omitempty"`
+
 	// ConflictFiles List of files with merge conflicts (populated when merge_conflict is true)
 	ConflictFiles *[]string  `json:"conflict_files,omitempty"`
 	Files         []DiffFile `json:"files"`

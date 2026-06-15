@@ -1053,6 +1053,9 @@ components:
         uncommitted_summary:
           description: Counts of uncommitted changes in the worktree
           $ref: '#/components/schemas/UncommittedSummary'
+        behind_count:
+          type: integer
+          description: Number of commits on the base branch not yet merged into the agent branch (how far behind the base the branch is)
         base_commit:
           nullable: true
           allOf:

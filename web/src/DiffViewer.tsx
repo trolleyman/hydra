@@ -7,10 +7,11 @@ import {
   Plus, Calendar, TriangleAlert,
   ChevronDown, ChevronRight, ChevronLeft, Check, LoaderCircle, RefreshCw, RotateCcw,
   Settings, Copy, Folder, FolderOpen, X, GitMerge, Bot,
-  MoveRight, MessageSquarePlus,
+  MoveRight, MessageSquarePlus, FolderSync,
 } from 'lucide-react'
 import { Tooltip } from './components/Tooltip'
 import { ArtifactsPanel } from './components/ArtifactsPanel'
+import { useDialogStore } from './stores/dialogStore'
 
 // ── Syntax highlighting helpers ───────────────────────────────────────────────
 
@@ -976,6 +977,84 @@ function MergeConflictButton({ diff, agent, projectId }: {
   )
 }
 
+// ── Out-of-date (behind base) button ──────────────────────────────────────────
+
+// BehindBaseButton warns when the branch trails its base branch and offers to
+// merge the base in (update-from-base). It uses the same icon as the header's
+// "Update from base branch" action for consistency. When an agent session is
+// live or there are uncommitted changes, it surfaces those risks and requires an
+// explicit confirmation before merging into the worktree.
+function BehindBaseButton({ diff, agent, projectId, onUpdated }: {
+  diff: DiffResponse | null
+  agent: AgentResponse
+  projectId: string | null
+  onUpdated: () => void
+}) {
+  const [updating, setUpdating] = useState(false)
+  const behind = diff?.behind_count ?? 0
+  if (behind <= 0 || !agent.branch_name) return null
+
+  const baseBranch = agent.base_branch
+  const running = agent.session_status === 'running'
+  const hasUncommitted = diff?.uncommitted_changes ?? false
+
+  const handleClick = () => {
+    const warnings: string[] = []
+    if (running) warnings.push("⚠️ An agent session is currently running — merging now may collide with work in progress.")
+    if (hasUncommitted) warnings.push("⚠️ This branch has uncommitted changes — the merge may fail or conflict until they're committed.")
+    const warnText = warnings.length ? '\n\n' + warnings.join('\n') : ''
+
+    useDialogStore.getState().show({
+      title: 'Update from base',
+      message: `"${agent.branch_name}" is ${behind} commit${behind !== 1 ? 's' : ''} behind "${baseBranch}".\n\nMerge "${baseBranch}" into your branch to bring it up to date? This also re-baselines diff artifacts (e.g. screenshots) against the latest base.${warnText}`,
+      type: warnings.length ? 'warning' : 'confirm',
+      onConfirm: async () => {
+        setUpdating(true)
+        try {
+          await api.default.updateAgentFromBase(projectId ?? '', agent.id)
+          onUpdated()
+        } catch (err: any) {
+          const errorData = (err.body && typeof err.body === 'object') ? err.body : err
+          if (errorData.error === 'merge_conflict') {
+            useDialogStore.getState().show({
+              title: 'Update Conflict',
+              message: `CONFLICT: Merging "${baseBranch}" failed due to git conflicts. Resolve them manually in the worktree.`,
+              type: 'warning',
+            })
+          } else {
+            useDialogStore.getState().show({
+              title: 'Update Failed',
+              message: `Failed to update from base: ${formatError(err)}`,
+              type: 'error',
+            })
+          }
+        } finally {
+          setUpdating(false)
+        }
+      },
+    })
+  }
+
+  return (
+    <Tooltip className="shrink-0" content={
+      <div>
+        <p className="font-semibold mb-1">Branch out of date</p>
+        <p className="text-gray-300">{behind} commit{behind !== 1 ? 's' : ''} behind <span className="font-mono">{baseBranch}</span></p>
+        <p className="text-gray-400 mt-1 text-[10px]">Click to merge {baseBranch} in</p>
+      </div>
+    }>
+      <button
+        onClick={handleClick}
+        disabled={updating}
+        className="flex items-center gap-1 h-7 px-2 rounded-md text-xs font-medium text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 hover:bg-amber-100 dark:hover:bg-amber-900/40 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        {updating ? <LoaderCircle className="w-3.5 h-3.5 animate-spin shrink-0" /> : <FolderSync className="w-3.5 h-3.5 shrink-0" />}
+        <span>{behind} behind</span>
+      </button>
+    </Tooltip>
+  )
+}
+
 // ── File tree helpers ─────────────────────────────────────────────────────────
 
 type FileView = 'tree' | 'flat' | 'grouped'
@@ -1553,6 +1632,9 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger }: { agent
 
         {/* Merge conflict button */}
         <MergeConflictButton diff={diff} agent={agent} projectId={projectId} />
+
+        {/* Branch out-of-date (behind base) warning + update button */}
+        <BehindBaseButton diff={diff} agent={agent} projectId={projectId} onUpdated={() => setRefreshKey((k) => k + 1)} />
 
         <div className="flex items-center gap-2 ml-auto shrink-0">
           {loadingDiff && hasExistingDiff && (
