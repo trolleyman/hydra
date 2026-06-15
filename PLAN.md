@@ -2,12 +2,12 @@
 
 ## Sandbox migration follow-ups
 
-1. [ ] macOS: implement per-head status reporting under `sandbox-exec`. There are no bind mounts on macOS, so the Linux trick of binding a per-head `status.json` into `$HOME/.hydra` doesn't apply — pass a `HYDRA_STATUS_PATH` env var pointing at a writable per-head path (and `allow file-write*` it in the seatbelt profile) and have `trigger-hook` honour it. Validate the generated profile on a real Mac.
-2. [ ] Web Settings: replace the deprecated Docker fields (now no-ops) with a sandbox-policy editor — writable paths, masked paths, restore-RO paths, and network (on/off + allowed hosts).
+1. [x] macOS: per-head status reporting under `sandbox-exec`. `trigger-hook` honours `HYDRA_STATUS_PATH`/`HYDRA_STATUS_LOG_PATH`; the sandbox keeps the status files at their real host paths, makes them writable (bind on Linux, `allow file-write*` on macOS), and hooks invoke the hydra binary at its real path. _Still TODO: validate the generated seatbelt profile + claude hook-registration on a real Mac (macOS has no bind mounts, so injecting settings.json hooks is unsolved there)._
+2. [x] Web Settings: replaced the Docker fields with a sandbox-policy editor — network on/off + allowed hosts, and writable/masked/restore-RO path lists.
 3. [ ] Network: enforce `allowed_hosts`. The config field is reserved but unenforced; today only full network on/off works. Implement a filtering HTTPS-CONNECT proxy the sandbox is forced through (best-effort without root).
 4. [ ] Windows: implement the Windows Sandbox backend and ConPTY attach (currently stubbed with a clear "not supported" error).
-5. [ ] Rename the repurposed fields `ContainerID`/`ContainerStatus` → `SessionPID`/`SessionStatus` (DB, `Head`, and the `container_id`/`container_status` API JSON) once the frontend is updated to match.
-6. [ ] Fix `TestGetDevToolsConfig`: it hard-codes the instance UUID `"test-uuid"` and fails on any machine whose `~/.config/hydra/uuid.txt` differs (i.e. always). Inject the UUID via a test fixture/env instead.
+5. [x] Renamed the repurposed fields `ContainerID`/`ContainerStatus` → `SessionPID`/`SessionStatus` (DB, `Head`, HTTP handlers, and the API JSON: `session_pid` integer + `session_status`). API + TS client regenerated, frontend updated.
+6. [x] Fixed `TestGetDevToolsConfig`: it now seeds a temp config dir with a known instance UUID instead of hard-coding `"test-uuid"`.
 
 ## Agent UX
 
