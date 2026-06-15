@@ -58,7 +58,12 @@ func (s *Store) ListAgents(projectRoot string) ([]Agent, error) {
 func (s *Store) UpdateSessionInfo(id string, pid int, status string) error {
 	updates := map[string]interface{}{
 		"session_status": status,
-		"session_pid":    pid,
+		// gorm's NamingStrategy derives the column for the `SessionPID` struct
+		// field as `session_p_id` (it splits the `PID` initialism). Struct-based
+		// reads/writes map automatically, but this raw-map write must use the real
+		// column name — `session_pid` here silently failed with
+		// "no such column: session_pid", breaking the liveness reconciler.
+		"session_p_id": pid,
 	}
 	result := s.db.Model(&Agent{}).Where("id = ?", id).Updates(updates)
 	return errtrace.Wrap(result.Error)
