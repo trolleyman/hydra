@@ -13,7 +13,6 @@ interface PaneProps {
   sandboxed: boolean
   active: boolean
   reconnectAttempt: number
-  forceRedrawAttempt: number
   onStatusUpdate?: (status: string) => void
   onDiffRefresh?: () => void
 }
@@ -32,7 +31,7 @@ function getWsUrl(agentId: string, projectId: string | null, shell?: boolean, sa
   return `${protocol}//${host}/ws/projects/${pid}/agents/${encodeURIComponent(agentId)}/terminal${qs}`
 }
 
-function TerminalPane({ agentId, projectId, shell, sandboxed, active, reconnectAttempt, forceRedrawAttempt, onStatusUpdate, onDiffRefresh }: PaneProps) {
+function TerminalPane({ agentId, projectId, shell, sandboxed, active, reconnectAttempt, onStatusUpdate, onDiffRefresh }: PaneProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<Terminal | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
@@ -43,48 +42,39 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, active, reconnectA
   const [showCopiedAt, setShowCopiedAt] = useState(0)
   const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // Re-fit when tab becomes visible (after display:none -> display:block)
-  useEffect(() => {
-    if (!active) return
+  // Fit the terminal to its container and, if the geometry actually changed,
+  // forward the new cols/rows to the backend PTY so the agent program receives
+  // a SIGWINCH with the correct size. The FitAddon already subtracts the
+  // viewport scrollbar width when proposing dimensions, so this never
+  // overestimates cols. `force` re-sends even if the geometry is unchanged
+  // (used right after the socket opens, when lastSentSize is reset).
+  const fitAndSend = useRef<(force?: boolean) => void>(() => {})
+  fitAndSend.current = (force = false) => {
     const fitAddon = fitAddonRef.current
     const term = termRef.current
     const ws = wsRef.current
     if (!fitAddon || !term) return
-    setTimeout(() => {
-      fitAddon.fit()
-      const { cols, rows } = term
-      if (ws?.readyState === WebSocket.OPEN && cols > 0 && rows > 0) {
-        ws.send(JSON.stringify({ type: 'resize', cols, rows }))
-        lastSentSize.current = { cols, rows }
-      }
-    }, 0)
-  }, [active])
-
-  // Force a clean repaint of the live session (Refresh button). TUI apps like
-  // Claude Code (Ink) repaint in place using a cached row count; shrinking the
-  // width by even one column can throw that accounting off and corrupt the
-  // layout for the rest of the session. Recover by wiping xterm's buffer and
-  // wiggling the PTY size so the app receives two distinct SIGWINCHes and does a
-  // full redraw. We go *bigger* first (never re-triggers the shrink bug) and
-  // wait well past Ink's resize debounce so the two events aren't coalesced.
-  useEffect(() => {
-    if (!forceRedrawAttempt) return // skip the initial mount (attempt 0)
-    const fitAddon = fitAddonRef.current
-    const term = termRef.current
-    const ws = wsRef.current
-    if (!fitAddon || !term || ws?.readyState !== WebSocket.OPEN) return
     fitAddon.fit()
     const { cols, rows } = term
-    if (cols <= 0 || rows <= 0) return
-    ws.send(JSON.stringify({ type: 'resize', cols: cols + 2, rows }))
-    const timer = setTimeout(() => {
-      if (ws.readyState !== WebSocket.OPEN) return
-      term.clear() // drop garbled scrollback before the app repaints
-      ws.send(JSON.stringify({ type: 'resize', cols, rows }))
-      lastSentSize.current = { cols, rows }
-    }, 150)
-    return () => clearTimeout(timer)
-  }, [forceRedrawAttempt])
+    if (ws?.readyState !== WebSocket.OPEN || cols <= 0 || rows <= 0) return
+    if (!force && cols === lastSentSize.current.cols && rows === lastSentSize.current.rows) return
+    ws.send(JSON.stringify({ type: 'resize', cols, rows }))
+    lastSentSize.current = { cols, rows }
+  }
+
+  // Re-fit when tab becomes visible (after display:none -> display:block). The
+  // container only has its real size once it's displayed, so a fit done while
+  // hidden would compute a wrong (often too-small) geometry.
+  useEffect(() => {
+    if (!active) return
+    // Two rAFs: let the browser apply the display:flex and run layout before we
+    // measure, otherwise the fit reads stale dimensions and the agent ends up
+    // sized for the wrong terminal.
+    const raf = requestAnimationFrame(() => {
+      requestAnimationFrame(() => fitAndSend.current())
+    })
+    return () => cancelAnimationFrame(raf)
+  }, [active])
 
   useEffect(() => {
     // If a kill was scheduled, cancel it because we are remounting
@@ -141,18 +131,11 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, active, reconnectA
     wsRef.current = ws
 
     ws.onopen = () => {
-      const { cols, rows } = term
-      // Send a slightly larger resize first, then the actual size, so the app
-      // receives two distinct SIGWINCHes and fully redraws. The gap must clear
-      // the app's resize debounce (Ink coalesces events ~10ms apart), and we go
-      // larger first so the intermediate size never triggers the shrink bug.
-      ws.send(JSON.stringify({ type: 'resize', cols: cols + 1, rows }))
-      setTimeout(() => {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: 'resize', cols, rows }))
-          lastSentSize.current = { cols, rows }
-        }
-      }, 150)
+      // Re-fit now that we're connected (layout has had a chance to settle) and
+      // send the real geometry so the agent's PTY matches what the user sees.
+      // The backend replays the session's scrollback on attach, so content
+      // renders without any buffer wiggling.
+      requestAnimationFrame(() => fitAndSend.current(true))
     }
 
     ws.onmessage = (e: MessageEvent) => {
@@ -246,22 +229,11 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, active, reconnectA
       }
     })
 
-    // Resize terminal when the container element resizes.
-    // Only send the resize signal when the column/row count actually changes to
-    // avoid spurious SIGWINCH signals (e.g. from layout shifts caused by the
-    // diff viewer loading content below the terminal).
-    const observer = new ResizeObserver(() => {
-      fitAddon.fit()
-      const { cols, rows } = term
-      if (
-        ws.readyState === WebSocket.OPEN &&
-        cols > 0 && rows > 0 &&
-        (cols !== lastSentSize.current.cols || rows !== lastSentSize.current.rows)
-      ) {
-        ws.send(JSON.stringify({ type: 'resize', cols, rows }))
-        lastSentSize.current = { cols, rows }
-      }
-    })
+    // Resize terminal when the container element resizes. fitAndSend only sends
+    // when the column/row count actually changes, avoiding spurious SIGWINCH
+    // signals (e.g. from layout shifts caused by the diff viewer loading content
+    // below the terminal).
+    const observer = new ResizeObserver(() => fitAndSend.current())
     observer.observe(el)
 
     return () => {
@@ -312,7 +284,6 @@ export function AgentTerminal({ agentId, projectId, bashEnabled, onRefresh, onSt
   const [tabs, setTabs] = useState<TabConfig[]>([{ id: 'terminal', label: 'Terminal', shell: false, sandboxed: true }])
   const [activeTabId, setActiveTabId] = useState('terminal')
   const [reconnectKeys, setReconnectKeys] = useState<Record<string, number>>({})
-  const [forceRedrawKeys, setForceRedrawKeys] = useState<Record<string, number>>({})
   const [status, setStatus] = useState<string>('pending')
   const [shellMenuOpen, setShellMenuOpen] = useState(false)
 
@@ -344,18 +315,14 @@ export function AgentTerminal({ agentId, projectId, bashEnabled, onRefresh, onSt
       delete next[id]
       return next
     })
-    setForceRedrawKeys(prev => {
-      const next = { ...prev }
-      delete next[id]
-      return next
-    })
   }
 
-  // Refresh: force a clean repaint of the live session without tearing down the
-  // WebSocket (see the force-redraw effect in TerminalPane). This fixes the
-  // common case where resizing the terminal corrupts a TUI app's layout.
+  // Refresh: reconnect the active tab's WebSocket by remounting its pane. On
+  // attach the backend replays the session's scrollback, so the terminal
+  // re-renders all existing content (rather than just clearing the buffer) and
+  // the agent's PTY is re-fitted to the current size.
   function reconnectActive() {
-    setForceRedrawKeys(prev => ({ ...prev, [activeTabId]: (prev[activeTabId] ?? 0) + 1 }))
+    setReconnectKeys(prev => ({ ...prev, [activeTabId]: (prev[activeTabId] ?? 0) + 1 }))
     onRefresh?.()
   }
 
@@ -480,7 +447,6 @@ export function AgentTerminal({ agentId, projectId, bashEnabled, onRefresh, onSt
             sandboxed={tab.sandboxed}
             active={activeTabId === tab.id}
             reconnectAttempt={reconnectKeys[tab.id] ?? 0}
-            forceRedrawAttempt={forceRedrawKeys[tab.id] ?? 0}
             onStatusUpdate={tab.id === 'terminal' ? handleStatusUpdate : undefined}
             onDiffRefresh={tab.id === 'terminal' ? onDiffRefresh : undefined}
           />
