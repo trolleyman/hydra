@@ -116,6 +116,6 @@
 
 ---
 
-### Note on uncommitted working-tree changes (not yet committed)
+### Note on the former WIP (now committed)
 
-The tree has WIP in `internal/heads/seed.go`, `internal/sandbox/linux.go`, `internal/sandbox/sandbox.go`: it binds the hydra binary to a fixed `/tmp/hydra-internal` and stops gating `--tmpfs`/binds on host `os.Stat`, plus an `expandPath` tweak. This is a real fix for "the hydra binary isn't visible inside the sandbox when Hydra is run via `go run ./`" — `os.Executable()` then points into `/tmp/go-build*/exe/hydra`, which the sandbox's fresh `--tmpfs /tmp` hides, so hooks can't find it. It's being folded into the #29/#31 hardening pass and committed deliberately rather than left dangling. (The `expandPath` `~.`/`~\\`/`p[1:]` change is suspect and is being reviewed as part of that.)
+The prior WIP in `internal/heads/seed.go`, `internal/sandbox/linux.go`, `internal/sandbox/sandbox.go` — bind the hydra binary at a fixed `/tmp/hydra-internal`, stop gating `--tmpfs`/binds on host `os.Stat`, and expand `~` in bind paths — was a real fix for "the hydra binary isn't visible inside the sandbox when Hydra is run via `go run ./`" (`os.Executable()` points into `/tmp/go-build*/exe/hydra`, which the sandbox's fresh `--tmpfs /tmp` hides). Committed as part of the #28–#32 pass. The suspect `expandPath` `~.`/`~\\`/`p[1:]` experiment was reverted to the clean `~`-and-`~/`-only form (`p[2:]`); `expandPath`/`expandAll` stay (they drive writable/masked/restore-RO expansion on Linux + macOS).
