@@ -284,10 +284,10 @@ func (s *Server) GetStatus(_ context.Context, _ api.GetStatusRequestObject) (api
 	defaultProjectID := s.DefaultProject.ID
 	development := s.Development
 
-	var dockerErr *string
+	var sandboxErr *string
 	if lastErr := s.GetSandboxError(); lastErr != "" {
 		errStr := lastErr
-		dockerErr = &errStr
+		sandboxErr = &errStr
 	}
 
 	terminalBashEnabled := false
@@ -297,7 +297,7 @@ func (s *Server) GetStatus(_ context.Context, _ api.GetStatusRequestObject) (api
 
 	return api.GetStatus200JSONResponse(api.StatusResponse{
 		Status:           &status,
-		DockerError:      dockerErr,
+		SandboxError:     sandboxErr,
 		Version:          &v,
 		UptimeSeconds:    &uptime,
 		ProjectRoot:      &projectRoot,
@@ -346,7 +346,6 @@ func (s *Server) GetConfig(_ context.Context, request api.GetConfigRequestObject
 	}
 
 	defaultPrePrompt := config.DefaultPrePrompt
-	emptyDockerfiles := map[string]string{}
 	resp := api.ConfigResponse{
 		Defaults: toAPIAgentConfig(cfg.Defaults),
 		Agents:   make(map[string]api.AgentConfig),
@@ -355,10 +354,7 @@ func (s *Server) GetConfig(_ context.Context, request api.GetConfigRequestObject
 		}{
 			TerminalBash: &cfg.Features.TerminalBash,
 		},
-		// Deprecated; the sandbox backend has no Dockerfiles. Returned empty for
-		// API compatibility.
-		DefaultDockerfiles: &emptyDockerfiles,
-		DefaultPrePrompt:   &defaultPrePrompt,
+		DefaultPrePrompt: &defaultPrePrompt,
 	}
 
 	for name, agent := range cfg.Agents {
@@ -370,10 +366,8 @@ func (s *Server) GetConfig(_ context.Context, request api.GetConfigRequestObject
 
 // toAPIAgentConfig converts an internal AgentConfig to the API representation.
 func toAPIAgentConfig(c config.AgentConfig) api.AgentConfig {
-	sm := c.SharedMounts
 	out := api.AgentConfig{
-		PrePrompt:    c.PrePrompt,
-		SharedMounts: &sm,
+		PrePrompt: c.PrePrompt,
 	}
 	if c.Sandbox != nil {
 		out.Sandbox = &api.SandboxConfig{
@@ -394,9 +388,6 @@ func toAPIAgentConfig(c config.AgentConfig) api.AgentConfig {
 // fromAPIAgentConfig converts an API AgentConfig to the internal representation.
 func fromAPIAgentConfig(a api.AgentConfig) config.AgentConfig {
 	out := config.AgentConfig{PrePrompt: a.PrePrompt}
-	if a.SharedMounts != nil {
-		out.SharedMounts = *a.SharedMounts
-	}
 	if a.Sandbox != nil {
 		sb := &config.SandboxConfig{}
 		if a.Sandbox.WritablePaths != nil {
@@ -1180,20 +1171,6 @@ func (s *Server) GetAgentDiffFiles(ctx context.Context, request api.GetAgentDiff
 		UncommittedSummary: uncommittedSummary,
 	}
 	return api.GetAgentDiffFiles200JSONResponse(resp), nil
-}
-
-func (s *Server) CleanBuildCache(ctx context.Context, request api.CleanBuildCacheRequestObject) (api.CleanBuildCacheResponseObject, error) {
-	_, err := s.resolveProjectRoot(request.ProjectId)
-	if err != nil {
-		return nil, errtrace.Wrap(err)
-	}
-
-	// No-op: the sandbox backend builds no images, so there is nothing to clean.
-	// Retained for API compatibility with the previous Docker backend.
-	return api.CleanBuildCache200JSONResponse{
-		ImagesRemoved:  0,
-		SpaceReclaimed: 0,
-	}, nil
 }
 
 func (s *Server) SendAgentInput(ctx context.Context, request api.SendAgentInputRequestObject) (api.SendAgentInputResponseObject, error) {

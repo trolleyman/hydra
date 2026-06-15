@@ -169,42 +169,50 @@ func BuildCopilotHooks(hydraBin string) ([]byte, error) {
 	return data, nil
 }
 
-// CombinePrompt joins a pre-prompt and prompt with a newline.
-func CombinePrompt(prePrompt, prompt string) string {
-	if prePrompt == "" {
-		return prompt
-	}
-	return prePrompt + "\n" + prompt
-}
-
 // AgentArgv returns the command line to run inside the sandbox for the given
-// agent type. resume runs the agent's own resume flow; otherwise prompt (if
-// non-empty) is passed as the task.
-func AgentArgv(agentType AgentType, resume bool, prompt string) ([]string, error) {
+// agent type. resume runs the agent's own resume flow (continuing the prior
+// conversation, so no task prompt is passed); otherwise prompt (if non-empty)
+// is passed as the task. The permission-bypass mode flag
+// (--dangerously-skip-permissions / --approval-mode=yolo / --yolo) is applied in
+// BOTH cases — a resumed agent must stay non-interactive.
+//
+// systemPrompt holds the standing Hydra instructions, delivered as a system
+// prompt, never as part of the user's task: Claude takes them via
+// --append-system-prompt (applied on resume too). Gemini and Copilot have no
+// such flag, so for them the instructions are seeded as context files (see
+// seedHead, which also runs on resume) and systemPrompt is ignored here.
+func AgentArgv(agentType AgentType, resume bool, systemPrompt, prompt string) ([]string, error) {
 	switch agentType {
 	case AgentTypeClaude:
-		if resume {
-			return []string{"claude", "--resume"}, nil
-		}
 		argv := []string{"claude", "--dangerously-skip-permissions"}
+		if systemPrompt != "" {
+			argv = append(argv, "--append-system-prompt", systemPrompt)
+		}
+		if resume {
+			// --continue resumes the most recent conversation in the worktree
+			// directly; --resume would pop an interactive session picker that
+			// exits the process if cancelled.
+			return append(argv, "--continue"), nil
+		}
 		if prompt != "" {
 			argv = append(argv, "--", prompt)
 		}
 		return argv, nil
 	case AgentTypeGemini:
-		if resume {
-			return []string{"gemini", "--resume"}, nil
-		}
 		argv := []string{"gemini", "--approval-mode=yolo"}
+		if resume {
+			// "latest" resumes the most recent session non-interactively.
+			return append(argv, "--resume", "latest"), nil
+		}
 		if prompt != "" {
 			argv = append(argv, "-i", prompt)
 		}
 		return argv, nil
 	case AgentTypeCopilot:
-		if resume {
-			return []string{"copilot", "--resume"}, nil
-		}
 		argv := []string{"copilot", "--yolo"}
+		if resume {
+			return append(argv, "--resume"), nil
+		}
 		if prompt != "" {
 			argv = append(argv, "--autopilot", "-p", prompt)
 		}

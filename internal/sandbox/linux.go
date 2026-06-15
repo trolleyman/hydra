@@ -39,6 +39,10 @@ func trimOutput(b []byte) string {
 // the whole filesystem, a curated set of writable binds, masked credential
 // locations, optional network isolation and a seccomp syscall filter.
 func BuildSpec(opts Options) (*Spec, error) {
+	if opts.NoSandbox {
+		return rawSpec(opts)
+	}
+
 	bwrap, err := exec.LookPath("bwrap")
 	if err != nil {
 		return nil, errtrace.Wrap(fmt.Errorf("bwrap not found on PATH: %w", err))
@@ -58,7 +62,15 @@ func BuildSpec(opts Options) (*Spec, error) {
 		"--unshare-ipc",
 		"--unshare-uts",
 		"--die-with-parent",
-		"--new-session",
+	}
+
+	// --new-session calls setsid(), which drops the PTY as the controlling
+	// terminal and so breaks job control ("no job control in this shell"). It's
+	// a defence against TIOCSTI input-injection into a shared terminal, but each
+	// session here has its own dedicated PTY, so there's nothing to escape to.
+	// Keep it for agents; omit it for interactive shells that need job control.
+	if !opts.Interactive {
+		args = append(args, "--new-session")
 	}
 
 	// Writable: the worktree is always writable; then config-driven paths.
@@ -71,6 +83,9 @@ func BuildSpec(opts Options) (*Spec, error) {
 		}
 	}
 	addRWDir(opts.WorktreePath)
+	// The worktree's git metadata lives in the main repo's common dir; bind it
+	// writable so the agent can commit (index.lock, refs, objects, logs).
+	addRWDir(opts.GitCommonDir)
 	for _, p := range expandAll(opts.WritablePaths, home) {
 		addRWDir(p)
 	}

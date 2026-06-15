@@ -63,26 +63,23 @@ const (
 
 // Defines values for TerminalDataEventType.
 const (
-	TerminalDataEventTypeBuildFinished TerminalDataEventType = "build_finished"
-	TerminalDataEventTypeData          TerminalDataEventType = "data"
-	TerminalDataEventTypeDiffRefresh   TerminalDataEventType = "diff_refresh"
-	TerminalDataEventTypeStatus        TerminalDataEventType = "status"
+	TerminalDataEventTypeData        TerminalDataEventType = "data"
+	TerminalDataEventTypeDiffRefresh TerminalDataEventType = "diff_refresh"
+	TerminalDataEventTypeStatus      TerminalDataEventType = "status"
 )
 
 // Defines values for TerminalEventType.
 const (
-	TerminalEventTypeBuildFinished TerminalEventType = "build_finished"
-	TerminalEventTypeData          TerminalEventType = "data"
-	TerminalEventTypeDiffRefresh   TerminalEventType = "diff_refresh"
-	TerminalEventTypeStatus        TerminalEventType = "status"
+	TerminalEventTypeData        TerminalEventType = "data"
+	TerminalEventTypeDiffRefresh TerminalEventType = "diff_refresh"
+	TerminalEventTypeStatus      TerminalEventType = "status"
 )
 
 // Defines values for TerminalStatusEventType.
 const (
-	BuildFinished TerminalStatusEventType = "build_finished"
-	Data          TerminalStatusEventType = "data"
-	DiffRefresh   TerminalStatusEventType = "diff_refresh"
-	Status        TerminalStatusEventType = "status"
+	Data        TerminalStatusEventType = "data"
+	DiffRefresh TerminalStatusEventType = "diff_refresh"
+	Status      TerminalStatusEventType = "status"
 )
 
 // Defines values for GetConfigParamsScope.
@@ -111,19 +108,10 @@ type AddProjectRequest struct {
 
 // AgentConfig defines model for AgentConfig.
 type AgentConfig struct {
-	// Deprecated: this property has been marked as deprecated upstream, but no `x-deprecated-reason` was set
-	Context *string `json:"context"`
-	// Deprecated: this property has been marked as deprecated upstream, but no `x-deprecated-reason` was set
-	Dockerfile *string `json:"dockerfile"`
-	// Deprecated: this property has been marked as deprecated upstream, but no `x-deprecated-reason` was set
-	DockerfileContents *string `json:"dockerfile_contents"`
-	// Deprecated: this property has been marked as deprecated upstream, but no `x-deprecated-reason` was set
-	DockerignoreContents *string `json:"dockerignore_contents"`
-	PrePrompt            *string `json:"pre_prompt"`
+	PrePrompt *string `json:"pre_prompt"`
 
 	// Sandbox User-editable sandbox policy, additive on top of baked-in defaults
-	Sandbox      *SandboxConfig `json:"sandbox,omitempty"`
-	SharedMounts *[]string      `json:"shared_mounts"`
+	Sandbox *SandboxConfig `json:"sandbox,omitempty"`
 }
 
 // AgentInputRequest defines model for AgentInputRequest.
@@ -178,15 +166,6 @@ type AgentStatusInfo struct {
 	Timestamp string `json:"timestamp"`
 }
 
-// CleanCacheResponse defines model for CleanCacheResponse.
-type CleanCacheResponse struct {
-	// ImagesRemoved Number of Hydra-specific images removed
-	ImagesRemoved int `json:"images_removed"`
-
-	// SpaceReclaimed Total space reclaimed in bytes (images + build cache)
-	SpaceReclaimed int64 `json:"space_reclaimed"`
-}
-
 // CommitInfo defines model for CommitInfo.
 type CommitInfo struct {
 	AuthorEmail string `json:"author_email"`
@@ -211,9 +190,6 @@ type CommitInfo struct {
 // ConfigResponse defines model for ConfigResponse.
 type ConfigResponse struct {
 	Agents map[string]AgentConfig `json:"agents"`
-
-	// DefaultDockerfiles Built-in default Dockerfiles for each agent type (read-only)
-	DefaultDockerfiles *map[string]string `json:"default_dockerfiles,omitempty"`
 
 	// DefaultPrePrompt Built-in default pre-prompt always prepended to agent prompts (read-only)
 	DefaultPrePrompt *string     `json:"default_pre_prompt,omitempty"`
@@ -385,9 +361,6 @@ type StatusResponse struct {
 
 	// Development Whether the server is running in development mode
 	Development *bool `json:"development,omitempty"`
-
-	// DockerError Error message if there is an issue connecting to Docker
-	DockerError *string `json:"docker_error"`
 	Features    *struct {
 		// TerminalBash Whether the bash terminal feature is enabled
 		TerminalBash *bool `json:"terminal_bash,omitempty"`
@@ -395,7 +368,10 @@ type StatusResponse struct {
 
 	// ProjectRoot Absolute path to the default project root (server CWD)
 	ProjectRoot *string `json:"project_root,omitempty"`
-	Status      *string `json:"status,omitempty"`
+
+	// SandboxError Error message if the sandbox backend is unavailable or misconfigured
+	SandboxError *string `json:"sandbox_error"`
+	Status       *string `json:"status,omitempty"`
 
 	// UptimeSeconds Seconds since the server started
 	UptimeSeconds *float32 `json:"uptime_seconds,omitempty"`
@@ -470,12 +446,6 @@ type GetAgentDiffFilesParams struct {
 
 	// IncludeUncommitted Include uncommitted changes in the worktree
 	IncludeUncommitted *bool `form:"include_uncommitted,omitempty" json:"include_uncommitted,omitempty"`
-}
-
-// CleanBuildCacheParams defines parameters for CleanBuildCache.
-type CleanBuildCacheParams struct {
-	// AgentType Agent type to clean (claude, gemini, copilot, bash). If omitted, cleans all.
-	AgentType *string `form:"agent_type,omitempty" json:"agent_type,omitempty"`
 }
 
 // GetConfigParams defines parameters for GetConfig.
@@ -558,9 +528,6 @@ type ServerInterface interface {
 	// Update a Hydra agent's branch from its base branch (merge base into head)
 	// (POST /api/projects/{project_id}/agents/{id}/update-from-base)
 	UpdateAgentFromBase(w http.ResponseWriter, r *http.Request, projectId string, id string)
-	// Clean the Docker build cache for agents
-	// (POST /api/projects/{project_id}/clean-build-cache)
-	CleanBuildCache(w http.ResponseWriter, r *http.Request, projectId string, params CleanBuildCacheParams)
 	// Get the merged configuration
 	// (GET /api/projects/{project_id}/config)
 	GetConfig(w http.ResponseWriter, r *http.Request, projectId string, params GetConfigParams)
@@ -1099,42 +1066,6 @@ func (siw *ServerInterfaceWrapper) UpdateAgentFromBase(w http.ResponseWriter, r 
 	handler.ServeHTTP(w, r)
 }
 
-// CleanBuildCache operation middleware
-func (siw *ServerInterfaceWrapper) CleanBuildCache(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-
-	// ------------- Path parameter "project_id" -------------
-	var projectId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
-		return
-	}
-
-	// Parameter object where we will unmarshal all parameters from the context
-	var params CleanBuildCacheParams
-
-	// ------------- Optional query parameter "agent_type" -------------
-
-	err = runtime.BindQueryParameter("form", true, false, "agent_type", r.URL.Query(), &params.AgentType)
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "agent_type", Err: err})
-		return
-	}
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.CleanBuildCache(w, r, projectId, params)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
 // GetConfig operation middleware
 func (siw *ServerInterfaceWrapper) GetConfig(w http.ResponseWriter, r *http.Request) {
 
@@ -1371,7 +1302,6 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/merge", wrapper.MergeAgent)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/restart", wrapper.RestartAgent)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/update-from-base", wrapper.UpdateAgentFromBase)
-	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/clean-build-cache", wrapper.CleanBuildCache)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/config", wrapper.GetConfig)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/config", wrapper.SaveConfig)
 	m.HandleFunc("GET "+options.BaseURL+"/api/status", wrapper.GetStatus)
@@ -1976,42 +1906,6 @@ func (response UpdateAgentFromBase500JSONResponse) VisitUpdateAgentFromBaseRespo
 	return json.NewEncoder(w).Encode(response)
 }
 
-type CleanBuildCacheRequestObject struct {
-	ProjectId string `json:"project_id"`
-	Params    CleanBuildCacheParams
-}
-
-type CleanBuildCacheResponseObject interface {
-	VisitCleanBuildCacheResponse(w http.ResponseWriter) error
-}
-
-type CleanBuildCache200JSONResponse CleanCacheResponse
-
-func (response CleanBuildCache200JSONResponse) VisitCleanBuildCacheResponse(w http.ResponseWriter) error {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(200)
-
-	return json.NewEncoder(w).Encode(response)
-}
-
-type CleanBuildCache404JSONResponse ErrorResponse
-
-func (response CleanBuildCache404JSONResponse) VisitCleanBuildCacheResponse(w http.ResponseWriter) error {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(404)
-
-	return json.NewEncoder(w).Encode(response)
-}
-
-type CleanBuildCache500JSONResponse ErrorResponse
-
-func (response CleanBuildCache500JSONResponse) VisitCleanBuildCacheResponse(w http.ResponseWriter) error {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(500)
-
-	return json.NewEncoder(w).Encode(response)
-}
-
 type GetConfigRequestObject struct {
 	ProjectId string `json:"project_id"`
 	Params    GetConfigParams
@@ -2176,9 +2070,6 @@ type StrictServerInterface interface {
 	// Update a Hydra agent's branch from its base branch (merge base into head)
 	// (POST /api/projects/{project_id}/agents/{id}/update-from-base)
 	UpdateAgentFromBase(ctx context.Context, request UpdateAgentFromBaseRequestObject) (UpdateAgentFromBaseResponseObject, error)
-	// Clean the Docker build cache for agents
-	// (POST /api/projects/{project_id}/clean-build-cache)
-	CleanBuildCache(ctx context.Context, request CleanBuildCacheRequestObject) (CleanBuildCacheResponseObject, error)
 	// Get the merged configuration
 	// (GET /api/projects/{project_id}/config)
 	GetConfig(ctx context.Context, request GetConfigRequestObject) (GetConfigResponseObject, error)
@@ -2655,33 +2546,6 @@ func (sh *strictHandler) UpdateAgentFromBase(w http.ResponseWriter, r *http.Requ
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(UpdateAgentFromBaseResponseObject); ok {
 		if err := validResponse.VisitUpdateAgentFromBaseResponse(w); err != nil {
-			sh.options.ResponseErrorHandlerFunc(w, r, err)
-		}
-	} else if response != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
-	}
-}
-
-// CleanBuildCache operation middleware
-func (sh *strictHandler) CleanBuildCache(w http.ResponseWriter, r *http.Request, projectId string, params CleanBuildCacheParams) {
-	var request CleanBuildCacheRequestObject
-
-	request.ProjectId = projectId
-	request.Params = params
-
-	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.CleanBuildCache(ctx, request.(CleanBuildCacheRequestObject))
-	}
-	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "CleanBuildCache")
-	}
-
-	response, err := handler(r.Context(), w, r, request)
-
-	if err != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(CleanBuildCacheResponseObject); ok {
-		if err := validResponse.VisitCleanBuildCacheResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

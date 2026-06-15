@@ -1,7 +1,6 @@
 package http
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -307,11 +306,11 @@ func (s *SimulationServer) GetAgentDiff(w http.ResponseWriter, r *http.Request, 
 							OldStart: 98,
 							NewStart: 112,
 							Lines: []api.DiffLine{
-								{Type: api.Context, Content: "// KillHead stops and removes a head's container, worktree, and branch.", OldLineNum: ptr(98), NewLineNum: ptr(112)},
-								{Type: api.Deletion, Content: "func KillHead(ctx context.Context, cli *dockerclient.Client, head Head) error {", OldLineNum: ptr(99)},
-								{Type: api.Addition, Content: "func KillHead(ctx context.Context, cli *dockerclient.Client, store *db.Store, head Head) error {", NewLineNum: ptr(113)},
+								{Type: api.Context, Content: "// KillHead stops a head's session, worktree, and branch.", OldLineNum: ptr(98), NewLineNum: ptr(112)},
+								{Type: api.Deletion, Content: "func KillHead(ctx context.Context, reg *session.Registry, head Head) error {", OldLineNum: ptr(99)},
+								{Type: api.Addition, Content: "func KillHead(ctx context.Context, reg *session.Registry, store *db.Store, head Head) error {", NewLineNum: ptr(113)},
 								{Type: api.Context, Content: "\tlog.Printf(\"heads: kill requested for agent %s\", head.ID)", OldLineNum: ptr(100), NewLineNum: ptr(114)},
-								{Type: api.Deletion, Content: "\tcontainerRef := head.SessionPID", OldLineNum: ptr(101)},
+								{Type: api.Deletion, Content: "\tsessionPID := head.SessionPID", OldLineNum: ptr(101)},
 								{Type: api.Addition, Content: "\tif store != nil {", NewLineNum: ptr(115)},
 								{Type: api.Addition, Content: "\t\tok, err := store.TrySetHeadStatus(head.ID, \"idle\", \"killing\")", NewLineNum: ptr(116)},
 								{Type: api.Addition, Content: "\t\tif err != nil {", NewLineNum: ptr(117)},
@@ -321,12 +320,12 @@ func (s *SimulationServer) GetAgentDiff(w http.ResponseWriter, r *http.Request, 
 								{Type: api.Addition, Content: "\t\t\treturn errtrace.Wrap(db.ErrOperationInProgress)", NewLineNum: ptr(121)},
 								{Type: api.Addition, Content: "\t\t}", NewLineNum: ptr(122)},
 								{Type: api.Addition, Content: "\t}", NewLineNum: ptr(123)},
-								{Type: api.Addition, Content: "\tcontainerRef := head.SessionPID", NewLineNum: ptr(124)},
-								{Type: api.Context, Content: "\tif containerRef == \"\" {", OldLineNum: ptr(102), NewLineNum: ptr(125)},
-								{Type: api.Context, Content: "\t\tcontainerRef = \"hydra-agent-\" + head.ID", OldLineNum: ptr(103), NewLineNum: ptr(126)},
+								{Type: api.Addition, Content: "\tsessionPID := head.SessionPID", NewLineNum: ptr(124)},
+								{Type: api.Context, Content: "\tif sessionPID == 0 {", OldLineNum: ptr(102), NewLineNum: ptr(125)},
+								{Type: api.Context, Content: "\t\tlog.Printf(\"heads: %s has no live session\", head.ID)", OldLineNum: ptr(103), NewLineNum: ptr(126)},
 								{Type: api.Context, Content: "\t}", OldLineNum: ptr(104), NewLineNum: ptr(127)},
-								{Type: api.Deletion, Content: "\treturn killInternal(ctx, cli, head, containerRef)", OldLineNum: ptr(105)},
-								{Type: api.Addition, Content: "\treturn killInternal(ctx, cli, store, head, containerRef)", NewLineNum: ptr(128)},
+								{Type: api.Deletion, Content: "\treturn killInternal(ctx, reg, head, sessionPID)", OldLineNum: ptr(105)},
+								{Type: api.Addition, Content: "\treturn killInternal(ctx, reg, store, head, sessionPID)", NewLineNum: ptr(128)},
 								{Type: api.Context, Content: "}", OldLineNum: ptr(106), NewLineNum: ptr(129)},
 							},
 						},
@@ -496,15 +495,15 @@ func (s *SimulationServer) GetAgentDiff(w http.ResponseWriter, r *http.Request, 
 							OldStart: 134,
 							NewStart: 134,
 							Lines: []api.DiffLine{
-								{Type: api.Context, Content: "\thead, err := heads.GetHeadByID(r.Context(), s.DockerClient, s.DB, projectRoot, id)", OldLineNum: ptr(134), NewLineNum: ptr(134)},
+								{Type: api.Context, Content: "\thead, err := heads.GetHeadByID(r.Context(), s.Sessions, s.DB, projectRoot, id)", OldLineNum: ptr(134), NewLineNum: ptr(134)},
 								{Type: api.Context, Content: "\tif err != nil || head == nil {", OldLineNum: ptr(135), NewLineNum: ptr(135)},
 								{Type: api.Context, Content: "\t\tapi.WriteError(w, http.StatusNotFound, \"agent not found\")", OldLineNum: ptr(136), NewLineNum: ptr(136)},
 								{Type: api.Context, Content: "\t\treturn", OldLineNum: ptr(137), NewLineNum: ptr(137)},
 								{Type: api.Context, Content: "\t}", OldLineNum: ptr(138), NewLineNum: ptr(138)},
-								{Type: api.Deletion, Content: "\tif err := heads.KillHead(r.Context(), s.DockerClient, *head); err != nil {", OldLineNum: ptr(139)},
+								{Type: api.Deletion, Content: "\tif err := heads.KillHead(r.Context(), s.Sessions, *head); err != nil {", OldLineNum: ptr(139)},
 								{Type: api.Deletion, Content: "\t\tapi.WriteError(w, http.StatusInternalServerError, err.Error())", OldLineNum: ptr(140)},
 								{Type: api.Deletion, Content: "\t\treturn", OldLineNum: ptr(141)},
-								{Type: api.Addition, Content: "\tif err := heads.KillHead(r.Context(), s.DockerClient, s.DB, *head); err != nil {", NewLineNum: ptr(139)},
+								{Type: api.Addition, Content: "\tif err := heads.KillHead(r.Context(), s.Sessions, s.DB, *head); err != nil {", NewLineNum: ptr(139)},
 								{Type: api.Addition, Content: "\t\tif errors.Is(err, db.ErrOperationInProgress) {", NewLineNum: ptr(140)},
 								{Type: api.Addition, Content: "\t\t\tapi.WriteError(w, http.StatusConflict, \"kill already in progress\")", NewLineNum: ptr(141)},
 								{Type: api.Addition, Content: "\t\t\treturn", NewLineNum: ptr(142)},
@@ -537,9 +536,9 @@ func (s *SimulationServer) GetAgentDiff(w http.ResponseWriter, r *http.Request, 
 								{Type: api.Deletion, Content: "type Agent struct {", OldLineNum: ptr(6)},
 								{Type: api.Deletion, Content: "\tID              string    `gorm:\"primaryKey\"`", OldLineNum: ptr(7)},
 								{Type: api.Deletion, Content: "\tProjectPath     string", OldLineNum: ptr(8)},
-								{Type: api.Deletion, Content: "\tSessionPID     string", OldLineNum: ptr(9)},
-								{Type: api.Deletion, Content: "\tContainerName   string", OldLineNum: ptr(10)},
-								{Type: api.Deletion, Content: "\tSessionStatus string", OldLineNum: ptr(11)},
+								{Type: api.Deletion, Content: "\tSessionPID      int", OldLineNum: ptr(9)},
+								{Type: api.Deletion, Content: "\tLastError       *string", OldLineNum: ptr(10)},
+								{Type: api.Deletion, Content: "\tSessionStatus   string", OldLineNum: ptr(11)},
 								{Type: api.Deletion, Content: "\tAgentStatus     *string", OldLineNum: ptr(12)},
 								{Type: api.Deletion, Content: "\tAgentStatusTime string", OldLineNum: ptr(13)},
 								{Type: api.Deletion, Content: "\tHeadStatus      string    `gorm:\"default:idle\"`", OldLineNum: ptr(14)},
@@ -580,9 +579,9 @@ func (s *SimulationServer) GetAgentDiff(w http.ResponseWriter, r *http.Request, 
 								{Type: api.Addition, Content: "type Agent struct {", NewLineNum: ptr(11)},
 								{Type: api.Addition, Content: "\tID              string         `gorm:\"primaryKey\"`", NewLineNum: ptr(12)},
 								{Type: api.Addition, Content: "\tProjectPath     string", NewLineNum: ptr(13)},
-								{Type: api.Addition, Content: "\tSessionPID     string", NewLineNum: ptr(14)},
-								{Type: api.Addition, Content: "\tContainerName   string", NewLineNum: ptr(15)},
-								{Type: api.Addition, Content: "\tSessionStatus string", NewLineNum: ptr(16)},
+								{Type: api.Addition, Content: "\tSessionPID      int", NewLineNum: ptr(14)},
+								{Type: api.Addition, Content: "\tLastError       *string", NewLineNum: ptr(15)},
+								{Type: api.Addition, Content: "\tSessionStatus   string", NewLineNum: ptr(16)},
 								{Type: api.Addition, Content: "\tAgentStatus     *string", NewLineNum: ptr(17)},
 								{Type: api.Addition, Content: "\tAgentStatusTime string", NewLineNum: ptr(18)},
 								{Type: api.Addition, Content: "\tHeadStatus      string         `gorm:\"default:idle\"`", NewLineNum: ptr(19)},
@@ -662,15 +661,6 @@ func (s *SimulationServer) GetAgentDiffFiles(w http.ResponseWriter, r *http.Requ
 	api.WriteJSON(w, http.StatusOK, api.DiffResponse{Files: []api.DiffFile{}})
 }
 
-func (s *SimulationServer) CleanBuildCache(w http.ResponseWriter, r *http.Request, projectId string, params api.CleanBuildCacheParams) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(api.CleanCacheResponse{
-		ImagesRemoved:  2,
-		SpaceReclaimed: 1024 * 1024 * 50, // 50 MB
-	})
-}
-
 func (s *SimulationServer) SendAgentInput(w http.ResponseWriter, r *http.Request, projectId string, id string) {
 	w.WriteHeader(http.StatusOK)
 }
@@ -734,17 +724,17 @@ func (s *SimulationServer) HandleTerminalWS(w http.ResponseWriter, r *http.Reque
 	conn := &safeConn{Conn: rawConn}
 	defer conn.Close()
 
-	// 1. Simulate Building
+	// 1. Simulate sandbox startup
 	sendStatusUpdate(conn, "building")
-	_ = conn.WriteMessage(websocket.BinaryMessage, []byte("\x1b[32m[Simulation] Building agent "+agentID+"...\x1b[0m\r\n"))
+	_ = conn.WriteMessage(websocket.BinaryMessage, []byte("\x1b[32m[Simulation] Starting agent "+agentID+"...\x1b[0m\r\n"))
 	time.Sleep(1 * time.Second)
-	_ = conn.WriteMessage(websocket.BinaryMessage, []byte("Step 1/3: Pulling base image...\r\n"))
+	_ = conn.WriteMessage(websocket.BinaryMessage, []byte("Step 1/3: Creating git worktree...\r\n"))
 	time.Sleep(1 * time.Second)
-	_ = conn.WriteMessage(websocket.BinaryMessage, []byte("Step 2/3: Installing dependencies...\r\n"))
+	_ = conn.WriteMessage(websocket.BinaryMessage, []byte("Step 2/3: Preparing sandbox...\r\n"))
 	time.Sleep(1 * time.Second)
-	_ = conn.WriteMessage(websocket.BinaryMessage, []byte("Step 3/3: Finalizing...\r\n"))
+	_ = conn.WriteMessage(websocket.BinaryMessage, []byte("Step 3/3: Launching agent session...\r\n"))
 	time.Sleep(500 * time.Millisecond)
-	_ = conn.WriteMessage(websocket.BinaryMessage, []byte("\x1b[32mSuccessfully built simulated agent.\x1b[0m\r\n\r\n"))
+	_ = conn.WriteMessage(websocket.BinaryMessage, []byte("\x1b[32mSimulated agent ready.\x1b[0m\r\n\r\n"))
 
 	// 2. Transition to Running
 	sendStatusUpdate(conn, "running")

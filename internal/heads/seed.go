@@ -1,11 +1,14 @@
 package heads
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"path"
 	"path/filepath"
+	"strings"
+	"time"
 
 	"braces.dev/errtrace"
 	"github.com/trolleyman/hydra/internal/paths"
@@ -35,7 +38,13 @@ type seedResult struct {
 // paths (made writable + pointed at via HYDRA_STATUS_PATH) so reporting works on
 // both Linux and macOS. Hooks invoke the hydra binary at its real path, visible
 // inside the sandbox via the read-only root bind.
-func seedHead(projectRoot, id string, agentType sandbox.AgentType, worktreePath, home string) (*seedResult, error) {
+//
+// prePrompt holds the standing Hydra instructions delivered as a system prompt.
+// Claude receives them via --append-system-prompt (see sandbox.AgentArgv), but
+// Gemini and Copilot have no such flag, so for them the instructions are seeded
+// here as context files (~/.gemini/GEMINI.md, ~/.copilot/copilot-instructions.md),
+// merged on top of any the host user already has.
+func seedHead(projectRoot, id string, agentType sandbox.AgentType, worktreePath, home, prePrompt string) (*seedResult, error) {
 	hydraDir := paths.GetHydraDirFromProjectRoot(projectRoot)
 	cacheDir := filepath.Join(hydraDir, "cache")
 	if err := paths.CreateGitignoreAllInDir(cacheDir); err != nil {
@@ -104,6 +113,12 @@ func seedHead(projectRoot, id string, agentType sandbox.AgentType, worktreePath,
 		}
 		res.Binds = append(res.Binds, sandbox.Bind{Source: settingsHost, Target: path.Join(home, ".gemini", "settings.json")})
 
+		if prePrompt != "" {
+			if err := seedGeminiPrePrompt(res, cacheDir, home, prePrompt); err != nil {
+				return nil, errtrace.Wrap(err)
+			}
+		}
+
 	case sandbox.AgentTypeCopilot:
 		// Copilot loads hooks from .github/hooks/ in the (writable) worktree.
 		hooksDir := filepath.Join(worktreePath, ".github", "hooks")
@@ -117,9 +132,109 @@ func seedHead(projectRoot, id string, agentType sandbox.AgentType, worktreePath,
 		if err := os.WriteFile(filepath.Join(hooksDir, "hydra.json"), hooksData, 0644); err != nil {
 			return nil, errtrace.Wrap(err)
 		}
+
+		// Copilot has no --append-system-prompt; deliver the pre-prompt as the
+		// home-dir custom instructions (~/.copilot/copilot-instructions.md),
+		// merged over the host's.
+		if prePrompt != "" {
+			instrHost := filepath.Join(cacheDir, "copilot-instructions.md")
+			content := combineInstructions(prePrompt, readHostFile(filepath.Join(home, ".copilot", "copilot-instructions.md")))
+			if err := os.WriteFile(instrHost, content, 0644); err != nil {
+				return nil, errtrace.Wrap(err)
+			}
+			res.Binds = append(res.Binds, sandbox.Bind{Source: instrHost, Target: path.Join(home, ".copilot", "copilot-instructions.md")})
+		}
 	}
 
 	return res, nil
+}
+
+// seedGeminiPrePrompt delivers the pre-prompt to Gemini, which has no
+// --append-system-prompt flag. Preferred path: capture Gemini's built-in system
+// prompt (GEMINI_WRITE_SYSTEM_MD, cached per CLI version), append the pre-prompt,
+// and point GEMINI_SYSTEM_MD at the combined file — a true system prompt of
+// "default + our rules". If the default can't be captured (e.g. gemini is not
+// authenticated, or offline), fall back to seeding the pre-prompt as a GEMINI.md
+// context file, which is loaded as instructional context instead.
+func seedGeminiPrePrompt(res *seedResult, cacheDir, home, prePrompt string) error {
+	if dflt := geminiDefaultSystemPrompt(cacheDir); dflt != "" {
+		combined := strings.TrimRight(dflt, "\n") + "\n\n" + prePrompt + "\n"
+		sysHost := filepath.Join(cacheDir, "gemini-system.md")
+		if err := os.WriteFile(sysHost, []byte(combined), 0644); err != nil {
+			return errtrace.Wrap(err)
+		}
+		target := path.Join(home, ".gemini", "hydra-system.md")
+		res.Binds = append(res.Binds, sandbox.Bind{Source: sysHost, Target: target})
+		res.Env = append(res.Env, "GEMINI_SYSTEM_MD="+target)
+		return nil
+	}
+
+	// Fallback: GEMINI.md context file, merged over the host's global one.
+	ctxHost := filepath.Join(cacheDir, "gemini-context.md")
+	content := combineInstructions(prePrompt, readHostFile(filepath.Join(home, ".gemini", "GEMINI.md")))
+	if err := os.WriteFile(ctxHost, content, 0644); err != nil {
+		return errtrace.Wrap(err)
+	}
+	res.Binds = append(res.Binds, sandbox.Bind{Source: ctxHost, Target: path.Join(home, ".gemini", "GEMINI.md")})
+	return nil
+}
+
+// geminiDefaultSystemPrompt returns Gemini's built-in system prompt, captured
+// once per CLI version and cached under cacheDir. Returns "" if it can't be
+// captured; a per-version marker prevents repeated slow capture attempts.
+func geminiDefaultSystemPrompt(cacheDir string) string {
+	if _, err := exec.LookPath("gemini"); err != nil {
+		return ""
+	}
+	ver := geminiVersion()
+	if ver == "" {
+		return ""
+	}
+	cacheFile := filepath.Join(cacheDir, "gemini-default-system-"+ver+".md")
+	if b := readHostFile(cacheFile); len(trimTrailingNewline(b)) > 0 {
+		return string(b)
+	}
+	unavailable := cacheFile + ".unavailable"
+	if _, err := os.Stat(unavailable); err == nil {
+		return "" // already tried for this version and failed
+	}
+
+	// GEMINI_WRITE_SYSTEM_MD makes gemini dump its default system prompt to the
+	// given file. It only writes once it builds a turn, so run a trivial headless
+	// prompt, time-boxed. Best-effort: failures are non-fatal.
+	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "gemini", "-p", "ok")
+	cmd.Env = append(os.Environ(), "GEMINI_WRITE_SYSTEM_MD="+cacheFile)
+	cmd.Dir = cacheDir
+	_ = cmd.Run()
+
+	if b := readHostFile(cacheFile); len(trimTrailingNewline(b)) > 0 {
+		return string(b)
+	}
+	_ = os.WriteFile(unavailable, []byte(ver), 0644)
+	return ""
+}
+
+// geminiVersion returns a filename-safe gemini CLI version string, or "".
+func geminiVersion() string {
+	out, err := exec.Command("gemini", "--version").Output()
+	if err != nil {
+		return ""
+	}
+	v := strings.TrimSpace(string(out))
+	return strings.NewReplacer("/", "_", " ", "_", string(os.PathSeparator), "_").Replace(v)
+}
+
+// combineInstructions builds an agent context/instructions file from Hydra's
+// pre-prompt and whatever the host user already has. Hydra's instructions go
+// last so they take precedence.
+func combineInstructions(prePrompt string, host []byte) []byte {
+	host = trimTrailingNewline(host)
+	if len(host) == 0 {
+		return []byte(prePrompt + "\n")
+	}
+	return []byte(string(host) + "\n\n" + prePrompt + "\n")
 }
 
 // readHostFile returns the file contents or nil if it can't be read.

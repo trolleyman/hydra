@@ -60,7 +60,7 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 			},
 		},
 		Agents: map[string]AgentConfig{
-			"claude": {PrePrompt: ptr(prePrompt), SharedMounts: []string{"~/shared"}},
+			"claude": {PrePrompt: ptr(prePrompt), Sandbox: &SandboxConfig{WritablePaths: []string{"~/shared"}}},
 		},
 	}
 

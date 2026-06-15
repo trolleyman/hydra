@@ -626,43 +626,6 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /api/projects/{project_id}/clean-build-cache:
-    post:
-      summary: Clean the Docker build cache for agents
-      operationId: cleanBuildCache
-      parameters:
-        - in: path
-          name: project_id
-          required: true
-          schema:
-            type: string
-          description: Project ID
-        - in: query
-          name: agent_type
-          required: false
-          schema:
-            type: string
-          description: Agent type to clean (claude, gemini, copilot, bash). If omitted, cleans all.
-      responses:
-        '200':
-          description: OK (Cache cleaned)
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/CleanCacheResponse'
-        '404':
-          description: Project Not Found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '500':
-          description: Internal Server Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-
   /api/projects/{project_id}/agents/{id}:
     get:
       summary: Get a specific Hydra agent by ID
@@ -767,10 +730,10 @@ components:
         status:
           type: string
           example: "OK"
-        docker_error:
+        sandbox_error:
           type: string
           nullable: true
-          description: "Error message if there is an issue connecting to Docker"
+          description: "Error message if the sandbox backend is unavailable or misconfigured"
         version:
           type: string
           example: "1.0.0"
@@ -1103,32 +1066,9 @@ components:
         sandbox:
           $ref: '#/components/schemas/SandboxConfig'
           nullable: true
-        shared_mounts:
-          type: array
-          items:
-            type: string
-          nullable: true
         pre_prompt:
           type: string
           nullable: true
-        # Deprecated Docker fields, retained for API compatibility; ignored by
-        # the sandbox backend.
-        dockerfile:
-          type: string
-          nullable: true
-          deprecated: true
-        dockerfile_contents:
-          type: string
-          nullable: true
-          deprecated: true
-        dockerignore_contents:
-          type: string
-          nullable: true
-          deprecated: true
-        context:
-          type: string
-          nullable: true
-          deprecated: true
 
     ConfigResponse:
       type: object
@@ -1145,11 +1085,6 @@ components:
           properties:
             terminal_bash:
               type: boolean
-        default_dockerfiles:
-          type: object
-          additionalProperties:
-            type: string
-          description: Built-in default Dockerfiles for each agent type (read-only)
         default_pre_prompt:
           type: string
           description: Built-in default pre-prompt always prepended to agent prompts (read-only)
@@ -1162,12 +1097,11 @@ components:
         mapping:
           status: '#/components/schemas/TerminalStatusEvent'
           data: '#/components/schemas/TerminalDataEvent'
-          build_finished: '#/components/schemas/TerminalEvent'
           diff_refresh: '#/components/schemas/TerminalEvent'
       properties:
         type:
           type: string
-          enum: [status, data, build_finished, diff_refresh]
+          enum: [status, data, diff_refresh]
 
     TerminalStatusEvent:
       allOf:
@@ -1186,14 +1120,3 @@ components:
               type: string
               description: Base64 encoded binary data or plain string
 
-    CleanCacheResponse:
-      type: object
-      required: [images_removed, space_reclaimed]
-      properties:
-        images_removed:
-          type: integer
-          description: Number of Hydra-specific images removed
-        space_reclaimed:
-          type: integer
-          format: int64
-          description: Total space reclaimed in bytes (images + build cache)

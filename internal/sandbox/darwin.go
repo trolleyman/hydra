@@ -32,6 +32,10 @@ func Available() (bool, string) {
 // invokes sandbox-exec with WORK_DIR/HOME_DIR params, mirroring
 // sandbox-demo/macos/sandbox.sb.
 func BuildSpec(opts Options) (*Spec, error) {
+	if opts.NoSandbox {
+		return rawSpec(opts)
+	}
+
 	sandboxExec, err := exec.LookPath("sandbox-exec")
 	if err != nil {
 		return nil, errtrace.Wrap(fmt.Errorf("sandbox-exec not found: %w", err))
@@ -42,6 +46,11 @@ func BuildSpec(opts Options) (*Spec, error) {
 	b.WriteString(sandboxProfileTemplate)
 	b.WriteString("\n;; --- Hydra config-driven rules (appended; last match wins) ---\n")
 
+	// The worktree's git metadata lives in the main repo's common dir; allow
+	// writes there so the agent can commit (the worktree itself is WORK_DIR).
+	if opts.GitCommonDir != "" {
+		fmt.Fprintf(&b, "(allow file-write* %s)\n", sbPathRule(opts.GitCommonDir))
+	}
 	// Writable paths (the worktree is covered by WORK_DIR in the template).
 	for _, p := range expandAll(opts.WritablePaths, home) {
 		fmt.Fprintf(&b, "(allow file-write* %s)\n", sbPathRule(p))

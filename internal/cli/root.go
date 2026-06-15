@@ -26,7 +26,7 @@ var rootCmd = &cobra.Command{
 	Use:   "hydra",
 	Short: "AI agent orchestrator",
 	Long: `Hydra is an AI agent orchestrator.
-It manages AI coding agents running in isolated Docker containers and git worktrees.`,
+It manages AI coding agents running in OS sandboxes and git worktrees.`,
 	Version: Version,
 	// Suppress usage on runtime errors (but show it on arg errors).
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
