@@ -791,13 +791,15 @@ func (s *SimulationServer) GetAgentDiffFiles(w http.ResponseWriter, r *http.Requ
 	api.WriteJSON(w, http.StatusOK, api.DiffResponse{Files: []api.DiffFile{}})
 }
 
-// simSVG builds an inline data-URL SVG image so the demo can render artifacts
-// without any on-disk blob serving.
-func simSVG(label, color string) string {
-	doc := fmt.Sprintf(`<svg xmlns="http://www.w3.org/2000/svg" width="320" height="200">`+
-		`<rect width="320" height="200" fill="%s"/>`+
-		`<text x="160" y="108" font-family="sans-serif" font-size="20" fill="white" text-anchor="middle">%s</text></svg>`,
-		color, label)
+// simSVG builds an inline data-URL SVG image (w×h) so the demo can render
+// artifacts without any on-disk blob serving. Mixing tall "phone" shapes with
+// wide "desktop" ones shows off the flex-wrap artifact layout: narrow shots
+// pack several per row while a wide one claims its own.
+func simSVG(label, color string, w, h int) string {
+	doc := fmt.Sprintf(`<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%d">`+
+		`<rect width="%d" height="%d" fill="%s"/>`+
+		`<text x="%d" y="%d" font-family="sans-serif" font-size="18" fill="white" text-anchor="middle">%s</text></svg>`,
+		w, h, w, h, color, w/2, h/2, label)
 	return "data:image/svg+xml;base64," + base64.StdEncoding.EncodeToString([]byte(doc))
 }
 
@@ -815,19 +817,31 @@ func (s *SimulationServer) GetAgentArtifacts(w http.ResponseWriter, r *http.Requ
 				{
 					Name:       "home.png",
 					ChangeType: api.ArtifactFileChangeTypeModified,
-					LeftUrl:    ptr(simSVG("Home (before)", "#b91c1c")),
-					RightUrl:   ptr(simSVG("Home (after)", "#15803d")),
+					LeftUrl:    ptr(simSVG("Home (before)", "#b91c1c", 360, 220)),
+					RightUrl:   ptr(simSVG("Home (after)", "#15803d", 360, 220)),
 				},
 				{
-					Name:       "settings.png",
+					Name:       "login-phone.png",
+					ChangeType: api.ArtifactFileChangeTypeModified,
+					LeftUrl:    ptr(simSVG("Login (before)", "#b91c1c", 240, 480)),
+					RightUrl:   ptr(simSVG("Login (after)", "#15803d", 240, 480)),
+				},
+				{
+					Name:       "profile-phone.png",
+					ChangeType: api.ArtifactFileChangeTypeModified,
+					LeftUrl:    ptr(simSVG("Profile (before)", "#b91c1c", 240, 480)),
+					RightUrl:   ptr(simSVG("Profile (after)", "#15803d", 240, 480)),
+				},
+				{
+					Name:       "settings-phone.png",
 					ChangeType: api.ArtifactFileChangeTypeAdded,
-					RightUrl:   ptr(simSVG("Settings (new)", "#15803d")),
+					RightUrl:   ptr(simSVG("Settings (new)", "#15803d", 240, 480)),
 				},
 				{
 					Name:       "about.png",
 					ChangeType: api.ArtifactFileChangeTypeUnchanged,
-					LeftUrl:    ptr(simSVG("About", "#334155")),
-					RightUrl:   ptr(simSVG("About", "#334155")),
+					LeftUrl:    ptr(simSVG("About", "#334155", 360, 220)),
+					RightUrl:   ptr(simSVG("About", "#334155", 360, 220)),
 				},
 			},
 		},

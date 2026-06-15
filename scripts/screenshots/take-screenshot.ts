@@ -144,13 +144,29 @@ try {
     // below the fold. agent-3's diff tree is below the terminal, so we scroll
     // the "Changes" section to the top and capture just the viewport there
     // instead of the whole (mostly-terminal) page.
-    const pages: { name: string; path: string; scrollTo?: string }[] = [
+    const pages: {
+      name: string
+      path: string
+      scrollTo?: string
+      viewport?: { width: number; height: number }
+    }[] = [
       { name: 'home', path: '/' },
       { name: 'nested-folders', path: '/project/sim-project/agent/agent-3', scrollTo: 'Changes' },
+      // agent-1's diff carries simulated "screenshots" artifacts (mixed phone +
+      // desktop shapes). Scroll to the "Changes" header — the artifacts panel
+      // renders directly below it — and use a taller viewport so the wrapped
+      // before/after cards fit in one capture. Meta: a screenshot of the diff
+      // page showing artifact before/after screenshots.
+      {
+        name: 'artifacts',
+        path: '/project/sim-project/agent/agent-1',
+        scrollTo: 'Changes',
+        viewport: { width: 1280, height: 1280 },
+      },
     ]
     for (const pg of pages) {
       const ctx = await browser.newContext({
-        viewport: { width: 1280, height: 800 },
+        viewport: pg.viewport ?? { width: 1280, height: 800 },
         deviceScaleFactor: 1,
       })
       await ctx.addInitScript(() => {
