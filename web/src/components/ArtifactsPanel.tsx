@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { api } from '../stores/apiClient'
 import type { ArtifactSet, ArtifactFile } from '../api'
 import { LoaderCircle, Image as ImageIcon, ChevronDown, ChevronRight, TriangleAlert } from 'lucide-react'
+import { InfoTooltip } from './InfoTooltip'
 
 const CHANGE_LABEL: Record<string, string> = {
   added: 'added',
@@ -196,6 +197,12 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
       <div className="flex items-center gap-2 mb-2">
         <ImageIcon className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400" />
         <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Artifacts</h3>
+        <InfoTooltip title="Artifacts">
+          <p>Artifacts are visual snapshots — typically screenshots — rendered from your code so you can see what a change <em>looks like</em>, side by side with the base branch.</p>
+          <p>Each one is produced by a project-defined <strong>artifact script</strong>. Hydra checks out both the base ref and the head ref (or your uncommitted working tree), runs the script against each with <code className="text-blue-300">$HYDRA_ARTIFACT_OUTPUT</code>, <code className="text-blue-300">$HYDRA_ARTIFACT_SOURCE</code> and <code className="text-blue-300">$HYDRA_ARTIFACT_REF</code> set, and compares the images it writes. Results are cached per commit, so re-viewing a diff is free.</p>
+          <p>Configure them in <code className="text-blue-300">.hydra/config.toml</code> with <code className="text-blue-300">[[artifacts]]</code> blocks (<code className="text-blue-300">name</code>, <code className="text-blue-300">command</code>, optional <code className="text-blue-300">timeout_sec</code>).</p>
+          <p className="text-gray-400 italic">In this project the <strong>screenshots</strong> script builds the frontend, boots <code className="text-blue-300">hydra server --simulation</code>, and captures the home page with headless Chromium — so visual UI changes show up here in the diff viewer.</p>
+        </InfoTooltip>
       </div>
       <div className="flex flex-col gap-2">
         {sets.map((s) => <ArtifactSetCard key={s.name} set={s} />)}
