@@ -1404,6 +1404,7 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger }: { agent
       params.baseRef, params.headRef, params.ignoreWhitespace, params.includeUncommitted, undefined, 3)
       .then((d) => {
         if (!cancelled) {
+          lastDiffSigRef.current = JSON.stringify(d.files)
           setDiff(d)
           applyHiddenFiles(d.files)
           setLoadingDiff(false)
@@ -1442,8 +1443,18 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger }: { agent
     return root.contains(sel.getRangeAt(0).commonAncestorContainer)
   }, [])
 
+  // Signature of the last-applied diff content. A background refresh re-fetches the
+  // full diff every 20s (see internal/http/terminal.go); when nothing has actually
+  // changed we must NOT replace the diff state, or the re-render resets the user's
+  // text selection (and discards their per-file context expansions) for no reason.
+  const lastDiffSigRef = useRef<string | null>(null)
+
   // Apply a silently-fetched diff and re-apply the user's per-file context expansions.
+  // No-ops when the content is byte-identical to what's already shown.
   const applySilentDiff = useCallback((d: DiffResponse, contexts: Map<string, number>) => {
+    const sig = JSON.stringify(d.files)
+    if (sig === lastDiffSigRef.current) return
+    lastDiffSigRef.current = sig
     setDiff(d)
     applyHiddenFiles(d.files)
     for (const [path, ctx] of contexts) {
