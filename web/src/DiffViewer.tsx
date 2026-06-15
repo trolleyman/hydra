@@ -1424,6 +1424,7 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger }: { agent
       params.baseRef, params.headRef, params.ignoreWhitespace, params.includeUncommitted, undefined, 3)
       .then((d) => {
         if (!cancelled) {
+          lastDiffSigRef.current = JSON.stringify(d.files)
           setDiff(d)
           applyHiddenFiles(d.files)
           setLoadingDiff(false)
@@ -1447,6 +1448,53 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger }: { agent
   // Keep a ref to expandFileDiff so the silent refresh can call it without stale closures.
   const expandFileDiffRef = useRef(expandFileDiff)
   useEffect(() => { expandFileDiffRef.current = expandFileDiff }, [expandFileDiff])
+
+  // Root container, used to scope the active-selection check below to this diff.
+  const rootRef = useRef<HTMLDivElement>(null)
+
+  // True when the user currently has a non-collapsed text selection inside the diff.
+  // Applying a background refresh in this state would replace the DOM nodes the
+  // selection is anchored to and wipe it, so we defer the refresh until it clears.
+  const hasActiveSelection = useCallback(() => {
+    const sel = window.getSelection()
+    if (!sel || sel.isCollapsed || sel.rangeCount === 0) return false
+    const root = rootRef.current
+    if (!root) return false
+    return root.contains(sel.getRangeAt(0).commonAncestorContainer)
+  }, [])
+
+  // Signature of the last-applied diff content. A background refresh re-fetches the
+  // full diff every 20s (see internal/http/terminal.go); when nothing has actually
+  // changed we must NOT replace the diff state, or the re-render resets the user's
+  // text selection (and discards their per-file context expansions) for no reason.
+  const lastDiffSigRef = useRef<string | null>(null)
+
+  // Apply a silently-fetched diff and re-apply the user's per-file context expansions.
+  // No-ops when the content is byte-identical to what's already shown.
+  const applySilentDiff = useCallback((d: DiffResponse, contexts: Map<string, number>) => {
+    const sig = JSON.stringify(d.files)
+    if (sig === lastDiffSigRef.current) return
+    lastDiffSigRef.current = sig
+    setDiff(d)
+    applyHiddenFiles(d.files)
+    for (const [path, ctx] of contexts) {
+      if (ctx > 3) expandFileDiffRef.current(path, ctx).catch(() => { })
+    }
+  }, [applyHiddenFiles])
+
+  // A background refresh deferred because the user had an active selection. Flushed
+  // by the selectionchange listener once the selection clears. Latest fetch wins.
+  const pendingSilentRef = useRef<{ d: DiffResponse; contexts: Map<string, number> } | null>(null)
+  useEffect(() => {
+    const flush = () => {
+      const pending = pendingSilentRef.current
+      if (!pending || hasActiveSelection()) return
+      pendingSilentRef.current = null
+      applySilentDiff(pending.d, pending.contexts)
+    }
+    document.addEventListener('selectionchange', flush)
+    return () => document.removeEventListener('selectionchange', flush)
+  }, [hasActiveSelection, applySilentDiff])
 
   // Background (silent) refresh when triggered externally (e.g. git command detected via WS).
   const silentRefreshRef = useRef(false)
@@ -1473,11 +1521,13 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger }: { agent
     api.default.getAgentDiff(projectId ?? '', agent.id,
       params.baseRef, params.headRef, params.ignoreWhitespace, params.includeUncommitted, undefined, 3)
       .then((d) => {
-        setDiff(d)
-        applyHiddenFiles(d.files)
-        // Re-apply any per-file context expansions the user had set
-        for (const [path, ctx] of contextsSnap) {
-          if (ctx > 3) expandFileDiffRef.current(path, ctx).catch(() => { })
+        // Defer applying while the user is selecting text — otherwise the re-render
+        // wipes their selection. The selectionchange listener flushes it later.
+        if (hasActiveSelection()) {
+          pendingSilentRef.current = { d, contexts: contextsSnap }
+        } else {
+          pendingSilentRef.current = null
+          applySilentDiff(d, contextsSnap)
         }
       })
       .catch(() => { })
@@ -1642,7 +1692,7 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger }: { agent
   if (!agent.branch_name) return null
 
   return (
-    <div className="mt-4">
+    <div ref={rootRef} className="mt-4">
       {/* Section header */}
       <div className="flex items-center gap-3 mb-4 flex-wrap sticky -top-6 z-30 bg-gray-50 dark:bg-gray-900 py-2 border-b border-gray-200 dark:border-gray-800 shadow-sm -mx-1 px-1">
         <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Changes</h2>
