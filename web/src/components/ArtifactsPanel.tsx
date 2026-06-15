@@ -51,7 +51,7 @@ function ImageCell({ url, label }: { url?: string | null; label: string }) {
 function FileRow({ file }: { file: ArtifactFile }) {
   const ct = file.change_type as string
   return (
-    <div className="py-3 min-w-0 max-w-full">
+    <div className="p-3 min-w-0 max-w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40">
       <div className="flex items-center gap-2 mb-2">
         <span className="text-xs font-medium text-gray-700 dark:text-gray-300 truncate">{file.name}</span>
         <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${CHANGE_COLOR[ct] ?? ''}`}>{CHANGE_LABEL[ct] ?? ct}</span>
@@ -70,7 +70,7 @@ function FileRow({ file }: { file: ArtifactFile }) {
 // file's name + before + after stays a single, unbreakable block.
 function FileGrid({ files }: { files: ArtifactFile[] }) {
   return (
-    <div className="flex flex-wrap gap-x-6 gap-y-1">
+    <div className="flex flex-wrap gap-3 pt-1">
       {files.map((f) => <FileRow key={f.name} file={f} />)}
     </div>
   )
