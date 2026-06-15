@@ -147,3 +147,11 @@
 39. [ ] When sending a message to an agent, the status should probably update immediately to running. Sending a message in the terminal should somehow update the status in hydrad (but keep the agent as the single source of truth - so this ping just triggers an update that would have happened anyway just later). Maybe update the UI optimistically - waiting/finished to running immediately?
 
 40. [ ] When clicking on the branch out of date button, you sometimes get 'An agent session is currently running — merging now may collide with work in progress'. However, I think I've seen this even if the status has been waiting - can this be resolved?
+
+41. [ ] Repository view
+    - a) [ ] add line numbers to files
+    - b) [ ] add branch selector. prioritise current agent branches in the list
+    - c) [ ] collapse all folders by default
+    - d) [ ] have wrapping on by default (and make this work with the line numbers correctly)
+    - e) [ ] Add a little settings button to the right of the file size indicator for the file, similar to the diff viewer settings button. Give it a little pop up out thing same as the diff viewer settings. Ideally it should share the same code, but that may not be practical. It should just have one setting for now - wrapping on/off
+    - f) [ ] The URL should contain the current path, though to start with it can just be `project/X/repository`, rather than `project/X/repository/main/README.md`. However when clicking on something it should change. It should use the history stack - you should be able to go back etc.
