@@ -19,19 +19,20 @@ func Defaults() DefaultConfig {
 		// Writable: developer caches + agent state. The worktree itself is
 		// always writable and added separately.
 		WritablePaths: []string{
-			"~/.cache",                 // global tool cache
-			"~/.npm",                   // node package manager cache
-			"~/.cargo",                 // rust toolchain registry cache
-			"~/.gradle",                // gradle build cache
-			"~/.local/share/mise",      // mise version manager
-			"~/.local/share/JetBrains", // JetBrains toolbox
-			"~/.local/share/kotlin",    // kotlin compiler cache
-			"~/.local/state",           // XDG state (logs, history)
-			"~/.claude",                // claude config + conversation logs
-			"~/.claude.json",           // claude top-level config
-			"~/.gemini",                // gemini config + creds
-			"~/.copilot",               // copilot config + creds
-			"/tmp",                     // temp scratch
+			"~/.cache",                  // global tool cache
+			"~/.npm",                    // node package manager cache
+			"~/.cargo",                  // rust toolchain registry cache
+			"~/.gradle",                 // gradle build cache
+			"~/.local/share/mise",       // mise version manager
+			"~/.local/share/JetBrains",  // JetBrains toolbox
+			"~/.local/share/kotlin",     // kotlin compiler cache
+			"~/.local/state",            // XDG state (logs, history)
+			"~/.local/share/hydra/logs", // hydra's own log file (trigger-hook writes here)
+			"~/.claude",                 // claude config + conversation logs
+			"~/.claude.json",            // claude top-level config
+			"~/.gemini",                 // gemini config + creds
+			"~/.copilot",                // copilot config + creds
+			"/tmp",                      // temp scratch
 		},
 		// Masked: credential + secret directories/files hidden entirely.
 		MaskedPaths: []string{
