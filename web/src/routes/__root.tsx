@@ -6,7 +6,7 @@ import { useAgentStore } from '../stores/agentStore'
 import type { ProjectInfo, AgentResponse } from '../api'
 import { ApiError, ErrorResponse } from '../api'
 import { formatError } from '../api/format_error'
-import { Sun, Moon, ChevronDown, Folder, Plus, Settings, Check, X } from 'lucide-react'
+import { Sun, Moon, Monitor, ChevronDown, Folder, Plus, Settings, Check, X } from 'lucide-react'
 import { AgentSidebarItem } from '../components/AgentComponents'
 import { SpawnForm } from '../components/SpawnForm'
 
@@ -228,6 +228,36 @@ function ProjectDropdown({
 
 // ── Root Layout ────────────────────────────────────────────────────────────────
 
+// Theme preference: an explicit light/dark choice, or `system` to follow the OS
+// `prefers-color-scheme` and react to changes while the app is open.
+type ThemeMode = 'light' | 'dark' | 'system'
+const THEME_MODE_KEY = 'hydra-theme-mode'
+// Cycle order used by the header selector button.
+const NEXT_THEME_MODE: Record<ThemeMode, ThemeMode> = {
+  light: 'dark',
+  dark: 'system',
+  system: 'light',
+}
+const THEME_MODE_ICON: Record<ThemeMode, typeof Sun> = {
+  light: Sun,
+  dark: Moon,
+  system: Monitor,
+}
+const THEME_MODE_LABEL: Record<ThemeMode, string> = {
+  light: 'Light',
+  dark: 'Dark',
+  system: 'System',
+}
+
+function loadThemeMode(): ThemeMode {
+  const stored = localStorage.getItem(THEME_MODE_KEY)
+  if (stored === 'light' || stored === 'dark' || stored === 'system') return stored
+  // Migrate the legacy boolean preference (`hydra-dark-mode`) if present.
+  const legacy = localStorage.getItem('hydra-dark-mode')
+  if (legacy !== null) return legacy === 'true' ? 'dark' : 'light'
+  return 'system'
+}
+
 function RootLayout() {
   const spawnedAt = useRef<number | null>(null)
   // Guards the one-time redirect from the bare root path to the selected
@@ -236,11 +266,7 @@ function RootLayout() {
   const [, setTick] = useState(0)
   const [development, setDevelopment] = useState(false)
   const [restarting, setRestarting] = useState(false)
-  const [dark, setDark] = useState<boolean>(() => {
-    const stored = localStorage.getItem('hydra-dark-mode')
-    if (stored !== null) return stored === 'true'
-    return window.matchMedia('(prefers-color-scheme: dark)').matches
-  })
+  const [themeMode, setThemeMode] = useState<ThemeMode>(loadThemeMode)
 
   const { projects, selectedProjectId, setProjects, setSelectedProjectId, setSystemStatus } = useProjectStore()
   const { agents, setAgents, addAgent } = useAgentStore()
@@ -284,13 +310,20 @@ function RootLayout() {
   }, [])
 
   useEffect(() => {
-    localStorage.setItem('hydra-dark-mode', String(dark))
-    if (dark) {
-      document.documentElement.classList.add('dark')
-    } else {
-      document.documentElement.classList.remove('dark')
+    localStorage.setItem(THEME_MODE_KEY, themeMode)
+    localStorage.removeItem('hydra-dark-mode') // drop the migrated legacy key
+    const mql = window.matchMedia('(prefers-color-scheme: dark)')
+    const apply = () => {
+      const isDark = themeMode === 'dark' || (themeMode === 'system' && mql.matches)
+      document.documentElement.classList.toggle('dark', isDark)
     }
-  }, [dark])
+    apply()
+    // In `system` mode, track OS preference changes live.
+    if (themeMode === 'system') {
+      mql.addEventListener('change', apply)
+      return () => mql.removeEventListener('change', apply)
+    }
+  }, [themeMode])
 
   // Poll agents for selected project
   useEffect(() => {
@@ -560,12 +593,15 @@ function RootLayout() {
               </button>
             </Tooltip>
           )}
-          <Tooltip content={dark ? 'Switch to light mode' : 'Switch to dark mode'}>
+          <Tooltip content={`Theme: ${THEME_MODE_LABEL[themeMode]} (switch to ${THEME_MODE_LABEL[NEXT_THEME_MODE[themeMode]]})`}>
             <button
-              onClick={() => setDark((d) => !d)}
+              onClick={() => setThemeMode((m) => NEXT_THEME_MODE[m])}
               className="w-7 h-7 flex items-center justify-center rounded-md cursor-pointer text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
             >
-              {dark ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+              {(() => {
+                const Icon = THEME_MODE_ICON[themeMode]
+                return <Icon className="w-5 h-5" />
+              })()}
             </button>
           </Tooltip>
           <Tooltip content="Settings">
