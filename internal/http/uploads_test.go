@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/trolleyman/hydra/internal/paths"
 	"github.com/trolleyman/hydra/internal/projects"
@@ -126,6 +127,51 @@ func TestHandleUploadRejectsGet(t *testing.T) {
 
 	if rr.Code != http.StatusMethodNotAllowed {
 		t.Errorf("expected 405 for GET, got %d", rr.Code)
+	}
+}
+
+func TestPruneUploads(t *testing.T) {
+	root := t.TempDir()
+	dir := paths.GetUploadsDirFromProjectRoot(root)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	write := func(name string, age time.Duration) string {
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		mt := time.Now().Add(-age)
+		if err := os.Chtimes(p, mt, mt); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+
+	old := write("old.png", 40*24*time.Hour)
+	fresh := write("fresh.png", 1*time.Hour)
+	gitignore := write(".gitignore", 40*24*time.Hour) // must be preserved
+
+	if err := PruneUploads(root, DefaultUploadMaxAge); err != nil {
+		t.Fatalf("prune: %v", err)
+	}
+
+	if _, err := os.Stat(old); !os.IsNotExist(err) {
+		t.Errorf("expected old upload removed, got err=%v", err)
+	}
+	if _, err := os.Stat(fresh); err != nil {
+		t.Errorf("expected fresh upload kept, got err=%v", err)
+	}
+	if _, err := os.Stat(gitignore); err != nil {
+		t.Errorf("expected .gitignore kept, got err=%v", err)
+	}
+}
+
+func TestPruneUploadsMissingDir(t *testing.T) {
+	// Nothing ever uploaded: a missing dir is not an error.
+	if err := PruneUploads(t.TempDir(), DefaultUploadMaxAge); err != nil {
+		t.Errorf("expected nil for missing dir, got %v", err)
 	}
 }
 

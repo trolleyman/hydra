@@ -92,6 +92,13 @@ func GetArtifactsDirFromProjectRoot(projectRoot string) string {
 	return filepath.Join(GetHydraDirFromProjectRoot(projectRoot), "artifacts")
 }
 
+// GetUploadsDirFromProjectRoot returns the (gitignored) directory holding files
+// pasted/attached to prompts. It sits under .hydra so it's readable read-only
+// inside agent sandboxes at the same absolute path.
+func GetUploadsDirFromProjectRoot(projectRoot string) string {
+	return filepath.Join(GetHydraDirFromProjectRoot(projectRoot), "uploads")
+}
+
 func GetDBPathFromProjectRoot(projectRoot string) string {
 	return filepath.Join(GetStateDirFromProjectRoot(projectRoot), "db.sqlite3")
 }

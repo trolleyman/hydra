@@ -93,7 +93,7 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 
 	go heads.RunLivenessReconciler(ctx, reg, store, projectRoot)
 	go heads.RunJSONStatusPoller(ctx, store, projectRoot)
-	go runArtifactPruner(ctx, artifactMgr)
+	go runStoragePruner(ctx, artifactMgr, projectRoot)
 
 	mux := buildMux(server)
 	return &daemonRuntime{
@@ -150,12 +150,16 @@ func buildMux(server *httppkg.Server) *http.ServeMux {
 	return mux
 }
 
-// runArtifactPruner periodically evicts stale/oversized diff artifacts. The
-// first cycle runs immediately; thereafter once an hour until ctx is done.
-func runArtifactPruner(ctx context.Context, mgr *artifacts.Manager) {
+// runStoragePruner periodically evicts stale/oversized diff artifacts and
+// aged-out prompt uploads. The first cycle runs immediately; thereafter once an
+// hour until ctx is done.
+func runStoragePruner(ctx context.Context, mgr *artifacts.Manager, projectRoot string) {
 	prune := func() {
 		if err := mgr.PruneStale(artifacts.DefaultMaxAge, artifacts.DefaultMaxBytes); err != nil {
 			log.Printf("warn: prune artifacts: %v", err)
+		}
+		if err := httppkg.PruneUploads(projectRoot, httppkg.DefaultUploadMaxAge); err != nil {
+			log.Printf("warn: prune uploads: %v", err)
 		}
 	}
 	prune()

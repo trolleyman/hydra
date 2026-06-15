@@ -10,12 +10,19 @@ import (
 	"strings"
 	"time"
 
+	"braces.dev/errtrace"
 	"github.com/trolleyman/hydra/internal/paths"
 )
 
 // maxUploadBytes caps a single pasted/attached file. Generous enough for
 // screenshots and small assets, bounded so a paste can't fill the disk.
 const maxUploadBytes = 25 * 1024 * 1024
+
+// DefaultUploadMaxAge is how long a pasted/attached file is retained before the
+// background pruner removes it. Uploads are referenced only by the absolute
+// path embedded in a prompt at submit time, so once an agent has consumed them
+// (or the user has moved on) they can safely age out.
+const DefaultUploadMaxAge = 30 * 24 * time.Hour
 
 // uploadResponse is returned to the browser after a successful upload. Path is
 // the absolute host path of the stored file. Crucially, that same path is valid
@@ -61,7 +68,7 @@ func (s *Server) HandleUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	dir := filepath.Join(paths.GetHydraDirFromProjectRoot(projectRoot), "uploads")
+	dir := paths.GetUploadsDirFromProjectRoot(projectRoot)
 	// CreateGitignoreAllInDir makes the dir and drops a "*" .gitignore so pasted
 	// files never pollute the repo's status.
 	if err := paths.CreateGitignoreAllInDir(dir); err != nil {
@@ -109,6 +116,35 @@ func uniqueUploadName(original string) string {
 		name += "." + ext
 	}
 	return name
+}
+
+// PruneUploads removes files in the project's uploads dir last modified longer
+// ago than maxAge. The .gitignore is preserved. It's best-effort: failures on
+// individual entries are skipped so one bad file can't stall the sweep. A
+// missing dir (nothing ever uploaded) is not an error.
+func PruneUploads(projectRoot string, maxAge time.Duration) error {
+	dir := paths.GetUploadsDirFromProjectRoot(projectRoot)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return errtrace.Wrap(err)
+	}
+	cutoff := time.Now().Add(-maxAge)
+	for _, e := range entries {
+		if e.IsDir() || e.Name() == ".gitignore" {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		if info.ModTime().Before(cutoff) {
+			_ = os.Remove(filepath.Join(dir, e.Name()))
+		}
+	}
+	return nil
 }
 
 // sanitizeUploadComponent maps anything outside [A-Za-z0-9-_.] to '-', trims
