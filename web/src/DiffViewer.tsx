@@ -576,9 +576,9 @@ function CustomTooltip({ content, children, side = 'bottom', className = 'w-full
     if (ref.current) {
       const rect = ref.current.getBoundingClientRect()
       if (side === 'right') {
-        setPos({ top: rect.top, left: rect.right + 8 })
+        setPos({ top: rect.top, left: rect.right })
       } else if (side === 'left') {
-        setPos({ top: rect.top, left: rect.left - 8 })
+        setPos({ top: rect.top, left: rect.left })
       } else if (side === 'top') {
         setPos({ top: rect.top - 8, left: rect.left })
       } else {
