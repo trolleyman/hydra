@@ -145,3 +145,5 @@
 38. [ ] Add an indicator for artifacts - how many are there to generate, how many have already been generated? Update as they're being generated. WebSocket updates?
 
 39. [ ] When sending a message to an agent, the status should probably update immediately to running. Sending a message in the terminal should somehow update the status in hydrad (but keep the agent as the single source of truth - so this ping just triggers an update that would have happened anyway just later). Maybe update the UI optimistically - waiting/finished to running immediately?
+
+40. [ ] When clicking on the branch out of date button, you sometimes get 'An agent session is currently running — merging now may collide with work in progress'. However, I think I've seen this even if the status has been waiting - can this be resolved?
