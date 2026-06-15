@@ -98,7 +98,6 @@ func runSimulationServer() error {
 	log.Printf("Starting Hydra in SIMULATION mode")
 
 	server := &httppkg.SimulationServer{
-		StartTime:   time.Now(),
 		Development: true,
 	}
 

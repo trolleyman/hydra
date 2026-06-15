@@ -271,7 +271,7 @@ export function SpawnForm({
           <h2 className="text-2xl font-bold bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 bg-clip-text text-transparent animate-gradient">
             Spawn an Agent
           </h2>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Describe what you need — an AI agent will get it done.</p>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Describe what you need — and consider it done.</p>
         </div>
 
         <form onSubmit={handleSubmit}>

@@ -13,7 +13,6 @@ import (
 
 // SimulationServer implements api.ServerInterface with mock data.
 type SimulationServer struct {
-	StartTime   time.Time
 	Development bool
 }
 
@@ -25,7 +24,14 @@ func (s *SimulationServer) CheckHealth(w http.ResponseWriter, r *http.Request) {
 func (s *SimulationServer) GetStatus(w http.ResponseWriter, r *http.Request) {
 	status := "OK"
 	v := "0.1.0-sim"
-	uptime := float32(time.Since(s.StartTime).Seconds())
+	// Pin uptime to a fixed value rather than time.Since(StartTime). The diff
+	// viewer renders both sides of a comparison in separate server boots and
+	// hashes the resulting screenshots, so a live uptime makes the header's
+	// "Spawned X ago" label differ between otherwise-identical renders (e.g.
+	// "just now" vs "7 seconds ago"). 2h sits comfortably mid-bucket so the
+	// sub-second jitter between status fetch and capture never crosses a
+	// unit boundary.
+	uptime := float32(2 * time.Hour / time.Second)
 	projectRoot := "/simulated/project"
 	defaultProjectID := "sim-project"
 	development := s.Development
