@@ -26,6 +26,23 @@ const checkerStyle: React.CSSProperties = {
   backgroundPosition: '0 0, 0 8px, 8px -8px, -8px 0px',
 }
 
+// The four ways to compare a before/after image pair. Persisted in the diff
+// viewer's settings; see DiffViewer's SettingsPopup.
+export type ImageDiffMode = 'side-by-side' | 'ab' | 'slider' | 'onion'
+
+export const IMAGE_DIFF_MODES: { value: ImageDiffMode; label: string }[] = [
+  { value: 'side-by-side', label: 'Side by side' },
+  { value: 'ab', label: 'A/B switch' },
+  { value: 'slider', label: 'Before/after slider' },
+  { value: 'onion', label: 'Onion skin' },
+]
+
+const IMG_CLASS = 'max-w-full max-h-[480px] rounded-md border border-gray-200 dark:border-gray-700 object-contain'
+// Shared by the overlay modes: the base image sizes the box, the overlay is
+// stretched to fill that same box so the two align pixel-for-pixel.
+const OVERLAY_CLASS = 'absolute inset-0 w-full h-full object-contain rounded-md border border-gray-200 dark:border-gray-700'
+const TAG_CLASS = 'absolute top-1 z-10 text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-black/55 text-white pointer-events-none'
+
 function ImageCell({ url, label }: { url?: string | null; label: string }) {
   return (
     <div className="min-w-0">
@@ -36,7 +53,7 @@ function ImageCell({ url, label }: { url?: string | null; label: string }) {
             src={url}
             loading="lazy"
             style={checkerStyle}
-            className="max-w-full max-h-[480px] rounded-md border border-gray-200 dark:border-gray-700 object-contain"
+            className={IMG_CLASS}
           />
         </a>
       ) : (
@@ -48,7 +65,118 @@ function ImageCell({ url, label }: { url?: string | null; label: string }) {
   )
 }
 
-function FileRow({ file }: { file: ArtifactFile }) {
+// A/B switch: both images stay mounted and stacked; clicking (or the Before/After
+// buttons) flips which one is shown for an instant, flicker-free hard switch.
+function ABSwitch({ left, right }: { left: string; right: string }) {
+  const [showAfter, setShowAfter] = useState(true)
+  const btn = (active: boolean) =>
+    `text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded cursor-pointer transition-colors ${
+      active ? 'bg-blue-500 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600'
+    }`
+  return (
+    <div className="min-w-0">
+      <div className="flex items-center gap-1 mb-1">
+        <button onClick={() => setShowAfter(false)} className={btn(!showAfter)}>Before</button>
+        <button onClick={() => setShowAfter(true)} className={btn(showAfter)}>After</button>
+      </div>
+      <div className="relative inline-block cursor-pointer" onClick={() => setShowAfter((s) => !s)}>
+        <img src={right} style={{ ...checkerStyle, visibility: showAfter ? 'visible' : 'hidden' }} className={`${IMG_CLASS} block`} draggable={false} />
+        <img src={left} style={{ ...checkerStyle, visibility: showAfter ? 'hidden' : 'visible' }} className={OVERLAY_CLASS} draggable={false} />
+      </div>
+    </div>
+  )
+}
+
+// Before/after slider: "after" is the base layer; "before" sits on top, clipped to
+// the region left of the draggable handle, giving a sharp (hard-cut) boundary.
+function SliderCompare({ left, right }: { left: string; right: string }) {
+  const [pos, setPos] = useState(50)
+  const [dragging, setDragging] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  const update = useCallback((clientX: number) => {
+    const el = ref.current
+    if (!el) return
+    const r = el.getBoundingClientRect()
+    if (r.width === 0) return
+    setPos(Math.max(0, Math.min(100, ((clientX - r.left) / r.width) * 100)))
+  }, [])
+
+  useEffect(() => {
+    if (!dragging) return
+    const onMove = (e: PointerEvent) => update(e.clientX)
+    const onUp = () => setDragging(false)
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    return () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+    }
+  }, [dragging, update])
+
+  return (
+    <div
+      ref={ref}
+      className="relative inline-block select-none touch-none cursor-ew-resize"
+      onPointerDown={(e) => { setDragging(true); update(e.clientX) }}
+    >
+      <span className={`${TAG_CLASS} left-1`}>Before</span>
+      <span className={`${TAG_CLASS} right-1`}>After</span>
+      <img src={right} style={checkerStyle} className={`${IMG_CLASS} block`} draggable={false} />
+      <img
+        src={left}
+        style={{ ...checkerStyle, clipPath: `inset(0 ${100 - pos}% 0 0)` }}
+        className={OVERLAY_CLASS}
+        draggable={false}
+      />
+      <div className="absolute inset-y-0 w-0.5 bg-white shadow-[0_0_0_1px_rgba(0,0,0,0.4)] pointer-events-none" style={{ left: `${pos}%` }}>
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-5 h-5 rounded-full bg-white shadow ring-1 ring-black/30" />
+      </div>
+    </div>
+  )
+}
+
+// Onion skin: "before" is the base layer with "after" blended over it; the range
+// slider controls the opacity of the "after" image (0 = before, 1 = after).
+function OnionCompare({ left, right }: { left: string; right: string }) {
+  const [opacity, setOpacity] = useState(50)
+  return (
+    <div className="min-w-0">
+      <div className="relative inline-block">
+        <img src={left} style={checkerStyle} className={`${IMG_CLASS} block`} draggable={false} />
+        <img src={right} style={{ opacity: opacity / 100 }} className={OVERLAY_CLASS} draggable={false} />
+      </div>
+      <div className="flex items-center gap-2 mt-1">
+        <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">Before</span>
+        <input
+          type="range" min={0} max={100} value={opacity}
+          onChange={(e) => setOpacity(Number(e.target.value))}
+          className="flex-1 accent-blue-500 cursor-pointer"
+        />
+        <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">After</span>
+      </div>
+    </div>
+  )
+}
+
+// Render a before/after image pair in the selected comparison mode. The overlay
+// modes need both images, so when one side is missing (added/removed file) we fall
+// back to the plain side-by-side layout regardless of the requested mode.
+function ImageDiffView({ left, right, mode }: { left?: string | null; right?: string | null; mode: ImageDiffMode }) {
+  if (mode === 'side-by-side' || !left || !right) {
+    return (
+      <div className="flex gap-3">
+        <ImageCell url={left} label="Before" />
+        <ImageCell url={right} label="After" />
+      </div>
+    )
+  }
+  if (mode === 'ab') return <ABSwitch left={left} right={right} />
+  if (mode === 'slider') return <SliderCompare left={left} right={right} />
+  return <OnionCompare left={left} right={right} />
+}
+
+function FileRow({ file, mode }: { file: ArtifactFile; mode: ImageDiffMode }) {
   const ct = file.change_type as string
   return (
     <div className="p-3 min-w-0 max-w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40">
@@ -56,10 +184,7 @@ function FileRow({ file }: { file: ArtifactFile }) {
         <span className="text-xs font-medium text-gray-700 dark:text-gray-300 truncate">{file.name}</span>
         <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${CHANGE_COLOR[ct] ?? ''}`}>{CHANGE_LABEL[ct] ?? ct}</span>
       </div>
-      <div className="flex gap-3">
-        <ImageCell url={file.left_url} label="Before" />
-        <ImageCell url={file.right_url} label="After" />
-      </div>
+      <ImageDiffView left={file.left_url} right={file.right_url} mode={mode} />
     </div>
   )
 }
@@ -68,15 +193,15 @@ function FileRow({ file }: { file: ArtifactFile }) {
 // artifact (e.g. a phone screenshot) only claims the width it needs and several
 // can share a row, while a wide desktop screenshot wraps onto its own line. Each
 // file's name + before + after stays a single, unbreakable block.
-function FileGrid({ files }: { files: ArtifactFile[] }) {
+function FileGrid({ files, mode }: { files: ArtifactFile[]; mode: ImageDiffMode }) {
   return (
     <div className="flex flex-wrap gap-3 pt-1">
-      {files.map((f) => <FileRow key={f.name} file={f} />)}
+      {files.map((f) => <FileRow key={f.name} file={f} mode={mode} />)}
     </div>
   )
 }
 
-function ArtifactSetCard({ set }: { set: ArtifactSet }) {
+function ArtifactSetCard({ set, mode }: { set: ArtifactSet; mode: ImageDiffMode }) {
   const [collapsed, setCollapsed] = useState(false)
   const [showUnchanged, setShowUnchanged] = useState(false)
 
@@ -125,7 +250,7 @@ function ArtifactSetCard({ set }: { set: ArtifactSet }) {
         </button>
         {expandable && showUnchanged && (
           <div className="px-3 pb-2">
-            <FileGrid files={set.files} />
+            <FileGrid files={set.files} mode={mode} />
           </div>
         )}
       </div>
@@ -162,7 +287,7 @@ function ArtifactSetCard({ set }: { set: ArtifactSet }) {
           )}
           {status === 'ready' && (
             <>
-              <FileGrid files={changedFiles} />
+              <FileGrid files={changedFiles} mode={mode} />
               {unchangedFiles.length > 0 && (
                 <div className="pt-2">
                   <button
@@ -171,7 +296,7 @@ function ArtifactSetCard({ set }: { set: ArtifactSet }) {
                   >
                     {showUnchanged ? 'Hide' : 'Show'} {unchangedFiles.length} unchanged
                   </button>
-                  {showUnchanged && <FileGrid files={unchangedFiles} />}
+                  {showUnchanged && <FileGrid files={unchangedFiles} mode={mode} />}
                 </div>
               )}
             </>
@@ -182,13 +307,14 @@ function ArtifactSetCard({ set }: { set: ArtifactSet }) {
   )
 }
 
-export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUncommitted, refreshKey }: {
+export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUncommitted, refreshKey, imageDiffMode }: {
   projectId: string | null
   agentId: string
   baseRef?: string
   headRef?: string
   includeUncommitted?: boolean
   refreshKey: number
+  imageDiffMode: ImageDiffMode
 }) {
   const [sets, setSets] = useState<ArtifactSet[] | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -244,7 +370,7 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
         </InfoTooltip>
       </div>
       <div className="flex flex-col gap-2">
-        {sets.map((s) => <ArtifactSetCard key={s.name} set={s} />)}
+        {sets.map((s) => <ArtifactSetCard key={s.name} set={s} mode={imageDiffMode} />)}
       </div>
     </div>
   )

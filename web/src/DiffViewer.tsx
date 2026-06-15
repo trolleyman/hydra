@@ -10,7 +10,7 @@ import {
   MoveRight, MessageSquarePlus, FolderSync,
 } from 'lucide-react'
 import { Tooltip } from './components/Tooltip'
-import { ArtifactsPanel } from './components/ArtifactsPanel'
+import { ArtifactsPanel, IMAGE_DIFF_MODES, type ImageDiffMode } from './components/ArtifactsPanel'
 import { useDialogStore } from './stores/dialogStore'
 
 // ── Syntax highlighting helpers ───────────────────────────────────────────────
@@ -1199,11 +1199,13 @@ function TreeNodeView({ node, depth, collapsedFolders, toggleFolder, onFileClick
 // ── Settings popup ────────────────────────────────────────────────────────────
 
 function SettingsPopup({ fileView, onFileViewChange, sideBySide, onSideBySideChange,
-  ignoreWhitespace, onIgnoreWhitespaceChange, singleFile, onSingleFileChange }: {
+  ignoreWhitespace, onIgnoreWhitespaceChange, singleFile, onSingleFileChange,
+  imageDiffMode, onImageDiffModeChange }: {
     fileView: FileView; onFileViewChange: (v: FileView) => void
     sideBySide: boolean; onSideBySideChange: (v: boolean) => void
     ignoreWhitespace: boolean; onIgnoreWhitespaceChange: (v: boolean) => void
     singleFile: boolean; onSingleFileChange: (v: boolean) => void
+    imageDiffMode: ImageDiffMode; onImageDiffModeChange: (v: ImageDiffMode) => void
   }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -1262,6 +1264,16 @@ function SettingsPopup({ fileView, onFileViewChange, sideBySide, onSideBySideCha
               </label>
             ))}
           </div>
+          <p className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mt-3 mb-2">Image diff</p>
+          <div className="flex flex-col gap-0.5">
+            {IMAGE_DIFF_MODES.map((opt) => (
+              <label key={opt.value} className="flex items-center gap-2 py-0.5 cursor-pointer">
+                <input type="radio" name="hydra-image-diff-mode" checked={imageDiffMode === opt.value}
+                  onChange={() => onImageDiffModeChange(opt.value)} className="w-3 h-3 accent-blue-500" />
+                <span className="text-xs text-gray-700 dark:text-gray-300">{opt.label}</span>
+              </label>
+            ))}
+          </div>
         </div>
       )}
     </div>
@@ -1302,6 +1314,13 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger }: { agent
     } catch { }
     return 220
   })
+  const [imageDiffMode, setImageDiffMode] = useState<ImageDiffMode>(() => {
+    try {
+      const stored = localStorage.getItem('hydra-diff-image-mode')
+      if (stored === 'side-by-side' || stored === 'ab' || stored === 'slider' || stored === 'onion') return stored
+    } catch { }
+    return 'side-by-side'
+  })
 
   const [singleFileIdx, setSingleFileIdx] = useState(0)
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set())
@@ -1321,6 +1340,7 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger }: { agent
   useEffect(() => { try { localStorage.setItem('hydra-diff-single-file', String(singleFile)) } catch { } }, [singleFile])
   useEffect(() => { try { localStorage.setItem('hydra-diff-file-view', fileView) } catch { } }, [fileView])
   useEffect(() => { try { localStorage.setItem('hydra-diff-sidebar-width', String(sidebarWidth)) } catch { } }, [sidebarWidth])
+  useEffect(() => { try { localStorage.setItem('hydra-diff-image-mode', imageDiffMode) } catch { } }, [imageDiffMode])
 
   const toggleFolder = useCallback((path: string) => {
     setCollapsedFolders((prev) => {
@@ -1745,6 +1765,7 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger }: { agent
             sideBySide={sideBySide} onSideBySideChange={setSideBySide}
             ignoreWhitespace={ignoreWhitespace} onIgnoreWhitespaceChange={setIgnoreWhitespace}
             singleFile={singleFile} onSingleFileChange={handleSingleFileChange}
+            imageDiffMode={imageDiffMode} onImageDiffModeChange={setImageDiffMode}
           />
         </div>
       </div>
@@ -1765,6 +1786,7 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger }: { agent
           headRef={artifactParams.headRef}
           includeUncommitted={artifactParams.includeUncommitted}
           refreshKey={refreshKey}
+          imageDiffMode={imageDiffMode}
         />
       )}
 
