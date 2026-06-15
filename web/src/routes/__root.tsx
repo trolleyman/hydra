@@ -230,6 +230,9 @@ function ProjectDropdown({
 
 function RootLayout() {
   const spawnedAt = useRef<number | null>(null)
+  // Guards the one-time redirect from the bare root path to the selected
+  // project (see effect below).
+  const didAutoNavigate = useRef(false)
   const [, setTick] = useState(0)
   const [development, setDevelopment] = useState(false)
   const [restarting, setRestarting] = useState(false)
@@ -352,8 +355,9 @@ function RootLayout() {
               newId = ps[0].id
             }
             if (newId != null) {
+              // Just record the selection; the redirect effect below moves the
+              // UI onto the project's page if we're sitting on the root route.
               setSelectedProjectId(newId)
-              // Do NOT auto-navigate — just set the selected project
             }
           }
         } catch {
@@ -372,6 +376,25 @@ function RootLayout() {
       if (ticker !== null) clearInterval(ticker)
     }
   }, [setProjects, setSelectedProjectId])
+
+  // When the app lands on the bare root path ("/") but a project is already
+  // selected — restored from localStorage, or auto-selected above — the index
+  // route just shows "Select a project to get started" even though the dropdown
+  // shows a project. Redirect onto that project's page once, on initial load.
+  // Gated by a ref so a deliberate deselect (which navigates back to "/") is not
+  // undone by the 10s status poll re-selecting a project.
+  useEffect(() => {
+    if (didAutoNavigate.current) return
+    // Only redirect from the exact root path, never from /settings or a project route.
+    if (window.location.pathname !== '/') {
+      didAutoNavigate.current = true
+      return
+    }
+    if (selectedProjectId != null && projects.some((p) => p.id === selectedProjectId)) {
+      didAutoNavigate.current = true
+      navigate({ to: '/project/$projectId', params: { projectId: selectedProjectId } })
+    }
+  }, [selectedProjectId, projects, navigate])
 
   async function handleRestart() {
     setRestarting(true)
