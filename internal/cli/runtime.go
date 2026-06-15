@@ -60,8 +60,8 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 	}
 	log.Printf("Default project: %s (%s)", defaultProject.Name, defaultProject.ID)
 
-	artifactMgr := artifacts.NewManager(projectRoot)
-	artifactMgr.CleanCheckouts()
+	// One artifacts Manager per registered project, created lazily on first use.
+	artifactReg := artifacts.NewRegistry()
 
 	server := &httppkg.Server{
 		WorktreesDir:    worktreesDir,
@@ -72,7 +72,7 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 		DB:              store,
 		StartTime:       time.Now(),
 		Development:     os.Getenv("HYDRA_DEV_RESTART") == "1",
-		Artifacts:       artifactMgr,
+		Artifacts:       artifactReg,
 	}
 
 	if ok, reason := sandbox.Available(); !ok {
@@ -84,16 +84,32 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 		log.Printf("warn: prune deleted agents: %v", err)
 	}
 
-	// Resume heads that were running before a restart (best-effort).
-	resumeHeadsOnBoot(reg, store, projectRoot)
+	// The pollers and boot-time resume cover every registered project, not just
+	// the project the daemon was launched in: a single daemon/DB serves all
+	// projects added via the web UI, and their agents' status must stay fresh
+	// too. roots is re-evaluated each cycle so runtime add/remove is picked up.
+	roots := func() []string { return projectRoots(pm) }
+
+	// Resume heads that were running before a restart (best-effort), and clear
+	// out any ephemeral artifact checkouts left behind by a crash mid-generation.
+	// Only touch projects that already have an artifacts dir, so we don't create
+	// empty ones in projects that never generated artifacts.
+	for _, root := range roots() {
+		resumeHeadsOnBoot(reg, store, root)
+		if _, err := os.Stat(paths.GetArtifactsDirFromProjectRoot(root)); err == nil {
+			artifactReg.Manager(root).CleanCheckouts()
+		}
+	}
 
 	// Immediate first poller cycles before accepting requests.
-	heads.ReconcileLivenessOnce(reg, store, projectRoot)
-	heads.RunJSONStatusPollerOnce(store, projectRoot)
+	for _, root := range roots() {
+		heads.ReconcileLivenessOnce(reg, store, root)
+		heads.RunJSONStatusPollerOnce(store, root)
+	}
 
-	go heads.RunLivenessReconciler(ctx, reg, store, projectRoot)
-	go heads.RunJSONStatusPoller(ctx, store, projectRoot)
-	go runStoragePruner(ctx, artifactMgr, projectRoot)
+	go heads.RunLivenessReconciler(ctx, reg, store, roots)
+	go heads.RunJSONStatusPoller(ctx, store, roots)
+	go runStoragePruner(ctx, artifactReg, roots)
 
 	mux := buildMux(server)
 	return &daemonRuntime{
@@ -151,15 +167,24 @@ func buildMux(server *httppkg.Server) *http.ServeMux {
 }
 
 // runStoragePruner periodically evicts stale/oversized diff artifacts and
-// aged-out prompt uploads. The first cycle runs immediately; thereafter once an
-// hour until ctx is done.
-func runStoragePruner(ctx context.Context, mgr *artifacts.Manager, projectRoot string) {
+// aged-out prompt uploads across every registered project (roots is
+// re-evaluated each cycle). The first cycle runs immediately; thereafter once
+// an hour until ctx is done.
+func runStoragePruner(ctx context.Context, artifactReg *artifacts.Registry, roots func() []string) {
 	prune := func() {
-		if err := mgr.PruneStale(artifacts.DefaultMaxAge, artifacts.DefaultMaxBytes); err != nil {
-			log.Printf("warn: prune artifacts: %v", err)
+		// Artifacts: prune only projects with a live Manager (lazily created on
+		// first artifact request). Reusing the live managers keeps in-flight
+		// generation tracking intact and skips projects that never generated any.
+		for root, mgr := range artifactReg.Snapshot() {
+			if err := mgr.PruneStale(artifacts.DefaultMaxAge, artifacts.DefaultMaxBytes); err != nil {
+				log.Printf("warn: prune artifacts (%s): %v", root, err)
+			}
 		}
-		if err := httppkg.PruneUploads(projectRoot, httppkg.DefaultUploadMaxAge); err != nil {
-			log.Printf("warn: prune uploads: %v", err)
+		// Uploads are a plain per-project directory, so prune every project.
+		for _, root := range roots() {
+			if err := httppkg.PruneUploads(root, httppkg.DefaultUploadMaxAge); err != nil {
+				log.Printf("warn: prune uploads (%s): %v", root, err)
+			}
 		}
 	}
 	prune()
@@ -173,6 +198,22 @@ func runStoragePruner(ctx context.Context, mgr *artifacts.Manager, projectRoot s
 			prune()
 		}
 	}
+}
+
+// projectRoots returns the normalized root path of every registered project.
+// Paths are normalized to match how agents are stored (project_path) and looked
+// up (resolveProjectRoot), so the pollers query the right rows.
+func projectRoots(pm *projects.Manager) []string {
+	ps := pm.ListProjects()
+	out := make([]string, 0, len(ps))
+	for _, p := range ps {
+		root := p.Path
+		if norm, err := paths.NormalizePath(p.Path); err == nil {
+			root = norm
+		}
+		out = append(out, root)
+	}
+	return out
 }
 
 // resumeHeadsOnBoot restarts agents that the DB marks as running but have no

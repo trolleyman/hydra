@@ -16,7 +16,10 @@ import (
 // RunLivenessReconciler periodically syncs session-registry liveness into the
 // DB. The registry's OnExit callback is the primary, low-latency signal; this
 // loop is a backstop that also reconciles rows whose session is gone.
-func RunLivenessReconciler(ctx context.Context, reg *session.Registry, store *db.Store, projectRoot string) {
+//
+// roots returns the set of project roots to reconcile on each tick; it is
+// re-evaluated every cycle so projects added/removed at runtime are picked up.
+func RunLivenessReconciler(ctx context.Context, reg *session.Registry, store *db.Store, roots func() []string) {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 	for {
@@ -24,7 +27,9 @@ func RunLivenessReconciler(ctx context.Context, reg *session.Registry, store *db
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			ReconcileLivenessOnce(reg, store, projectRoot)
+			for _, root := range roots() {
+				ReconcileLivenessOnce(reg, store, root)
+			}
 		}
 	}
 }
@@ -60,8 +65,11 @@ func ReconcileLivenessOnce(reg *session.Registry, store *db.Store, projectRoot s
 	}
 }
 
-// RunJSONStatusPoller runs a polling loop that syncs JSON status files into the DB every 1 second.
-func RunJSONStatusPoller(ctx context.Context, store *db.Store, projectRoot string) {
+// RunJSONStatusPoller runs a polling loop that syncs JSON status files into the
+// DB every 1 second. roots returns the set of project roots to poll on each
+// tick; it is re-evaluated every cycle so projects added/removed at runtime are
+// picked up.
+func RunJSONStatusPoller(ctx context.Context, store *db.Store, roots func() []string) {
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 	for {
@@ -69,7 +77,9 @@ func RunJSONStatusPoller(ctx context.Context, store *db.Store, projectRoot strin
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			RunJSONStatusPollerOnce(store, projectRoot)
+			for _, root := range roots() {
+				RunJSONStatusPollerOnce(store, root)
+			}
 		}
 	}
 }

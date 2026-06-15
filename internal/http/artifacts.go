@@ -36,11 +36,14 @@ func (s *Server) GetAgentArtifacts(ctx context.Context, request api.GetAgentArti
 		}, nil
 	}
 
-	mgr := s.Artifacts
 	empty := api.ArtifactsResponse{Scripts: []api.ArtifactSet{}}
+	if s.Artifacts == nil {
+		return api.GetAgentArtifacts200JSONResponse(empty), nil
+	}
+	mgr := s.Artifacts.Manager(projectRoot)
 
 	liveCfg, err := config.Load(projectRoot)
-	if err != nil || mgr == nil || head.Branch == nil {
+	if err != nil || head.Branch == nil {
 		return api.GetAgentArtifacts200JSONResponse(empty), nil
 	}
 
@@ -261,14 +264,10 @@ func (s *Server) HandleArtifactBlob(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	// The daemon owns a single project; only serve blobs for it.
-	if projectRoot != s.ProjectRoot {
-		http.NotFound(w, r)
-		return
-	}
 
 	q := r.URL.Query()
-	path, contentType, err := s.Artifacts.BlobPath(q.Get("script"), q.Get("key"), q.Get("file"))
+	mgr := s.Artifacts.Manager(projectRoot)
+	path, contentType, err := mgr.BlobPath(q.Get("script"), q.Get("key"), q.Get("file"))
 	if err != nil {
 		http.Error(w, "invalid artifact request", http.StatusBadRequest)
 		return

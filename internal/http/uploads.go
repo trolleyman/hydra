@@ -52,11 +52,6 @@ func (s *Server) HandleUpload(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	// The daemon owns a single project; only accept uploads for it.
-	if projectRoot != s.ProjectRoot {
-		http.NotFound(w, r)
-		return
-	}
 
 	// Bound the request body before touching the multipart reader so an oversize
 	// upload is rejected rather than buffered.
