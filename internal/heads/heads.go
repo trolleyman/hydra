@@ -299,6 +299,7 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 
 	env := append(agentEnv(home, username, gitAuthorName, gitAuthorEmail), seed.Env...)
 	env = append(env, sandbox.MiseTrustEnv(projectRoot, worktreePath)...)
+	env = append(env, headContextEnv(opts.ID, opts.AgentType, projectRoot, worktreePath, branchName, baseBranch)...)
 
 	sess, err := reg.Start(session.StartOptions{
 		ID:   opts.ID,
@@ -421,6 +422,9 @@ func StartShellSession(reg *session.Registry, projectRoot string, head Head, row
 	home := currentUser.HomeDir
 	env := agentEnv(home, currentUser.Username, readGitConfigVal(projectRoot, "user.name"), readGitConfigVal(projectRoot, "user.email"))
 	env = append(env, sandbox.MiseTrustEnv(projectRoot, worktreePath)...)
+	// The shell shares the head's worktree; report it as a bash session since
+	// the pre-spawn config it runs is the bash agent's.
+	env = append(env, headContextEnv(head.ID, sandbox.AgentTypeBash, projectRoot, worktreePath, derefStr(head.Branch), head.BaseBranch)...)
 
 	var sb sandbox.Options
 	if sandboxed {
@@ -494,6 +498,7 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 
 	env := append(agentEnv(home, currentUser.Username, readGitConfigVal(projectRoot, "user.name"), readGitConfigVal(projectRoot, "user.email")), seed.Env...)
 	env = append(env, sandbox.MiseTrustEnv(projectRoot, worktreePath)...)
+	env = append(env, headContextEnv(head.ID, head.AgentType, projectRoot, worktreePath, derefStr(head.Branch), head.BaseBranch)...)
 
 	sess, err := reg.Start(session.StartOptions{
 		ID:   head.ID,

@@ -267,6 +267,15 @@ export function ConfigForm({
             <InfoTooltip title="Pre-Spawn Script">
               <p>A shell script run <strong>inside the sandbox</strong> via <code className="text-blue-300">/bin/sh</code> immediately before each agent starts, in its worktree with the same environment and confinement.</p>
               <p className="mt-1.5">Useful for per-spawn setup such as <code className="text-blue-300">mise trust</code>. The agent launches after the script falls through; an explicit <code className="text-blue-300">exit 1</code> aborts the launch.</p>
+              <p className="mt-1.5">These environment variables describe the head and are available to the script:</p>
+              <ul className="mt-1 space-y-0.5 list-none">
+                <li><code className="text-blue-300">HYDRA_HEAD_ID</code> — the head's ID</li>
+                <li><code className="text-blue-300">HYDRA_AGENT_TYPE</code> — <code className="text-blue-300">claude</code>, <code className="text-blue-300">gemini</code>, <code className="text-blue-300">copilot</code> or <code className="text-blue-300">bash</code></li>
+                <li><code className="text-blue-300">HYDRA_WORKTREE</code> — worktree path (the working directory)</li>
+                <li><code className="text-blue-300">HYDRA_PROJECT_ROOT</code> — the main repository root</li>
+                <li><code className="text-blue-300">HYDRA_BRANCH</code> — the head's git branch</li>
+                <li><code className="text-blue-300">HYDRA_BASE_BRANCH</code> — the branch it targets</li>
+              </ul>
             </InfoTooltip>
           </div>
           {inheritedSandbox?.pre_spawn_script && (

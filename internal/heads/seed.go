@@ -269,6 +269,41 @@ func readHostFile(p string) []byte {
 var envKeysHydraOwns = map[string]bool{
 	"GEMINI_SYSTEM_MD":       true,
 	"GEMINI_WRITE_SYSTEM_MD": true,
+	// HYDRA_* head-context variables (see headContextEnv): set per-head, so
+	// never inherit a stale value from the daemon's own environment.
+	"HYDRA_HEAD_ID":      true,
+	"HYDRA_AGENT_TYPE":   true,
+	"HYDRA_PROJECT_ROOT": true,
+	"HYDRA_WORKTREE":     true,
+	"HYDRA_BRANCH":       true,
+	"HYDRA_BASE_BRANCH":  true,
+}
+
+// headContextEnv returns the HYDRA_* environment variables describing the head
+// being launched. They are exposed to the pre-spawn script (and, since they
+// share the same environment, the agent/shell process) so per-spawn setup can
+// branch on the head's identity, agent type and git layout — e.g. seeding only
+// for a given agent, or copying files into the worktree.
+//
+// Keep this set, envKeysHydraOwns above, and the Pre-Spawn Script tooltip in
+// web/src/components/SettingsComponents.tsx in sync.
+// derefStr returns the pointed-to string, or "" when the pointer is nil.
+func derefStr(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
+func headContextEnv(id string, agentType sandbox.AgentType, projectRoot, worktreePath, branch, baseBranch string) []string {
+	return []string{
+		"HYDRA_HEAD_ID=" + id,
+		"HYDRA_AGENT_TYPE=" + string(agentType),
+		"HYDRA_PROJECT_ROOT=" + projectRoot,
+		"HYDRA_WORKTREE=" + worktreePath,
+		"HYDRA_BRANCH=" + branch,
+		"HYDRA_BASE_BRANCH=" + baseBranch,
+	}
 }
 
 // agentEnv builds the environment for the sandboxed agent process.
