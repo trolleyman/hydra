@@ -1574,6 +1574,20 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger }: { agent
     return fileRefCallbacksRef.current.get(path)!
   }, [])
 
+  // Stable per-path "show this file" callbacks. An inline `() => handleShowFile(path)`
+  // would be a fresh function identity on every render, breaking FileDiff's memo() —
+  // every DiffViewer re-render would then re-render every FileDiff, re-apply the
+  // highlighted lines' dangerouslySetInnerHTML, and recreate the text nodes an
+  // in-progress sub-line selection is anchored to, collapsing it (issue #34). Caching
+  // by path (like getFileRef) keeps the prop reference-stable so memo() holds.
+  const showCallbacksRef = useRef<Map<string, () => void>>(new Map())
+  const getShowCallback = useCallback((path: string) => {
+    if (!showCallbacksRef.current.has(path)) {
+      showCallbacksRef.current.set(path, () => handleShowFile(path))
+    }
+    return showCallbacksRef.current.get(path)!
+  }, [handleShowFile])
+
   const scrollToFile = useCallback((path: string) => {
     fileRefs.current.get(path)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }, [])
@@ -1853,7 +1867,7 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger }: { agent
                   onComment={handleComment}
                   onExpand={expandFileDiff}
                   isHidden={hiddenFiles.has(diff.files[singleFileIdx].path)}
-                  onShow={() => handleShowFile(diff.files[singleFileIdx].path)}
+                  onShow={getShowCallback(diff.files[singleFileIdx].path)}
                   fileRef={getFileRef(diff.files[singleFileIdx].path)}
                   currentContext={fileContexts.get(diff.files[singleFileIdx].path) ?? 3}
                 />
@@ -1866,7 +1880,7 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger }: { agent
                   onComment={handleComment}
                   onExpand={expandFileDiff}
                   isHidden={hiddenFiles.has(f.path)}
-                  onShow={() => handleShowFile(f.path)}
+                  onShow={getShowCallback(f.path)}
                   fileRef={getFileRef(f.path)}
                   currentContext={fileContexts.get(f.path) ?? 3}
                 />
