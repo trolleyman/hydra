@@ -1,6 +1,10 @@
 package artifacts
 
 import (
+	"bytes"
+	"image"
+	"image/color"
+	"image/png"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -203,5 +207,84 @@ func TestCompare(t *testing.T) {
 	}
 	if AnyChanged(Compare(left, left)) {
 		t.Error("expected AnyChanged false for identical lists")
+	}
+}
+
+func encodePNG(t *testing.T, img image.Image, level png.CompressionLevel) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	enc := png.Encoder{CompressionLevel: level}
+	if err := enc.Encode(&buf, img); err != nil {
+		t.Fatalf("encode png: %v", err)
+	}
+	return buf.Bytes()
+}
+
+func writeArtifact(t *testing.T, m *Manager, script, key, name string, data []byte) {
+	t.Helper()
+	dir := m.entryDir(script, key)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, name), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestManagerComparePixelEqual checks that a file whose bytes differ but whose
+// decoded pixels are identical is reported as unchanged, while genuinely
+// different pixels (and non-decodable files) stay modified.
+func TestManagerComparePixelEqual(t *testing.T) {
+	m := NewManager(t.TempDir())
+	const script = "shot"
+
+	img := image.NewRGBA(image.Rect(0, 0, 8, 8))
+	for y := range 8 {
+		for x := range 8 {
+			img.Set(x, y, color.RGBA{uint8(x * 32), uint8(y * 32), 64, 255})
+		}
+	}
+	// Same pixels, different bytes (different compression level).
+	defaultPNG := encodePNG(t, img, png.DefaultCompression)
+	fastPNG := encodePNG(t, img, png.BestSpeed)
+	if bytes.Equal(defaultPNG, fastPNG) {
+		t.Fatal("expected differing PNG bytes for the two compression levels")
+	}
+
+	// A genuinely different image.
+	other := image.NewRGBA(image.Rect(0, 0, 8, 8))
+	otherPNG := encodePNG(t, other, png.DefaultCompression)
+
+	writeArtifact(t, m, script, "cleft", "same.png", defaultPNG)
+	writeArtifact(t, m, script, "cleft", "diff.png", defaultPNG)
+	writeArtifact(t, m, script, "cleft", "note.svg", []byte("<svg>a</svg>"))
+	writeArtifact(t, m, script, "cright", "same.png", fastPNG)
+	writeArtifact(t, m, script, "cright", "diff.png", otherPNG)
+	writeArtifact(t, m, script, "cright", "note.svg", []byte("<svg>b</svg>"))
+
+	leftFiles, err := scanOutputs(m.entryDir(script, "cleft"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rightFiles, err := scanOutputs(m.entryDir(script, "cright"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	left := Meta{Script: script, Key: "cleft", Files: leftFiles}
+	right := Meta{Script: script, Key: "cright", Files: rightFiles}
+
+	got := map[string]ChangeType{}
+	for _, d := range m.Compare(left, right) {
+		got[d.Name] = d.Change
+	}
+	want := map[string]ChangeType{
+		"same.png": ChangeUnchanged, // byte-different, pixel-identical
+		"diff.png": ChangeModified,  // pixels differ
+		"note.svg": ChangeModified,  // not decodable, byte hash differs
+	}
+	for name, w := range want {
+		if got[name] != w {
+			t.Errorf("%s: got %s want %s", name, got[name], w)
+		}
 	}
 }

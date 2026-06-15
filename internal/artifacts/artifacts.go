@@ -33,6 +33,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"image"
+	_ "image/gif"  // register GIF decoder for pixel comparison
+	_ "image/jpeg" // register JPEG decoder for pixel comparison
+	_ "image/png"  // register PNG decoder for pixel comparison
 	"io"
 	"io/fs"
 	"os"
@@ -168,6 +172,99 @@ func AnyChanged(deltas []FileDelta) bool {
 	for _, d := range deltas {
 		if d.Change != ChangeUnchanged {
 			return true
+		}
+	}
+	return false
+}
+
+// Compare classifies artifact files across two cache entries like the package
+// [Compare], but refines the byte-hash verdict with a pixel-level check: a file
+// flagged ChangeModified is downgraded to ChangeUnchanged when both sides decode
+// to images with identical dimensions and pixels. This keeps cosmetic
+// re-encodings (different compression level, added metadata/EXIF, timestamp
+// chunks) from surfacing as visual changes while still catching any real pixel
+// difference.
+//
+// Only formats the standard library can decode (PNG, JPEG, GIF) get the pixel
+// check; other types — and any file that fails to decode — keep the byte-hash
+// verdict.
+func (m *Manager) Compare(left, right Meta) []FileDelta {
+	deltas := Compare(left.Files, right.Files)
+	for i := range deltas {
+		d := &deltas[i]
+		if d.Change != ChangeModified {
+			continue
+		}
+		lp := filepath.Join(m.entryDir(left.Script, left.Key), filepath.FromSlash(d.Name))
+		rp := filepath.Join(m.entryDir(right.Script, right.Key), filepath.FromSlash(d.Name))
+		if equal, err := imagesPixelEqual(lp, rp); err == nil && equal {
+			d.Change = ChangeUnchanged
+		}
+	}
+	return deltas
+}
+
+// imagesPixelEqual reports whether two image files decode to the same dimensions
+// and pixels. A decode failure (unsupported format, corrupt file) returns an
+// error so the caller can fall back to the byte-hash verdict.
+func imagesPixelEqual(leftPath, rightPath string) (bool, error) {
+	la, err := decodeImage(leftPath)
+	if err != nil {
+		return false, errtrace.Wrap(err)
+	}
+	ra, err := decodeImage(rightPath)
+	if err != nil {
+		return false, errtrace.Wrap(err)
+	}
+	lb, rb := la.Bounds(), ra.Bounds()
+	if lb.Dx() != rb.Dx() || lb.Dy() != rb.Dy() {
+		return false, nil
+	}
+	// Fast path: same concrete type with byte-identical pixel buffers.
+	if equalRawPix(la, ra) {
+		return true, nil
+	}
+	// General path: compare pixel-by-pixel in RGBA space, aligning the two
+	// (possibly differently-originated) coordinate systems.
+	ox, oy := rb.Min.X-lb.Min.X, rb.Min.Y-lb.Min.Y
+	for y := lb.Min.Y; y < lb.Max.Y; y++ {
+		for x := lb.Min.X; x < lb.Max.X; x++ {
+			lr, lg, lbl, laa := la.At(x, y).RGBA()
+			rr, rg, rbl, raa := ra.At(x+ox, y+oy).RGBA()
+			if lr != rr || lg != rg || lbl != rbl || laa != raa {
+				return false, nil
+			}
+		}
+	}
+	return true, nil
+}
+
+func decodeImage(path string) (image.Image, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	defer f.Close()
+	img, _, err := image.Decode(f)
+	return img, errtrace.Wrap(err)
+}
+
+// equalRawPix is a fast path that reports true only when two images share the
+// same concrete pixel type and byte-identical pixel buffers. A false result
+// means "unknown" — the caller falls back to the general per-pixel comparison.
+func equalRawPix(a, b image.Image) bool {
+	switch av := a.(type) {
+	case *image.RGBA:
+		if bv, ok := b.(*image.RGBA); ok {
+			return av.Stride == bv.Stride && av.Rect == bv.Rect && bytes.Equal(av.Pix, bv.Pix)
+		}
+	case *image.NRGBA:
+		if bv, ok := b.(*image.NRGBA); ok {
+			return av.Stride == bv.Stride && av.Rect == bv.Rect && bytes.Equal(av.Pix, bv.Pix)
+		}
+	case *image.Gray:
+		if bv, ok := b.(*image.Gray); ok {
+			return av.Stride == bv.Stride && av.Rect == bv.Rect && bytes.Equal(av.Pix, bv.Pix)
 		}
 	}
 	return false

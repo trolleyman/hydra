@@ -100,7 +100,7 @@ func (s *Server) buildArtifactSet(projectID string, spec config.ArtifactScript, 
 		set.Status = api.Ready
 	}
 
-	deltas := artifacts.Compare(leftMeta.Files, rightMeta.Files)
+	deltas := mgr.Compare(leftMeta, rightMeta)
 	set.Changed = artifacts.AnyChanged(deltas)
 	for _, d := range deltas {
 		f := api.ArtifactFile{Name: d.Name, ChangeType: api.ArtifactFileChangeType(d.Change)}
