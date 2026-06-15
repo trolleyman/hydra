@@ -12,6 +12,7 @@ import (
 	"github.com/trolleyman/hydra/internal/api"
 	"github.com/trolleyman/hydra/internal/artifacts"
 	"github.com/trolleyman/hydra/internal/config"
+	"github.com/trolleyman/hydra/internal/git"
 	"github.com/trolleyman/hydra/internal/heads"
 )
 
@@ -42,10 +43,18 @@ func (s *Server) GetAgentArtifacts(ctx context.Context, request api.GetAgentArti
 		return api.GetAgentArtifacts200JSONResponse(empty), nil
 	}
 
-	// Left version: a committed ref (defaults to the base branch).
+	// Left version: a committed ref. When no explicit base ref is requested we
+	// baseline against the *merge-base* (fork point) of the base branch and the
+	// head branch — NOT the base branch tip. This mirrors the triple-dot diff used
+	// for code (see GetAgentDiff) so artifacts reflect only the branch's own
+	// changes. Otherwise commits landed on the base branch after the fork would
+	// regenerate the "before" artifact from newer state, producing spurious
+	// before/after differences (e.g. a screenshot's clock) unrelated to the work.
 	leftRef := head.BaseBranch
 	if request.Params.BaseRef != nil && *request.Params.BaseRef != "" {
 		leftRef = *request.Params.BaseRef
+	} else if mb, err := git.GetMergeBase(projectRoot, head.BaseBranch, *head.Branch); err == nil && mb != "" {
+		leftRef = mb
 	}
 	left := artifacts.Version{Ref: leftRef}
 

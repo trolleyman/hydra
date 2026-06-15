@@ -32,6 +32,10 @@ export type DiffResponse = {
      */
     uncommitted_summary?: UncommittedSummary;
     /**
+     * Number of commits on the base branch not yet merged into the agent branch (how far behind the base the branch is)
+     */
+    behind_count?: number;
+    /**
      * Details of the base commit (if a specific commit SHA was given)
      */
     base_commit?: CommitInfo | null;
