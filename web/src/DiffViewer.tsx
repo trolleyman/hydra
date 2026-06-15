@@ -1363,7 +1363,11 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger }: { agent
   useEffect(() => {
     if (!agent.branch_name) return
     api.default.getAgentCommits(projectId ?? '', agent.id)
-      .then((c) => { setCommits(c); commitsRef.current = c }).catch(() => setCommits([]))
+      .then((c) => {
+        setCommits(c)
+        commitsRef.current = c
+        lastCommitsSigRef.current = JSON.stringify(c.map((x) => x.sha))
+      }).catch(() => setCommits([]))
   }, [agent.id, agent.branch_name, projectId, refreshKey])
 
   // expandFileDiff: fetches a single file's diff with a given context (for context expansion only).
@@ -1485,6 +1489,11 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger }: { agent
   // text selection (and discards their per-file context expansions) for no reason.
   const lastDiffSigRef = useRef<string | null>(null)
 
+  // Signature of the last-applied commits list. A silent refresh must not call
+  // setCommits with an identical list: that re-renders DiffViewer for nothing, and a
+  // re-render is enough to disturb an in-progress text selection (issue #34).
+  const lastCommitsSigRef = useRef<string | null>(null)
+
   // Apply a silently-fetched diff and re-apply the user's per-file context expansions.
   // No-ops when the content is byte-identical to what's already shown.
   const applySilentDiff = useCallback((d: DiffResponse, contexts: Map<string, number>) => {
@@ -1529,9 +1538,18 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger }: { agent
     // Snapshot current per-file contexts before async work
     const contextsSnap = new Map(fileContextsRef.current)
 
-    // Refresh commits list silently
+    // Refresh commits list silently — but only push it into state when it actually
+    // changed, so an idle/no-op refresh never re-renders (and never disturbs a
+    // text selection the user has in the diff).
     api.default.getAgentCommits(projectId ?? '', agent.id)
-      .then((c) => { setCommits(c); commitsRef.current = c }).catch(() => { })
+      .then((c) => {
+        commitsRef.current = c
+        const sig = JSON.stringify(c.map((x) => x.sha))
+        if (sig !== lastCommitsSigRef.current) {
+          lastCommitsSigRef.current = sig
+          setCommits(c)
+        }
+      }).catch(() => { })
 
     // Fetch full diff silently — preserves open comments since we diff against previous state.
     api.default.getAgentDiff(projectId ?? '', agent.id,
@@ -1575,6 +1593,20 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger }: { agent
     }
     return fileRefCallbacksRef.current.get(path)!
   }, [])
+
+  // Stable per-path "show this file" callbacks. An inline `() => handleShowFile(path)`
+  // would be a fresh function identity on every render, breaking FileDiff's memo() —
+  // every DiffViewer re-render would then re-render every FileDiff, re-apply the
+  // highlighted lines' dangerouslySetInnerHTML, and recreate the text nodes an
+  // in-progress sub-line selection is anchored to, collapsing it (issue #34). Caching
+  // by path (like getFileRef) keeps the prop reference-stable so memo() holds.
+  const showCallbacksRef = useRef<Map<string, () => void>>(new Map())
+  const getShowCallback = useCallback((path: string) => {
+    if (!showCallbacksRef.current.has(path)) {
+      showCallbacksRef.current.set(path, () => handleShowFile(path))
+    }
+    return showCallbacksRef.current.get(path)!
+  }, [handleShowFile])
 
   const scrollToFile = useCallback((path: string) => {
     fileRefs.current.get(path)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
@@ -1857,7 +1889,7 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger }: { agent
                   onComment={handleComment}
                   onExpand={expandFileDiff}
                   isHidden={hiddenFiles.has(diff.files[singleFileIdx].path)}
-                  onShow={() => handleShowFile(diff.files[singleFileIdx].path)}
+                  onShow={getShowCallback(diff.files[singleFileIdx].path)}
                   fileRef={getFileRef(diff.files[singleFileIdx].path)}
                   currentContext={fileContexts.get(diff.files[singleFileIdx].path) ?? 3}
                 />
@@ -1870,7 +1902,7 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger }: { agent
                   onComment={handleComment}
                   onExpand={expandFileDiff}
                   isHidden={hiddenFiles.has(f.path)}
-                  onShow={() => handleShowFile(f.path)}
+                  onShow={getShowCallback(f.path)}
                   fileRef={getFileRef(f.path)}
                   currentContext={fileContexts.get(f.path) ?? 3}
                 />

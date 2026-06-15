@@ -1,5 +1,5 @@
 import { createRootRoute, Link, Outlet, useNavigate, useParams } from '@tanstack/react-router'
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback, type WheelEvent } from 'react'
 import { api } from '../stores/apiClient'
 import { useProjectStore } from '../stores/projectStore'
 import { useAgentStore } from '../stores/agentStore'
@@ -37,6 +37,24 @@ function formatSpawnedAgo(ms: number): string {
 const SIDEBAR_MIN = 160
 const SIDEBAR_MAX = 600
 const SIDEBAR_DEFAULT = 224
+
+// When the agents sidebar can't consume a wheel event (no scrollbar, or already
+// at the top/bottom edge), forward the scroll to the main content area (e.g. the
+// diff view) so the wheel isn't swallowed by the sidebar's dead space.
+function forwardSidebarWheelToMain(e: WheelEvent<HTMLDivElement>) {
+  const list = e.currentTarget
+  const atTop = list.scrollTop <= 0
+  const atBottom = Math.ceil(list.scrollTop + list.clientHeight) >= list.scrollHeight
+  const canConsume =
+    list.scrollHeight > list.clientHeight &&
+    ((e.deltaY < 0 && !atTop) || (e.deltaY > 0 && !atBottom))
+  if (canConsume) return
+
+  const main = document.querySelector<HTMLElement>('[data-main-scroll]')
+  if (main && main.scrollHeight > main.clientHeight) {
+    main.scrollTop += e.deltaY
+  }
+}
 
 // ── Project Dropdown ───────────────────────────────────────────────────────────
 
@@ -660,7 +678,7 @@ function RootLayout() {
             <span className="ml-2 text-xs text-gray-400 dark:text-gray-500">({filteredAgents.length})</span>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-2 space-y-0.5">
+          <div className="flex-1 overflow-y-auto p-2 space-y-0.5" onWheel={forwardSidebarWheelToMain}>
             {filteredAgents.length === 0 ? (
               <div className="px-3 py-4 text-xs text-gray-400 dark:text-gray-500 text-center">
                 {!currentProjectId
