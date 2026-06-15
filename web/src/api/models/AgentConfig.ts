@@ -2,12 +2,26 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
+import type { SandboxConfig } from './SandboxConfig';
 export type AgentConfig = {
-    dockerfile?: string | null;
-    dockerfile_contents?: string | null;
-    dockerignore_contents?: string | null;
+    sandbox?: SandboxConfig | null;
     shared_mounts?: Array<string> | null;
-    context?: string | null;
     pre_prompt?: string | null;
+    /**
+     * @deprecated
+     */
+    dockerfile?: string | null;
+    /**
+     * @deprecated
+     */
+    dockerfile_contents?: string | null;
+    /**
+     * @deprecated
+     */
+    dockerignore_contents?: string | null;
+    /**
+     * @deprecated
+     */
+    context?: string | null;
 };
 

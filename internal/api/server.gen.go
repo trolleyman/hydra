@@ -111,12 +111,19 @@ type AddProjectRequest struct {
 
 // AgentConfig defines model for AgentConfig.
 type AgentConfig struct {
-	Context              *string   `json:"context"`
-	Dockerfile           *string   `json:"dockerfile"`
-	DockerfileContents   *string   `json:"dockerfile_contents"`
-	DockerignoreContents *string   `json:"dockerignore_contents"`
-	PrePrompt            *string   `json:"pre_prompt"`
-	SharedMounts         *[]string `json:"shared_mounts"`
+	// Deprecated: this property has been marked as deprecated upstream, but no `x-deprecated-reason` was set
+	Context *string `json:"context"`
+	// Deprecated: this property has been marked as deprecated upstream, but no `x-deprecated-reason` was set
+	Dockerfile *string `json:"dockerfile"`
+	// Deprecated: this property has been marked as deprecated upstream, but no `x-deprecated-reason` was set
+	DockerfileContents *string `json:"dockerfile_contents"`
+	// Deprecated: this property has been marked as deprecated upstream, but no `x-deprecated-reason` was set
+	DockerignoreContents *string `json:"dockerignore_contents"`
+	PrePrompt            *string `json:"pre_prompt"`
+
+	// Sandbox User-editable sandbox policy, additive on top of baked-in defaults
+	Sandbox      *SandboxConfig `json:"sandbox,omitempty"`
+	SharedMounts *[]string      `json:"shared_mounts"`
 }
 
 // AgentInputRequest defines model for AgentInputRequest.
@@ -320,6 +327,15 @@ type MergeConflictError struct {
 // MergeConflictErrorError defines model for MergeConflictError.Error.
 type MergeConflictErrorError string
 
+// NetworkConfig defines model for NetworkConfig.
+type NetworkConfig struct {
+	// AllowedHosts Reserved for a future proxy-based host allow-list (not yet enforced)
+	AllowedHosts *[]string `json:"allowed_hosts"`
+
+	// Enabled Whether outbound network access is allowed (default true)
+	Enabled *bool `json:"enabled"`
+}
+
 // ProjectInfo defines model for ProjectInfo.
 type ProjectInfo struct {
 	// Id Unique project identifier (derived from folder name)
@@ -330,6 +346,14 @@ type ProjectInfo struct {
 
 	// Path Absolute filesystem path to the project root
 	Path string `json:"path"`
+}
+
+// SandboxConfig User-editable sandbox policy, additive on top of baked-in defaults
+type SandboxConfig struct {
+	MaskedPaths   *[]string      `json:"masked_paths"`
+	Network       *NetworkConfig `json:"network,omitempty"`
+	RestoreRo     *[]string      `json:"restore_ro"`
+	WritablePaths *[]string      `json:"writable_paths"`
 }
 
 // SpawnAgentRequest defines model for SpawnAgentRequest.

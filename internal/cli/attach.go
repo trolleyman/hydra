@@ -1,14 +1,11 @@
 package cli
 
 import (
-	"context"
+	"fmt"
 
 	"braces.dev/errtrace"
-	"github.com/cockroachdb/errors"
 	"github.com/spf13/cobra"
-	"github.com/trolleyman/hydra/internal/db"
-	"github.com/trolleyman/hydra/internal/docker"
-	"github.com/trolleyman/hydra/internal/heads"
+	"github.com/trolleyman/hydra/internal/daemon"
 	"github.com/trolleyman/hydra/internal/paths"
 )
 
@@ -28,25 +25,17 @@ var attachCmd = &cobra.Command{
 			return errtrace.Wrap(err)
 		}
 
-		cli, err := docker.NewClient()
-		if err != nil {
-			return errtrace.Wrap(err)
-		}
-		defer cli.Close()
-
-		store, err := db.Open(projectRoot)
+		ctx := cmd.Context()
+		client, err := daemon.Connect(ctx, projectRoot)
 		if err != nil {
 			return errtrace.Wrap(err)
 		}
 
-		head, err := heads.GetHeadByID(context.Background(), cli, store, projectRoot, id)
+		conn, err := client.DialTerminal(id, false)
 		if err != nil {
 			return errtrace.Wrap(err)
 		}
-		if head == nil {
-			return errtrace.Wrap(errors.Errorf("no head found with ID: %s", id))
-		}
-
-		return errtrace.Wrap(docker.AttachAgent(cmd.Context(), cli, head.ContainerID))
+		fmt.Printf("Attached to agent %s. Press Ctrl+C to detach (agent keeps running).\n", id)
+		return errtrace.Wrap(attachWS(conn))
 	},
 }

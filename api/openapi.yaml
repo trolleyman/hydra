@@ -1058,29 +1058,75 @@ components:
           type: string
           description: Text to send to the agent's stdin (a newline is appended automatically)
 
+    NetworkConfig:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+          nullable: true
+          description: Whether outbound network access is allowed (default true)
+        allowed_hosts:
+          type: array
+          items:
+            type: string
+          nullable: true
+          description: Reserved for a future proxy-based host allow-list (not yet enforced)
+
+    SandboxConfig:
+      type: object
+      description: User-editable sandbox policy, additive on top of baked-in defaults
+      properties:
+        writable_paths:
+          type: array
+          items:
+            type: string
+          nullable: true
+        masked_paths:
+          type: array
+          items:
+            type: string
+          nullable: true
+        restore_ro:
+          type: array
+          items:
+            type: string
+          nullable: true
+        network:
+          $ref: '#/components/schemas/NetworkConfig'
+          nullable: true
+
     AgentConfig:
       type: object
       properties:
-        dockerfile:
-          type: string
-          nullable: true
-        dockerfile_contents:
-          type: string
-          nullable: true
-        dockerignore_contents:
-          type: string
+        sandbox:
+          $ref: '#/components/schemas/SandboxConfig'
           nullable: true
         shared_mounts:
           type: array
           items:
             type: string
           nullable: true
-        context:
-          type: string
-          nullable: true
         pre_prompt:
           type: string
           nullable: true
+        # Deprecated Docker fields, retained for API compatibility; ignored by
+        # the sandbox backend.
+        dockerfile:
+          type: string
+          nullable: true
+          deprecated: true
+        dockerfile_contents:
+          type: string
+          nullable: true
+          deprecated: true
+        dockerignore_contents:
+          type: string
+          nullable: true
+          deprecated: true
+        context:
+          type: string
+          nullable: true
+          deprecated: true
 
     ConfigResponse:
       type: object

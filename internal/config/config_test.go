@@ -10,12 +10,10 @@ func ptr(s string) *string { return &s }
 
 func TestMarshalConfig_MultiLineStrings(t *testing.T) {
 	prePrompt := "You are an agent.\n- Do stuff\n- More stuff\n"
-	dockerfileContents := "FROM ubuntu\nRUN apt-get update\n"
 
 	cfg := Config{
 		Defaults: AgentConfig{
-			PrePrompt:          ptr(prePrompt),
-			DockerfileContents: ptr(dockerfileContents),
+			PrePrompt: ptr(prePrompt),
 		},
 	}
 
@@ -49,16 +47,20 @@ func TestMarshalConfig_NoIndentation(t *testing.T) {
 
 func TestSaveLoadRoundTrip(t *testing.T) {
 	prePrompt := "You are an agent.\n- Do stuff\n- More stuff\n"
-	dockerfileContents := "FROM ubuntu\nRUN apt-get update\nRUN echo \"hello\"\n"
-	context := "agent context"
+	enabled := false
 
 	cfg := Config{
 		Defaults: AgentConfig{
-			PrePrompt:          ptr(prePrompt),
-			DockerfileContents: ptr(dockerfileContents),
+			PrePrompt: ptr(prePrompt),
+			Sandbox: &SandboxConfig{
+				WritablePaths: []string{"~/.cache", "/tmp"},
+				MaskedPaths:   []string{"~/.ssh"},
+				RestoreRO:     []string{"~/.config/git"},
+				Network:       &NetworkConfig{Enabled: &enabled, AllowedHosts: []string{"example.com"}},
+			},
 		},
 		Agents: map[string]AgentConfig{
-			"claude": {PrePrompt: ptr(prePrompt), Context: ptr(context)},
+			"claude": {PrePrompt: ptr(prePrompt), SharedMounts: []string{"~/shared"}},
 		},
 	}
 
@@ -78,8 +80,14 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	if *loaded.Defaults.PrePrompt != prePrompt {
 		t.Errorf("PrePrompt mismatch\ngot:  %q\nwant: %q", *loaded.Defaults.PrePrompt, prePrompt)
 	}
-	if *loaded.Defaults.DockerfileContents != dockerfileContents {
-		t.Errorf("DockerfileContents mismatch\ngot:  %q\nwant: %q", *loaded.Defaults.DockerfileContents, dockerfileContents)
+	if loaded.Defaults.Sandbox == nil {
+		t.Fatal("sandbox config not round-tripped")
+	}
+	if len(loaded.Defaults.Sandbox.MaskedPaths) != 1 || loaded.Defaults.Sandbox.MaskedPaths[0] != "~/.ssh" {
+		t.Errorf("MaskedPaths mismatch: %v", loaded.Defaults.Sandbox.MaskedPaths)
+	}
+	if loaded.Defaults.Sandbox.Network == nil || loaded.Defaults.Sandbox.Network.Enabled == nil || *loaded.Defaults.Sandbox.Network.Enabled != false {
+		t.Errorf("network policy not round-tripped: %+v", loaded.Defaults.Sandbox.Network)
 	}
 	if *loaded.Agents["claude"].PrePrompt != prePrompt {
 		t.Errorf("claude.PrePrompt mismatch")

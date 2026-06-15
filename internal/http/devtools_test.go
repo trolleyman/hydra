@@ -12,8 +12,8 @@ import (
 
 func TestGetDevToolsConfig(t *testing.T) {
 	s := &Server{
-		Development: true,
-		ProjectRoot: "/tmp/test-project",
+		Development:    true,
+		ProjectRoot:    "/tmp/test-project",
 		DefaultProject: projects.ProjectInfo{},
 	}
 

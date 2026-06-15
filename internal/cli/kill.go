@@ -1,11 +1,11 @@
 package cli
 
 import (
+	"fmt"
+
 	"braces.dev/errtrace"
 	"github.com/spf13/cobra"
-	"github.com/trolleyman/hydra/internal/db"
-	"github.com/trolleyman/hydra/internal/docker"
-	"github.com/trolleyman/hydra/internal/heads"
+	"github.com/trolleyman/hydra/internal/daemon"
 	"github.com/trolleyman/hydra/internal/paths"
 )
 
@@ -25,31 +25,16 @@ var killCmd = &cobra.Command{
 			return errtrace.Wrap(err)
 		}
 
-		cli, err := docker.NewClient()
-		if err != nil {
-			return errtrace.Wrap(err)
-		}
-		defer cli.Close()
-
-		store, err := db.Open(projectRoot)
+		ctx := cmd.Context()
+		client, err := daemon.Connect(ctx, projectRoot)
 		if err != nil {
 			return errtrace.Wrap(err)
 		}
 
-		head, err := heads.GetHeadByID(cmd.Context(), cli, store, projectRoot, id)
-		if err != nil {
+		if err := client.KillAgent(ctx, id); err != nil {
 			return errtrace.Wrap(err)
 		}
-
-		if head == nil {
-			return errtrace.Errorf("no head found with ID: %s", id)
-		}
-
-		err = heads.KillHead(cmd.Context(), cli, store, *head)
-		if err != nil {
-			return errtrace.Wrap(err)
-		}
-
+		fmt.Printf("Killed agent %s\n", id)
 		return nil
 	},
 }

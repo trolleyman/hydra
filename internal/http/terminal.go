@@ -2,7 +2,6 @@ package http
 
 import (
 	"bufio"
-	"context"
 	"encoding/json"
 	"io"
 	"log"
@@ -14,7 +13,6 @@ import (
 	"time"
 
 	"braces.dev/errtrace"
-	"github.com/docker/docker/api/types/container"
 	"github.com/gorilla/websocket"
 	"github.com/trolleyman/hydra/internal/config"
 	"github.com/trolleyman/hydra/internal/heads"
@@ -131,7 +129,7 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	head, err := heads.GetHeadByID(r.Context(), s.DockerClient, s.DB, projectRoot, agentID)
+	head, err := heads.GetHeadByID(r.Context(), s.Sessions, s.DB, projectRoot, agentID)
 	if err != nil {
 		log.Printf("terminal ws: error fetching head %q: %v", agentID, err)
 		http.Error(w, "failed to find agent", http.StatusInternalServerError)
@@ -183,97 +181,34 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 
-	// If the agent is still building (no container ID yet), stream the build log if it exists.
-	if head.ContainerID == "" {
-		buildLogPath := paths.GetBuildLogFromProjectRoot(projectRoot, agentID)
-		log.Printf("terminal ws: container ID empty, checking build log at %s", buildLogPath)
-		if _, err := os.Stat(buildLogPath); err == nil {
-			log.Printf("terminal ws: streaming build log for agent %q", agentID)
-			if !s.streamBuildLog(ctx, conn, projectRoot, agentID, buildLogPath) {
-				log.Printf("terminal ws: stream build log interrupted for agent %q", agentID)
-				return // Context cancelled or error
-			}
-			// Build finished! Refresh head info to get the new ContainerID.
-			log.Printf("terminal ws: streamBuildLog finished, refreshing head for %q", agentID)
-			head, err = heads.GetHeadByID(ctx, s.DockerClient, s.DB, projectRoot, agentID)
-			if err != nil || head == nil || head.ContainerID == "" {
-				log.Printf("terminal ws: build finished for %q but container still missing: err=%v, head=%+v", agentID, err, head)
-				_ = conn.WriteMessage(websocket.BinaryMessage, []byte("\r\n\x1b[31mError: Build finished but container not found.\x1b[0m\r\n"))
-				return
-			}
-			log.Printf("terminal ws: build finished for agent %q, container ID: %s", agentID, head.ContainerID[:12])
-			// Explicitly send the new status
-			sendStatusUpdate(conn, head.ContainerStatus)
-		} else {
-			log.Printf("terminal ws: container ID empty and NO build log found for agent %q", agentID)
-			_ = conn.WriteMessage(websocket.BinaryMessage, []byte("Agent container not started and no build logs found.\r\n"))
-			return
-		}
-	}
-
-	var attachID string
-	var attachConn io.ReadWriteCloser
-	var attachReader io.Reader
-
+	// Resolve the session to attach to. The shell tab gets a transient sandboxed
+	// bash session sharing the agent's worktree; otherwise we attach the agent.
+	sessionID := head.ID
 	if useShell {
-		log.Printf("terminal ws: creating exec bash for container %s agent %q", head.ContainerID[:12], agentID)
-		execConfig := container.ExecOptions{
-			AttachStdin:  true,
-			AttachStdout: true,
-			AttachStderr: true,
-			Tty:          true,
-			Cmd:          []string{"/bin/bash"},
-			Env:          []string{"TERM=xterm-256color"},
-		}
-		execID, err := s.DockerClient.ContainerExecCreate(ctx, head.ContainerID, execConfig)
+		shellID, err := heads.StartShellSession(s.Sessions, projectRoot, *head, 24, 80)
 		if err != nil {
-			log.Printf("terminal ws: failed to create bash exec, trying sh: %v", err)
-			execConfig.Cmd = []string{"/bin/sh"}
-			execID, err = s.DockerClient.ContainerExecCreate(ctx, head.ContainerID, execConfig)
-		}
-		if err != nil {
-			log.Printf("terminal ws: exec create container %q: %v", head.ContainerID, err)
+			log.Printf("terminal ws: start shell session for %q: %v", agentID, err)
 			_ = conn.WriteMessage(websocket.TextMessage, []byte("error: "+err.Error()))
 			return
 		}
-
-		resp, err := s.DockerClient.ContainerExecAttach(ctx, execID.ID, container.ExecStartOptions{
-			Tty: true,
-		})
-		if err != nil {
-			log.Printf("terminal ws: exec attach container %q: %v", head.ContainerID, err)
-			_ = conn.WriteMessage(websocket.TextMessage, []byte("error: "+err.Error()))
-			return
-		}
-		attachID = execID.ID
-		attachConn = resp.Conn
-		attachReader = resp.Reader
-	} else {
-		log.Printf("terminal ws: attaching to container %s for agent %q", head.ContainerID[:12], agentID)
-		// Now we (should) have a ContainerID.
-		attach, err := s.DockerClient.ContainerAttach(ctx, head.ContainerID, container.AttachOptions{
-			Stream: true,
-			Stdin:  true,
-			Stdout: true,
-			Stderr: true,
-		})
-		if err != nil {
-			log.Printf("terminal ws: attach container %q: %v", head.ContainerID, err)
-			_ = conn.WriteMessage(websocket.TextMessage, []byte("error: "+err.Error()))
-			return
-		}
-		attachID = head.ContainerID
-		attachConn = attach.Conn
-		attachReader = attach.Reader
+		sessionID = shellID
 	}
-	defer attachConn.Close()
+
+	att, err := s.Sessions.Attach(sessionID, 24, 80)
+	if err != nil {
+		log.Printf("terminal ws: attach session %q: %v", sessionID, err)
+		_ = conn.WriteMessage(websocket.BinaryMessage, []byte("\r\n\x1b[31mAgent is not running.\x1b[0m\r\n"))
+		sendStatusUpdate(conn, "stopped")
+		return
+	}
+	defer att.Close()
 
 	// Initial status again just in case it changed between checks
 	sendStatusUpdate(conn, "running")
 
 	done := make(chan struct{})
 
-	// WebSocket → container stdin (reads from ws, writes to docker attach)
+	// WebSocket → session stdin (and resize control messages)
 	go func() {
 		defer close(done)
 		defer func() {
@@ -288,29 +223,19 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 			}
 			switch msgType {
 			case websocket.BinaryMessage:
-				if _, err := attachConn.Write(data); err != nil {
+				if err := s.Sessions.Write(sessionID, data); err != nil {
 					return
 				}
 			case websocket.TextMessage:
 				var msg termResizeMsg
 				if err := json.Unmarshal(data, &msg); err == nil && msg.Type == "resize" && msg.Cols > 0 && msg.Rows > 0 {
-					if useShell {
-						_ = s.DockerClient.ContainerExecResize(ctx, attachID, container.ResizeOptions{
-							Height: msg.Rows,
-							Width:  msg.Cols,
-						})
-					} else {
-						_ = s.DockerClient.ContainerResize(ctx, attachID, container.ResizeOptions{
-							Height: msg.Rows,
-							Width:  msg.Cols,
-						})
-					}
+					_ = s.Sessions.Resize(sessionID, uint16(msg.Rows), uint16(msg.Cols))
 				}
 			}
 		}
 	}()
 
-	// Container stdout → WebSocket
+	// Session output → WebSocket
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
@@ -325,24 +250,20 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 			_ = conn.Close() // Closing the WS will unblock the ReadMessage in the other goroutine
 		}()
 
-		buf := make([]byte, 32*1024)
 		for {
-			n, err := attachReader.Read(buf)
-			if n > 0 {
-				if writeErr := conn.WriteMessage(websocket.BinaryMessage, buf[:n]); writeErr != nil {
+			select {
+			case <-att.Done:
+				return
+			case data, ok := <-att.Output:
+				if !ok {
+					return
+				}
+				if writeErr := conn.WriteMessage(websocket.BinaryMessage, data); writeErr != nil {
 					log.Printf("terminal ws: error writing to WS for %q: %v", agentID, writeErr)
-					break
+					return
 				}
-			}
-			if err != nil {
-				if err != io.EOF {
-					log.Printf("terminal ws: error reading from container stdout for %q: %v", agentID, err)
-				}
-				break
 			}
 		}
-		// When stdout ends (container stopped or exec finished), closing attachConn will unblock stdin Write if it was pending
-		_ = attachConn.Close()
 	}()
 
 	// Tail the status log and send diff_refresh events when git commands are detected,
@@ -417,61 +338,4 @@ func looksLikeGitCommand(line string) bool {
 		}
 	}
 	return false
-}
-
-// streamBuildLog returns true if the build finished successfully and we should transition to attach.
-func (s *Server) streamBuildLog(ctx context.Context, conn *safeConn, projectRoot, agentID, logPath string) bool {
-	_ = conn.WriteMessage(websocket.BinaryMessage, []byte("\x1b[32mBuilding agent...\x1b[0m\r\n\r\n"))
-	sendStatusUpdate(conn, "building")
-
-	f, err := os.Open(logPath)
-	if err != nil {
-		_ = conn.WriteMessage(websocket.BinaryMessage, []byte("error: failed to open build log: "+err.Error()))
-		return false
-	}
-	defer f.Close()
-
-	lastCheck := time.Now()
-
-	buf := make([]byte, 4096)
-
-	// Simple tail: read current content, then poll for more.
-	for {
-		select {
-		case <-ctx.Done():
-			return false
-		default:
-			n, err := f.Read(buf)
-			if n > 0 {
-				// Convert newlines to \r\n for the terminal (Xterm.js expects \r\n)
-				// Replace any existing \r\n with \n first to avoid \r\r\n, then \n to \r\n
-				s := strings.ReplaceAll(string(buf[:n]), "\r\n", "\n")
-				data := strings.ReplaceAll(s, "\n", "\r\n")
-				_ = conn.WriteMessage(websocket.BinaryMessage, []byte(data))
-			}
-			if err == io.EOF {
-				// Periodically check if build finished
-				if time.Since(lastCheck) > 1*time.Second {
-					lastCheck = time.Now()
-					head, _ := heads.GetHeadByID(ctx, s.DockerClient, s.DB, projectRoot, agentID)
-					if head != nil && head.ContainerID != "" {
-						log.Printf("streamBuildLog: build finished for %q, container: %s", agentID, head.ContainerID[:12])
-						sendTerminalEvent(conn, "build_finished")
-						// Small delay to let the frontend see the message
-						time.Sleep(100 * time.Millisecond)
-						return true
-					}
-					if head != nil && head.ContainerStatus == "stopped" {
-						log.Printf("streamBuildLog: build failed for %q", agentID)
-						return false
-					}
-				}
-				time.Sleep(200 * time.Millisecond)
-				continue
-			}
-			if err != nil {
-				return false
-			}
-		}
-	}
 }

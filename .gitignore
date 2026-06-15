@@ -8,6 +8,9 @@
 *.so
 *.dylib
 
+# Locally-built hydra binary (e.g. `go build -o hydra .`); mage builds to .mage/
+/hydra
+
 # Test binary, built with `go test -c`
 *.test
 

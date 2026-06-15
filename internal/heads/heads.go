@@ -7,61 +7,57 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"os/exec"
 	"os/user"
-	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	"braces.dev/errtrace"
-	dockerclient "github.com/docker/docker/client"
 
 	"github.com/trolleyman/hydra/internal/api"
-	"github.com/trolleyman/hydra/internal/common"
 	"github.com/trolleyman/hydra/internal/config"
 	"github.com/trolleyman/hydra/internal/db"
-	"github.com/trolleyman/hydra/internal/docker"
 	"github.com/trolleyman/hydra/internal/git"
 	"github.com/trolleyman/hydra/internal/paths"
+	"github.com/trolleyman/hydra/internal/sandbox"
+	"github.com/trolleyman/hydra/internal/session"
 )
 
-// Head represents a Hydra agent unit: an ID with optional branch, worktree, and container.
+// Head represents a Hydra agent unit: an ID with optional branch, worktree, and
+// running sandbox session.
 type Head struct {
-	ID              string
-	Branch          *string // "hydra/<id>", nil if the git branch does not exist
-	Worktree        *string // path to the worktree directory, nil if it does not exist
-	ProjectPath     string
+	ID          string
+	Branch      *string // "hydra/<id>", nil if the git branch does not exist
+	Worktree    *string // path to the worktree directory, nil if it does not exist
+	ProjectPath string
+	// ContainerID / ContainerStatus retain their names for API compatibility but
+	// now describe the sandbox session: ContainerID holds the process PID (as a
+	// string), ContainerStatus the session status (running|exited|stopped|...).
 	ContainerID     string
 	ContainerStatus string
-	AgentType       docker.AgentType
+	AgentType       sandbox.AgentType
 	PrePrompt       string
 	Prompt          string
 	BaseBranch      string
 	Ephemeral       bool
 	// AgentStatus holds the computed status for display.
 	AgentStatus *api.AgentStatusInfo
-	CreatedAt   int64 // Unix timestamp from container creation; 0 if no container
+	CreatedAt   int64 // Unix timestamp; 0 if not started
 }
 
-// ListHeads returns all Hydra heads from the DB, cross-referenced with live Docker state.
-func ListHeads(ctx context.Context, cli *dockerclient.Client, store *db.Store, projectRoot string) ([]Head, error) {
+// ListHeads returns all Hydra heads from the DB, cross-referenced with live
+// session state from the registry (best-effort; nil registry is allowed).
+func ListHeads(ctx context.Context, reg *session.Registry, store *db.Store, projectRoot string) ([]Head, error) {
 	dbAgents, err := store.ListAgents(projectRoot)
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
 
-	// Get live Docker state for confirmation (best-effort).
-	dockerAgents, dockerErr := docker.ListAgents(ctx, cli)
-	dockerByID := make(map[string]docker.Agent)
-	if dockerErr != nil {
-		log.Printf("warn: list docker agents: %v", dockerErr)
-	} else {
-		for _, a := range dockerAgents {
-			// Only include agents matching current project (platform-appropriate comparison)
-			if paths.ComparePaths(a.Meta.ProjectPath, projectRoot) {
-				dockerByID[a.Meta.Id] = a
-			}
+	live := make(map[string]session.Info)
+	if reg != nil {
+		for _, info := range reg.Snapshot() {
+			live[info.ID] = info
 		}
 	}
 
@@ -79,10 +75,11 @@ func ListHeads(ctx context.Context, cli *dockerclient.Client, store *db.Store, p
 			branch = &b
 		}
 
-		// Use live Docker container ID if available, else DB value.
 		containerID := a.ContainerID
-		if da, ok := dockerByID[a.ID]; ok && da.ContainerID != "" {
-			containerID = da.ContainerID
+		containerStatus := a.ContainerStatus
+		if info, ok := live[a.ID]; ok {
+			containerID = strconv.Itoa(info.PID)
+			containerStatus = sessionStatusToDB(info.Status)
 		}
 
 		h := Head{
@@ -91,8 +88,8 @@ func ListHeads(ctx context.Context, cli *dockerclient.Client, store *db.Store, p
 			Worktree:        worktree,
 			ProjectPath:     a.ProjectPath,
 			ContainerID:     containerID,
-			ContainerStatus: a.ContainerStatus,
-			AgentType:       docker.AgentType(a.AgentType),
+			ContainerStatus: containerStatus,
+			AgentType:       sandbox.AgentType(a.AgentType),
 			PrePrompt:       a.PrePrompt,
 			Prompt:          a.Prompt,
 			BaseBranch:      a.BaseBranch,
@@ -103,7 +100,6 @@ func ListHeads(ctx context.Context, cli *dockerclient.Client, store *db.Store, p
 		result = append(result, h)
 	}
 
-	// Sort: newest first, ID as tiebreaker.
 	sort.Slice(result, func(i, j int) bool {
 		if result[i].CreatedAt != result[j].CreatedAt {
 			return result[i].CreatedAt > result[j].CreatedAt
@@ -112,6 +108,16 @@ func ListHeads(ctx context.Context, cli *dockerclient.Client, store *db.Store, p
 	})
 
 	return result, nil
+}
+
+// sessionStatusToDB maps a session status to the DB container_status string.
+func sessionStatusToDB(s session.Status) string {
+	switch s {
+	case session.StatusRunning, session.StatusStarting:
+		return "running"
+	default:
+		return "stopped"
+	}
 }
 
 // computeAgentStatus derives the single API-facing status from the three DB status fields.
@@ -146,8 +152,8 @@ func computeAgentStatus(a *db.Agent) *api.AgentStatusInfo {
 }
 
 // GetHeadByID returns the head with the given ID, or nil if not found.
-func GetHeadByID(ctx context.Context, cli *dockerclient.Client, store *db.Store, projectRoot, id string) (*Head, error) {
-	hs, err := ListHeads(ctx, cli, store, projectRoot)
+func GetHeadByID(ctx context.Context, reg *session.Registry, store *db.Store, projectRoot, id string) (*Head, error) {
+	hs, err := ListHeads(ctx, reg, store, projectRoot)
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
@@ -161,21 +167,20 @@ func GetHeadByID(ctx context.Context, cli *dockerclient.Client, store *db.Store,
 
 // SpawnHeadOptions holds parameters for spawning a new agent head.
 type SpawnHeadOptions struct {
-	ID                   string           // empty = auto-generated
-	PrePrompt            string           // pre-prompt
-	Prompt               string           // prompt
-	AgentType            docker.AgentType // empty = "claude"
-	BaseBranch           string           // empty = current HEAD branch
-	DockerfilePath       string           // optional custom Dockerfile path
-	DockerfileContents   string           // optional custom Dockerfile contents
-	DockerignoreContents string           // optional custom .dockerignore contents
-	SharedMounts         []string         // optional container paths to share
-	Ephemeral            bool             // if true, container is auto-removed
+	ID         string            // empty = auto-generated
+	PrePrompt  string            // pre-prompt
+	Prompt     string            // prompt
+	AgentType  sandbox.AgentType // empty = "claude"
+	BaseBranch string            // empty = current HEAD branch
+	Ephemeral  bool              // if true, runs in the project root, no worktree/branch
+	Resume     bool              // if true, resume the agent's prior conversation
+	Rows       uint16
+	Cols       uint16
 }
 
-// SpawnHead creates a new git worktree, branch, and Docker container for an agent.
+// SpawnHead creates a new git worktree, branch, and sandbox session for an agent.
 // Returns the newly created Head.
-func SpawnHead(ctx context.Context, cli *dockerclient.Client, store *db.Store, projectRoot string, opts SpawnHeadOptions) (*Head, error) {
+func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, projectRoot string, opts SpawnHeadOptions) (*Head, error) {
 	norm, err := paths.NormalizePath(projectRoot)
 	if err == nil {
 		projectRoot = norm
@@ -184,7 +189,7 @@ func SpawnHead(ctx context.Context, cli *dockerclient.Client, store *db.Store, p
 	log.Printf("heads: spawning agent %q (type=%v, project=%q, ephemeral=%v)", opts.ID, opts.AgentType, projectRoot, opts.Ephemeral)
 
 	if opts.AgentType == "" {
-		opts.AgentType = docker.AgentTypeClaude
+		opts.AgentType = sandbox.AgentTypeClaude
 	}
 	if opts.ID == "" {
 		b := make([]byte, 4)
@@ -210,7 +215,6 @@ func SpawnHead(ctx context.Context, cli *dockerclient.Client, store *db.Store, p
 		worktreePath = projectRoot
 	}
 
-	// Substitute branch placeholders in the pre-prompt now that we know the branch names.
 	opts.PrePrompt = strings.NewReplacer(
 		"<branch>", branchName,
 		"<base-branch>", baseBranch,
@@ -218,7 +222,6 @@ func SpawnHead(ctx context.Context, cli *dockerclient.Client, store *db.Store, p
 
 	now := time.Now()
 
-	// Write DB record first so the agent is visible immediately.
 	if store != nil {
 		agent := &db.Agent{
 			ID:              opts.ID,
@@ -251,32 +254,15 @@ func SpawnHead(ctx context.Context, cli *dockerclient.Client, store *db.Store, p
 
 	currentUser, err := user.Current()
 	if err != nil {
-		if !opts.Ephemeral {
-			_ = git.RemoveWorktree(projectRoot, worktreePath)
-			_ = git.DeleteBranch(projectRoot, branchName)
-		}
-		if store != nil {
-			_ = store.SoftDeleteAgent(opts.ID)
-		}
-		RemoveAgentStatusFiles(projectRoot, opts.ID)
+		spawnCleanup(store, projectRoot, opts, worktreePath, branchName)
 		return nil, errtrace.Wrap(fmt.Errorf("get current user: %w", err))
 	}
-	uid, gid, username, groupName := common.ContainerUserInfo(currentUser)
+	home := currentUser.HomeDir
+	username := currentUser.Username
 
 	gitAuthorName := readGitConfigVal(projectRoot, "user.name")
 	gitAuthorEmail := readGitConfigVal(projectRoot, "user.email")
 
-	// If no dockerfile provided in opts, resolve it from config.
-	if opts.DockerfilePath == "" {
-		if cfg, cfgErr := config.Load(projectRoot); cfgErr == nil {
-			resolved := cfg.GetResolvedConfig(string(opts.AgentType))
-			if resolved.Dockerfile != nil {
-				opts.DockerfilePath = *resolved.Dockerfile
-			}
-		}
-	}
-
-	// Write initial JSON status file for backward compatibility.
 	e := "polling"
 	initialStatus := &api.AgentStatusInfo{
 		Status:    api.Pending,
@@ -287,87 +273,66 @@ func SpawnHead(ctx context.Context, cli *dockerclient.Client, store *db.Store, p
 		log.Printf("warn: write initial agent status: %v", err)
 	}
 
-	// Launch background spawn. Use a detached context so the spawn is not
-	// cancelled when the HTTP request context ends, but cap it so a stalled
-	// Docker build cannot run forever.
-	go func() {
-		bgCtx, cancel := context.WithTimeout(context.Background(), 2*time.Hour)
-		defer cancel()
+	setStatus := func(status api.AgentStatus) {
+		s := *initialStatus
+		s.Status = status
+		s.Timestamp = time.Now().Format(time.RFC3339)
+		if err := WriteAgentStatus(projectRoot, opts.ID, &s); err != nil {
+			log.Printf("warn: update agent status to %s: %v", status, err)
+		}
+	}
+	setStatus(api.Starting)
 
-		if store != nil {
-			if err := store.UpdateContainerInfo(opts.ID, "", "building"); err != nil {
-				log.Printf("warn: update container status to building for %s: %v", opts.ID, err)
-			}
-		}
+	// Build the sandbox launch options.
+	cfg, _ := config.Load(projectRoot)
+	writable, masked, restore, net := cfg.ResolveSandboxOptions(string(opts.AgentType))
 
-		buildLogPath := paths.GetBuildLogFromProjectRoot(projectRoot, opts.ID)
-		if err := os.MkdirAll(filepath.Dir(buildLogPath), 0755); err != nil {
-			log.Printf("warn: failed to create build log directory: %v", err)
-		}
-		buildLogFile, err := os.Create(buildLogPath)
-		if err != nil {
-			log.Printf("warn: failed to create build log file %s: %v", buildLogPath, err)
-		} else {
-			defer buildLogFile.Close()
-		}
+	binds, tmpfsDirs, err := seedHead(projectRoot, opts.ID, opts.AgentType, worktreePath, home)
+	if err != nil {
+		spawnFail(store, projectRoot, opts.ID, setStatus, fmt.Errorf("seed head: %w", err))
+		return nil, errtrace.Wrap(err)
+	}
 
-		containerID, err := docker.SpawnAgent(bgCtx, cli, docker.SpawnOptions{
-			Id:                   opts.ID,
-			AgentType:            opts.AgentType,
-			DockerfilePath:       opts.DockerfilePath,
-			DockerfileContents:   opts.DockerfileContents,
-			DockerignoreContents: opts.DockerignoreContents,
-			SharedMounts:         opts.SharedMounts,
-			PrePrompt:            opts.PrePrompt,
-			Prompt:               opts.Prompt,
-			ProjectPath:          projectRoot,
-			WorktreePath:         worktreePath,
-			BranchName:           branchName,
-			BaseBranch:           baseBranch,
-			GitAuthorName:        gitAuthorName,
-			GitAuthorEmail:       gitAuthorEmail,
-			UID:                  uid,
-			GID:                  gid,
-			Username:             username,
-			GroupName:            groupName,
-			Ephemeral:            opts.Ephemeral,
-			BuildLog:             buildLogFile,
-			OnStatus: func(status api.AgentStatus) {
-				s := initialStatus
-				s.Status = status
-				s.Timestamp = time.Now().Format(time.RFC3339)
-				if err := WriteAgentStatus(projectRoot, opts.ID, s); err != nil {
-					log.Printf("warn: update agent status to %s: %v", status, err)
-				}
-			},
-		})
-		if err != nil {
-			log.Printf("error: background spawn agent %s: %v", opts.ID, err)
-			if buildLogFile != nil {
-				fmt.Fprintf(buildLogFile, "\nerror: %v\n", err)
-			}
-			s := initialStatus
-			s.Status = api.Stopped
-			e := "error"
-			s.Event = &e
-			s.Timestamp = time.Now().Format(time.RFC3339)
-			_ = WriteAgentStatus(projectRoot, opts.ID, s)
-			if store != nil {
-				if err := store.UpdateContainerInfo(opts.ID, "", "stopped"); err != nil {
-					log.Printf("warn: update container status to stopped for %s: %v", opts.ID, err)
-				}
-			}
-			return
-		}
+	argv, err := sandbox.AgentArgv(opts.AgentType, opts.Resume, sandbox.CombinePrompt(opts.PrePrompt, opts.Prompt))
+	if err != nil {
+		spawnFail(store, projectRoot, opts.ID, setStatus, err)
+		return nil, errtrace.Wrap(err)
+	}
 
-		if store != nil {
-			if err := store.UpdateContainerInfo(opts.ID, containerID, "starting"); err != nil {
-				log.Printf("warn: update container status to starting for %s: %v", opts.ID, err)
-			} else {
-				log.Printf("heads: updated container info for %s: %s (starting)", opts.ID, containerID[:12])
-			}
+	sess, err := reg.Start(session.StartOptions{
+		ID:   opts.ID,
+		Rows: opts.Rows,
+		Cols: opts.Cols,
+		Sandbox: sandbox.Options{
+			AgentType:     opts.AgentType,
+			WorktreePath:  worktreePath,
+			Home:          home,
+			WritablePaths: writable,
+			MaskedPaths:   masked,
+			RestoreRO:     restore,
+			Network:       net,
+			Binds:         binds,
+			TmpfsDirs:     tmpfsDirs,
+			Env:           agentEnv(home, username, gitAuthorName, gitAuthorEmail),
+			Argv:          argv,
+			HardenGUI:     true,
+			Seccomp:       true,
+		},
+	})
+	if err != nil {
+		spawnFail(store, projectRoot, opts.ID, setStatus, fmt.Errorf("start session: %w", err))
+		return nil, errtrace.Wrap(err)
+	}
+
+	pid := strconv.Itoa(sess.PID())
+	if store != nil {
+		if err := store.UpdateContainerInfo(opts.ID, pid, "running"); err != nil {
+			log.Printf("warn: update container status to running for %s: %v", opts.ID, err)
 		}
-	}()
+	}
+	if opts.AgentType == sandbox.AgentTypeBash || opts.AgentType == sandbox.AgentTypeCopilot {
+		setStatus(api.Running)
+	}
 
 	var hBranch *string
 	var hWorktree *string
@@ -381,8 +346,8 @@ func SpawnHead(ctx context.Context, cli *dockerclient.Client, store *db.Store, p
 		Branch:          hBranch,
 		Worktree:        hWorktree,
 		ProjectPath:     projectRoot,
-		ContainerID:     "",
-		ContainerStatus: "pending",
+		ContainerID:     pid,
+		ContainerStatus: "running",
 		AgentType:       opts.AgentType,
 		PrePrompt:       opts.PrePrompt,
 		Prompt:          opts.Prompt,
@@ -393,18 +358,140 @@ func SpawnHead(ctx context.Context, cli *dockerclient.Client, store *db.Store, p
 	}, nil
 }
 
-// readGitConfigVal reads a single git config value.
-func readGitConfigVal(projectRoot, key string) string {
-	out, err := exec.Command("git", "-C", projectRoot, "config", "--get", key).Output()
-	if err != nil {
-		return ""
+// spawnCleanup tears down a partially-created head after an early failure.
+func spawnCleanup(store *db.Store, projectRoot string, opts SpawnHeadOptions, worktreePath, branchName string) {
+	if !opts.Ephemeral {
+		_ = git.RemoveWorktree(projectRoot, worktreePath)
+		_ = git.DeleteBranch(projectRoot, branchName)
 	}
-	return strings.TrimRight(string(out), "\n")
+	if store != nil {
+		_ = store.SoftDeleteAgent(opts.ID)
+	}
+	RemoveAgentStatusFiles(projectRoot, opts.ID)
 }
 
-// KillHead removes a Hydra head in safe order: container -> worktree -> branch.
+// spawnFail records a spawn failure in the status file + DB.
+func spawnFail(store *db.Store, projectRoot, id string, setStatus func(api.AgentStatus), cause error) {
+	log.Printf("error: spawn agent %s: %v", id, cause)
+	setStatus(api.Stopped)
+	if store != nil {
+		if err := store.UpdateContainerInfo(id, "", "stopped"); err != nil {
+			log.Printf("warn: update container status to stopped for %s: %v", id, err)
+		}
+	}
+}
+
+// StartShellSession starts (or returns the existing) transient sandboxed bash
+// session sharing the head's worktree, used by the web terminal's shell tab.
+// Returns the session ID to attach to.
+func StartShellSession(reg *session.Registry, projectRoot string, head Head, rows, cols uint16) (string, error) {
+	shellID := head.ID + "-shell"
+	if _, ok := reg.Get(shellID); ok {
+		return shellID, nil
+	}
+
+	worktreePath := projectRoot
+	if head.Worktree != nil {
+		worktreePath = *head.Worktree
+	}
+
+	currentUser, err := user.Current()
+	if err != nil {
+		return "", errtrace.Wrap(fmt.Errorf("get current user: %w", err))
+	}
+	home := currentUser.HomeDir
+
+	cfg, _ := config.Load(projectRoot)
+	writable, masked, restore, net := cfg.ResolveSandboxOptions("bash")
+	binds, tmpfsDirs, err := seedHead(projectRoot, shellID, sandbox.AgentTypeBash, worktreePath, home)
+	if err != nil {
+		return "", errtrace.Wrap(err)
+	}
+
+	_, err = reg.Start(session.StartOptions{
+		ID:   shellID,
+		Rows: rows,
+		Cols: cols,
+		Sandbox: sandbox.Options{
+			AgentType:     sandbox.AgentTypeBash,
+			WorktreePath:  worktreePath,
+			Home:          home,
+			WritablePaths: writable,
+			MaskedPaths:   masked,
+			RestoreRO:     restore,
+			Network:       net,
+			Binds:         binds,
+			TmpfsDirs:     tmpfsDirs,
+			Env:           agentEnv(home, currentUser.Username, readGitConfigVal(projectRoot, "user.name"), readGitConfigVal(projectRoot, "user.email")),
+			Argv:          []string{"/bin/bash"},
+			HardenGUI:     true,
+			Seccomp:       true,
+		},
+	})
+	if err != nil {
+		return "", errtrace.Wrap(err)
+	}
+	return shellID, nil
+}
+
+// ResumeHead starts a new sandbox session for an existing head (worktree and
+// branch already exist), running the agent's own --resume flow. Used by the TUI
+// and by the daemon to restore heads after a restart.
+func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head Head, rows, cols uint16) error {
+	worktreePath := projectRoot
+	if head.Worktree != nil {
+		worktreePath = *head.Worktree
+	}
+
+	currentUser, err := user.Current()
+	if err != nil {
+		return errtrace.Wrap(fmt.Errorf("get current user: %w", err))
+	}
+	home := currentUser.HomeDir
+
+	cfg, _ := config.Load(projectRoot)
+	writable, masked, restore, net := cfg.ResolveSandboxOptions(string(head.AgentType))
+	binds, tmpfsDirs, err := seedHead(projectRoot, head.ID, head.AgentType, worktreePath, home)
+	if err != nil {
+		return errtrace.Wrap(err)
+	}
+	argv, err := sandbox.AgentArgv(head.AgentType, true, "")
+	if err != nil {
+		return errtrace.Wrap(err)
+	}
+
+	sess, err := reg.Start(session.StartOptions{
+		ID:   head.ID,
+		Rows: rows,
+		Cols: cols,
+		Sandbox: sandbox.Options{
+			AgentType:     head.AgentType,
+			WorktreePath:  worktreePath,
+			Home:          home,
+			WritablePaths: writable,
+			MaskedPaths:   masked,
+			RestoreRO:     restore,
+			Network:       net,
+			Binds:         binds,
+			TmpfsDirs:     tmpfsDirs,
+			Env:           agentEnv(home, currentUser.Username, readGitConfigVal(projectRoot, "user.name"), readGitConfigVal(projectRoot, "user.email")),
+			Argv:          argv,
+			HardenGUI:     true,
+			Seccomp:       true,
+		},
+	})
+	if err != nil {
+		return errtrace.Wrap(err)
+	}
+	if store != nil {
+		_ = store.UpdateContainerInfo(head.ID, strconv.Itoa(sess.PID()), "running")
+	}
+	return nil
+}
+
+// KillHead removes a Hydra head in safe order: session -> worktree -> branch.
 // When store is non-nil, uses atomic CAS to prevent concurrent kill operations and soft-deletes the record.
-func KillHead(ctx context.Context, cli *dockerclient.Client, store *db.Store, head Head) error {
+func KillHead(ctx context.Context, reg *session.Registry, store *db.Store, head Head) error {
 	log.Printf("heads: kill requested for agent %s", head.ID)
 	if store != nil {
 		ok, err := store.TrySetHeadStatus(head.ID, "idle", "killing")
@@ -416,22 +503,20 @@ func KillHead(ctx context.Context, cli *dockerclient.Client, store *db.Store, he
 			return errtrace.Wrap(db.ErrOperationInProgress)
 		}
 	}
-	return errtrace.Wrap(KillHeadNoLock(ctx, cli, store, head))
+	return errtrace.Wrap(KillHeadNoLock(ctx, reg, store, head))
 }
 
 // KillHeadNoLock performs the kill cleanup without acquiring the head_status lock.
-// Used when the caller has already set head_status (e.g. merge sets it to "merging").
-func KillHeadNoLock(ctx context.Context, cli *dockerclient.Client, store *db.Store, head Head) error {
+func KillHeadNoLock(ctx context.Context, reg *session.Registry, store *db.Store, head Head) error {
 	var killErr error
 
-	containerRef := head.ContainerID
-	if containerRef == "" {
-		containerRef = "hydra-agent-" + head.ID
-	}
-	log.Printf("heads: killing container %q for agent %s", containerRef, head.ID)
-	if err := docker.KillAgent(ctx, cli, containerRef); err != nil {
-		log.Printf("warn: heads: kill container failed for %s: %v", head.ID, err)
-		killErr = errtrace.Wrap(err)
+	if reg != nil {
+		log.Printf("heads: killing session for agent %s", head.ID)
+		if err := reg.Kill(head.ID); err != nil {
+			log.Printf("warn: heads: kill session failed for %s: %v", head.ID, err)
+			killErr = errtrace.Wrap(err)
+		}
+		reg.Remove(head.ID)
 	}
 
 	if killErr == nil {

@@ -9,8 +9,8 @@ import (
 
 	"braces.dev/errtrace"
 	"github.com/spf13/cobra"
+	"github.com/trolleyman/hydra/internal/daemon"
 	"github.com/trolleyman/hydra/internal/db"
-	"github.com/trolleyman/hydra/internal/docker"
 	"github.com/trolleyman/hydra/internal/git"
 	"github.com/trolleyman/hydra/internal/heads"
 	"github.com/trolleyman/hydra/internal/paths"
@@ -37,19 +37,13 @@ var mergeCmd = &cobra.Command{
 			return errtrace.Wrap(err)
 		}
 
-		cli, err := docker.NewClient()
-		if err != nil {
-			return errtrace.Wrap(err)
-		}
-		defer cli.Close()
-
 		store, err := db.Open(projectRoot)
 		if err != nil {
 			return errtrace.Wrap(err)
 		}
 
 		ctx := cmd.Context()
-		head, err := heads.GetHeadByID(ctx, cli, store, projectRoot, id)
+		head, err := heads.GetHeadByID(ctx, nil, store, projectRoot, id)
 		if err != nil {
 			return errtrace.Wrap(err)
 		}
@@ -114,7 +108,13 @@ var mergeCmd = &cobra.Command{
 			return errtrace.Wrap(fmt.Errorf("merge failed (resolve conflicts then run 'hydra kill %s'): %w", id, err))
 		}
 
-		if err := heads.KillHead(ctx, cli, store, *head); err != nil {
+		// Tear down the head (session + worktree + branch) through the daemon so
+		// the live session is stopped too.
+		client, err := daemon.Connect(ctx, projectRoot)
+		if err != nil {
+			return errtrace.Wrap(err)
+		}
+		if err := client.KillAgent(ctx, id); err != nil {
 			return errtrace.Wrap(err)
 		}
 

@@ -1,7 +1,6 @@
 package config
 
 import (
-	_ "embed"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,32 +9,15 @@ import (
 
 	"braces.dev/errtrace"
 	"github.com/BurntSushi/toml"
+	"github.com/trolleyman/hydra/internal/sandbox"
 )
-
-//go:embed claude.Dockerfile
-var DefaultDockerfileClaude string
-
-//go:embed gemini.Dockerfile
-var DefaultDockerfileGemini string
-
-//go:embed bash.Dockerfile
-var DefaultDockerfileBash string
-
-//go:embed copilot.Dockerfile
-var DefaultDockerfileCopilot string
-
-//go:embed base.Dockerfile
-var DefaultDockerfileBase string
-
-//go:embed entrypoint.sh
-var DefaultEntrypointScript string
 
 // DefaultPrePrompt is the built-in pre-prompt always prepended to agent prompts.
 // The placeholders <branch> and <base-branch> are substituted at spawn time.
 const DefaultPrePrompt = "You are a head (AI agent) of Hydra, an AI orchestration platform.\n" +
-	"- You have unrestricted access to the file system.\n" +
+	"- You are running inside an OS sandbox on a git worktree, as the host user.\n" +
+	"- You have full read access to the host, write access to the worktree and developer caches, and credential locations are hidden.\n" +
 	"- You are allowed to install what is necessary to complete the task.\n" +
-	"- You are running inside a Docker container on a git worktree.\n" +
 	"- The current branch is `<branch>` and it targets `<base-branch>`.\n" +
 	"- As you work, use git commit to save your progress at logical points.\n" +
 	"- Once you have finished the task, make a final git commit with all remaining changes.\n" +
@@ -44,21 +26,33 @@ const DefaultPrePrompt = "You are a head (AI agent) of Hydra, an AI orchestratio
 	"- If there are any design decisions made without user input, document them in each commit.\n" +
 	"- Use rg (ripgrep) instead of grep."
 
+// NetworkConfig is the per-agent network policy.
+type NetworkConfig struct {
+	// Enabled toggles outbound network access. nil = inherit/default (enabled).
+	Enabled *bool `toml:"enabled"`
+	// AllowedHosts is reserved for a future proxy-based host allow-list.
+	AllowedHosts []string `toml:"allowed_hosts"`
+}
+
+// SandboxConfig holds user-editable sandbox policy. All path lists are additive
+// on top of the baked-in defaults (sandbox.Defaults()).
+type SandboxConfig struct {
+	// WritablePaths are extra paths made writable inside the sandbox.
+	WritablePaths []string `toml:"writable_paths"`
+	// MaskedPaths are extra paths hidden inside the sandbox.
+	MaskedPaths []string `toml:"masked_paths"`
+	// RestoreRO re-exposes paths read-only after masking their parent.
+	RestoreRO []string `toml:"restore_ro"`
+	// Network is the network policy.
+	Network *NetworkConfig `toml:"network"`
+}
+
 // AgentConfig holds per-agent-type configuration.
 type AgentConfig struct {
-	// Dockerfile is a path to a custom Dockerfile for this agent type.
-	// Relative paths are resolved from the config file location.
-	Dockerfile *string `toml:"dockerfile"`
-	// DockerfileContents is the actual content of the Dockerfile.
-	// This will be used as the base and always starts with FROM <default-agent-image>.
-	DockerfileContents *string `toml:"dockerfile_contents"`
-	// DockerignoreContents is the content of the .dockerignore file.
-	DockerignoreContents *string `toml:"dockerignore_contents"`
-	// SharedMounts is a list of container paths to share across agents.
+	// Sandbox overrides sandbox policy for this agent type.
+	Sandbox *SandboxConfig `toml:"sandbox"`
+	// SharedMounts is a list of sandbox paths shared (writable) across agents.
 	SharedMounts []string `toml:"shared_mounts"`
-	// Context is the build context directory.
-	// Relative paths are resolved from the config file location.
-	Context *string `toml:"context"`
 	// PrePrompt is prepended to every agent prompt.
 	PrePrompt *string `toml:"pre_prompt"`
 }
@@ -113,7 +107,7 @@ func BuildFinalPrePrompt(cfg Config, agentType string) string {
 	return strings.Join(parts, "\n") + "\n\nTask:\n"
 }
 
-// LoadFile loads a configuration from a file and resolves relative paths.
+// LoadFile loads a configuration from a file.
 func LoadFile(path string) (*Config, error) {
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		return nil, nil
@@ -123,27 +117,7 @@ func LoadFile(path string) (*Config, error) {
 	if err != nil {
 		return nil, errtrace.Wrap(fmt.Errorf("load config: %s: %w", path, err))
 	}
-
-	baseDir := filepath.Dir(path)
-	cfg.Defaults.ResolvePaths(baseDir)
-	for name, agent := range cfg.Agents {
-		agent.ResolvePaths(baseDir)
-		cfg.Agents[name] = agent
-	}
-
 	return &cfg, nil
-}
-
-// ResolvePaths resolves relative paths in the AgentConfig relative to baseDir.
-func (a *AgentConfig) ResolvePaths(baseDir string) {
-	if a.Dockerfile != nil && !filepath.IsAbs(*a.Dockerfile) {
-		abs := filepath.Join(baseDir, *a.Dockerfile)
-		a.Dockerfile = &abs
-	}
-	if a.Context != nil && !filepath.IsAbs(*a.Context) {
-		abs := filepath.Join(baseDir, *a.Context)
-		a.Context = &abs
-	}
 }
 
 // Merge merges another configuration into this one.
@@ -168,23 +142,42 @@ func (c *Config) Merge(other Config) {
 
 // Merge merges another AgentConfig into this one.
 func (a *AgentConfig) Merge(other AgentConfig) {
-	if other.Dockerfile != nil {
-		a.Dockerfile = other.Dockerfile
-	}
-	if other.DockerfileContents != nil {
-		a.DockerfileContents = other.DockerfileContents
-	}
-	if other.DockerignoreContents != nil {
-		a.DockerignoreContents = other.DockerignoreContents
+	if other.Sandbox != nil {
+		if a.Sandbox == nil {
+			a.Sandbox = &SandboxConfig{}
+		}
+		a.Sandbox.Merge(*other.Sandbox)
 	}
 	if other.SharedMounts != nil {
 		a.SharedMounts = other.SharedMounts
 	}
-	if other.Context != nil {
-		a.Context = other.Context
-	}
 	if other.PrePrompt != nil {
 		a.PrePrompt = other.PrePrompt
+	}
+}
+
+// Merge merges another SandboxConfig into this one (path lists are replaced,
+// not concatenated, when set; nil leaves the existing value).
+func (s *SandboxConfig) Merge(other SandboxConfig) {
+	if other.WritablePaths != nil {
+		s.WritablePaths = other.WritablePaths
+	}
+	if other.MaskedPaths != nil {
+		s.MaskedPaths = other.MaskedPaths
+	}
+	if other.RestoreRO != nil {
+		s.RestoreRO = other.RestoreRO
+	}
+	if other.Network != nil {
+		if s.Network == nil {
+			s.Network = &NetworkConfig{}
+		}
+		if other.Network.Enabled != nil {
+			s.Network.Enabled = other.Network.Enabled
+		}
+		if other.Network.AllowedHosts != nil {
+			s.Network.AllowedHosts = other.Network.AllowedHosts
+		}
 	}
 }
 
@@ -227,6 +220,33 @@ func (c Config) GetResolvedConfig(agentType string) AgentConfig {
 	return resolved
 }
 
+// ResolveSandboxOptions merges the baked-in sandbox defaults with the resolved
+// per-agent config into concrete path lists + network policy. User config is
+// additive for the path lists.
+func (c Config) ResolveSandboxOptions(agentType string) (writable, masked, restore []string, net sandbox.NetworkPolicy) {
+	def := sandbox.Defaults()
+	writable = append([]string{}, def.WritablePaths...)
+	masked = append([]string{}, def.MaskedPaths...)
+	restore = append([]string{}, def.RestoreRO...)
+	net = sandbox.NetworkPolicy{Enabled: true}
+
+	resolved := c.GetResolvedConfig(agentType)
+	if sb := resolved.Sandbox; sb != nil {
+		writable = append(writable, sb.WritablePaths...)
+		masked = append(masked, sb.MaskedPaths...)
+		restore = append(restore, sb.RestoreRO...)
+		if sb.Network != nil {
+			if sb.Network.Enabled != nil {
+				net.Enabled = *sb.Network.Enabled
+			}
+			net.AllowedHosts = sb.Network.AllowedHosts
+		}
+	}
+	// SharedMounts are treated as additional writable paths.
+	writable = append(writable, resolved.SharedMounts...)
+	return writable, masked, restore, net
+}
+
 // Save saves a configuration to the project-specific configuration file.
 func Save(projectRoot string, cfg Config) error {
 	return errtrace.Wrap(SaveToFile(GetProjectConfigPath(projectRoot), cfg))
@@ -256,47 +276,58 @@ func tomlStringValue(s string) string {
 	return `"` + escaped + `"`
 }
 
-// writeAgentConfigFields writes the fields of an AgentConfig to buf.
-func writeAgentConfigFields(buf *strings.Builder, cfg AgentConfig) {
-	if cfg.Dockerfile != nil {
-		buf.WriteString("dockerfile = " + tomlStringValue(*cfg.Dockerfile) + "\n")
+// tomlStringArray renders a string slice as a TOML inline array.
+func tomlStringArray(vals []string) string {
+	parts := make([]string, len(vals))
+	for i, v := range vals {
+		parts[i] = tomlStringValue(v)
 	}
-	if cfg.DockerfileContents != nil {
-		buf.WriteString("dockerfile_contents = " + tomlStringValue(*cfg.DockerfileContents) + "\n")
-	}
-	if cfg.DockerignoreContents != nil {
-		buf.WriteString("dockerignore_contents = " + tomlStringValue(*cfg.DockerignoreContents) + "\n")
-	}
-	if len(cfg.SharedMounts) > 0 {
-		parts := make([]string, len(cfg.SharedMounts))
-		for i, m := range cfg.SharedMounts {
-			parts[i] = tomlStringValue(m)
-		}
-		buf.WriteString("shared_mounts = [" + strings.Join(parts, ", ") + "]\n")
-	}
-	if cfg.Context != nil {
-		buf.WriteString("context = " + tomlStringValue(*cfg.Context) + "\n")
-	}
+	return "[" + strings.Join(parts, ", ") + "]"
+}
+
+// writeAgentConfigFields writes the fields of an AgentConfig to buf under the
+// given table name (e.g. "defaults" or "agents.claude").
+func writeAgentConfigFields(buf *strings.Builder, table string, cfg AgentConfig) {
+	buf.WriteString("[" + table + "]\n")
 	if cfg.PrePrompt != nil {
 		buf.WriteString("pre_prompt = " + tomlStringValue(*cfg.PrePrompt) + "\n")
 	}
+	if len(cfg.SharedMounts) > 0 {
+		buf.WriteString("shared_mounts = " + tomlStringArray(cfg.SharedMounts) + "\n")
+	}
+	if sb := cfg.Sandbox; sb != nil {
+		buf.WriteString("\n[" + table + ".sandbox]\n")
+		if len(sb.WritablePaths) > 0 {
+			buf.WriteString("writable_paths = " + tomlStringArray(sb.WritablePaths) + "\n")
+		}
+		if len(sb.MaskedPaths) > 0 {
+			buf.WriteString("masked_paths = " + tomlStringArray(sb.MaskedPaths) + "\n")
+		}
+		if len(sb.RestoreRO) > 0 {
+			buf.WriteString("restore_ro = " + tomlStringArray(sb.RestoreRO) + "\n")
+		}
+		if sb.Network != nil {
+			buf.WriteString("\n[" + table + ".sandbox.network]\n")
+			if sb.Network.Enabled != nil {
+				buf.WriteString(fmt.Sprintf("enabled = %t\n", *sb.Network.Enabled))
+			}
+			if len(sb.Network.AllowedHosts) > 0 {
+				buf.WriteString("allowed_hosts = " + tomlStringArray(sb.Network.AllowedHosts) + "\n")
+			}
+		}
+	}
 }
 
-// marshalConfig serializes a Config to TOML without indentation and with
-// triple-quoted multi-line strings.
+func agentConfigEmpty(cfg AgentConfig) bool {
+	return cfg.Sandbox == nil && len(cfg.SharedMounts) == 0 && cfg.PrePrompt == nil
+}
+
+// marshalConfig serializes a Config to TOML.
 func marshalConfig(cfg Config) string {
 	var buf strings.Builder
 
-	defaultsEmpty := cfg.Defaults.Dockerfile == nil &&
-		cfg.Defaults.DockerfileContents == nil &&
-		cfg.Defaults.DockerignoreContents == nil &&
-		len(cfg.Defaults.SharedMounts) == 0 &&
-		cfg.Defaults.Context == nil &&
-		cfg.Defaults.PrePrompt == nil
-
-	if !defaultsEmpty {
-		buf.WriteString("[defaults]\n")
-		writeAgentConfigFields(&buf, cfg.Defaults)
+	if !agentConfigEmpty(cfg.Defaults) {
+		writeAgentConfigFields(&buf, "defaults", cfg.Defaults)
 	}
 
 	agentNames := make([]string, 0, len(cfg.Agents))
@@ -306,11 +337,13 @@ func marshalConfig(cfg Config) string {
 	sort.Strings(agentNames)
 
 	for _, name := range agentNames {
+		if agentConfigEmpty(cfg.Agents[name]) {
+			continue
+		}
 		if buf.Len() > 0 {
 			buf.WriteString("\n")
 		}
-		buf.WriteString("[agents." + name + "]\n")
-		writeAgentConfigFields(&buf, cfg.Agents[name])
+		writeAgentConfigFields(&buf, "agents."+name, cfg.Agents[name])
 	}
 
 	if cfg.Features.TerminalBash {
@@ -322,20 +355,4 @@ func marshalConfig(cfg Config) string {
 	}
 
 	return buf.String()
-}
-
-// Deprecated: Use GetResolvedConfig instead.
-func (c Config) GetDockerfileForAgent(projectRoot, agentType string) string {
-	resolved := c.GetResolvedConfig(agentType)
-	if resolved.Dockerfile != nil {
-		return *resolved.Dockerfile
-	}
-
-	// Check if .hydra/config/<agentType>/Dockerfile exists (legacy fallback)
-	customPath := filepath.Join(".hydra", "config", agentType, "Dockerfile")
-	if _, err := os.Stat(filepath.Join(projectRoot, customPath)); err == nil {
-		return customPath
-	}
-
-	return ""
 }

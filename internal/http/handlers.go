@@ -12,18 +12,16 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/docker/docker/api/types/container"
-
 	"braces.dev/errtrace"
-	dockerclient "github.com/docker/docker/client"
 	"github.com/trolleyman/hydra/internal/api"
 	"github.com/trolleyman/hydra/internal/config"
 	"github.com/trolleyman/hydra/internal/db"
-	"github.com/trolleyman/hydra/internal/docker"
 	"github.com/trolleyman/hydra/internal/git"
 	"github.com/trolleyman/hydra/internal/heads"
 	"github.com/trolleyman/hydra/internal/paths"
 	"github.com/trolleyman/hydra/internal/projects"
+	"github.com/trolleyman/hydra/internal/sandbox"
+	"github.com/trolleyman/hydra/internal/session"
 )
 
 const version = "0.1.0"
@@ -46,24 +44,26 @@ type Server struct {
 	ProjectRoot     string
 	DefaultProject  projects.ProjectInfo
 	ProjectsManager *projects.Manager
-	DockerClient    *dockerclient.Client
+	Sessions        *session.Registry
 	DB              *db.Store
 	StartTime       time.Time
 	Development     bool // set when running under mage dev / mage DevAutoReload
 
-	lastDockerError atomic.Value // holds string
+	lastSandboxError atomic.Value // holds string
 }
 
-func (s *Server) SetDockerError(err error) {
+// SetSandboxError records the most recent sandbox-availability error (or clears
+// it when err is nil). Surfaced via GetStatus as sandbox_error.
+func (s *Server) SetSandboxError(err error) {
 	if err == nil {
-		s.lastDockerError.Store("")
+		s.lastSandboxError.Store("")
 	} else {
-		s.lastDockerError.Store(err.Error())
+		s.lastSandboxError.Store(err.Error())
 	}
 }
 
-func (s *Server) GetDockerError() string {
-	v := s.lastDockerError.Load()
+func (s *Server) GetSandboxError() string {
+	v := s.lastSandboxError.Load()
 	if v == nil {
 		return ""
 	}
@@ -243,18 +243,11 @@ func (s *Server) ListAgents(ctx context.Context, request api.ListAgentsRequestOb
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
-	headList, err := heads.ListHeads(ctx, s.DockerClient, s.DB, projectRoot)
+	headList, err := heads.ListHeads(ctx, s.Sessions, s.DB, projectRoot)
 	if err != nil {
-		errStr := err.Error()
-		errorType := api.ErrorResponseErrorInternalError
-		if dockerclient.IsErrConnectionFailed(err) || strings.Contains(errStr, "error during connect") {
-			errorType = api.ErrorResponseErrorDockerConnect
-			err = fmt.Errorf("Error connecting to Docker: %w", err)
-		}
-
 		return nil, &apiError{ //errtrace:skip
 			Code: 500,
-			Type: errorType,
+			Type: api.ErrorResponseErrorInternalError,
 			Err:  err,
 		}
 	}
@@ -292,11 +285,8 @@ func (s *Server) GetStatus(_ context.Context, _ api.GetStatusRequestObject) (api
 	development := s.Development
 
 	var dockerErr *string
-	if lastErr := s.GetDockerError(); lastErr != "" {
+	if lastErr := s.GetSandboxError(); lastErr != "" {
 		errStr := lastErr
-		if strings.Contains(errStr, "error during connect") {
-			errStr = "Error connecting to Docker: " + errStr
-		}
 		dockerErr = &errStr
 	}
 
@@ -355,46 +345,78 @@ func (s *Server) GetConfig(_ context.Context, request api.GetConfigRequestObject
 		}
 	}
 
-	defaultDockerfiles := map[string]string{
-		"base":    config.DefaultDockerfileBase,
-		"claude":  config.DefaultDockerfileClaude,
-		"copilot": config.DefaultDockerfileCopilot,
-		"gemini":  config.DefaultDockerfileGemini,
-		"bash":    config.DefaultDockerfileBash,
-	}
 	defaultPrePrompt := config.DefaultPrePrompt
+	emptyDockerfiles := map[string]string{}
 	resp := api.ConfigResponse{
-		Defaults: api.AgentConfig{
-			Dockerfile:           cfg.Defaults.Dockerfile,
-			DockerfileContents:   cfg.Defaults.DockerfileContents,
-			DockerignoreContents: cfg.Defaults.DockerignoreContents,
-			SharedMounts:         &cfg.Defaults.SharedMounts,
-			Context:              cfg.Defaults.Context,
-			PrePrompt:            cfg.Defaults.PrePrompt,
-		},
-		Agents: make(map[string]api.AgentConfig),
+		Defaults: toAPIAgentConfig(cfg.Defaults),
+		Agents:   make(map[string]api.AgentConfig),
 		Features: &struct {
 			TerminalBash *bool `json:"terminal_bash,omitempty"`
 		}{
 			TerminalBash: &cfg.Features.TerminalBash,
 		},
-		DefaultDockerfiles: &defaultDockerfiles,
+		// Deprecated; the sandbox backend has no Dockerfiles. Returned empty for
+		// API compatibility.
+		DefaultDockerfiles: &emptyDockerfiles,
 		DefaultPrePrompt:   &defaultPrePrompt,
 	}
 
 	for name, agent := range cfg.Agents {
-		sharedMounts := agent.SharedMounts
-		resp.Agents[name] = api.AgentConfig{
-			Dockerfile:           agent.Dockerfile,
-			DockerfileContents:   agent.DockerfileContents,
-			DockerignoreContents: agent.DockerignoreContents,
-			SharedMounts:         &sharedMounts,
-			Context:              agent.Context,
-			PrePrompt:            agent.PrePrompt,
-		}
+		resp.Agents[name] = toAPIAgentConfig(agent)
 	}
 
 	return api.GetConfig200JSONResponse(resp), nil
+}
+
+// toAPIAgentConfig converts an internal AgentConfig to the API representation.
+func toAPIAgentConfig(c config.AgentConfig) api.AgentConfig {
+	sm := c.SharedMounts
+	out := api.AgentConfig{
+		PrePrompt:    c.PrePrompt,
+		SharedMounts: &sm,
+	}
+	if c.Sandbox != nil {
+		out.Sandbox = &api.SandboxConfig{
+			WritablePaths: &c.Sandbox.WritablePaths,
+			MaskedPaths:   &c.Sandbox.MaskedPaths,
+			RestoreRo:     &c.Sandbox.RestoreRO,
+		}
+		if c.Sandbox.Network != nil {
+			out.Sandbox.Network = &api.NetworkConfig{
+				Enabled:      c.Sandbox.Network.Enabled,
+				AllowedHosts: &c.Sandbox.Network.AllowedHosts,
+			}
+		}
+	}
+	return out
+}
+
+// fromAPIAgentConfig converts an API AgentConfig to the internal representation.
+func fromAPIAgentConfig(a api.AgentConfig) config.AgentConfig {
+	out := config.AgentConfig{PrePrompt: a.PrePrompt}
+	if a.SharedMounts != nil {
+		out.SharedMounts = *a.SharedMounts
+	}
+	if a.Sandbox != nil {
+		sb := &config.SandboxConfig{}
+		if a.Sandbox.WritablePaths != nil {
+			sb.WritablePaths = *a.Sandbox.WritablePaths
+		}
+		if a.Sandbox.MaskedPaths != nil {
+			sb.MaskedPaths = *a.Sandbox.MaskedPaths
+		}
+		if a.Sandbox.RestoreRo != nil {
+			sb.RestoreRO = *a.Sandbox.RestoreRo
+		}
+		if a.Sandbox.Network != nil {
+			sb.Network = &config.NetworkConfig{Enabled: a.Sandbox.Network.Enabled}
+			if a.Sandbox.Network.AllowedHosts != nil {
+				sb.Network.AllowedHosts = *a.Sandbox.Network.AllowedHosts
+			}
+		}
+		out.Sandbox = sb
+	}
+	return out
 }
 
 func (s *Server) SaveConfig(_ context.Context, request api.SaveConfigRequestObject) (api.SaveConfigResponseObject, error) {
@@ -403,38 +425,15 @@ func (s *Server) SaveConfig(_ context.Context, request api.SaveConfigRequestObje
 		return nil, errtrace.Wrap(err)
 	}
 
-	var defaultSm []string
-	if request.Body.Defaults.SharedMounts != nil {
-		defaultSm = *request.Body.Defaults.SharedMounts
-	}
-
 	newCfg := config.Config{
-		Defaults: config.AgentConfig{
-			Dockerfile:           request.Body.Defaults.Dockerfile,
-			DockerfileContents:   request.Body.Defaults.DockerfileContents,
-			DockerignoreContents: request.Body.Defaults.DockerignoreContents,
-			SharedMounts:         defaultSm,
-			Context:              request.Body.Defaults.Context,
-			PrePrompt:            request.Body.Defaults.PrePrompt,
-		},
-		Agents: make(map[string]config.AgentConfig),
+		Defaults: fromAPIAgentConfig(request.Body.Defaults),
+		Agents:   make(map[string]config.AgentConfig),
 	}
 	if request.Body.Features != nil && request.Body.Features.TerminalBash != nil {
 		newCfg.Features.TerminalBash = *request.Body.Features.TerminalBash
 	}
 	for name, agent := range request.Body.Agents {
-		var sm []string
-		if agent.SharedMounts != nil {
-			sm = *agent.SharedMounts
-		}
-		newCfg.Agents[name] = config.AgentConfig{
-			Dockerfile:           agent.Dockerfile,
-			DockerfileContents:   agent.DockerfileContents,
-			DockerignoreContents: agent.DockerignoreContents,
-			SharedMounts:         sm,
-			Context:              agent.Context,
-			PrePrompt:            agent.PrePrompt,
-		}
+		newCfg.Agents[name] = fromAPIAgentConfig(agent)
 	}
 
 	scope := api.SaveConfigParamsScopeProject
@@ -490,11 +489,11 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 		return nil, errtrace.Wrap(err)
 	}
 	log.Printf("api: spawn agent request: id=%q, type=%v, project=%q", request.Body.Id, request.Body.AgentType, projectRoot)
-	var agentType docker.AgentType
+	var agentType sandbox.AgentType
 	if request.Body.AgentType != nil && *request.Body.AgentType != "" {
-		agentType = docker.AgentType(*request.Body.AgentType)
+		agentType = sandbox.AgentType(*request.Body.AgentType)
 	}
-	if agentType != docker.AgentTypeClaude && agentType != docker.AgentTypeGemini && agentType != docker.AgentTypeBash && agentType != docker.AgentTypeCopilot {
+	if agentType != sandbox.AgentTypeClaude && agentType != sandbox.AgentTypeGemini && agentType != sandbox.AgentTypeBash && agentType != sandbox.AgentTypeCopilot {
 		return api.SpawnAgent400JSONResponse{
 			Code:    400,
 			Error:   api.ErrorResponseErrorBadRequest,
@@ -507,35 +506,10 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 		return nil, errtrace.Wrap(err)
 	}
 
-	resolved := cfg.GetResolvedConfig(string(agentType))
-
 	prePrompt := config.BuildFinalPrePrompt(cfg, string(agentType))
 	prompt := ""
 	if request.Body.Prompt != nil {
 		prompt = strings.TrimSpace(*request.Body.Prompt)
-	}
-
-	// Resolve Dockerfile path and contents
-	dockerfilePath := ""
-	dockerfileContents := ""
-	dockerignoreContents := ""
-	var sharedMounts []string
-	if resolved.Dockerfile != nil {
-		dockerfilePath = *resolved.Dockerfile
-	}
-	if resolved.DockerfileContents != nil {
-		dockerfileContents = *resolved.DockerfileContents
-	}
-	if resolved.DockerignoreContents != nil {
-		dockerignoreContents = *resolved.DockerignoreContents
-	}
-	if resolved.SharedMounts != nil {
-		sharedMounts = resolved.SharedMounts
-	}
-	if dockerfilePath != "" {
-		if _, readErr := os.ReadFile(dockerfilePath); readErr != nil {
-			return nil, errtrace.Wrap(fmt.Errorf("read dockerfile: %w", readErr))
-		}
 	}
 
 	id := strings.TrimSpace(request.Body.Id)
@@ -549,17 +523,13 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 		ephemeral = *request.Body.Ephemeral
 	}
 
-	head, err := heads.SpawnHead(ctx, s.DockerClient, s.DB, projectRoot, heads.SpawnHeadOptions{
-		ID:                   id,
-		PrePrompt:            prePrompt,
-		Prompt:               prompt,
-		AgentType:            agentType,
-		BaseBranch:           baseBranch,
-		DockerfilePath:       dockerfilePath,
-		DockerfileContents:   dockerfileContents,
-		DockerignoreContents: dockerignoreContents,
-		SharedMounts:         sharedMounts,
-		Ephemeral:            ephemeral,
+	head, err := heads.SpawnHead(ctx, s.Sessions, s.DB, projectRoot, heads.SpawnHeadOptions{
+		ID:         id,
+		PrePrompt:  prePrompt,
+		Prompt:     prompt,
+		AgentType:  agentType,
+		BaseBranch: baseBranch,
+		Ephemeral:  ephemeral,
 	})
 	if err != nil {
 		return nil, errtrace.Wrap(err)
@@ -590,7 +560,7 @@ func (s *Server) GetAgent(ctx context.Context, request api.GetAgentRequestObject
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
-	head, err := heads.GetHeadByID(ctx, s.DockerClient, s.DB, projectRoot, request.Id)
+	head, err := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, request.Id)
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
@@ -627,7 +597,7 @@ func (s *Server) MergeAgent(ctx context.Context, request api.MergeAgentRequestOb
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
-	head, err := heads.GetHeadByID(ctx, s.DockerClient, s.DB, projectRoot, request.Id)
+	head, err := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, request.Id)
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
@@ -683,7 +653,7 @@ func (s *Server) MergeAgent(ctx context.Context, request api.MergeAgentRequestOb
 	}
 
 	// Kill cleanup without re-doing the CAS (already in "merging" state).
-	if err := heads.KillHeadNoLock(ctx, s.DockerClient, s.DB, *head); err != nil {
+	if err := heads.KillHeadNoLock(ctx, s.Sessions, s.DB, *head); err != nil {
 		return nil, errtrace.Wrap(err)
 	}
 
@@ -695,7 +665,7 @@ func (s *Server) UpdateAgentFromBase(ctx context.Context, request api.UpdateAgen
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
-	head, err := heads.GetHeadByID(ctx, s.DockerClient, s.DB, projectRoot, request.Id)
+	head, err := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, request.Id)
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
@@ -744,7 +714,7 @@ func (s *Server) RestartAgent(ctx context.Context, request api.RestartAgentReque
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
-	head, err := heads.GetHeadByID(ctx, s.DockerClient, s.DB, projectRoot, request.Id)
+	head, err := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, request.Id)
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
@@ -764,7 +734,7 @@ func (s *Server) RestartAgent(ctx context.Context, request api.RestartAgentReque
 	baseBranch := head.BaseBranch
 
 	// Kill the existing head (container, worktree, branch).
-	if err := heads.KillHead(ctx, s.DockerClient, s.DB, *head); err != nil {
+	if err := heads.KillHead(ctx, s.Sessions, s.DB, *head); err != nil {
 		if errors.Is(err, db.ErrOperationInProgress) {
 			return api.RestartAgent409JSONResponse{
 				Code:    409,
@@ -775,41 +745,22 @@ func (s *Server) RestartAgent(ctx context.Context, request api.RestartAgentReque
 		return nil, errtrace.Wrap(err)
 	}
 
-	// Resolve dockerfile from config (same as SpawnAgent).
-	dockerfilePath := ""
-	dockerfileContents := ""
-	dockerignoreContents := ""
-	var sharedMounts []string
-	if cfg, cfgErr := config.Load(projectRoot); cfgErr == nil {
-		resolved := cfg.GetResolvedConfig(string(agentType))
-		if resolved.Dockerfile != nil {
-			dockerfilePath = *resolved.Dockerfile
-		}
-		if resolved.DockerfileContents != nil {
-			dockerfileContents = *resolved.DockerfileContents
-		}
-		if resolved.DockerignoreContents != nil {
-			dockerignoreContents = *resolved.DockerignoreContents
-		}
-		if resolved.SharedMounts != nil {
-			sharedMounts = resolved.SharedMounts
-		}
-		// Override pre_prompt from config if we didn't already have one stored.
-		if prePrompt == "" && resolved.PrePrompt != nil {
-			prePrompt = *resolved.PrePrompt
+	// Override pre_prompt from config if we didn't already have one stored.
+	if prePrompt == "" {
+		if cfg, cfgErr := config.Load(projectRoot); cfgErr == nil {
+			resolved := cfg.GetResolvedConfig(string(agentType))
+			if resolved.PrePrompt != nil {
+				prePrompt = *resolved.PrePrompt
+			}
 		}
 	}
 
-	newHead, err := heads.SpawnHead(ctx, s.DockerClient, s.DB, projectRoot, heads.SpawnHeadOptions{
-		ID:                   id,
-		PrePrompt:            prePrompt,
-		Prompt:               prompt,
-		AgentType:            agentType,
-		BaseBranch:           baseBranch,
-		DockerfilePath:       dockerfilePath,
-		DockerfileContents:   dockerfileContents,
-		DockerignoreContents: dockerignoreContents,
-		SharedMounts:         sharedMounts,
+	newHead, err := heads.SpawnHead(ctx, s.Sessions, s.DB, projectRoot, heads.SpawnHeadOptions{
+		ID:         id,
+		PrePrompt:  prePrompt,
+		Prompt:     prompt,
+		AgentType:  agentType,
+		BaseBranch: baseBranch,
 	})
 	if err != nil {
 		return nil, errtrace.Wrap(err)
@@ -842,7 +793,7 @@ func (s *Server) KillAgent(ctx context.Context, request api.KillAgentRequestObje
 		return nil, errtrace.Wrap(err)
 	}
 	log.Printf("api: kill agent request: id=%q, project=%q", request.Id, projectRoot)
-	head, err := heads.GetHeadByID(ctx, s.DockerClient, s.DB, projectRoot, request.Id)
+	head, err := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, request.Id)
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
@@ -854,7 +805,7 @@ func (s *Server) KillAgent(ctx context.Context, request api.KillAgentRequestObje
 		}, nil
 	}
 
-	if err := heads.KillHead(ctx, s.DockerClient, s.DB, *head); err != nil {
+	if err := heads.KillHead(ctx, s.Sessions, s.DB, *head); err != nil {
 		if errors.Is(err, db.ErrOperationInProgress) {
 			return api.KillAgent409JSONResponse{
 				Code:    409,
@@ -873,7 +824,7 @@ func (s *Server) GetAgentCommits(ctx context.Context, request api.GetAgentCommit
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
-	head, err := heads.GetHeadByID(ctx, s.DockerClient, s.DB, projectRoot, request.Id)
+	head, err := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, request.Id)
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
@@ -920,7 +871,7 @@ func (s *Server) GetAgentDiff(ctx context.Context, request api.GetAgentDiffReque
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
-	head, err := heads.GetHeadByID(ctx, s.DockerClient, s.DB, projectRoot, request.Id)
+	head, err := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, request.Id)
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
@@ -1114,7 +1065,7 @@ func (s *Server) GetAgentDiffFiles(ctx context.Context, request api.GetAgentDiff
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
-	head, err := heads.GetHeadByID(ctx, s.DockerClient, s.DB, projectRoot, request.Id)
+	head, err := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, request.Id)
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
@@ -1237,19 +1188,11 @@ func (s *Server) CleanBuildCache(ctx context.Context, request api.CleanBuildCach
 		return nil, errtrace.Wrap(err)
 	}
 
-	var agentType docker.AgentType
-	if request.Params.AgentType != nil && *request.Params.AgentType != "" {
-		agentType = docker.AgentType(*request.Params.AgentType)
-	}
-
-	res, err := docker.CleanBuildCache(ctx, s.DockerClient, agentType)
-	if err != nil {
-		return nil, errtrace.Wrap(err)
-	}
-
+	// No-op: the sandbox backend builds no images, so there is nothing to clean.
+	// Retained for API compatibility with the previous Docker backend.
 	return api.CleanBuildCache200JSONResponse{
-		ImagesRemoved:  res.ImagesRemoved,
-		SpaceReclaimed: res.SpaceReclaimed,
+		ImagesRemoved:  0,
+		SpaceReclaimed: 0,
 	}, nil
 }
 
@@ -1258,7 +1201,7 @@ func (s *Server) SendAgentInput(ctx context.Context, request api.SendAgentInputR
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
-	head, err := heads.GetHeadByID(ctx, s.DockerClient, s.DB, projectRoot, request.Id)
+	head, err := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, request.Id)
 	if err != nil {
 		return api.SendAgentInput500JSONResponse{
 			Code:    500,
@@ -1275,32 +1218,17 @@ func (s *Server) SendAgentInput(ctx context.Context, request api.SendAgentInputR
 	}
 
 	text := request.Body.Text
-	if head.AgentType == docker.AgentTypeGemini {
+	if head.AgentType == sandbox.AgentTypeGemini {
 		// Use bracketed paste mode to prevent gemini-cli from interpreting ! as a shell command
 		text = "\x1b[200~" + text + "\x1b[201~"
 	}
 	text += "\r"
 
-	attach, err := s.DockerClient.ContainerAttach(ctx, head.ContainerID, container.AttachOptions{
-		Stream: true,
-		Stdin:  true,
-		Stdout: false,
-		Stderr: false,
-	})
-	if err != nil {
+	if err := s.Sessions.Write(head.ID, []byte(text)); err != nil {
 		return api.SendAgentInput500JSONResponse{
 			Code:    500,
 			Error:   api.ErrorResponseErrorInternalError,
-			Details: "failed to attach to container: " + err.Error(),
-		}, nil
-	}
-	defer attach.Close()
-
-	if _, err := attach.Conn.Write([]byte(text)); err != nil {
-		return api.SendAgentInput500JSONResponse{
-			Code:    500,
-			Error:   api.ErrorResponseErrorInternalError,
-			Details: "failed to write to container stdin: " + err.Error(),
+			Details: "failed to write to agent stdin: " + err.Error(),
 		}, nil
 	}
 

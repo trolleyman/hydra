@@ -1,16 +1,10 @@
 package tui
 
 import (
-	"bufio"
+	"bytes"
 	"context"
 	"crypto/rand"
 	"fmt"
-	"io"
-	"log"
-	"os"
-	"os/exec"
-	"os/user"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -20,15 +14,11 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	dockercontainer "github.com/docker/docker/api/types/container"
-	dockerclient "github.com/docker/docker/client"
-	"github.com/trolleyman/hydra/internal/api"
-	"github.com/trolleyman/hydra/internal/common"
 	"github.com/trolleyman/hydra/internal/config"
 	"github.com/trolleyman/hydra/internal/db"
-	"github.com/trolleyman/hydra/internal/docker"
 	"github.com/trolleyman/hydra/internal/heads"
-	"github.com/trolleyman/hydra/internal/paths"
+	"github.com/trolleyman/hydra/internal/sandbox"
+	"github.com/trolleyman/hydra/internal/session"
 )
 
 // focusPanel identifies which panel currently has keyboard focus.
@@ -41,7 +31,7 @@ const (
 
 // Model is the Bubble Tea model for the Hydra TUI.
 type Model struct {
-	client      *dockerclient.Client
+	reg         *session.Registry
 	store       *db.Store
 	projectRoot string
 	heads       []heads.Head
@@ -84,7 +74,7 @@ type spawnForm struct {
 	promptInput     textinput.Model
 }
 
-var agentTypes = []docker.AgentType{docker.AgentTypeClaude, docker.AgentTypeGemini, docker.AgentTypeCopilot}
+var agentTypes = []sandbox.AgentType{sandbox.AgentTypeClaude, sandbox.AgentTypeGemini, sandbox.AgentTypeCopilot}
 
 func newSpawnForm() spawnForm {
 	id := textinput.New()
@@ -182,10 +172,10 @@ var (
 )
 
 // New creates a new TUI model.
-func New(cli *dockerclient.Client, store *db.Store, projectRoot string) Model {
+func New(reg *session.Registry, store *db.Store, projectRoot string) Model {
 	vp := viewport.New(0, 0)
 	return Model{
-		client:      cli,
+		reg:         reg,
 		store:       store,
 		projectRoot: projectRoot,
 		logViewport: vp,
@@ -203,7 +193,7 @@ func tickCmd() tea.Cmd {
 
 func (m Model) doRefresh() tea.Cmd {
 	return func() tea.Msg {
-		hs, err := heads.ListHeads(context.Background(), m.client, m.store, m.projectRoot)
+		hs, err := heads.ListHeads(context.Background(), m.reg, m.store, m.projectRoot)
 		if err != nil {
 			return errMsg{err}
 		}
@@ -310,7 +300,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if head := m.selectedHead(); head != nil {
 			h := *head
 			return m, func() tea.Msg {
-				if err := heads.KillHead(context.Background(), m.client, m.store, h); err != nil {
+				if err := heads.KillHead(context.Background(), m.reg, m.store, h); err != nil {
 					return errMsg{err}
 				}
 				return killDoneMsg(h.ID)
@@ -364,81 +354,12 @@ func (m Model) resumeSelected() (tea.Model, tea.Cmd) {
 	}
 
 	m.statusMsg = fmt.Sprintf("Resuming %s...", head.ID)
-	oldContainerID := head.ContainerID
 	headCopy := *head
-	client := m.client
-
-	var headBranch, headWorktree string
-	if headCopy.Branch != nil {
-		headBranch = *headCopy.Branch
-	}
-	if headCopy.Worktree != nil {
-		headWorktree = *headCopy.Worktree
-	}
+	reg := m.reg
+	store := m.store
 
 	return m, func() tea.Msg {
-		ctx := context.Background()
-
-		// Remove the old stopped container so we can reuse its name.
-		if err := client.ContainerRemove(ctx, oldContainerID, dockercontainer.RemoveOptions{Force: true}); err != nil {
-			log.Printf("warn: remove container for resume: %v", err)
-		}
-
-		// Look up current user identity for container user creation.
-		u, _ := user.Current()
-		uid, gid, username, groupName := common.ContainerUserInfo(u)
-
-		var sharedMounts []string
-		if cfg, cfgErr := config.Load(headCopy.ProjectPath); cfgErr == nil {
-			resolved := cfg.GetResolvedConfig(string(headCopy.AgentType))
-			if resolved.SharedMounts != nil {
-				sharedMounts = resolved.SharedMounts
-			}
-		}
-
-		buildLogPath := paths.GetBuildLogFromProjectRoot(headCopy.ProjectPath, headCopy.ID)
-		if err := os.MkdirAll(filepath.Dir(buildLogPath), 0755); err != nil {
-			log.Printf("warn: failed to create build log directory: %v", err)
-		}
-		buildLogFile, err := os.Create(buildLogPath)
-		if err != nil {
-			log.Printf("warn: failed to create build log file %s: %v", buildLogPath, err)
-		} else {
-			defer buildLogFile.Close()
-		}
-
-		_, err = docker.SpawnAgent(ctx, client, docker.SpawnOptions{
-			Id:             headCopy.ID,
-			AgentType:      headCopy.AgentType,
-			SharedMounts:   sharedMounts,
-			PrePrompt:      headCopy.PrePrompt,
-			Prompt:         headCopy.Prompt,
-			ProjectPath:    headCopy.ProjectPath,
-			WorktreePath:   headWorktree,
-			BranchName:     headBranch,
-			BaseBranch:     headCopy.BaseBranch,
-			GitAuthorName:  os.Getenv("GIT_AUTHOR_NAME"),
-			GitAuthorEmail: os.Getenv("GIT_AUTHOR_EMAIL"),
-			UID:            uid,
-			GID:            gid,
-			Username:       username,
-			GroupName:      groupName,
-			Resume:         true,
-			BuildLog:       buildLogFile,
-			OnStatus: func(status api.AgentStatus) {
-				s := heads.ReadAgentStatus(headCopy.ProjectPath, headCopy.ID)
-				if s == nil {
-					e := "polling"
-					s = &api.AgentStatusInfo{
-						Event: &e,
-					}
-				}
-				s.Status = status
-				s.Timestamp = time.Now().Format(time.RFC3339)
-				_ = heads.WriteAgentStatus(headCopy.ProjectPath, headCopy.ID, s)
-			},
-		})
-		if err != nil {
+		if err := heads.ResumeHead(reg, store, headCopy.ProjectPath, headCopy, 24, 80); err != nil {
 			return errMsg{err}
 		}
 		return resumeDoneMsg(headCopy.ID)
@@ -512,7 +433,7 @@ func (m Model) updateSpawnForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.statusMsg = fmt.Sprintf("Spawning agent %s...", id)
 
 			return m, func() tea.Msg {
-				if err := spawnHead(projectRoot, id, agentType, dockerfilePath, promptText, m.client, m.store); err != nil {
+				if err := spawnHead(projectRoot, id, agentType, dockerfilePath, promptText, m.reg, m.store); err != nil {
 					return errMsg{err}
 				}
 				return spawnDoneMsg(id)
@@ -778,32 +699,34 @@ func waitForLog(id string, ch <-chan string) tea.Cmd {
 	}
 }
 
-// startLogStream cancels any existing log stream and starts a new one for containerID.
-func startLogStream(m Model, containerID string) (Model, tea.Cmd) {
+// startLogStream cancels any existing log stream and starts a new one for the head.
+func startLogStream(m Model, id string) (Model, tea.Cmd) {
 	if m.logCancel != nil {
 		m.logCancel()
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	m.logCancel = cancel
-	m.logForID = containerID
+	m.logForID = id
 	m.logLines = nil
 	m.logDone = false
 	m.logViewport.SetContent(dimStyle.Render("Loading logs…"))
 
-	ch := streamDockerLogs(ctx, containerID)
+	ch := streamSessionOutput(ctx, m.reg, id)
 	m.logChan = ch
-	return m, waitForLog(containerID, ch)
+	return m, waitForLog(id, ch)
 }
 
 // syncLogStream checks whether the log stream matches the currently selected head
 // and restarts it if necessary.
 func syncLogStream(m Model) (Model, tea.Cmd) {
 	head := m.selectedHead()
-	var containerID string
+	var id string
+	running := false
 	if head != nil {
-		containerID = head.ContainerID
+		id = head.ID
+		running = isContainerRunning(head.ContainerStatus)
 	}
-	if containerID == "" {
+	if id == "" || !running {
 		if m.logCancel != nil {
 			m.logCancel()
 			m.logCancel = nil
@@ -811,46 +734,59 @@ func syncLogStream(m Model) (Model, tea.Cmd) {
 		m.logForID = ""
 		m.logLines = nil
 		m.logDone = false
-		m.logViewport.SetContent(dimStyle.Render("No container"))
+		if head == nil {
+			m.logViewport.SetContent(dimStyle.Render("No agent selected"))
+		} else {
+			m.logViewport.SetContent(dimStyle.Render("Agent not running — press [r] to resume"))
+		}
 		return m, nil
 	}
-	if containerID == m.logForID {
+	if id == m.logForID {
 		return m, nil // already streaming
 	}
-	return startLogStream(m, containerID)
+	return startLogStream(m, id)
 }
 
-// streamDockerLogs runs `docker logs --follow` in a goroutine and feeds lines into the returned channel.
-func streamDockerLogs(ctx context.Context, containerID string) <-chan string {
+// streamSessionOutput attaches to the registry session and feeds output lines
+// into the returned channel.
+func streamSessionOutput(ctx context.Context, reg *session.Registry, id string) <-chan string {
 	ch := make(chan string, 200)
 	go func() {
 		defer close(ch)
-
-		pr, pw := io.Pipe()
-		cmd := exec.CommandContext(ctx, "docker", "logs", "--follow", "--tail", "500", containerID)
-		cmd.Stdout = pw
-		cmd.Stderr = pw
-
-		if err := cmd.Start(); err != nil {
-			log.Printf("docker logs start: %v", err)
-			_ = pw.Close()
+		if reg == nil {
 			return
 		}
+		att, err := reg.Attach(id, 24, 80)
+		if err != nil {
+			return
+		}
+		defer att.Close()
 
-		// Close the write-end of the pipe when the process exits.
-		go func() {
-			_ = cmd.Wait()
-			_ = pw.Close()
-		}()
-
-		scanner := bufio.NewScanner(pr)
-		scanner.Buffer(make([]byte, 1<<16), 1<<16)
-		for scanner.Scan() {
+		var buf []byte
+		for {
 			select {
-			case ch <- scanner.Text():
 			case <-ctx.Done():
-				_ = pr.Close()
 				return
+			case <-att.Done:
+				return
+			case data, ok := <-att.Output:
+				if !ok {
+					return
+				}
+				buf = append(buf, data...)
+				for {
+					i := bytes.IndexByte(buf, '\n')
+					if i < 0 {
+						break
+					}
+					line := string(buf[:i])
+					buf = buf[i+1:]
+					select {
+					case ch <- line:
+					case <-ctx.Done():
+						return
+					}
+				}
 			}
 		}
 	}()
@@ -910,34 +846,16 @@ func isContainerRunning(status string) bool {
 	return strings.HasPrefix(s, "up") || s == "running"
 }
 
-func spawnHead(projectRoot, id string, agentType docker.AgentType, dockerfilePath, prompt string, cli *dockerclient.Client, store *db.Store) error {
-	var dockerfileContents string
-	var dockerignoreContents string
-	var sharedMounts []string
+func spawnHead(projectRoot, id string, agentType sandbox.AgentType, dockerfilePath, prompt string, reg *session.Registry, store *db.Store) error {
+	prePrompt := ""
 	if cfg, err := config.Load(projectRoot); err == nil {
-		resolved := cfg.GetResolvedConfig(string(agentType))
-		if dockerfilePath == "" && resolved.Dockerfile != nil {
-			dockerfilePath = *resolved.Dockerfile
-		}
-		if resolved.DockerfileContents != nil {
-			dockerfileContents = *resolved.DockerfileContents
-		}
-		if resolved.DockerignoreContents != nil {
-			dockerignoreContents = *resolved.DockerignoreContents
-		}
-		if resolved.SharedMounts != nil {
-			sharedMounts = resolved.SharedMounts
-		}
+		prePrompt = config.BuildFinalPrePrompt(cfg, string(agentType))
 	}
-
-	_, err := heads.SpawnHead(context.Background(), cli, store, projectRoot, heads.SpawnHeadOptions{
-		ID:                   id,
-		AgentType:            agentType,
-		DockerfilePath:       dockerfilePath,
-		DockerfileContents:   dockerfileContents,
-		DockerignoreContents: dockerignoreContents,
-		SharedMounts:         sharedMounts,
-		Prompt:               prompt,
+	_, err := heads.SpawnHead(context.Background(), reg, store, projectRoot, heads.SpawnHeadOptions{
+		ID:        id,
+		AgentType: agentType,
+		PrePrompt: prePrompt,
+		Prompt:    prompt,
 	})
 	return errtrace.Wrap(err)
 }

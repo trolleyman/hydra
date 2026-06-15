@@ -1,0 +1,139 @@
+//go:build linux
+
+package sandbox
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+// argIndex returns the index of the first occurrence of want in args, or -1.
+func argIndex(args []string, want string) int {
+	for i, a := range args {
+		if a == want {
+			return i
+		}
+	}
+	return -1
+}
+
+// hasPair reports whether args contains flag followed immediately by a, then b.
+func hasPair(args []string, flag, a, b string) bool {
+	for i := 0; i+2 < len(args); i++ {
+		if args[i] == flag && args[i+1] == a && args[i+2] == b {
+			return true
+		}
+	}
+	return false
+}
+
+func TestBuildSpecLinux(t *testing.T) {
+	home := t.TempDir()
+	work := filepath.Join(home, "work")
+	cache := filepath.Join(home, ".cache")
+	secret := filepath.Join(home, ".ssh")
+	gitcfg := filepath.Join(home, ".config", "git")
+	for _, d := range []string{work, cache, secret, gitcfg} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	opts := Options{
+		AgentType:     AgentTypeClaude,
+		WorktreePath:  work,
+		Home:          home,
+		WritablePaths: []string{"~/.cache", "~/.does-not-exist"},
+		MaskedPaths:   []string{"~/.ssh", "~/.config"},
+		RestoreRO:     []string{"~/.config/git"},
+		Network:       NetworkPolicy{Enabled: false},
+		HardenGUI:     true,
+		Seccomp:       false,
+		Argv:          []string{"claude", "--dangerously-skip-permissions"},
+	}
+
+	spec, err := BuildSpec(opts)
+	if err != nil {
+		t.Fatalf("BuildSpec: %v", err)
+	}
+	defer spec.Cleanup()
+	args := spec.Args
+
+	if !strings.HasSuffix(spec.Path, "bwrap") {
+		t.Errorf("Path = %q, want .../bwrap", spec.Path)
+	}
+	if !hasPair(args, "--ro-bind", "/", "/") {
+		t.Error("missing --ro-bind / /")
+	}
+	// Worktree must be writable.
+	if !hasPair(args, "--bind", work, work) {
+		t.Error("worktree not bound writable")
+	}
+	// Existing writable path bound; non-existent one skipped.
+	if !hasPair(args, "--bind", cache, cache) {
+		t.Error("~/.cache not bound writable")
+	}
+	if argIndex(args, filepath.Join(home, ".does-not-exist")) != -1 {
+		t.Error("non-existent writable path should be skipped")
+	}
+	// Masked dir -> tmpfs.
+	if !hasPair2(args, "--tmpfs", secret) {
+		t.Error("~/.ssh not masked with tmpfs")
+	}
+	// Restore RO applied after mask.
+	maskIdx := pairIndex(args, "--tmpfs", filepath.Join(home, ".config"))
+	restoreIdx := pairIndex(args, "--ro-bind", gitcfg)
+	if maskIdx == -1 || restoreIdx == -1 {
+		t.Fatalf("expected mask(%d) and restore(%d) present", maskIdx, restoreIdx)
+	}
+	if restoreIdx < maskIdx {
+		t.Error("restore must come after mask")
+	}
+	// Network disabled.
+	if argIndex(args, "--unshare-net") == -1 {
+		t.Error("expected --unshare-net when network disabled")
+	}
+	// chdir to worktree.
+	if !hasPair2(args, "--chdir", work) {
+		t.Error("missing --chdir worktree")
+	}
+	// Argv after --.
+	dashIdx := argIndex(args, "--")
+	if dashIdx == -1 || args[len(args)-1] != "--dangerously-skip-permissions" {
+		t.Error("argv not appended after --")
+	}
+	// GUI hardening unsets DISPLAY.
+	if !hasPair2(args, "--unsetenv", "DISPLAY") {
+		t.Error("expected --unsetenv DISPLAY with HardenGUI")
+	}
+}
+
+func TestBuildSpecNetworkEnabled(t *testing.T) {
+	home := t.TempDir()
+	opts := Options{Home: home, WorktreePath: home, Network: NetworkPolicy{Enabled: true}, Argv: []string{"true"}}
+	spec, err := BuildSpec(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer spec.Cleanup()
+	if argIndex(spec.Args, "--unshare-net") != -1 {
+		t.Error("should not unshare net when network enabled")
+	}
+}
+
+// hasPair2 reports whether args contains flag immediately followed by a.
+func hasPair2(args []string, flag, a string) bool {
+	return pairIndex(args, flag, a) != -1
+}
+
+// pairIndex returns the index of flag where it is immediately followed by a.
+func pairIndex(args []string, flag, a string) int {
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == flag && args[i+1] == a {
+			return i
+		}
+	}
+	return -1
+}

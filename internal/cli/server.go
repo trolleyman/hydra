@@ -3,19 +3,18 @@ package cli
 import (
 	"context"
 	"log"
+	"net"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"braces.dev/errtrace"
 	"github.com/spf13/cobra"
 	"github.com/trolleyman/hydra/internal/api"
-	"github.com/trolleyman/hydra/internal/db"
-	"github.com/trolleyman/hydra/internal/docker"
-	"github.com/trolleyman/hydra/internal/heads"
 	httppkg "github.com/trolleyman/hydra/internal/http"
 	"github.com/trolleyman/hydra/internal/paths"
-	"github.com/trolleyman/hydra/internal/projects"
 )
 
 var simulationMode bool
@@ -40,86 +39,59 @@ func runServer(_ *cobra.Command, _ []string) error {
 	if err != nil {
 		log.Fatalf("Resolve project root: %v", err)
 	}
-	worktreesDir := paths.GetWorktreesDirFromProjectRoot(projectRoot)
 
-	log.Printf("Worktrees: %s", worktreesDir)
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
 
-	dockerClient, err := docker.NewClient()
+	rt, err := setupRuntime(ctx, projectRoot)
 	if err != nil {
-		log.Fatalf("Create docker client: %v", err)
+		return errtrace.Wrap(err)
 	}
-
-	store, err := db.Open(projectRoot)
-	if err != nil {
-		log.Fatalf("Open database: %v", err)
-	}
-	log.Printf("Database: %s", paths.GetDBPathFromProjectRoot(projectRoot))
-
-	pm, err := projects.NewManager()
-	if err != nil {
-		log.Fatalf("Create projects manager: %v", err)
-	}
-
-	// Register the CWD project so it appears in the dropdown.
-	defaultProject, err := pm.AddProject(projectRoot)
-	if err != nil {
-		log.Fatalf("Register default project: %v", err)
-	}
-	log.Printf("Default project: %s (%s)", defaultProject.Name, defaultProject.ID)
-
-	ctx := context.Background()
-
-	server := &httppkg.Server{
-		WorktreesDir:    worktreesDir,
-		ProjectRoot:     projectRoot,
-		DefaultProject:  defaultProject,
-		ProjectsManager: pm,
-		DockerClient:    dockerClient,
-		DB:              store,
-		StartTime:       time.Now(),
-		Development:     os.Getenv("HYDRA_DEV_RESTART") == "1",
-	}
-
-	// Prune stale soft-deleted agent records (older than 30 days) at startup.
-	if err := store.PruneDeletedAgents(30 * 24 * time.Hour); err != nil {
-		log.Printf("warn: prune deleted agents: %v", err)
-	}
-
-	// Run immediate first cycles of both pollers before accepting HTTP requests.
-	heads.RunDockerPollerOnce(ctx, dockerClient, store, projectRoot, server.SetDockerError)
-	heads.RunJSONStatusPollerOnce(store, projectRoot)
-
-	// Start background pollers.
-	go heads.RunDockerPoller(ctx, dockerClient, store, projectRoot, server.SetDockerError)
-	go heads.RunJSONStatusPoller(ctx, store, projectRoot)
-
-	// Build the main mux
-	mux := http.NewServeMux()
-
-	// Register API routes (body capped at 10 MB to prevent abuse)
-	apiHandler := httppkg.RequestBodyLimitMiddleware(10 * 1024 * 1024)(httppkg.NewHandler(server))
-	mux.Handle("/api/", apiHandler)
-	mux.Handle("/health", apiHandler)
-
-	// WebSocket terminal endpoint
-	mux.HandleFunc("/ws/projects/{project_id}/agents/{id}/terminal", server.HandleTerminalWS)
-
-	// API routes for well-known and specific paths
-	mux.Handle("/.well-known/", apiHandler)
-
-	registerFrontend(mux)
 
 	addr := "localhost:8080"
 	if envAddr := os.Getenv("HYDRA_API_ADDR"); envAddr != "" {
 		addr = envAddr
 	}
-	log.Printf("Server starting on http://%s", addr)
 	srv := &http.Server{
 		Addr:           addr,
-		Handler:        httppkg.LoggingMiddleware(mux),
+		Handler:        rt.handler,
 		MaxHeaderBytes: 1 << 20, // 1 MB
 	}
-	return errtrace.Wrap(srv.ListenAndServe())
+
+	// Also serve the daemon control socket so CLI commands (spawn/attach/list)
+	// share this process's session registry — agents started from the CLI show
+	// up in the web UI and vice versa. Takes over any existing daemon.
+	cleanup, err := serveUnixSocket(ctx, srv, projectRoot)
+	if err != nil {
+		return errtrace.Wrap(err)
+	}
+	defer cleanup()
+
+	tcpLn, err := net.Listen("tcp", addr)
+	if err != nil {
+		return errtrace.Wrap(err)
+	}
+	log.Printf("Server starting on http://%s", addr)
+
+	serveErr := make(chan error, 1)
+	go func() { serveErr <- srv.Serve(tcpLn) }()
+
+	// Wait for a signal or a fatal serve error, then shut down cleanly so the
+	// port + control socket are released (avoids orphaned servers holding :8080).
+	select {
+	case <-ctx.Done():
+		log.Printf("server: shutting down")
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		rt.reg.StopAll()
+		_ = srv.Shutdown(shutdownCtx)
+		return nil
+	case err := <-serveErr:
+		if err == http.ErrServerClosed {
+			return nil
+		}
+		return errtrace.Wrap(err)
+	}
 }
 
 func runSimulationServer() error {

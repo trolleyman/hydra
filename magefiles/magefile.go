@@ -404,35 +404,45 @@ func Tidy() error {
 }
 
 func addGoBuildDeps() {
-	mg.Deps(BuildWeb, GenerateGo, BuildLinuxBinary)
+	mg.Deps(BuildWeb, GenerateGo)
 }
 
-// goBuildTags returns the extra go tool flags needed for the current platform.
-// On non-Linux hosts this activates embedding of the cross-compiled Linux binary.
-func goBuildTags(forceIgnoreLinuxBinary bool, extra ...string) []string {
-	var tags []string
-	if !forceIgnoreLinuxBinary && runtime.GOOS != "linux" {
-		tags = append(tags, "hydra_embed_linux_binary")
-	}
-	tags = append(tags, extra...)
-	if len(tags) == 0 {
+// goBuildTags returns the extra go tool flags for the build. The agent now runs
+// natively on the host (no cross-compiled embedded binary), so only explicit
+// extra tags are honored.
+func goBuildTags(_ bool, extra ...string) []string {
+	if len(extra) == 0 {
 		return nil
 	}
-	return []string{"-tags", strings.Join(tags, ",")}
+	return []string{"-tags", strings.Join(extra, ",")}
 }
 
-// BuildLinuxBinary cross-compiles hydra for linux/GOARCH and writes the result
-// to internal/docker/hydra-linux so it can be embedded by the main build.
-// No-op on Linux hosts.
-func BuildLinuxBinary() error {
-	if runtime.GOOS == "linux" {
-		return nil
+// GenSeccomp compiles the seccomp-BPF generator and regenerates the embedded
+// blocklist blob for the host architecture (internal/sandbox/seccomp/seccomp_<arch>.bin).
+// Run it once per target architecture; the blob is consumed by the Linux
+// sandbox via bwrap's --seccomp <fd>. Requires a C compiler and libseccomp.
+func GenSeccomp() error {
+	if runtime.GOOS != "linux" {
+		return errtrace.Wrap(errors.New("GenSeccomp must run on Linux"))
 	}
-	output := filepath.Join("internal", "docker", "hydra-linux")
-	return errtrace.Wrap(runWithEnv(
-		map[string]string{"GOOS": "linux", "GOARCH": runtime.GOARCH},
-		"go", "build", "-o", output, ".",
-	))
+	dir := filepath.Join("internal", "sandbox", "seccomp")
+	src := filepath.Join(dir, "seccomp-gen.c")
+	gen := filepath.Join(os.TempDir(), "hydra-seccomp-gen")
+	out := filepath.Join(dir, fmt.Sprintf("seccomp_%s.bin", runtime.GOARCH))
+
+	if err := sh.RunV("cc", "-O2", "-o", gen, src, "-lseccomp"); err != nil {
+		return errtrace.Wrap(fmt.Errorf("compile seccomp generator (need cc + libseccomp-dev): %w", err))
+	}
+	// Capture raw bytes (the BPF blob is binary; do not trim).
+	blob, err := exec.Command(gen).Output()
+	if err != nil {
+		return errtrace.Wrap(fmt.Errorf("run seccomp generator: %w", err))
+	}
+	if err := os.WriteFile(out, blob, 0o644); err != nil {
+		return errtrace.Wrap(fmt.Errorf("write %s: %w", out, err))
+	}
+	log.Printf("wrote %s (%d bytes)", out, len(blob))
+	return nil
 }
 
 func Run() error {
@@ -563,7 +573,6 @@ func getGoSourceModTime() (time.Time, error) {
 
 	// generatedFiles are produced by the build itself and must not trigger a rebuild.
 	generatedFiles := map[string]struct{}{
-		filepath.Join("internal", "docker", "hydra-linux"): {},
 	}
 
 	check := func(path string, info os.FileInfo, err error) error {
@@ -628,9 +637,6 @@ func Dev() error {
 		if err := GenerateGo(); err != nil {
 			return errtrace.Wrap(err)
 		}
-		if err := BuildLinuxBinary(); err != nil {
-			return errtrace.Wrap(err)
-		}
 		if err := BuildWeb(); err != nil {
 			return errtrace.Wrap(err)
 		}
@@ -671,9 +677,6 @@ func Dev() error {
 func DevFast() error {
 	os.Setenv("HYDRA_DEV_BUILD", "1")
 	if err := GenerateGo(); err != nil {
-		return errtrace.Wrap(err)
-	}
-	if err := BuildLinuxBinary(); err != nil {
 		return errtrace.Wrap(err)
 	}
 	if err := BuildWeb(); err != nil {
@@ -739,9 +742,6 @@ func DevFast() error {
 				if err := GenerateGo(); err != nil {
 					fmt.Printf("GenerateGo error: %v\n", err)
 					time.Sleep(2 * time.Second)
-				} else if err := BuildLinuxBinary(); err != nil {
-					fmt.Printf("BuildLinuxBinary error: %v\n", err)
-					time.Sleep(2 * time.Second)
 				} else if err := BuildWeb(); err != nil {
 					fmt.Printf("BuildWeb error: %v\n", err)
 					time.Sleep(2 * time.Second)
@@ -765,9 +765,6 @@ func DevAutoReload() error {
 	os.Setenv("HYDRA_DEV_BUILD", "1")
 	// Ensure generated Go code is up to date.
 	if err := GenerateGo(); err != nil {
-		return errtrace.Wrap(err)
-	}
-	if err := BuildLinuxBinary(); err != nil {
 		return errtrace.Wrap(err)
 	}
 	// Build the frontend once to ensure web/dist/ exists for Go compilation.
@@ -844,11 +841,6 @@ func DevAutoReload() error {
 
 			if err := GenerateGo(); err != nil {
 				fmt.Printf("GenerateGo error: %v\n", err)
-				time.Sleep(2 * time.Second)
-				continue
-			}
-			if err := BuildLinuxBinary(); err != nil {
-				fmt.Printf("BuildLinuxBinary error: %v\n", err)
 				time.Sleep(2 * time.Second)
 				continue
 			}
@@ -949,10 +941,6 @@ func Demo() error {
 	if err := GenerateGo(); err != nil {
 		return errtrace.Wrap(err)
 	}
-	// We don't need to build the Linux binary
-	// if err := BuildLinuxBinary(); err != nil {
-	// 	return errtrace.Wrap(err)
-	// }
 	// Build the frontend once to ensure web/dist/ exists for Go compilation.
 	if err := BuildWeb(); err != nil {
 		return errtrace.Wrap(err)
