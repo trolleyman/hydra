@@ -24,3 +24,4 @@
 14. [ ] Fix the uncommitted-changes button breaking the diff-header layout — it adds a new line that splits the left buttons from the settings button (likely the tooltip).
 15. [ ] Make the expand-lines buttons work in demo mode (may need a new API endpoint).
 16. [ ] Fix diff-viewer comments: the add-comment button is half-clipped (overflow / z-index), the comment dialog flickers in and out, and Ctrl/Cmd+Enter doesn't submit. Render the comment inline by splitting the diff (GitLab-style) so the diff and the comment box are visible at the same time.
+17. [ ] Custom things that can be shown in both versions that have changed, without having to store them in the index - e.g. screenshots. Only show if they're different. This should be configurable by project.
