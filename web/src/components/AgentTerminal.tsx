@@ -13,6 +13,7 @@ interface PaneProps {
   sandboxed: boolean
   active: boolean
   reconnectAttempt: number
+  forceRedrawAttempt: number
   onStatusUpdate?: (status: string) => void
   onDiffRefresh?: () => void
 }
@@ -31,7 +32,7 @@ function getWsUrl(agentId: string, projectId: string | null, shell?: boolean, sa
   return `${protocol}//${host}/ws/projects/${pid}/agents/${encodeURIComponent(agentId)}/terminal${qs}`
 }
 
-function TerminalPane({ agentId, projectId, shell, sandboxed, active, reconnectAttempt, onStatusUpdate, onDiffRefresh }: PaneProps) {
+function TerminalPane({ agentId, projectId, shell, sandboxed, active, reconnectAttempt, forceRedrawAttempt, onStatusUpdate, onDiffRefresh }: PaneProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<Terminal | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
@@ -58,6 +59,32 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, active, reconnectA
       }
     }, 0)
   }, [active])
+
+  // Force a clean repaint of the live session (Refresh button). TUI apps like
+  // Claude Code (Ink) repaint in place using a cached row count; shrinking the
+  // width by even one column can throw that accounting off and corrupt the
+  // layout for the rest of the session. Recover by wiping xterm's buffer and
+  // wiggling the PTY size so the app receives two distinct SIGWINCHes and does a
+  // full redraw. We go *bigger* first (never re-triggers the shrink bug) and
+  // wait well past Ink's resize debounce so the two events aren't coalesced.
+  useEffect(() => {
+    if (!forceRedrawAttempt) return // skip the initial mount (attempt 0)
+    const fitAddon = fitAddonRef.current
+    const term = termRef.current
+    const ws = wsRef.current
+    if (!fitAddon || !term || ws?.readyState !== WebSocket.OPEN) return
+    fitAddon.fit()
+    const { cols, rows } = term
+    if (cols <= 0 || rows <= 0) return
+    ws.send(JSON.stringify({ type: 'resize', cols: cols + 2, rows }))
+    const timer = setTimeout(() => {
+      if (ws.readyState !== WebSocket.OPEN) return
+      term.clear() // drop garbled scrollback before the app repaints
+      ws.send(JSON.stringify({ type: 'resize', cols, rows }))
+      lastSentSize.current = { cols, rows }
+    }, 150)
+    return () => clearTimeout(timer)
+  }, [forceRedrawAttempt])
 
   useEffect(() => {
     // If a kill was scheduled, cancel it because we are remounting
@@ -115,15 +142,17 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, active, reconnectA
 
     ws.onopen = () => {
       const { cols, rows } = term
-      // Send a slightly smaller resize first, then the actual size.
-      // This forces SIGWINCH to fire twice, causing the terminal app to fully redraw.
-      ws.send(JSON.stringify({ type: 'resize', cols: Math.max(1, cols - 1), rows: Math.max(1, rows - 1) }))
+      // Send a slightly larger resize first, then the actual size, so the app
+      // receives two distinct SIGWINCHes and fully redraws. The gap must clear
+      // the app's resize debounce (Ink coalesces events ~10ms apart), and we go
+      // larger first so the intermediate size never triggers the shrink bug.
+      ws.send(JSON.stringify({ type: 'resize', cols: cols + 1, rows }))
       setTimeout(() => {
         if (ws.readyState === WebSocket.OPEN) {
           ws.send(JSON.stringify({ type: 'resize', cols, rows }))
           lastSentSize.current = { cols, rows }
         }
-      }, 10)
+      }, 150)
     }
 
     ws.onmessage = (e: MessageEvent) => {
@@ -283,6 +312,7 @@ export function AgentTerminal({ agentId, projectId, bashEnabled, onRefresh, onSt
   const [tabs, setTabs] = useState<TabConfig[]>([{ id: 'terminal', label: 'Terminal', shell: false, sandboxed: true }])
   const [activeTabId, setActiveTabId] = useState('terminal')
   const [reconnectKeys, setReconnectKeys] = useState<Record<string, number>>({})
+  const [forceRedrawKeys, setForceRedrawKeys] = useState<Record<string, number>>({})
   const [status, setStatus] = useState<string>('pending')
   const [shellMenuOpen, setShellMenuOpen] = useState(false)
 
@@ -314,15 +344,20 @@ export function AgentTerminal({ agentId, projectId, bashEnabled, onRefresh, onSt
       delete next[id]
       return next
     })
+    setForceRedrawKeys(prev => {
+      const next = { ...prev }
+      delete next[id]
+      return next
+    })
   }
 
+  // Refresh: force a clean repaint of the live session without tearing down the
+  // WebSocket (see the force-redraw effect in TerminalPane). This fixes the
+  // common case where resizing the terminal corrupts a TUI app's layout.
   function reconnectActive() {
-    isRefreshingRef.current = true
-    setReconnectKeys(prev => ({ ...prev, [activeTabId]: (prev[activeTabId] ?? 0) + 1 }))
+    setForceRedrawKeys(prev => ({ ...prev, [activeTabId]: (prev[activeTabId] ?? 0) + 1 }))
     onRefresh?.()
   }
-
-  const isRefreshingRef = useRef(false)
 
   const isRunning = status === AgentStatus.RUNNING || status === AgentStatus.STARTING
   const isWaiting = status === AgentStatus.WAITING
@@ -445,6 +480,7 @@ export function AgentTerminal({ agentId, projectId, bashEnabled, onRefresh, onSt
             sandboxed={tab.sandboxed}
             active={activeTabId === tab.id}
             reconnectAttempt={reconnectKeys[tab.id] ?? 0}
+            forceRedrawAttempt={forceRedrawKeys[tab.id] ?? 0}
             onStatusUpdate={tab.id === 'terminal' ? handleStatusUpdate : undefined}
             onDiffRefresh={tab.id === 'terminal' ? onDiffRefresh : undefined}
           />
