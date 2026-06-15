@@ -1,0 +1,12 @@
+{
+  "name": "hydra-screenshots",
+  "private": true,
+  "type": "module",
+  "description": "Diff-viewer artifact generator: renders Hydra's web UI to PNGs (see ../../.hydra/config.toml [[artifacts]]).",
+  "scripts": {
+    "screenshot": "bun take-screenshot.ts"
+  },
+  "dependencies": {
+    "playwright": "1.60.0"
+  }
+}
