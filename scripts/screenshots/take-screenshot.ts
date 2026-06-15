@@ -149,6 +149,10 @@ try {
       path: string
       scrollTo?: string
       viewport?: { width: number; height: number }
+      // Seeds the diff viewer's image-diff comparison mode ('hydra-diff-image-mode')
+      // before the app boots, so the artifacts panel renders before/after pairs in
+      // the chosen mode. Only meaningful on the artifacts (agent-1) page.
+      imageDiffMode?: 'side-by-side' | 'ab' | 'slider' | 'onion'
     }[] = [
       { name: 'home', path: '/' },
       // The repository view: a GitHub-style browser with a file/folder tree on
@@ -163,11 +167,41 @@ try {
       // renders directly below it — and use a taller viewport so the wrapped
       // before/after cards fit in one capture. Meta: a screenshot of the diff
       // page showing artifact before/after screenshots.
+      //
+      // The diff viewer offers four image-diff comparison modes (a setting in the
+      // diff viewer; see web/src/components/ArtifactsPanel.tsx ImageDiffView). We
+      // capture the artifacts panel once per mode so each option is documented:
+      //   side-by-side — before and after shown next to each other (default)
+      //   ab           — both stacked; click to flip between them (hard switch)
+      //   slider       — draggable divider with a hard cut between before/after
+      //   onion        — before/after blended via an opacity slider
       {
         name: 'artifacts',
         path: '/project/sim-project/agent/agent-1',
         scrollTo: 'Changes',
         viewport: { width: 1280, height: 1280 },
+        imageDiffMode: 'side-by-side',
+      },
+      {
+        name: 'artifacts-ab',
+        path: '/project/sim-project/agent/agent-1',
+        scrollTo: 'Changes',
+        viewport: { width: 1280, height: 1280 },
+        imageDiffMode: 'ab',
+      },
+      {
+        name: 'artifacts-slider',
+        path: '/project/sim-project/agent/agent-1',
+        scrollTo: 'Changes',
+        viewport: { width: 1280, height: 1280 },
+        imageDiffMode: 'slider',
+      },
+      {
+        name: 'artifacts-onion',
+        path: '/project/sim-project/agent/agent-1',
+        scrollTo: 'Changes',
+        viewport: { width: 1280, height: 1280 },
+        imageDiffMode: 'onion',
       },
     ]
     // Capture every page in both themes. Dark mode has its own colours (e.g.
@@ -194,6 +228,17 @@ try {
             // ignore storage failures
           }
         }, theme)
+        // Seed the diff viewer's image-diff mode so the artifacts panel renders
+        // before/after pairs in the requested comparison style.
+        if (pg.imageDiffMode) {
+          await ctx.addInitScript((mode) => {
+            try {
+              localStorage.setItem('hydra-diff-image-mode', mode)
+            } catch {
+              // ignore storage failures
+            }
+          }, pg.imageDiffMode)
+        }
         await ctx.addInitScript(() => {
           // Deterministic shuffle (spawn-form placeholder order).
           ;(Math as unknown as { random: () => number }).random = () => 0.5
