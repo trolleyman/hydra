@@ -85,13 +85,37 @@ function ArtifactSetCard({ set }: { set: ArtifactSet }) {
     )
   }
 
-  // Hide artifact sets with no visual changes behind a single muted line.
+  // Hide artifact sets with no visual changes behind a single muted line, but
+  // let the user expand it to view the (unchanged) artifacts anyway — useful for
+  // confirming a screenshot still renders even when nothing visibly moved. When
+  // the script produced no files at all there is nothing to expand, so the line
+  // stays static.
   if (status === 'ready' && !set.changed) {
+    const expandable = set.files.length > 0
     return (
-      <div className="px-3 py-2 text-xs text-gray-400 dark:text-gray-500 flex items-center gap-2">
-        <ImageIcon className="w-3.5 h-3.5 shrink-0" />
-        <span className="font-medium text-gray-500 dark:text-gray-400">{set.name}</span>
-        <span>· no visual changes</span>
+      <div>
+        <button
+          onClick={expandable ? () => setShowUnchanged((s) => !s) : undefined}
+          disabled={!expandable}
+          className={`w-full px-3 py-2 text-xs text-gray-400 dark:text-gray-500 flex items-center gap-2 text-left ${
+            expandable ? 'hover:text-gray-600 dark:hover:text-gray-300 cursor-pointer' : 'cursor-default'
+          }`}
+        >
+          {expandable &&
+            (showUnchanged ? (
+              <ChevronDown className="w-3.5 h-3.5 shrink-0" />
+            ) : (
+              <ChevronRight className="w-3.5 h-3.5 shrink-0" />
+            ))}
+          <ImageIcon className="w-3.5 h-3.5 shrink-0" />
+          <span className="font-medium text-gray-500 dark:text-gray-400">{set.name}</span>
+          <span>· no visual changes</span>
+        </button>
+        {expandable && showUnchanged && (
+          <div className="px-3 pb-2">
+            {set.files.map((f) => <FileRow key={f.name} file={f} />)}
+          </div>
+        )}
       </div>
     )
   }
@@ -204,6 +228,7 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
           <p>Artifacts are visual snapshots — typically screenshots — rendered from your code so you can see what a change <em>looks like</em>, side by side with the base branch.</p>
           <p>Each one is produced by a project-defined <strong>artifact script</strong>. Hydra checks out both the base ref and the head ref (or your uncommitted working tree), runs the script against each with <code className="text-blue-300">$HYDRA_ARTIFACT_OUTPUT</code>, <code className="text-blue-300">$HYDRA_ARTIFACT_SOURCE</code> and <code className="text-blue-300">$HYDRA_ARTIFACT_REF</code> set, and compares the images it writes. Results are cached per commit, so re-viewing a diff is free.</p>
           <p>Configure them in <code className="text-blue-300">.hydra/config.toml</code> with <code className="text-blue-300">[[artifacts]]</code> blocks (<code className="text-blue-300">name</code>, <code className="text-blue-300">command</code>, optional <code className="text-blue-300">timeout_sec</code>) — for example a script that builds the app and screenshots a page, so visual UI changes show up here in the diff viewer.</p>
+          <p>A script with no visual changes collapses to a single muted line; click it to expand and view the artifacts anyway.</p>
         </InfoTooltip>
       </div>
       <div className="flex flex-col gap-2">
