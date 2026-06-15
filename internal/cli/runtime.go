@@ -144,6 +144,7 @@ func buildMux(server *httppkg.Server) *http.ServeMux {
 	mux.Handle("/health", apiHandler)
 	mux.HandleFunc("/ws/projects/{project_id}/agents/{id}/terminal", server.HandleTerminalWS)
 	mux.HandleFunc("/artifacts/projects/{project_id}/blob", server.HandleArtifactBlob)
+	mux.HandleFunc("/uploads/projects/{project_id}", server.HandleUpload)
 	mux.Handle("/.well-known/", apiHandler)
 	registerFrontend(mux)
 	return mux

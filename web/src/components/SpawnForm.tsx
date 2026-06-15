@@ -2,9 +2,22 @@ import { useState, useRef, useEffect } from 'react'
 import { api } from '../stores/apiClient'
 import type { AgentResponse, SpawnAgentRequest } from '../api'
 import { formatError } from '../api/format_error'
-import { Zap, LoaderCircle } from 'lucide-react'
+import { uploadFile, extractFiles, isImageFile } from '../api/uploads'
+import { Zap, LoaderCircle, Paperclip, X, FileText } from 'lucide-react'
+import { Tooltip } from './Tooltip'
 
 type AgentTypeOption = 'claude' | 'gemini' | 'copilot'
+
+// A pasted/attached file in the spawn form. Its absolute `path` (set once the
+// upload resolves) is appended to the prompt on submit so the agent can read it.
+interface Attachment {
+  id: number
+  filename: string
+  path: string | null
+  previewUrl?: string
+  uploading: boolean
+  error?: string
+}
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/i.test(navigator.platform)
 
@@ -118,7 +131,21 @@ export function SpawnForm({
   })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [attachments, setAttachments] = useState<Attachment[]>([])
+  const [dragOver, setDragOver] = useState(false)
+  const attachIdRef = useRef(0)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  // Tracks every image preview object URL we create, so they can all be revoked
+  // on unmount without relying on the (stale) attachments closure.
+  const objectUrlsRef = useRef<Set<string>>(new Set())
   const animatedPlaceholder = useTypewriter(PLACEHOLDERS)
+
+  useEffect(() => {
+    const urls = objectUrlsRef.current
+    return () => {
+      urls.forEach((u) => URL.revokeObjectURL(u))
+    }
+  }, [])
 
   useEffect(() => {
     try {
@@ -176,28 +203,124 @@ export function SpawnForm({
     setIdManuallyEdited(true)
   }
 
+  // Upload each file, tracking it as an attachment chip. The uploaded path is
+  // appended to the prompt on submit (and so wired through to the agent).
+  function addFiles(files: File[]) {
+    for (const file of files) {
+      const id = attachIdRef.current++
+      const previewUrl = isImageFile(file) ? URL.createObjectURL(file) : undefined
+      if (previewUrl) objectUrlsRef.current.add(previewUrl)
+      setAttachments((prev) => [...prev, { id, filename: file.name || 'pasted-image', path: null, previewUrl, uploading: true }])
+      uploadFile(projectId, file)
+        .then((res) => {
+          setAttachments((prev) => prev.map((a) => (a.id === id ? { ...a, path: res.path, uploading: false } : a)))
+        })
+        .catch((err) => {
+          setAttachments((prev) => prev.map((a) => (a.id === id ? { ...a, uploading: false, error: formatError(err) } : a)))
+        })
+    }
+  }
+
+  function removeAttachment(id: number) {
+    setAttachments((prev) => {
+      const found = prev.find((a) => a.id === id)
+      if (found?.previewUrl) {
+        URL.revokeObjectURL(found.previewUrl)
+        objectUrlsRef.current.delete(found.previewUrl)
+      }
+      return prev.filter((a) => a.id !== id)
+    })
+  }
+
+  function handlePaste(e: React.ClipboardEvent) {
+    const files = extractFiles(e.clipboardData)
+    if (files.length === 0) return
+    e.preventDefault()
+    addFiles(files)
+  }
+
+  function handleDrop(e: React.DragEvent) {
+    const files = extractFiles(e.dataTransfer)
+    setDragOver(false)
+    if (files.length === 0) return
+    e.preventDefault()
+    addFiles(files)
+  }
+
+  function handleFileInput(e: React.ChangeEvent<HTMLInputElement>) {
+    if (e.target.files) addFiles(Array.from(e.target.files))
+    e.target.value = ''
+  }
+
+  const uploading = attachments.some((a) => a.uploading)
+  const readyAttachments = attachments.filter((a) => a.path && !a.error)
+  const canSubmit = (!!prompt.trim() || readyAttachments.length > 0) && !uploading
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    if (!prompt.trim() || loading) return
+    if (!canSubmit || loading) return
     setLoading(true)
     setError(null)
     try {
+      // Append uploaded file paths so the agent receives them as part of the
+      // task. They sit on their own lines below the typed prompt.
+      const paths = readyAttachments.map((a) => a.path).join('\n')
+      const base = prompt.trim()
+      const finalPrompt = paths ? (base ? `${base}\n\n${paths}` : paths) : base
       const finalId = idManuallyEdited ? slugify(agentId) : ''
       const req: SpawnAgentRequest = {
-        prompt: prompt.trim(),
+        prompt: finalPrompt,
         agent_type: agentType,
-        id: finalId || generateId(prompt.trim()),
+        id: finalId || generateId(base) || generateId(readyAttachments[0]?.filename ?? '') || 'attachment',
       }
       const agent = await api.default.spawnAgent(projectId ?? '', req)
       setPrompt('')
       setAgentId('')
       setIdManuallyEdited(false)
+      attachments.forEach((a) => a.previewUrl && URL.revokeObjectURL(a.previewUrl))
+      objectUrlsRef.current.clear()
+      setAttachments([])
       onSpawned?.(agent)
     } catch (err) {
       setError(formatError(err))
     } finally {
       setLoading(false)
     }
+  }
+
+  // Renders the attachment chips row (shared by both layout variants).
+  function renderAttachments(size: 'sm' | 'md') {
+    if (attachments.length === 0) return null
+    const thumb = size === 'sm' ? 'w-6 h-6' : 'w-8 h-8'
+    const text = size === 'sm' ? 'text-[10px]' : 'text-xs'
+    return (
+      <div className={`flex flex-wrap gap-1.5 px-3 ${size === 'sm' ? 'pb-1.5' : 'pb-2'}`}>
+        {attachments.map((a) => (
+          <div
+            key={a.id}
+            className={`group relative flex items-center gap-1.5 rounded-md border px-1.5 py-1 ${text} ${a.error ? 'border-red-300 bg-red-50 dark:border-red-800 dark:bg-red-900/20' : 'border-gray-200 bg-gray-50 dark:border-gray-600 dark:bg-gray-700/60'}`}
+            title={a.error ? a.error : a.filename}
+          >
+            {a.previewUrl ? (
+              <img src={a.previewUrl} alt={a.filename} className={`${thumb} rounded object-cover`} />
+            ) : (
+              <FileText className={`${size === 'sm' ? 'w-3.5 h-3.5' : 'w-4 h-4'} text-gray-400 shrink-0`} />
+            )}
+            <span className="max-w-[120px] truncate text-gray-600 dark:text-gray-300">{a.filename}</span>
+            {a.uploading && <LoaderCircle className="w-3 h-3 animate-spin text-gray-400 shrink-0" />}
+            {a.error && <span className="text-red-500 shrink-0">failed</span>}
+            <button
+              type="button"
+              onClick={() => removeAttachment(a.id)}
+              className="ml-0.5 rounded p-0.5 text-gray-400 hover:text-gray-700 hover:bg-gray-200 dark:hover:text-gray-100 dark:hover:bg-gray-600 cursor-pointer shrink-0"
+              aria-label={`Remove ${a.filename}`}
+            >
+              <X className="w-3 h-3" />
+            </button>
+          </div>
+        ))}
+      </div>
+    )
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement | HTMLInputElement>) {
@@ -213,6 +336,7 @@ export function SpawnForm({
   if (compact) {
     return (
       <form onSubmit={handleSubmit} className="px-3 py-3 border-b border-gray-100 dark:border-gray-700">
+        <input ref={fileInputRef} type="file" multiple className="hidden" onChange={handleFileInput} />
         <div className={`relative rounded-xl p-[1.5px] transition-colors duration-200 ${disabled ? 'bg-gray-100 dark:bg-gray-700' : 'bg-gray-200 dark:bg-gray-600 focus-within:bg-gradient-to-br focus-within:from-blue-500 focus-within:via-indigo-500 focus-within:to-purple-600 focus-within:shadow-md focus-within:shadow-blue-500/20'}`}>
           <div className="rounded-[10px] bg-white dark:bg-gray-800 overflow-hidden">
             <textarea
@@ -220,13 +344,28 @@ export function SpawnForm({
               value={prompt}
               onChange={(e) => handlePromptChange(e.target.value)}
               onKeyDown={handleKeyDown}
+              onPaste={handlePaste}
+              onDrop={handleDrop}
+              onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
+              onDragLeave={() => setDragOver(false)}
               placeholder={disabled ? 'Select a project first…' : (prompt ? 'Describe a task…' : animatedPlaceholder)}
               rows={2}
               disabled={loading || disabled}
-              className="w-full px-3 pt-2.5 pb-1 text-xs text-gray-800 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 bg-transparent resize-y focus:outline-none leading-relaxed disabled:opacity-50 min-h-[48px]"
+              className={`w-full px-3 pt-2.5 pb-1 text-xs text-gray-800 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 bg-transparent resize-y focus:outline-none leading-relaxed disabled:opacity-50 min-h-[48px] ${dragOver ? 'ring-2 ring-blue-400 rounded' : ''}`}
             />
+            {renderAttachments('sm')}
             <div className="flex items-center justify-between px-2 pb-2 gap-2">
               <div className="flex items-center gap-1 min-w-0 flex-1">
+                <Tooltip content="Attach files" side="top">
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={loading || disabled}
+                    className="p-0.5 rounded text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors cursor-pointer disabled:opacity-40 shrink-0"
+                  >
+                    <Paperclip className="w-3 h-3" />
+                  </button>
+                </Tooltip>
                 <select
                   value={agentType}
                   onChange={(e) => setAgentType(e.target.value as AgentTypeOption)}
@@ -245,7 +384,7 @@ export function SpawnForm({
               </div>
               <button
                 type="submit"
-                disabled={!prompt.trim() || loading || disabled}
+                disabled={!canSubmit || loading || disabled}
                 className="relative overflow-hidden text-[10px] font-semibold px-2.5 py-1 rounded-lg text-white bg-gradient-to-r from-blue-600 to-purple-600 animate-gradient shadow-sm cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed transition-opacity hover:opacity-90 shrink-0"
               >
                 {loading ? '…' : 'Spawn'}
@@ -275,6 +414,7 @@ export function SpawnForm({
         </div>
 
         <form onSubmit={handleSubmit}>
+          <input ref={fileInputRef} type="file" multiple className="hidden" onChange={handleFileInput} />
           {/* Gradient border card */}
           <div className="relative rounded-2xl p-[1.5px] bg-gradient-to-br from-blue-500 via-indigo-500 to-purple-600 animate-gradient shadow-2xl shadow-blue-500/20">
             <div className="rounded-[14px] bg-white dark:bg-gray-800">
@@ -284,15 +424,32 @@ export function SpawnForm({
                 value={prompt}
                 onChange={(e) => handlePromptChange(e.target.value)}
                 onKeyDown={handleKeyDown}
+                onPaste={handlePaste}
+                onDrop={handleDrop}
+                onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
+                onDragLeave={() => setDragOver(false)}
                 placeholder={prompt ? 'Describe what you need…' : animatedPlaceholder}
                 rows={6}
                 disabled={loading}
-                className="w-full px-4 pt-4 pb-2 text-sm text-gray-800 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 bg-transparent resize-y focus:outline-none leading-relaxed disabled:opacity-50 min-h-[120px]"
+                className={`w-full px-4 pt-4 pb-2 text-sm text-gray-800 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 bg-transparent resize-y focus:outline-none leading-relaxed disabled:opacity-50 min-h-[120px] ${dragOver ? 'ring-2 ring-blue-400 rounded' : ''}`}
               />
+
+              {renderAttachments('md')}
 
               {/* Footer bar */}
               <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100 dark:border-gray-700 gap-4">
                 <div className="flex items-center gap-2 min-w-0 flex-1">
+                  {/* Attach files */}
+                  <Tooltip content="Attach files" side="top">
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={loading}
+                      className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors cursor-pointer disabled:opacity-40 shrink-0"
+                    >
+                      <Paperclip className="w-4 h-4" />
+                    </button>
+                  </Tooltip>
                   {/* Agent type pills */}
                   <div className="flex gap-1.5 shrink-0">
                     {(['claude', 'gemini', 'copilot'] as AgentTypeOption[]).map((t) => (
@@ -333,7 +490,7 @@ export function SpawnForm({
                   <span className="text-xs text-gray-400 dark:text-gray-500">{submitHint}</span>
                   <button
                     type="submit"
-                    disabled={!prompt.trim() || loading}
+                    disabled={!canSubmit || loading}
                     className="relative overflow-hidden flex items-center gap-2 px-5 py-2 rounded-xl text-sm font-semibold text-white bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 animate-gradient shadow-md shadow-blue-500/30 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed transition-all hover:shadow-lg hover:shadow-blue-500/40 hover:scale-[1.02] active:scale-[0.98]"
                   >
                     {loading ? (

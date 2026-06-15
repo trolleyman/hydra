@@ -28,6 +28,7 @@ export default defineConfig(({ mode }) => {
       port: devPort,
       proxy: {
         '/api': apiBase,
+        '/uploads': apiBase,
         '/health': apiBase,
         '/.well-known': apiBase,
         '/ws': { target: `ws://localhost:${apiPort}`, ws: true },

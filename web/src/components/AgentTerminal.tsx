@@ -5,6 +5,7 @@ import '@xterm/xterm/css/xterm.css'
 import { TerminalEvent, type TerminalStatusEvent, type TerminalDataEvent, AgentStatus } from '../api'
 import { RefreshCw, Plus, X, ChevronDown, Shield, ShieldOff } from 'lucide-react'
 import { Tooltip } from './Tooltip'
+import { uploadFile, extractFiles } from '../api/uploads'
 
 interface PaneProps {
   agentId: string
@@ -41,6 +42,15 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, active, reconnectA
   const lastSentSize = useRef({ cols: 0, rows: 0 })
   const [showCopiedAt, setShowCopiedAt] = useState(0)
   const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
+  const noticeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Toast above the terminal for upload progress/result of pasted files.
+  function showNotice(msg: string, autoHide: boolean) {
+    if (noticeTimeoutRef.current) clearTimeout(noticeTimeoutRef.current)
+    setNotice(msg)
+    if (autoHide) noticeTimeoutRef.current = setTimeout(() => setNotice(null), 2500)
+  }
 
   // Fit the terminal to its container and, if the geometry actually changed,
   // forward the new cols/rows to the backend PTY so the agent program receives
@@ -229,6 +239,35 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, active, reconnectA
       }
     })
 
+    // Intercept pastes that carry files (e.g. a screenshot, or a copied file).
+    // We upload the file and type its absolute path into the agent's prompt so
+    // the agent can read it — the path is valid inside the sandbox. Plain text
+    // pastes fall through to xterm. Capture phase + stopImmediatePropagation so
+    // xterm never also handles a file paste.
+    async function handlePastedFiles(files: File[]) {
+      for (const file of files) {
+        showNotice(`Uploading ${file.name || 'file'}…`, false)
+        try {
+          const res = await uploadFile(projectId, file)
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(new TextEncoder().encode(res.path + ' '))
+          }
+          showNotice(`Attached ${res.filename}`, true)
+        } catch (err) {
+          showNotice(`Upload failed: ${err instanceof Error ? err.message : 'error'}`, true)
+        }
+      }
+    }
+    const onPaste = (ev: ClipboardEvent) => {
+      const files = extractFiles(ev.clipboardData)
+      if (files.length === 0) return // let xterm handle text pastes
+      ev.preventDefault()
+      ev.stopImmediatePropagation()
+      void handlePastedFiles(files)
+    }
+    const textarea = term.textarea
+    textarea?.addEventListener('paste', onPaste, true)
+
     // Resize terminal when the container element resizes. fitAndSend only sends
     // when the column/row count actually changes, avoiding spurious SIGWINCH
     // signals (e.g. from layout shifts caused by the diff viewer loading content
@@ -239,9 +278,11 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, active, reconnectA
     return () => {
       observer.disconnect()
       inputDisposable.dispose()
+      textarea?.removeEventListener('paste', onPaste, true)
       ws.close()
       term.dispose()
       if (copyTimeoutRef.current) clearTimeout(copyTimeoutRef.current)
+      if (noticeTimeoutRef.current) clearTimeout(noticeTimeoutRef.current)
       termRef.current = null
       wsRef.current = null
       fitAddonRef.current = null
@@ -257,6 +298,11 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, active, reconnectA
       {showCopiedAt > 0 && (
         <div key={showCopiedAt} className="absolute top-2 right-2 px-2 py-1 bg-green-800/90 text-gray-200 text-[10px] rounded border border-green-700 shadow-lg pointer-events-none animate-fade-in-out z-10">
           Copied to clipboard!
+        </div>
+      )}
+      {notice && (
+        <div className="absolute top-2 left-2 px-2 py-1 bg-blue-900/90 text-gray-100 text-[10px] rounded border border-blue-700 shadow-lg pointer-events-none z-10 max-w-[80%] truncate">
+          {notice}
         </div>
       )}
     </div>
