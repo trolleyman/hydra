@@ -4,7 +4,7 @@ import { X, Plus, Globe, FolderOpen, EyeOff, Eye, Layers, Monitor, Sparkles, Ter
 import { InfoTooltip } from './InfoTooltip'
 import { AgentTerminal } from './AgentTerminal'
 
-export type SettingsSection = 'all' | 'claude' | 'gemini' | 'copilot' | 'defaults' | 'features'
+export type SettingsSection = 'all' | 'claude' | 'gemini' | 'copilot' | 'defaults'
 
 // ── PathListEditor ──────────────────────────────────────────────────────────────
 // Edits a list of filesystem paths (writable / masked / restore-RO / allowed hosts).
@@ -296,7 +296,6 @@ export function SettingsContent({
   inheritedConfig,
   activeSection,
   setActiveSection,
-  development,
   selectedProject,
   testAgent,
   testing,
@@ -309,7 +308,6 @@ export function SettingsContent({
   inheritedConfig: ConfigResponse | null
   activeSection: SettingsSection
   setActiveSection: (s: SettingsSection) => void
-  development: boolean
   selectedProject: ProjectInfo | undefined
   testAgent: AgentResponse | null
   testing: boolean
@@ -337,14 +335,6 @@ export function SettingsContent({
               {tab.label}
             </button>
           ))}
-          {development && (
-            <button
-              onClick={() => setActiveSection('features')}
-              className={`px-4 py-3 text-sm font-semibold transition-all border-b-2 cursor-pointer ${activeSection === 'features' ? 'border-pink-500 text-pink-600 dark:text-pink-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}
-            >
-              Feature Flags
-            </button>
-          )}
         </div>
 
         <div className="p-6">
@@ -416,32 +406,6 @@ export function SettingsContent({
             </div>
           )}
 
-          {activeSection === 'features' && development && (
-            <div className="animate-in fade-in slide-in-from-bottom-1 duration-200">
-              <div className="flex items-center gap-2 mb-6">
-                <div className="w-8 h-8 rounded-lg bg-pink-100 dark:bg-pink-900/30 flex items-center justify-center">
-                  <Sparkles className="w-4 h-4 text-pink-600 dark:text-pink-400" />
-                </div>
-                <div>
-                  <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">Feature Flags</h2>
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Experimental or internal features. These are stored in the configuration file.</p>
-                </div>
-              </div>
-              <div className="space-y-4">
-                <div className="flex items-center justify-between p-4 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-800/30">
-                  <div>
-                    <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100">Terminal Bash</h3>
-                    <p className="text-xs text-gray-500 dark:text-gray-400">Enable the interactive bash terminal for agents.</p>
-                  </div>
-                  <label className="relative inline-flex items-center cursor-pointer">
-                    <input type="checkbox" className="sr-only peer" checked={config.features?.terminal_bash ?? false}
-                      onChange={(e) => setConfig({ ...config, features: { ...config.features, terminal_bash: e.target.checked } })} />
-                    <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
-                  </label>
-                </div>
-              </div>
-            </div>
-          )}
         </div>
       </div>
 

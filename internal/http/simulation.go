@@ -35,7 +35,6 @@ func (s *SimulationServer) GetStatus(w http.ResponseWriter, r *http.Request) {
 	projectRoot := "/simulated/project"
 	defaultProjectID := "sim-project"
 	development := s.Development
-	terminalBashEnabled := true
 
 	api.WriteJSON(w, http.StatusOK, api.StatusResponse{
 		Status:           &status,
@@ -44,11 +43,6 @@ func (s *SimulationServer) GetStatus(w http.ResponseWriter, r *http.Request) {
 		ProjectRoot:      &projectRoot,
 		DefaultProjectId: &defaultProjectID,
 		Development:      &development,
-		Features: &struct {
-			TerminalBash *bool `json:"terminal_bash,omitempty"`
-		}{
-			TerminalBash: &terminalBashEnabled,
-		},
 	})
 }
 

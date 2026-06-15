@@ -250,9 +250,6 @@ type ConfigResponse struct {
 	// DefaultPrePrompt Built-in default pre-prompt always prepended to agent prompts (read-only)
 	DefaultPrePrompt *string     `json:"default_pre_prompt,omitempty"`
 	Defaults         AgentConfig `json:"defaults"`
-	Features         *struct {
-		TerminalBash *bool `json:"terminal_bash,omitempty"`
-	} `json:"features,omitempty"`
 }
 
 // DiffFile defines model for DiffFile.
@@ -423,10 +420,6 @@ type StatusResponse struct {
 
 	// Development Whether the server is running in development mode
 	Development *bool `json:"development,omitempty"`
-	Features    *struct {
-		// TerminalBash Whether the bash terminal feature is enabled
-		TerminalBash *bool `json:"terminal_bash,omitempty"`
-	} `json:"features,omitempty"`
 
 	// ProjectRoot Absolute path to the default project root (server CWD)
 	ProjectRoot *string `json:"project_root,omitempty"`

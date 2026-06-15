@@ -25,11 +25,5 @@ export type StatusResponse = {
      * Whether the server is running in development mode
      */
     development?: boolean;
-    features?: {
-        /**
-         * Whether the bash terminal feature is enabled
-         */
-        terminal_bash?: boolean;
-    };
 };
 

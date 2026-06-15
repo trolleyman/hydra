@@ -79,10 +79,6 @@ type AgentConfig struct {
 	PrePrompt *string `toml:"pre_prompt"`
 }
 
-type Features struct {
-	TerminalBash bool `toml:"terminal_bash"`
-}
-
 // ArtifactScript describes a per-project command that generates visual
 // artifacts (e.g. screenshots) for a checkout of the repository. The diff
 // viewer runs it against both sides of a comparison and shows the outputs that
@@ -117,8 +113,6 @@ type Config struct {
 	Defaults AgentConfig `toml:"defaults"`
 	// Per-agent overrides (e.g. claude, gemini).
 	Agents map[string]AgentConfig `toml:"agents"`
-	// Feature flags.
-	Features Features `toml:"features"`
 	// Artifacts are per-project visual-artifact generation scripts.
 	Artifacts []ArtifactScript `toml:"artifacts"`
 }
@@ -186,10 +180,6 @@ func (c *Config) Merge(other Config) {
 			agent.Merge(otherAgent)
 			c.Agents[name] = agent
 		}
-	}
-
-	if other.Features.TerminalBash {
-		c.Features.TerminalBash = true
 	}
 
 	// Artifact scripts are replaced wholesale when the other config sets any.
@@ -420,14 +410,6 @@ func marshalConfig(cfg Config) string {
 			buf.WriteString("\n")
 		}
 		writeAgentConfigFields(&buf, "agents."+name, cfg.Agents[name])
-	}
-
-	if cfg.Features.TerminalBash {
-		if buf.Len() > 0 {
-			buf.WriteString("\n")
-		}
-		buf.WriteString("[features]\n")
-		buf.WriteString("terminal_bash = true\n")
 	}
 
 	for _, a := range cfg.Artifacts {

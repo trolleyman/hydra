@@ -19,7 +19,7 @@ type SettingsScope = 'project' | 'user'
 
 function ProjectSettingsPage() {
   const { projectId } = useParams({ from: '/project/$projectId/settings' })
-  const { projects, systemStatus } = useProjectStore()
+  const { projects } = useProjectStore()
   const [scope, setScope] = useState<SettingsScope>('project')
   const [config, setConfig] = useState<ConfigResponse | null>(null)
   const [baseConfig, setBaseConfig] = useState<string | null>(null)
@@ -31,7 +31,6 @@ function ProjectSettingsPage() {
   const [testAgent, setTestAgent] = useState<AgentResponse | null>(null)
   const [testing, setTesting] = useState(false)
 
-  const development = systemStatus?.development ?? false
   const selectedProject = projects.find(p => p.id === projectId)
 
   const hasUnsavedChanges = useMemo(() => {
@@ -174,7 +173,6 @@ function ProjectSettingsPage() {
           inheritedConfig={inheritedConfig}
           activeSection={activeSection}
           setActiveSection={setActiveSection}
-          development={development}
           selectedProject={selectedProject}
           testAgent={testAgent}
           testing={testing}

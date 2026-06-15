@@ -6,9 +6,6 @@ pre_prompt = """
 [defaults.sandbox]
 writable_paths = ["~/.cache/go-build", "~/.go/pkg", "~/.bun/install/cache", "~/.cache/goimports", "~/.magefile"]
 
-[features]
-terminal_bash = true
-
 # Diff-viewer artifact generator (PLAN.md #17): renders Hydra's own web UI to
 # PNGs so visual changes show up side-by-side in the diff viewer. The script
 # builds the checkout's frontend, boots `hydra server --simulation` and
