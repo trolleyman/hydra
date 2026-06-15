@@ -84,15 +84,25 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 		log.Printf("warn: prune deleted agents: %v", err)
 	}
 
+	// The pollers and boot-time resume cover every registered project, not just
+	// the project the daemon was launched in: a single daemon/DB serves all
+	// projects added via the web UI, and their agents' status must stay fresh
+	// too. roots is re-evaluated each cycle so runtime add/remove is picked up.
+	roots := func() []string { return projectRoots(pm) }
+
 	// Resume heads that were running before a restart (best-effort).
-	resumeHeadsOnBoot(reg, store, projectRoot)
+	for _, root := range roots() {
+		resumeHeadsOnBoot(reg, store, root)
+	}
 
 	// Immediate first poller cycles before accepting requests.
-	heads.ReconcileLivenessOnce(reg, store, projectRoot)
-	heads.RunJSONStatusPollerOnce(store, projectRoot)
+	for _, root := range roots() {
+		heads.ReconcileLivenessOnce(reg, store, root)
+		heads.RunJSONStatusPollerOnce(store, root)
+	}
 
-	go heads.RunLivenessReconciler(ctx, reg, store, projectRoot)
-	go heads.RunJSONStatusPoller(ctx, store, projectRoot)
+	go heads.RunLivenessReconciler(ctx, reg, store, roots)
+	go heads.RunJSONStatusPoller(ctx, store, roots)
 	go runStoragePruner(ctx, artifactMgr, projectRoot)
 
 	mux := buildMux(server)
@@ -173,6 +183,22 @@ func runStoragePruner(ctx context.Context, mgr *artifacts.Manager, projectRoot s
 			prune()
 		}
 	}
+}
+
+// projectRoots returns the normalized root path of every registered project.
+// Paths are normalized to match how agents are stored (project_path) and looked
+// up (resolveProjectRoot), so the pollers query the right rows.
+func projectRoots(pm *projects.Manager) []string {
+	ps := pm.ListProjects()
+	out := make([]string, 0, len(ps))
+	for _, p := range ps {
+		root := p.Path
+		if norm, err := paths.NormalizePath(p.Path); err == nil {
+			root = norm
+		}
+		out = append(out, root)
+	}
+	return out
 }
 
 // resumeHeadsOnBoot restarts agents that the DB marks as running but have no
