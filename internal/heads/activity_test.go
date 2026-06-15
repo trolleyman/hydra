@@ -84,6 +84,24 @@ func TestEnrichAgentStatusStoppedSkipped(t *testing.T) {
 	}
 }
 
+func TestReadStatusLogTailQuestion(t *testing.T) {
+	root := t.TempDir()
+	id := "abc"
+	writeStatusLog(t, root, id,
+		`{"hook":{"hook_event_name":"PreToolUse","tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"Which DB?"}]}}}`,
+	)
+
+	info := &api.AgentStatusInfo{Status: api.Waiting}
+	enrichAgentStatus(root, id, info)
+	if info.LastMessage == nil || *info.LastMessage != "Which DB?" {
+		t.Fatalf("lastMessage = %v, want %q", info.LastMessage, "Which DB?")
+	}
+	// A question tool isn't "activity" — the agent is blocked, not working.
+	if info.Activity != nil {
+		t.Fatalf("activity = %v, want nil while waiting", info.Activity)
+	}
+}
+
 func TestDescribeActivity(t *testing.T) {
 	cases := []struct {
 		tool  string

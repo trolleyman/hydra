@@ -81,7 +81,7 @@ func readStatusLogTail(projectRoot, id string) (activity, lastMessage string) {
 		}
 
 		if lastMessage == "" {
-			if msg, _ := payload["last_assistant_message"].(string); msg != "" {
+			if msg := messageFromPayload(payload); msg != "" {
 				lastMessage = truncate(strings.TrimSpace(msg), 300)
 			}
 		}
@@ -91,6 +91,47 @@ func readStatusLogTail(projectRoot, id string) (activity, lastMessage string) {
 		}
 	}
 	return activity, lastMessage
+}
+
+// messageFromPayload extracts the agent's most recent user-facing message from a
+// hook payload: its last assistant message, or — for a tool that asks the user
+// something (e.g. AskUserQuestion) — the question/plan text it's waiting on.
+func messageFromPayload(p map[string]interface{}) string {
+	if msg, _ := p["last_assistant_message"].(string); msg != "" {
+		return msg
+	}
+	tool, _ := p["tool_name"].(string)
+	if !isUserInputTool(tool) {
+		return ""
+	}
+	ti, _ := p["tool_input"].(map[string]interface{})
+	if ti == nil {
+		return ""
+	}
+	if qs, ok := ti["questions"].([]interface{}); ok {
+		for _, q := range qs {
+			if qm, ok := q.(map[string]interface{}); ok {
+				if s, _ := qm["question"].(string); s != "" {
+					return s
+				}
+			}
+		}
+	}
+	if s, _ := ti["plan"].(string); s != "" {
+		return s
+	}
+	return ""
+}
+
+// isUserInputTool reports whether a tool blocks waiting for the user. Keep in
+// sync with the equivalent list in internal/cli/trigger_hook.go.
+func isUserInputTool(tool string) bool {
+	switch tool {
+	case "AskUserQuestion", "ExitPlanMode":
+		return true
+	default:
+		return false
+	}
 }
 
 // isToolEvent reports whether a hook event name denotes a tool invocation across

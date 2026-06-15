@@ -22,6 +22,41 @@ func stringField(input map[string]interface{}, key string) string {
 	return ""
 }
 
+// isUserInputTool reports whether a tool, when invoked, blocks waiting for the
+// user to respond (answering a question, approving a plan) rather than doing
+// work. Keep in sync with the equivalent list in internal/heads/activity.go.
+func isUserInputTool(tool string) bool {
+	switch tool {
+	case "AskUserQuestion", "ExitPlanMode":
+		return true
+	default:
+		return false
+	}
+}
+
+// questionText best-effort extracts the prompt an input tool is presenting to
+// the user (AskUserQuestion's first question, or ExitPlanMode's plan), for
+// display as the agent's pending message.
+func questionText(input map[string]interface{}) string {
+	ti, ok := input["tool_input"].(map[string]interface{})
+	if !ok {
+		return ""
+	}
+	if qs, ok := ti["questions"].([]interface{}); ok {
+		for _, q := range qs {
+			if qm, ok := q.(map[string]interface{}); ok {
+				if s, _ := qm["question"].(string); s != "" {
+					return s
+				}
+			}
+		}
+	}
+	if s, _ := ti["plan"].(string); s != "" {
+		return s
+	}
+	return ""
+}
+
 // stopStatus decides whether a finished turn means the agent is waiting on the
 // user or has genuinely finished. Heuristic: a trailing '?' in the agent's last
 // message signals it ended by asking a question, so it's waiting for an answer;
@@ -166,10 +201,22 @@ func runTriggerHook(agentType string, eventOverride string, logFile *os.File) er
 		status = stopStatus(lastMessage)
 	case "SessionEnd", "sessionEnd":
 		status = api.Stopped
-	case "PreToolUse", "PostToolUse", "PostToolUseFailure", "BeforeTool", "AfterTool", "preToolUse", "postToolUse":
-		// A tool event means the agent is actively working. We rewrite status.json
-		// (keeping it Running) so the timestamp changes, signaling the frontend it
-		// may need to refresh (e.g. after a git commit) and refreshing live activity.
+	case "PreToolUse", "preToolUse", "BeforeTool":
+		// A tool is about to run. Most tools mean the agent is working, but a tool
+		// that asks the user something (e.g. AskUserQuestion) blocks until the user
+		// answers — that's waiting on input, not working.
+		if isUserInputTool(stringField(input, "tool_name")) {
+			status = api.Waiting
+			if q := questionText(input); q != "" {
+				lastMessage = q
+			}
+		} else {
+			status = api.Running
+		}
+	case "PostToolUse", "PostToolUseFailure", "AfterTool", "postToolUse":
+		// A tool finished (including the user answering a question) — the agent is
+		// working again. Rewriting status.json also refreshes the timestamp, so the
+		// frontend knows it may need to refresh (e.g. after a git commit).
 		status = api.Running
 	case "Notification", "notification":
 		// Any notification means the agent is blocking on the user — either a
