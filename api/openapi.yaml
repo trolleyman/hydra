@@ -512,6 +512,66 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /api/projects/{project_id}/agents/{id}/artifacts:
+    get:
+      summary: Get generated visual artifacts (e.g. screenshots) for both sides of a diff
+      description: >
+        Returns, per configured artifact script, the generated image files for
+        the left and right versions of the comparison and whether they differ.
+        Generation runs in the background and is cached; a script with status
+        "generating" should be polled. Returns an empty list when the project
+        configures no artifact scripts.
+      operationId: getAgentArtifacts
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            type: string
+          description: Project ID
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: base_ref
+          required: false
+          schema:
+            type: string
+          description: Left (base) commit SHA or ref. Defaults to the agent's base branch.
+        - in: query
+          name: head_ref
+          required: false
+          schema:
+            type: string
+          description: Right (head) commit SHA or ref. Defaults to the agent's branch tip.
+        - in: query
+          name: include_uncommitted
+          required: false
+          schema:
+            type: boolean
+          description: Use the agent's uncommitted working tree as the right version.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArtifactsResponse'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /api/projects/{project_id}/agents/{id}/input:
     post:
       summary: Send text input to an agent's terminal stdin
@@ -1153,6 +1213,55 @@ components:
         default_pre_prompt:
           type: string
           description: Built-in default pre-prompt always prepended to agent prompts (read-only)
+
+    ArtifactFile:
+      type: object
+      required: [name, change_type]
+      properties:
+        name:
+          type: string
+          description: File name relative to the artifact set
+        change_type:
+          type: string
+          enum: [added, removed, modified, unchanged]
+        left_url:
+          type: string
+          nullable: true
+          description: URL of the file for the left version (null if absent on the left)
+        right_url:
+          type: string
+          nullable: true
+          description: URL of the file for the right version (null if absent on the right)
+
+    ArtifactSet:
+      type: object
+      required: [name, status, changed, files]
+      properties:
+        name:
+          type: string
+          description: The configured artifact script name
+        status:
+          type: string
+          enum: [ready, generating, error]
+        changed:
+          type: boolean
+          description: Whether any file differs between the two versions
+        error:
+          type: string
+          nullable: true
+        files:
+          type: array
+          items:
+            $ref: '#/components/schemas/ArtifactFile'
+
+    ArtifactsResponse:
+      type: object
+      required: [scripts]
+      properties:
+        scripts:
+          type: array
+          items:
+            $ref: '#/components/schemas/ArtifactSet'
 
     TerminalEvent:
       type: object

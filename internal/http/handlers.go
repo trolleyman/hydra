@@ -14,6 +14,7 @@ import (
 
 	"braces.dev/errtrace"
 	"github.com/trolleyman/hydra/internal/api"
+	"github.com/trolleyman/hydra/internal/artifacts"
 	"github.com/trolleyman/hydra/internal/config"
 	"github.com/trolleyman/hydra/internal/db"
 	"github.com/trolleyman/hydra/internal/git"
@@ -48,6 +49,9 @@ type Server struct {
 	DB              *db.Store
 	StartTime       time.Time
 	Development     bool // set when running under mage dev / mage DevAutoReload
+	// Artifacts generates/caches diff artifacts (screenshots etc.) for the
+	// daemon's project root. nil disables the feature.
+	Artifacts *artifacts.Manager
 
 	lastSandboxError atomic.Value // holds string
 }

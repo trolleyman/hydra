@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"braces.dev/errtrace"
+	"github.com/trolleyman/hydra/internal/artifacts"
 	"github.com/trolleyman/hydra/internal/daemon"
 	"github.com/trolleyman/hydra/internal/db"
 	"github.com/trolleyman/hydra/internal/heads"
@@ -59,6 +60,9 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 	}
 	log.Printf("Default project: %s (%s)", defaultProject.Name, defaultProject.ID)
 
+	artifactMgr := artifacts.NewManager(projectRoot)
+	artifactMgr.CleanCheckouts()
+
 	server := &httppkg.Server{
 		WorktreesDir:    worktreesDir,
 		ProjectRoot:     projectRoot,
@@ -68,6 +72,7 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 		DB:              store,
 		StartTime:       time.Now(),
 		Development:     os.Getenv("HYDRA_DEV_RESTART") == "1",
+		Artifacts:       artifactMgr,
 	}
 
 	if ok, reason := sandbox.Available(); !ok {
@@ -88,6 +93,7 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 
 	go heads.RunLivenessReconciler(ctx, reg, store, projectRoot)
 	go heads.RunJSONStatusPoller(ctx, store, projectRoot)
+	go runArtifactPruner(ctx, artifactMgr)
 
 	mux := buildMux(server)
 	return &daemonRuntime{
@@ -137,9 +143,31 @@ func buildMux(server *httppkg.Server) *http.ServeMux {
 	mux.Handle("/api/", apiHandler)
 	mux.Handle("/health", apiHandler)
 	mux.HandleFunc("/ws/projects/{project_id}/agents/{id}/terminal", server.HandleTerminalWS)
+	mux.HandleFunc("/artifacts/projects/{project_id}/blob", server.HandleArtifactBlob)
 	mux.Handle("/.well-known/", apiHandler)
 	registerFrontend(mux)
 	return mux
+}
+
+// runArtifactPruner periodically evicts stale/oversized diff artifacts. The
+// first cycle runs immediately; thereafter once an hour until ctx is done.
+func runArtifactPruner(ctx context.Context, mgr *artifacts.Manager) {
+	prune := func() {
+		if err := mgr.PruneStale(artifacts.DefaultMaxAge, artifacts.DefaultMaxBytes); err != nil {
+			log.Printf("warn: prune artifacts: %v", err)
+		}
+	}
+	prune()
+	ticker := time.NewTicker(time.Hour)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			prune()
+		}
+	}
 }
 
 // resumeHeadsOnBoot restarts agents that the DB marks as running but have no

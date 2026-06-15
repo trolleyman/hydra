@@ -10,6 +10,7 @@ import {
   MoveRight, MessageSquarePlus,
 } from 'lucide-react'
 import { Tooltip } from './components/Tooltip'
+import { ArtifactsPanel } from './components/ArtifactsPanel'
 
 // ── Syntax highlighting helpers ───────────────────────────────────────────────
 
@@ -1311,6 +1312,16 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger }: { agent
     return () => { cancelled = true }
   }, [agent.id, agent.branch_name, projectId, leftSel, rightSel, refreshKey, ignoreWhitespace, applyHiddenFiles])
 
+  // Version params for the artifacts panel, mirroring the diff request logic.
+  const artifactParams = useMemo(() => {
+    const p: { baseRef?: string; headRef?: string; includeUncommitted?: boolean } = {}
+    if (leftSel.type === 'commit') p.baseRef = leftSel.sha
+    else if (leftSel.type === 'latest' && commits.length > 0) p.baseRef = commits[0].sha
+    if (rightSel.type === 'uncommitted') p.includeUncommitted = true
+    else if (rightSel.type === 'commit') p.headRef = rightSel.sha
+    return p
+  }, [leftSel, rightSel, commits])
+
   // Keep a ref to expandFileDiff so the silent refresh can call it without stale closures.
   const expandFileDiffRef = useRef(expandFileDiff)
   useEffect(() => { expandFileDiffRef.current = expandFileDiff }, [expandFileDiff])
@@ -1572,6 +1583,18 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger }: { agent
         <div className="mb-3 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-xs text-red-600 dark:text-red-400">
           Refresh failed: {diffError}
         </div>
+      )}
+
+      {/* Visual artifacts (e.g. screenshots) for the selected versions */}
+      {agent.branch_name && (
+        <ArtifactsPanel
+          projectId={projectId}
+          agentId={agent.id}
+          baseRef={artifactParams.baseRef}
+          headRef={artifactParams.headRef}
+          includeUncommitted={artifactParams.includeUncommitted}
+          refreshKey={refreshKey}
+        />
       )}
 
       {/* Content */}

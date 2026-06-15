@@ -1,6 +1,7 @@
 package http
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -206,7 +207,7 @@ func (s *SimulationServer) GetAgentDiff(w http.ResponseWriter, r *http.Request, 
 			Files: []api.DiffFile{
 				{
 					Path:       "README.md",
-					ChangeType: api.Modified,
+					ChangeType: api.DiffFileChangeTypeModified,
 					Additions:  2,
 					Deletions:  1,
 					Hunks: []api.DiffHunk{
@@ -226,7 +227,7 @@ func (s *SimulationServer) GetAgentDiff(w http.ResponseWriter, r *http.Request, 
 				},
 				{
 					Path:       "new_file.txt",
-					ChangeType: api.Added,
+					ChangeType: api.DiffFileChangeTypeAdded,
 					Additions:  1,
 					Deletions:  0,
 					Hunks: []api.DiffHunk{
@@ -254,7 +255,7 @@ func (s *SimulationServer) GetAgentDiff(w http.ResponseWriter, r *http.Request, 
 			Files: []api.DiffFile{
 				{
 					Path:       "internal/heads/heads.go",
-					ChangeType: api.Modified,
+					ChangeType: api.DiffFileChangeTypeModified,
 					Additions:  47,
 					Deletions:  18,
 					Hunks: []api.DiffHunk{
@@ -334,7 +335,7 @@ func (s *SimulationServer) GetAgentDiff(w http.ResponseWriter, r *http.Request, 
 				},
 				{
 					Path:       "internal/http/simulation.go",
-					ChangeType: api.Modified,
+					ChangeType: api.DiffFileChangeTypeModified,
 					Additions:  22,
 					Deletions:  8,
 					Hunks: []api.DiffHunk{
@@ -362,7 +363,7 @@ func (s *SimulationServer) GetAgentDiff(w http.ResponseWriter, r *http.Request, 
 				},
 				{
 					Path:       "web/src/components/AgentDetail.tsx",
-					ChangeType: api.Modified,
+					ChangeType: api.DiffFileChangeTypeModified,
 					Additions:  38,
 					Deletions:  14,
 					Hunks: []api.DiffHunk{
@@ -443,7 +444,7 @@ func (s *SimulationServer) GetAgentDiff(w http.ResponseWriter, r *http.Request, 
 				},
 				{
 					Path:       "internal/db/queries.go",
-					ChangeType: api.Modified,
+					ChangeType: api.DiffFileChangeTypeModified,
 					Additions:  29,
 					Deletions:  4,
 					Hunks: []api.DiffHunk{
@@ -487,7 +488,7 @@ func (s *SimulationServer) GetAgentDiff(w http.ResponseWriter, r *http.Request, 
 				},
 				{
 					Path:       "internal/http/server.go",
-					ChangeType: api.Modified,
+					ChangeType: api.DiffFileChangeTypeModified,
 					Additions:  12,
 					Deletions:  3,
 					Hunks: []api.DiffHunk{
@@ -520,7 +521,7 @@ func (s *SimulationServer) GetAgentDiff(w http.ResponseWriter, r *http.Request, 
 				},
 				{
 					Path:       "internal/db/model.go",
-					ChangeType: api.Deleted,
+					ChangeType: api.DiffFileChangeTypeDeleted,
 					Additions:  0,
 					Deletions:  42,
 					Hunks: []api.DiffHunk{
@@ -558,7 +559,7 @@ func (s *SimulationServer) GetAgentDiff(w http.ResponseWriter, r *http.Request, 
 				},
 				{
 					Path:       "internal/db/schema.go",
-					ChangeType: api.Added,
+					ChangeType: api.DiffFileChangeTypeAdded,
 					Additions:  58,
 					Deletions:  0,
 					Hunks: []api.DiffHunk{
@@ -628,13 +629,13 @@ func (s *SimulationServer) GetAgentDiffFiles(w http.ResponseWriter, r *http.Requ
 	if id == "agent-1" {
 		resp := api.DiffResponse{
 			Files: []api.DiffFile{
-				{Path: "internal/heads/heads.go", ChangeType: api.Modified, Additions: 47, Deletions: 18},
-				{Path: "internal/http/simulation.go", ChangeType: api.Modified, Additions: 22, Deletions: 8},
-				{Path: "web/src/components/AgentDetail.tsx", ChangeType: api.Modified, Additions: 38, Deletions: 14},
-				{Path: "internal/db/queries.go", ChangeType: api.Modified, Additions: 29, Deletions: 4},
-				{Path: "internal/http/server.go", ChangeType: api.Modified, Additions: 12, Deletions: 3},
-				{Path: "internal/db/model.go", ChangeType: api.Deleted, Additions: 0, Deletions: 42},
-				{Path: "internal/db/schema.go", ChangeType: api.Added, Additions: 58, Deletions: 0},
+				{Path: "internal/heads/heads.go", ChangeType: api.DiffFileChangeTypeModified, Additions: 47, Deletions: 18},
+				{Path: "internal/http/simulation.go", ChangeType: api.DiffFileChangeTypeModified, Additions: 22, Deletions: 8},
+				{Path: "web/src/components/AgentDetail.tsx", ChangeType: api.DiffFileChangeTypeModified, Additions: 38, Deletions: 14},
+				{Path: "internal/db/queries.go", ChangeType: api.DiffFileChangeTypeModified, Additions: 29, Deletions: 4},
+				{Path: "internal/http/server.go", ChangeType: api.DiffFileChangeTypeModified, Additions: 12, Deletions: 3},
+				{Path: "internal/db/model.go", ChangeType: api.DiffFileChangeTypeDeleted, Additions: 0, Deletions: 42},
+				{Path: "internal/db/schema.go", ChangeType: api.DiffFileChangeTypeAdded, Additions: 58, Deletions: 0},
 			},
 		}
 		api.WriteJSON(w, http.StatusOK, resp)
@@ -652,14 +653,58 @@ func (s *SimulationServer) GetAgentDiffFiles(w http.ResponseWriter, r *http.Requ
 		}
 		if params.IncludeUncommitted != nil && *params.IncludeUncommitted {
 			resp.Files = []api.DiffFile{
-				{Path: "README.md", ChangeType: api.Modified, Additions: 2, Deletions: 1},
-				{Path: "new_file.txt", ChangeType: api.Added, Additions: 1, Deletions: 0},
+				{Path: "README.md", ChangeType: api.DiffFileChangeTypeModified, Additions: 2, Deletions: 1},
+				{Path: "new_file.txt", ChangeType: api.DiffFileChangeTypeAdded, Additions: 1, Deletions: 0},
 			}
 		}
 		api.WriteJSON(w, http.StatusOK, resp)
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, api.DiffResponse{Files: []api.DiffFile{}})
+}
+
+// simSVG builds an inline data-URL SVG image so the demo can render artifacts
+// without any on-disk blob serving.
+func simSVG(label, color string) string {
+	doc := fmt.Sprintf(`<svg xmlns="http://www.w3.org/2000/svg" width="320" height="200">`+
+		`<rect width="320" height="200" fill="%s"/>`+
+		`<text x="160" y="108" font-family="sans-serif" font-size="20" fill="white" text-anchor="middle">%s</text></svg>`,
+		color, label)
+	return "data:image/svg+xml;base64," + base64.StdEncoding.EncodeToString([]byte(doc))
+}
+
+func (s *SimulationServer) GetAgentArtifacts(w http.ResponseWriter, r *http.Request, projectId string, id string, params api.GetAgentArtifactsParams) {
+	if id != "agent-1" {
+		api.WriteJSON(w, http.StatusOK, api.ArtifactsResponse{Scripts: []api.ArtifactSet{}})
+		return
+	}
+	resp := api.ArtifactsResponse{Scripts: []api.ArtifactSet{
+		{
+			Name:    "screenshots",
+			Status:  api.Ready,
+			Changed: true,
+			Files: []api.ArtifactFile{
+				{
+					Name:       "home.png",
+					ChangeType: api.ArtifactFileChangeTypeModified,
+					LeftUrl:    ptr(simSVG("Home (before)", "#b91c1c")),
+					RightUrl:   ptr(simSVG("Home (after)", "#15803d")),
+				},
+				{
+					Name:       "settings.png",
+					ChangeType: api.ArtifactFileChangeTypeAdded,
+					RightUrl:   ptr(simSVG("Settings (new)", "#15803d")),
+				},
+				{
+					Name:       "about.png",
+					ChangeType: api.ArtifactFileChangeTypeUnchanged,
+					LeftUrl:    ptr(simSVG("About", "#334155")),
+					RightUrl:   ptr(simSVG("About", "#334155")),
+				},
+			},
+		},
+	}}
+	api.WriteJSON(w, http.StatusOK, resp)
 }
 
 func (s *SimulationServer) CleanBuildCache(w http.ResponseWriter, r *http.Request, projectId string, params api.CleanBuildCacheParams) {

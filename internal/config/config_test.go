@@ -94,6 +94,47 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	}
 }
 
+func TestArtifactsRoundTrip(t *testing.T) {
+	cfg := Config{
+		Artifacts: []ArtifactScript{
+			{Name: "web screenshots", Command: "bun run shots.ts", TimeoutSec: 600},
+			{Name: "docs", Command: "make docs-png"},
+		},
+	}
+
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := SaveToFile(path, cfg); err != nil {
+		t.Fatalf("SaveToFile: %v", err)
+	}
+
+	loaded, err := LoadFile(path)
+	if err != nil {
+		t.Fatalf("LoadFile: %v", err)
+	}
+	if loaded == nil || len(loaded.Artifacts) != 2 {
+		t.Fatalf("expected 2 artifacts, got %+v", loaded)
+	}
+	if loaded.Artifacts[0].Name != "web screenshots" || loaded.Artifacts[0].Command != "bun run shots.ts" || loaded.Artifacts[0].TimeoutSec != 600 {
+		t.Errorf("artifact[0] mismatch: %+v", loaded.Artifacts[0])
+	}
+	if loaded.Artifacts[1].Name != "docs" || loaded.Artifacts[1].TimeoutSec != 0 {
+		t.Errorf("artifact[1] mismatch: %+v", loaded.Artifacts[1])
+	}
+}
+
+func TestArtifactsMergeReplaces(t *testing.T) {
+	base := Config{Artifacts: []ArtifactScript{{Name: "a", Command: "x"}}}
+	base.Merge(Config{Artifacts: []ArtifactScript{{Name: "b", Command: "y"}}})
+	if len(base.Artifacts) != 1 || base.Artifacts[0].Name != "b" {
+		t.Errorf("expected merge to replace artifacts, got %+v", base.Artifacts)
+	}
+	// Merging a config without artifacts leaves the existing list intact.
+	base.Merge(Config{})
+	if len(base.Artifacts) != 1 || base.Artifacts[0].Name != "b" {
+		t.Errorf("expected artifacts preserved, got %+v", base.Artifacts)
+	}
+}
+
 func contains(s, sub string) bool {
 	return len(s) >= len(sub) && (s == sub || len(sub) == 0 ||
 		func() bool {

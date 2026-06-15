@@ -5,6 +5,7 @@
 import type { AddProjectRequest } from '../models/AddProjectRequest';
 import type { AgentInputRequest } from '../models/AgentInputRequest';
 import type { AgentResponse } from '../models/AgentResponse';
+import type { ArtifactsResponse } from '../models/ArtifactsResponse';
 import type { CleanCacheResponse } from '../models/CleanCacheResponse';
 import type { CommitInfo } from '../models/CommitInfo';
 import type { ConfigResponse } from '../models/ConfigResponse';
@@ -340,6 +341,43 @@ export class DefaultService {
         return this.httpRequest.request({
             method: 'GET',
             url: '/api/projects/{project_id}/agents/{id}/diff-files',
+            path: {
+                'project_id': projectId,
+                'id': id,
+            },
+            query: {
+                'base_ref': baseRef,
+                'head_ref': headRef,
+                'include_uncommitted': includeUncommitted,
+            },
+            errors: {
+                404: `Not Found`,
+                500: `Internal Server Error`,
+            },
+        });
+    }
+    /**
+     * Get generated visual artifacts (e.g. screenshots) for both sides of a diff
+     * Returns, per configured artifact script, the generated image files for the left and right versions of the comparison and whether they differ. Generation runs in the background and is cached; a script with status "generating" should be polled. Returns an empty list when the project configures no artifact scripts.
+     *
+     * @param projectId Project ID
+     * @param id
+     * @param baseRef Left (base) commit SHA or ref. Defaults to the agent's base branch.
+     * @param headRef Right (head) commit SHA or ref. Defaults to the agent's branch tip.
+     * @param includeUncommitted Use the agent's uncommitted working tree as the right version.
+     * @returns ArtifactsResponse OK
+     * @throws ApiError
+     */
+    public getAgentArtifacts(
+        projectId: string,
+        id: string,
+        baseRef?: string,
+        headRef?: string,
+        includeUncommitted?: boolean,
+    ): CancelablePromise<ArtifactsResponse> {
+        return this.httpRequest.request({
+            method: 'GET',
+            url: '/api/projects/{project_id}/agents/{id}/artifacts',
             path: {
                 'project_id': projectId,
                 'id': id,

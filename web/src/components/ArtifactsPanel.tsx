@@ -1,0 +1,205 @@
+import { useEffect, useRef, useState, useCallback } from 'react'
+import { api } from '../stores/apiClient'
+import type { ArtifactSet, ArtifactFile } from '../api'
+import { LoaderCircle, Image as ImageIcon, ChevronDown, ChevronRight, TriangleAlert } from 'lucide-react'
+
+const CHANGE_LABEL: Record<string, string> = {
+  added: 'added',
+  removed: 'removed',
+  modified: 'modified',
+  unchanged: 'unchanged',
+}
+
+const CHANGE_COLOR: Record<string, string> = {
+  added: 'text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-900/20',
+  removed: 'text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20',
+  modified: 'text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20',
+  unchanged: 'text-gray-400 dark:text-gray-500 bg-gray-50 dark:bg-gray-800',
+}
+
+// A subtle checkerboard so transparent screenshots read clearly in both themes.
+const checkerStyle: React.CSSProperties = {
+  backgroundImage:
+    'linear-gradient(45deg, rgba(0,0,0,0.06) 25%, transparent 25%), linear-gradient(-45deg, rgba(0,0,0,0.06) 25%, transparent 25%), linear-gradient(45deg, transparent 75%, rgba(0,0,0,0.06) 75%), linear-gradient(-45deg, transparent 75%, rgba(0,0,0,0.06) 75%)',
+  backgroundSize: '16px 16px',
+  backgroundPosition: '0 0, 0 8px, 8px -8px, -8px 0px',
+}
+
+function ImageCell({ url, label }: { url?: string | null; label: string }) {
+  return (
+    <div className="flex-1 min-w-0">
+      <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-1">{label}</div>
+      {url ? (
+        <a href={url} target="_blank" rel="noreferrer" className="block">
+          <img
+            src={url}
+            loading="lazy"
+            style={checkerStyle}
+            className="max-w-full max-h-[480px] rounded-md border border-gray-200 dark:border-gray-700 object-contain"
+          />
+        </a>
+      ) : (
+        <div className="flex items-center justify-center h-24 rounded-md border border-dashed border-gray-200 dark:border-gray-700 text-xs text-gray-400 dark:text-gray-500">
+          (none)
+        </div>
+      )}
+    </div>
+  )
+}
+
+function FileRow({ file }: { file: ArtifactFile }) {
+  const ct = file.change_type as string
+  return (
+    <div className="py-3 border-t border-gray-100 dark:border-gray-800 first:border-t-0">
+      <div className="flex items-center gap-2 mb-2">
+        <span className="text-xs font-medium text-gray-700 dark:text-gray-300 truncate">{file.name}</span>
+        <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${CHANGE_COLOR[ct] ?? ''}`}>{CHANGE_LABEL[ct] ?? ct}</span>
+      </div>
+      <div className="flex gap-3">
+        <ImageCell url={file.left_url} label="Before" />
+        <ImageCell url={file.right_url} label="After" />
+      </div>
+    </div>
+  )
+}
+
+function ArtifactSetCard({ set }: { set: ArtifactSet }) {
+  const [collapsed, setCollapsed] = useState(false)
+  const [showUnchanged, setShowUnchanged] = useState(false)
+
+  const status = set.status as string
+  const changedFiles = set.files.filter((f) => f.change_type !== 'unchanged')
+  const unchangedFiles = set.files.filter((f) => f.change_type === 'unchanged')
+
+  // Hide artifact sets with no visual changes behind a single muted line.
+  if (status === 'ready' && !set.changed) {
+    return (
+      <div className="px-3 py-2 text-xs text-gray-400 dark:text-gray-500 flex items-center gap-2">
+        <ImageIcon className="w-3.5 h-3.5 shrink-0" />
+        <span className="font-medium text-gray-500 dark:text-gray-400">{set.name}</span>
+        <span>· no visual changes</span>
+      </div>
+    )
+  }
+
+  return (
+    <div className="border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 overflow-hidden">
+      <button
+        onClick={() => setCollapsed((c) => !c)}
+        className="w-full flex items-center gap-2 px-3 py-2 bg-gray-50 dark:bg-gray-800/60 hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors cursor-pointer text-left"
+      >
+        {collapsed ? <ChevronRight className="w-3.5 h-3.5 text-gray-400" /> : <ChevronDown className="w-3.5 h-3.5 text-gray-400" />}
+        <ImageIcon className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400 shrink-0" />
+        <span className="text-sm font-medium text-gray-700 dark:text-gray-300">{set.name}</span>
+        {status === 'generating' && (
+          <span className="flex items-center gap-1 text-xs text-blue-500 dark:text-blue-400">
+            <LoaderCircle className="w-3 h-3 animate-spin" /> generating…
+          </span>
+        )}
+        {status === 'error' && (
+          <span className="flex items-center gap-1 text-xs text-red-500 dark:text-red-400">
+            <TriangleAlert className="w-3 h-3" /> failed
+          </span>
+        )}
+        {status === 'ready' && changedFiles.length > 0 && (
+          <span className="text-xs text-gray-400 dark:text-gray-500">
+            {changedFiles.length} changed
+          </span>
+        )}
+      </button>
+
+      {!collapsed && (
+        <div className="px-3 pb-2">
+          {status === 'generating' && (
+            <div className="py-6 flex items-center justify-center text-xs text-gray-400 dark:text-gray-500 gap-2">
+              <LoaderCircle className="w-4 h-4 animate-spin" /> Running artifact script…
+            </div>
+          )}
+          {status === 'error' && (
+            <div className="my-2 px-3 py-2 rounded-md bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-xs text-red-600 dark:text-red-400 whitespace-pre-wrap break-words">
+              {set.error || 'Artifact generation failed.'}
+            </div>
+          )}
+          {status === 'ready' && (
+            <>
+              {changedFiles.map((f) => <FileRow key={f.name} file={f} />)}
+              {unchangedFiles.length > 0 && (
+                <div className="pt-2">
+                  <button
+                    onClick={() => setShowUnchanged((s) => !s)}
+                    className="text-[11px] text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 cursor-pointer"
+                  >
+                    {showUnchanged ? 'Hide' : 'Show'} {unchangedFiles.length} unchanged
+                  </button>
+                  {showUnchanged && unchangedFiles.map((f) => <FileRow key={f.name} file={f} />)}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUncommitted, refreshKey }: {
+  projectId: string | null
+  agentId: string
+  baseRef?: string
+  headRef?: string
+  includeUncommitted?: boolean
+  refreshKey: number
+}) {
+  const [sets, setSets] = useState<ArtifactSet[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const fetchArtifacts = useCallback(async (): Promise<boolean> => {
+    const resp = await api.default.getAgentArtifacts(projectId ?? '', agentId, baseRef, headRef, includeUncommitted)
+    setSets(resp.scripts)
+    setError(null)
+    // Keep polling while anything is still generating.
+    return resp.scripts.some((s) => (s.status as string) === 'generating')
+  }, [projectId, agentId, baseRef, headRef, includeUncommitted])
+
+  useEffect(() => {
+    let cancelled = false
+    const clear = () => { if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null } }
+
+    const tick = async () => {
+      try {
+        const stillGenerating = await fetchArtifacts()
+        if (!cancelled && stillGenerating) {
+          timerRef.current = setTimeout(tick, 2500)
+        }
+      } catch (e) {
+        if (!cancelled) setError(e instanceof Error ? e.message : String(e))
+      }
+    }
+    clear()
+    tick()
+    return () => { cancelled = true; clear() }
+  }, [fetchArtifacts, refreshKey])
+
+  // Render nothing until we know there are configured scripts.
+  if (error) {
+    return (
+      <div className="mb-4 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-xs text-red-600 dark:text-red-400">
+        Failed to load artifacts: {error}
+      </div>
+    )
+  }
+  if (!sets || sets.length === 0) return null
+
+  return (
+    <div className="mb-4">
+      <div className="flex items-center gap-2 mb-2">
+        <ImageIcon className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400" />
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Artifacts</h3>
+      </div>
+      <div className="flex flex-col gap-2">
+        {sets.map((s) => <ArtifactSetCard key={s.name} set={s} />)}
+      </div>
+    </div>
+  )
+}

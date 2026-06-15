@@ -27,12 +27,27 @@ const (
 	Waiting  AgentStatus = "waiting"
 )
 
+// Defines values for ArtifactFileChangeType.
+const (
+	ArtifactFileChangeTypeAdded     ArtifactFileChangeType = "added"
+	ArtifactFileChangeTypeModified  ArtifactFileChangeType = "modified"
+	ArtifactFileChangeTypeRemoved   ArtifactFileChangeType = "removed"
+	ArtifactFileChangeTypeUnchanged ArtifactFileChangeType = "unchanged"
+)
+
+// Defines values for ArtifactSetStatus.
+const (
+	Error      ArtifactSetStatus = "error"
+	Generating ArtifactSetStatus = "generating"
+	Ready      ArtifactSetStatus = "ready"
+)
+
 // Defines values for DiffFileChangeType.
 const (
-	Added    DiffFileChangeType = "added"
-	Deleted  DiffFileChangeType = "deleted"
-	Modified DiffFileChangeType = "modified"
-	Renamed  DiffFileChangeType = "renamed"
+	DiffFileChangeTypeAdded    DiffFileChangeType = "added"
+	DiffFileChangeTypeDeleted  DiffFileChangeType = "deleted"
+	DiffFileChangeTypeModified DiffFileChangeType = "modified"
+	DiffFileChangeTypeRenamed  DiffFileChangeType = "renamed"
 )
 
 // Defines values for DiffLineType.
@@ -176,6 +191,43 @@ type AgentStatusInfo struct {
 
 	// Timestamp ISO 8601 timestamp of when the status was set
 	Timestamp string `json:"timestamp"`
+}
+
+// ArtifactFile defines model for ArtifactFile.
+type ArtifactFile struct {
+	ChangeType ArtifactFileChangeType `json:"change_type"`
+
+	// LeftUrl URL of the file for the left version (null if absent on the left)
+	LeftUrl *string `json:"left_url"`
+
+	// Name File name relative to the artifact set
+	Name string `json:"name"`
+
+	// RightUrl URL of the file for the right version (null if absent on the right)
+	RightUrl *string `json:"right_url"`
+}
+
+// ArtifactFileChangeType defines model for ArtifactFile.ChangeType.
+type ArtifactFileChangeType string
+
+// ArtifactSet defines model for ArtifactSet.
+type ArtifactSet struct {
+	// Changed Whether any file differs between the two versions
+	Changed bool           `json:"changed"`
+	Error   *string        `json:"error"`
+	Files   []ArtifactFile `json:"files"`
+
+	// Name The configured artifact script name
+	Name   string            `json:"name"`
+	Status ArtifactSetStatus `json:"status"`
+}
+
+// ArtifactSetStatus defines model for ArtifactSet.Status.
+type ArtifactSetStatus string
+
+// ArtifactsResponse defines model for ArtifactsResponse.
+type ArtifactsResponse struct {
+	Scripts []ArtifactSet `json:"scripts"`
 }
 
 // CleanCacheResponse defines model for CleanCacheResponse.
@@ -439,6 +491,18 @@ type UncommittedSummary struct {
 	UntrackedCount int `json:"untracked_count"`
 }
 
+// GetAgentArtifactsParams defines parameters for GetAgentArtifacts.
+type GetAgentArtifactsParams struct {
+	// BaseRef Left (base) commit SHA or ref. Defaults to the agent's base branch.
+	BaseRef *string `form:"base_ref,omitempty" json:"base_ref,omitempty"`
+
+	// HeadRef Right (head) commit SHA or ref. Defaults to the agent's branch tip.
+	HeadRef *string `form:"head_ref,omitempty" json:"head_ref,omitempty"`
+
+	// IncludeUncommitted Use the agent's uncommitted working tree as the right version.
+	IncludeUncommitted *bool `form:"include_uncommitted,omitempty" json:"include_uncommitted,omitempty"`
+}
+
 // GetAgentDiffParams defines parameters for GetAgentDiff.
 type GetAgentDiffParams struct {
 	// BaseRef Base commit SHA or ref. Defaults to the agent's base branch.
@@ -537,6 +601,9 @@ type ServerInterface interface {
 	// Get a specific Hydra agent by ID
 	// (GET /api/projects/{project_id}/agents/{id})
 	GetAgent(w http.ResponseWriter, r *http.Request, projectId string, id string)
+	// Get generated visual artifacts (e.g. screenshots) for both sides of a diff
+	// (GET /api/projects/{project_id}/agents/{id}/artifacts)
+	GetAgentArtifacts(w http.ResponseWriter, r *http.Request, projectId string, id string, params GetAgentArtifactsParams)
 	// List commits on an agent's branch (between base branch and agent branch)
 	// (GET /api/projects/{project_id}/agents/{id}/commits)
 	GetAgentCommits(w http.ResponseWriter, r *http.Request, projectId string, id string)
@@ -774,6 +841,67 @@ func (siw *ServerInterfaceWrapper) GetAgent(w http.ResponseWriter, r *http.Reque
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetAgent(w, r, projectId, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetAgentArtifacts operation middleware
+func (siw *ServerInterfaceWrapper) GetAgentArtifacts(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetAgentArtifactsParams
+
+	// ------------- Optional query parameter "base_ref" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "base_ref", r.URL.Query(), &params.BaseRef)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "base_ref", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "head_ref" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "head_ref", r.URL.Query(), &params.HeadRef)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "head_ref", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "include_uncommitted" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "include_uncommitted", r.URL.Query(), &params.IncludeUncommitted)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "include_uncommitted", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetAgentArtifacts(w, r, projectId, id, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1364,6 +1492,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents", wrapper.SpawnAgent)
 	m.HandleFunc("DELETE "+options.BaseURL+"/api/projects/{project_id}/agents/{id}", wrapper.KillAgent)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/{id}", wrapper.GetAgent)
+	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/artifacts", wrapper.GetAgentArtifacts)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/commits", wrapper.GetAgentCommits)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/diff", wrapper.GetAgentDiff)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/diff-files", wrapper.GetAgentDiffFiles)
@@ -1682,6 +1811,43 @@ func (response GetAgent404JSONResponse) VisitGetAgentResponse(w http.ResponseWri
 type GetAgent500JSONResponse ErrorResponse
 
 func (response GetAgent500JSONResponse) VisitGetAgentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetAgentArtifactsRequestObject struct {
+	ProjectId string `json:"project_id"`
+	Id        string `json:"id"`
+	Params    GetAgentArtifactsParams
+}
+
+type GetAgentArtifactsResponseObject interface {
+	VisitGetAgentArtifactsResponse(w http.ResponseWriter) error
+}
+
+type GetAgentArtifacts200JSONResponse ArtifactsResponse
+
+func (response GetAgentArtifacts200JSONResponse) VisitGetAgentArtifactsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetAgentArtifacts404JSONResponse ErrorResponse
+
+func (response GetAgentArtifacts404JSONResponse) VisitGetAgentArtifactsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetAgentArtifacts500JSONResponse ErrorResponse
+
+func (response GetAgentArtifacts500JSONResponse) VisitGetAgentArtifactsResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(500)
 
@@ -2155,6 +2321,9 @@ type StrictServerInterface interface {
 	// Get a specific Hydra agent by ID
 	// (GET /api/projects/{project_id}/agents/{id})
 	GetAgent(ctx context.Context, request GetAgentRequestObject) (GetAgentResponseObject, error)
+	// Get generated visual artifacts (e.g. screenshots) for both sides of a diff
+	// (GET /api/projects/{project_id}/agents/{id}/artifacts)
+	GetAgentArtifacts(ctx context.Context, request GetAgentArtifactsRequestObject) (GetAgentArtifactsResponseObject, error)
 	// List commits on an agent's branch (between base branch and agent branch)
 	// (GET /api/projects/{project_id}/agents/{id}/commits)
 	GetAgentCommits(ctx context.Context, request GetAgentCommitsRequestObject) (GetAgentCommitsResponseObject, error)
@@ -2457,6 +2626,34 @@ func (sh *strictHandler) GetAgent(w http.ResponseWriter, r *http.Request, projec
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetAgentResponseObject); ok {
 		if err := validResponse.VisitGetAgentResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetAgentArtifacts operation middleware
+func (sh *strictHandler) GetAgentArtifacts(w http.ResponseWriter, r *http.Request, projectId string, id string, params GetAgentArtifactsParams) {
+	var request GetAgentArtifactsRequestObject
+
+	request.ProjectId = projectId
+	request.Id = id
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetAgentArtifacts(ctx, request.(GetAgentArtifactsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetAgentArtifacts")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetAgentArtifactsResponseObject); ok {
+		if err := validResponse.VisitGetAgentArtifactsResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

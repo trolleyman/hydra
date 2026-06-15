@@ -86,6 +86,12 @@ func GetStateDirFromProjectRoot(projectRoot string) string {
 	return filepath.Join(GetHydraDirFromProjectRoot(projectRoot), "state")
 }
 
+// GetArtifactsDirFromProjectRoot returns the (gitignored) directory holding
+// generated diff artifacts (screenshots etc.) and their ephemeral checkouts.
+func GetArtifactsDirFromProjectRoot(projectRoot string) string {
+	return filepath.Join(GetHydraDirFromProjectRoot(projectRoot), "artifacts")
+}
+
 func GetDBPathFromProjectRoot(projectRoot string) string {
 	return filepath.Join(GetStateDirFromProjectRoot(projectRoot), "db.sqlite3")
 }

@@ -61,6 +61,25 @@ type Features struct {
 	TerminalBash bool `toml:"terminal_bash"`
 }
 
+// ArtifactScript describes a per-project command that generates visual
+// artifacts (e.g. screenshots) for a checkout of the repository. The diff
+// viewer runs it against both sides of a comparison and shows the outputs that
+// differ. See internal/artifacts for the runner.
+//
+// Contract: the command is run with the checkout directory as its working
+// directory and these environment variables set:
+//   - HYDRA_ARTIFACT_OUTPUT: directory the script must write image files into
+//   - HYDRA_ARTIFACT_SOURCE: the checkout directory (same as cwd)
+//   - HYDRA_ARTIFACT_REF:    the resolved git ref/sha being rendered (best-effort)
+type ArtifactScript struct {
+	// Name uniquely identifies the script; used as the UI label and cache dir.
+	Name string `toml:"name"`
+	// Command is the shell command run (via `sh -c`) in the checkout directory.
+	Command string `toml:"command"`
+	// TimeoutSec bounds how long the command may run (0 = default, see artifacts).
+	TimeoutSec int `toml:"timeout_sec"`
+}
+
 type Config struct {
 	// Defaults for all agents.
 	Defaults AgentConfig `toml:"defaults"`
@@ -68,6 +87,8 @@ type Config struct {
 	Agents map[string]AgentConfig `toml:"agents"`
 	// Feature flags.
 	Features Features `toml:"features"`
+	// Artifacts are per-project visual-artifact generation scripts.
+	Artifacts []ArtifactScript `toml:"artifacts"`
 }
 
 // GetUserConfigPath returns the path to the global user configuration file.
@@ -137,6 +158,11 @@ func (c *Config) Merge(other Config) {
 
 	if other.Features.TerminalBash {
 		c.Features.TerminalBash = true
+	}
+
+	// Artifact scripts are replaced wholesale when the other config sets any.
+	if other.Artifacts != nil {
+		c.Artifacts = other.Artifacts
 	}
 }
 
@@ -352,6 +378,21 @@ func marshalConfig(cfg Config) string {
 		}
 		buf.WriteString("[features]\n")
 		buf.WriteString("terminal_bash = true\n")
+	}
+
+	for _, a := range cfg.Artifacts {
+		if a.Name == "" && a.Command == "" {
+			continue
+		}
+		if buf.Len() > 0 {
+			buf.WriteString("\n")
+		}
+		buf.WriteString("[[artifacts]]\n")
+		buf.WriteString("name = " + tomlStringValue(a.Name) + "\n")
+		buf.WriteString("command = " + tomlStringValue(a.Command) + "\n")
+		if a.TimeoutSec > 0 {
+			buf.WriteString(fmt.Sprintf("timeout_sec = %d\n", a.TimeoutSec))
+		}
 	}
 
 	return buf.String()

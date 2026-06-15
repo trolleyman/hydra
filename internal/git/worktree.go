@@ -1,7 +1,10 @@
 package git
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -68,6 +71,83 @@ func CreateWorktree(projectRoot, worktreePath, branchName, baseBranch string) er
 		return errtrace.Wrap(fmt.Errorf("git worktree add: %w", err))
 	}
 	return nil
+}
+
+// ResolveRef resolves a commit-ish ref to its full commit SHA.
+func ResolveRef(projectRoot, ref string) (string, error) {
+	if err := ValidateRef(ref); err != nil {
+		return "", errtrace.Wrap(err)
+	}
+	return gitOutput(projectRoot, "rev-parse", ref+"^{commit}")
+}
+
+// AddDetachedWorktree checks out ref into a new detached-HEAD worktree at path.
+// The parent directory is created and marked gitignored. Use RemoveWorktree to
+// clean it up afterwards.
+func AddDetachedWorktree(projectRoot, worktreePath, ref string) error {
+	if err := ValidateRef(ref); err != nil {
+		return errtrace.Wrap(fmt.Errorf("ref: %w", err))
+	}
+	if err := paths.CreateGitignoreAllInDir(filepath.Dir(worktreePath)); err != nil {
+		return errtrace.Wrap(err)
+	}
+	cmd := exec.Command("git", "-C", projectRoot,
+		"worktree", "add", "--detach", worktreePath, ref)
+	common.PrintExecCmd(cmd)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return errtrace.Wrap(fmt.Errorf("git worktree add --detach: %w", err))
+	}
+	return nil
+}
+
+// WorktreeStateHash returns a hex digest that changes whenever the working-tree
+// content of dir changes: it folds in HEAD, the porcelain status, the tracked
+// diff against HEAD, and the names+sizes of untracked files.
+func WorktreeStateHash(dir string) (string, error) {
+	h := sha256.New()
+	add := func(label, s string) {
+		_, _ = io.WriteString(h, label)
+		_, _ = io.WriteString(h, "\x00")
+		_, _ = io.WriteString(h, s)
+		_, _ = io.WriteString(h, "\x00")
+	}
+
+	head, err := gitOutput(dir, "rev-parse", "HEAD")
+	if err != nil {
+		return "", errtrace.Wrap(err)
+	}
+	add("head", head)
+
+	status, err := gitOutput(dir, "status", "--porcelain=v1")
+	if err != nil {
+		return "", errtrace.Wrap(err)
+	}
+	add("status", status)
+
+	// Tracked changes (staged + unstaged) relative to HEAD.
+	diff, err := gitOutput(dir, "diff", "HEAD")
+	if err == nil {
+		add("diff", diff)
+	}
+
+	// Untracked files: fold in name + size so new/edited untracked files bust the cache.
+	others, err := gitOutput(dir, "ls-files", "--others", "--exclude-standard")
+	if err == nil {
+		for _, p := range strings.Split(others, "\n") {
+			if p == "" {
+				continue
+			}
+			size := int64(-1)
+			if fi, err := os.Stat(filepath.Join(dir, p)); err == nil {
+				size = fi.Size()
+			}
+			add("untracked", fmt.Sprintf("%s:%d", p, size))
+		}
+	}
+
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 // RemoveWorktree runs `git worktree remove --force <path>`.

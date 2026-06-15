@@ -1,0 +1,530 @@
+// Package artifacts generates, caches, and serves per-project "visual
+// artifacts" (e.g. screenshots) for the diff viewer.
+//
+// A project configures one or more [config.ArtifactScript]s. For a given side
+// of a diff (a commit ref, or the head's uncommitted working tree) the manager
+// checks out the relevant source, runs the script against it, and collects the
+// image files it writes. Results are cached on disk under
+// .hydra/artifacts/out/<script>/<version-key> (gitignored, never committed) and
+// keyed by an immutable version identifier (the resolved commit SHA, or a hash
+// of the working-tree state), so repeat views are free.
+//
+// Generation runs in the background: Get returns immediately with a
+// "generating" status while a goroutine does the (potentially slow) work, and a
+// per-entry lock collapses duplicate concurrent requests for the same version.
+//
+// Design note: scripts run on the host as the invoking user (the project config
+// is trusted, like pre_prompt and shared_mounts), with the checkout as their
+// working directory and a wall-clock timeout. Running them inside the sandbox
+// is a follow-up.
+package artifacts
+
+import (
+	"bytes"
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"io"
+	"io/fs"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+
+	"braces.dev/errtrace"
+	"github.com/trolleyman/hydra/internal/config"
+	"github.com/trolleyman/hydra/internal/git"
+	"github.com/trolleyman/hydra/internal/paths"
+)
+
+const (
+	metaFile       = "meta.json"
+	defaultTimeout = 5 * time.Minute
+	// DefaultMaxAge and DefaultMaxBytes bound the on-disk artifact cache.
+	DefaultMaxAge   = 7 * 24 * time.Hour
+	DefaultMaxBytes = int64(2) << 30 // 2 GiB
+)
+
+// imageExts maps collectible output extensions to their content types.
+var imageExts = map[string]string{
+	".png":  "image/png",
+	".jpg":  "image/jpeg",
+	".jpeg": "image/jpeg",
+	".gif":  "image/gif",
+	".webp": "image/webp",
+	".avif": "image/avif",
+	".svg":  "image/svg+xml",
+	".bmp":  "image/bmp",
+	".pdf":  "application/pdf",
+}
+
+// Status is the generation state of a cache entry.
+type Status string
+
+const (
+	StatusReady      Status = "ready"
+	StatusGenerating Status = "generating"
+	StatusError      Status = "error"
+)
+
+// FileMeta describes a single generated artifact file.
+type FileMeta struct {
+	Name string `json:"name"` // path relative to the entry dir, forward-slashed
+	Size int64  `json:"size"`
+	Hash string `json:"hash"` // sha256 hex of the file contents
+}
+
+// Meta is the persisted (and returned) description of one cache entry.
+type Meta struct {
+	Script    string     `json:"script"`
+	Key       string     `json:"key"`
+	Ref       string     `json:"ref,omitempty"`
+	Status    Status     `json:"status"`
+	Error     string     `json:"error,omitempty"`
+	Files     []FileMeta `json:"files,omitempty"`
+	UpdatedAt int64      `json:"updated_at"`
+}
+
+// ChangeType classifies an artifact file across the two compared versions.
+type ChangeType string
+
+const (
+	ChangeAdded     ChangeType = "added"     // present only on the right
+	ChangeRemoved   ChangeType = "removed"   // present only on the left
+	ChangeModified  ChangeType = "modified"  // present on both, contents differ
+	ChangeUnchanged ChangeType = "unchanged" // present on both, identical
+)
+
+// FileDelta is the result of matching one artifact file (by name) across the
+// left and right versions.
+type FileDelta struct {
+	Name    string
+	Change  ChangeType
+	InLeft  bool
+	InRight bool
+}
+
+// Compare matches files by name across two versions' file lists and classifies
+// each as added/removed/modified/unchanged. The result is sorted by name.
+func Compare(left, right []FileMeta) []FileDelta {
+	leftHash := make(map[string]string, len(left))
+	rightHash := make(map[string]string, len(right))
+	names := map[string]struct{}{}
+	for _, f := range left {
+		leftHash[f.Name] = f.Hash
+		names[f.Name] = struct{}{}
+	}
+	for _, f := range right {
+		rightHash[f.Name] = f.Hash
+		names[f.Name] = struct{}{}
+	}
+	ordered := make([]string, 0, len(names))
+	for n := range names {
+		ordered = append(ordered, n)
+	}
+	sort.Strings(ordered)
+
+	out := make([]FileDelta, 0, len(ordered))
+	for _, name := range ordered {
+		lh, inLeft := leftHash[name]
+		rh, inRight := rightHash[name]
+		d := FileDelta{Name: name, InLeft: inLeft, InRight: inRight}
+		switch {
+		case inLeft && !inRight:
+			d.Change = ChangeRemoved
+		case !inLeft && inRight:
+			d.Change = ChangeAdded
+		case lh != rh:
+			d.Change = ChangeModified
+		default:
+			d.Change = ChangeUnchanged
+		}
+		out = append(out, d)
+	}
+	return out
+}
+
+// AnyChanged reports whether any file differs between the two versions.
+func AnyChanged(deltas []FileDelta) bool {
+	for _, d := range deltas {
+		if d.Change != ChangeUnchanged {
+			return true
+		}
+	}
+	return false
+}
+
+// Version identifies one side of a comparison: either a committed ref (checked
+// out into an ephemeral worktree) or an existing working-tree directory (run in
+// place, for uncommitted changes).
+type Version struct {
+	Ref         string
+	WorktreeDir string
+}
+
+// Manager owns artifact generation, caching, locking, and pruning for a project.
+type Manager struct {
+	projectRoot string
+
+	mu   sync.Mutex
+	gens map[string]struct{} // entry dirs with an in-flight generation
+}
+
+// NewManager returns a Manager for the given project root.
+func NewManager(projectRoot string) *Manager {
+	m := &Manager{projectRoot: projectRoot, gens: map[string]struct{}{}}
+	_ = paths.CreateGitignoreAllInDir(m.root())
+	return m
+}
+
+func (m *Manager) root() string         { return paths.GetArtifactsDirFromProjectRoot(m.projectRoot) }
+func (m *Manager) outDir() string       { return filepath.Join(m.root(), "out") }
+func (m *Manager) checkoutsDir() string { return filepath.Join(m.root(), "checkouts") }
+
+func (m *Manager) entryDir(script, key string) string {
+	return filepath.Join(m.outDir(), sanitizeName(script), key)
+}
+
+// versionKey resolves a Version to a stable cache key and a human-readable ref.
+func (m *Manager) versionKey(v Version) (key, ref string, err error) {
+	if v.WorktreeDir != "" {
+		h, err := git.WorktreeStateHash(v.WorktreeDir)
+		if err != nil {
+			return "", "", errtrace.Wrap(err)
+		}
+		return "w" + h, "working tree", nil
+	}
+	sha, err := git.ResolveRef(m.projectRoot, v.Ref)
+	if err != nil {
+		return "", "", errtrace.Wrap(err)
+	}
+	return "c" + sha, sha, nil
+}
+
+// Get returns the cache entry for (spec, v), starting a background generation
+// if it is neither cached nor already in flight. A returned Meta with status
+// StatusGenerating means the caller should poll again shortly.
+func (m *Manager) Get(spec config.ArtifactScript, v Version) (Meta, error) {
+	key, ref, err := m.versionKey(v)
+	if err != nil {
+		return Meta{}, errtrace.Wrap(err)
+	}
+	dir := m.entryDir(spec.Name, key)
+
+	m.mu.Lock()
+	// Cache hit on disk takes precedence (survives restarts).
+	if meta, ok := readMeta(dir); ok {
+		m.mu.Unlock()
+		return meta, nil
+	}
+	if _, inFlight := m.gens[dir]; inFlight {
+		m.mu.Unlock()
+		return Meta{Script: spec.Name, Key: key, Ref: ref, Status: StatusGenerating}, nil
+	}
+	m.gens[dir] = struct{}{}
+	m.mu.Unlock()
+
+	go func() {
+		meta := m.generate(spec, v, key, ref)
+		if err := writeMeta(dir, meta); err != nil {
+			// Best-effort: a failed write just means the next request regenerates.
+			_ = err
+		}
+		m.mu.Lock()
+		delete(m.gens, dir)
+		m.mu.Unlock()
+	}()
+
+	return Meta{Script: spec.Name, Key: key, Ref: ref, Status: StatusGenerating}, nil
+}
+
+// generate runs the script for one version and returns the resulting Meta.
+func (m *Manager) generate(spec config.ArtifactScript, v Version, key, ref string) Meta {
+	meta := Meta{Script: spec.Name, Key: key, Ref: ref, UpdatedAt: time.Now().Unix()}
+
+	_ = paths.CreateGitignoreAllInDir(m.root())
+	dir := m.entryDir(spec.Name, key)
+	if err := os.RemoveAll(dir); err != nil {
+		meta.Status, meta.Error = StatusError, err.Error()
+		return meta
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		meta.Status, meta.Error = StatusError, err.Error()
+		return meta
+	}
+
+	// Resolve the directory the script runs in.
+	runDir := v.WorktreeDir
+	if runDir == "" {
+		co := filepath.Join(m.checkoutsDir(), key)
+		_ = git.RemoveWorktree(m.projectRoot, co) // clear any stale checkout
+		_ = os.RemoveAll(co)
+		if err := git.AddDetachedWorktree(m.projectRoot, co, ref); err != nil {
+			meta.Status, meta.Error = StatusError, fmt.Sprintf("checkout %s: %v", ref, err)
+			return meta
+		}
+		defer func() {
+			_ = git.RemoveWorktree(m.projectRoot, co)
+			_ = os.RemoveAll(co)
+		}()
+		runDir = co
+	}
+
+	timeout := defaultTimeout
+	if spec.TimeoutSec > 0 {
+		timeout = time.Duration(spec.TimeoutSec) * time.Second
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "sh", "-c", spec.Command)
+	cmd.Dir = runDir
+	cmd.Env = append(os.Environ(),
+		"HYDRA_ARTIFACT_OUTPUT="+dir,
+		"HYDRA_ARTIFACT_SOURCE="+runDir,
+		"HYDRA_ARTIFACT_REF="+ref,
+	)
+	var stderr bytes.Buffer
+	cmd.Stdout = io.Discard
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		msg := err.Error()
+		if ctx.Err() == context.DeadlineExceeded {
+			msg = "timed out after " + timeout.String()
+		}
+		if tail := strings.TrimSpace(stderr.String()); tail != "" {
+			msg += ": " + lastLines(tail, 15)
+		}
+		meta.Status, meta.Error = StatusError, msg
+		return meta
+	}
+
+	files, err := scanOutputs(dir)
+	if err != nil {
+		meta.Status, meta.Error = StatusError, err.Error()
+		return meta
+	}
+	meta.Files = files
+	meta.Status = StatusReady
+	meta.UpdatedAt = time.Now().Unix()
+	return meta
+}
+
+// keyRe matches valid cache keys produced by versionKey.
+var keyRe = regexp.MustCompile(`^[cw][0-9a-f]+$`)
+
+// BlobPath validates a (script, key, file) triple and returns the absolute
+// on-disk path of the artifact file plus its content type. It guards against
+// path traversal: the resolved path is guaranteed to stay within the entry dir.
+func (m *Manager) BlobPath(script, key, file string) (path, contentType string, err error) {
+	if !keyRe.MatchString(key) {
+		return "", "", errtrace.Wrap(fmt.Errorf("invalid key"))
+	}
+	ext := strings.ToLower(filepath.Ext(file))
+	ct, ok := imageExts[ext]
+	if !ok {
+		return "", "", errtrace.Wrap(fmt.Errorf("unsupported artifact type %q", ext))
+	}
+	base := m.entryDir(script, key)
+	full := filepath.Join(base, filepath.FromSlash(filepath.Clean("/"+file)))
+	rel, err := filepath.Rel(base, full)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", "", errtrace.Wrap(fmt.Errorf("invalid file path"))
+	}
+	return full, ct, nil
+}
+
+// CleanCheckouts removes leftover ephemeral checkouts. Safe to call on boot,
+// before any generation is in flight.
+func (m *Manager) CleanCheckouts() {
+	_, _ = exec.Command("git", "-C", m.projectRoot, "worktree", "prune").Output()
+	_ = os.RemoveAll(m.checkoutsDir())
+}
+
+// PruneStale removes cache entries older than maxAge, then removes the oldest
+// remaining entries until the total cache size is under maxBytes. Entries with
+// an in-flight generation are never touched.
+func (m *Manager) PruneStale(maxAge time.Duration, maxBytes int64) error {
+	type entry struct {
+		dir     string
+		modTime time.Time
+		size    int64
+	}
+	var entries []entry
+
+	scriptDirs, err := os.ReadDir(m.outDir())
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return errtrace.Wrap(err)
+	}
+
+	m.mu.Lock()
+	inFlight := make(map[string]struct{}, len(m.gens))
+	for d := range m.gens {
+		inFlight[d] = struct{}{}
+	}
+	m.mu.Unlock()
+
+	cutoff := time.Now().Add(-maxAge)
+	for _, sd := range scriptDirs {
+		if !sd.IsDir() {
+			continue
+		}
+		scriptPath := filepath.Join(m.outDir(), sd.Name())
+		keyDirs, err := os.ReadDir(scriptPath)
+		if err != nil {
+			continue
+		}
+		for _, kd := range keyDirs {
+			if !kd.IsDir() {
+				continue
+			}
+			dir := filepath.Join(scriptPath, kd.Name())
+			if _, busy := inFlight[dir]; busy {
+				continue
+			}
+			size, modTime := dirStats(dir)
+			if maxAge > 0 && modTime.Before(cutoff) {
+				_ = os.RemoveAll(dir)
+				continue
+			}
+			entries = append(entries, entry{dir: dir, modTime: modTime, size: size})
+		}
+	}
+
+	if maxBytes > 0 {
+		var total int64
+		for _, e := range entries {
+			total += e.size
+		}
+		if total > maxBytes {
+			// Evict oldest-first until under the cap.
+			sort.Slice(entries, func(i, j int) bool { return entries[i].modTime.Before(entries[j].modTime) })
+			for _, e := range entries {
+				if total <= maxBytes {
+					break
+				}
+				_ = os.RemoveAll(e.dir)
+				total -= e.size
+			}
+		}
+	}
+	return nil
+}
+
+// --- helpers ---
+
+func readMeta(dir string) (Meta, bool) {
+	data, err := os.ReadFile(filepath.Join(dir, metaFile))
+	if err != nil {
+		return Meta{}, false
+	}
+	var meta Meta
+	if err := json.Unmarshal(data, &meta); err != nil {
+		return Meta{}, false
+	}
+	if meta.Status == "" {
+		return Meta{}, false
+	}
+	return meta, true
+}
+
+func writeMeta(dir string, meta Meta) error {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return errtrace.Wrap(err)
+	}
+	data, err := json.MarshalIndent(meta, "", "  ")
+	if err != nil {
+		return errtrace.Wrap(err)
+	}
+	return errtrace.Wrap(os.WriteFile(filepath.Join(dir, metaFile), data, 0o644))
+}
+
+func scanOutputs(dir string) ([]FileMeta, error) {
+	var out []FileMeta
+	err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || d.Name() == metaFile {
+			return nil
+		}
+		if _, ok := imageExts[strings.ToLower(filepath.Ext(d.Name()))]; !ok {
+			return nil
+		}
+		hash, size, err := hashFile(p)
+		if err != nil {
+			return err
+		}
+		rel, _ := filepath.Rel(dir, p)
+		out = append(out, FileMeta{Name: filepath.ToSlash(rel), Size: size, Hash: hash})
+		return nil
+	})
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out, nil
+}
+
+func hashFile(path string) (string, int64, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", 0, errtrace.Wrap(err)
+	}
+	defer f.Close()
+	h := sha256.New()
+	n, err := io.Copy(h, f)
+	if err != nil {
+		return "", 0, errtrace.Wrap(err)
+	}
+	return hex.EncodeToString(h.Sum(nil)), n, nil
+}
+
+func dirStats(dir string) (size int64, newest time.Time) {
+	_ = filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil {
+			return nil
+		}
+		if !d.IsDir() {
+			size += info.Size()
+		}
+		if info.ModTime().After(newest) {
+			newest = info.ModTime()
+		}
+		return nil
+	})
+	return size, newest
+}
+
+var unsafeNameRe = regexp.MustCompile(`[^a-zA-Z0-9._-]+`)
+
+// sanitizeName turns an arbitrary script name into a safe directory component.
+func sanitizeName(name string) string {
+	s := unsafeNameRe.ReplaceAllString(name, "_")
+	s = strings.Trim(s, "._-")
+	if s == "" {
+		return "unnamed"
+	}
+	return s
+}
+
+func lastLines(s string, n int) string {
+	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
+	if len(lines) > n {
+		lines = lines[len(lines)-n:]
+	}
+	return strings.Join(lines, "\n")
+}
