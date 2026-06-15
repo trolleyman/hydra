@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 
 	"braces.dev/errtrace"
 	"github.com/trolleyman/hydra/internal/api"
@@ -41,8 +42,8 @@ func (s *Server) GetAgentArtifacts(ctx context.Context, request api.GetAgentArti
 	}
 	mgr := s.Artifacts.Manager(projectRoot)
 
-	cfg, err := config.Load(projectRoot)
-	if err != nil || len(cfg.Artifacts) == 0 || head.Branch == nil {
+	liveCfg, err := config.Load(projectRoot)
+	if err != nil || head.Branch == nil {
 		return api.GetAgentArtifacts200JSONResponse(empty), nil
 	}
 
@@ -73,24 +74,142 @@ func (s *Server) GetAgentArtifacts(ctx context.Context, request api.GetAgentArti
 		right = artifacts.Version{Ref: *head.Branch}
 	}
 
-	sets := make([]api.ArtifactSet, 0, len(cfg.Artifacts))
-	for _, spec := range cfg.Artifacts {
-		if spec.Name == "" || spec.Command == "" {
-			continue
+	// Resolve the artifact scripts independently for each side: the [[artifacts]]
+	// section of .hydra/config.toml is loaded as it existed *at each version*, not
+	// once from the live config. So if the branch adds, removes, renames, or edits
+	// a script, the "before" side runs the merge-base's definitions and the "after"
+	// side runs the branch's. The two are then matched up by script name below.
+	leftByName, err := artifactSpecsByName(projectRoot, left, liveCfg)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	rightByName, err := artifactSpecsByName(projectRoot, right, liveCfg)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	if len(leftByName) == 0 && len(rightByName) == 0 {
+		return api.GetAgentArtifacts200JSONResponse(empty), nil
+	}
+
+	// Union of names present on either side, sorted for stable output.
+	nameSet := map[string]struct{}{}
+	for n := range leftByName {
+		nameSet[n] = struct{}{}
+	}
+	for n := range rightByName {
+		nameSet[n] = struct{}{}
+	}
+	names := make([]string, 0, len(nameSet))
+	for n := range nameSet {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+
+	sets := make([]api.ArtifactSet, 0, len(names))
+	for _, name := range names {
+		var leftSpec, rightSpec *config.ArtifactScript
+		if spec, ok := leftByName[name]; ok {
+			leftSpec = &spec
 		}
-		sets = append(sets, s.buildArtifactSet(request.ProjectId, spec, mgr, left, right))
+		if spec, ok := rightByName[name]; ok {
+			rightSpec = &spec
+		}
+		sets = append(sets, s.buildArtifactSet(request.ProjectId, name, leftSpec, rightSpec, mgr, left, right))
 	}
 
 	return api.GetAgentArtifacts200JSONResponse(api.ArtifactsResponse{Scripts: sets}), nil
 }
 
-// buildArtifactSet generates/loads both sides for one script and folds them
-// into the API representation.
-func (s *Server) buildArtifactSet(projectID string, spec config.ArtifactScript, mgr *artifacts.Manager, left, right artifacts.Version) api.ArtifactSet {
-	set := api.ArtifactSet{Name: spec.Name, Files: []api.ArtifactFile{}}
+// artifactSpecsByName loads the artifact scripts that apply to one side of the
+// comparison and indexes them by name. It reads .hydra/config.toml as it existed
+// at that version — the worktree's own file for an uncommitted working tree, or
+// the file at the committed ref otherwise — so a branch's [[artifacts]] edits are
+// reflected on the side that introduced them. Scripts with an empty name or
+// command are dropped, and on a duplicate name the first definition wins.
+//
+// Security: a version's config is attacker-controllable (a branch can edit
+// .hydra/config.toml), and unsafe_host runs a command unconfined on the host, so
+// a version is never allowed to grant itself host access. unsafe_host is honored
+// only when the trusted live config (config.Load of the project root, what a human
+// controls on the main branch) authorizes that exact name+command; otherwise the
+// command is forced back into the sandbox. Sandboxed commands need no such gate —
+// the sandbox is the boundary and already runs the checkout's untrusted code.
+func artifactSpecsByName(projectRoot string, v artifacts.Version, liveCfg config.Config) (map[string]config.ArtifactScript, error) {
+	var content []byte
+	if v.WorktreeDir != "" {
+		// Read the worktree's own config so uncommitted [[artifacts]] edits apply.
+		data, err := os.ReadFile(config.GetProjectConfigPath(v.WorktreeDir))
+		if err != nil && !os.IsNotExist(err) {
+			return nil, errtrace.Wrap(err)
+		}
+		content = data // nil when absent → inherits the user config's artifacts
+	} else {
+		data, err := git.ShowFile(projectRoot, v.Ref, ".hydra/config.toml")
+		if err != nil {
+			return nil, errtrace.Wrap(err)
+		}
+		content = data
+	}
 
-	leftMeta, lerr := mgr.Get(spec, left)
-	rightMeta, rerr := mgr.Get(spec, right)
+	specs, err := config.ArtifactsAtProjectTOML(content)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+
+	trustedHost := trustedHostCommands(liveCfg)
+	byName := make(map[string]config.ArtifactScript, len(specs))
+	for _, spec := range specs {
+		if spec.Name == "" || spec.Command == "" {
+			continue
+		}
+		if _, dup := byName[spec.Name]; dup {
+			continue
+		}
+		if spec.UnsafeHost && !trustedHost[hostKey(spec.Name, spec.Command)] {
+			// A version-sourced command not authorized on the host by the trusted
+			// config must run confined, regardless of what the version claims.
+			spec.UnsafeHost = false
+		}
+		byName[spec.Name] = spec
+	}
+	return byName, nil
+}
+
+// trustedHostCommands returns the set of name+command pairs that the live config
+// explicitly authorizes to run unconfined on the host (unsafe_host = true).
+func trustedHostCommands(cfg config.Config) map[string]bool {
+	trusted := map[string]bool{}
+	for _, s := range cfg.Artifacts {
+		if s.UnsafeHost && s.Name != "" && s.Command != "" {
+			trusted[hostKey(s.Name, s.Command)] = true
+		}
+	}
+	return trusted
+}
+
+// hostKey keys the trusted-host set by name and command. The NUL separator can't
+// appear in either field, so distinct (name, command) pairs never collide.
+func hostKey(name, command string) string { return name + "\x00" + command }
+
+// buildArtifactSet generates/loads both sides for one script (matched by name)
+// and folds them into the API representation. Either side's spec may be nil when
+// the script is defined on only one version (added or removed on the branch); a
+// nil side contributes no files, so its counterparts surface as added/removed.
+func (s *Server) buildArtifactSet(projectID, name string, leftSpec, rightSpec *config.ArtifactScript, mgr *artifacts.Manager, left, right artifacts.Version) api.ArtifactSet {
+	set := api.ArtifactSet{Name: name, Files: []api.ArtifactFile{}}
+
+	var leftMeta, rightMeta artifacts.Meta
+	var lerr, rerr error
+	if leftSpec != nil {
+		leftMeta, lerr = mgr.Get(*leftSpec, left)
+	} else {
+		leftMeta = artifacts.Meta{Status: artifacts.StatusReady}
+	}
+	if rightSpec != nil {
+		rightMeta, rerr = mgr.Get(*rightSpec, right)
+	} else {
+		rightMeta = artifacts.Meta{Status: artifacts.StatusReady}
+	}
 	if lerr != nil || rerr != nil {
 		set.Status = api.Error
 		msg := joinErrs(lerr, rerr)
@@ -117,10 +236,10 @@ func (s *Server) buildArtifactSet(projectID string, spec config.ArtifactScript, 
 	for _, d := range deltas {
 		f := api.ArtifactFile{Name: d.Name, ChangeType: api.ArtifactFileChangeType(d.Change)}
 		if d.InLeft {
-			f.LeftUrl = ptr(blobURL(projectID, spec.Name, leftMeta.Key, d.Name))
+			f.LeftUrl = ptr(blobURL(projectID, name, leftMeta.Key, d.Name))
 		}
 		if d.InRight {
-			f.RightUrl = ptr(blobURL(projectID, spec.Name, rightMeta.Key, d.Name))
+			f.RightUrl = ptr(blobURL(projectID, name, rightMeta.Key, d.Name))
 		}
 		set.Files = append(set.Files, f)
 	}

@@ -294,11 +294,6 @@ func (s *Server) GetStatus(_ context.Context, _ api.GetStatusRequestObject) (api
 		sandboxErr = &errStr
 	}
 
-	terminalBashEnabled := false
-	if cfg, err := config.Load(projectRoot); err == nil {
-		terminalBashEnabled = cfg.Features.TerminalBash
-	}
-
 	return api.GetStatus200JSONResponse(api.StatusResponse{
 		Status:           &status,
 		SandboxError:     sandboxErr,
@@ -307,11 +302,6 @@ func (s *Server) GetStatus(_ context.Context, _ api.GetStatusRequestObject) (api
 		ProjectRoot:      &projectRoot,
 		DefaultProjectId: &defaultProjectID,
 		Development:      &development,
-		Features: &struct {
-			TerminalBash *bool `json:"terminal_bash,omitempty"`
-		}{
-			TerminalBash: &terminalBashEnabled,
-		},
 	}), nil
 }
 
@@ -351,13 +341,8 @@ func (s *Server) GetConfig(_ context.Context, request api.GetConfigRequestObject
 
 	defaultPrePrompt := config.DefaultPrePrompt
 	resp := api.ConfigResponse{
-		Defaults: toAPIAgentConfig(cfg.Defaults),
-		Agents:   make(map[string]api.AgentConfig),
-		Features: &struct {
-			TerminalBash *bool `json:"terminal_bash,omitempty"`
-		}{
-			TerminalBash: &cfg.Features.TerminalBash,
-		},
+		Defaults:         toAPIAgentConfig(cfg.Defaults),
+		Agents:           make(map[string]api.AgentConfig),
 		DefaultPrePrompt: &defaultPrePrompt,
 	}
 
@@ -427,9 +412,6 @@ func (s *Server) SaveConfig(_ context.Context, request api.SaveConfigRequestObje
 	newCfg := config.Config{
 		Defaults: fromAPIAgentConfig(request.Body.Defaults),
 		Agents:   make(map[string]config.AgentConfig),
-	}
-	if request.Body.Features != nil && request.Body.Features.TerminalBash != nil {
-		newCfg.Features.TerminalBash = *request.Body.Features.TerminalBash
 	}
 	for name, agent := range request.Body.Agents {
 		newCfg.Agents[name] = fromAPIAgentConfig(agent)

@@ -16,7 +16,7 @@ export const Route = createFileRoute('/settings')({
 })
 
 function SettingsPage() {
-  const { selectedProjectId, projects, systemStatus } = useProjectStore()
+  const { selectedProjectId, projects } = useProjectStore()
   const navigate = useNavigate()
   const [config, setConfig] = useState<ConfigResponse | null>(null)
   const [baseConfig, setBaseConfig] = useState<string | null>(null)
@@ -27,7 +27,6 @@ function SettingsPage() {
   const [testAgent, setTestAgent] = useState<AgentResponse | null>(null)
   const [testing, setTesting] = useState(false)
 
-  const development = systemStatus?.development ?? false
   const selectedProject = projects.find(p => p.id === selectedProjectId)
   // User config API requires a project ID in the path even though config is global.
   // Fall back to first available project if none is selected.
@@ -160,7 +159,6 @@ function SettingsPage() {
           inheritedConfig={null}
           activeSection={activeSection}
           setActiveSection={setActiveSection}
-          development={development}
           selectedProject={selectedProject}
           testAgent={testAgent}
           testing={testing}

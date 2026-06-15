@@ -810,12 +810,6 @@ components:
         development:
           type: boolean
           description: Whether the server is running in development mode
-        features:
-          type: object
-          properties:
-            terminal_bash:
-              type: boolean
-              description: Whether the bash terminal feature is enabled
 
     ProjectInfo:
       type: object
@@ -1151,11 +1145,6 @@ components:
           type: object
           additionalProperties:
             $ref: '#/components/schemas/AgentConfig'
-        features:
-          type: object
-          properties:
-            terminal_bash:
-              type: boolean
         default_pre_prompt:
           type: string
           description: Built-in default pre-prompt always prepended to agent prompts (read-only)

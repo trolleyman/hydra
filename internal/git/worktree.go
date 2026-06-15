@@ -3,6 +3,7 @@ package git
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -79,6 +80,31 @@ func ResolveRef(projectRoot, ref string) (string, error) {
 		return "", errtrace.Wrap(err)
 	}
 	return gitOutput(projectRoot, "rev-parse", ref+"^{commit}")
+}
+
+// ShowFile returns the contents of a repo-relative path as it exists at ref
+// (`git show ref:path`). It returns (nil, nil) when the path does not exist at
+// that ref, so callers can distinguish "absent" from a genuine git error.
+func ShowFile(projectRoot, ref, path string) ([]byte, error) {
+	if err := ValidateRef(ref); err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	out, err := exec.Command("git", "-C", projectRoot, "show", ref+":"+path).Output()
+	if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			stderr := string(exitErr.Stderr)
+			// git reports a path missing from the tree (vs only present on disk) as
+			// one of these; both mean "absent at this ref", not a real failure.
+			if strings.Contains(stderr, "does not exist") ||
+				strings.Contains(stderr, "exists on disk, but not in") {
+				return nil, nil
+			}
+			return nil, errtrace.Wrap(fmt.Errorf("git show %s:%s: %w: %s", ref, path, err, stderr))
+		}
+		return nil, errtrace.Wrap(err)
+	}
+	return out, nil
 }
 
 // AddDetachedWorktree checks out ref into a new detached-HEAD worktree at path.

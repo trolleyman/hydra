@@ -79,10 +79,6 @@ type AgentConfig struct {
 	PrePrompt *string `toml:"pre_prompt"`
 }
 
-type Features struct {
-	TerminalBash bool `toml:"terminal_bash"`
-}
-
 // ArtifactScript describes a per-project command that generates visual
 // artifacts (e.g. screenshots) for a checkout of the repository. The diff
 // viewer runs it against both sides of a comparison and shows the outputs that
@@ -117,8 +113,6 @@ type Config struct {
 	Defaults AgentConfig `toml:"defaults"`
 	// Per-agent overrides (e.g. claude, gemini).
 	Agents map[string]AgentConfig `toml:"agents"`
-	// Feature flags.
-	Features Features `toml:"features"`
 	// Artifacts are per-project visual-artifact generation scripts.
 	Artifacts []ArtifactScript `toml:"artifacts"`
 }
@@ -186,10 +180,6 @@ func (c *Config) Merge(other Config) {
 			agent.Merge(otherAgent)
 			c.Agents[name] = agent
 		}
-	}
-
-	if other.Features.TerminalBash {
-		c.Features.TerminalBash = true
 	}
 
 	// Artifact scripts are replaced wholesale when the other config sets any.
@@ -282,6 +272,32 @@ func Load(projectRoot string) (Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// ArtifactsAtProjectTOML resolves the [[artifacts]] scripts that apply when the
+// project's .hydra/config.toml holds the given content. It mirrors Load's merge
+// order (internal defaults, then user config, then project), so it can be used
+// to load the artifact scripts exactly as they existed at a specific git ref by
+// passing that ref's config.toml content (an empty/absent file inherits the user
+// config's artifacts, just like the live path). Project config that fails to
+// parse returns an error.
+func ArtifactsAtProjectTOML(content []byte) ([]ArtifactScript, error) {
+	cfg := LoadInternalDefaults()
+
+	// User config (best-effort, matching Load).
+	if userPath, err := GetUserConfigPath(); err == nil {
+		if userCfg, err := LoadFile(userPath); err == nil && userCfg != nil {
+			cfg.Merge(*userCfg)
+		}
+	}
+
+	var projectCfg Config
+	if _, err := toml.Decode(string(content), &projectCfg); err != nil {
+		return nil, errtrace.Wrap(fmt.Errorf("parse project config: %w", err))
+	}
+	cfg.Merge(projectCfg)
+
+	return cfg.Artifacts, nil
 }
 
 // GetResolvedConfig returns the fully resolved AgentConfig for a specific agent type.
@@ -420,14 +436,6 @@ func marshalConfig(cfg Config) string {
 			buf.WriteString("\n")
 		}
 		writeAgentConfigFields(&buf, "agents."+name, cfg.Agents[name])
-	}
-
-	if cfg.Features.TerminalBash {
-		if buf.Len() > 0 {
-			buf.WriteString("\n")
-		}
-		buf.WriteString("[features]\n")
-		buf.WriteString("terminal_bash = true\n")
 	}
 
 	for _, a := range cfg.Artifacts {

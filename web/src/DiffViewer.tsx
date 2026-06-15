@@ -562,14 +562,23 @@ function CustomTooltip({ content, children, side = 'bottom', className = 'w-full
   const [visible, setVisible] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
+  const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const cancelHide = useCallback(() => {
+    if (hideTimer.current) {
+      clearTimeout(hideTimer.current)
+      hideTimer.current = null
+    }
+  }, [])
 
   const show = useCallback(() => {
+    cancelHide()
     if (ref.current) {
       const rect = ref.current.getBoundingClientRect()
       if (side === 'right') {
-        setPos({ top: rect.top, left: rect.right + 8 })
+        setPos({ top: rect.top, left: rect.right })
       } else if (side === 'left') {
-        setPos({ top: rect.top, left: rect.left - 8 })
+        setPos({ top: rect.top, left: rect.left })
       } else if (side === 'top') {
         setPos({ top: rect.top - 8, left: rect.left })
       } else {
@@ -577,19 +586,30 @@ function CustomTooltip({ content, children, side = 'bottom', className = 'w-full
       }
     }
     setVisible(true)
-  }, [side])
+  }, [side, cancelHide])
+
+  // Hide after a short grace period so the pointer can travel from the trigger
+  // into the tooltip (and back) without it disappearing.
+  const scheduleHide = useCallback(() => {
+    cancelHide()
+    hideTimer.current = setTimeout(() => setVisible(false), 150)
+  }, [cancelHide])
+
+  useEffect(() => () => cancelHide(), [cancelHide])
 
   return (
-    <div ref={ref} className={`relative inline-flex ${className}`} onMouseEnter={show} onMouseLeave={() => setVisible(false)}>
+    <div ref={ref} className={`relative inline-flex ${className}`} onMouseEnter={show} onMouseLeave={scheduleHide}>
       {children}
       {visible && pos && (
         <div
-          className="fixed z-[200] bg-gray-900 dark:bg-gray-700 text-white text-xs rounded-lg px-3 py-2 shadow-xl max-w-sm pointer-events-none"
+          className="fixed z-[200] bg-gray-900 dark:bg-gray-700 text-white text-xs rounded-lg px-3 py-2 shadow-xl"
           style={{
             top: pos.top,
             left: pos.left,
             transform: side === 'left' ? 'translateX(-100%)' : side === 'top' ? 'translateY(-100%)' : undefined
           }}
+          onMouseEnter={cancelHide}
+          onMouseLeave={scheduleHide}
         >
           {content}
         </div>
@@ -600,7 +620,7 @@ function CustomTooltip({ content, children, side = 'bottom', className = 'w-full
 
 function CommitTooltipContent({ commit }: { commit: CommitInfo }) {
   return (
-    <div className="font-mono space-y-0.5 min-w-[260px]">
+    <div className="font-mono space-y-0.5 min-w-[260px] max-w-[80ch]">
       <div className="flex items-center gap-2 mb-1.5">
         <span className="text-yellow-400">commit</span>
         <span className="text-gray-300 break-all">{commit.sha}</span>

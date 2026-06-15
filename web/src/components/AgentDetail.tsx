@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react'
 import { api } from '../stores/apiClient'
 import { formatError } from '../api/format_error'
-import { useProjectStore } from '../stores/projectStore'
 import type { AgentResponse } from '../api'
 import { AgentTerminal } from './AgentTerminal'
 import { DiffViewer } from '../DiffViewer'
@@ -61,9 +60,6 @@ export function AgentDetail({
   const [copied, setCopied] = useState(false)
   const [, setTick] = useState(0)
   const [diffRefreshTrigger, setDiffRefreshTrigger] = useState(0)
-
-  const systemStatus = useProjectStore(state => state.systemStatus)
-  const terminalBashEnabled = systemStatus?.features?.terminal_bash ?? false
 
   useEffect(() => {
     if (agent.created_at == null) return
@@ -321,7 +317,6 @@ export function AgentDetail({
           agentId={agent.id}
           projectId={projectId}
           isEphemeral={agent.ephemeral}
-          bashEnabled={terminalBashEnabled}
           onRefresh={onRefresh}
           onDiffRefresh={() => setDiffRefreshTrigger((t) => t + 1)}
         />

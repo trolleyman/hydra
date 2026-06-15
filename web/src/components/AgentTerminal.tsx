@@ -320,13 +320,12 @@ interface Props {
   agentId: string
   projectId: string | null
   isEphemeral?: boolean
-  bashEnabled?: boolean
   onRefresh?: () => void
   onStatusUpdate?: (status: string) => void
   onDiffRefresh?: () => void
 }
 
-export function AgentTerminal({ agentId, projectId, bashEnabled, onRefresh, onStatusUpdate, onDiffRefresh }: Props) {
+export function AgentTerminal({ agentId, projectId, onRefresh, onStatusUpdate, onDiffRefresh }: Props) {
   const [tabs, setTabs] = useState<TabConfig[]>([{ id: 'terminal', label: 'Terminal', shell: false, sandboxed: true }])
   const [activeTabId, setActiveTabId] = useState('terminal')
   const [reconnectKeys, setReconnectKeys] = useState<Record<string, number>>({})
@@ -413,8 +412,7 @@ export function AgentTerminal({ agentId, projectId, bashEnabled, onRefresh, onSt
               )}
             </div>
           ))}
-          {bashEnabled && (
-            <div className="relative ml-1 flex items-center">
+          <div className="relative ml-1 flex items-center">
               {/* Default action: sandboxed shell */}
               <Tooltip content="New sandboxed shell" side="bottom">
                 <button
@@ -461,8 +459,7 @@ export function AgentTerminal({ agentId, projectId, bashEnabled, onRefresh, onSt
                   </div>
                 </>
               )}
-            </div>
-          )}
+          </div>
         </div>
 
         {/* Status + refresh */}
