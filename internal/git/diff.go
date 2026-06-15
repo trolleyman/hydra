@@ -234,32 +234,45 @@ func HasConflicts(projectRoot, baseRef, headRef string) (bool, error) {
 	return len(conflicts) > 0, nil
 }
 
-// GetConflictingFiles returns files modified in both branches since their common ancestor.
+// GetConflictingFiles returns the files that would actually conflict when
+// merging headRef into baseRef.
+//
+// It performs a real in-memory three-way merge with `git merge-tree
+// --write-tree` (git 2.38+), so files that both branches touched but that still
+// merge cleanly (e.g. edits to different parts of the same file) are NOT
+// reported. The previous implementation flagged any file changed on both sides,
+// which produced false-positive conflict warnings on changes git can merge.
 func GetConflictingFiles(projectRoot, baseRef, headRef string) ([]string, error) {
-	mergeBase, err := GetMergeBase(projectRoot, baseRef, headRef)
-	if err != nil {
-		return nil, errtrace.Wrap(err)
+	// merge-tree operates purely against the object store: it writes the merged
+	// tree as loose objects but does not touch the index, working tree, or any
+	// refs, so it is safe to run repeatedly and concurrently. Exit status:
+	//   0 -> clean merge, 1 -> conflicts, >1 -> error (e.g. unrelated histories).
+	out, err := exec.Command("git", "-C", projectRoot,
+		"merge-tree", "--write-tree", "--name-only", baseRef, headRef).Output()
+	if err == nil {
+		return nil, nil // clean merge, no conflicts
 	}
-	baseChangedOut, err := gitOutput(projectRoot, "diff", "--name-only", mergeBase, baseRef)
-	if err != nil {
-		return nil, errtrace.Wrap(err)
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		return nil, errtrace.Wrap(fmt.Errorf("git merge-tree %s %s: %w", baseRef, headRef, err))
 	}
-	headChangedOut, err := gitOutput(projectRoot, "diff", "--name-only", mergeBase, headRef)
-	if err != nil {
-		return nil, errtrace.Wrap(err)
+	if exitErr.ExitCode() != 1 {
+		return nil, errtrace.Wrap(fmt.Errorf("git merge-tree %s %s: %w: %s", baseRef, headRef, err, exitErr.Stderr))
 	}
 
-	baseSet := make(map[string]bool)
-	for _, f := range strings.Split(baseChangedOut, "\n") {
-		if f != "" {
-			baseSet[f] = true
-		}
-	}
+	// Conflicted output (without -z) is three sections:
+	//   <OID of toplevel tree>
+	//   <conflicted path>...        (one per line; just the path with --name-only)
+	//   <blank line>
+	//   <informational messages>
+	// Skip the OID line and collect paths up to the blank-line separator.
+	lines := strings.Split(strings.TrimRight(string(out), "\n"), "\n")
 	var conflicts []string
-	for _, f := range strings.Split(headChangedOut, "\n") {
-		if f != "" && baseSet[f] {
-			conflicts = append(conflicts, f)
+	for _, f := range lines[1:] {
+		if f == "" {
+			break
 		}
+		conflicts = append(conflicts, f)
 	}
 	return conflicts, nil
 }
