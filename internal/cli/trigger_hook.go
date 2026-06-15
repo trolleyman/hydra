@@ -6,12 +6,68 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"braces.dev/errtrace"
 	"github.com/spf13/cobra"
 	"github.com/trolleyman/hydra/internal/api"
 )
+
+// stringField returns input[key] as a string, or "" if absent or not a string.
+func stringField(input map[string]interface{}, key string) string {
+	if v, ok := input[key].(string); ok {
+		return v
+	}
+	return ""
+}
+
+// isUserInputTool reports whether a tool, when invoked, blocks waiting for the
+// user to respond (answering a question, approving a plan) rather than doing
+// work. Keep in sync with the equivalent list in internal/heads/activity.go.
+func isUserInputTool(tool string) bool {
+	switch tool {
+	case "AskUserQuestion", "ExitPlanMode":
+		return true
+	default:
+		return false
+	}
+}
+
+// questionText best-effort extracts the prompt an input tool is presenting to
+// the user (AskUserQuestion's first question, or ExitPlanMode's plan), for
+// display as the agent's pending message.
+func questionText(input map[string]interface{}) string {
+	ti, ok := input["tool_input"].(map[string]interface{})
+	if !ok {
+		return ""
+	}
+	if qs, ok := ti["questions"].([]interface{}); ok {
+		for _, q := range qs {
+			if qm, ok := q.(map[string]interface{}); ok {
+				if s, _ := qm["question"].(string); s != "" {
+					return s
+				}
+			}
+		}
+	}
+	if s, _ := ti["plan"].(string); s != "" {
+		return s
+	}
+	return ""
+}
+
+// stopStatus decides whether a finished turn means the agent is waiting on the
+// user or has genuinely finished. Heuristic: a trailing '?' in the agent's last
+// message signals it ended by asking a question, so it's waiting for an answer;
+// otherwise it completed its work. (Best-effort — agents don't expose an
+// explicit "I need input" signal on turn end.)
+func stopStatus(lastMessage string) api.AgentStatus {
+	if strings.HasSuffix(strings.TrimRight(lastMessage, " \t\r\n"), "?") {
+		return api.Waiting
+	}
+	return api.Finished
+}
 
 func init() {
 	rootCmd.AddCommand(triggerHookCmd)
@@ -129,6 +185,10 @@ func runTriggerHook(agentType string, eventOverride string, logFile *os.File) er
 		}
 	}
 
+	// lastMessage is the agent's most recent assistant message, when the hook
+	// payload carries one (Claude/Gemini include it on turn-end events).
+	lastMessage := stringField(input, "last_assistant_message")
+
 	// Only update status.json for events that represent a meaningful status change.
 	// All other events are logged above but do not alter the displayed status.
 	var status api.AgentStatus
@@ -136,19 +196,34 @@ func runTriggerHook(agentType string, eventOverride string, logFile *os.File) er
 	case "SessionStart", "sessionStart":
 		status = api.Running
 	case "Stop", "AfterAgent":
-		status = api.Waiting
+		// The turn finished. Distinguish "waiting on the user" (the agent ended
+		// by asking a question) from "finished" (it completed its work).
+		status = stopStatus(lastMessage)
 	case "SessionEnd", "sessionEnd":
 		status = api.Stopped
-	case "AfterTool", "postToolUse":
-		// AfterTool/postToolUse doesn't change the status (it remains Running), but we
-		// want to update status.json so the timestamp changes, signaling to the frontend
-		// that it might need to refresh (e.g. after a git commit).
+	case "PreToolUse", "preToolUse", "BeforeTool":
+		// A tool is about to run. Most tools mean the agent is working, but a tool
+		// that asks the user something (e.g. AskUserQuestion) blocks until the user
+		// answers — that's waiting on input, not working.
+		if isUserInputTool(stringField(input, "tool_name")) {
+			status = api.Waiting
+			if q := questionText(input); q != "" {
+				lastMessage = q
+			}
+		} else {
+			status = api.Running
+		}
+	case "PostToolUse", "PostToolUseFailure", "AfterTool", "postToolUse":
+		// A tool finished (including the user answering a question) — the agent is
+		// working again. Rewriting status.json also refreshes the timestamp, so the
+		// frontend knows it may need to refresh (e.g. after a git commit).
 		status = api.Running
 	case "Notification", "notification":
-		if nType, ok := input["notification_type"].(string); ok && nType == "ToolPermission" {
-			status = api.Waiting
-		} else {
-			return nil
+		// Any notification means the agent is blocking on the user — either a
+		// permission prompt or the "waiting for your input" idle nudge.
+		status = api.Waiting
+		if lastMessage == "" {
+			lastMessage = stringField(input, "message")
 		}
 	default:
 		return nil
@@ -164,27 +239,18 @@ func runTriggerHook(agentType string, eventOverride string, logFile *os.File) er
 	info := api.AgentStatusInfo{
 		Status:    status,
 		Event:     &eventCopy,
-		Timestamp: time.Now().Format(time.RFC3339),
+		Timestamp: time.Now().Format(time.RFC3339Nano),
 	}
 
-	if event == "Stop" || event == "AfterAgent" {
-		if msg, ok := input["last_assistant_message"].(string); ok && msg != "" {
-			if len(msg) > 300 {
-				msg = msg[:300]
-			}
-			info.LastMessage = &msg
+	if lastMessage != "" {
+		if len(lastMessage) > 300 {
+			lastMessage = lastMessage[:300]
 		}
-	} else if event == "Notification" || event == "notification" {
-		if msg, ok := input["message"].(string); ok && msg != "" {
-			if len(msg) > 300 {
-				msg = msg[:300]
-			}
-			info.LastMessage = &msg
-		}
+		info.LastMessage = &lastMessage
 	}
 
-	if event == "SessionEnd" {
-		if reason, ok := input["reason"].(string); ok && reason != "" {
+	if event == "SessionEnd" || event == "sessionEnd" {
+		if reason := stringField(input, "reason"); reason != "" {
 			info.Reason = &reason
 		}
 	}

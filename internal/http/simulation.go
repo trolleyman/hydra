@@ -74,6 +74,7 @@ func (s *SimulationServer) RemoveProject(w http.ResponseWriter, r *http.Request,
 func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, projectId string) {
 	createdAt1 := time.Now().Add(-1 * time.Hour).Unix()
 	createdAt2 := time.Now().Add(-2 * time.Hour).Unix()
+	createdAt3 := time.Now().Add(-3 * time.Hour).Unix()
 
 	running := api.Running
 	waiting := api.Waiting
@@ -105,6 +106,21 @@ func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, pr
 				Timestamp: time.Now().Format(time.RFC3339),
 			},
 		},
+		{
+			// Deeply-nested refactor — exercises the diff tree's VS Code-style
+			// "compact folders" rendering (see GetAgentDiff for agent-3).
+			Id:            "agent-3",
+			AgentType:     "claude",
+			BaseBranch:    "main",
+			BranchName:    ptr("hydra/feat-3"),
+			SessionPid:    1003,
+			SessionStatus: "running",
+			CreatedAt:     &createdAt3,
+			AgentStatus: &api.AgentStatusInfo{
+				Status:    running,
+				Timestamp: time.Now().Format(time.RFC3339),
+			},
+		},
 	}
 	api.WriteJSON(w, http.StatusOK, resp)
 }
@@ -120,6 +136,24 @@ func (s *SimulationServer) GetAgent(w http.ResponseWriter, r *http.Request, proj
 			SessionPid:    1001,
 			SessionStatus: "running",
 			CreatedAt:     &createdAt,
+			AgentStatus: &api.AgentStatusInfo{
+				Status:    api.Running,
+				Timestamp: time.Now().Format(time.RFC3339),
+			},
+		})
+		return
+	}
+	if id == "agent-3" {
+		createdAt := time.Now().Add(-3 * time.Hour).Unix()
+		api.WriteJSON(w, http.StatusOK, api.AgentResponse{
+			Id:            "agent-3",
+			AgentType:     "claude",
+			BaseBranch:    "main",
+			BranchName:    ptr("hydra/feat-3"),
+			SessionPid:    1003,
+			SessionStatus: "running",
+			CreatedAt:     &createdAt,
+			Prompt:        "Refactor the auth providers into a deeply nested package layout so the diff tree shows VS Code-style compacted folders.",
 			AgentStatus: &api.AgentStatusInfo{
 				Status:    api.Running,
 				Timestamp: time.Now().Format(time.RFC3339),
@@ -620,7 +654,85 @@ func (s *SimulationServer) GetAgentDiff(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 
+	if id == "agent-3" {
+		// Deeply-nested paths chosen to exercise every branch of the diff tree's
+		// "compact folders" logic (web/src/DiffViewer.tsx → compactTree):
+		//   - README.md                       top-level file, no folder to fold.
+		//   - docs/architecture/diagrams/...   a pure single-child chain that
+		//                                      fully collapses onto one row.
+		//   - internal/app/services/...        two sibling chains (auth, billing)
+		//                                      under one trunk: the trunk folds to
+		//                                      `internal/app/services`, then each
+		//                                      branch folds independently — auth's
+		//                                      chain stops at `google` because it
+		//                                      holds two files.
+		//   - web/src/{index.ts,components/…}  `web` folds into `src`, but `src`
+		//                                      holds a file AND a folder so the
+		//                                      chain stops there (no over-merging).
+		resp := api.DiffResponse{
+			BaseRef: "main",
+			HeadRef: "hydra/feat-3",
+			Files: []api.DiffFile{
+				simFile("README.md", api.DiffFileChangeTypeModified, 1, 0,
+					"@@ -1,2 +1,3 @@", 1, 1,
+					api.DiffLine{Type: api.Context, Content: "# Hydra", OldLineNum: ptr(1), NewLineNum: ptr(1)},
+					api.DiffLine{Type: api.Addition, Content: "Now with deeply nested auth providers.", NewLineNum: ptr(2)},
+					api.DiffLine{Type: api.Context, Content: "", OldLineNum: ptr(2), NewLineNum: ptr(3)},
+				),
+				simFile("docs/architecture/diagrams/overview.md", api.DiffFileChangeTypeAdded, 2, 0,
+					"@@ -0,0 +1,2 @@", 0, 1,
+					api.DiffLine{Type: api.Addition, Content: "# Architecture overview", NewLineNum: ptr(1)},
+					api.DiffLine{Type: api.Addition, Content: "See the provider tree below.", NewLineNum: ptr(2)},
+				),
+				simFile("internal/app/services/auth/providers/oauth/google/client.go", api.DiffFileChangeTypeAdded, 3, 0,
+					"@@ -0,0 +1,3 @@", 0, 1,
+					api.DiffLine{Type: api.Addition, Content: "package google", NewLineNum: ptr(1)},
+					api.DiffLine{Type: api.Addition, Content: "", NewLineNum: ptr(2)},
+					api.DiffLine{Type: api.Addition, Content: "type Client struct{ token string }", NewLineNum: ptr(3)},
+				),
+				simFile("internal/app/services/auth/providers/oauth/google/handler.go", api.DiffFileChangeTypeAdded, 2, 0,
+					"@@ -0,0 +1,2 @@", 0, 1,
+					api.DiffLine{Type: api.Addition, Content: "package google", NewLineNum: ptr(1)},
+					api.DiffLine{Type: api.Addition, Content: "func Handle() {}", NewLineNum: ptr(2)},
+				),
+				simFile("internal/app/services/billing/stripe/webhook.go", api.DiffFileChangeTypeModified, 1, 1,
+					"@@ -3,3 +3,3 @@", 3, 3,
+					api.DiffLine{Type: api.Context, Content: "func Webhook() {", OldLineNum: ptr(3), NewLineNum: ptr(3)},
+					api.DiffLine{Type: api.Deletion, Content: "\t// TODO", OldLineNum: ptr(4)},
+					api.DiffLine{Type: api.Addition, Content: "\tverifySignature()", NewLineNum: ptr(4)},
+					api.DiffLine{Type: api.Context, Content: "}", OldLineNum: ptr(5), NewLineNum: ptr(5)},
+				),
+				simFile("web/src/index.ts", api.DiffFileChangeTypeModified, 1, 0,
+					"@@ -1,1 +1,2 @@", 1, 1,
+					api.DiffLine{Type: api.Context, Content: "import './app'", OldLineNum: ptr(1), NewLineNum: ptr(1)},
+					api.DiffLine{Type: api.Addition, Content: "import './components/Button'", NewLineNum: ptr(2)},
+				),
+				simFile("web/src/components/Button.tsx", api.DiffFileChangeTypeAdded, 1, 0,
+					"@@ -0,0 +1,1 @@", 0, 1,
+					api.DiffLine{Type: api.Addition, Content: "export const Button = () => null", NewLineNum: ptr(1)},
+				),
+			},
+		}
+		resp.Files = expandDiffContext(resp.Files, ctx)
+		api.WriteJSON(w, http.StatusOK, resp)
+		return
+	}
+
 	api.WriteJSON(w, http.StatusOK, api.DiffResponse{Files: []api.DiffFile{}})
+}
+
+// simFile builds a single-hunk DiffFile for the simulation server, keeping the
+// nested-folder fixtures (agent-3) terse.
+func simFile(path string, ct api.DiffFileChangeType, add, del int, header string, oldStart, newStart int, lines ...api.DiffLine) api.DiffFile {
+	return api.DiffFile{
+		Path:       path,
+		ChangeType: ct,
+		Additions:  add,
+		Deletions:  del,
+		Hunks: []api.DiffHunk{
+			{Header: header, OldStart: oldStart, NewStart: newStart, Lines: lines},
+		},
+	}
 }
 
 func simContext(params api.GetAgentDiffParams) int {
@@ -641,6 +753,23 @@ func (s *SimulationServer) GetAgentDiffFiles(w http.ResponseWriter, r *http.Requ
 				{Path: "internal/http/server.go", ChangeType: api.DiffFileChangeTypeModified, Additions: 12, Deletions: 3},
 				{Path: "internal/db/model.go", ChangeType: api.DiffFileChangeTypeDeleted, Additions: 0, Deletions: 42},
 				{Path: "internal/db/schema.go", ChangeType: api.DiffFileChangeTypeAdded, Additions: 58, Deletions: 0},
+			},
+		}
+		api.WriteJSON(w, http.StatusOK, resp)
+		return
+	}
+	if id == "agent-3" {
+		resp := api.DiffResponse{
+			BaseRef: "main",
+			HeadRef: "hydra/feat-3",
+			Files: []api.DiffFile{
+				{Path: "README.md", ChangeType: api.DiffFileChangeTypeModified, Additions: 1, Deletions: 0},
+				{Path: "docs/architecture/diagrams/overview.md", ChangeType: api.DiffFileChangeTypeAdded, Additions: 2, Deletions: 0},
+				{Path: "internal/app/services/auth/providers/oauth/google/client.go", ChangeType: api.DiffFileChangeTypeAdded, Additions: 3, Deletions: 0},
+				{Path: "internal/app/services/auth/providers/oauth/google/handler.go", ChangeType: api.DiffFileChangeTypeAdded, Additions: 2, Deletions: 0},
+				{Path: "internal/app/services/billing/stripe/webhook.go", ChangeType: api.DiffFileChangeTypeModified, Additions: 1, Deletions: 1},
+				{Path: "web/src/index.ts", ChangeType: api.DiffFileChangeTypeModified, Additions: 1, Deletions: 0},
+				{Path: "web/src/components/Button.tsx", ChangeType: api.DiffFileChangeTypeAdded, Additions: 1, Deletions: 0},
 			},
 		}
 		api.WriteJSON(w, http.StatusOK, resp)

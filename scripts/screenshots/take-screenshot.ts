@@ -111,7 +111,10 @@ try {
 
   // 4. Screenshot the pages. The home page ("/") shows the full app shell:
   //    header, project dropdown, agent sidebar (populated with mock data) and
-  //    the main content pane.
+  //    the main content pane. The "nested-folders" page opens a simulated
+  //    agent (agent-3) whose diff spans deeply nested paths, so the captured
+  //    diff tree shows VS Code-style compacted folders (one/two/three on a
+  //    single row) — see internal/http/simulation.go GetAgentDiff(agent-3).
   //
   //    The diff viewer compares versions by hashing the output bytes and only
   //    surfaces files that differ, so the render MUST be byte-reproducible —
@@ -136,7 +139,15 @@ try {
   ]
   const browser = await chromium.launch({ headless: true, args: flags })
   try {
-    const pages: { name: string; path: string }[] = [{ name: 'home', path: '/' }]
+    // `scrollTo` names a section <h2> to pin to the top of its scroll container
+    // before a non-fullPage capture — used when the interesting content sits
+    // below the fold. agent-3's diff tree is below the terminal, so we scroll
+    // the "Changes" section to the top and capture just the viewport there
+    // instead of the whole (mostly-terminal) page.
+    const pages: { name: string; path: string; scrollTo?: string }[] = [
+      { name: 'home', path: '/' },
+      { name: 'nested-folders', path: '/project/sim-project/agent/agent-3', scrollTo: 'Changes' },
+    ]
     for (const pg of pages) {
       const ctx = await browser.newContext({
         viewport: { width: 1280, height: 800 },
@@ -162,8 +173,30 @@ try {
       })
       // Let async data + layout settle before capturing.
       await page.waitForTimeout(800)
+      if (pg.scrollTo) {
+        // Pin the named section heading to the top of its scroll container. We
+        // can't use scrollIntoViewIfNeeded: the diff header is position:sticky,
+        // so the browser already counts it as "in view" and won't scroll.
+        // Compute the heading's offset within the scroll container and set
+        // scrollTop directly.
+        await page.evaluate((heading) => {
+          const title = Array.from(document.querySelectorAll('h2')).find(
+            (e) => e.textContent?.trim() === heading,
+          )
+          const cont = title?.closest('.overflow-auto') as HTMLElement | null | undefined
+          if (title && cont) {
+            const offset =
+              title.getBoundingClientRect().top - cont.getBoundingClientRect().top + cont.scrollTop
+            cont.scrollTop = offset - 24
+          }
+        }, pg.scrollTo)
+        // Settle the scroll/sticky-header layout before capturing.
+        await page.waitForTimeout(300)
+      }
       const out = join(OUT, `${pg.name}.png`)
-      await page.screenshot({ path: out, fullPage: true })
+      // Scrolled pages capture the viewport (so the scroll is meaningful);
+      // others capture the full page.
+      await page.screenshot({ path: out, fullPage: !pg.scrollTo })
       console.log(`wrote ${out}`)
       await ctx.close()
     }

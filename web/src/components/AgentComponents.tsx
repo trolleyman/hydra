@@ -48,11 +48,21 @@ export function agentStatusBadge(status: string | undefined): { label: string; c
     case 'running':   return { label: 'running',   className: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' }
     case 'starting':  return { label: 'starting',  className: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' }
     case 'waiting':   return { label: 'waiting',   className: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400' }
+    case 'finished':  return { label: 'finished',  className: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400' }
     case 'merging':   return { label: 'merging',   className: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' }
     case 'ended':     return { label: 'ended',     className: 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400' }
     case 'exited':    return { label: 'exited',    className: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' }
     default:          return { label: status ?? '', className: 'bg-gray-50 text-gray-400 dark:bg-gray-800 dark:text-gray-500' }
   }
+}
+
+// agentStatusDetail returns the richer progress line to show under an agent:
+// its live activity while running, otherwise its most recent message (e.g. the
+// question it's waiting on, or its closing summary).
+export function agentStatusDetail(status: AgentResponse['agent_status']): string {
+  if (!status) return ''
+  if (status.status === 'running' && status.activity) return status.activity
+  return status.last_message ?? ''
 }
 
 export function AgentSidebarItem({
@@ -89,6 +99,11 @@ export function AgentSidebarItem({
           </span>
         )}
       </div>
+      {agentStatusDetail(agent.agent_status) && (
+        <div className="mt-0.5 ml-4 text-[11px] text-gray-400 dark:text-gray-500 truncate">
+          {agentStatusDetail(agent.agent_status)}
+        </div>
+      )}
     </button>
   )
 }

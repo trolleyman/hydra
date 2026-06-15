@@ -95,6 +95,7 @@ func ListHeads(ctx context.Context, reg *session.Registry, store *db.Store, proj
 			CreatedAt:     a.CreatedAt.Unix(),
 			AgentStatus:   computeAgentStatus(&a),
 		}
+		enrichAgentStatus(a.ProjectPath, a.ID, h.AgentStatus)
 		result = append(result, h)
 	}
 
@@ -120,7 +121,7 @@ func sessionStatusToDB(s session.Status) string {
 
 // computeAgentStatus derives the single API-facing status from the three DB status fields.
 func computeAgentStatus(a *db.Agent) *api.AgentStatusInfo {
-	now := time.Now().Format(time.RFC3339)
+	now := time.Now().Format(time.RFC3339Nano)
 	event := "polling"
 
 	var status api.AgentStatus
@@ -264,7 +265,7 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 	initialStatus := &api.AgentStatusInfo{
 		Status:    api.Pending,
 		Event:     &e,
-		Timestamp: now.Format(time.RFC3339),
+		Timestamp: now.Format(time.RFC3339Nano),
 	}
 	if err := WriteAgentStatus(projectRoot, opts.ID, initialStatus); err != nil {
 		log.Printf("warn: write initial agent status: %v", err)
@@ -273,7 +274,7 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 	setStatus := func(status api.AgentStatus) {
 		s := *initialStatus
 		s.Status = status
-		s.Timestamp = time.Now().Format(time.RFC3339)
+		s.Timestamp = time.Now().Format(time.RFC3339Nano)
 		if err := WriteAgentStatus(projectRoot, opts.ID, &s); err != nil {
 			log.Printf("warn: update agent status to %s: %v", status, err)
 		}
