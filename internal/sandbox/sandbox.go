@@ -9,9 +9,12 @@
 package sandbox
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"braces.dev/errtrace"
 )
 
 // AgentType identifies which AI agent runs inside the sandbox.
@@ -49,6 +52,10 @@ type Options struct {
 
 	// WorktreePath is the agent's working directory; always writable.
 	WorktreePath string
+	// GitCommonDir is the repository's shared git dir (the main repo's .git),
+	// bound writable so the agent can commit from its linked worktree. Empty to
+	// skip. See git.GetCommonDir.
+	GitCommonDir string
 	// Home is the HOME directory the agent should see.
 	Home string
 
@@ -77,6 +84,30 @@ type Options struct {
 	HardenGUI bool
 	// Seccomp applies the embedded syscall blocklist on Linux when true.
 	Seccomp bool
+	// Interactive marks a hands-on shell (not an agent). It keeps the sandbox in
+	// the PTY's session so bash gets a controlling terminal and job control,
+	// instead of starting a detached new session. Default false (agents don't
+	// need job control and benefit from the extra isolation).
+	Interactive bool
+	// NoSandbox runs Argv directly on the host with no confinement at all (full
+	// host access). Used only for the user-opted-in "regular shell"; never for
+	// agents. All other sandbox fields are ignored when set.
+	NoSandbox bool
+}
+
+// rawSpec builds a launch spec that runs opts.Argv directly on the host with no
+// sandbox. Backs the regular (non-sandboxed) shell the user can opt into.
+func rawSpec(opts Options) (*Spec, error) {
+	if len(opts.Argv) == 0 {
+		return nil, errtrace.Wrap(fmt.Errorf("rawSpec: no command to run"))
+	}
+	return &Spec{
+		Path:    opts.Argv[0],
+		Args:    opts.Argv,
+		Env:     opts.Env,
+		Dir:     opts.WorktreePath,
+		Cleanup: func() {},
+	}, nil
 }
 
 // Spec is the fully-resolved launch command produced by BuildSpec. The session

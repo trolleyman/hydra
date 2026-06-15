@@ -19,7 +19,6 @@ export type { AgentStatusInfo } from './models/AgentStatusInfo';
 export { ArtifactFile } from './models/ArtifactFile';
 export { ArtifactSet } from './models/ArtifactSet';
 export type { ArtifactsResponse } from './models/ArtifactsResponse';
-export type { CleanCacheResponse } from './models/CleanCacheResponse';
 export type { CommitInfo } from './models/CommitInfo';
 export type { ConfigResponse } from './models/ConfigResponse';
 export { DiffFile } from './models/DiffFile';

@@ -10,9 +10,8 @@ import (
 
 // Agent represents a Hydra agent record in the database.
 type Agent struct {
-	ID            string `gorm:"primaryKey;not null"`
-	ProjectPath   string `gorm:"not null;index;type:text COLLATE NOCASE"`
-	ContainerName string // "hydra-agent-<id>" — deterministic
+	ID          string `gorm:"primaryKey;not null"`
+	ProjectPath string `gorm:"not null;index;type:text COLLATE NOCASE"`
 
 	// Git
 	BranchName string

@@ -110,6 +110,19 @@ func (r *Registry) Get(id string) (*Session, bool) {
 	return s, ok
 }
 
+// IsLive reports whether a session for id exists and has not exited. An exited
+// session lingers in the map until replaced, so callers deciding whether to
+// (re)start must use this rather than Get's mere presence check.
+func (r *Registry) IsLive(id string) bool {
+	s, ok := r.Get(id)
+	if !ok {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.status != StatusExited
+}
+
 // Attach returns a consumer handle that replays scrollback then streams live
 // output. Returns ErrNotFound if the session is unknown.
 func (r *Registry) Attach(id string, rows, cols uint16) (*Attachment, error) {

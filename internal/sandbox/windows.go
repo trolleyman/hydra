@@ -12,7 +12,11 @@ func Available() (bool, string) {
 	return false, ErrUnsupported.Error()
 }
 
-// BuildSpec is not yet implemented on Windows.
+// BuildSpec is not yet implemented on Windows, except for the non-sandboxed
+// shell, which runs the command directly with no confinement.
 func BuildSpec(opts Options) (*Spec, error) {
+	if opts.NoSandbox {
+		return rawSpec(opts)
+	}
 	return nil, ErrUnsupported
 }

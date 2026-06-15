@@ -56,8 +56,9 @@ func Defaults() DefaultConfig {
 		// RestoreRO: re-expose specific tool configs read-only after masking
 		// the parent (~/.config). Order matters: restores apply after masks.
 		RestoreRO: []string{
-			"~/.config/git", // git global config
-			"~/.config/gh",  // GitHub CLI config
+			"~/.config/git",              // git global config
+			"~/.config/gh",               // GitHub CLI config
+			"~/.config/mise/config.toml", // mise global tool versions (config.local.toml secrets stay masked)
 		},
 	}
 }

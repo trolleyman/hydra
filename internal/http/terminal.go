@@ -185,13 +185,24 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 	// bash session sharing the agent's worktree; otherwise we attach the agent.
 	sessionID := head.ID
 	if useShell {
-		shellID, err := heads.StartShellSession(s.Sessions, projectRoot, *head, 24, 80)
+		// Sandboxed unless the client explicitly opts into a regular host shell.
+		sandboxed := r.URL.Query().Get("sandboxed") != "false"
+		shellID, err := heads.StartShellSession(s.Sessions, projectRoot, *head, 24, 80, sandboxed)
 		if err != nil {
 			log.Printf("terminal ws: start shell session for %q: %v", agentID, err)
 			_ = conn.WriteMessage(websocket.TextMessage, []byte("error: "+err.Error()))
 			return
 		}
 		sessionID = shellID
+	} else if !s.Sessions.IsLive(head.ID) && head.Worktree != nil {
+		// The agent's session isn't running (e.g. the daemon was restarted).
+		// Resume it on demand so opening the page brings the agent back via its
+		// own --resume, instead of showing "Agent is not running".
+		log.Printf("terminal ws: resuming agent %q (no live session)", head.ID)
+		sendStatusUpdate(conn, "starting")
+		if err := heads.ResumeHead(s.Sessions, s.DB, projectRoot, *head, 24, 80); err != nil {
+			log.Printf("terminal ws: resume agent %q failed: %v", head.ID, err)
+		}
 	}
 
 	att, err := s.Sessions.Attach(sessionID, 24, 80)

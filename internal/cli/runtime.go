@@ -182,7 +182,7 @@ func resumeHeadsOnBoot(reg *session.Registry, store *db.Store, projectRoot strin
 		if h.Ephemeral || h.SessionStatus != "running" {
 			continue
 		}
-		if _, live := reg.Get(h.ID); live {
+		if reg.IsLive(h.ID) {
 			continue
 		}
 		log.Printf("daemon: resuming head %s after restart", h.ID)

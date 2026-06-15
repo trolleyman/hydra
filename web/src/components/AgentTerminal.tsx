@@ -3,30 +3,35 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import { TerminalEvent, type TerminalStatusEvent, type TerminalDataEvent, AgentStatus } from '../api'
-import { RefreshCw, Plus, X } from 'lucide-react'
+import { RefreshCw, Plus, X, ChevronDown, Shield, ShieldOff } from 'lucide-react'
 import { Tooltip } from './Tooltip'
 
 interface PaneProps {
   agentId: string
   projectId: string | null
   shell: boolean
+  sandboxed: boolean
   active: boolean
   reconnectAttempt: number
   onStatusUpdate?: (status: string) => void
   onDiffRefresh?: () => void
 }
 
-function getWsUrl(agentId: string, projectId: string | null, shell?: boolean): string {
+function getWsUrl(agentId: string, projectId: string | null, shell?: boolean, sandboxed?: boolean): string {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
   const host = window.location.host
   const params = new URLSearchParams()
-  if (shell) params.set('shell', 'true')
+  if (shell) {
+    params.set('shell', 'true')
+    // Default is sandboxed; only signal when the user opted into a host shell.
+    if (sandboxed === false) params.set('sandboxed', 'false')
+  }
   const qs = params.toString() ? `?${params.toString()}` : ''
   const pid = projectId ? encodeURIComponent(projectId) : '_'
   return `${protocol}//${host}/ws/projects/${pid}/agents/${encodeURIComponent(agentId)}/terminal${qs}`
 }
 
-function TerminalPane({ agentId, projectId, shell, active, reconnectAttempt, onStatusUpdate, onDiffRefresh }: PaneProps) {
+function TerminalPane({ agentId, projectId, shell, sandboxed, active, reconnectAttempt, onStatusUpdate, onDiffRefresh }: PaneProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<Terminal | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
@@ -103,7 +108,7 @@ function TerminalPane({ agentId, projectId, shell, active, reconnectAttempt, onS
     termRef.current = term
     fitAddonRef.current = fitAddon
 
-    const url = getWsUrl(agentId, projectId, shell)
+    const url = getWsUrl(agentId, projectId, shell, sandboxed)
     const ws = new WebSocket(url)
     ws.binaryType = 'arraybuffer'
     wsRef.current = ws
@@ -134,11 +139,6 @@ function TerminalPane({ agentId, projectId, shell, active, reconnectAttempt, onS
                 const newStatus = statusEvent.status.toLowerCase()
                 onStatusUpdate?.(newStatus)
               }
-              return
-            }
-            case TerminalEvent.type.BUILD_FINISHED: {
-              term.write('\x1bc') // RIS (Reset to Initial State) - clear screen
-              term.writeln('\x1b[32mBuild finished. Starting agent...\x1b[0m\r\n')
               return
             }
             case TerminalEvent.type.DIFF_REFRESH: {
@@ -266,6 +266,7 @@ interface TabConfig {
   id: string
   label: string
   shell: boolean
+  sandboxed: boolean
 }
 
 interface Props {
@@ -279,22 +280,25 @@ interface Props {
 }
 
 export function AgentTerminal({ agentId, projectId, bashEnabled, onRefresh, onStatusUpdate, onDiffRefresh }: Props) {
-  const [tabs, setTabs] = useState<TabConfig[]>([{ id: 'terminal', label: 'Terminal', shell: false }])
+  const [tabs, setTabs] = useState<TabConfig[]>([{ id: 'terminal', label: 'Terminal', shell: false, sandboxed: true }])
   const [activeTabId, setActiveTabId] = useState('terminal')
   const [reconnectKeys, setReconnectKeys] = useState<Record<string, number>>({})
   const [status, setStatus] = useState<string>('pending')
+  const [shellMenuOpen, setShellMenuOpen] = useState(false)
 
   function handleStatusUpdate(newStatus: string) {
     setStatus(newStatus)
     onStatusUpdate?.(newStatus)
   }
 
-  function addBashTab() {
+  function addBashTab(sandboxed: boolean) {
     const bashCount = tabs.filter(t => t.shell).length
     const id = `bash-${Date.now()}`
-    const label = bashCount === 0 ? 'Bash' : `Bash ${bashCount + 1}`
-    setTabs(prev => [...prev, { id, label, shell: true }])
+    const base = sandboxed ? 'Bash' : 'Bash (host)'
+    const label = bashCount === 0 ? base : `${base} ${bashCount + 1}`
+    setTabs(prev => [...prev, { id, label, shell: true, sandboxed }])
     setActiveTabId(id)
+    setShellMenuOpen(false)
   }
 
   function closeTab(id: string) {
@@ -362,14 +366,54 @@ export function AgentTerminal({ agentId, projectId, bashEnabled, onRefresh, onSt
             </div>
           ))}
           {bashEnabled && (
-            <Tooltip content="New bash terminal" side="bottom">
-              <button
-                onClick={addBashTab}
-                className="ml-1 p-0.5 rounded text-gray-500 hover:text-gray-300 hover:bg-gray-700 transition-colors cursor-pointer"
-              >
-                <Plus className="w-3 h-3" />
-              </button>
-            </Tooltip>
+            <div className="relative ml-1 flex items-center">
+              {/* Default action: sandboxed shell */}
+              <Tooltip content="New sandboxed shell" side="bottom">
+                <button
+                  onClick={() => addBashTab(true)}
+                  className="p-0.5 rounded-l text-gray-500 hover:text-gray-300 hover:bg-gray-700 transition-colors cursor-pointer"
+                >
+                  <Plus className="w-3 h-3" />
+                </button>
+              </Tooltip>
+              {/* Dropdown: choose sandboxed vs regular */}
+              <Tooltip content="Choose shell type" side="bottom">
+                <button
+                  onClick={() => setShellMenuOpen(o => !o)}
+                  className="p-0.5 rounded-r text-gray-500 hover:text-gray-300 hover:bg-gray-700 transition-colors cursor-pointer"
+                >
+                  <ChevronDown className="w-3 h-3" />
+                </button>
+              </Tooltip>
+              {shellMenuOpen && (
+                <>
+                  {/* click-away backdrop */}
+                  <div className="fixed inset-0 z-10" onClick={() => setShellMenuOpen(false)} />
+                  <div className="absolute left-0 top-full mt-1 z-20 w-56 rounded-md border border-gray-700 bg-gray-800 shadow-lg py-1 text-xs">
+                    <button
+                      onClick={() => addBashTab(true)}
+                      className="flex w-full items-start gap-2 px-3 py-1.5 text-left text-gray-200 hover:bg-gray-700 cursor-pointer"
+                    >
+                      <Shield className="w-3.5 h-3.5 mt-0.5 text-green-400 shrink-0" />
+                      <span>
+                        <span className="block font-medium">Sandboxed shell</span>
+                        <span className="block text-gray-500">Confined to the worktree, like the agent.</span>
+                      </span>
+                    </button>
+                    <button
+                      onClick={() => addBashTab(false)}
+                      className="flex w-full items-start gap-2 px-3 py-1.5 text-left text-gray-200 hover:bg-gray-700 cursor-pointer"
+                    >
+                      <ShieldOff className="w-3.5 h-3.5 mt-0.5 text-yellow-400 shrink-0" />
+                      <span>
+                        <span className="block font-medium">Regular shell (host)</span>
+                        <span className="block text-gray-500">Full host access, no sandbox.</span>
+                      </span>
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
           )}
         </div>
 
@@ -398,6 +442,7 @@ export function AgentTerminal({ agentId, projectId, bashEnabled, onRefresh, onSt
             agentId={agentId}
             projectId={projectId}
             shell={tab.shell}
+            sandboxed={tab.sandboxed}
             active={activeTabId === tab.id}
             reconnectAttempt={reconnectKeys[tab.id] ?? 0}
             onStatusUpdate={tab.id === 'terminal' ? handleStatusUpdate : undefined}

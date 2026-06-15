@@ -5,9 +5,9 @@
 export type StatusResponse = {
     status?: string;
     /**
-     * Error message if there is an issue connecting to Docker
+     * Error message if the sandbox backend is unavailable or misconfigured
      */
-    docker_error?: string | null;
+    sandbox_error?: string | null;
     version?: string;
     /**
      * Seconds since the server started

@@ -150,6 +150,27 @@ func WorktreeStateHash(dir string) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
+// GetCommonDir returns the absolute path to the repository's shared git
+// directory — the main repo's `.git`, where the index, refs, objects and logs
+// for every linked worktree actually live. The sandbox must bind this writable
+// for an agent to `git commit` from its worktree.
+func GetCommonDir(projectRoot string) (string, error) {
+	// --path-format=absolute (git 2.31+) gives an absolute path directly.
+	out, err := gitOutput(projectRoot, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	if err == nil && filepath.IsAbs(out) {
+		return out, nil
+	}
+	// Fallback for older git: --git-common-dir may be relative to projectRoot.
+	out, err = gitOutput(projectRoot, "rev-parse", "--git-common-dir")
+	if err != nil {
+		return "", errtrace.Wrap(err)
+	}
+	if !filepath.IsAbs(out) {
+		out = filepath.Join(projectRoot, out)
+	}
+	return out, nil
+}
+
 // RemoveWorktree runs `git worktree remove --force <path>`.
 func RemoveWorktree(projectRoot, worktreePath string) error {
 	cmd := exec.Command("git", "-C", projectRoot,

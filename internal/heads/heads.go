@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"os/user"
 	"sort"
 	"strings"
@@ -224,7 +225,6 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 		agent := &db.Agent{
 			ID:            opts.ID,
 			ProjectPath:   projectRoot,
-			ContainerName: "hydra-agent-" + opts.ID,
 			BranchName:    branchName,
 			BaseBranch:    baseBranch,
 			AgentType:     string(opts.AgentType),
@@ -285,17 +285,20 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 	cfg, _ := config.Load(projectRoot)
 	writable, masked, restore, net := cfg.ResolveSandboxOptions(string(opts.AgentType))
 
-	seed, err := seedHead(projectRoot, opts.ID, opts.AgentType, worktreePath, home)
+	seed, err := seedHead(projectRoot, opts.ID, opts.AgentType, worktreePath, home, opts.PrePrompt)
 	if err != nil {
 		spawnFail(store, projectRoot, opts.ID, setStatus, fmt.Errorf("seed head: %w", err))
 		return nil, errtrace.Wrap(err)
 	}
 
-	argv, err := sandbox.AgentArgv(opts.AgentType, opts.Resume, sandbox.CombinePrompt(opts.PrePrompt, opts.Prompt))
+	argv, err := sandbox.AgentArgv(opts.AgentType, opts.Resume, opts.PrePrompt, opts.Prompt)
 	if err != nil {
 		spawnFail(store, projectRoot, opts.ID, setStatus, err)
 		return nil, errtrace.Wrap(err)
 	}
+
+	env := append(agentEnv(home, username, gitAuthorName, gitAuthorEmail), seed.Env...)
+	env = append(env, miseTrustEnv(projectRoot, worktreePath)...)
 
 	sess, err := reg.Start(session.StartOptions{
 		ID:   opts.ID,
@@ -304,13 +307,14 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 		Sandbox: sandbox.Options{
 			AgentType:     opts.AgentType,
 			WorktreePath:  worktreePath,
+			GitCommonDir:  gitCommonDir(projectRoot),
 			Home:          home,
 			WritablePaths: append(writable, seed.WritablePaths...),
 			MaskedPaths:   masked,
 			RestoreRO:     restore,
 			Network:       net,
 			Binds:         seed.Binds,
-			Env:           append(agentEnv(home, username, gitAuthorName, gitAuthorEmail), seed.Env...),
+			Env:           env,
 			Argv:          argv,
 			HardenGUI:     true,
 			Seccomp:       true,
@@ -378,11 +382,72 @@ func spawnFail(store *db.Store, projectRoot, id string, setStatus func(api.Agent
 	}
 }
 
-// StartShellSession starts (or returns the existing) transient sandboxed bash
-// session sharing the head's worktree, used by the web terminal's shell tab.
-// Returns the session ID to attach to.
-func StartShellSession(reg *session.Registry, projectRoot string, head Head, rows, cols uint16) (string, error) {
+// gitCommonDir resolves the repo's shared git dir for the sandbox to bind
+// writable, so the agent can commit from its worktree. Non-fatal: logs and
+// returns "" on failure (commits would then fail, but the spawn proceeds).
+func gitCommonDir(projectRoot string) string {
+	dir, err := git.GetCommonDir(projectRoot)
+	if err != nil {
+		log.Printf("warn: resolve git common dir for %s: %v", projectRoot, err)
+		return ""
+	}
+	return dir
+}
+
+// miseTrustEnv returns a MISE_TRUSTED_CONFIG_PATHS override that trusts the
+// worktree's copied mise config — but only when the host already trusts the
+// project's mise config. (mise trust is path-based, so the copy at the worktree
+// path would otherwise prompt or error.) Returns nil when there's nothing to do.
+func miseTrustEnv(projectRoot, worktreePath string) []string {
+	if worktreePath == "" || worktreePath == projectRoot {
+		return nil // no separate worktree: the project path is already trusted
+	}
+	if !hostTrustsMiseConfig(projectRoot) {
+		return nil
+	}
+	val := worktreePath
+	if existing := os.Getenv("MISE_TRUSTED_CONFIG_PATHS"); existing != "" {
+		val = existing + string(os.PathListSeparator) + worktreePath
+	}
+	return []string{"MISE_TRUSTED_CONFIG_PATHS=" + val}
+}
+
+// hostTrustsMiseConfig reports whether the host user trusts projectRoot's mise
+// config, via `mise trust --show` (which prints "<path>: <status>" for each
+// config in the dir hierarchy). False if mise is absent or the project is untrusted.
+func hostTrustsMiseConfig(projectRoot string) bool {
+	out, err := exec.Command("mise", "trust", "--show", "-C", projectRoot).Output()
+	if err != nil {
+		return false
+	}
+	home, _ := os.UserHomeDir()
+	for _, line := range strings.Split(string(out), "\n") {
+		idx := strings.LastIndex(line, ": ")
+		if idx < 0 {
+			continue
+		}
+		p := strings.TrimSpace(line[:idx])
+		status := strings.TrimSpace(line[idx+2:])
+		if home != "" && strings.HasPrefix(p, "~") {
+			p = home + p[len("~"):]
+		}
+		if p == projectRoot {
+			return status == "trusted"
+		}
+	}
+	return false
+}
+
+// StartShellSession opens an interactive bash session sharing the head's
+// worktree. When sandboxed is true the shell runs inside the same OS sandbox as
+// the agent; when false it runs directly on the host with no confinement (an
+// explicit user opt-in). The two modes get distinct session IDs so both can be
+// open at once.
+func StartShellSession(reg *session.Registry, projectRoot string, head Head, rows, cols uint16, sandboxed bool) (string, error) {
 	shellID := head.ID + "-shell"
+	if !sandboxed {
+		shellID = head.ID + "-shell-host"
+	}
 	if _, ok := reg.Get(shellID); ok {
 		return shellID, nil
 	}
@@ -397,34 +462,47 @@ func StartShellSession(reg *session.Registry, projectRoot string, head Head, row
 		return "", errtrace.Wrap(fmt.Errorf("get current user: %w", err))
 	}
 	home := currentUser.HomeDir
+	env := agentEnv(home, currentUser.Username, readGitConfigVal(projectRoot, "user.name"), readGitConfigVal(projectRoot, "user.email"))
+	env = append(env, miseTrustEnv(projectRoot, worktreePath)...)
 
-	cfg, _ := config.Load(projectRoot)
-	writable, masked, restore, net := cfg.ResolveSandboxOptions("bash")
-	seed, err := seedHead(projectRoot, shellID, sandbox.AgentTypeBash, worktreePath, home)
-	if err != nil {
-		return "", errtrace.Wrap(err)
-	}
-
-	_, err = reg.Start(session.StartOptions{
-		ID:   shellID,
-		Rows: rows,
-		Cols: cols,
-		Sandbox: sandbox.Options{
+	var sb sandbox.Options
+	if sandboxed {
+		cfg, _ := config.Load(projectRoot)
+		writable, masked, restore, net := cfg.ResolveSandboxOptions("bash")
+		// Bash is an interactive shell, not an agent — no system prompt to inject.
+		seed, err := seedHead(projectRoot, shellID, sandbox.AgentTypeBash, worktreePath, home, "")
+		if err != nil {
+			return "", errtrace.Wrap(err)
+		}
+		sb = sandbox.Options{
 			AgentType:     sandbox.AgentTypeBash,
 			WorktreePath:  worktreePath,
+			GitCommonDir:  gitCommonDir(projectRoot),
 			Home:          home,
 			WritablePaths: append(writable, seed.WritablePaths...),
 			MaskedPaths:   masked,
 			RestoreRO:     restore,
 			Network:       net,
 			Binds:         seed.Binds,
-			Env:           append(agentEnv(home, currentUser.Username, readGitConfigVal(projectRoot, "user.name"), readGitConfigVal(projectRoot, "user.email")), seed.Env...),
+			Env:           append(env, seed.Env...),
 			Argv:          []string{"/bin/bash"},
 			HardenGUI:     true,
 			Seccomp:       true,
-		},
-	})
-	if err != nil {
+			Interactive:   true,
+		}
+	} else {
+		// Regular shell: plain host bash in the worktree, no confinement.
+		sb = sandbox.Options{
+			AgentType:    sandbox.AgentTypeBash,
+			WorktreePath: worktreePath,
+			Home:         home,
+			Env:          env,
+			Argv:         []string{"/bin/bash"},
+			NoSandbox:    true,
+		}
+	}
+
+	if _, err = reg.Start(session.StartOptions{ID: shellID, Rows: rows, Cols: cols, Sandbox: sb}); err != nil {
 		return "", errtrace.Wrap(err)
 	}
 	return shellID, nil
@@ -447,14 +525,17 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 
 	cfg, _ := config.Load(projectRoot)
 	writable, masked, restore, net := cfg.ResolveSandboxOptions(string(head.AgentType))
-	seed, err := seedHead(projectRoot, head.ID, head.AgentType, worktreePath, home)
+	seed, err := seedHead(projectRoot, head.ID, head.AgentType, worktreePath, home, head.PrePrompt)
 	if err != nil {
 		return errtrace.Wrap(err)
 	}
-	argv, err := sandbox.AgentArgv(head.AgentType, true, "")
+	argv, err := sandbox.AgentArgv(head.AgentType, true, head.PrePrompt, "")
 	if err != nil {
 		return errtrace.Wrap(err)
 	}
+
+	env := append(agentEnv(home, currentUser.Username, readGitConfigVal(projectRoot, "user.name"), readGitConfigVal(projectRoot, "user.email")), seed.Env...)
+	env = append(env, miseTrustEnv(projectRoot, worktreePath)...)
 
 	sess, err := reg.Start(session.StartOptions{
 		ID:   head.ID,
@@ -463,13 +544,14 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 		Sandbox: sandbox.Options{
 			AgentType:     head.AgentType,
 			WorktreePath:  worktreePath,
+			GitCommonDir:  gitCommonDir(projectRoot),
 			Home:          home,
 			WritablePaths: append(writable, seed.WritablePaths...),
 			MaskedPaths:   masked,
 			RestoreRO:     restore,
 			Network:       net,
 			Binds:         seed.Binds,
-			Env:           append(agentEnv(home, currentUser.Username, readGitConfigVal(projectRoot, "user.name"), readGitConfigVal(projectRoot, "user.email")), seed.Env...),
+			Env:           env,
 			Argv:          argv,
 			HardenGUI:     true,
 			Seccomp:       true,

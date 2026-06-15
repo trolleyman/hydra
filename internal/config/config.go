@@ -12,19 +12,35 @@ import (
 	"github.com/trolleyman/hydra/internal/sandbox"
 )
 
-// DefaultPrePrompt is the built-in pre-prompt always prepended to agent prompts.
-// The placeholders <branch> and <base-branch> are substituted at spawn time.
+// DefaultPrePrompt is the built-in pre-prompt delivered to every agent as a
+// system prompt (not as part of the user's task prompt). The placeholders
+// <branch> and <base-branch> are substituted at spawn time.
 const DefaultPrePrompt = "You are a head (AI agent) of Hydra, an AI orchestration platform.\n" +
-	"- You are running inside an OS sandbox on a git worktree, as the host user.\n" +
-	"- You have full read access to the host, write access to the worktree and developer caches, and credential locations are hidden.\n" +
-	"- You are allowed to install what is necessary to complete the task.\n" +
+	"\n" +
+	"## Environment\n" +
+	"- You are running inside a locked-down OS sandbox on a dedicated git worktree, as the host user.\n" +
+	"- You have read access to the host, write access to your worktree and the developer caches; credential locations are masked.\n" +
 	"- The current branch is `<branch>` and it targets `<base-branch>`.\n" +
+	"\n" +
+	"## Sandbox rules\n" +
+	"- Do NOT install anything: no package managers, no global tools, no new system dependencies. Work with the toolchain already present on the host.\n" +
+	"- Do NOT try to escape, weaken, or probe the sandbox (e.g. remounting paths, reading masked credentials, disabling seccomp, or reaching blocked hosts). The sandbox is a security boundary — treat it as fixed.\n" +
+	"- If you need something the environment does not provide — a tool installed, a path made writable, network access, etc. — STOP and ask the user to change it for you. Do not work around it.\n" +
+	"\n" +
+	"## What the user can change for you\n" +
+	"The user controls your sandbox through Hydra's config (the per-agent `[<agent>.sandbox]` section of config.toml, editable in the web UI). When you need an environment change, tell the user exactly which setting to adjust and why:\n" +
+	"- `writable_paths` — extra paths made writable inside the sandbox.\n" +
+	"- `masked_paths` — extra paths hidden inside the sandbox.\n" +
+	"- `restore_ro` — paths re-exposed read-only after a parent was masked.\n" +
+	"- `network.enabled` / `network.allowed_hosts` — outbound network access and its host allow-list.\n" +
+	"- `pre_prompt` — the standing instructions you are reading now.\n" +
+	"\n" +
+	"## Workflow\n" +
 	"- As you work, use git commit to save your progress at logical points.\n" +
 	"- Once you have finished the task, make a final git commit with all remaining changes.\n" +
 	"- Do *not* use git push or git pull.\n" +
 	"- Try not to bother the user with requests unless necessary.\n" +
-	"- If there are any design decisions made without user input, document them in each commit.\n" +
-	"- Use rg (ripgrep) instead of grep."
+	"- If there are any design decisions made without user input, document them in each commit."
 
 // NetworkConfig is the per-agent network policy.
 type NetworkConfig struct {
@@ -51,8 +67,6 @@ type SandboxConfig struct {
 type AgentConfig struct {
 	// Sandbox overrides sandbox policy for this agent type.
 	Sandbox *SandboxConfig `toml:"sandbox"`
-	// SharedMounts is a list of sandbox paths shared (writable) across agents.
-	SharedMounts []string `toml:"shared_mounts"`
 	// PrePrompt is prepended to every agent prompt.
 	PrePrompt *string `toml:"pre_prompt"`
 }
@@ -174,9 +188,6 @@ func (a *AgentConfig) Merge(other AgentConfig) {
 		}
 		a.Sandbox.Merge(*other.Sandbox)
 	}
-	if other.SharedMounts != nil {
-		a.SharedMounts = other.SharedMounts
-	}
 	if other.PrePrompt != nil {
 		a.PrePrompt = other.PrePrompt
 	}
@@ -268,8 +279,6 @@ func (c Config) ResolveSandboxOptions(agentType string) (writable, masked, resto
 			net.AllowedHosts = sb.Network.AllowedHosts
 		}
 	}
-	// SharedMounts are treated as additional writable paths.
-	writable = append(writable, resolved.SharedMounts...)
 	return writable, masked, restore, net
 }
 
@@ -318,9 +327,6 @@ func writeAgentConfigFields(buf *strings.Builder, table string, cfg AgentConfig)
 	if cfg.PrePrompt != nil {
 		buf.WriteString("pre_prompt = " + tomlStringValue(*cfg.PrePrompt) + "\n")
 	}
-	if len(cfg.SharedMounts) > 0 {
-		buf.WriteString("shared_mounts = " + tomlStringArray(cfg.SharedMounts) + "\n")
-	}
 	if sb := cfg.Sandbox; sb != nil {
 		buf.WriteString("\n[" + table + ".sandbox]\n")
 		if len(sb.WritablePaths) > 0 {
@@ -345,7 +351,7 @@ func writeAgentConfigFields(buf *strings.Builder, table string, cfg AgentConfig)
 }
 
 func agentConfigEmpty(cfg AgentConfig) bool {
-	return cfg.Sandbox == nil && len(cfg.SharedMounts) == 0 && cfg.PrePrompt == nil
+	return cfg.Sandbox == nil && cfg.PrePrompt == nil
 }
 
 // marshalConfig serializes a Config to TOML.
