@@ -28,7 +28,7 @@ const checkerStyle: React.CSSProperties = {
 
 function ImageCell({ url, label }: { url?: string | null; label: string }) {
   return (
-    <div className="flex-1 min-w-0">
+    <div className="min-w-0">
       <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-1">{label}</div>
       {url ? (
         <a href={url} target="_blank" rel="noreferrer" className="block">
@@ -40,7 +40,7 @@ function ImageCell({ url, label }: { url?: string | null; label: string }) {
           />
         </a>
       ) : (
-        <div className="flex items-center justify-center h-24 rounded-md border border-dashed border-gray-200 dark:border-gray-700 text-xs text-gray-400 dark:text-gray-500">
+        <div className="flex items-center justify-center w-40 h-24 rounded-md border border-dashed border-gray-200 dark:border-gray-700 text-xs text-gray-400 dark:text-gray-500">
           (none)
         </div>
       )}
@@ -51,7 +51,7 @@ function ImageCell({ url, label }: { url?: string | null; label: string }) {
 function FileRow({ file }: { file: ArtifactFile }) {
   const ct = file.change_type as string
   return (
-    <div className="py-3 border-t border-gray-100 dark:border-gray-800 first:border-t-0">
+    <div className="py-3 min-w-0 max-w-full">
       <div className="flex items-center gap-2 mb-2">
         <span className="text-xs font-medium text-gray-700 dark:text-gray-300 truncate">{file.name}</span>
         <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${CHANGE_COLOR[ct] ?? ''}`}>{CHANGE_LABEL[ct] ?? ct}</span>
@@ -60,6 +60,18 @@ function FileRow({ file }: { file: ArtifactFile }) {
         <ImageCell url={file.left_url} label="Before" />
         <ImageCell url={file.right_url} label="After" />
       </div>
+    </div>
+  )
+}
+
+// Lay the per-file before/after blocks out as flex-wrap items so a tall, narrow
+// artifact (e.g. a phone screenshot) only claims the width it needs and several
+// can share a row, while a wide desktop screenshot wraps onto its own line. Each
+// file's name + before + after stays a single, unbreakable block.
+function FileGrid({ files }: { files: ArtifactFile[] }) {
+  return (
+    <div className="flex flex-wrap gap-x-6 gap-y-1">
+      {files.map((f) => <FileRow key={f.name} file={f} />)}
     </div>
   )
 }
@@ -113,7 +125,7 @@ function ArtifactSetCard({ set }: { set: ArtifactSet }) {
         </button>
         {expandable && showUnchanged && (
           <div className="px-3 pb-2">
-            {set.files.map((f) => <FileRow key={f.name} file={f} />)}
+            <FileGrid files={set.files} />
           </div>
         )}
       </div>
@@ -150,7 +162,7 @@ function ArtifactSetCard({ set }: { set: ArtifactSet }) {
           )}
           {status === 'ready' && (
             <>
-              {changedFiles.map((f) => <FileRow key={f.name} file={f} />)}
+              <FileGrid files={changedFiles} />
               {unchangedFiles.length > 0 && (
                 <div className="pt-2">
                   <button
@@ -159,7 +171,7 @@ function ArtifactSetCard({ set }: { set: ArtifactSet }) {
                   >
                     {showUnchanged ? 'Hide' : 'Show'} {unchangedFiles.length} unchanged
                   </button>
-                  {showUnchanged && unchangedFiles.map((f) => <FileRow key={f.name} file={f} />)}
+                  {showUnchanged && <FileGrid files={unchangedFiles} />}
                 </div>
               )}
             </>
