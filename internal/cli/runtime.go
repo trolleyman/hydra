@@ -103,7 +103,7 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 
 	go heads.RunLivenessReconciler(ctx, reg, store, roots)
 	go heads.RunJSONStatusPoller(ctx, store, roots)
-	go runStoragePruner(ctx, artifactMgr, projectRoot)
+	go runStoragePruner(ctx, artifactMgr, roots)
 
 	mux := buildMux(server)
 	return &daemonRuntime{
@@ -161,15 +161,31 @@ func buildMux(server *httppkg.Server) *http.ServeMux {
 }
 
 // runStoragePruner periodically evicts stale/oversized diff artifacts and
-// aged-out prompt uploads. The first cycle runs immediately; thereafter once an
-// hour until ctx is done.
-func runStoragePruner(ctx context.Context, mgr *artifacts.Manager, projectRoot string) {
+// aged-out prompt uploads across every registered project (roots is
+// re-evaluated each cycle). The first cycle runs immediately; thereafter once
+// an hour until ctx is done.
+func runStoragePruner(ctx context.Context, bootMgr *artifacts.Manager, roots func() []string) {
 	prune := func() {
-		if err := mgr.PruneStale(artifacts.DefaultMaxAge, artifacts.DefaultMaxBytes); err != nil {
-			log.Printf("warn: prune artifacts: %v", err)
-		}
-		if err := httppkg.PruneUploads(projectRoot, httppkg.DefaultUploadMaxAge); err != nil {
-			log.Printf("warn: prune uploads: %v", err)
+		for _, root := range roots() {
+			// Reuse the boot project's manager: it tracks in-flight generations
+			// so pruning skips dirs mid-build. For other projects, construct a
+			// lightweight manager — but only when an artifacts dir already
+			// exists, so we don't litter empty .hydra/artifacts dirs into
+			// projects that never generated any.
+			var mgr *artifacts.Manager
+			if root == bootMgr.ProjectRoot() {
+				mgr = bootMgr
+			} else if _, err := os.Stat(paths.GetArtifactsDirFromProjectRoot(root)); err == nil {
+				mgr = artifacts.NewManager(root)
+			}
+			if mgr != nil {
+				if err := mgr.PruneStale(artifacts.DefaultMaxAge, artifacts.DefaultMaxBytes); err != nil {
+					log.Printf("warn: prune artifacts (%s): %v", root, err)
+				}
+			}
+			if err := httppkg.PruneUploads(root, httppkg.DefaultUploadMaxAge); err != nil {
+				log.Printf("warn: prune uploads (%s): %v", root, err)
+			}
 		}
 	}
 	prune()

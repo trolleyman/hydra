@@ -298,6 +298,9 @@ func NewManager(projectRoot string) *Manager {
 	return m
 }
 
+// ProjectRoot returns the project root this manager is bound to.
+func (m *Manager) ProjectRoot() string { return m.projectRoot }
+
 func (m *Manager) root() string         { return paths.GetArtifactsDirFromProjectRoot(m.projectRoot) }
 func (m *Manager) outDir() string       { return filepath.Join(m.root(), "out") }
 func (m *Manager) checkoutsDir() string { return filepath.Join(m.root(), "checkouts") }
