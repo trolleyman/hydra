@@ -60,8 +60,8 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 	}
 	log.Printf("Default project: %s (%s)", defaultProject.Name, defaultProject.ID)
 
-	artifactMgr := artifacts.NewManager(projectRoot)
-	artifactMgr.CleanCheckouts()
+	// One artifacts Manager per registered project, created lazily on first use.
+	artifactReg := artifacts.NewRegistry()
 
 	server := &httppkg.Server{
 		WorktreesDir:    worktreesDir,
@@ -72,7 +72,7 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 		DB:              store,
 		StartTime:       time.Now(),
 		Development:     os.Getenv("HYDRA_DEV_RESTART") == "1",
-		Artifacts:       artifactMgr,
+		Artifacts:       artifactReg,
 	}
 
 	if ok, reason := sandbox.Available(); !ok {
@@ -90,9 +90,15 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 	// too. roots is re-evaluated each cycle so runtime add/remove is picked up.
 	roots := func() []string { return projectRoots(pm) }
 
-	// Resume heads that were running before a restart (best-effort).
+	// Resume heads that were running before a restart (best-effort), and clear
+	// out any ephemeral artifact checkouts left behind by a crash mid-generation.
+	// Only touch projects that already have an artifacts dir, so we don't create
+	// empty ones in projects that never generated artifacts.
 	for _, root := range roots() {
 		resumeHeadsOnBoot(reg, store, root)
+		if _, err := os.Stat(paths.GetArtifactsDirFromProjectRoot(root)); err == nil {
+			artifactReg.Manager(root).CleanCheckouts()
+		}
 	}
 
 	// Immediate first poller cycles before accepting requests.
@@ -103,7 +109,7 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 
 	go heads.RunLivenessReconciler(ctx, reg, store, roots)
 	go heads.RunJSONStatusPoller(ctx, store, roots)
-	go runStoragePruner(ctx, artifactMgr, roots)
+	go runStoragePruner(ctx, artifactReg, roots)
 
 	mux := buildMux(server)
 	return &daemonRuntime{
@@ -164,25 +170,18 @@ func buildMux(server *httppkg.Server) *http.ServeMux {
 // aged-out prompt uploads across every registered project (roots is
 // re-evaluated each cycle). The first cycle runs immediately; thereafter once
 // an hour until ctx is done.
-func runStoragePruner(ctx context.Context, bootMgr *artifacts.Manager, roots func() []string) {
+func runStoragePruner(ctx context.Context, artifactReg *artifacts.Registry, roots func() []string) {
 	prune := func() {
+		// Artifacts: prune only projects with a live Manager (lazily created on
+		// first artifact request). Reusing the live managers keeps in-flight
+		// generation tracking intact and skips projects that never generated any.
+		for root, mgr := range artifactReg.Snapshot() {
+			if err := mgr.PruneStale(artifacts.DefaultMaxAge, artifacts.DefaultMaxBytes); err != nil {
+				log.Printf("warn: prune artifacts (%s): %v", root, err)
+			}
+		}
+		// Uploads are a plain per-project directory, so prune every project.
 		for _, root := range roots() {
-			// Reuse the boot project's manager: it tracks in-flight generations
-			// so pruning skips dirs mid-build. For other projects, construct a
-			// lightweight manager — but only when an artifacts dir already
-			// exists, so we don't litter empty .hydra/artifacts dirs into
-			// projects that never generated any.
-			var mgr *artifacts.Manager
-			if root == bootMgr.ProjectRoot() {
-				mgr = bootMgr
-			} else if _, err := os.Stat(paths.GetArtifactsDirFromProjectRoot(root)); err == nil {
-				mgr = artifacts.NewManager(root)
-			}
-			if mgr != nil {
-				if err := mgr.PruneStale(artifacts.DefaultMaxAge, artifacts.DefaultMaxBytes); err != nil {
-					log.Printf("warn: prune artifacts (%s): %v", root, err)
-				}
-			}
 			if err := httppkg.PruneUploads(root, httppkg.DefaultUploadMaxAge); err != nil {
 				log.Printf("warn: prune uploads (%s): %v", root, err)
 			}

@@ -49,9 +49,9 @@ type Server struct {
 	DB              *db.Store
 	StartTime       time.Time
 	Development     bool // set when running under mage dev / mage DevAutoReload
-	// Artifacts generates/caches diff artifacts (screenshots etc.) for the
-	// daemon's project root. nil disables the feature.
-	Artifacts *artifacts.Manager
+	// Artifacts generates/caches diff artifacts (screenshots etc.), one Manager
+	// per registered project (resolved per request). nil disables the feature.
+	Artifacts *artifacts.Registry
 
 	lastSandboxError atomic.Value // holds string
 }

@@ -39,6 +39,7 @@ import (
 	_ "image/png"  // register PNG decoder for pixel comparison
 	"io"
 	"io/fs"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -298,8 +299,43 @@ func NewManager(projectRoot string) *Manager {
 	return m
 }
 
-// ProjectRoot returns the project root this manager is bound to.
-func (m *Manager) ProjectRoot() string { return m.projectRoot }
+// Registry lazily creates and caches one Manager per project root. A single
+// daemon serves every registered project, but each project needs its own
+// Manager: managers are stateful (in-flight generation tracking, the cache
+// lives under that project's .hydra/artifacts) so they must be reused across
+// requests for the same project rather than recreated.
+type Registry struct {
+	mu   sync.Mutex
+	mgrs map[string]*Manager
+}
+
+// NewRegistry returns an empty registry.
+func NewRegistry() *Registry {
+	return &Registry{mgrs: map[string]*Manager{}}
+}
+
+// Manager returns the manager for projectRoot, creating it on first use.
+func (r *Registry) Manager(projectRoot string) *Manager {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if m, ok := r.mgrs[projectRoot]; ok {
+		return m
+	}
+	m := NewManager(projectRoot)
+	r.mgrs[projectRoot] = m
+	return m
+}
+
+// Snapshot returns a copy of the currently-created managers, keyed by project
+// root. Used by maintenance loops (e.g. cache pruning) that should touch only
+// projects whose artifacts have actually been exercised this daemon lifetime.
+func (r *Registry) Snapshot() map[string]*Manager {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make(map[string]*Manager, len(r.mgrs))
+	maps.Copy(out, r.mgrs)
+	return out
+}
 
 func (m *Manager) root() string         { return paths.GetArtifactsDirFromProjectRoot(m.projectRoot) }
 func (m *Manager) outDir() string       { return filepath.Join(m.root(), "out") }
