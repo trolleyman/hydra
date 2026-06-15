@@ -15,15 +15,19 @@
 // and a semaphore bounds how many generations run at once.
 //
 // Security note: scripts run *inside the OS sandbox* (the same bubblewrap /
-// sandbox-exec confinement agents get), not on the host. The command string is
-// trusted (it comes from the project's live config, not the checked-out ref),
-// but it executes against an attacker-controllable checkout — build tooling and
-// package lifecycle scripts run the diffed ref's own code — so confining it is
-// what keeps a malicious branch from escaping onto the host. The checkout dir,
-// the artifact output dir, the dev caches and the git common dir are writable;
-// credentials are masked; network is on (cold installs need it). A script can
-// opt out with `unsafe_host = true` in config, which runs it unconfined on the
-// host — only safe for self-contained, audited commands. See buildCommandSpec.
+// sandbox-exec confinement agents get), not on the host. The command string may
+// come from the version being rendered (each side of a diff loads [[artifacts]]
+// from its own .hydra/config.toml, so a branch's edits show up — see
+// internal/http/artifacts.go), and it executes against an attacker-controllable
+// checkout — build tooling and package lifecycle scripts run the diffed ref's
+// own code — so confining it is what keeps a malicious branch from escaping onto
+// the host. The checkout dir, the artifact output dir, the dev caches and the git
+// common dir are writable; credentials are masked; network is on (cold installs
+// need it). A script can opt out with `unsafe_host = true` in config, which runs
+// it unconfined on the host — only safe for self-contained, audited commands. So
+// that a branch cannot grant *itself* host access, unsafe_host is honored only
+// when the trusted live config authorizes that exact command; the gating lives in
+// internal/http/artifacts.go, and buildCommandSpec just executes the decision.
 package artifacts
 
 import (

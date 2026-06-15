@@ -274,6 +274,32 @@ func Load(projectRoot string) (Config, error) {
 	return cfg, nil
 }
 
+// ArtifactsAtProjectTOML resolves the [[artifacts]] scripts that apply when the
+// project's .hydra/config.toml holds the given content. It mirrors Load's merge
+// order (internal defaults, then user config, then project), so it can be used
+// to load the artifact scripts exactly as they existed at a specific git ref by
+// passing that ref's config.toml content (an empty/absent file inherits the user
+// config's artifacts, just like the live path). Project config that fails to
+// parse returns an error.
+func ArtifactsAtProjectTOML(content []byte) ([]ArtifactScript, error) {
+	cfg := LoadInternalDefaults()
+
+	// User config (best-effort, matching Load).
+	if userPath, err := GetUserConfigPath(); err == nil {
+		if userCfg, err := LoadFile(userPath); err == nil && userCfg != nil {
+			cfg.Merge(*userCfg)
+		}
+	}
+
+	var projectCfg Config
+	if _, err := toml.Decode(string(content), &projectCfg); err != nil {
+		return nil, errtrace.Wrap(fmt.Errorf("parse project config: %w", err))
+	}
+	cfg.Merge(projectCfg)
+
+	return cfg.Artifacts, nil
+}
+
 // GetResolvedConfig returns the fully resolved AgentConfig for a specific agent type.
 func (c Config) GetResolvedConfig(agentType string) AgentConfig {
 	resolved := c.Defaults.clone()

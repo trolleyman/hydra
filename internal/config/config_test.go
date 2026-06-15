@@ -147,6 +147,54 @@ func contains(s, sub string) bool {
 		}())
 }
 
+func TestArtifactsAtProjectTOML(t *testing.T) {
+	// Isolate from any real user config so the result is deterministic.
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
+	content := []byte(`
+[[artifacts]]
+name = "home"
+command = "shot home"
+
+[[artifacts]]
+name = "about"
+command = "shot about"
+timeout_sec = 30
+`)
+	got, err := ArtifactsAtProjectTOML(content)
+	if err != nil {
+		t.Fatalf("ArtifactsAtProjectTOML: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d artifacts, want 2: %+v", len(got), got)
+	}
+	if got[0].Name != "home" || got[0].Command != "shot home" {
+		t.Errorf("artifact[0] = %+v", got[0])
+	}
+	if got[1].Name != "about" || got[1].TimeoutSec != 30 {
+		t.Errorf("artifact[1] = %+v", got[1])
+	}
+
+	// A config without an [[artifacts]] section yields none (no user config here).
+	none, err := ArtifactsAtProjectTOML([]byte("[defaults]\n"))
+	if err != nil {
+		t.Fatalf("ArtifactsAtProjectTOML(empty): %v", err)
+	}
+	if len(none) != 0 {
+		t.Errorf("expected no artifacts, got %+v", none)
+	}
+
+	// Empty content (file absent at a ref) is not an error.
+	if _, err := ArtifactsAtProjectTOML(nil); err != nil {
+		t.Errorf("ArtifactsAtProjectTOML(nil): %v", err)
+	}
+
+	// Malformed TOML surfaces an error.
+	if _, err := ArtifactsAtProjectTOML([]byte("this is not = = toml")); err == nil {
+		t.Error("expected error for malformed TOML, got nil")
+	}
+}
+
 func splitLines(s string) []string {
 	var lines []string
 	start := 0
