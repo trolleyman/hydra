@@ -89,7 +89,9 @@ func BuildSpec(opts Options) (*Spec, error) {
 		"-D", "WORK_DIR=" + opts.WorktreePath,
 		"-D", "HOME_DIR=" + home,
 	}
-	args = append(args, opts.Argv...)
+	// Optionally run the configured pre-spawn script first; it execs into Argv
+	// when it falls through.
+	args = append(args, withPreSpawn(opts.PreSpawnScript, opts.Argv)...)
 
 	return &Spec{
 		Path:    sandboxExec,

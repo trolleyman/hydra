@@ -382,10 +382,13 @@ type ProjectInfo struct {
 
 // SandboxConfig User-editable sandbox policy, additive on top of baked-in defaults
 type SandboxConfig struct {
-	MaskedPaths   *[]string      `json:"masked_paths"`
-	Network       *NetworkConfig `json:"network,omitempty"`
-	RestoreRo     *[]string      `json:"restore_ro"`
-	WritablePaths *[]string      `json:"writable_paths"`
+	MaskedPaths *[]string      `json:"masked_paths"`
+	Network     *NetworkConfig `json:"network,omitempty"`
+
+	// PreSpawnScript Shell script run inside the sandbox immediately before each agent is launched (e.g. `mise trust`)
+	PreSpawnScript *string   `json:"pre_spawn_script"`
+	RestoreRo      *[]string `json:"restore_ro"`
+	WritablePaths  *[]string `json:"writable_paths"`
 }
 
 // SpawnAgentRequest defines model for SpawnAgentRequest.

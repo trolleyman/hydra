@@ -183,9 +183,10 @@ func BuildSpec(opts Options) (*Spec, error) {
 		}
 	}
 
-	// The command to run inside the sandbox.
+	// The command to run inside the sandbox (optionally preceded by the
+	// configured pre-spawn script, which execs into Argv when it falls through).
 	args = append(args, "--")
-	args = append(args, opts.Argv...)
+	args = append(args, withPreSpawn(opts.PreSpawnScript, opts.Argv)...)
 
 	return &Spec{
 		Path:       bwrap,
