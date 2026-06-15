@@ -151,6 +151,12 @@ try {
       viewport?: { width: number; height: number }
     }[] = [
       { name: 'home', path: '/' },
+      // The repository view: a GitHub-style browser with a file/folder tree on
+      // the left and the picked file rendered on the right. Simulation mode
+      // serves a small mock repo (see internal/http/simulation.go) and opens
+      // README.md by default, so the capture shows rendered markdown beside the
+      // tree. Full-page; the layout fills the viewport with internal scroll.
+      { name: 'repository', path: '/project/sim-project/repository' },
       { name: 'nested-folders', path: '/project/sim-project/agent/agent-3', scrollTo: 'Changes' },
       // agent-1's diff carries simulated "screenshots" artifacts (mixed phone +
       // desktop shapes). Scroll to the "Changes" header — the artifacts panel
@@ -164,57 +170,78 @@ try {
         viewport: { width: 1280, height: 1280 },
       },
     ]
+    // Capture every page in both themes. Dark mode has its own colours (e.g.
+    // diff add/remove backgrounds), so a light-only render would miss visual
+    // changes that only show up in dark mode. The app stores its theme
+    // preference in localStorage ('hydra-theme-mode') and toggles a `dark`
+    // class on <html>; we seed that key before the app boots so each capture
+    // renders the chosen theme deterministically (no reliance on the OS
+    // `prefers-color-scheme`). Light renders keep their original filenames; dark
+    // renders get a `-dark` suffix.
+    const themes = ['light', 'dark'] as const
     for (const pg of pages) {
-      const ctx = await browser.newContext({
-        viewport: pg.viewport ?? { width: 1280, height: 800 },
-        deviceScaleFactor: 1,
-      })
-      await ctx.addInitScript(() => {
-        // Deterministic shuffle (spawn-form placeholder order).
-        ;(Math as unknown as { random: () => number }).random = () => 0.5
-        // Freeze short-lived timers (the typewriter placeholder animation runs
-        // on 30–2500ms timeouts) while leaving long timers/polling intact.
-        const orig = window.setTimeout
-        ;(window as unknown as { setTimeout: typeof setTimeout }).setTimeout = ((
-          fn: TimerHandler,
-          ms?: number,
-          ...rest: unknown[]
-        ) => (ms && ms < 4000 ? 0 : orig(fn, ms, ...rest))) as typeof setTimeout
-      })
-      const page = await ctx.newPage()
-      await page.goto(base + pg.path, { waitUntil: 'networkidle' })
-      await page.addStyleTag({
-        content:
-          '*,*::before,*::after{animation:none!important;transition:none!important;caret-color:transparent!important}',
-      })
-      // Let async data + layout settle before capturing.
-      await page.waitForTimeout(800)
-      if (pg.scrollTo) {
-        // Pin the named section heading to the top of its scroll container. We
-        // can't use scrollIntoViewIfNeeded: the diff header is position:sticky,
-        // so the browser already counts it as "in view" and won't scroll.
-        // Compute the heading's offset within the scroll container and set
-        // scrollTop directly.
-        await page.evaluate((heading) => {
-          const title = Array.from(document.querySelectorAll('h2')).find(
-            (e) => e.textContent?.trim() === heading,
-          )
-          const cont = title?.closest('.overflow-auto') as HTMLElement | null | undefined
-          if (title && cont) {
-            const offset =
-              title.getBoundingClientRect().top - cont.getBoundingClientRect().top + cont.scrollTop
-            cont.scrollTop = offset - 24
+      for (const theme of themes) {
+        const ctx = await browser.newContext({
+          viewport: pg.viewport ?? { width: 1280, height: 800 },
+          deviceScaleFactor: 1,
+          colorScheme: theme,
+        })
+        // Seed the theme preference before any app code runs.
+        await ctx.addInitScript((mode) => {
+          try {
+            localStorage.setItem('hydra-theme-mode', mode)
+          } catch {
+            // ignore storage failures
           }
-        }, pg.scrollTo)
-        // Settle the scroll/sticky-header layout before capturing.
-        await page.waitForTimeout(300)
+        }, theme)
+        await ctx.addInitScript(() => {
+          // Deterministic shuffle (spawn-form placeholder order).
+          ;(Math as unknown as { random: () => number }).random = () => 0.5
+          // Freeze short-lived timers (the typewriter placeholder animation runs
+          // on 30–2500ms timeouts) while leaving long timers/polling intact.
+          const orig = window.setTimeout
+          ;(window as unknown as { setTimeout: typeof setTimeout }).setTimeout = ((
+            fn: TimerHandler,
+            ms?: number,
+            ...rest: unknown[]
+          ) => (ms && ms < 4000 ? 0 : orig(fn, ms, ...rest))) as typeof setTimeout
+        })
+        const page = await ctx.newPage()
+        await page.goto(base + pg.path, { waitUntil: 'networkidle' })
+        await page.addStyleTag({
+          content:
+            '*,*::before,*::after{animation:none!important;transition:none!important;caret-color:transparent!important}',
+        })
+        // Let async data + layout settle before capturing.
+        await page.waitForTimeout(800)
+        if (pg.scrollTo) {
+          // Pin the named section heading to the top of its scroll container. We
+          // can't use scrollIntoViewIfNeeded: the diff header is position:sticky,
+          // so the browser already counts it as "in view" and won't scroll.
+          // Compute the heading's offset within the scroll container and set
+          // scrollTop directly.
+          await page.evaluate((heading) => {
+            const title = Array.from(document.querySelectorAll('h2')).find(
+              (e) => e.textContent?.trim() === heading,
+            )
+            const cont = title?.closest('.overflow-auto') as HTMLElement | null | undefined
+            if (title && cont) {
+              const offset =
+                title.getBoundingClientRect().top - cont.getBoundingClientRect().top + cont.scrollTop
+              cont.scrollTop = offset - 24
+            }
+          }, pg.scrollTo)
+          // Settle the scroll/sticky-header layout before capturing.
+          await page.waitForTimeout(300)
+        }
+        const suffix = theme === 'dark' ? '-dark' : ''
+        const out = join(OUT, `${pg.name}${suffix}.png`)
+        // Scrolled pages capture the viewport (so the scroll is meaningful);
+        // others capture the full page.
+        await page.screenshot({ path: out, fullPage: !pg.scrollTo })
+        console.log(`wrote ${out}`)
+        await ctx.close()
       }
-      const out = join(OUT, `${pg.name}.png`)
-      // Scrolled pages capture the viewport (so the scroll is meaningful);
-      // others capture the full page.
-      await page.screenshot({ path: out, fullPage: !pg.scrollTo })
-      console.log(`wrote ${out}`)
-      await ctx.close()
     }
   } finally {
     await browser.close()

@@ -107,6 +107,23 @@ func ShowFile(projectRoot, ref, path string) ([]byte, error) {
 	return out, nil
 }
 
+// ListTreeFiles returns the repo-relative paths of every file tracked at ref
+// (`git ls-tree -r --name-only <ref>`), sorted by git's default ordering. Paths
+// use forward slashes regardless of platform.
+func ListTreeFiles(projectRoot, ref string) ([]string, error) {
+	if err := ValidateRef(ref); err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	out, err := gitOutput(projectRoot, "ls-tree", "-r", "--name-only", ref)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	if out == "" {
+		return nil, nil
+	}
+	return strings.Split(out, "\n"), nil
+}
+
 // AddDetachedWorktree checks out ref into a new detached-HEAD worktree at path.
 // The parent directory is created and marked gitignored. Use RemoveWorktree to
 // clean it up afterwards.

@@ -64,14 +64,19 @@ func BuildSpec(opts Options) (*Spec, error) {
 		"--die-with-parent",
 	}
 
-	// --new-session calls setsid(), which drops the PTY as the controlling
-	// terminal and so breaks job control ("no job control in this shell"). It's
-	// a defence against TIOCSTI input-injection into a shared terminal, but each
-	// session here has its own dedicated PTY, so there's nothing to escape to.
-	// Keep it for agents; omit it for interactive shells that need job control.
-	if !opts.Interactive {
-		args = append(args, "--new-session")
-	}
+	// NOTE: we deliberately do NOT pass bwrap's --new-session. It calls setsid(),
+	// which drops the PTY as the controlling terminal. creack/pty already starts
+	// the sandbox with the slave as its controlling terminal (Setsid+Setctty), so
+	// a second setsid detaches it — and a process with no controlling terminal
+	// has no foreground process group for the kernel to signal. That breaks two
+	// things that depend on the ctty:
+	//   - job control in interactive shells ("no job control in this shell");
+	//   - SIGWINCH delivery on resize: TIOCSWINSZ on the master signals the tty's
+	//     foreground process group, so without a ctty the agent never learns it
+	//     was resized and renders at a fixed width forever.
+	// --new-session is only a defence against TIOCSTI input-injection into a
+	// *shared* terminal, but every session here has its own dedicated PTY whose
+	// master is read only by the daemon, so there is nothing to escape to.
 
 	// Writable: the worktree is always writable; then config-driven paths.
 	addRWDir := func(p string) {

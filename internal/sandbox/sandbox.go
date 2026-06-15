@@ -89,11 +89,6 @@ type Options struct {
 	HardenGUI bool
 	// Seccomp applies the embedded syscall blocklist on Linux when true.
 	Seccomp bool
-	// Interactive marks a hands-on shell (not an agent). It keeps the sandbox in
-	// the PTY's session so bash gets a controlling terminal and job control,
-	// instead of starting a detached new session. Default false (agents don't
-	// need job control and benefit from the extra isolation).
-	Interactive bool
 	// NoSandbox runs Argv directly on the host with no confinement at all (full
 	// host access). Used only for the user-opted-in "regular shell"; never for
 	// agents. All other sandbox fields are ignored when set.

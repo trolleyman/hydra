@@ -10,6 +10,8 @@ import type { CommitInfo } from '../models/CommitInfo';
 import type { ConfigResponse } from '../models/ConfigResponse';
 import type { DiffResponse } from '../models/DiffResponse';
 import type { ProjectInfo } from '../models/ProjectInfo';
+import type { RepositoryFileResponse } from '../models/RepositoryFileResponse';
+import type { RepositoryTreeResponse } from '../models/RepositoryTreeResponse';
 import type { SpawnAgentRequest } from '../models/SpawnAgentRequest';
 import type { StatusResponse } from '../models/StatusResponse';
 import type { CancelablePromise } from '../core/CancelablePromise';
@@ -472,6 +474,61 @@ export class DefaultService {
             mediaType: 'application/json',
             errors: {
                 404: `Project Not Found`,
+                500: `Internal Server Error`,
+            },
+        });
+    }
+    /**
+     * List the files tracked in the project's repository
+     * @param projectId Project ID
+     * @param ref Git ref to read the tree from (defaults to HEAD)
+     * @returns RepositoryTreeResponse OK
+     * @throws ApiError
+     */
+    public getRepositoryTree(
+        projectId: string,
+        ref?: string,
+    ): CancelablePromise<RepositoryTreeResponse> {
+        return this.httpRequest.request({
+            method: 'GET',
+            url: '/api/projects/{project_id}/repository/tree',
+            path: {
+                'project_id': projectId,
+            },
+            query: {
+                'ref': ref,
+            },
+            errors: {
+                404: `Project Not Found`,
+                500: `Internal Server Error`,
+            },
+        });
+    }
+    /**
+     * Read the contents of a file in the project's repository
+     * @param projectId Project ID
+     * @param path Repo-relative path of the file to read
+     * @param ref Git ref to read the file from (defaults to HEAD)
+     * @returns RepositoryFileResponse OK
+     * @throws ApiError
+     */
+    public getRepositoryFile(
+        projectId: string,
+        path: string,
+        ref?: string,
+    ): CancelablePromise<RepositoryFileResponse> {
+        return this.httpRequest.request({
+            method: 'GET',
+            url: '/api/projects/{project_id}/repository/file',
+            path: {
+                'project_id': projectId,
+            },
+            query: {
+                'path': path,
+                'ref': ref,
+            },
+            errors: {
+                404: `Project or file not found`,
                 500: `Internal Server Error`,
             },
         });

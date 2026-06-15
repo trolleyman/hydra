@@ -450,7 +450,6 @@ func StartShellSession(reg *session.Registry, projectRoot string, head Head, row
 			PreSpawnScript: preSpawn,
 			HardenGUI:      true,
 			Seccomp:        true,
-			Interactive:    true,
 		}
 	} else {
 		// Regular shell: plain host bash in the worktree, no confinement.

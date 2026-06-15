@@ -6,7 +6,7 @@ import { useAgentStore } from '../stores/agentStore'
 import type { ProjectInfo, AgentResponse } from '../api'
 import { ApiError, ErrorResponse } from '../api'
 import { formatError } from '../api/format_error'
-import { Sun, Moon, Monitor, ChevronDown, Folder, Plus, Settings, Check, X } from 'lucide-react'
+import { Sun, Moon, Monitor, ChevronDown, Folder, FolderGit2, Plus, Settings, Check, X } from 'lucide-react'
 import { AgentSidebarItem } from '../components/AgentComponents'
 import { SpawnForm } from '../components/SpawnForm'
 
@@ -632,6 +632,26 @@ function RootLayout() {
           className="relative bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex flex-col shrink-0"
         >
           <SpawnForm compact projectId={currentProjectId} onSpawned={handleSpawned} disabled={!currentProjectId} />
+
+          {/* Repository view — sits between the spawn box and the agents list */}
+          <div className="px-2 pt-2 pb-1 border-b border-gray-100 dark:border-gray-700">
+            {currentProjectId ? (
+              <Link
+                to="/project/$projectId/repository"
+                params={{ projectId: currentProjectId }}
+                className="flex items-center gap-2 px-2.5 py-2 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                activeProps={{ className: 'flex items-center gap-2 px-2.5 py-2 rounded-lg text-sm font-medium bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300' }}
+              >
+                <FolderGit2 className="w-4 h-4 shrink-0" />
+                Repository
+              </Link>
+            ) : (
+              <span className="flex items-center gap-2 px-2.5 py-2 rounded-lg text-sm font-medium text-gray-400 dark:text-gray-600 cursor-not-allowed">
+                <FolderGit2 className="w-4 h-4 shrink-0" />
+                Repository
+              </span>
+            )}
+          </div>
 
           <div className="px-3 py-3 border-b border-gray-100 dark:border-gray-700">
             <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">
