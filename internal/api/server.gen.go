@@ -384,6 +384,39 @@ type ProjectInfo struct {
 	Path string `json:"path"`
 }
 
+// RepositoryFileResponse defines model for RepositoryFileResponse.
+type RepositoryFileResponse struct {
+	// Binary True when the file looks binary; content is then omitted
+	Binary bool `json:"binary"`
+
+	// Content UTF-8 file content (omitted for binary files)
+	Content *string `json:"content"`
+
+	// Path Repo-relative path of the file
+	Path string `json:"path"`
+
+	// Ref The git ref the file was read from
+	Ref string `json:"ref"`
+
+	// Size File size in bytes
+	Size int `json:"size"`
+
+	// Truncated True when content was truncated because the file is large
+	Truncated bool `json:"truncated"`
+}
+
+// RepositoryTreeResponse defines model for RepositoryTreeResponse.
+type RepositoryTreeResponse struct {
+	// DefaultPath Suggested file to open first (README.md when present), or null
+	DefaultPath *string `json:"default_path"`
+
+	// Files Repo-relative paths of every file tracked at this ref
+	Files []string `json:"files"`
+
+	// Ref The git ref the tree was read from (e.g. HEAD)
+	Ref string `json:"ref"`
+}
+
 // SandboxConfig User-editable sandbox policy, additive on top of baked-in defaults
 type SandboxConfig struct {
 	MaskedPaths *[]string      `json:"masked_paths"`
@@ -533,6 +566,21 @@ type SaveConfigParams struct {
 // SaveConfigParamsScope defines parameters for SaveConfig.
 type SaveConfigParamsScope string
 
+// GetRepositoryFileParams defines parameters for GetRepositoryFile.
+type GetRepositoryFileParams struct {
+	// Path Repo-relative path of the file to read
+	Path string `form:"path" json:"path"`
+
+	// Ref Git ref to read the file from (defaults to HEAD)
+	Ref *string `form:"ref,omitempty" json:"ref,omitempty"`
+}
+
+// GetRepositoryTreeParams defines parameters for GetRepositoryTree.
+type GetRepositoryTreeParams struct {
+	// Ref Git ref to read the tree from (defaults to HEAD)
+	Ref *string `form:"ref,omitempty" json:"ref,omitempty"`
+}
+
 // AddProjectJSONRequestBody defines body for AddProject for application/json ContentType.
 type AddProjectJSONRequestBody = AddProjectRequest
 
@@ -604,6 +652,12 @@ type ServerInterface interface {
 	// Save configuration changes
 	// (POST /api/projects/{project_id}/config)
 	SaveConfig(w http.ResponseWriter, r *http.Request, projectId string, params SaveConfigParams)
+	// Read the contents of a file in the project's repository
+	// (GET /api/projects/{project_id}/repository/file)
+	GetRepositoryFile(w http.ResponseWriter, r *http.Request, projectId string, params GetRepositoryFileParams)
+	// List the files tracked in the project's repository
+	// (GET /api/projects/{project_id}/repository/tree)
+	GetRepositoryTree(w http.ResponseWriter, r *http.Request, projectId string, params GetRepositoryTreeParams)
 	// Get system status
 	// (GET /api/status)
 	GetStatus(w http.ResponseWriter, r *http.Request)
@@ -1269,6 +1323,93 @@ func (siw *ServerInterfaceWrapper) SaveConfig(w http.ResponseWriter, r *http.Req
 	handler.ServeHTTP(w, r)
 }
 
+// GetRepositoryFile operation middleware
+func (siw *ServerInterfaceWrapper) GetRepositoryFile(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetRepositoryFileParams
+
+	// ------------- Required query parameter "path" -------------
+
+	if paramValue := r.URL.Query().Get("path"); paramValue != "" {
+
+	} else {
+		siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "path"})
+		return
+	}
+
+	err = runtime.BindQueryParameter("form", true, true, "path", r.URL.Query(), &params.Path)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "path", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "ref" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "ref", r.URL.Query(), &params.Ref)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "ref", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetRepositoryFile(w, r, projectId, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetRepositoryTree operation middleware
+func (siw *ServerInterfaceWrapper) GetRepositoryTree(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetRepositoryTreeParams
+
+	// ------------- Optional query parameter "ref" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "ref", r.URL.Query(), &params.Ref)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "ref", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetRepositoryTree(w, r, projectId, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetStatus operation middleware
 func (siw *ServerInterfaceWrapper) GetStatus(w http.ResponseWriter, r *http.Request) {
 
@@ -1436,6 +1577,8 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/update-from-base", wrapper.UpdateAgentFromBase)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/config", wrapper.GetConfig)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/config", wrapper.SaveConfig)
+	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/repository/file", wrapper.GetRepositoryFile)
+	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/repository/tree", wrapper.GetRepositoryTree)
 	m.HandleFunc("GET "+options.BaseURL+"/api/status", wrapper.GetStatus)
 	m.HandleFunc("GET "+options.BaseURL+"/health", wrapper.CheckHealth)
 
@@ -2147,6 +2290,78 @@ func (response SaveConfig500JSONResponse) VisitSaveConfigResponse(w http.Respons
 	return json.NewEncoder(w).Encode(response)
 }
 
+type GetRepositoryFileRequestObject struct {
+	ProjectId string `json:"project_id"`
+	Params    GetRepositoryFileParams
+}
+
+type GetRepositoryFileResponseObject interface {
+	VisitGetRepositoryFileResponse(w http.ResponseWriter) error
+}
+
+type GetRepositoryFile200JSONResponse RepositoryFileResponse
+
+func (response GetRepositoryFile200JSONResponse) VisitGetRepositoryFileResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetRepositoryFile404JSONResponse ErrorResponse
+
+func (response GetRepositoryFile404JSONResponse) VisitGetRepositoryFileResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetRepositoryFile500JSONResponse ErrorResponse
+
+func (response GetRepositoryFile500JSONResponse) VisitGetRepositoryFileResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetRepositoryTreeRequestObject struct {
+	ProjectId string `json:"project_id"`
+	Params    GetRepositoryTreeParams
+}
+
+type GetRepositoryTreeResponseObject interface {
+	VisitGetRepositoryTreeResponse(w http.ResponseWriter) error
+}
+
+type GetRepositoryTree200JSONResponse RepositoryTreeResponse
+
+func (response GetRepositoryTree200JSONResponse) VisitGetRepositoryTreeResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetRepositoryTree404JSONResponse ErrorResponse
+
+func (response GetRepositoryTree404JSONResponse) VisitGetRepositoryTreeResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetRepositoryTree500JSONResponse ErrorResponse
+
+func (response GetRepositoryTree500JSONResponse) VisitGetRepositoryTreeResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 type GetStatusRequestObject struct {
 }
 
@@ -2248,6 +2463,12 @@ type StrictServerInterface interface {
 	// Save configuration changes
 	// (POST /api/projects/{project_id}/config)
 	SaveConfig(ctx context.Context, request SaveConfigRequestObject) (SaveConfigResponseObject, error)
+	// Read the contents of a file in the project's repository
+	// (GET /api/projects/{project_id}/repository/file)
+	GetRepositoryFile(ctx context.Context, request GetRepositoryFileRequestObject) (GetRepositoryFileResponseObject, error)
+	// List the files tracked in the project's repository
+	// (GET /api/projects/{project_id}/repository/tree)
+	GetRepositoryTree(ctx context.Context, request GetRepositoryTreeRequestObject) (GetRepositoryTreeResponseObject, error)
 	// Get system status
 	// (GET /api/status)
 	GetStatus(ctx context.Context, request GetStatusRequestObject) (GetStatusResponseObject, error)
@@ -2807,6 +3028,60 @@ func (sh *strictHandler) SaveConfig(w http.ResponseWriter, r *http.Request, proj
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(SaveConfigResponseObject); ok {
 		if err := validResponse.VisitSaveConfigResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetRepositoryFile operation middleware
+func (sh *strictHandler) GetRepositoryFile(w http.ResponseWriter, r *http.Request, projectId string, params GetRepositoryFileParams) {
+	var request GetRepositoryFileRequestObject
+
+	request.ProjectId = projectId
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetRepositoryFile(ctx, request.(GetRepositoryFileRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetRepositoryFile")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetRepositoryFileResponseObject); ok {
+		if err := validResponse.VisitGetRepositoryFileResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetRepositoryTree operation middleware
+func (sh *strictHandler) GetRepositoryTree(w http.ResponseWriter, r *http.Request, projectId string, params GetRepositoryTreeParams) {
+	var request GetRepositoryTreeRequestObject
+
+	request.ProjectId = projectId
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetRepositoryTree(ctx, request.(GetRepositoryTreeRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetRepositoryTree")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetRepositoryTreeResponseObject); ok {
+		if err := validResponse.VisitGetRepositoryTreeResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
