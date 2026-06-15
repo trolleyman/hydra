@@ -246,7 +246,7 @@ const UnifiedHunk = memo(function UnifiedHunk({ hunk, highlightedOld, highlighte
         const highlighted = isAdd
           ? (line.new_line_num != null ? highlightedNew.get(line.new_line_num) : undefined)
           : (line.old_line_num != null ? highlightedOld.get(line.old_line_num) : undefined)
-        const bgClass = isAdd ? 'bg-green-50 dark:bg-green-950/30' : isDel ? 'bg-red-50 dark:bg-red-950/30' : ''
+        const bgClass = isAdd ? 'bg-green-50 dark:bg-green-500/15' : isDel ? 'bg-red-50 dark:bg-red-500/15' : ''
         return (
           <Fragment key={idx}>
             <div className={`flex items-stretch hover:brightness-95 dark:hover:brightness-110 relative group ${bgClass}`}>
@@ -308,8 +308,8 @@ const SideBySideHunk = memo(function SideBySideHunk({ hunk, highlightedOld, high
       {sbsLines.map((line, idx) => {
         const oldHighlighted = line.oldLineNum != null ? highlightedOld.get(line.oldLineNum) : undefined
         const newHighlighted = line.newLineNum != null ? highlightedNew.get(line.newLineNum) : undefined
-        const oldBg = line.oldType === 'deletion' ? 'bg-red-50 dark:bg-red-950/30' : line.oldType === 'empty' ? 'bg-gray-50 dark:bg-gray-900/50' : ''
-        const newBg = line.newType === 'addition' ? 'bg-green-50 dark:bg-green-950/30' : line.newType === 'empty' ? 'bg-gray-50 dark:bg-gray-900/50' : ''
+        const oldBg = line.oldType === 'deletion' ? 'bg-red-50 dark:bg-red-500/15' : line.oldType === 'empty' ? 'bg-gray-50 dark:bg-gray-900/50' : ''
+        const newBg = line.newType === 'addition' ? 'bg-green-50 dark:bg-green-500/15' : line.newType === 'empty' ? 'bg-gray-50 dark:bg-gray-900/50' : ''
         return (
           <Fragment key={idx}>
             <div className="flex items-stretch divide-x divide-gray-200 dark:divide-gray-700">
