@@ -873,6 +873,7 @@ components:
         - starting
         - running
         - waiting
+        - finished
         - stopped
         - killing
         - merging
@@ -892,10 +893,13 @@ components:
           description: "ISO 8601 timestamp of when the status was set"
         last_message:
           type: string
-          description: "Last assistant message (only present on Stop events)"
+          description: "Last assistant message (present on turn-end and notification events)"
         reason:
           type: string
           description: "Session end reason (only present on SessionEnd events)"
+        activity:
+          type: string
+          description: "Short human-readable description of the agent's current action, derived from status_log.jsonl (present while running)"
 
     AgentResponse:
       type: object

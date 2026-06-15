@@ -18,7 +18,17 @@
 
 9. [ ] **[Agent UX]** When merging or killing a head, move it into a transitional state and return an HTTP status indicating work-in-progress, so the UI button stays disabled only until the operation completes.
 
-10. [ ] **[Agent UX]** Use `status_log.jsonl` to surface richer agent status/progress.
+10. [x] **[Agent UX]** Use `status_log.jsonl` to surface richer agent status/progress.
+
+    _Done, plus two related status-pipeline fixes:_
+
+    - **Stuck in "starting".** Status writes used second-resolution `RFC3339`, and the JSON poller skipped any update whose timestamp wasn't lexically `>` the last one. The spawn's `starting` write and the `SessionStart` `running` hook routinely land in the same wall-clock second, so the poller recorded `starting@T` then dropped `running@T` (`T <= T`) — and a fast agent could run its whole lifecycle inside that second, leaving it stuck in `starting` even after it finished. _Fix:_ all status timestamps are now `RFC3339Nano`, and the poller compares by parsing to `time.Time` (`statusTimeAfter`) rather than string compare (also robust to `RFC3339Nano`'s trailing-zero trimming, which breaks lexical ordering).
+
+    - **Richer states (`waiting` vs `finished`).** `Stop`/`AfterAgent` used to always map to `waiting`, conflating "done" with "needs you". Added a `finished` status: a finished turn maps to `waiting` only when the agent ended by asking a question (trailing `?` in its last message — best-effort, agents expose no explicit "I need input" signal), otherwise `finished`. Any `Notification` (permission prompt or the idle "waiting for your input" nudge) now maps to `waiting` (previously only `ToolPermission` did). `finished` keeps the session alive (vs `stopped` = session ended), so the dot stays green.
+
+    - **Richer progress (issue #10 proper).** `internal/heads/activity.go` tails `status_log.jsonl` (last 64 KiB) in `enrichAgentStatus`, surfacing a live `activity` line for running agents (the current tool action — `$ go test`, `Editing foo.go`, `Reading bar.go`, … across Claude/Gemini/Copilot tool names) plus the most recent `last_message`. New `AgentStatusInfo.activity` API field. The web sidebar item and the agent-detail header now show a status badge + a detail line (⏳ activity while running, 💬 last message / question while waiting/finished).
+
+    Design decisions (made without user input): the question-detection heuristic is a trailing `?`; richer detail is derived on read in `ListHeads` (no new DB column) directly from `status_log.jsonl` as the issue intends; tool-event hooks now also rewrite `status.json` (keeping `running`) so the timestamp/activity stay fresh.
 
 11. [ ] **[Agent UX]** Stream command stdout/stderr live and prefix log lines (e.g. `[stdout]` / `[stderr]`), preserving interleaving instead of buffering and printing everything at once.
 

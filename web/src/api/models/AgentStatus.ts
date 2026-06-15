@@ -11,6 +11,7 @@ export enum AgentStatus {
     STARTING = 'starting',
     RUNNING = 'running',
     WAITING = 'waiting',
+    FINISHED = 'finished',
     STOPPED = 'stopped',
     KILLING = 'killing',
     MERGING = 'merging',

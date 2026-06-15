@@ -14,12 +14,16 @@ export type AgentStatusInfo = {
      */
     timestamp: string;
     /**
-     * Last assistant message (only present on Stop events)
+     * Last assistant message (present on turn-end and notification events)
      */
     last_message?: string;
     /**
      * Session end reason (only present on SessionEnd events)
      */
     reason?: string;
+    /**
+     * Short human-readable description of the agent's current action, derived from status_log.jsonl (present while running)
+     */
+    activity?: string;
 };
 

@@ -6,12 +6,33 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"braces.dev/errtrace"
 	"github.com/spf13/cobra"
 	"github.com/trolleyman/hydra/internal/api"
 )
+
+// stringField returns input[key] as a string, or "" if absent or not a string.
+func stringField(input map[string]interface{}, key string) string {
+	if v, ok := input[key].(string); ok {
+		return v
+	}
+	return ""
+}
+
+// stopStatus decides whether a finished turn means the agent is waiting on the
+// user or has genuinely finished. Heuristic: a trailing '?' in the agent's last
+// message signals it ended by asking a question, so it's waiting for an answer;
+// otherwise it completed its work. (Best-effort — agents don't expose an
+// explicit "I need input" signal on turn end.)
+func stopStatus(lastMessage string) api.AgentStatus {
+	if strings.HasSuffix(strings.TrimRight(lastMessage, " \t\r\n"), "?") {
+		return api.Waiting
+	}
+	return api.Finished
+}
 
 func init() {
 	rootCmd.AddCommand(triggerHookCmd)
@@ -129,6 +150,10 @@ func runTriggerHook(agentType string, eventOverride string, logFile *os.File) er
 		}
 	}
 
+	// lastMessage is the agent's most recent assistant message, when the hook
+	// payload carries one (Claude/Gemini include it on turn-end events).
+	lastMessage := stringField(input, "last_assistant_message")
+
 	// Only update status.json for events that represent a meaningful status change.
 	// All other events are logged above but do not alter the displayed status.
 	var status api.AgentStatus
@@ -136,19 +161,22 @@ func runTriggerHook(agentType string, eventOverride string, logFile *os.File) er
 	case "SessionStart", "sessionStart":
 		status = api.Running
 	case "Stop", "AfterAgent":
-		status = api.Waiting
+		// The turn finished. Distinguish "waiting on the user" (the agent ended
+		// by asking a question) from "finished" (it completed its work).
+		status = stopStatus(lastMessage)
 	case "SessionEnd", "sessionEnd":
 		status = api.Stopped
-	case "AfterTool", "postToolUse":
-		// AfterTool/postToolUse doesn't change the status (it remains Running), but we
-		// want to update status.json so the timestamp changes, signaling to the frontend
-		// that it might need to refresh (e.g. after a git commit).
+	case "PreToolUse", "PostToolUse", "PostToolUseFailure", "BeforeTool", "AfterTool", "preToolUse", "postToolUse":
+		// A tool event means the agent is actively working. We rewrite status.json
+		// (keeping it Running) so the timestamp changes, signaling the frontend it
+		// may need to refresh (e.g. after a git commit) and refreshing live activity.
 		status = api.Running
 	case "Notification", "notification":
-		if nType, ok := input["notification_type"].(string); ok && nType == "ToolPermission" {
-			status = api.Waiting
-		} else {
-			return nil
+		// Any notification means the agent is blocking on the user — either a
+		// permission prompt or the "waiting for your input" idle nudge.
+		status = api.Waiting
+		if lastMessage == "" {
+			lastMessage = stringField(input, "message")
 		}
 	default:
 		return nil
@@ -164,27 +192,18 @@ func runTriggerHook(agentType string, eventOverride string, logFile *os.File) er
 	info := api.AgentStatusInfo{
 		Status:    status,
 		Event:     &eventCopy,
-		Timestamp: time.Now().Format(time.RFC3339),
+		Timestamp: time.Now().Format(time.RFC3339Nano),
 	}
 
-	if event == "Stop" || event == "AfterAgent" {
-		if msg, ok := input["last_assistant_message"].(string); ok && msg != "" {
-			if len(msg) > 300 {
-				msg = msg[:300]
-			}
-			info.LastMessage = &msg
+	if lastMessage != "" {
+		if len(lastMessage) > 300 {
+			lastMessage = lastMessage[:300]
 		}
-	} else if event == "Notification" || event == "notification" {
-		if msg, ok := input["message"].(string); ok && msg != "" {
-			if len(msg) > 300 {
-				msg = msg[:300]
-			}
-			info.LastMessage = &msg
-		}
+		info.LastMessage = &lastMessage
 	}
 
-	if event == "SessionEnd" {
-		if reason, ok := input["reason"].(string); ok && reason != "" {
+	if event == "SessionEnd" || event == "sessionEnd" {
+		if reason := stringField(input, "reason"); reason != "" {
 			info.Reason = &reason
 		}
 	}

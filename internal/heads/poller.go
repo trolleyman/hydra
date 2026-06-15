@@ -94,7 +94,7 @@ func pollJSONStatusOnce(store *db.Store, projectRoot string) {
 		if info == nil || info.Timestamp == "" {
 			continue
 		}
-		if info.Timestamp <= a.AgentStatusTime {
+		if !statusTimeAfter(info.Timestamp, a.AgentStatusTime) {
 			continue
 		}
 		agentStatus := mapAgentStatus(info.Status)
@@ -129,9 +129,29 @@ func mapAgentStatus(s api.AgentStatus) string {
 		return "running"
 	case api.Waiting:
 		return "waiting"
+	case api.Finished:
+		return "finished"
 	case api.Stopped, "ended", "exited":
 		return "stopped"
 	default:
 		return ""
 	}
+}
+
+// statusTimeAfter reports whether status timestamp a is strictly after b. Both
+// are RFC3339/RFC3339Nano; an unparseable a never wins, and an unparseable (or
+// empty) b loses to any valid a. Parsing — rather than string comparison —
+// matters because status writes can collide within a single second (the spawn
+// "starting" write and the SessionStart "running" hook), and the trailing-zero
+// trimming in RFC3339Nano makes lexical ordering unreliable.
+func statusTimeAfter(a, b string) bool {
+	ta, err := time.Parse(time.RFC3339Nano, a)
+	if err != nil {
+		return false
+	}
+	tb, err := time.Parse(time.RFC3339Nano, b)
+	if err != nil {
+		return true
+	}
+	return ta.After(tb)
 }

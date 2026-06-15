@@ -39,3 +39,21 @@ func TestStatusLogFilePathHonorsEnv(t *testing.T) {
 		t.Errorf("statusLogFilePath = %q, want the HYDRA_STATUS_LOG_PATH value", got)
 	}
 }
+
+func TestStopStatus(t *testing.T) {
+	cases := []struct {
+		msg  string
+		want string
+	}{
+		{"All tests pass and the feature works.", "finished"},
+		{"Which approach would you prefer?", "waiting"},
+		{"Should I proceed?  \n", "waiting"}, // trailing whitespace tolerated
+		{"", "finished"},
+		{"Done.", "finished"},
+	}
+	for _, c := range cases {
+		if got := string(stopStatus(c.msg)); got != c.want {
+			t.Errorf("stopStatus(%q) = %q, want %q", c.msg, got, c.want)
+		}
+	}
+}

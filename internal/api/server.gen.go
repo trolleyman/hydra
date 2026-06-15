@@ -18,6 +18,7 @@ import (
 // Defines values for AgentStatus.
 const (
 	Building AgentStatus = "building"
+	Finished AgentStatus = "finished"
 	Killing  AgentStatus = "killing"
 	Merging  AgentStatus = "merging"
 	Pending  AgentStatus = "pending"
@@ -165,10 +166,13 @@ type AgentStatus string
 
 // AgentStatusInfo defines model for AgentStatusInfo.
 type AgentStatusInfo struct {
+	// Activity Short human-readable description of the agent's current action, derived from status_log.jsonl (present while running)
+	Activity *string `json:"activity,omitempty"`
+
 	// Event The hook event that triggered this status (SessionStart, Stop, SessionEnd, or polling)
 	Event *string `json:"event,omitempty"`
 
-	// LastMessage Last assistant message (only present on Stop events)
+	// LastMessage Last assistant message (present on turn-end and notification events)
 	LastMessage *string `json:"last_message,omitempty"`
 
 	// Reason Session end reason (only present on SessionEnd events)
