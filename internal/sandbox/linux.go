@@ -115,23 +115,23 @@ func BuildSpec(opts Options) (*Spec, error) {
 	// files can be bind-mounted into otherwise read-only locations. The bind
 	// sources below are real host files, so writes still reach the host.
 	for _, d := range expandAll(opts.TmpfsDirs, home) {
-		if info, err := os.Stat(d); err == nil && info.IsDir() {
-			args = append(args, "--tmpfs", d)
-		}
+		args = append(args, "--tmpfs", d)
 	}
 
 	// Per-head config seeding binds.
 	for _, b := range opts.Binds {
-		if b.Source == "" || b.Target == "" {
+		source := expandPath(b.Source, home)
+		target := expandPath(b.Target, home)
+		if source == "" || target == "" {
 			continue
 		}
-		if _, err := os.Stat(b.Source); err != nil {
+		if _, err := os.Stat(source); err != nil {
 			continue
 		}
 		if b.ReadOnly {
-			args = append(args, "--ro-bind", b.Source, b.Target)
+			args = append(args, "--ro-bind", source, target)
 		} else {
-			args = append(args, "--bind", b.Source, b.Target)
+			args = append(args, "--bind", source, target)
 		}
 	}
 

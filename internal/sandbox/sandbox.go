@@ -156,8 +156,8 @@ func expandPath(p, home string) string {
 	if p == "~" {
 		return home
 	}
-	if strings.HasPrefix(p, "~/") {
-		p = filepath.Join(home, p[2:])
+	if strings.HasPrefix(p, "~/") || strings.HasPrefix(p, "~.") || strings.HasPrefix(p, "~\\") {
+		p = filepath.Join(home, p[1:])
 	}
 	if strings.ContainsRune(p, '$') {
 		p = os.Expand(p, func(key string) string {

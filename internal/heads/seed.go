@@ -79,11 +79,20 @@ func seedHead(projectRoot, id string, agentType sandbox.AgentType, worktreePath,
 	if err != nil {
 		return nil, errtrace.Wrap(fmt.Errorf("resolve hydra binary: %w", err))
 	}
+	// Bind the hydra binary to a well-known path inside the sandbox.
+	// We use /tmp/hydra-internal because /tmp is always a fresh tmpfs in our
+	// bwrap config, making it a reliable mount point.
+	stableHydraBin := "/tmp/hydra-internal"
+	res.Binds = append(res.Binds, sandbox.Bind{
+		Source:   hydraBin,
+		Target:   stableHydraBin,
+		ReadOnly: true,
+	})
 
 	switch agentType {
 	case sandbox.AgentTypeClaude:
 		settingsHost := filepath.Join(cacheDir, "claude-settings.json")
-		merged, err := sandbox.BuildClaudeSettings(readHostFile(filepath.Join(home, ".claude", "settings.json")), hydraBin)
+		merged, err := sandbox.BuildClaudeSettings(readHostFile(filepath.Join(home, ".claude", "settings.json")), stableHydraBin)
 		if err != nil {
 			return nil, errtrace.Wrap(err)
 		}
@@ -104,7 +113,7 @@ func seedHead(projectRoot, id string, agentType sandbox.AgentType, worktreePath,
 
 	case sandbox.AgentTypeGemini:
 		settingsHost := filepath.Join(cacheDir, "gemini-settings.json")
-		merged, err := sandbox.BuildGeminiSettings(readHostFile(filepath.Join(home, ".gemini", "settings.json")), hydraBin)
+		merged, err := sandbox.BuildGeminiSettings(readHostFile(filepath.Join(home, ".gemini", "settings.json")), stableHydraBin)
 		if err != nil {
 			return nil, errtrace.Wrap(err)
 		}
@@ -125,7 +134,7 @@ func seedHead(projectRoot, id string, agentType sandbox.AgentType, worktreePath,
 		if err := os.MkdirAll(hooksDir, 0755); err != nil {
 			return nil, errtrace.Wrap(err)
 		}
-		hooksData, err := sandbox.BuildCopilotHooks(hydraBin)
+		hooksData, err := sandbox.BuildCopilotHooks(stableHydraBin)
 		if err != nil {
 			return nil, errtrace.Wrap(err)
 		}
