@@ -87,6 +87,25 @@ func statusFilePath() (string, error) {
 	return filepath.Join(home, ".hydra", "status.json"), nil
 }
 
+// currentStatus reads the status currently persisted in status.json, returning
+// "" if it can't be read or parsed. Used to avoid downgrading a terminal status
+// (finished/stopped) when a late idle-nudge notification arrives.
+func currentStatus() api.AgentStatus {
+	path, err := statusFilePath()
+	if err != nil {
+		return ""
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	var info api.AgentStatusInfo
+	if err := json.Unmarshal(data, &info); err != nil {
+		return ""
+	}
+	return info.Status
+}
+
 // statusLogFilePath returns the per-head status_log.jsonl path, honoring
 // HYDRA_STATUS_LOG_PATH with the same fallback as statusFilePath.
 func statusLogFilePath() (string, error) {
@@ -219,8 +238,17 @@ func runTriggerHook(agentType string, eventOverride string, logFile *os.File) er
 		// frontend knows it may need to refresh (e.g. after a git commit).
 		status = api.Running
 	case "Notification", "notification":
-		// Any notification means the agent is blocking on the user — either a
-		// permission prompt or the "waiting for your input" idle nudge.
+		// A notification means the agent is blocking on the user — either a
+		// permission prompt or the "waiting for your input" idle nudge. The idle
+		// nudge, though, also fires ~60s after a turn ends, when the agent has
+		// simply gone quiet. In that case the status is already terminal
+		// (finished/stopped) and downgrading it back to waiting would spuriously
+		// reset a finished agent to waiting with nothing having changed. A real
+		// permission prompt only fires mid-turn, so the status would be running;
+		// guard against clobbering a terminal status here.
+		if cur := currentStatus(); cur == api.Finished || cur == api.Stopped {
+			return nil
+		}
 		status = api.Waiting
 		if lastMessage == "" {
 			lastMessage = stringField(input, "message")
