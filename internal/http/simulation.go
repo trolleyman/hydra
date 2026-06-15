@@ -853,6 +853,83 @@ func (s *SimulationServer) SendAgentInput(w http.ResponseWriter, r *http.Request
 	w.WriteHeader(http.StatusOK)
 }
 
+// simRepoOrder lists the simulated repository's tracked files in git's natural
+// (lexical) order, so the browser renders a stable, GitHub-like tree.
+var simRepoOrder = []string{
+	".gitignore",
+	"README.md",
+	"go.mod",
+	"package.json",
+	"internal/server/server.go",
+	"internal/store/store.go",
+	"web/src/App.tsx",
+	"web/src/components/Button.tsx",
+	"web/src/main.tsx",
+}
+
+// simRepoFiles holds the simulated content for each path in simRepoOrder.
+var simRepoFiles = map[string]string{
+	".gitignore": "node_modules/\ndist/\n.env\n*.log\n",
+	"README.md": "# Hydra Demo\n\nA simulated repository powering the **Repository** view.\n\n" +
+		"This page is a lightweight, GitHub-style browser: pick a file or folder\n" +
+		"on the left, read it on the right. By default it opens `README.md`.\n\n" +
+		"## Features\n\n" +
+		"- Collapsible file & folder tree\n" +
+		"- Syntax-highlighted file contents\n" +
+		"- Markdown rendering for `README` files\n\n" +
+		"## Getting started\n\n" +
+		"```sh\nbun install\nbun run dev\n```\n\n" +
+		"Enjoy exploring the tree!\n",
+	"go.mod": "module github.com/example/hydra-demo\n\ngo 1.26\n",
+	"package.json": "{\n  \"name\": \"hydra-demo\",\n  \"version\": \"1.0.0\",\n" +
+		"  \"scripts\": {\n    \"dev\": \"vite\",\n    \"build\": \"vite build\"\n  }\n}\n",
+	"internal/server/server.go": "package server\n\nimport \"net/http\"\n\n" +
+		"// New returns the demo HTTP handler.\nfunc New() http.Handler {\n" +
+		"\tmux := http.NewServeMux()\n\tmux.HandleFunc(\"/\", func(w http.ResponseWriter, r *http.Request) {\n" +
+		"\t\tw.Write([]byte(\"hello from hydra-demo\"))\n\t})\n\treturn mux\n}\n",
+	"internal/store/store.go": "package store\n\n// Store is an in-memory key/value store.\n" +
+		"type Store struct {\n\tdata map[string]string\n}\n\n" +
+		"func New() *Store {\n\treturn &Store{data: map[string]string{}}\n}\n",
+	"web/src/App.tsx": "export function App() {\n  return <h1>Hydra Demo</h1>\n}\n",
+	"web/src/components/Button.tsx": "export function Button({ label }: { label: string }) {\n" +
+		"  return <button className=\"btn\">{label}</button>\n}\n",
+	"web/src/main.tsx": "import { createRoot } from 'react-dom/client'\n" +
+		"import { App } from './App'\n\ncreateRoot(document.getElementById('root')!).render(<App />)\n",
+}
+
+func (s *SimulationServer) GetRepositoryTree(w http.ResponseWriter, r *http.Request, projectId string, params api.GetRepositoryTreeParams) {
+	ref := "HEAD"
+	if params.Ref != nil && *params.Ref != "" {
+		ref = *params.Ref
+	}
+	defaultPath := "README.md"
+	files := append([]string(nil), simRepoOrder...)
+	api.WriteJSON(w, http.StatusOK, api.RepositoryTreeResponse{
+		Ref:         ref,
+		Files:       files,
+		DefaultPath: &defaultPath,
+	})
+}
+
+func (s *SimulationServer) GetRepositoryFile(w http.ResponseWriter, r *http.Request, projectId string, params api.GetRepositoryFileParams) {
+	ref := "HEAD"
+	if params.Ref != nil && *params.Ref != "" {
+		ref = *params.Ref
+	}
+	content, ok := simRepoFiles[params.Path]
+	if !ok {
+		api.WriteError(w, http.StatusNotFound, "file not found: "+params.Path)
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, api.RepositoryFileResponse{
+		Path:    params.Path,
+		Ref:     ref,
+		Size:    len(content),
+		Binary:  false,
+		Content: &content,
+	})
+}
+
 func (s *SimulationServer) GetConfig(w http.ResponseWriter, r *http.Request, projectId string, params api.GetConfigParams) {
 	resp := api.ConfigResponse{
 		Defaults: api.AgentConfig{

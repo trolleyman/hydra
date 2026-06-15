@@ -151,6 +151,12 @@ try {
       viewport?: { width: number; height: number }
     }[] = [
       { name: 'home', path: '/' },
+      // The repository view: a GitHub-style browser with a file/folder tree on
+      // the left and the picked file rendered on the right. Simulation mode
+      // serves a small mock repo (see internal/http/simulation.go) and opens
+      // README.md by default, so the capture shows rendered markdown beside the
+      // tree. Full-page; the layout fills the viewport with internal scroll.
+      { name: 'repository', path: '/project/sim-project/repository' },
       { name: 'nested-folders', path: '/project/sim-project/agent/agent-3', scrollTo: 'Changes' },
       // agent-1's diff carries simulated "screenshots" artifacts (mixed phone +
       // desktop shapes). Scroll to the "Changes" header — the artifacts panel
