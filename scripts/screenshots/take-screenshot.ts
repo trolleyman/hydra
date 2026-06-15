@@ -111,7 +111,10 @@ try {
 
   // 4. Screenshot the pages. The home page ("/") shows the full app shell:
   //    header, project dropdown, agent sidebar (populated with mock data) and
-  //    the main content pane.
+  //    the main content pane. The "nested-folders" page opens a simulated
+  //    agent (agent-3) whose diff spans deeply nested paths, so the captured
+  //    diff tree shows VS Code-style compacted folders (one/two/three on a
+  //    single row) — see internal/http/simulation.go GetAgentDiff(agent-3).
   //
   //    The diff viewer compares versions by hashing the output bytes and only
   //    surfaces files that differ, so the render MUST be byte-reproducible —
@@ -136,7 +139,10 @@ try {
   ]
   const browser = await chromium.launch({ headless: true, args: flags })
   try {
-    const pages: { name: string; path: string }[] = [{ name: 'home', path: '/' }]
+    const pages: { name: string; path: string }[] = [
+      { name: 'home', path: '/' },
+      { name: 'nested-folders', path: '/project/sim-project/agent/agent-3' },
+    ]
     for (const pg of pages) {
       const ctx = await browser.newContext({
         viewport: { width: 1280, height: 800 },

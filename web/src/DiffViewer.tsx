@@ -1085,6 +1085,29 @@ function buildFileTree(files: DiffFile[]): TreeNode[] {
   return root
 }
 
+// compactTree merges chains of single-child directories into one node, the way
+// VS Code's "compact folders" does: one/two/three renders on a single row when
+// `one` contains only `two` and `two` contains only `three`. This trims the
+// horizontal indent that deeply nested trees would otherwise waste.
+//
+// A directory is folded into its child only when that child is its *sole* entry
+// and is itself a directory — so a folder holding a file (or more than one
+// child) stops the chain. The merged node keeps the deepest folder's `path`
+// (stable, unique → safe as a collapse-state / React key) and joins the segment
+// names for display.
+function compactTree(nodes: TreeNode[]): TreeNode[] {
+  return nodes.map((node) => {
+    if (node.type !== 'dir') return node
+    let current = node
+    const names = [node.name]
+    while (current.children.length === 1 && current.children[0].type === 'dir') {
+      current = current.children[0]
+      names.push(current.name)
+    }
+    return { ...current, name: names.join('/'), children: compactTree(current.children) }
+  })
+}
+
 function getGroupedFiles(files: DiffFile[]): [string, DiffFile[]][] {
   const map = new Map<string, DiffFile[]>()
   for (const file of files) {
@@ -1565,7 +1588,7 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger }: { agent
 
   const renderSidebar = (files: DiffFile[]) => {
     if (fileView === 'tree') {
-      const tree = buildFileTree(files)
+      const tree = compactTree(buildFileTree(files))
       return tree.map((node) => (
         <TreeNodeView key={node.path} node={node} depth={0}
           collapsedFolders={collapsedFolders} toggleFolder={toggleFolder}
