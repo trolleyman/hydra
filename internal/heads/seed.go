@@ -157,6 +157,11 @@ func seedHead(projectRoot, id string, agentType sandbox.AgentType, worktreePath,
 // authenticated, or offline), fall back to seeding the pre-prompt as a GEMINI.md
 // context file, which is loaded as instructional context instead.
 func seedGeminiPrePrompt(res *seedResult, cacheDir, home, prePrompt string) error {
+	// Never let Gemini write its default system prompt into the read-only
+	// `.hydra/cache` inside the sandbox (EROFS crash). We capture the default
+	// ourselves on the host below; the agent only ever reads via GEMINI_SYSTEM_MD.
+	res.Env = append(res.Env, "GEMINI_WRITE_SYSTEM_MD=")
+
 	if dflt := geminiDefaultSystemPrompt(cacheDir); dflt != "" {
 		combined := strings.TrimRight(dflt, "\n") + "\n\n" + prePrompt + "\n"
 		sysHost := filepath.Join(cacheDir, "gemini-system.md")
@@ -246,9 +251,26 @@ func readHostFile(p string) []byte {
 	return data
 }
 
+// envKeysHydraOwns are environment variables Hydra controls per-head and must
+// not inherit from the daemon's own environment, or they leak into every agent.
+// In particular GEMINI_SYSTEM_MD / GEMINI_WRITE_SYSTEM_MD drive where the Gemini
+// CLI reads/writes its system prompt: an inherited GEMINI_WRITE_SYSTEM_MD makes
+// Gemini try to write into the read-only `.hydra/cache` inside the sandbox and
+// crash with EROFS. seedGeminiPrePrompt sets the ones it wants explicitly.
+var envKeysHydraOwns = map[string]bool{
+	"GEMINI_SYSTEM_MD":       true,
+	"GEMINI_WRITE_SYSTEM_MD": true,
+}
+
 // agentEnv builds the environment for the sandboxed agent process.
 func agentEnv(home, username string, gitAuthorName, gitAuthorEmail string) []string {
-	env := append([]string{}, os.Environ()...)
+	env := make([]string, 0, len(os.Environ()))
+	for _, kv := range os.Environ() {
+		if k, _, ok := strings.Cut(kv, "="); ok && envKeysHydraOwns[k] {
+			continue
+		}
+		env = append(env, kv)
+	}
 	env = append(env,
 		"HOME="+home,
 		"USER="+username,
