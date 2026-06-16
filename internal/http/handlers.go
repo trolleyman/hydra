@@ -51,6 +51,10 @@ type Server struct {
 	DB              *db.Store
 	StartTime       time.Time
 	Development     bool // set when running under mage dev / mage DevAutoReload
+	// BackgroundCtx is the server-lifetime context (cancelled on shutdown). It's
+	// handed to detached best-effort work started by a request — e.g. async title
+	// refinement — so that work outlives the request but still dies on shutdown.
+	BackgroundCtx context.Context
 	// Artifacts generates/caches diff artifacts (screenshots etc.), one Manager
 	// per registered project (resolved per request). nil disables the feature.
 	Artifacts *artifacts.Registry
@@ -663,12 +667,13 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 	}
 
 	head, err := heads.SpawnHead(ctx, s.Sessions, s.DB, projectRoot, heads.SpawnHeadOptions{
-		ID:         id,
-		PrePrompt:  prePrompt,
-		Prompt:     prompt,
-		AgentType:  agentType,
-		BaseBranch: baseBranch,
-		Ephemeral:  ephemeral,
+		ID:            id,
+		PrePrompt:     prePrompt,
+		Prompt:        prompt,
+		AgentType:     agentType,
+		BaseBranch:    baseBranch,
+		Ephemeral:     ephemeral,
+		BackgroundCtx: s.BackgroundCtx,
 	})
 	if err != nil {
 		return nil, errtrace.Wrap(err)
@@ -924,11 +929,12 @@ func (s *Server) RestartAgent(ctx context.Context, request api.RestartAgentReque
 	}
 
 	newHead, err := heads.SpawnHead(ctx, s.Sessions, s.DB, projectRoot, heads.SpawnHeadOptions{
-		ID:         id,
-		PrePrompt:  prePrompt,
-		Prompt:     prompt,
-		AgentType:  agentType,
-		BaseBranch: baseBranch,
+		ID:            id,
+		PrePrompt:     prePrompt,
+		Prompt:        prompt,
+		AgentType:     agentType,
+		BaseBranch:    baseBranch,
+		BackgroundCtx: s.BackgroundCtx,
 	})
 	if err != nil {
 		return nil, errtrace.Wrap(err)

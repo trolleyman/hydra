@@ -57,7 +57,15 @@ func runDaemon(_ *cobra.Command, _ []string) error {
 		return errtrace.Wrap(err)
 	}
 
-	srv := &http.Server{Handler: rt.handler, MaxHeaderBytes: 1 << 20}
+	// BaseContext ties every request context to the signal context so Ctrl-C
+	// cancels in-flight handlers immediately (e.g. the up-to-20s `claude /usage`
+	// probe), letting srv.Shutdown return promptly instead of blocking on its
+	// 5s deadline. See the matching note in server.go.
+	srv := &http.Server{
+		Handler:        rt.handler,
+		MaxHeaderBytes: 1 << 20,
+		BaseContext:    func(net.Listener) context.Context { return ctx },
+	}
 
 	cleanup, err := serveUnixSocket(ctx, srv, projectRoot)
 	if err != nil {

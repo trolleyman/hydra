@@ -60,15 +60,21 @@ const titleGenTimeout = 25 * time.Second
 // host `claude` CLI (cheapest model, non-interactive) for a concise summary of
 // the prompt, then writing it to the DB for the next poll to pick up. It is
 // strictly best-effort: any failure (no credits, offline, CLI missing) leaves
-// the prompt-derived title in place. Runs detached from the request lifecycle.
-func generateTitleAsync(store *db.Store, id, prompt string) {
+// the prompt-derived title in place. Runs detached from the request lifecycle,
+// but bound to ctx (the server-lifetime context) so it — and its `claude` child
+// — are cancelled on shutdown rather than left orphaned.
+func generateTitleAsync(ctx context.Context, store *db.Store, id, prompt string) {
 	if store == nil || strings.TrimSpace(prompt) == "" {
 		return
 	}
 	go func() {
-		title, err := generateTitle(context.Background(), prompt)
+		title, err := generateTitle(ctx, prompt)
 		if err != nil {
-			log.Printf("heads: title generation for %s failed (keeping derived title): %v", id, err)
+			// A cancelled context means the server is shutting down, not a real
+			// failure — don't cry wolf in the log.
+			if ctx.Err() == nil {
+				log.Printf("heads: title generation for %s failed (keeping derived title): %v", id, err)
+			}
 			return
 		}
 		if title == "" {
