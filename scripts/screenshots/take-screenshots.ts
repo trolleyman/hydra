@@ -24,7 +24,7 @@
 
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import { createServer } from 'node:net'
-import { mkdtempSync, existsSync } from 'node:fs'
+import { mkdtempSync, existsSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chromium } from 'playwright'
@@ -196,8 +196,20 @@ try {
       // Expands the named artifact card (clicks its header) after load — used to
       // document the in-flight card's live, scrollable generation log.
       expandArtifact?: string
+      // Attaches the given checkout-relative images to the spawn form's hidden
+      // file input (each fed in named "image.png", so the form renumbers them
+      // image1.png, image2.png …) and then opens the lightbox by clicking the
+      // first attachment chip — documents the fullscreen image viewer and the
+      // numbered-paste naming. Captures the viewport (the lightbox is a fixed
+      // overlay), and the upload request is stubbed so the chips settle instantly.
+      attachImages?: string[]
     }[] = [
       { name: 'home', path: '/' },
+      // The spawn form's image lightbox: two images attached to the prompt, the
+      // first opened in the Slack-style fullscreen viewer (blurred backdrop,
+      // prev/next arrows, "1 / 2" counter). Also shows the numbered-paste naming
+      // (image1.png) on the chips behind. Rendered on the full-page spawn form.
+      { name: 'spawn-image-lightbox', path: '/project/sim-project/', attachImages: ['web/public/android-chrome-512x512.png', 'web/public/apple-touch-icon.png'] },
       // The repository view: a GitHub-style browser with a file/folder tree on
       // the left and the picked file rendered on the right. Simulation mode
       // serves a small mock repo (see internal/http/simulation.go) and opens
@@ -404,6 +416,45 @@ try {
         }
         // Let async data + layout settle before capturing (fonts + frames, no sleep).
         await settle(page)
+        if (pg.attachImages) {
+          // Stub the upload endpoint so it resolves instantly and deterministically
+          // (no disk writes, no timing jitter) — the chips then leave their
+          // "uploading" state at a fixed point.
+          await page.route('**/uploads/**', (route) =>
+            route.fulfill({
+              status: 200,
+              contentType: 'application/json',
+              body: JSON.stringify({ path: '/sim/.hydra/uploads/upload.png', filename: 'upload.png' }),
+            }),
+          )
+          // Feed the files into the hidden <input type=file>. Naming each
+          // "image.png" exercises the form's numbered-paste renaming.
+          await page.setInputFiles(
+            'input[type=file]',
+            pg.attachImages.map((rel) => ({
+              name: 'image.png',
+              mimeType: 'image/png',
+              buffer: readFileSync(join(SRC, rel)),
+            })),
+          )
+          // Wait until every chip has rendered (its View label is present) and
+          // none is still uploading (no spinner), so the layout is stable.
+          await page.waitForFunction(
+            (n) =>
+              document.querySelectorAll('[aria-label^="View "]').length === n &&
+              !document.querySelector('svg.lucide-loader-circle'),
+            pg.attachImages.length,
+          )
+          // Open the lightbox on the first image.
+          await page.click('[aria-label^="View "]')
+          // Wait for the figure's caption to show the pixel dimensions ("W × H"),
+          // which only render after the image's onLoad fires — so the capture
+          // always includes them.
+          await page.waitForFunction(() =>
+            !!document.querySelector('figure figcaption')?.textContent?.includes('×'),
+          )
+          await settle(page)
+        }
         if (pg.imageDiffMode || pg.expandArtifact) {
           // The artifacts panel populates from a WebSocket snapshot, which (unlike
           // the HTTP fetches the goto's networkidle waits for) isn't tracked by
@@ -471,9 +522,9 @@ try {
           await settle(page)
         }
         const out = join(OUT, `${pg.name}${suffix}.png`)
-        // Scrolled pages capture the viewport (so the scroll is meaningful);
-        // others capture the full page.
-        await page.screenshot({ path: out, fullPage: !pg.scrollTo })
+        // Scrolled pages and the lightbox (a fixed, viewport-filling overlay)
+        // capture the viewport; others capture the full page.
+        await page.screenshot({ path: out, fullPage: !pg.scrollTo && !pg.attachImages })
         console.log(`wrote ${out}`)
         await ctx.close()
         done++
