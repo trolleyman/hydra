@@ -502,7 +502,7 @@ function PersistedLogView({ leftUrl, rightUrl, open, onOpenChange }: { leftUrl?:
   const toggle = () => onOpenChange(!open)
 
   return (
-    <div className="pt-2">
+    <div className="pt-1.5">
       <button
         onClick={toggle}
         className="text-[11px] text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 cursor-pointer"
@@ -564,7 +564,10 @@ function ArtifactSetCard({ set, mode, onRefresh, projectId, agentId }: { set: Ar
 
   return (
     <div className="border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 overflow-hidden">
-      <div className="flex items-stretch bg-gray-50 dark:bg-gray-800/60">
+      {/* Give the header a resting tint that's distinct from the card body
+          (bg-white / dark:bg-gray-800) on its own, not only on hover — a 60%
+          gray-800 over a gray-800 body was indistinguishable at rest. */}
+      <div className="flex items-stretch bg-gray-100 dark:bg-gray-700/40">
         <button
           onClick={() => setCollapsed((c) => !c)}
           className="flex-1 min-w-0 flex items-center gap-2 px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors cursor-pointer text-left"
@@ -657,9 +660,13 @@ function ArtifactSetCard({ set, mode, onRefresh, projectId, agentId }: { set: Ar
                 <div className="my-2 text-xs text-gray-400 dark:text-gray-500">No artifacts produced.</div>
               ) : (
                 <>
-                  <FileGrid files={changedFiles} mode={mode} />
+                  {/* Skip the grid entirely when nothing changed — an empty
+                      FileGrid still emits a pt-1 spacer row, which (with the
+                      toggles' own top padding) opened a big gap under the header
+                      in the no-visual-changes case. */}
+                  {changedFiles.length > 0 && <FileGrid files={changedFiles} mode={mode} />}
                   {unchangedFiles.length > 0 && (
-                    <div className="pt-2">
+                    <div className="pt-1.5">
                       <button
                         onClick={() => setShowUnchanged((s) => !s)}
                         className="text-[11px] text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 cursor-pointer"
