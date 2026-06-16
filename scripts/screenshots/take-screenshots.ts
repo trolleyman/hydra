@@ -334,7 +334,7 @@ try {
     // many run in parallel, so this doesn't affect the diff-hash reproducibility.
     const tasks = pages.flatMap((pg) => themes.map((theme) => ({ pg, theme })))
     const totalShots = tasks.length
-    const concurrency = Math.max(1, Math.min(Number(process.env.HYDRA_SHOT_CONCURRENCY) || 4, totalShots))
+    const concurrency = Math.max(1, Math.min(Number(process.env.HYDRA_SHOT_CONCURRENCY) || 8, totalShots))
     let done = 0
     let nextTask = 0
 

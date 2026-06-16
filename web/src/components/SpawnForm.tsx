@@ -151,15 +151,19 @@ export function SpawnForm({
   }, [agentType])
 
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  // The resizable element is the whole card (textarea + footer), so the drag
+  // grip sits at the bottom-right of the entire box rather than just the
+  // textarea. We persist/restore the card's height for compact mode.
+  const cardRef = useRef<HTMLDivElement>(null)
 
-  // Persist textarea height for compact mode
+  // Persist card height for compact mode
   useEffect(() => {
-    if (!compact || !textareaRef.current) return
+    if (!compact || !cardRef.current) return
 
-    const textarea = textareaRef.current
+    const card = cardRef.current
     const savedHeight = readLocal(StorageKeys.spawnHeight)
     if (savedHeight) {
-      textarea.style.height = `${savedHeight}px`
+      card.style.height = `${savedHeight}px`
     }
 
     let timer: ReturnType<typeof setTimeout>
@@ -175,12 +179,52 @@ export function SpawnForm({
       }
     })
 
-    observer.observe(textarea)
+    observer.observe(card)
     return () => {
       observer.disconnect()
       clearTimeout(timer)
     }
   }, [compact])
+
+  // Custom drag-to-resize handle for the spawn card. We use a styled grab bar
+  // (matching the sidebar width resizer) rather than the native textarea resize
+  // grip, which looked awkward poking out of the card's rounded gradient corner.
+  // Dragging sets the card height directly; the ResizeObserver above persists it
+  // for the compact box.
+  function handleCardResizeStart(e: React.MouseEvent) {
+    e.preventDefault()
+    const card = cardRef.current
+    if (!card) return
+    const startY = e.clientY
+    const startHeight = card.offsetHeight
+    const min = compact ? 128 : 180
+    document.body.style.cursor = 'ns-resize'
+    document.body.style.userSelect = 'none'
+    const onMove = (ev: MouseEvent) => {
+      card.style.height = `${Math.max(min, startHeight + ev.clientY - startY)}px`
+    }
+    const onUp = () => {
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+    }
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+  }
+
+  // The grab bar rendered at the bottom of each spawn card.
+  function renderResizeHandle() {
+    return (
+      <div
+        onMouseDown={handleCardResizeStart}
+        className="group shrink-0 h-2 -mt-1.5 flex items-center justify-center cursor-ns-resize"
+        title="Drag to resize"
+      >
+        <div className="h-0.5 w-10 rounded-full bg-gray-200 dark:bg-gray-600 group-hover:bg-blue-400/70 group-active:bg-blue-500 transition-colors" />
+      </div>
+    )
+  }
 
   useEffect(() => {
     if (!compact) textareaRef.current?.focus()
@@ -348,7 +392,7 @@ export function SpawnForm({
       <form onSubmit={handleSubmit} className="px-3 py-3 border-b border-gray-100 dark:border-gray-700">
         <input ref={fileInputRef} type="file" multiple className="hidden" onChange={handleFileInput} />
         <div className={`relative rounded-xl p-[1.5px] transition-colors duration-200 ${disabled ? 'bg-gray-100 dark:bg-gray-700' : 'bg-gray-200 dark:bg-gray-600 focus-within:bg-gradient-to-br focus-within:from-blue-500 focus-within:via-indigo-500 focus-within:to-purple-600 focus-within:shadow-md focus-within:shadow-blue-500/20'}`}>
-          <div className="rounded-[10px] bg-white dark:bg-gray-800 overflow-hidden">
+          <div ref={cardRef} className="rounded-[10px] bg-white dark:bg-gray-800 overflow-hidden flex flex-col min-h-[128px]">
             <textarea
               ref={textareaRef}
               value={prompt}
@@ -359,12 +403,12 @@ export function SpawnForm({
               onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
               onDragLeave={() => setDragOver(false)}
               placeholder={disabled ? 'Select a project first…' : (prompt ? 'Describe a task…' : animatedPlaceholder)}
-              rows={2}
+              rows={3}
               disabled={loading || disabled}
-              className={`w-full px-3 pt-2.5 pb-1 text-xs text-gray-800 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 bg-transparent resize-y focus:outline-none leading-relaxed disabled:opacity-50 min-h-[48px] ${dragOver ? 'ring-2 ring-blue-400 rounded' : ''}`}
+              className={`w-full flex-1 px-3 pt-2.5 pb-1 text-xs text-gray-800 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 bg-transparent resize-none focus:outline-none leading-relaxed disabled:opacity-50 min-h-[72px] ${dragOver ? 'ring-2 ring-blue-400 rounded' : ''}`}
             />
             {renderAttachments('sm')}
-            <div className="flex items-center justify-between px-2 pb-2 gap-2">
+            <div className="flex items-center justify-between px-2 pb-2 gap-2 shrink-0">
               <div className="flex items-center gap-1 min-w-0 flex-1">
                 <Tooltip content="Attach files" side="top">
                   <button
@@ -400,6 +444,7 @@ export function SpawnForm({
                 {loading ? '…' : 'Spawn'}
               </button>
             </div>
+            {renderResizeHandle()}
           </div>
         </div>
         {error && (
@@ -427,7 +472,7 @@ export function SpawnForm({
           <input ref={fileInputRef} type="file" multiple className="hidden" onChange={handleFileInput} />
           {/* Gradient border card */}
           <div className="relative rounded-2xl p-[1.5px] bg-gradient-to-br from-blue-500 via-indigo-500 to-purple-600 animate-gradient shadow-2xl shadow-blue-500/20">
-            <div className="rounded-[14px] bg-white dark:bg-gray-800">
+            <div ref={cardRef} className="rounded-[14px] bg-white dark:bg-gray-800 overflow-hidden flex flex-col min-h-[180px]">
               {/* Prompt textarea */}
               <textarea
                 ref={textareaRef}
@@ -441,13 +486,13 @@ export function SpawnForm({
                 placeholder={prompt ? 'Describe what you need…' : animatedPlaceholder}
                 rows={6}
                 disabled={loading}
-                className={`w-full px-4 pt-4 pb-2 text-sm text-gray-800 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 bg-transparent resize-y focus:outline-none leading-relaxed disabled:opacity-50 min-h-[120px] ${dragOver ? 'ring-2 ring-blue-400 rounded' : ''}`}
+                className={`w-full flex-1 px-4 pt-4 pb-2 text-sm text-gray-800 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 bg-transparent resize-none focus:outline-none leading-relaxed disabled:opacity-50 min-h-[120px] ${dragOver ? 'ring-2 ring-blue-400 rounded' : ''}`}
               />
 
               {renderAttachments('md')}
 
               {/* Footer bar */}
-              <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100 dark:border-gray-700 gap-4">
+              <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100 dark:border-gray-700 gap-4 shrink-0">
                 <div className="flex items-center gap-2 min-w-0 flex-1">
                   {/* Attach files */}
                   <Tooltip content="Attach files" side="top">
@@ -517,6 +562,7 @@ export function SpawnForm({
                   </button>
                 </div>
               </div>
+              {renderResizeHandle()}
             </div>
           </div>
 
