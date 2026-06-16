@@ -20,6 +20,7 @@ export const Route = createRootRoute({
 })
 
 import { useDialogStore } from '../stores/dialogStore'
+import { pruneArtifactPrefs } from '../lib/artifactPrefs'
 
 function formatSpawnedAgo(ms: number): string {
   const seconds = Math.floor(ms / 1000)
@@ -276,6 +277,28 @@ function loadThemeMode(): ThemeMode {
   return 'system'
 }
 
+// Per-project memory of the last-selected agent, so switching back to a project
+// restores its agent view rather than dropping you on the bare project page.
+const SELECTED_AGENT_KEY_PREFIX = 'hydra-selected-agent-'
+
+function loadSelectedAgentId(projectId: string): string | null {
+  try {
+    return localStorage.getItem(SELECTED_AGENT_KEY_PREFIX + projectId)
+  } catch {
+    return null
+  }
+}
+
+function saveSelectedAgentId(projectId: string, agentId: string | null) {
+  try {
+    if (agentId == null) {
+      localStorage.removeItem(SELECTED_AGENT_KEY_PREFIX + projectId)
+    } else {
+      localStorage.setItem(SELECTED_AGENT_KEY_PREFIX + projectId, agentId)
+    }
+  } catch { /* ignore */ }
+}
+
 function RootLayout() {
   const spawnedAt = useRef<number | null>(null)
   // Guards the one-time redirect from the bare root path to the selected
@@ -443,9 +466,45 @@ function RootLayout() {
     }
     if (selectedProjectId != null && projects.some((p) => p.id === selectedProjectId)) {
       didAutoNavigate.current = true
-      navigate({ to: '/project/$projectId', params: { projectId: selectedProjectId } })
+      // Restore the agent that was last open in this project, if any (read the
+      // saved id up front so the save effect below — which momentarily sees the
+      // bare project route — can't wipe it before we navigate).
+      const savedAgentId = loadSelectedAgentId(selectedProjectId)
+      if (savedAgentId) {
+        navigate({ to: '/project/$projectId/agent/$agentId', params: { projectId: selectedProjectId, agentId: savedAgentId } })
+      } else {
+        navigate({ to: '/project/$projectId', params: { projectId: selectedProjectId } })
+      }
     }
   }, [selectedProjectId, projects, navigate])
+
+  // Persist which agent is selected per project so switching back restores it.
+  // Keyed off the actual route params (not currentProjectId, which falls back to
+  // the stored project on "/" and would let this wipe the memory before the boot
+  // restore below runs). Single writer: clear on the bare project page, and avoid
+  // persisting an id that isn't in the project's loaded agent list — so a
+  // killed/expired agent doesn't keep routing you to "not found".
+  useEffect(() => {
+    const projectId = routeParams.projectId
+    if (!projectId) return // not on a project route ("/", "/settings") — leave storage alone
+    const agentId = routeParams.agentId
+    if (agentId == null) {
+      saveSelectedAgentId(projectId, null)
+      return
+    }
+    // `agents` is loaded for this project once every entry's project_path matches
+    // it; until then (e.g. mid project-switch) keep the optimistic value.
+    const proj = projects.find((p) => p.id === projectId)
+    const agentsLoaded = proj != null && agents.length > 0 && agents.every((a) => a.project_path === proj.path)
+    if (agentsLoaded && !agents.some((a) => a.id === agentId)) {
+      saveSelectedAgentId(projectId, null)
+    } else {
+      saveSelectedAgentId(projectId, agentId)
+    }
+  }, [routeParams.projectId, routeParams.agentId, agents, projects])
+
+  // Drop expired per-artifact UI prefs once on boot (see lib/artifactPrefs).
+  useEffect(() => { pruneArtifactPrefs() }, [])
 
   async function handleRestart() {
     setRestarting(true)
@@ -576,7 +635,19 @@ function RootLayout() {
           onSelect={(id) => {
             setSelectedProjectId(id)
             const isOnSettings = window.location.pathname.endsWith('/settings')
-            navigate({ to: isOnSettings ? '/project/$projectId/settings' : '/project/$projectId', params: { projectId: id } })
+            if (isOnSettings) {
+              navigate({ to: '/project/$projectId/settings', params: { projectId: id } })
+              return
+            }
+            // Restore the agent last open in the project we're switching to;
+            // navigate straight to it so the agent view comes back, not the bare
+            // project page. Falls back to the project page when none is remembered.
+            const savedAgentId = loadSelectedAgentId(id)
+            if (savedAgentId) {
+              navigate({ to: '/project/$projectId/agent/$agentId', params: { projectId: id, agentId: savedAgentId } })
+            } else {
+              navigate({ to: '/project/$projectId', params: { projectId: id } })
+            }
           }}
           onDeselect={() => {
             setSelectedProjectId(null)

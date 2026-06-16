@@ -3,6 +3,7 @@ import { api } from '../stores/apiClient'
 import type { ArtifactSet, ArtifactFile, ArtifactLogLine } from '../api'
 import { LoaderCircle, Image as ImageIcon, ImageOff, ChevronDown, ChevronRight, TriangleAlert, RefreshCw } from 'lucide-react'
 import { InfoTooltip } from './InfoTooltip'
+import { loadArtifactPrefs, saveArtifactPrefs } from '../lib/artifactPrefs'
 
 const CHANGE_LABEL: Record<string, string> = {
   added: 'added',
@@ -366,37 +367,50 @@ function LogPanes({ left, right }: { left: ArtifactLogLine[] | null; right: Arti
 // PersistedLogView lets a settled card reopen its build log: a "Show build log"
 // toggle that lazily fetches each side's persisted log (left_log_url /
 // right_log_url) and renders them in the same side-by-side panes as the live log.
-function PersistedLogView({ leftUrl, rightUrl }: { leftUrl?: string | null; rightUrl?: string | null }) {
-  const [open, setOpen] = useState(false)
+function PersistedLogView({ leftUrl, rightUrl, open, onOpenChange }: { leftUrl?: string | null; rightUrl?: string | null; open: boolean; onOpenChange: (open: boolean) => void }) {
   const [logs, setLogs] = useState<{ left: ArtifactLogLine[] | null; right: ArtifactLogLine[] | null } | null>(null)
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState<string | null>(null)
 
-  if (!leftUrl && !rightUrl) return null
-
-  const toggle = async () => {
-    if (open) { setOpen(false); return }
-    setOpen(true)
-    if (logs || loading) return
+  // Lazily fetch each side's log the first time the view is open — driven by an
+  // effect (not the click handler) so a restored-open state also loads the log.
+  // Keyed by url-pair via a ref so the fetch runs once per pair (and refetches if
+  // a regenerate swaps the urls), without `logs`/`loading` in the deps — which
+  // would re-fire the effect mid-flight and cancel the request.
+  const fetchedKey = useRef<string | null>(null)
+  useEffect(() => {
+    if (!open || (!leftUrl && !rightUrl)) return
+    const key = `${leftUrl ?? ''}|${rightUrl ?? ''}`
+    if (fetchedKey.current === key) return
+    fetchedKey.current = key
+    let cancelled = false
     setLoading(true)
     setErr(null)
-    try {
-      // A side with no URL (absent on that version) stays null → "No log" pane.
-      const fetchSide = async (u?: string | null): Promise<ArtifactLogLine[] | null> => {
-        if (!u) return null // side absent or no log → "No log" pane
-        const r = await fetch(u)
-        if (!r.ok) return null
-        const j = (await r.json()) as { lines?: ArtifactLogLine[] }
-        return j.lines ?? []
+    setLogs(null)
+    ;(async () => {
+      try {
+        // A side with no URL (absent on that version) stays null → "No log" pane.
+        const fetchSide = async (u?: string | null): Promise<ArtifactLogLine[] | null> => {
+          if (!u) return null // side absent or no log → "No log" pane
+          const r = await fetch(u)
+          if (!r.ok) return null
+          const j = (await r.json()) as { lines?: ArtifactLogLine[] }
+          return j.lines ?? []
+        }
+        const [left, right] = await Promise.all([fetchSide(leftUrl), fetchSide(rightUrl)])
+        if (!cancelled) setLogs({ left, right })
+      } catch (e) {
+        if (!cancelled) { setErr(e instanceof Error ? e.message : String(e)); fetchedKey.current = null }
+      } finally {
+        if (!cancelled) setLoading(false)
       }
-      const [left, right] = await Promise.all([fetchSide(leftUrl), fetchSide(rightUrl)])
-      setLogs({ left, right })
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e))
-    } finally {
-      setLoading(false)
-    }
-  }
+    })()
+    return () => { cancelled = true }
+  }, [open, leftUrl, rightUrl])
+
+  if (!leftUrl && !rightUrl) return null
+
+  const toggle = () => onOpenChange(!open)
 
   return (
     <div className="pt-2">
@@ -419,11 +433,18 @@ function PersistedLogView({ leftUrl, rightUrl }: { leftUrl?: string | null; righ
   )
 }
 
-function ArtifactSetCard({ set, mode, onRefresh }: { set: ArtifactSet; mode: ImageDiffMode; onRefresh: (name: string) => void }) {
+function ArtifactSetCard({ set, mode, onRefresh, projectId, agentId }: { set: ArtifactSet; mode: ImageDiffMode; onRefresh: (name: string) => void; projectId: string | null; agentId: string }) {
   const status = set.status as string
   const changedFiles = set.files.filter((f) => f.change_type !== 'unchanged')
   const unchangedFiles = set.files.filter((f) => f.change_type === 'unchanged')
   const noChanges = status === 'ready' && !set.changed
+
+  // Restore any saved view prefs for this card (persisted per project+agent+name).
+  // loadArtifactPrefs returns null when the saved status no longer matches the
+  // current one, so a regenerate / generating→ready transition falls back to the
+  // status-derived defaults below rather than a stale toggle. Read once on mount
+  // via the lazy useState initializers.
+  const loadPrefs = () => loadArtifactPrefs(projectId, agentId, set.name, status)
 
   // Every state (generating / error / no-changes / changed) renders inside the
   // same bordered card so switching between them never shifts the layout (e.g.
@@ -433,8 +454,15 @@ function ArtifactSetCard({ set, mode, onRefresh }: { set: ArtifactSet; mode: Ima
   // (the live log is opt-in, not in your face); the initial status is evaluated
   // once on mount, and the card stays mounted across status changes (keyed by
   // name) so a manual expand/collapse or regenerate keeps its state.
-  const [collapsed, setCollapsed] = useState(() => (status === 'ready' && !set.changed) || status === 'generating')
-  const [showUnchanged, setShowUnchanged] = useState(false)
+  const [collapsed, setCollapsed] = useState(() => loadPrefs()?.collapsed ?? ((status === 'ready' && !set.changed) || status === 'generating'))
+  const [showUnchanged, setShowUnchanged] = useState(() => loadPrefs()?.showUnchanged ?? false)
+  const [buildLogOpen, setBuildLogOpen] = useState(() => loadPrefs()?.buildLogOpen ?? false)
+
+  // Persist the view prefs whenever a toggle changes (and re-key them under the
+  // current status, so they only restore while that status holds).
+  useEffect(() => {
+    saveArtifactPrefs(projectId, agentId, set.name, status, { collapsed, showUnchanged, buildLogOpen })
+  }, [projectId, agentId, set.name, status, collapsed, showUnchanged, buildLogOpen])
 
   // Header progress while generating: both sides' latest progress lines joined by
   // a "·" (the two builds run in parallel), e.g. "building frontend · home 7/24".
@@ -496,7 +524,7 @@ function ArtifactSetCard({ set, mode, onRefresh }: { set: ArtifactSet; mode: Ima
               <div className="my-2 px-3 py-2 rounded-md bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 font-mono text-xs text-red-600 dark:text-red-400 whitespace-pre-wrap break-words">
                 {set.error || 'Artifact generation failed.'}
               </div>
-              <PersistedLogView leftUrl={set.left_log_url} rightUrl={set.right_log_url} />
+              <PersistedLogView leftUrl={set.left_log_url} rightUrl={set.right_log_url} open={buildLogOpen} onOpenChange={setBuildLogOpen} />
             </>
           )}
           {status === 'ready' && (
@@ -526,7 +554,7 @@ function ArtifactSetCard({ set, mode, onRefresh }: { set: ArtifactSet; mode: Ima
                   )}
                 </>
               )}
-              <PersistedLogView leftUrl={set.left_log_url} rightUrl={set.right_log_url} />
+              <PersistedLogView leftUrl={set.left_log_url} rightUrl={set.right_log_url} open={buildLogOpen} onOpenChange={setBuildLogOpen} />
             </>
           )}
         </div>
@@ -722,7 +750,7 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
         </InfoTooltip>
       </div>
       <div className="flex flex-col gap-2">
-        {sets.map((s) => <ArtifactSetCard key={s.name} set={s} mode={imageDiffMode} onRefresh={requestRefresh} />)}
+        {sets.map((s) => <ArtifactSetCard key={s.name} set={s} mode={imageDiffMode} onRefresh={requestRefresh} projectId={projectId} agentId={agentId} />)}
       </div>
     </div>
   )
