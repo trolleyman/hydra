@@ -127,7 +127,7 @@ export function AgentSidebarItem({
         )}
       </div>
       {agentStatusDetail(agent.agent_status) && (
-        <div className="mt-0.5 ml-4 text-[11px] text-gray-400 dark:text-gray-500 truncate font-serif">
+        <div className="mt-0.5 ml-4 text-[11px] text-gray-400 dark:text-gray-500 truncate">
           {agentStatusDetail(agent.agent_status)}
         </div>
       )}
