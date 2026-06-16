@@ -1,4 +1,4 @@
-import { createRootRoute, Link, Outlet, useNavigate, useParams } from '@tanstack/react-router'
+import { createRootRoute, Link, Outlet, useNavigate, useParams, useLocation } from '@tanstack/react-router'
 import { useEffect, useRef, useState, useCallback, type WheelEvent } from 'react'
 import { api } from '../stores/apiClient'
 import { useProjectStore } from '../stores/projectStore'
@@ -24,7 +24,8 @@ export const Route = createRootRoute({
 import { useDialogStore } from '../stores/dialogStore'
 import { pruneArtifactPrefs } from '../lib/artifactPrefs'
 import { pruneAgentViewPrefs } from '../lib/agentViewPrefs'
-import { StorageKeys, selectedAgentKey, readLocal, writeLocal, readTrustedProjects, trustProject } from '../lib/storage'
+import { StorageKeys, readLocal, writeLocal, readTrustedProjects, trustProject } from '../lib/storage'
+import { loadProjectView, saveProjectView, type ProjectView } from '../lib/projectView'
 
 function formatSpawnedAgo(ms: number): string {
   const seconds = Math.floor(ms / 1000)
@@ -280,14 +281,20 @@ function loadThemeMode(): ThemeMode {
   return 'system'
 }
 
-// Per-project memory of the last-selected agent, so switching back to a project
-// restores its agent view rather than dropping you on the bare project page.
-function loadSelectedAgentId(projectId: string): string | null {
-  return readLocal(selectedAgentKey(projectId))
-}
-
-function saveSelectedAgentId(projectId: string, agentId: string | null) {
-  writeLocal(selectedAgentKey(projectId), agentId)
+// Derive the current view from the active route so it can be persisted as the
+// project's last-open view. Agent routes set agentId; the repository browser is
+// recognised by its path (and its splat preserved so a deep file path restores);
+// anything else is the bare project page.
+function currentViewFromRoute(projectId: string, agentId: string | undefined, pathname: string): ProjectView {
+  if (agentId != null) return { kind: 'agent', agentId }
+  const repoBase = `/project/${projectId}/repository`
+  if (pathname === repoBase || pathname.startsWith(`${repoBase}/`)) {
+    const path = pathname.startsWith(`${repoBase}/`)
+      ? decodeURIComponent(pathname.slice(repoBase.length + 1))
+      : ''
+    return { kind: 'repository', path }
+  }
+  return { kind: 'project' }
 }
 
 function RootLayout() {
@@ -307,9 +314,27 @@ function RootLayout() {
   const { agents, setAgents, addAgent } = useAgentStore()
   const dialog = useDialogStore()
   const navigate = useNavigate()
+  const location = useLocation()
   const routeParams = useParams({ strict: false }) as { projectId?: string; agentId?: string }
   const currentProjectId = routeParams.projectId ?? selectedProjectId
   const selectedAgentId = routeParams.agentId
+
+  // Navigate to a project's remembered view (agent / repository / bare project).
+  // Used by the boot restore and the project-switch dropdown. A remembered agent
+  // that no longer exists is corrected to the project page once that project's
+  // agents load (see the persist effect below), so it's safe to route to it
+  // optimistically here without first waiting for the agent list.
+  const navigateToProjectView = useCallback((projectId: string, view: ProjectView) => {
+    if (view.kind === 'agent') {
+      navigate({ to: '/project/$projectId/agent/$agentId', params: { projectId, agentId: view.agentId } })
+    } else if (view.kind === 'repository' && view.path) {
+      navigate({ to: '/project/$projectId/repository/$', params: { projectId, _splat: view.path } })
+    } else if (view.kind === 'repository') {
+      navigate({ to: '/project/$projectId/repository', params: { projectId } })
+    } else {
+      navigate({ to: '/project/$projectId', params: { projectId } })
+    }
+  }, [navigate])
 
   const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
     const saved = readLocal(StorageKeys.sidebarWidth)
@@ -458,30 +483,30 @@ function RootLayout() {
     }
     if (selectedProjectId != null && projects.some((p) => p.id === selectedProjectId)) {
       didAutoNavigate.current = true
-      // Restore the agent that was last open in this project, if any (read the
-      // saved id up front so the save effect below — which momentarily sees the
-      // bare project route — can't wipe it before we navigate).
-      const savedAgentId = loadSelectedAgentId(selectedProjectId)
-      if (savedAgentId) {
-        navigate({ to: '/project/$projectId/agent/$agentId', params: { projectId: selectedProjectId, agentId: savedAgentId } })
-      } else {
-        navigate({ to: '/project/$projectId', params: { projectId: selectedProjectId } })
-      }
+      // Restore the view (agent / repository / project) last open in this
+      // project. Read up front so the persist effect below — which momentarily
+      // sees the bare project route — can't overwrite it before we navigate.
+      navigateToProjectView(selectedProjectId, loadProjectView(selectedProjectId))
     }
-  }, [selectedProjectId, projects, navigate])
+  }, [selectedProjectId, projects, navigateToProjectView])
 
-  // Persist which agent is selected per project so switching back restores it.
-  // Keyed off the actual route params (not currentProjectId, which falls back to
-  // the stored project on "/" and would let this wipe the memory before the boot
-  // restore below runs). Single writer: clear on the bare project page, and avoid
-  // persisting an id that isn't in the project's loaded agent list — so a
-  // killed/expired agent doesn't keep routing you to "not found".
+  // Persist the current view per project so switching back (or reloading)
+  // restores it. Keyed off the actual route params (not currentProjectId, which
+  // falls back to the stored project on "/" and would let this overwrite the
+  // memory before the boot restore above runs). Single writer for the three view
+  // kinds: agent, repository (path included), and the bare project page.
+  //
+  // A remembered agent that's been killed/merged (possibly in another session)
+  // is detected here once the project's agents have loaded: we drop the memory
+  // to the project page AND redirect off the dead agent so you never get stuck
+  // on "Agent Not Found".
   useEffect(() => {
     const projectId = routeParams.projectId
     if (!projectId) return // not on a project route ("/", "/settings") — leave storage alone
     const agentId = routeParams.agentId
     if (agentId == null) {
-      saveSelectedAgentId(projectId, null)
+      // Repository browser or bare project page — persisted verbatim.
+      saveProjectView(projectId, currentViewFromRoute(projectId, undefined, location.pathname))
       return
     }
     // `agents` is loaded for this project once every entry's project_path matches
@@ -489,11 +514,12 @@ function RootLayout() {
     const proj = projects.find((p) => p.id === projectId)
     const agentsLoaded = proj != null && agents.length > 0 && agents.every((a) => a.project_path === proj.path)
     if (agentsLoaded && !agents.some((a) => a.id === agentId)) {
-      saveSelectedAgentId(projectId, null)
+      saveProjectView(projectId, { kind: 'project' })
+      navigate({ to: '/project/$projectId', params: { projectId } })
     } else {
-      saveSelectedAgentId(projectId, agentId)
+      saveProjectView(projectId, { kind: 'agent', agentId })
     }
-  }, [routeParams.projectId, routeParams.agentId, agents, projects])
+  }, [routeParams.projectId, routeParams.agentId, location.pathname, agents, projects, navigate])
 
   // Drop expired per-artifact and per-agent-view UI prefs once on boot.
   useEffect(() => { pruneArtifactPrefs(); pruneAgentViewPrefs() }, [])
@@ -649,15 +675,10 @@ function RootLayout() {
               navigate({ to: '/project/$projectId/settings', params: { projectId: id } })
               return
             }
-            // Restore the agent last open in the project we're switching to;
-            // navigate straight to it so the agent view comes back, not the bare
-            // project page. Falls back to the project page when none is remembered.
-            const savedAgentId = loadSelectedAgentId(id)
-            if (savedAgentId) {
-              navigate({ to: '/project/$projectId/agent/$agentId', params: { projectId: id, agentId: savedAgentId } })
-            } else {
-              navigate({ to: '/project/$projectId', params: { projectId: id } })
-            }
+            // Restore the view (agent / repository / project) last open in the
+            // project we're switching to, so it comes back rather than the bare
+            // project page.
+            navigateToProjectView(id, loadProjectView(id))
           }}
           onDeselect={() => {
             setSelectedProjectId(null)

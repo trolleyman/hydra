@@ -5,16 +5,30 @@
 //   - scrollTop: the scroll position of the agent detail page.
 //   - collapsedFiles: which files are collapsed in the diff viewer.
 //
-// All three live in a single entry per agent (rather than three keys) so the
+//   - bashTabs: the extra bash shell tabs open in the terminal panel (each with
+//     its sandboxed/host flag), plus activeTabId, so each agent keeps its own
+//     set of shells when you switch away and back.
+//
+// These live in a single entry per agent (rather than separate keys) so the
 // store stays compact and a single TTL prune drops everything for a stale
 // agent at once. Entries untouched for AGENT_VIEW_TTL_MS are pruned on boot.
 
 import { agentViewPrefsKey, AGENT_VIEW_PREFS_PREFIX, readLocal, writeLocal } from './storage'
 
+// A persisted bash shell tab. `id` doubles as the backend shell_id, so on
+// restore the pane reconnects to the same session if it's still alive.
+export type BashTabPref = {
+  id: string
+  label: string
+  sandboxed: boolean
+}
+
 export type AgentViewPrefs = {
   terminalHeight?: number
   scrollTop?: number
   collapsedFiles?: string[]
+  bashTabs?: BashTabPref[]
+  activeTabId?: string
 }
 
 // What we actually store: the prefs plus a last-touched timestamp for TTL.
@@ -40,7 +54,13 @@ export function loadAgentViewPrefs(projectId: string | null, agentId: string): A
   const stored = readStored(agentViewPrefsKey(projectId, agentId))
   if (!stored) return {}
   if (Date.now() - stored.t > AGENT_VIEW_TTL_MS) return {}
-  return { terminalHeight: stored.terminalHeight, scrollTop: stored.scrollTop, collapsedFiles: stored.collapsedFiles }
+  return {
+    terminalHeight: stored.terminalHeight,
+    scrollTop: stored.scrollTop,
+    collapsedFiles: stored.collapsedFiles,
+    bashTabs: stored.bashTabs,
+    activeTabId: stored.activeTabId,
+  }
 }
 
 // Merge a partial update into an agent's stored prefs, refreshing the TTL.

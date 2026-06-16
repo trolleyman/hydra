@@ -381,6 +381,16 @@ interface TabConfig {
   sandboxed: boolean
 }
 
+// The always-present agent tab. Bash tabs are appended after it.
+const TERMINAL_TAB: TabConfig = { id: 'terminal', label: 'Terminal', shell: false, sandboxed: true }
+
+// Rebuild the tab list for an agent from its persisted bash tabs, always keeping
+// the fixed agent terminal first.
+function tabsFromPrefs(projectId: string | null, agentId: string): TabConfig[] {
+  const saved = loadAgentViewPrefs(projectId, agentId).bashTabs ?? []
+  return [TERMINAL_TAB, ...saved.map((t) => ({ id: t.id, label: t.label, shell: true, sandboxed: t.sandboxed }))]
+}
+
 interface Props {
   agentId: string
   projectId: string | null
@@ -391,8 +401,15 @@ interface Props {
 }
 
 export function AgentTerminal({ agentId, projectId, onRefresh, onStatusUpdate, onDiffRefresh }: Props) {
-  const [tabs, setTabs] = useState<TabConfig[]>([{ id: 'terminal', label: 'Terminal', shell: false, sandboxed: true }])
-  const [activeTabId, setActiveTabId] = useState('terminal')
+  // Restore this agent's bash tabs (and which was active) from localStorage, so
+  // switching away and back brings the same shells with you rather than dropping
+  // them or leaking another agent's tabs in.
+  const [tabs, setTabs] = useState<TabConfig[]>(() => tabsFromPrefs(projectId, agentId))
+  const [activeTabId, setActiveTabId] = useState(() => {
+    const restored = tabsFromPrefs(projectId, agentId)
+    const saved = loadAgentViewPrefs(projectId, agentId).activeTabId
+    return saved && restored.some((t) => t.id === saved) ? saved : 'terminal'
+  })
   const [reconnectKeys, setReconnectKeys] = useState<Record<string, number>>({})
   const [status, setStatus] = useState<string>('pending')
   const [shellMenuOpen, setShellMenuOpen] = useState(false)
@@ -428,6 +445,29 @@ export function AgentTerminal({ agentId, projectId, onRefresh, onStatusUpdate, o
     lastHeightRef.current = h
     setHeight(h)
   }
+
+  // Likewise reload the per-agent bash tabs during render when the agent changes,
+  // so we never carry the previous agent's shells over (or persist them onto the
+  // new agent). Keep the active tab if it still exists, else fall back to the
+  // agent terminal.
+  const tabsAgentRef = useRef(agentId)
+  if (tabsAgentRef.current !== agentId) {
+    tabsAgentRef.current = agentId
+    const restored = tabsFromPrefs(projectId, agentId)
+    const savedActive = loadAgentViewPrefs(projectId, agentId).activeTabId
+    setTabs(restored)
+    setActiveTabId(savedActive && restored.some((t) => t.id === savedActive) ? savedActive : 'terminal')
+  }
+
+  // Persist the bash tabs (and active tab) for this agent whenever they change.
+  // Runs after the agent-switch reset above commits, so it always writes the
+  // current agent's tabs to that agent's key.
+  useEffect(() => {
+    patchAgentViewPrefs(projectId, agentId, {
+      bashTabs: tabs.filter((t) => t.shell).map((t) => ({ id: t.id, label: t.label, sandboxed: t.sandboxed })),
+      activeTabId,
+    })
+  }, [tabs, activeTabId, projectId, agentId])
 
   // The CSS `resize-y` handle writes directly to the element's inline height, so
   // we observe size changes, mirror them into state (otherwise a later re-render

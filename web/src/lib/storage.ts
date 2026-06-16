@@ -34,7 +34,14 @@ export const StorageKeys = {
 
 // ── Dynamic keys (prefix + builder pair) ─────────────────────────────────────
 
-// Which agent is selected within a project. One entry per project.
+// Which view is last open within a project — an agent, the repository browser,
+// or the bare project page. One entry per project. See lib/projectView.ts.
+export const PROJECT_VIEW_PREFIX = 'hydra-project-view-'
+export const projectViewKey = (projectId: string): string =>
+  `${PROJECT_VIEW_PREFIX}${projectId}`
+
+// Legacy: which agent was selected within a project. Superseded by the richer
+// project-view key above; still read once so an existing selection migrates.
 export const SELECTED_AGENT_PREFIX = 'hydra-selected-agent-'
 export const selectedAgentKey = (projectId: string): string =>
   `${SELECTED_AGENT_PREFIX}${projectId}`
