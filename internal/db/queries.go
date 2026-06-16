@@ -69,13 +69,52 @@ func (s *Store) UpdateSessionInfo(id string, pid int, status string) error {
 	return errtrace.Wrap(result.Error)
 }
 
-// UpdateAgentStatus updates the agent status and its timestamp.
-func (s *Store) UpdateAgentStatus(id, agentStatus, timestamp string) error {
-	result := s.db.Model(&Agent{}).Where("id = ?", id).Updates(map[string]interface{}{
+// UpdateAgentStatus updates the agent status and its timestamp. When markUnread
+// is true the has_unread_changes flag is also raised (the caller decides this
+// based on the status transition); it is never lowered here — clearing is an
+// explicit user action via MarkAgentRead.
+func (s *Store) UpdateAgentStatus(id, agentStatus, timestamp string, markUnread bool) error {
+	updates := map[string]interface{}{
 		"agent_status":      agentStatus,
 		"agent_status_time": timestamp,
-	})
+	}
+	if markUnread {
+		updates["has_unread_changes"] = true
+	}
+	result := s.db.Model(&Agent{}).Where("id = ?", id).Updates(updates)
 	return errtrace.Wrap(result.Error)
+}
+
+// MarkAgentRead clears the has_unread_changes flag for an agent (set when the
+// user opens it).
+func (s *Store) MarkAgentRead(id string) error {
+	result := s.db.Model(&Agent{}).Where("id = ?", id).Update("has_unread_changes", false)
+	return errtrace.Wrap(result.Error)
+}
+
+// CountUnreadByProject returns, for every project, how many of its active agents
+// have unread changes. Projects with no unread agents are omitted. Used to drive
+// the cross-project "updates waiting elsewhere" indicator.
+func (s *Store) CountUnreadByProject() (map[string]int, error) {
+	var rows []struct {
+		ProjectPath string
+		N           int
+	}
+	// Exclude ephemeral agents: the sidebar hides them, so they must not inflate
+	// the per-project count either.
+	err := s.db.Model(&Agent{}).
+		Select("project_path, count(*) as n").
+		Where("has_unread_changes = ? AND ephemeral = ?", true, false).
+		Group("project_path").
+		Scan(&rows).Error
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	counts := make(map[string]int, len(rows))
+	for _, r := range rows {
+		counts[r.ProjectPath] = r.N
+	}
+	return counts, nil
 }
 
 // UpdateAgentTitle updates the user-facing display title for an agent.

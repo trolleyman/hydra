@@ -219,6 +219,13 @@ try {
       artifactInfo?: boolean
     }[] = [
       { name: 'home', path: '/' },
+      // The unread-changes indicator: the agent sidebar shows an amber dot on the
+      // right of agents that went running→waiting/finished while you were away
+      // (agent-2 in the simulation), and the project dropdown — opened here —
+      // shows a per-project unread count badge, with a dot on the folder button
+      // when other projects have updates waiting (see simulation.go ListProjects /
+      // ListAgents and AgentSidebarItem).
+      { name: 'unread-indicator', path: '/', click: 'button[aria-label="Select project"]' },
       // The spawn form's image lightbox: two images attached to the prompt, the
       // first opened in the Slack-style fullscreen viewer (blurred backdrop,
       // prev/next arrows, "1 / 2" counter). Also shows the numbered-paste naming
