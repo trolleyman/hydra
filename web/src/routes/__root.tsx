@@ -234,13 +234,11 @@ function ProjectDropdown({
                     <div className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{p.name}</div>
                     <div className="text-xs font-mono text-gray-400 dark:text-gray-500 truncate">{p.path}</div>
                   </div>
-                  {(p.unread_count ?? 0) > 0 && hoveredId !== p.id && (
+                  {(p.unread_count ?? 0) > 0 && (
                     <span
                       aria-label={`${p.unread_count} agents with unread changes`}
-                      className="shrink-0 mt-0.5 min-w-[1.125rem] h-[1.125rem] px-1 inline-flex items-center justify-center rounded-full text-[10px] font-semibold bg-sky-500 text-white"
-                    >
-                      {p.unread_count}
-                    </span>
+                      className="shrink-0 mt-1.5 w-2 h-2 rounded-full bg-sky-500"
+                    />
                   )}
                   {p.id === selectedId && hoveredId !== p.id && (
                     <Check className="w-3.5 h-3.5 text-blue-500 shrink-0 mt-0.5" />
