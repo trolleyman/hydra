@@ -63,11 +63,12 @@ export function saveArtifactPrefs(
 }
 
 // The artifact tag filter, shared across an agent's cards. `scoped` maps a label
-// category (e.g. "theme") to the single selected value (e.g. "dark"); an absent
-// or empty value means "all". `free` is the set of selected free-form tags. An
-// empty filter (no scoped values, no free tags) means "show everything".
+// category (e.g. "theme") to the selected values (e.g. ["dark", "light"]) — a
+// file matches the category if it carries any one of them; an absent or empty
+// list means "all". `free` is the set of selected free-form tags. An empty
+// filter (no scoped values, no free tags) means "show everything".
 export type ArtifactTagFilter = {
-  scoped: Record<string, string>
+  scoped: Record<string, string[]>
   free: string[]
 }
 
@@ -75,9 +76,18 @@ export function loadTagFilter(projectId: string | null, agentId: string): Artifa
   const raw = readLocal(artifactTagFilterKey(projectId, agentId))
   if (!raw) return { scoped: {}, free: [] }
   try {
-    const parsed = JSON.parse(raw) as Partial<ArtifactTagFilter>
+    const parsed = JSON.parse(raw) as { scoped?: unknown; free?: unknown }
+    const scoped: Record<string, string[]> = {}
+    if (parsed.scoped && typeof parsed.scoped === 'object') {
+      // Normalize each category to a string[]. Tolerate the legacy single-value
+      // shape (Record<string, string>) by wrapping a non-empty string in a list.
+      for (const [cat, v] of Object.entries(parsed.scoped as Record<string, unknown>)) {
+        if (Array.isArray(v)) scoped[cat] = v.filter((x): x is string => typeof x === 'string')
+        else if (typeof v === 'string' && v) scoped[cat] = [v]
+      }
+    }
     return {
-      scoped: parsed.scoped && typeof parsed.scoped === 'object' ? parsed.scoped : {},
+      scoped,
       free: Array.isArray(parsed.free) ? parsed.free.filter((t): t is string => typeof t === 'string') : [],
     }
   } catch {
