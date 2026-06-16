@@ -44,29 +44,6 @@ func TestStatusLogFilePathHonorsEnv(t *testing.T) {
 	}
 }
 
-func TestStopStatus(t *testing.T) {
-	cases := []struct {
-		msg  string
-		want string
-	}{
-		{"All tests pass and the feature works.", "finished"},
-		{"Which approach would you prefer?", "waiting"},
-		{"Should I proceed?  \n", "waiting"},   // trailing whitespace tolerated
-		{"Want me to also add tests?", "waiting"},
-		{"", "finished"},
-		{"Done.", "finished"},
-		// Finished turns that merely end on a '?' must NOT be read as waiting.
-		{"The fix works. Could this have been a caching bug?", "finished"},
-		{"I refactored the parser. Anything else?", "finished"},
-		{"Why was the build failing? A missing import, now fixed.", "finished"},
-	}
-	for _, c := range cases {
-		if got := string(stopStatus(c.msg)); got != c.want {
-			t.Errorf("stopStatus(%q) = %q, want %q", c.msg, got, c.want)
-		}
-	}
-}
-
 func TestIsUserInputTool(t *testing.T) {
 	for _, tool := range []string{"AskUserQuestion", "ExitPlanMode"} {
 		if !isUserInputTool(tool) {

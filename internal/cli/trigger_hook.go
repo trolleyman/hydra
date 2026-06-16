@@ -6,7 +6,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"braces.dev/errtrace"
@@ -55,52 +54,6 @@ func questionText(input map[string]interface{}) string {
 		return s
 	}
 	return ""
-}
-
-// userQuestionLeads are phrases that, appearing in the final sentence of a
-// turn, mark it as a question addressed to the user — asking them to choose,
-// confirm, or grant permission. They're what distinguishes "Should I proceed?"
-// (waiting on input) from the many finished turns that merely happen to end on
-// a '?' (rhetorical recaps, "Anything else?", "Could that be a caching bug?").
-// Matched case-insensitively as substrings of the last sentence.
-var userQuestionLeads = []string{
-	"should i",
-	"shall i",
-	"do you want",
-	"do you prefer",
-	"would you like",
-	"would you prefer",
-	"which would you",
-	"how would you like",
-	"what would you like",
-	"want me to",
-	"let me know",
-	"may i",
-	"can i proceed",
-}
-
-// stopStatus decides whether a finished turn means the agent is waiting on the
-// user or has genuinely finished. Agents don't expose an explicit "I need
-// input" signal on turn end, so this is best-effort. A trailing '?' alone is
-// NOT enough — plenty of finished agents end on a question — so we additionally
-// require the final sentence to read as a question put to the user (see
-// userQuestionLeads). Only then is it treated as waiting; otherwise finished.
-func stopStatus(lastMessage string) api.AgentStatus {
-	trimmed := strings.TrimRight(lastMessage, " \t\r\n")
-	if !strings.HasSuffix(trimmed, "?") {
-		return api.Finished
-	}
-	// Isolate the final sentence: the text after the last sentence terminator
-	// (or newline) that precedes the closing '?'.
-	body := strings.TrimSuffix(trimmed, "?")
-	start := strings.LastIndexAny(body, ".!?\n")
-	sentence := strings.ToLower(strings.TrimSpace(body[start+1:]))
-	for _, lead := range userQuestionLeads {
-		if strings.Contains(sentence, lead) {
-			return api.Waiting
-		}
-	}
-	return api.Finished
 }
 
 func init() {
@@ -257,9 +210,14 @@ func runTriggerHook(agentType string, eventOverride string, logFile *os.File) er
 		// waiting/finished until the agent happened to run a tool.
 		status = api.Running
 	case "Stop", "AfterAgent":
-		// The turn finished. Distinguish "waiting on the user" (the agent ended
-		// by asking a question) from "finished" (it completed its work).
-		status = stopStatus(lastMessage)
+		// The turn ended, so the agent has finished its work. The "waiting on
+		// the user" case isn't inferred here: agents don't expose an explicit
+		// "I need input" signal on turn end, and guessing from the message text
+		// (e.g. a trailing '?') misfires too often — plenty of finished turns
+		// end on a question. Genuine waits surface through other hooks instead:
+		// the AskUserQuestion/ExitPlanMode tool calls (PreToolUse) and the
+		// Notification event.
+		status = api.Finished
 	case "SessionEnd", "sessionEnd":
 		status = api.Stopped
 	case "PreToolUse", "preToolUse", "BeforeTool":
