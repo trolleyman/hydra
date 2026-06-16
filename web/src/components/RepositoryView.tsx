@@ -3,11 +3,12 @@ import { useNavigate } from '@tanstack/react-router'
 import hljs from 'highlight.js'
 import { api } from '../stores/apiClient'
 import { formatError } from '../api/format_error'
+import { ApiError } from '../api'
 import type { RepositoryFileResponse, RepositoryBranch } from '../api'
 import {
   ChevronDown, ChevronRight, File as FileIcon, Folder, FolderOpen, FileText,
   FileCode, FileJson, FileImage, FileCog, Info, Scale, Bot, GitBranch, Braces,
-  LoaderCircle, Settings, Check,
+  LoaderCircle, Settings, Check, FileQuestion, FileSymlink, CornerDownRight,
 } from 'lucide-react'
 
 // ── File tree model ────────────────────────────────────────────────────────────
@@ -518,13 +519,32 @@ function FileContent({
   projectId: string
   refStr: string
 }) {
-  if (isImage(file.path)) {
-    const url = `/repository/projects/${encodeURIComponent(projectId)}/blob?path=${encodeURIComponent(file.path)}&ref=${encodeURIComponent(refStr)}`
+  // For symlinks, render the file we resolved to (target_path) — its extension
+  // decides syntax highlighting / markdown / image handling, and the raw blob is
+  // fetched from there. A symlink with no target_path couldn't be resolved.
+  if (file.symlink && !file.target_path) {
+    return (
+      <div className="min-h-full flex flex-col items-center justify-center gap-3 text-center px-6 text-gray-400 dark:text-gray-500">
+        <FileSymlink className="w-10 h-10" />
+        <div className="space-y-1">
+          <p className="text-sm font-medium text-gray-600 dark:text-gray-300">Unresolved symbolic link</p>
+          {file.symlink_target && (
+            <p className="text-xs font-mono break-all">→ {file.symlink_target}</p>
+          )}
+          <p className="text-xs">The target doesn’t exist at this ref, points outside the repository, or is a directory.</p>
+        </div>
+      </div>
+    )
+  }
+  const contentPath = file.target_path ?? file.path
+
+  if (isImage(contentPath)) {
+    const url = `/repository/projects/${encodeURIComponent(projectId)}/blob?path=${encodeURIComponent(contentPath)}&ref=${encodeURIComponent(refStr)}`
     return (
       <div className="min-h-full flex flex-col items-center justify-center gap-3 p-6 bg-gray-50 dark:bg-gray-800/40">
         <img
           src={url}
-          alt={file.path}
+          alt={contentPath}
           className="max-w-full object-contain border border-gray-200 dark:border-gray-700 rounded shadow-sm"
           style={{ backgroundImage: 'repeating-conic-gradient(#e5e7eb 0% 25%, #f9fafb 0% 50%)', backgroundSize: '16px 16px' }}
         />
@@ -541,7 +561,7 @@ function FileContent({
     )
   }
 
-  if (isMarkdown(file.path)) {
+  if (isMarkdown(contentPath)) {
     return (
       <div
         className="max-w-3xl mx-auto px-8 py-6 text-gray-800 dark:text-gray-200"
@@ -552,13 +572,34 @@ function FileContent({
 
   return (
     <>
-      <CodeView content={file.content} lang={getLanguage(file.path)} wrap={wrap} />
+      <CodeView content={file.content} lang={getLanguage(contentPath)} wrap={wrap} />
       {file.truncated && (
         <div className="px-4 py-2 text-xs text-amber-600 dark:text-amber-400 border-t border-gray-200 dark:border-gray-700">
           File truncated — showing the first part only.
         </div>
       )}
     </>
+  )
+}
+
+// ── File-not-found state ──────────────────────────────────────────────────────
+
+// FileNotFound is shown when the requested path doesn't exist at the selected
+// ref (a 404 from getRepositoryFile) — e.g. a stale deep link, or a file that
+// only exists on another branch. A dedicated state reads more clearly than a raw
+// error string.
+function FileNotFound({ path, refStr }: { path: string; refStr: string }) {
+  return (
+    <div className="flex-1 flex flex-col items-center justify-center gap-3 text-center px-6">
+      <FileQuestion className="w-12 h-12 text-gray-300 dark:text-gray-600" />
+      <div className="space-y-1">
+        <p className="text-sm font-medium text-gray-700 dark:text-gray-300">File not found</p>
+        <p className="text-xs font-mono text-gray-500 dark:text-gray-400 break-all">{path}</p>
+        <p className="text-xs text-gray-400 dark:text-gray-500">
+          This file doesn’t exist at <span className="font-mono">{refStr}</span>.
+        </p>
+      </div>
+    </div>
   )
 }
 
@@ -607,6 +648,7 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
   const [file, setFile] = useState<RepositoryFileResponse | null>(null)
   const [fileLoading, setFileLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [notFound, setNotFound] = useState(false)
 
   // Settings (PLAN.md #41d wrap-on-by-default, #41e popup, #41l icons).
   const [settings, setSettings] = useState<RepoSettings>(() => ({
@@ -696,9 +738,17 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
     let cancelled = false
     setFileLoading(true)
     setError(null)
+    setNotFound(false)
     api.default.getRepositoryFile(projectId, viewPath, queryRef)
       .then((resp) => { if (!cancelled) setFile(resp) })
-      .catch((err) => { if (!cancelled) { setFile(null); setError(formatError(err)) } })
+      .catch((err) => {
+        if (cancelled) return
+        setFile(null)
+        // A missing path gets its own "File not found" page; other failures fall
+        // back to the inline error message.
+        if (err instanceof ApiError && err.status === 404) setNotFound(true)
+        else setError(formatError(err))
+      })
       .finally(() => { if (!cancelled) setFileLoading(false) })
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -779,8 +829,16 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
         <div className="px-4 py-2 border-b border-gray-200 dark:border-gray-700 flex items-center gap-2 shrink-0">
           {viewPath ? (
             <>
-              {(() => { const { Icon, className } = getFileIcon(viewPath.split('/').pop() ?? viewPath); return <Icon className={`w-4 h-4 shrink-0 ${settings.showIcons ? className : 'text-gray-400'}`} /> })()}
+              {file?.symlink
+                ? <FileSymlink className={`w-4 h-4 shrink-0 ${settings.showIcons ? 'text-teal-500' : 'text-gray-400'}`} />
+                : (() => { const { Icon, className } = getFileIcon(viewPath.split('/').pop() ?? viewPath); return <Icon className={`w-4 h-4 shrink-0 ${settings.showIcons ? className : 'text-gray-400'}`} /> })()}
               <span className="text-sm font-mono text-gray-700 dark:text-gray-300 truncate">{viewPath}</span>
+              {file?.symlink && file.symlink_target && (
+                <span className="flex items-center gap-1 text-xs font-mono text-gray-400 dark:text-gray-500 truncate shrink min-w-0" title={`Symlink → ${file.symlink_target}`}>
+                  <CornerDownRight className="w-3.5 h-3.5 shrink-0" />
+                  <span className="truncate">{file.symlink_target}</span>
+                </span>
+              )}
               {fileLoading && <LoaderCircle className="w-3.5 h-3.5 shrink-0 animate-spin text-gray-400" />}
               {file && (
                 <span className="ml-auto text-xs text-gray-400 dark:text-gray-500 shrink-0">{formatBytes(file.size)}</span>
@@ -798,7 +856,9 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
         </div>
 
         <div ref={contentRef} className="flex-1 flex flex-col min-h-0 overflow-auto">
-          {error ? (
+          {notFound && viewPath ? (
+            <FileNotFound path={viewPath} refStr={refStr} />
+          ) : error ? (
             <div className="flex-1 flex items-center justify-center text-sm text-red-500 px-4 text-center">{error}</div>
           ) : !viewPath ? (
             <div className="flex-1 flex flex-col items-center justify-center gap-2 text-gray-400 dark:text-gray-500">

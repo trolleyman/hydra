@@ -82,6 +82,52 @@ func TestShowFile(t *testing.T) {
 	}
 }
 
+func TestLsTreeEntryMode(t *testing.T) {
+	dir := gitInit(t)
+	commit := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@e",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@e")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+
+	if err := os.MkdirAll(filepath.Join(dir, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "sub", "file.txt"), []byte("hi\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// A symlink pointing at the regular file.
+	if err := os.Symlink("sub/file.txt", filepath.Join(dir, "link")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	commit("add", ".")
+	commit("commit", "-qm", "first")
+
+	cases := []struct {
+		path string
+		want string
+	}{
+		{"sub/file.txt", "100644"}, // regular file
+		{"link", "120000"},         // symlink
+		{"sub", "040000"},          // directory
+		{"missing", ""},            // absent
+	}
+	for _, c := range cases {
+		got, err := LsTreeEntryMode(dir, "HEAD", c.path)
+		if err != nil {
+			t.Fatalf("LsTreeEntryMode(%q): %v", c.path, err)
+		}
+		if got != c.want {
+			t.Errorf("LsTreeEntryMode(%q) = %q, want %q", c.path, got, c.want)
+		}
+	}
+}
+
 func TestListBranches(t *testing.T) {
 	dir := gitInit(t)
 	run := func(args ...string) {

@@ -449,6 +449,15 @@ type RepositoryFileResponse struct {
 	// Size File size in bytes
 	Size int `json:"size"`
 
+	// Symlink True when the requested path is a symbolic link; the other fields then describe the link's target
+	Symlink bool `json:"symlink"`
+
+	// SymlinkTarget The link's target exactly as stored (relative or absolute), set when symlink is true
+	SymlinkTarget *string `json:"symlink_target"`
+
+	// TargetPath Repo-relative path of the file the symlink ultimately resolves to (whose content is returned); null when the link is broken, escapes the repo, or points at a directory
+	TargetPath *string `json:"target_path"`
+
 	// Truncated True when content was truncated because the file is large
 	Truncated bool `json:"truncated"`
 }

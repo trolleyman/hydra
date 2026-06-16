@@ -18,6 +18,61 @@ import (
 // response (or the browser).
 const maxRepositoryFileBytes = 512 * 1024
 
+// git tree modes we care about: a symlink stores its target path as the blob
+// content (mode 120000); a directory entry is mode 040000.
+const (
+	gitSymlinkMode = "120000"
+	gitDirMode     = "040000"
+)
+
+// maxSymlinkHops bounds how many links resolveSymlink will follow before giving
+// up, so a symlink cycle can't loop forever.
+const maxSymlinkHops = 40
+
+// resolveSymlink follows a chain of symlinks at ref, starting from linkPath
+// (which the caller has already confirmed is a symlink). It returns the
+// repo-relative path of the first non-symlink entry reached and that entry's git
+// mode, plus the raw target of the *first* link (what it literally points at).
+// ok is false when the chain is broken, escapes the repository, or loops;
+// firstTarget is still reported so callers can show what the link pointed at.
+func resolveSymlink(projectRoot, ref, linkPath string) (finalPath, finalMode, firstTarget string, ok bool) {
+	cur := linkPath
+	seen := map[string]bool{}
+	for hop := 0; hop < maxSymlinkHops; hop++ {
+		if seen[cur] {
+			return "", "", firstTarget, false // cycle
+		}
+		seen[cur] = true
+
+		data, err := git.ShowFile(projectRoot, ref, cur)
+		if err != nil || data == nil {
+			return "", "", firstTarget, false
+		}
+		// git stores a symlink's target verbatim (no trailing newline).
+		target := string(data)
+		if firstTarget == "" {
+			firstTarget = target
+		}
+		// Absolute targets point outside the tracked tree; we can't show them.
+		if strings.HasPrefix(target, "/") {
+			return "", "", firstTarget, false
+		}
+		resolved := path.Clean(path.Join(path.Dir(cur), target))
+		if resolved == "." || resolved == ".." || strings.HasPrefix(resolved, "../") {
+			return "", "", firstTarget, false // escapes the repo root
+		}
+		mode, err := git.LsTreeEntryMode(projectRoot, ref, resolved)
+		if err != nil || mode == "" {
+			return "", "", firstTarget, false // dangling
+		}
+		if mode != gitSymlinkMode {
+			return resolved, mode, firstTarget, true // reached a real entry
+		}
+		cur = resolved
+	}
+	return "", "", firstTarget, false // too many hops
+}
+
 // repoRef returns the git ref to read from, defaulting to HEAD when the caller
 // did not pin one.
 func repoRef(ref *string) string {
@@ -144,11 +199,13 @@ func (s *Server) GetRepositoryFile(_ context.Context, request api.GetRepositoryF
 		}, nil
 	}
 
-	data, err := git.ShowFile(projectRoot, ref, filePath)
+	// Inspect the tree entry first so we can tell a missing path from a symlink
+	// (whose raw blob is its target text, not the pointed-to file's content).
+	mode, err := git.LsTreeEntryMode(projectRoot, ref, filePath)
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
-	if data == nil {
+	if mode == "" {
 		return api.GetRepositoryFile404JSONResponse{
 			Code:    404,
 			Error:   api.ErrorResponseErrorPathNotFound,
@@ -159,8 +216,36 @@ func (s *Server) GetRepositoryFile(_ context.Context, request api.GetRepositoryF
 	resp := api.GetRepositoryFile200JSONResponse{
 		Path: filePath,
 		Ref:  ref,
-		Size: len(data),
 	}
+	// contentPath is the path whose blob we actually render — the file itself,
+	// or, for a symlink, the entry it ultimately resolves to.
+	contentPath := filePath
+	if mode == gitSymlinkMode {
+		resp.Symlink = true
+		final, finalMode, firstTarget, ok := resolveSymlink(projectRoot, ref, filePath)
+		resp.SymlinkTarget = &firstTarget
+		if !ok || finalMode == gitDirMode {
+			// Broken, looping, out-of-repo, or a directory: report the link and its
+			// target, but there is no file content to preview.
+			return resp, nil
+		}
+		contentPath = final
+		resp.TargetPath = &final
+	}
+
+	data, err := git.ShowFile(projectRoot, ref, contentPath)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	if data == nil {
+		return api.GetRepositoryFile404JSONResponse{
+			Code:    404,
+			Error:   api.ErrorResponseErrorPathNotFound,
+			Details: "file not found: " + contentPath,
+		}, nil
+	}
+
+	resp.Size = len(data)
 	if looksBinary(data) {
 		resp.Binary = true
 		return resp, nil
@@ -190,6 +275,17 @@ func (s *Server) HandleRepositoryBlob(w http.ResponseWriter, r *http.Request) {
 	if filePath == "" || filePath == "." {
 		http.Error(w, "no file path given", http.StatusBadRequest)
 		return
+	}
+
+	// Resolve symlinks so an <img> pointing at a symlinked image serves the real
+	// bytes rather than the link's target text (git's raw blob for a symlink).
+	if mode, err := git.LsTreeEntryMode(projectRoot, ref, filePath); err == nil && mode == gitSymlinkMode {
+		final, finalMode, _, ok := resolveSymlink(projectRoot, ref, filePath)
+		if !ok || finalMode == gitDirMode {
+			http.NotFound(w, r)
+			return
+		}
+		filePath = final
 	}
 
 	data, err := git.ShowFile(projectRoot, ref, filePath)

@@ -944,6 +944,7 @@ var simRepoOrder = []string{
 	"go.mod",
 	"hydra.toml",
 	"package.json",
+	"server-link.go",
 	"config/env/staging/region/eu/settings.toml",
 	"internal/server/server.go",
 	"internal/store/store.go",
@@ -951,6 +952,13 @@ var simRepoOrder = []string{
 	"web/src/App.tsx",
 	"web/src/components/Button.tsx",
 	"web/src/main.tsx",
+}
+
+// simRepoSymlinks maps a simulated symlink path to the repo-relative file it
+// points at, so the repository browser's symlink support (the "→ target" header
+// and rendering the pointed-to file) has something to demonstrate.
+var simRepoSymlinks = map[string]string{
+	"server-link.go": "internal/server/server.go",
 }
 
 // simRepoImage is the path of the one binary (image) file in the simulated repo,
@@ -1029,6 +1037,22 @@ func (s *SimulationServer) GetRepositoryFile(w http.ResponseWriter, r *http.Requ
 	ref := "HEAD"
 	if params.Ref != nil && *params.Ref != "" {
 		ref = *params.Ref
+	}
+	if target, ok := simRepoSymlinks[params.Path]; ok {
+		// A symlink: report it as such and serve the target file's content, so the
+		// browser renders the pointed-to file with a "→ target" header.
+		content := simRepoFiles[target]
+		api.WriteJSON(w, http.StatusOK, api.RepositoryFileResponse{
+			Path:          params.Path,
+			Ref:           ref,
+			Size:          len(content),
+			Binary:        false,
+			Symlink:       true,
+			SymlinkTarget: &target,
+			TargetPath:    &target,
+			Content:       &content,
+		})
+		return
 	}
 	if params.Path == simRepoImage {
 		// Binary image: report it as binary with a size but no inline content, so
