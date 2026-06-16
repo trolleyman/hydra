@@ -150,8 +150,15 @@
 
 41. [ ] Repository view
     - a) [ ] add line numbers to files
-    - b) [ ] add branch selector. prioritise current agent branches in the list
+    - b) [ ] add branch selector. prioritise current agent branches in the list.
     - c) [ ] collapse all folders by default
     - d) [ ] have wrapping on by default (and make this work with the line numbers correctly)
     - e) [ ] Add a little settings button to the right of the file size indicator for the file, similar to the diff viewer settings button. Give it a little pop up out thing same as the diff viewer settings. Ideally it should share the same code, but that may not be practical. It should just have one setting for now - wrapping on/off
-    - f) [ ] The URL should contain the current path, though to start with it can just be `project/X/repository`, rather than `project/X/repository/main/README.md`. However when clicking on something it should change. It should use the history stack - you should be able to go back etc.
+    - f) [ ] The URL should contain the current path, though to start with it can just be `project/X/repository`, rather than `project/X/repository/main/README.md`. However when clicking on something it should change. It should use the history stack - you should be able to go back etc. You should also be able to select a specific diff by visiting it in the URL - e.g. `project/X/repository/8a02d21475ab084/README.md` (either short form or long form).
+    - g) [ ] The scroll shouldn't be stored across files (clicking on a new file should reset the scroll)
+    - h) [ ] There should be a loading indicator when loading the new file.
+    - i) [ ] You should be able to change the size of the files sidebar.
+    - j) [ ] When showing `123 B` - it should instead show `123 bytes`
+    - k) [ ] It should show binary files correctly (well, some - only images)
+
+42. [ ] Diff viewer - use the artifacts image diff viewer code to also let the user diff regular image diffs between branches
