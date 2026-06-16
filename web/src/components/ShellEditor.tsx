@@ -90,6 +90,11 @@ export function ShellEditor({
         ref={preRef}
         aria-hidden="true"
         className={typography + ' m-0 py-2 pr-3 absolute inset-0 overflow-auto pointer-events-none text-gray-800 dark:text-gray-100'}
+        // Reserve the scrollbar gutter on both layers so their text columns stay
+        // the same width whether or not the textarea is scrolling. Without this,
+        // the textarea's scrollbar narrows its wrap column relative to this <pre>,
+        // and the differing wraps accumulate into a vertical drift once scrolled.
+        style={{ scrollbarGutter: 'stable' }}
       >
         {lines.map((html, i) => (
           <div key={i} className="flex">
@@ -120,7 +125,7 @@ export function ShellEditor({
           typography +
           ' relative w-full resize-y m-0 py-2 pr-3 whitespace-pre-wrap break-words border-0 bg-transparent text-transparent caret-gray-800 dark:caret-gray-100 placeholder-gray-300 dark:placeholder-gray-600 focus:outline-none'
         }
-        style={{ paddingLeft: 'var(--shell-gutter)' }}
+        style={{ paddingLeft: 'var(--shell-gutter)', scrollbarGutter: 'stable' }}
       />
     </div>
   )
