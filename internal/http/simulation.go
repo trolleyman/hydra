@@ -1100,6 +1100,11 @@ func (s *SimulationServer) GetConfig(w http.ResponseWriter, r *http.Request, pro
 	resp := api.ConfigResponse{
 		Defaults: api.AgentConfig{
 			PrePrompt: ptr("Default pre-prompt"),
+			// A multi-line pre-spawn script so the settings screenshot exercises
+			// the ShellEditor's bash syntax highlighting and line-number gutter.
+			Sandbox: &api.SandboxConfig{
+				PreSpawnScript: ptr("#!/bin/bash\nset -euo pipefail\ncp -r \"$HYDRA_PROJECT_ROOT/pipeline/out\" \"$HYDRA_WORKTREE/pipeline/out\"\n"),
+			},
 		},
 		Agents: map[string]api.AgentConfig{
 			"claude": {
