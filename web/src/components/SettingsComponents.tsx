@@ -328,7 +328,7 @@ export function ArtifactsEditor({
         <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">Diff Artifacts</h2>
         <InfoTooltip title="Diff Artifacts">
           <p>Per-project commands that render visual artifacts (e.g. screenshots) of a checkout. The diff viewer runs each against both sides of a comparison and shows the outputs that differ.</p>
-          <p className="mt-1.5">The command runs via <code className="text-blue-300">sh -c</code> in the checkout directory with these variables set:</p>
+          <p className="mt-1.5">The command runs via <code className="text-blue-300">bash -c</code> in the checkout directory with these variables set:</p>
           <ul className="mt-1 space-y-0.5 list-none">
             <li><code className="text-blue-300">HYDRA_ARTIFACT_OUTPUT</code> — directory to write images into</li>
             <li><code className="text-blue-300">HYDRA_ARTIFACT_SOURCE</code> — the checkout directory</li>
@@ -350,29 +350,18 @@ export function ArtifactsEditor({
             <div key={index} className="rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50/40 dark:bg-gray-800/20 p-4 space-y-3">
               <div className="flex items-start gap-2">
                 <div className="flex-1 space-y-3">
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">Name</label>
-                    <input
-                      type="text"
-                      value={a.name}
-                      onChange={(e) => update(index, { name: e.target.value })}
-                      placeholder="e.g. screenshots"
-                      spellCheck={false}
-                      className="w-full text-sm px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-100 placeholder-gray-300 dark:placeholder-gray-600 font-mono shadow-inner focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">Command</label>
-                    <input
-                      type="text"
-                      value={a.command}
-                      onChange={(e) => update(index, { command: e.target.value })}
-                      placeholder="e.g. bun run screenshots.ts"
-                      spellCheck={false}
-                      className="w-full text-sm px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-100 placeholder-gray-300 dark:placeholder-gray-600 font-mono shadow-inner focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
-                    />
-                  </div>
-                  <div className="flex items-center gap-4 flex-wrap">
+                  <div className="flex items-end gap-4 flex-wrap">
+                    <div className="space-y-1 flex-1 min-w-[12rem]">
+                      <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">Name</label>
+                      <input
+                        type="text"
+                        value={a.name}
+                        onChange={(e) => update(index, { name: e.target.value })}
+                        placeholder="e.g. screenshots"
+                        spellCheck={false}
+                        className="w-full text-sm px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-100 placeholder-gray-300 dark:placeholder-gray-600 font-mono shadow-inner focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+                      />
+                    </div>
                     <div className="space-y-1">
                       <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest flex items-center gap-1">
                         Timeout (s)
@@ -389,7 +378,7 @@ export function ArtifactsEditor({
                         className="w-28 text-sm px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-100 placeholder-gray-300 dark:placeholder-gray-600 font-mono shadow-inner focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
                       />
                     </div>
-                    <label className="flex items-center gap-2 cursor-pointer pt-4">
+                    <label className="flex items-center gap-2 cursor-pointer h-[38px]">
                       <input
                         type="checkbox"
                         checked={unsafe}
@@ -404,6 +393,15 @@ export function ArtifactsEditor({
                         </InfoTooltip>
                       </span>
                     </label>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">Command</label>
+                    <ShellEditor
+                      value={a.command}
+                      onChange={(val) => update(index, { command: val })}
+                      placeholder="# e.g. bun run screenshots.ts"
+                      rows={6}
+                    />
                   </div>
                   {unsafe && (
                     <div className="flex items-start gap-1.5 text-[11px] text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 rounded-lg px-2.5 py-1.5">

@@ -756,7 +756,7 @@ func (m *Manager) buildCommandSpec(spec config.ArtifactScript, runDir, outputDir
 		WorktreePath: runDir,                // always writable + chdir target
 		Home:         home,
 		Env:          env,
-		Argv:         []string{"sh", "-c", spec.Command},
+		Argv:         []string{"bash", "-c", spec.Command},
 		NoSandbox:    spec.UnsafeHost,
 	}
 
