@@ -864,6 +864,7 @@ var simRepoOrder = []string{
 	"go.mod",
 	"hydra.toml",
 	"package.json",
+	"config/env/staging/region/eu/settings.toml",
 	"internal/server/server.go",
 	"internal/store/store.go",
 	"web/public/logo.png",
@@ -887,6 +888,10 @@ var simRepoFiles = map[string]string{
 	"CLAUDE.md":  "# Project guidelines\n\nThis demo repo powers Hydra's **Repository** view.\n\n- Use `bun` instead of `npm`.\n- Run the formatter before committing.\n",
 	"LICENSE":    "MIT License\n\nCopyright (c) 2026 Hydra Demo\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction.\n",
 	"hydra.toml": "[defaults]\npre_prompt = \"\"\"\n- Use bun instead of npm\n\"\"\"\n\n[defaults.sandbox]\nwritable_paths = [\"~/.cache/go-build\"]\n",
+	// A deeply-nested single-child chain; each folder holds only the next, so the
+	// tree compacts config/env/staging/region/eu onto one row (PLAN.md #41 compact
+	// folders, like the diff viewer).
+	"config/env/staging/region/eu/settings.toml": "[region]\nname = \"eu\"\nenv = \"staging\"\n\n[limits]\nmax_requests = 1000\ntimeout_sec = 30\n",
 	"README.md": "# Hydra Demo\n\nA simulated repository powering the **Repository** view.\n\n" +
 		"This page is a lightweight, GitHub-style browser: pick a file or folder\n" +
 		"on the left, read it on the right. By default it opens `README.md`.\n\n" +

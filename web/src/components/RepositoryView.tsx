@@ -48,6 +48,26 @@ function buildTree(files: string[]): TreeNode[] {
   return root.children
 }
 
+// compactTree merges chains of single-child directories into one node, the way
+// VS Code's "compact folders" (and the diff viewer's tree) does: one/two/three
+// renders on a single row when `one` holds only `two` and `two` holds only
+// `three`. A directory folds into its child only when that child is its sole
+// entry and is itself a directory, so a folder holding a file (or >1 child)
+// stops the chain. The merged node keeps the deepest folder's `path` (stable,
+// unique → safe expand-state key) and joins the segment names for display.
+function compactTree(nodes: TreeNode[]): TreeNode[] {
+  return nodes.map((node) => {
+    if (node.type !== 'dir') return node
+    let current = node
+    const names = [node.name]
+    while (current.children.length === 1 && current.children[0].type === 'dir') {
+      current = current.children[0]
+      names.push(current.name)
+    }
+    return { ...current, name: names.join('/'), children: compactTree(current.children) }
+  })
+}
+
 // ancestorsOf returns every directory path containing the given file path, so we
 // can auto-expand the tree down to a deep-linked file even though folders start
 // collapsed (PLAN.md #41c).
@@ -618,7 +638,7 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
   }, [isResizing])
 
   const parsed = useMemo(() => parseSplat(splat, branches), [splat, branches])
-  const tree = useMemo(() => buildTree(files), [files])
+  const tree = useMemo(() => compactTree(buildTree(files)), [files])
 
   // queryRef: the ref to actually fetch from. null/"" → server default (HEAD).
   const queryRef = parsed.ref ?? undefined

@@ -179,6 +179,11 @@ try {
       },
       // A binary image file rendered inline via the raw blob route (PLAN.md #41k).
       { name: 'repository-image', path: '/project/sim-project/repository/main/web/public/logo.png' },
+      // Compact folders: a single-child directory chain
+      // (config/env/staging/region/eu) renders on one row, VS Code style, just
+      // like the diff viewer's tree. Deep-linking the leaf file auto-expands the
+      // chain so the compacted row is visible.
+      { name: 'repository-compact-folders', path: '/project/sim-project/repository/main/config/env/staging/region/eu/settings.toml' },
       { name: 'nested-folders', path: '/project/sim-project/agent/agent-3', scrollTo: 'Changes' },
       // agent-1's diff carries simulated "screenshots" artifacts (mixed phone +
       // desktop shapes). Scroll to the "Changes" header — the artifacts panel
