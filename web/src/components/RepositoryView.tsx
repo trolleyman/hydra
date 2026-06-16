@@ -492,7 +492,7 @@ function CodeView({ content, lang, wrap }: { content: string; lang: string; wrap
   const gutterWidth = `${Math.max(2, String(lines.length).length)}ch`
 
   return (
-    <div className={`text-xs font-mono leading-snug ${wrap ? 'w-full' : 'w-max min-w-full'}`}>
+    <div className={`text-xs font-mono leading-snug pt-2 ${wrap ? 'w-full' : 'w-max min-w-full'}`}>
       {lines.map((html, i) => (
         <div key={i} className="flex hover:bg-gray-50 dark:hover:bg-gray-800/40">
           <span
