@@ -87,6 +87,13 @@ export function ImageLightbox({
           src={current.url}
           alt={current.filename}
           onLoad={(e) => setDims({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })}
+          // Checkerboard behind the image so transparent PNGs (e.g. an icon)
+          // read as transparent rather than blending into the dark backdrop. The
+          // <img> sizes to the image's own aspect ratio, so this sits exactly
+          // behind the picture; opaque images simply cover it.
+          style={{
+            background: 'repeating-conic-gradient(#bfbfbf 0% 25%, #f5f5f5 0% 50%) 0 0 / 20px 20px',
+          }}
           className="max-h-[85vh] max-w-[90vw] object-contain rounded-lg shadow-2xl"
         />
         <figcaption className="flex items-center gap-2 text-xs font-mono">
