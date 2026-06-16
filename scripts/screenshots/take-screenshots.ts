@@ -183,6 +183,12 @@ try {
       // popover such as the repository branch selector so the screenshot
       // documents it.
       click?: string
+      // Glob of a request to hold open (never fulfilled) so the page is captured
+      // in its in-flight loading state — e.g. holding the repo file-contents
+      // request so the loading spinner shows. With a request pending, networkidle
+      // never fires, so the goto waits for the DOM instead and then for the
+      // spinner to appear.
+      holdRequest?: string
       // Seeds the diff viewer's image-diff comparison mode ('hydra-diff-image-mode')
       // before the app boots, so the artifacts panel renders before/after pairs in
       // the chosen mode. Only meaningful on the artifacts (agent-1) page.
@@ -198,6 +204,14 @@ try {
       // README.md by default, so the capture shows rendered markdown beside the
       // tree. Full-page; the layout fills the viewport with internal scroll.
       { name: 'repository', path: '/project/sim-project/repository' },
+      // The repository view's loading state: while a file's contents are being
+      // fetched the main pane shows a centered spinner (not the previously shown
+      // file), so switching files never flashes stale content. We hold the
+      // file-contents request open so the capture lands mid-load — the tree
+      // populated on the left, the spinner on the right. (The file request only
+      // fires once branches + tree have loaded, so holding it implies both are
+      // already rendered.)
+      { name: 'repository-loading', path: '/project/sim-project/repository', holdRequest: '**/repository/file*' },
       // The repository view showing a source file: a deep-linked URL
       // (/repository/<ref>/<path>) renders the file with line numbers and the
       // tree auto-expanded down to it (folders are otherwise collapsed). Demos
@@ -357,11 +371,25 @@ try {
           ) => (ms && ms < 4000 ? 0 : orig(fn, ms, ...rest))) as typeof setTimeout
         })
         const page = await ctx.newPage()
-        await page.goto(base + pg.path, { waitUntil: 'networkidle' })
+        if (pg.holdRequest) {
+          // Hold the matching request open (never continued/fulfilled) so the
+          // page renders its in-flight loading state when captured.
+          await page.route(pg.holdRequest, () => { /* hold open */ })
+        }
+        // A held request keeps the network busy forever, so networkidle would
+        // never resolve — wait only for the DOM for those pages.
+        await page.goto(base + pg.path, { waitUntil: pg.holdRequest ? 'domcontentloaded' : 'networkidle' })
         await page.addStyleTag({
           content:
             '*,*::before,*::after{animation:none!important;transition:none!important;caret-color:transparent!important}',
         })
+        if (pg.holdRequest) {
+          // Wait for the main pane's loading spinner (the h-5 LoaderCircle, unique
+          // to the loading state — the tree spinner is h-4, the header one h-3.5).
+          // It only appears once branches + tree have loaded and the held file
+          // request is in flight, so this confirms the full loading layout.
+          await page.waitForSelector('svg.lucide-loader-circle.h-5')
+        }
         // Let async data + layout settle before capturing (fonts + frames, no sleep).
         await settle(page)
         if (pg.imageDiffMode || pg.expandArtifact) {

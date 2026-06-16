@@ -8,9 +8,10 @@ import type { RepositoryFileResponse, RepositoryBranch } from '../api'
 import { StorageKeys, readLocal, writeLocal } from '../lib/storage'
 import {
   ChevronDown, ChevronRight, File as FileIcon, Folder, FolderOpen, FileText,
-  FileCode, FileJson, FileImage, FileCog, Info, Scale, Bot, GitBranch, Braces,
+  Bot, GitBranch,
   LoaderCircle, Settings, Check, FileQuestion, FileSymlink, CornerDownRight,
 } from 'lucide-react'
+import { getFileIcon } from '../lib/fileIcons'
 
 // ── File tree model ────────────────────────────────────────────────────────────
 
@@ -228,52 +229,8 @@ function formatBytes(n: number): string {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`
 }
 
-// ── File icons (PLAN.md #41l) ─────────────────────────────────────────────────
-
-type IconSpec = { Icon: typeof FileIcon; className: string }
-
-function getFileIcon(name: string): IconSpec {
-  const lower = name.toLowerCase()
-  if (lower === 'readme.md' || lower === 'readme') return { Icon: Info, className: 'text-blue-500' }
-  if (lower === 'claude.md' || lower === 'gemini.md' || lower === 'agents.md') return { Icon: Bot, className: 'text-purple-500' }
-  if (lower.startsWith('license')) return { Icon: Scale, className: 'text-amber-500' }
-  if (lower === '.gitignore' || lower === '.gitattributes' || lower.startsWith('.git')) return { Icon: GitBranch, className: 'text-orange-500' }
-  if (isImage(name)) return { Icon: FileImage, className: 'text-emerald-500' }
-  const ext = lower.split('.').pop() ?? ''
-  switch (ext) {
-    case 'md':
-    case 'markdown':
-      return { Icon: FileText, className: 'text-blue-400' }
-    case 'toml':
-    case 'yaml':
-    case 'yml':
-    case 'ini':
-    case 'conf':
-      return { Icon: FileCog, className: 'text-gray-500' }
-    case 'json':
-      return { Icon: FileJson, className: 'text-yellow-500' }
-    case 'go':
-      return { Icon: FileCode, className: 'text-cyan-500' }
-    case 'ts':
-    case 'tsx':
-      return { Icon: FileCode, className: 'text-blue-500' }
-    case 'js':
-    case 'jsx':
-      return { Icon: FileCode, className: 'text-yellow-400' }
-    case 'rs':
-      return { Icon: FileCode, className: 'text-orange-400' }
-    case 'py':
-      return { Icon: FileCode, className: 'text-green-500' }
-    case 'css':
-    case 'scss':
-    case 'less':
-    case 'html':
-    case 'xml':
-      return { Icon: Braces, className: 'text-pink-500' }
-  }
-  if (EXT_LANG_MAP[ext]) return { Icon: FileCode, className: 'text-gray-400' }
-  return { Icon: FileIcon, className: 'text-gray-400' }
-}
+// File icons (PLAN.md #41l) now live in ../lib/fileIcons (getFileIcon), shared
+// with the diff viewer so both render files identically.
 
 // ── Settings popup (PLAN.md #41e) ─────────────────────────────────────────────
 // Mirrors the diff viewer's settings popup styling so the two feel consistent.
@@ -735,6 +692,9 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
   useEffect(() => {
     if (!ready || !viewPath) { setFile(null); return }
     let cancelled = false
+    // Clear the previously-shown file so the pane shows a loading icon instead
+    // of the stale file while the new one is fetched.
+    setFile(null)
     setFileLoading(true)
     setError(null)
     setNotFound(false)

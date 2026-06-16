@@ -9,10 +9,12 @@ import {
   Settings, Copy, Folder, FolderOpen, X, GitMerge, Bot,
   MoveRight, MessageSquarePlus, FolderSync,
 } from 'lucide-react'
+import { getFileIcon, changeTypeTextClass } from './lib/fileIcons'
 import { Tooltip } from './components/Tooltip'
 import { ArtifactsPanel, IMAGE_DIFF_MODES, type ImageDiffMode } from './components/ArtifactsPanel'
 import { useDialogStore } from './stores/dialogStore'
 import { StorageKeys, readLocal, writeLocal } from './lib/storage'
+import { loadAgentViewPrefs, patchAgentViewPrefs } from './lib/agentViewPrefs'
 
 // ── Syntax highlighting helpers ───────────────────────────────────────────────
 
@@ -94,15 +96,6 @@ interface SideBySideLine {
   newLineNum: number | null
   newType: 'context' | 'addition' | 'empty'
   newContent: string | null
-}
-
-function ChangeTypeIcon({ type }: { type: string }) {
-  switch (type) {
-    case 'added': return <Plus className="w-3.5 h-3.5 text-green-500 shrink-0" />
-    case 'deleted': return <div className="w-3.5 h-3.5 flex items-center justify-center shrink-0"><div className="w-2.5 h-0.5 bg-red-500 rounded-full" /></div>
-    case 'renamed': return <GitMerge className="w-3.5 h-3.5 text-blue-500 shrink-0" />
-    default: return <div className="w-3.5 h-3.5 rounded-full bg-yellow-500 shrink-0" />
-  }
 }
 
 function buildSideBySide(hunkLines: DiffHunk['lines']): SideBySideLine[] {
@@ -434,9 +427,9 @@ const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onComment, 
         >
           <ChevronDown className={`w-4 h-4 transition-transform ${isCollapsed ? '-rotate-90' : ''}`} />
         </button>
-        <ChangeTypeIcon type={file.change_type} />
+        {(() => { const { Icon, className } = getFileIcon(file.path.split('/').pop() ?? file.path); return <Icon className={`w-3.5 h-3.5 shrink-0 ${className}`} /> })()}
         <span
-          className="font-mono text-xs text-gray-700 dark:text-gray-300 flex-1 min-w-0 truncate cursor-pointer hover:underline"
+          className={`font-mono text-xs flex-1 min-w-0 truncate cursor-pointer hover:underline ${changeTypeTextClass(file.change_type)}`}
         >
           {displayPath}
         </span>
@@ -554,6 +547,12 @@ function formatCommitDate(iso: string): string {
 
 // ── Custom tooltip ────────────────────────────────────────────────────────────
 
+// Only one CustomTooltip is ever visible at a time. Showing a tooltip
+// immediately dismisses whichever was previously active, so scrolling the
+// pointer across many triggers (e.g. the commit list) can't leave a trail of
+// stale, lingering boxes behind.
+let activeHide: (() => void) | null = null
+
 function CustomTooltip({ content, children, side = 'bottom', className = 'w-full' }: {
   content: React.ReactNode
   children: React.ReactNode
@@ -572,8 +571,17 @@ function CustomTooltip({ content, children, side = 'bottom', className = 'w-full
     }
   }, [])
 
+  const hideNow = useCallback(() => {
+    cancelHide()
+    setVisible(false)
+    if (activeHide === hideNow) activeHide = null
+  }, [cancelHide])
+
   const show = useCallback(() => {
     cancelHide()
+    // Dismiss any other tooltip before we claim the active slot.
+    if (activeHide && activeHide !== hideNow) activeHide()
+    activeHide = hideNow
     if (ref.current) {
       const rect = ref.current.getBoundingClientRect()
       if (side === 'right') {
@@ -587,16 +595,25 @@ function CustomTooltip({ content, children, side = 'bottom', className = 'w-full
       }
     }
     setVisible(true)
-  }, [side, cancelHide])
+  }, [side, cancelHide, hideNow])
 
   // Hide after a short grace period so the pointer can travel from the trigger
   // into the tooltip (and back) without it disappearing.
   const scheduleHide = useCallback(() => {
     cancelHide()
-    hideTimer.current = setTimeout(() => setVisible(false), 150)
-  }, [cancelHide])
+    hideTimer.current = setTimeout(hideNow, 150)
+  }, [cancelHide, hideNow])
 
-  useEffect(() => () => cancelHide(), [cancelHide])
+  // The position is captured once on show, so it goes stale the moment the
+  // page scrolls. Dismiss on scroll rather than leave a detached box floating.
+  useEffect(() => {
+    if (!visible) return
+    const onScroll = () => hideNow()
+    window.addEventListener('scroll', onScroll, true)
+    return () => window.removeEventListener('scroll', onScroll, true)
+  }, [visible, hideNow])
+
+  useEffect(() => () => hideNow(), [hideNow])
 
   return (
     <div ref={ref} className={`relative inline-flex ${className}`} onMouseEnter={show} onMouseLeave={scheduleHide}>
@@ -1153,9 +1170,9 @@ function FileRow({ file, isActive, onClick, indent = 0 }: {
         }`}
       style={{ paddingLeft: `${10 + indent}px`, paddingRight: '10px' }}
     >
-      <ChangeTypeIcon type={file.change_type} />
+      {(() => { const { Icon, className } = getFileIcon(file.path.split('/').pop() ?? file.path); return <Icon className={`w-3.5 h-3.5 shrink-0 ${className}`} /> })()}
       <Tooltip content={file.path}>
-        <span className="font-mono text-[10px] text-gray-700 dark:text-gray-300 truncate flex-1 min-w-0">
+        <span className={`font-mono text-[10px] truncate flex-1 min-w-0 ${changeTypeTextClass(file.change_type)}`}>
           {file.path.split('/').pop()}
         </span>
       </Tooltip>
@@ -1318,7 +1335,11 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger }: { agent
 
   const [singleFileIdx, setSingleFileIdx] = useState(0)
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set())
-  const [collapsedFiles, setCollapsedFiles] = useState<Set<string>>(new Set())
+  // Collapsed diff files persist per agent so each agent's page restores which
+  // files were folded away.
+  const [collapsedFiles, setCollapsedFiles] = useState<Set<string>>(
+    () => new Set(loadAgentViewPrefs(projectId, agent.id).collapsedFiles ?? []),
+  )
   const [hiddenFiles, setHiddenFiles] = useState<Set<string>>(new Set())
   const userShownFilesRef = useRef<Set<string>>(new Set())
   // Per-file context (number of surrounding lines). Persists across polling refreshes.
@@ -1335,6 +1356,19 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger }: { agent
   useEffect(() => { writeLocal(StorageKeys.diffFileView, fileView) }, [fileView])
   useEffect(() => { writeLocal(StorageKeys.diffSidebarWidth, String(sidebarWidth)) }, [sidebarWidth])
   useEffect(() => { writeLocal(StorageKeys.diffImageMode, imageDiffMode) }, [imageDiffMode])
+
+  // DiffViewer is reused (not remounted) when switching agents, so reload the
+  // collapsed-file set when the agent changes. Reset during render (per React's
+  // "adjust state when a prop changes" guidance) so the persist effect below
+  // sees the new agent's set, not the old one.
+  const collapsedAgentRef = useRef(agent.id)
+  if (collapsedAgentRef.current !== agent.id) {
+    collapsedAgentRef.current = agent.id
+    setCollapsedFiles(new Set(loadAgentViewPrefs(projectId, agent.id).collapsedFiles ?? []))
+  }
+  useEffect(() => {
+    patchAgentViewPrefs(projectId, agent.id, { collapsedFiles: [...collapsedFiles] })
+  }, [projectId, agent.id, collapsedFiles])
 
   const toggleFolder = useCallback((path: string) => {
     setCollapsedFolders((prev) => {

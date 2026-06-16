@@ -40,6 +40,13 @@ export const ARTIFACT_PREFS_PREFIX = 'hydra-artifact-'
 export const artifactPrefsKey = (projectId: string | null, agentId: string, name: string): string =>
   `${ARTIFACT_PREFS_PREFIX}${projectId ?? '_'}-${agentId}-${name}`
 
+// Per-agent view prefs (terminal height, page scroll, collapsed diff files) so
+// each agent's detail page restores its own layout (see agentViewPrefs.ts).
+// projectId may be null → '_' keeps the key shape stable.
+export const AGENT_VIEW_PREFS_PREFIX = 'hydra-agent-view-'
+export const agentViewPrefsKey = (projectId: string | null, agentId: string): string =>
+  `${AGENT_VIEW_PREFS_PREFIX}${projectId ?? '_'}-${agentId}`
+
 // Unsent spawn-prompt draft, per project and per layout (compact vs full).
 export const promptDraftKey = (projectId: string, compact: boolean): string =>
   `hydra-prompt-draft-${compact ? 'compact' : 'full'}-${projectId}`

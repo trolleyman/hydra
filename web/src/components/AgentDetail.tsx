@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { api } from '../stores/apiClient'
+import { loadAgentViewPrefs, patchAgentViewPrefs } from '../lib/agentViewPrefs'
 import { formatError } from '../api/format_error'
 import type { AgentResponse } from '../api'
 import { AgentTerminal } from './AgentTerminal'
@@ -60,12 +61,62 @@ export function AgentDetail({
   const [copied, setCopied] = useState(false)
   const [, setTick] = useState(0)
   const [diffRefreshTrigger, setDiffRefreshTrigger] = useState(0)
+  const scrollRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (agent.created_at == null) return
     const id = setInterval(() => setTick((n) => n + 1), 1000)
     return () => clearInterval(id)
   }, [agent.created_at])
+
+  // Restore & persist the page scroll position per agent, so each agent's detail
+  // page behaves like its own page. Content below the fold (terminal, diff)
+  // loads asynchronously and grows the page, so we retry the restore for a short
+  // window until the saved offset is reachable, yielding the moment the user
+  // scrolls so we never fight them.
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    const target = loadAgentViewPrefs(projectId, agent.id).scrollTop ?? 0
+    let restoring = target > 0
+    let raf = 0
+    const save = () => {
+      if (raf) return
+      raf = requestAnimationFrame(() => {
+        raf = 0
+        if (restoring) return // ignore the programmatic scrolls of an in-flight restore
+        patchAgentViewPrefs(projectId, agent.id, { scrollTop: Math.round(el.scrollTop) })
+      })
+    }
+    const stopRestore = () => { restoring = false }
+    el.addEventListener('scroll', save, { passive: true })
+    // A real user gesture cancels any in-progress restore.
+    el.addEventListener('wheel', stopRestore, { passive: true })
+    el.addEventListener('touchstart', stopRestore, { passive: true })
+
+    let attempts = 0
+    let timer: ReturnType<typeof setTimeout> | null = null
+    const tryRestore = () => {
+      if (!restoring) return
+      el.scrollTop = target
+      // Reached it (within rounding) or out of attempts → stop restoring.
+      if (el.scrollTop >= target - 1 || attempts >= 30) {
+        restoring = false
+        return
+      }
+      attempts++
+      timer = setTimeout(tryRestore, 50)
+    }
+    tryRestore()
+
+    return () => {
+      el.removeEventListener('scroll', save)
+      el.removeEventListener('wheel', stopRestore)
+      el.removeEventListener('touchstart', stopRestore)
+      if (raf) cancelAnimationFrame(raf)
+      if (timer) clearTimeout(timer)
+    }
+  }, [agent.id, projectId])
 
   const agentTypeClass =
     agent.agent_type === 'claude'
@@ -199,7 +250,7 @@ export function AgentDetail({
   }
 
   return (
-    <div className="flex-1 flex flex-col overflow-auto p-6 min-w-0 min-h-0" data-main-scroll>
+    <div ref={scrollRef} className="flex-1 flex flex-col overflow-auto p-6 min-w-0 min-h-0" data-main-scroll>
       <div className="w-full">
         {/* Header */}
         <div className="mb-6">

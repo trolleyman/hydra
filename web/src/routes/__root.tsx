@@ -13,6 +13,7 @@ import { SpawnForm } from '../components/SpawnForm'
 import { Dialog } from '../components/Dialog'
 import { NotFound } from '../components/NotFound'
 import { Tooltip } from '../components/Tooltip'
+import { TrustProjectModal } from '../components/TrustProjectModal'
 
 export const Route = createRootRoute({
   component: RootLayout,
@@ -21,6 +22,7 @@ export const Route = createRootRoute({
 
 import { useDialogStore } from '../stores/dialogStore'
 import { pruneArtifactPrefs } from '../lib/artifactPrefs'
+import { pruneAgentViewPrefs } from '../lib/agentViewPrefs'
 import { StorageKeys, selectedAgentKey, readLocal, writeLocal } from '../lib/storage'
 
 function formatSpawnedAgo(ms: number): string {
@@ -489,8 +491,8 @@ function RootLayout() {
     }
   }, [routeParams.projectId, routeParams.agentId, agents, projects])
 
-  // Drop expired per-artifact UI prefs once on boot (see lib/artifactPrefs).
-  useEffect(() => { pruneArtifactPrefs() }, [])
+  // Drop expired per-artifact and per-agent-view UI prefs once on boot.
+  useEffect(() => { pruneArtifactPrefs(); pruneAgentViewPrefs() }, [])
 
   async function handleRestart() {
     setRestarting(true)
@@ -596,6 +598,21 @@ function RootLayout() {
 
   const filteredAgents = agents.filter((a) => !a.ephemeral)
   const selectedProject = projects.find((p) => p.id === currentProjectId) ?? null
+
+  // The selected project's config.toml is read from the repo and can run code /
+  // weaken the sandbox, so prompt for trust before acting on it. Shown on a fresh
+  // open and whenever the config changed since it was last trusted.
+  const untrustedProject = selectedProject && !selectedProject.trusted ? selectedProject : null
+
+  function handleProjectTrusted(updated: ProjectInfo) {
+    setProjects(projects.map((p) => (p.id === updated.id ? updated : p)))
+  }
+
+  function handleTrustDeclined() {
+    setSelectedProjectId(null)
+    setAgents([])
+    navigate({ to: '/' })
+  }
 
   return (
     <div className="h-full bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 flex flex-col">
@@ -774,6 +791,13 @@ function RootLayout() {
         <Outlet />
       </div>
       <Dialog />
+      {untrustedProject && (
+        <TrustProjectModal
+          project={untrustedProject}
+          onTrusted={handleProjectTrusted}
+          onCancel={handleTrustDeclined}
+        />
+      )}
     </div>
   )
 }
