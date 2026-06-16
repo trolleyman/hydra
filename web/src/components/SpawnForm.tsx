@@ -17,6 +17,7 @@ interface Attachment {
   filename: string
   path: string | null
   previewUrl?: string
+  size: number
   uploading: boolean
   error?: string
 }
@@ -242,7 +243,7 @@ export function SpawnForm({
       const id = attachIdRef.current++
       const previewUrl = isImageFile(file) ? URL.createObjectURL(file) : undefined
       if (previewUrl) objectUrlsRef.current.add(previewUrl)
-      setAttachments((prev) => [...prev, { id, filename: file.name || 'pasted-image', path: null, previewUrl, uploading: true }])
+      setAttachments((prev) => [...prev, { id, filename: file.name || 'pasted-image', path: null, previewUrl, size: file.size, uploading: true }])
       uploadFile(projectId, file)
         .then((res) => {
           setAttachments((prev) => prev.map((a) => (a.id === id ? { ...a, path: res.path, uploading: false } : a)))
@@ -289,7 +290,7 @@ export function SpawnForm({
   // Image attachments (those with a preview), in chip order — the lightbox
   // navigates this list, and each thumbnail opens its own index here.
   const imageAttachments = attachments.filter((a) => a.previewUrl)
-  const lightboxImages = imageAttachments.map((a) => ({ url: a.previewUrl!, filename: a.filename }))
+  const lightboxImages = imageAttachments.map((a) => ({ url: a.previewUrl!, filename: a.filename, size: a.size }))
   const canSubmit = (!!prompt.trim() || readyAttachments.length > 0) && !uploading
 
   async function handleSubmit(e: React.FormEvent) {

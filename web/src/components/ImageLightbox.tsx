@@ -1,9 +1,17 @@
-import { useCallback, useEffect, useState } from 'react'
+import { Fragment, useCallback, useEffect, useState } from 'react'
 import { X, ChevronLeft, ChevronRight } from 'lucide-react'
 
 export interface LightboxImage {
   url: string
   filename: string
+  /** File size in bytes, shown in the caption. */
+  size: number
+}
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`
 }
 
 // A Slack-style fullscreen image viewer: a blurred dark backdrop with the image
@@ -81,10 +89,20 @@ export function ImageLightbox({
           onLoad={(e) => setDims({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })}
           className="max-h-[85vh] max-w-[90vw] object-contain rounded-lg shadow-2xl"
         />
-        <figcaption className="flex items-center gap-2 text-xs text-white/70 font-mono">
-          <span>{current.filename}</span>
-          {dims && <span className="text-white/40">{dims.w} × {dims.h}</span>}
-          {count > 1 && <span className="text-white/40">{index + 1} / {count}</span>}
+        <figcaption className="flex items-center gap-2 text-xs font-mono">
+          {[
+            <span key="name" className="text-white/70">{current.filename}</span>,
+            dims && <span key="dims" className="text-white/40">{dims.w} × {dims.h}</span>,
+            <span key="size" className="text-white/40">{formatBytes(current.size)}</span>,
+            count > 1 && <span key="count" className="text-white/40">{index + 1} / {count}</span>,
+          ]
+            .filter(Boolean)
+            .map((part, i) => (
+              <Fragment key={i}>
+                {i > 0 && <span className="text-white/30">·</span>}
+                {part}
+              </Fragment>
+            ))}
         </figcaption>
       </figure>
 
