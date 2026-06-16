@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useRef } from 'react'
+import { useLayoutEffect, useMemo, useRef, type CSSProperties } from 'react'
 import hljs from 'highlight.js'
 
 function escapeHtml(s: string): string {
@@ -8,15 +8,38 @@ function escapeHtml(s: string): string {
     .replace(/>/g, '&gt;')
 }
 
-// ShellEditor is a small textarea with live bash syntax highlighting. A
-// transparent textarea sits on top of a highlighted <pre> layer that mirrors its
-// text, sharing identical typography/padding so the caret and characters line up.
+// Split highlight.js HTML into one fragment per source line, re-opening any
+// <span> tokens that stay open across a newline so each line is independently
+// valid markup. This lets us render a row per logical line (with a line-number
+// gutter) while keeping multi-line constructs (heredocs, `\` continuations,
+// quoted strings) correctly coloured.
+function splitHighlightedLines(html: string): string[] {
+  const open: string[] = []
+  const tag = /<span\b[^>]*>|<\/span>/g
+  return html.split('\n').map((line) => {
+    const prefix = open.join('')
+    tag.lastIndex = 0
+    let m: RegExpExecArray | null
+    while ((m = tag.exec(line))) {
+      if (m[0] === '</span>') open.pop()
+      else open.push(m[0])
+    }
+    return prefix + line + '</span>'.repeat(open.length)
+  })
+}
+
+// ShellEditor is a small textarea with live bash syntax highlighting and a
+// line-number gutter. A transparent textarea sits on top of a highlighted <pre>
+// layer that mirrors its text line-for-line, sharing identical typography,
+// padding and wrap width so the caret and characters line up exactly. The
+// gutter width and the textarea's left padding both read the same
+// `--shell-gutter` length, keeping the two wrap columns the same width.
 // Reuses the highlight.js `.hljs-*` token theme already defined in index.css.
 export function ShellEditor({
   value,
   onChange,
   placeholder,
-  rows = 3,
+  rows = 8,
   className = '',
 }: {
   value: string
@@ -28,18 +51,20 @@ export function ShellEditor({
   const taRef = useRef<HTMLTextAreaElement>(null)
   const preRef = useRef<HTMLPreElement>(null)
 
-  const highlighted = useMemo(() => {
-    if (!value) return ''
+  const lines = useMemo(() => {
+    const src = value ?? ''
+    let html: string
     try {
-      let html = hljs.highlight(value, { language: 'bash', ignoreIllegals: true }).value
-      // A trailing newline isn't rendered by the textarea but collapses in the
-      // <pre>, which would desync the last line — pad it so heights match.
-      if (value.endsWith('\n')) html += ' '
-      return html
+      html = hljs.highlight(src, { language: 'bash', ignoreIllegals: true }).value
     } catch {
-      return escapeHtml(value)
+      html = escapeHtml(src)
     }
+    return splitHighlightedLines(html)
   }, [value])
+
+  // Reserve room for the widest line number plus left/right breathing room. In
+  // the monospace font 1ch is one digit, so `${digits}ch` fits the gutter text.
+  const gutter = `calc(20px + ${String(lines.length).length}ch)`
 
   // Keep the highlight layer scrolled in lockstep with the textarea.
   function syncScroll() {
@@ -50,9 +75,8 @@ export function ShellEditor({
   }
   useLayoutEffect(syncScroll, [value])
 
-  // Identical box metrics on both layers so glyphs align exactly.
-  const shared =
-    'm-0 px-3 py-2 font-mono text-sm leading-[1.5] tracking-normal whitespace-pre-wrap break-words border border-transparent'
+  // Identical typography on both layers so glyphs align exactly.
+  const typography = 'font-mono text-sm leading-[1.5] tracking-normal'
 
   return (
     <div
@@ -60,13 +84,27 @@ export function ShellEditor({
         'relative rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-inner overflow-hidden focus-within:ring-2 focus-within:ring-blue-500/20 focus-within:border-blue-500 transition-all ' +
         className
       }
+      style={{ '--shell-gutter': gutter } as CSSProperties}
     >
       <pre
         ref={preRef}
         aria-hidden="true"
-        className={shared + ' absolute inset-0 overflow-auto pointer-events-none text-gray-800 dark:text-gray-100'}
+        className={typography + ' m-0 py-2 pr-3 absolute inset-0 overflow-auto pointer-events-none text-gray-800 dark:text-gray-100'}
       >
-        <code className="hljs language-bash bg-transparent p-0" dangerouslySetInnerHTML={{ __html: highlighted || '' }} />
+        {lines.map((html, i) => (
+          <div key={i} className="flex">
+            <span
+              className="shrink-0 box-border pl-3 pr-2 text-right select-none text-gray-400 dark:text-gray-600"
+              style={{ width: 'var(--shell-gutter)' }}
+            >
+              {i + 1}
+            </span>
+            <span
+              className="flex-1 min-w-0 whitespace-pre-wrap break-words"
+              dangerouslySetInnerHTML={{ __html: html.length ? html : ' ' }}
+            />
+          </div>
+        ))}
       </pre>
       <textarea
         ref={taRef}
@@ -79,9 +117,10 @@ export function ShellEditor({
         autoCorrect="off"
         rows={rows}
         className={
-          shared +
-          ' relative w-full resize-y bg-transparent text-transparent caret-gray-800 dark:caret-gray-100 placeholder-gray-300 dark:placeholder-gray-600 focus:outline-none'
+          typography +
+          ' relative w-full resize-y m-0 py-2 pr-3 whitespace-pre-wrap break-words border-0 bg-transparent text-transparent caret-gray-800 dark:caret-gray-100 placeholder-gray-300 dark:placeholder-gray-600 focus:outline-none'
         }
+        style={{ paddingLeft: 'var(--shell-gutter)' }}
       />
     </div>
   )
