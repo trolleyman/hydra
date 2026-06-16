@@ -160,5 +160,6 @@
     - i) [ ] You should be able to change the size of the files sidebar.
     - j) [ ] When showing `123 B` - it should instead show `123 bytes`
     - k) [ ] It should show binary files correctly (well, some - only images)
+    - l) [ ] Each file should have an icon if it makes sense - e.g. (i) for README.md, TOML icon for TOML, Go for go, LICENSE, CLAUDE.md, GEMINI.md, .gitignore (git), *.md - markdown. Add a setting in the mini settings selector to disable these icons.
 
 42. [ ] Diff viewer - use the artifacts image diff viewer code to also let the user diff regular image diffs between branches
