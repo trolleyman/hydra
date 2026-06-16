@@ -21,9 +21,9 @@ func TestWithPreSpawn(t *testing.T) {
 		t.Errorf("empty argv: got %v, want nil", got)
 	}
 
-	// Script set: wraps in /bin/sh -c, exec'ing the original argv via "$@".
+	// Script set: wraps in /bin/bash -c, exec'ing the original argv via "$@".
 	got := withPreSpawn("mise trust", argv)
-	want := []string{"/bin/sh", "-c", "mise trust\nexec \"$@\"", "hydra-pre-spawn", "claude", "--dangerously-skip-permissions"}
+	want := []string{"/bin/bash", "-c", "mise trust\nexec \"$@\"", "hydra-pre-spawn", "claude", "--dangerously-skip-permissions"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("wrapped argv:\n got %#v\nwant %#v", got, want)
 	}

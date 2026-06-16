@@ -1241,7 +1241,7 @@ components:
         pre_spawn_script:
           type: string
           nullable: true
-          description: Shell script run inside the sandbox immediately before each agent is launched (e.g. `mise trust`)
+          description: Bash script run inside the sandbox once, when the agent is first spawned — not on resume or for bash shells (e.g. `mise trust`)
         network:
           $ref: '#/components/schemas/NetworkConfig'
           nullable: true

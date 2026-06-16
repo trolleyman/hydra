@@ -37,7 +37,7 @@ const DefaultPrePrompt = "You are a head (AI agent) of Hydra, an AI orchestratio
 	"- `masked_paths` — extra paths hidden inside the sandbox.\n" +
 	"- `restore_ro` — paths re-exposed read-only after a parent was masked.\n" +
 	"- `network.enabled` / `network.allowed_hosts` — outbound network access and its host allow-list.\n" +
-	"- `pre_spawn_script` — a shell script run inside the sandbox before each agent starts (e.g. `mise trust`).\n" +
+	"- `pre_spawn_script` — a bash script run inside the sandbox once, when the agent is first spawned (e.g. `mise trust`).\n" +
 	"- `pre_prompt` — the standing instructions you are reading now.\n" +
 	"\n" +
 	"## Workflow\n" +

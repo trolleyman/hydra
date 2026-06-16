@@ -284,6 +284,11 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 	// Build the sandbox launch options.
 	cfg, _ := config.Load(projectRoot)
 	writable, masked, restore, net, preSpawn := cfg.ResolveSandboxOptions(string(opts.AgentType))
+	// Pre-spawn is a once-per-head hook: it runs only when a head is first
+	// spawned, never on a resume (where the prior conversation is restored).
+	if opts.Resume {
+		preSpawn = ""
+	}
 
 	seed, err := seedHead(projectRoot, opts.ID, opts.AgentType, worktreePath, home, opts.PrePrompt)
 	if err != nil {
@@ -306,14 +311,14 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 		Rows: opts.Rows,
 		Cols: opts.Cols,
 		Sandbox: sandbox.Options{
-			AgentType:     opts.AgentType,
-			WorktreePath:  worktreePath,
-			GitCommonDir:  gitCommonDir(projectRoot),
-			Home:          home,
-			WritablePaths: append(writable, seed.WritablePaths...),
-			MaskedPaths:   masked,
-			RestoreRO:     restore,
-			Network:       net,
+			AgentType:      opts.AgentType,
+			WorktreePath:   worktreePath,
+			GitCommonDir:   gitCommonDir(projectRoot),
+			Home:           home,
+			WritablePaths:  append(writable, seed.WritablePaths...),
+			MaskedPaths:    masked,
+			RestoreRO:      restore,
+			Network:        net,
 			Binds:          seed.Binds,
 			Env:            env,
 			Argv:           argv,
@@ -429,27 +434,31 @@ func StartShellSession(reg *session.Registry, projectRoot string, head Head, row
 	var sb sandbox.Options
 	if sandboxed {
 		cfg, _ := config.Load(projectRoot)
-		writable, masked, restore, net, preSpawn := cfg.ResolveSandboxOptions("bash")
+		// The pre-spawn script is intentionally NOT run for bash shells: it is a
+		// once-per-head agent-spawn hook, and these interactive shells open
+		// repeatedly over a head's life. Running it here also made a failing
+		// script (e.g. a bashism error) abort the shell before /bin/bash ever
+		// exec'd, closing the terminal instantly.
+		writable, masked, restore, net, _ := cfg.ResolveSandboxOptions("bash")
 		// Bash is an interactive shell, not an agent — no system prompt to inject.
 		seed, err := seedHead(projectRoot, shellID, sandbox.AgentTypeBash, worktreePath, home, "")
 		if err != nil {
 			return "", errtrace.Wrap(err)
 		}
 		sb = sandbox.Options{
-			AgentType:      sandbox.AgentTypeBash,
-			WorktreePath:   worktreePath,
-			GitCommonDir:   gitCommonDir(projectRoot),
-			Home:           home,
-			WritablePaths:  append(writable, seed.WritablePaths...),
-			MaskedPaths:    masked,
-			RestoreRO:      restore,
-			Network:        net,
-			Binds:          seed.Binds,
-			Env:            append(env, seed.Env...),
-			Argv:           []string{"/bin/bash"},
-			PreSpawnScript: preSpawn,
-			HardenGUI:      true,
-			Seccomp:        true,
+			AgentType:     sandbox.AgentTypeBash,
+			WorktreePath:  worktreePath,
+			GitCommonDir:  gitCommonDir(projectRoot),
+			Home:          home,
+			WritablePaths: append(writable, seed.WritablePaths...),
+			MaskedPaths:   masked,
+			RestoreRO:     restore,
+			Network:       net,
+			Binds:         seed.Binds,
+			Env:           append(env, seed.Env...),
+			Argv:          []string{"/bin/bash"},
+			HardenGUI:     true,
+			Seccomp:       true,
 		}
 	} else {
 		// Regular shell: plain host bash in the worktree, no confinement.
@@ -485,7 +494,9 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 	home := currentUser.HomeDir
 
 	cfg, _ := config.Load(projectRoot)
-	writable, masked, restore, net, preSpawn := cfg.ResolveSandboxOptions(string(head.AgentType))
+	// Pre-spawn runs once, at the head's initial spawn — not on resume (the agent
+	// is being restored, not freshly created), so the returned script is ignored.
+	writable, masked, restore, net, _ := cfg.ResolveSandboxOptions(string(head.AgentType))
 	seed, err := seedHead(projectRoot, head.ID, head.AgentType, worktreePath, home, head.PrePrompt)
 	if err != nil {
 		return errtrace.Wrap(err)
@@ -504,20 +515,19 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 		Rows: rows,
 		Cols: cols,
 		Sandbox: sandbox.Options{
-			AgentType:      head.AgentType,
-			WorktreePath:   worktreePath,
-			GitCommonDir:   gitCommonDir(projectRoot),
-			Home:           home,
-			WritablePaths:  append(writable, seed.WritablePaths...),
-			MaskedPaths:    masked,
-			RestoreRO:      restore,
-			Network:        net,
-			Binds:          seed.Binds,
-			Env:            env,
-			Argv:           argv,
-			PreSpawnScript: preSpawn,
-			HardenGUI:      true,
-			Seccomp:        true,
+			AgentType:     head.AgentType,
+			WorktreePath:  worktreePath,
+			GitCommonDir:  gitCommonDir(projectRoot),
+			Home:          home,
+			WritablePaths: append(writable, seed.WritablePaths...),
+			MaskedPaths:   masked,
+			RestoreRO:     restore,
+			Network:       net,
+			Binds:         seed.Binds,
+			Env:           env,
+			Argv:          argv,
+			HardenGUI:     true,
+			Seccomp:       true,
 		},
 	})
 	if err != nil {

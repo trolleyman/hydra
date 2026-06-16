@@ -164,4 +164,4 @@
 
 42. [ ] Diff viewer - use the artifacts image diff viewer code to also let the user diff regular image diffs between branches
 
-43. [ ] Pre-spawn script should be shell syntax highlighted
+43. [x] Pre-spawn script should be shell syntax highlighted. Done via a new `ShellEditor` component (highlight.js `bash`, reusing the `.hljs-*` theme already in `index.css`) — a transparent textarea overlaid on a highlighted `<pre>` with synced scroll. While here, also fixed three related bugs the user hit: (a) the script ran via `/bin/sh` (dash), so `set -o pipefail`/bashisms failed with "Illegal option" — now run via `/bin/bash`; (b) it ran for the web bash shells too, where a failing script aborted the shell before `/bin/bash` exec'd (terminal closed instantly) and a removed script still appeared to "stick" — bash shells no longer run it at all; (c) it re-ran on every resume — now it's a once-per-head hook that runs only at initial spawn (gated on `!opts.Resume`, removed from `ResumeHead` and `StartShellSession`).
