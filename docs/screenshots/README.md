@@ -14,8 +14,11 @@ HYDRA_ARTIFACT_OUTPUT=/tmp/shots bun take-screenshots.ts
 
 ![unread indicator](./unread-indicator.png)
 
-The unread-changes indicator (light + `-dark`). An amber dot sits on the right of
-any agent that went `running → waiting`/`finished` while you were away (agent-2
+The unread-changes indicator (light + `-dark`). A sky-blue dot sits on the right
+of any agent that went `running → waiting`/`finished` while you were away (agent-2
 here); it clears when you open the agent. The project dropdown shows a per-project
-unread count badge, and the folder button carries a small amber dot when *other*
-projects have updates waiting.
+unread count badge, and the folder button carries a small sky-blue dot when
+*other* projects have updates waiting.
+
+The left-hand status dot mirrors the status badge (e.g. agent-2 is yellow for
+`waiting`, not green), so the two never disagree.

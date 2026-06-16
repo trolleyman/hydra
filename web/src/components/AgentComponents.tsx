@@ -17,11 +17,22 @@ export function statusDotClass(status: string): string {
   }
 }
 
-// agentDotClass picks the sidebar status dot color. A finished head's session
-// is already stopped (gray), but we want it to read as "done" at a distance, so
-// the agent status takes priority over the raw session status for that case.
+// agentDotClass picks the sidebar status dot color. It mirrors the status badge
+// (agentStatusBadge) so the dot and badge never disagree — e.g. a waiting agent
+// reads yellow at a distance, not green just because its session is still alive.
+// Falls back to the raw session status when no agent status has been reported.
 export function agentDotClass(agent: AgentResponse): string {
-  if (agent.agent_status?.status === 'finished') return 'bg-violet-500'
+  switch (agent.agent_status?.status) {
+    case 'running':
+    case 'merging':  return 'bg-green-500'
+    case 'waiting':  return 'bg-yellow-400'
+    case 'finished': return 'bg-violet-500'
+    case 'starting':
+    case 'building': return 'bg-blue-400'
+    case 'killing':  return 'bg-red-400'
+    case 'pending':
+    case 'stopped':  return 'bg-gray-300 dark:bg-gray-600'
+  }
   return statusDotClass(agent.session_status)
 }
 
@@ -96,7 +107,7 @@ export function AgentSidebarItem({
         // the agent goes running→waiting/finished, cleared when it's opened.
         <span
           aria-label="unread changes"
-          className="absolute right-3 top-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full bg-amber-400 ring-2 ring-amber-400/25 shrink-0"
+          className="absolute right-3 top-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full bg-sky-400 ring-2 ring-sky-400/25 shrink-0"
         />
       )}
       <div className={`flex items-center gap-2 min-w-0 ${agent.has_unread_changes ? 'pr-4' : ''}`}>
