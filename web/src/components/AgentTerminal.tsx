@@ -243,12 +243,13 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
 
       // Shift+Enter -> insert a newline instead of submitting. A terminal can't
       // tell Shift+Enter apart from Enter on its own (both yield a bare CR), so
-      // the agent submits. Send ESC+CR (\x1b\r), the same sequence Claude Code's
-      // `/terminal-setup` configures iTerm2/VSCode to emit; the agent's input
-      // editor reads it as a newline rather than a submit.
+      // the agent submits. Send a bare line feed (\n, 0x0a): agent prompts
+      // (Claude Code, Gemini) treat LF as a literal newline while CR submits.
+      // The older ESC+CR (\x1b\r) sequence is unreliable on current Claude Code —
+      // it shows a transient newline that collapses as soon as you keep typing.
       if (isShiftEnter) {
         if (ws.readyState === WebSocket.OPEN) {
-          ws.send(new Uint8Array([0x1b, 0x0d]))
+          ws.send(new Uint8Array([0x0a]))
         }
         return false
       }
