@@ -45,6 +45,25 @@ type Bind struct {
 	ReadOnly bool
 }
 
+// CowMount exposes a read-only host directory (Lower) at Dest inside the sandbox
+// with copy-on-write semantics: the agent sees Lower's contents and may overwrite
+// them, but writes land in Upper (a per-head host dir) and never touch Lower.
+//
+// The mechanism is platform-specific. Linux mounts an overlayfs (Lower as the
+// read-only lower layer, Upper as the writable upper, Work as overlayfs's
+// scratch dir) — this needs an overlay-capable bwrap, and falls back to a plain
+// read-only bind when that is unavailable. macOS clones Lower into Dest with an
+// APFS copy-on-write clone (clonefile); Upper and Work are unused there.
+//
+// All paths are absolute host paths resolved by the caller (see heads). Dest is
+// always under the worktree, so its writes stay within the worktree confinement.
+type CowMount struct {
+	Lower string // read-only source directory (host)
+	Upper string // writable upper layer, persisted per-head (host; Linux only)
+	Work  string // overlayfs work dir, same filesystem as Upper (host; Linux only)
+	Dest  string // mountpoint inside the sandbox, under the worktree
+}
+
 // Options describes a sandbox launch request. Paths use the host's real
 // filesystem layout; "~" and "$VAR" are expanded against Home/the environment.
 type Options struct {
@@ -73,6 +92,9 @@ type Options struct {
 	// sandbox (applied before Binds), so per-head files can be bind-mounted into
 	// otherwise read-only locations like $HOME/.hydra.
 	TmpfsDirs []string
+	// CowMounts expose read-only host dirs at worktree paths with copy-on-write
+	// semantics (overlayfs on Linux, APFS clone on macOS). See CowMount.
+	CowMounts []CowMount
 
 	// Env is the environment for the sandboxed process.
 	Env []string

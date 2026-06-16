@@ -4,17 +4,58 @@ package sandbox
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
+	"strings"
+	"sync"
 
 	"braces.dev/errtrace"
 )
+
+// bwrapPath resolves the bwrap binary. HYDRA_BWRAP overrides PATH lookup so the
+// daemon can be pointed at a specific build (e.g. an overlay-capable bwrap in
+// ~/.local/bin when the distro's packaged bwrap has overlay support stripped).
+func bwrapPath() (string, error) {
+	if p := os.Getenv("HYDRA_BWRAP"); p != "" {
+		if info, err := os.Stat(p); err == nil && !info.IsDir() {
+			return p, nil
+		}
+	}
+	return errtrace.Wrap2(exec.LookPath("bwrap"))
+}
+
+// overlayCache memoises whether a given bwrap binary supports overlay mounts.
+// Some distros (e.g. Ubuntu) ship bwrap with overlay support compiled out, so a
+// COW mount has to fall back to a read-only bind there.
+var (
+	overlayMu    sync.Mutex
+	overlayCache = map[string]bool{}
+)
+
+// bwrapSupportsOverlay reports whether the bwrap at the given path accepts the
+// --overlay-src family of options (parsed once from its --help output).
+func bwrapSupportsOverlay(bwrap string) bool {
+	overlayMu.Lock()
+	defer overlayMu.Unlock()
+	if v, ok := overlayCache[bwrap]; ok {
+		return v
+	}
+	out, _ := exec.Command(bwrap, "--help").CombinedOutput()
+	ok := strings.Contains(string(out), "--overlay-src")
+	overlayCache[bwrap] = ok
+	if !ok {
+		log.Printf("sandbox: %s lacks overlay support; copy-on-write mounts will fall back to read-only binds. "+
+			"Install an overlay-capable bwrap and point HYDRA_BWRAP at it for true COW.", bwrap)
+	}
+	return ok
+}
 
 // Available reports whether bubblewrap can run on this host. It actually
 // executes a trivial bwrap to detect the common failure mode where the kernel
 // forbids unprivileged user namespaces (containers, hardened kernels, some WSL).
 func Available() (bool, string) {
-	path, err := exec.LookPath("bwrap")
+	path, err := bwrapPath()
 	if err != nil {
 		return false, "bubblewrap (bwrap) is not installed or not on PATH; install it (e.g. `sudo apt install bubblewrap` / `brew install bubblewrap`)"
 	}
@@ -43,7 +84,7 @@ func BuildSpec(opts Options) (*Spec, error) {
 		return rawSpec(opts)
 	}
 
-	bwrap, err := exec.LookPath("bwrap")
+	bwrap, err := bwrapPath()
 	if err != nil {
 		return nil, errtrace.Wrap(fmt.Errorf("bwrap not found on PATH: %w", err))
 	}
@@ -93,6 +134,29 @@ func BuildSpec(opts Options) (*Spec, error) {
 	addRWDir(opts.GitCommonDir)
 	for _, p := range expandAll(opts.WritablePaths, home) {
 		addRWDir(p)
+	}
+
+	// Copy-on-write mounts: expose a read-only Lower dir at Dest, but redirect
+	// writes to a per-head Upper via overlayfs. Applied after the worktree bind so
+	// the mountpoint's parent is already writable. When this bwrap lacks overlay
+	// support, fall back to a read-only bind (reads work; writes fail with EROFS
+	// instead of corrupting the source).
+	overlayOK := bwrapSupportsOverlay(bwrap)
+	for _, m := range opts.CowMounts {
+		if m.Lower == "" || m.Dest == "" {
+			continue
+		}
+		if _, err := os.Stat(m.Lower); err != nil {
+			continue
+		}
+		if overlayOK && m.Upper != "" && m.Work != "" {
+			args = append(args,
+				"--overlay-src", m.Lower,
+				"--overlay", m.Upper, m.Work, m.Dest,
+			)
+		} else {
+			args = append(args, "--ro-bind", m.Lower, m.Dest)
+		}
 	}
 
 	// Mask credential/secret locations (dirs -> empty tmpfs, files -> /dev/null).

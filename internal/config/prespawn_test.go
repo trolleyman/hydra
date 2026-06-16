@@ -33,7 +33,7 @@ func TestPreSpawnScriptRoundTrip(t *testing.T) {
 	}
 
 	// ResolveSandboxOptions surfaces the default script for any agent type.
-	_, _, _, _, preSpawn := parsed.ResolveSandboxOptions("claude")
+	_, _, _, _, _, preSpawn := parsed.ResolveSandboxOptions("claude")
 	if preSpawn != "mise trust\necho ready" {
 		t.Fatalf("resolved preSpawn mismatch: %q", preSpawn)
 	}
@@ -47,10 +47,10 @@ func TestPreSpawnScriptAgentOverride(t *testing.T) {
 			"claude": {Sandbox: &SandboxConfig{PreSpawnScript: strPtr("claude-only")}},
 		},
 	}
-	if _, _, _, _, ps := cfg.ResolveSandboxOptions("claude"); ps != "claude-only" {
+	if _, _, _, _, _, ps := cfg.ResolveSandboxOptions("claude"); ps != "claude-only" {
 		t.Fatalf("claude override: got %q", ps)
 	}
-	if _, _, _, _, ps := cfg.ResolveSandboxOptions("gemini"); ps != "default" {
+	if _, _, _, _, _, ps := cfg.ResolveSandboxOptions("gemini"); ps != "default" {
 		t.Fatalf("gemini inherits default: got %q", ps)
 	}
 }

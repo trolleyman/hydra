@@ -123,6 +123,61 @@ func TestBuildSpecNetworkEnabled(t *testing.T) {
 	}
 }
 
+// TestBuildSpecLinuxCowMount checks a CowMount is translated into either an
+// overlayfs mount (when this bwrap supports overlay) or a read-only bind
+// fallback, and that the read-only variant (empty Upper/Work) always binds.
+func TestBuildSpecLinuxCowMount(t *testing.T) {
+	home := t.TempDir()
+	work := filepath.Join(home, "work")
+	lower := filepath.Join(home, "src", "out")
+	upper := filepath.Join(home, "cow", "upper")
+	cowWork := filepath.Join(home, "cow", "work")
+	dest := filepath.Join(work, "pipeline", "out")
+	for _, d := range []string{work, lower, upper, cowWork, dest} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	opts := Options{
+		AgentType:    AgentTypeClaude,
+		WorktreePath: work,
+		Home:         home,
+		CowMounts:    []CowMount{{Lower: lower, Upper: upper, Work: cowWork, Dest: dest}},
+		Argv:         []string{"claude"},
+	}
+	spec, err := BuildSpec(opts)
+	if err != nil {
+		t.Fatalf("BuildSpec: %v", err)
+	}
+	defer spec.Cleanup()
+
+	if bwrapSupportsOverlay(spec.Path) {
+		// --overlay-src lower --overlay upper work dest
+		i := pairIndex(spec.Args, "--overlay-src", lower)
+		if i == -1 {
+			t.Fatalf("missing --overlay-src %s in %v", lower, spec.Args)
+		}
+		if !(spec.Args[i+2] == "--overlay" && spec.Args[i+3] == upper && spec.Args[i+4] == cowWork && spec.Args[i+5] == dest) {
+			t.Errorf("overlay args malformed near %v", spec.Args[i:])
+		}
+	} else if !hasPair(spec.Args, "--ro-bind", lower, dest) {
+		t.Errorf("expected --ro-bind %s %s fallback in %v", lower, dest, spec.Args)
+	}
+
+	// A read-only COW mount (no Upper/Work) must always be a read-only bind.
+	roOpts := opts
+	roOpts.CowMounts = []CowMount{{Lower: lower, Dest: dest}}
+	roSpec, err := BuildSpec(roOpts)
+	if err != nil {
+		t.Fatalf("BuildSpec ro: %v", err)
+	}
+	defer roSpec.Cleanup()
+	if !hasPair(roSpec.Args, "--ro-bind", lower, dest) {
+		t.Errorf("read-only cow mount should --ro-bind %s %s, got %v", lower, dest, roSpec.Args)
+	}
+}
+
 // hasPair2 reports whether args contains flag immediately followed by a.
 func hasPair2(args []string, flag, a string) bool {
 	return pairIndex(args, flag, a) != -1
