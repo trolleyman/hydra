@@ -1098,7 +1098,10 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
 
   return (
     <div className="mb-4">
-      <div className="flex flex-wrap items-center gap-2 mb-2">
+      {/* Reserve the filter bar's height (its segmented controls / chips are
+          taller than the bare title) so the header stays the same height whether
+          or not tags are present — the filter loading in must not jump the layout. */}
+      <div className="flex flex-wrap items-center gap-2 mb-2 min-h-[1.625rem]">
         <ImageIcon className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400" />
         <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Artifacts</h3>
         {generatingCount > 0 && (
