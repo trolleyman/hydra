@@ -178,7 +178,10 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 	if useShell {
 		// Sandboxed unless the client explicitly opts into a regular host shell.
 		sandboxed := r.URL.Query().Get("sandboxed") != "false"
-		shellID, err := heads.StartShellSession(s.Sessions, projectRoot, *head, 24, 80, sandboxed)
+		// shell_id identifies the terminal tab so each gets its own shell process
+		// and a refresh reattaches to the same one.
+		shellToken := r.URL.Query().Get("shell_id")
+		shellID, err := heads.StartShellSession(s.Sessions, projectRoot, *head, 24, 80, sandboxed, shellToken)
 		if err != nil {
 			log.Printf("terminal ws: start shell session for %q: %v", agentID, err)
 			_ = conn.WriteMessage(websocket.TextMessage, []byte("error: "+err.Error()))

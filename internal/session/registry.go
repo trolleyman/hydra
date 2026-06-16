@@ -22,6 +22,11 @@ type StartOptions struct {
 	Sandbox sandbox.Options
 	Rows    uint16
 	Cols    uint16
+	// Ephemeral marks a throwaway session (e.g. a web bash shell) that should be
+	// terminated once its last attacher disconnects and nobody reattaches within
+	// a short grace period, and removed from the registry as soon as it exits.
+	// Unlike agents, it is not meant to outlive its terminal.
+	Ephemeral bool
 }
 
 // Registry owns all live agent sessions for the daemon.
@@ -84,6 +89,7 @@ func (r *Registry) Start(opts StartOptions) (*Session, error) {
 		rows:         opts.Rows,
 		cols:         opts.Cols,
 		status:       StatusRunning,
+		ephemeral:    opts.Ephemeral,
 	}
 
 	r.mu.Lock()
@@ -96,6 +102,11 @@ func (r *Registry) Start(opts StartOptions) (*Session, error) {
 		r.mu.RUnlock()
 		if fn != nil {
 			fn(done.info())
+		}
+		// Ephemeral sessions (web bash shells) don't outlive their process, so
+		// drop them from the registry immediately rather than lingering as exited.
+		if done.ephemeral {
+			r.Remove(done.ID)
 		}
 	})
 

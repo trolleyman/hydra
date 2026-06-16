@@ -95,22 +95,41 @@ type Options struct {
 	NoSandbox bool
 }
 
-// withPreSpawn wraps argv so that script runs inside the sandbox (via /bin/bash)
-// before the real command. The script shares the agent's shell: falling through
-// it execs argv, while an explicit `exit N` aborts the launch. Returns argv
-// unchanged when no script is configured. Used by the platform BuildSpec impls.
+// withPreSpawn wraps argv so that script runs inside the sandbox before the real
+// command. The script shares the agent's shell: falling through it execs argv,
+// while an explicit `exit N` aborts the launch. Returns argv unchanged when no
+// script is configured. Used by the platform BuildSpec impls.
 //
-// bash (not /bin/sh) is used so the script can rely on bashisms — e.g.
-// `set -o pipefail` — which dash rejects with "Illegal option". A `#!/bin/bash`
-// shebang in the script is harmless: it is a comment to the bash already running
-// the wrapper.
+// The interpreter honors the script's `#!` shebang line (so e.g. `#!/bin/zsh`
+// runs under zsh, `#!/usr/bin/env bash` under bash). With no shebang it defaults
+// to /bin/bash, so bashisms like `set -o pipefail` — which dash rejects with
+// "Illegal option" — work out of the box. The shebang line itself is a harmless
+// comment to the interpreter that ends up running the wrapper.
 func withPreSpawn(script string, argv []string) []string {
 	if strings.TrimSpace(script) == "" || len(argv) == 0 {
 		return argv
 	}
+	interp := preSpawnInterp(script)
 	// $0 is the wrapper name; $@ is the original argv, exec'd after the script.
 	wrapper := script + "\nexec \"$@\""
-	return append([]string{"/bin/bash", "-c", wrapper, "hydra-pre-spawn"}, argv...)
+	cmd := append(interp, "-c", wrapper, "hydra-pre-spawn")
+	return append(cmd, argv...)
+}
+
+// preSpawnInterp returns the interpreter command line for a pre-spawn script: the
+// fields of a leading `#!` shebang (e.g. ["/usr/bin/env", "zsh"]), or the default
+// ["/bin/bash"] when the script has none. Invoked as `<interp...> -c <script>`.
+func preSpawnInterp(script string) []string {
+	s := strings.TrimLeft(script, " \t\r\n")
+	if line, ok := strings.CutPrefix(s, "#!"); ok {
+		if i := strings.IndexAny(line, "\r\n"); i >= 0 {
+			line = line[:i]
+		}
+		if fields := strings.Fields(line); len(fields) > 0 {
+			return fields
+		}
+	}
+	return []string{"/bin/bash"}
 }
 
 // rawSpec builds a launch spec that runs opts.Argv directly on the host with no

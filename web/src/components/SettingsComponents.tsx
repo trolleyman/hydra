@@ -266,8 +266,9 @@ export function ConfigForm({
               Pre-Spawn Script
             </label>
             <InfoTooltip title="Pre-Spawn Script">
-              <p>A shell script run <strong>inside the sandbox</strong> via <code className="text-blue-300">/bin/bash</code> <strong>once</strong>, when the agent is first spawned, in its worktree with the same environment and confinement. It does <strong>not</strong> run on resume or for the web bash shells.</p>
-              <p className="mt-1.5">Useful for one-off setup such as <code className="text-blue-300">mise trust</code>. The agent launches after the script falls through; an explicit <code className="text-blue-300">exit 1</code> aborts the launch. bash means <code className="text-blue-300">set -o pipefail</code> and other bashisms work.</p>
+              <p>A shell script run <strong>inside the sandbox</strong> <strong>once</strong>, when the agent is first spawned, in its worktree with the same environment and confinement. It does <strong>not</strong> run on resume or for the web bash shells.</p>
+              <p className="mt-1.5">Runs under the script's <code className="text-blue-300">#!</code> shebang if present (e.g. <code className="text-blue-300">#!/bin/zsh</code>), otherwise <code className="text-blue-300">/bin/bash</code> — so <code className="text-blue-300">set -o pipefail</code> and other bashisms work.</p>
+              <p className="mt-1.5">Useful for one-off setup such as <code className="text-blue-300">mise trust</code>. The agent launches after the script falls through; an explicit <code className="text-blue-300">exit 1</code> aborts the launch.</p>
               <p className="mt-1.5">These environment variables describe the head and are available to the script:</p>
               <ul className="mt-1 space-y-0.5 list-none">
                 <li><code className="text-blue-300">HYDRA_HEAD_ID</code> — the head's ID</li>

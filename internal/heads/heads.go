@@ -401,17 +401,41 @@ func gitCommonDir(projectRoot string) string {
 	return dir
 }
 
+// sanitizeShellToken reduces a client-supplied terminal-tab token to a safe
+// session-ID suffix: alphanumerics, '-' and '_' only, capped in length. The
+// token becomes part of a session ID and seed directory name, so anything else
+// (path separators, '..') is dropped to prevent traversal.
+func sanitizeShellToken(token string) string {
+	var b strings.Builder
+	for _, r := range token {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_' {
+			b.WriteRune(r)
+		}
+		if b.Len() >= 64 {
+			break
+		}
+	}
+	return b.String()
+}
+
 // StartShellSession opens an interactive bash session sharing the head's
 // worktree. When sandboxed is true the shell runs inside the same OS sandbox as
 // the agent; when false it runs directly on the host with no confinement (an
-// explicit user opt-in). The two modes get distinct session IDs so both can be
-// open at once.
-func StartShellSession(reg *session.Registry, projectRoot string, head Head, rows, cols uint16, sandboxed bool) (string, error) {
+// explicit user opt-in).
+//
+// token uniquely identifies a terminal tab so each opened shell gets its own
+// independent process (rather than all tabs sharing one), and is stable across a
+// tab's reconnects (a refresh reattaches to the same shell). Shells are started
+// ephemeral: closing the tab terminates the process after a short grace period.
+func StartShellSession(reg *session.Registry, projectRoot string, head Head, rows, cols uint16, sandboxed bool, token string) (string, error) {
 	shellID := head.ID + "-shell"
 	if !sandboxed {
-		shellID = head.ID + "-shell-host"
+		shellID += "-host"
 	}
-	if _, ok := reg.Get(shellID); ok {
+	if tok := sanitizeShellToken(token); tok != "" {
+		shellID += "-" + tok
+	}
+	if reg.IsLive(shellID) {
 		return shellID, nil
 	}
 
@@ -472,7 +496,7 @@ func StartShellSession(reg *session.Registry, projectRoot string, head Head, row
 		}
 	}
 
-	if _, err = reg.Start(session.StartOptions{ID: shellID, Rows: rows, Cols: cols, Sandbox: sb}); err != nil {
+	if _, err = reg.Start(session.StartOptions{ID: shellID, Rows: rows, Cols: cols, Sandbox: sb, Ephemeral: true}); err != nil {
 		return "", errtrace.Wrap(err)
 	}
 	return shellID, nil
