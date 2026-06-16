@@ -56,6 +56,12 @@ func runServer(_ *cobra.Command, _ []string) error {
 		Addr:           addr,
 		Handler:        rt.handler,
 		MaxHeaderBytes: 1 << 20, // 1 MB
+		// Derive every request context from the signal context so Ctrl-C cancels
+		// in-flight handlers immediately. Without this, a long-running handler
+		// (notably the `claude /usage` probe, up to 20s) keeps srv.Shutdown
+		// blocked until its 5s deadline, which races mage's own 5s cleanup
+		// timeout and can leave an orphaned server holding the port.
+		BaseContext: func(net.Listener) context.Context { return ctx },
 	}
 
 	// Also serve the daemon control socket so CLI commands (spawn/attach/list)
