@@ -554,6 +554,12 @@ function formatCommitDate(iso: string): string {
 
 // ── Custom tooltip ────────────────────────────────────────────────────────────
 
+// Only one CustomTooltip is ever visible at a time. Showing a tooltip
+// immediately dismisses whichever was previously active, so scrolling the
+// pointer across many triggers (e.g. the commit list) can't leave a trail of
+// stale, lingering boxes behind.
+let activeHide: (() => void) | null = null
+
 function CustomTooltip({ content, children, side = 'bottom', className = 'w-full' }: {
   content: React.ReactNode
   children: React.ReactNode
@@ -572,8 +578,17 @@ function CustomTooltip({ content, children, side = 'bottom', className = 'w-full
     }
   }, [])
 
+  const hideNow = useCallback(() => {
+    cancelHide()
+    setVisible(false)
+    if (activeHide === hideNow) activeHide = null
+  }, [cancelHide])
+
   const show = useCallback(() => {
     cancelHide()
+    // Dismiss any other tooltip before we claim the active slot.
+    if (activeHide && activeHide !== hideNow) activeHide()
+    activeHide = hideNow
     if (ref.current) {
       const rect = ref.current.getBoundingClientRect()
       if (side === 'right') {
@@ -587,16 +602,25 @@ function CustomTooltip({ content, children, side = 'bottom', className = 'w-full
       }
     }
     setVisible(true)
-  }, [side, cancelHide])
+  }, [side, cancelHide, hideNow])
 
   // Hide after a short grace period so the pointer can travel from the trigger
   // into the tooltip (and back) without it disappearing.
   const scheduleHide = useCallback(() => {
     cancelHide()
-    hideTimer.current = setTimeout(() => setVisible(false), 150)
-  }, [cancelHide])
+    hideTimer.current = setTimeout(hideNow, 150)
+  }, [cancelHide, hideNow])
 
-  useEffect(() => () => cancelHide(), [cancelHide])
+  // The position is captured once on show, so it goes stale the moment the
+  // page scrolls. Dismiss on scroll rather than leave a detached box floating.
+  useEffect(() => {
+    if (!visible) return
+    const onScroll = () => hideNow()
+    window.addEventListener('scroll', onScroll, true)
+    return () => window.removeEventListener('scroll', onScroll, true)
+  }, [visible, hideNow])
+
+  useEffect(() => () => hideNow(), [hideNow])
 
   return (
     <div ref={ref} className={`relative inline-flex ${className}`} onMouseEnter={show} onMouseLeave={scheduleHide}>
