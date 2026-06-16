@@ -321,8 +321,8 @@ try {
     // preference in localStorage ('hydra-theme-mode') and toggles a `dark`
     // class on <html>; we seed that key before the app boots so each capture
     // renders the chosen theme deterministically (no reliance on the OS
-    // `prefers-color-scheme`). Light renders keep their original filenames; dark
-    // renders get a `-dark` suffix.
+    // `prefers-color-scheme`). Each render is tagged by theme in its filename:
+    // light renders get a `-light` suffix, dark renders a `-dark` suffix.
     const themes = ['light', 'dark'] as const
     // Each (page, theme) capture is fully independent — its own browser context
     // (isolated localStorage/cookies) hitting the shared read-only simulation
@@ -339,7 +339,7 @@ try {
     let nextTask = 0
 
     const captureShot = async (pg: (typeof pages)[number], theme: (typeof themes)[number]) => {
-        const suffix = theme === 'dark' ? '-dark' : ''
+        const suffix = theme === 'dark' ? '-dark' : '-light'
         const ctx = await browser.newContext({
           viewport: pg.viewport ?? { width: 1280, height: 800 },
           deviceScaleFactor: 1,
