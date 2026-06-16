@@ -313,12 +313,16 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 			worktree = *head.Worktree
 		}
 
-		// lastHash starts at the current state so attaching never fires a spurious
-		// initial refresh — the client already fetched the diff on mount.
+		// lastHash/lastHead start at the current state so attaching never fires a
+		// spurious initial refresh — the client already fetched the diff on mount.
 		var lastHash string
+		var lastHead string
 		if worktree != "" {
 			if h, err := git.WorktreeStateHash(worktree); err == nil {
 				lastHash = h
+			}
+			if c, err := git.ResolveRef(worktree, "HEAD"); err == nil {
+				lastHead = c
 			}
 		}
 
@@ -334,11 +338,35 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			lastHash = h
+			if c, err := git.ResolveRef(worktree, "HEAD"); err == nil {
+				lastHead = c
+			}
 			sendTerminalEvent(conn, "diff_refresh")
 		}
 
-		ticker := time.NewTicker(3 * time.Second)
+		// checkHeadAndEmit is a cheap HEAD-only check (a single git rev-parse, no
+		// `git diff HEAD`) so a new commit surfaces within ~1s without paying the
+		// full worktree-hash cost on every tick. When HEAD moves it falls through to
+		// checkAndEmit, which recomputes the full fingerprint and emits.
+		checkHeadAndEmit := func() {
+			if worktree == "" {
+				return
+			}
+			c, err := git.ResolveRef(worktree, "HEAD")
+			if err != nil || c == lastHead {
+				return
+			}
+			checkAndEmit()
+		}
+
+		// Full worktree fingerprint poll (catches uncommitted edits) on a slow
+		// timer; cheap HEAD-only poll (catches new commits) on a faster one. The
+		// expensive full poll can be infrequent because agent-driven edits already
+		// trigger an immediate re-check via the status-log git-command scan below.
+		ticker := time.NewTicker(10 * time.Second)
 		defer ticker.Stop()
+		headTicker := time.NewTicker(1 * time.Second)
+		defer headTicker.Stop()
 
 		var scanner *bufio.Scanner
 		f, err := os.Open(statusLogPath)
@@ -357,6 +385,8 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 				return
 			case <-ticker.C:
 				checkAndEmit()
+			case <-headTicker.C:
+				checkHeadAndEmit()
 			default:
 				if scanner != nil && scanner.Scan() {
 					if looksLikeGitCommand(scanner.Text()) {
