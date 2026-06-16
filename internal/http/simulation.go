@@ -1135,6 +1135,9 @@ func (s *SimulationServer) GetConfig(w http.ResponseWriter, r *http.Request, pro
 		resp.Defaults.Sandbox = &api.SandboxConfig{
 			PreSpawnScript: ptr("#!/bin/bash\nset -euo pipefail\ncp -r \"$HYDRA_PROJECT_ROOT/pipeline/out\" \"$HYDRA_WORKTREE/pipeline/out\"\n"),
 		}
+		resp.Artifacts = &[]api.ArtifactScript{
+			{Name: "screenshots", Command: "bun run screenshots.ts", TimeoutSec: ptr(900)},
+		}
 	}
 	api.WriteJSON(w, http.StatusOK, resp)
 }

@@ -621,6 +621,53 @@ func artifactsExampleLines() []string {
 	}
 }
 
+// artifactComments holds the user-written comments preserved across a save for a
+// single artifact, keyed by its name: lines before the [[artifacts]] header and
+// comment lines inside the block.
+type artifactComments struct {
+	leading  []string
+	interior []string
+}
+
+// artifactFieldLines renders the field assignments of one artifact.
+func artifactFieldLines(a ArtifactScript) []string {
+	out := []string{
+		"name = " + tomlStringValue(a.Name),
+		"command = " + tomlStringValue(a.Command),
+	}
+	if a.TimeoutSec > 0 {
+		out = append(out, fmt.Sprintf("timeout_sec = %d", a.TimeoutSec))
+	}
+	if a.UnsafeHost {
+		out = append(out, "unsafe_host = true")
+	}
+	return out
+}
+
+// emitArtifactsAuthoritative renders arts as the source of truth, preserving any
+// hand-written comments matched to an existing artifact by name. An empty list
+// falls back to the commented example so the documentation never stands alone.
+func emitArtifactsAuthoritative(out *[]string, arts []ArtifactScript, meta map[string]artifactComments) {
+	rendered := 0
+	for _, a := range arts {
+		if a.Name == "" && a.Command == "" {
+			continue
+		}
+		if rendered > 0 {
+			*out = append(*out, "")
+		}
+		rendered++
+		m := meta[a.Name]
+		*out = append(*out, m.leading...)
+		*out = append(*out, "[[artifacts]]")
+		*out = append(*out, m.interior...)
+		*out = append(*out, artifactFieldLines(a)...)
+	}
+	if rendered == 0 {
+		*out = append(*out, artifactsExampleLines()...)
+	}
+}
+
 // section is a top-level TOML section: an optional header line plus the lines
 // that follow it until the next header, with any comment lines that immediately
 // preceded the header captured as its leading comments.
@@ -827,6 +874,7 @@ func renderConfig(existing []byte, cfg Config) string {
 	tableComments := map[string][]string{}
 	var artifactBlocks [][]string
 	existingArtifacts := map[string]bool{}
+	artifactMeta := map[string]artifactComments{} // name -> preserved comments
 
 	for _, sec := range parseSections(existing) {
 		if isArrayHeader(sec.header) {
@@ -834,9 +882,22 @@ func renderConfig(existing []byte, cfg Config) string {
 			block = append(block, sec.header)
 			block = append(block, sec.body...)
 			artifactBlocks = append(artifactBlocks, block)
+			var name string
+			var interior []string
 			for _, bl := range sec.body {
+				if strings.HasPrefix(strings.TrimSpace(bl), "#") {
+					interior = append(interior, bl)
+					continue
+				}
 				if keyName(bl) == "name" {
-					existingArtifacts[artifactValue(bl)] = true
+					name = artifactValue(bl)
+				}
+			}
+			if name != "" {
+				existingArtifacts[name] = true
+				artifactMeta[name] = artifactComments{
+					leading:  userComments(sec.leading, keys),
+					interior: interior,
 				}
 			}
 			continue
@@ -886,32 +947,25 @@ func renderConfig(existing []byte, cfg Config) string {
 		emitAgent(&out, name, cfg.Agents[name], keyComments, tableComments)
 	}
 
-	// Artifacts: documentation block, then preserved blocks / commented example.
+	// Artifacts: documentation block, then the artifact tables.
 	out = appendBlank(out)
 	out = append(out, artifactsDocLines()...)
-	if len(artifactBlocks) == 0 && !hasRenderableArtifacts(cfg.Artifacts, existingArtifacts) {
+	if cfg.Artifacts != nil {
+		// Authoritative mode (the editor sent an explicit list): cfg.Artifacts is
+		// the source of truth, so edits and deletions take effect. Per-artifact
+		// hand-written comments are preserved by matching on the artifact name.
+		emitArtifactsAuthoritative(&out, cfg.Artifacts, artifactMeta)
+	} else if len(artifactBlocks) == 0 {
+		// No artifacts configured and none in the file: show a commented example.
 		out = append(out, artifactsExampleLines()...)
 	} else {
+		// Preserve mode (no explicit list, e.g. a defaults-only save): keep the
+		// existing artifact blocks verbatim.
 		for i, block := range artifactBlocks {
 			if i > 0 {
 				out = append(out, "")
 			}
 			out = append(out, block...)
-		}
-		for _, a := range cfg.Artifacts {
-			if (a.Name == "" && a.Command == "") || existingArtifacts[a.Name] {
-				continue
-			}
-			out = append(out, "")
-			out = append(out, "[[artifacts]]")
-			out = append(out, "name = "+tomlStringValue(a.Name))
-			out = append(out, "command = "+tomlStringValue(a.Command))
-			if a.TimeoutSec > 0 {
-				out = append(out, fmt.Sprintf("timeout_sec = %d", a.TimeoutSec))
-			}
-			if a.UnsafeHost {
-				out = append(out, "unsafe_host = true")
-			}
 		}
 	}
 
@@ -1080,15 +1134,6 @@ func sandboxHasContent(sb *SandboxConfig) bool {
 		return true
 	}
 	return sb.Network != nil && (sb.Network.Enabled != nil || len(sb.Network.AllowedHosts) > 0)
-}
-
-func hasRenderableArtifacts(arts []ArtifactScript, existing map[string]bool) bool {
-	for _, a := range arts {
-		if (a.Name != "" || a.Command != "") && !existing[a.Name] {
-			return true
-		}
-	}
-	return false
 }
 
 // appendBlank adds a single blank separator line if out is non-empty.

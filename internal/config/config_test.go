@@ -347,6 +347,77 @@ writable_paths = ["~/.cache"]
 	}
 }
 
+func TestArtifactsAuthoritativeEditAndDelete(t *testing.T) {
+	const existing = `[sandbox]
+writable_paths = ["~/.cache"]
+
+# leading note
+[[artifacts]]
+# inner note about shots
+name = "shots"
+command = "bun shots.ts"
+timeout_sec = 900
+
+[[artifacts]]
+name = "docs"
+command = "make docs"
+`
+	// Simulate an editor save: artifacts sent explicitly. "shots" is edited,
+	// "docs" is deleted, and a brand-new "extra" is added.
+	cfg := Config{Artifacts: []ArtifactScript{
+		{Name: "shots", Command: "bun newshots.ts", TimeoutSec: 120},
+		{Name: "extra", Command: "echo hi"},
+	}}
+	out := renderConfig([]byte(existing), cfg)
+	t.Logf("rendered:\n%s", out)
+
+	loaded, err := decodeConfig([]byte(out))
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(loaded.Artifacts) != 2 {
+		t.Fatalf("want 2 artifacts, got %+v", loaded.Artifacts)
+	}
+	if loaded.Artifacts[0].Name != "shots" || loaded.Artifacts[0].Command != "bun newshots.ts" || loaded.Artifacts[0].TimeoutSec != 120 {
+		t.Errorf("edit not applied: %+v", loaded.Artifacts[0])
+	}
+	if loaded.Artifacts[1].Name != "extra" {
+		t.Errorf("new artifact missing: %+v", loaded.Artifacts)
+	}
+	if strings.Contains(out, `"docs"`) {
+		t.Errorf("deleted artifact still present:\n%s", out)
+	}
+	// Hand-written comments for a surviving artifact are preserved by name.
+	if !strings.Contains(out, "# leading note") || !strings.Contains(out, "# inner note about shots") {
+		t.Errorf("comments for surviving artifact dropped:\n%s", out)
+	}
+
+	// Idempotent re-render.
+	second := renderConfig([]byte(out), loaded)
+	if second != out {
+		t.Errorf("authoritative render not idempotent:\n--first--\n%s\n--second--\n%s", out, second)
+	}
+}
+
+func TestArtifactsAuthoritativeEmptyClears(t *testing.T) {
+	const existing = `[[artifacts]]
+name = "shots"
+command = "bun shots.ts"
+`
+	// An explicit empty (non-nil) list clears all artifacts.
+	out := renderConfig([]byte(existing), Config{Artifacts: []ArtifactScript{}})
+	loaded, err := decodeConfig([]byte(out))
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(loaded.Artifacts) != 0 {
+		t.Errorf("expected artifacts cleared, got %+v", loaded.Artifacts)
+	}
+	if !strings.Contains(out, "# [[artifacts]]") {
+		t.Errorf("commented example should appear after clearing:\n%s", out)
+	}
+}
+
 func TestArtifactsSurviveDefaultsOnlySave(t *testing.T) {
 	const existing = `[sandbox]
 writable_paths = ["~/.cache"]

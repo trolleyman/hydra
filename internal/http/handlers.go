@@ -431,7 +431,39 @@ func (s *Server) GetConfig(_ context.Context, request api.GetConfigRequestObject
 		resp.Agents[name] = toAPIAgentConfig(agent)
 	}
 
+	if len(cfg.Artifacts) > 0 {
+		arts := make([]api.ArtifactScript, len(cfg.Artifacts))
+		for i, a := range cfg.Artifacts {
+			arts[i] = toAPIArtifactScript(a)
+		}
+		resp.Artifacts = &arts
+	}
+
 	return api.GetConfig200JSONResponse(resp), nil
+}
+
+// toAPIArtifactScript converts an internal ArtifactScript to the API representation.
+func toAPIArtifactScript(a config.ArtifactScript) api.ArtifactScript {
+	out := api.ArtifactScript{Name: a.Name, Command: a.Command}
+	if a.TimeoutSec != 0 {
+		out.TimeoutSec = &a.TimeoutSec
+	}
+	if a.UnsafeHost {
+		out.UnsafeHost = &a.UnsafeHost
+	}
+	return out
+}
+
+// fromAPIArtifactScript converts an API ArtifactScript to the internal representation.
+func fromAPIArtifactScript(a api.ArtifactScript) config.ArtifactScript {
+	out := config.ArtifactScript{Name: a.Name, Command: a.Command}
+	if a.TimeoutSec != nil {
+		out.TimeoutSec = *a.TimeoutSec
+	}
+	if a.UnsafeHost != nil {
+		out.UnsafeHost = *a.UnsafeHost
+	}
+	return out
 }
 
 // toAPIAgentConfig converts an internal AgentConfig to the API representation.
@@ -496,6 +528,15 @@ func (s *Server) SaveConfig(_ context.Context, request api.SaveConfigRequestObje
 	}
 	for name, agent := range request.Body.Agents {
 		newCfg.Agents[name] = fromAPIAgentConfig(agent)
+	}
+	// A non-nil artifacts list (even empty) is authoritative, so the editor can
+	// add, edit, and delete artifacts. A nil list (older clients) leaves the
+	// existing [[artifacts]] blocks untouched.
+	if request.Body.Artifacts != nil {
+		newCfg.Artifacts = make([]config.ArtifactScript, 0, len(*request.Body.Artifacts))
+		for _, a := range *request.Body.Artifacts {
+			newCfg.Artifacts = append(newCfg.Artifacts, fromAPIArtifactScript(a))
+		}
 	}
 
 	scope := api.SaveConfigParamsScopeProject

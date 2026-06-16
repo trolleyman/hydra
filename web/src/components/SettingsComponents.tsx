@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
-import type { AgentConfig, AgentResponse, ConfigResponse, NetworkConfig, ProjectInfo, SandboxConfig } from '../api'
-import { X, Plus, Globe, FolderOpen, EyeOff, Eye, Layers, Monitor, Sparkles, Terminal } from 'lucide-react'
+import type { AgentConfig, AgentResponse, ArtifactScript, ConfigResponse, NetworkConfig, ProjectInfo, SandboxConfig } from '../api'
+import { X, Plus, Globe, FolderOpen, EyeOff, Eye, Layers, Monitor, Sparkles, Terminal, Image, AlertTriangle } from 'lucide-react'
 import { InfoTooltip } from './InfoTooltip'
 import { AgentTerminal } from './AgentTerminal'
 import { ShellEditor } from './ShellEditor'
@@ -297,6 +297,144 @@ export function ConfigForm({
   )
 }
 
+// ── ArtifactsEditor ──────────────────────────────────────────────────────────────
+// Edits the per-project [[artifacts]] scripts that render visual artifacts (e.g.
+// screenshots) for the diff viewer. Not agent-specific, so it lives outside the
+// per-agent tabs.
+export function ArtifactsEditor({
+  artifacts,
+  onChange,
+}: {
+  artifacts: ArtifactScript[]
+  onChange: (artifacts: ArtifactScript[]) => void
+}) {
+  function update(index: number, patch: Partial<ArtifactScript>) {
+    const next = artifacts.map((a, i) => (i === index ? { ...a, ...patch } : a))
+    onChange(next)
+  }
+  function remove(index: number) {
+    onChange(artifacts.filter((_, i) => i !== index))
+  }
+  function add() {
+    onChange([...artifacts, { name: '', command: '' }])
+  }
+
+  return (
+    <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
+      <div className="flex items-center gap-2 mb-1">
+        <div className="w-8 h-8 rounded-lg bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center">
+          <Image className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+        </div>
+        <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">Diff Artifacts</h2>
+        <InfoTooltip title="Diff Artifacts">
+          <p>Per-project commands that render visual artifacts (e.g. screenshots) of a checkout. The diff viewer runs each against both sides of a comparison and shows the outputs that differ.</p>
+          <p className="mt-1.5">The command runs via <code className="text-blue-300">sh -c</code> in the checkout directory with these variables set:</p>
+          <ul className="mt-1 space-y-0.5 list-none">
+            <li><code className="text-blue-300">HYDRA_ARTIFACT_OUTPUT</code> — directory to write images into</li>
+            <li><code className="text-blue-300">HYDRA_ARTIFACT_SOURCE</code> — the checkout directory</li>
+            <li><code className="text-blue-300">HYDRA_ARTIFACT_REF</code> — the resolved git ref</li>
+          </ul>
+        </InfoTooltip>
+      </div>
+      <p className="text-xs text-gray-500 dark:text-gray-400 mb-4 ml-10">
+        Visual artifacts generated for the diff viewer, stored as <span className="font-mono">[[artifacts]]</span> in config.toml.
+      </p>
+
+      <div className="space-y-4">
+        {artifacts.length === 0 && (
+          <p className="text-sm text-gray-400 dark:text-gray-500 italic">No artifact scripts configured.</p>
+        )}
+        {artifacts.map((a, index) => {
+          const unsafe = a.unsafe_host === true
+          return (
+            <div key={index} className="rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50/40 dark:bg-gray-800/20 p-4 space-y-3">
+              <div className="flex items-start gap-2">
+                <div className="flex-1 space-y-3">
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">Name</label>
+                    <input
+                      type="text"
+                      value={a.name}
+                      onChange={(e) => update(index, { name: e.target.value })}
+                      placeholder="e.g. screenshots"
+                      spellCheck={false}
+                      className="w-full text-sm px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-100 placeholder-gray-300 dark:placeholder-gray-600 font-mono shadow-inner focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">Command</label>
+                    <input
+                      type="text"
+                      value={a.command}
+                      onChange={(e) => update(index, { command: e.target.value })}
+                      placeholder="e.g. bun run screenshots.ts"
+                      spellCheck={false}
+                      className="w-full text-sm px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-100 placeholder-gray-300 dark:placeholder-gray-600 font-mono shadow-inner focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+                    />
+                  </div>
+                  <div className="flex items-center gap-4 flex-wrap">
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest flex items-center gap-1">
+                        Timeout (s)
+                        <InfoTooltip title="Timeout">
+                          <p>Max seconds the command may run. Leave empty (0) for the built-in default.</p>
+                        </InfoTooltip>
+                      </label>
+                      <input
+                        type="number"
+                        min={0}
+                        value={a.timeout_sec ?? ''}
+                        onChange={(e) => update(index, { timeout_sec: e.target.value === '' ? undefined : Math.max(0, parseInt(e.target.value, 10) || 0) })}
+                        placeholder="default"
+                        className="w-28 text-sm px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-100 placeholder-gray-300 dark:placeholder-gray-600 font-mono shadow-inner focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+                      />
+                    </div>
+                    <label className="flex items-center gap-2 cursor-pointer pt-4">
+                      <input
+                        type="checkbox"
+                        checked={unsafe}
+                        onChange={(e) => update(index, { unsafe_host: e.target.checked ? true : undefined })}
+                        className="w-4 h-4 rounded border-gray-300 text-amber-600 focus:ring-amber-500"
+                      />
+                      <span className="text-xs font-medium text-gray-600 dark:text-gray-300 flex items-center gap-1">
+                        Run on host (no sandbox)
+                        <InfoTooltip title="Unsafe Host Execution">
+                          <p>Runs the command directly on the host with <strong>no sandbox</strong> — full access to your machine, network, and credentials.</p>
+                          <p className="mt-1.5">The command executes the <em>diffed ref's</em> code, so only enable this for a self-contained, audited command you trust against every ref you compare.</p>
+                        </InfoTooltip>
+                      </span>
+                    </label>
+                  </div>
+                  {unsafe && (
+                    <div className="flex items-start gap-1.5 text-[11px] text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 rounded-lg px-2.5 py-1.5">
+                      <AlertTriangle className="w-3.5 h-3.5 mt-px shrink-0" />
+                      <span>Runs unsandboxed on the host with full access to your credentials. Only use for audited, self-contained commands.</span>
+                    </div>
+                  )}
+                </div>
+                <button
+                  onClick={() => remove(index)}
+                  className="flex items-center justify-center w-7 h-7 rounded-md text-gray-400 hover:text-red-500 transition-colors cursor-pointer shrink-0"
+                  title="Remove artifact"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          )
+        })}
+        <button
+          onClick={add}
+          className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors ml-1 cursor-pointer"
+        >
+          <Plus className="w-3.5 h-3.5" />
+          Add Artifact
+        </button>
+      </div>
+    </div>
+  )
+}
+
 // ── SettingsContent ────────────────────────────────────────────────────────────
 // Shared tab bar + section body + test modal used by both settings pages.
 export function SettingsContent({
@@ -416,6 +554,13 @@ export function SettingsContent({
           )}
 
         </div>
+      </div>
+
+      <div className="mt-6">
+        <ArtifactsEditor
+          artifacts={config.artifacts ?? []}
+          onChange={(artifacts) => setConfig({ ...config, artifacts })}
+        />
       </div>
 
       {testAgent && (

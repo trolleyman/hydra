@@ -1422,6 +1422,24 @@ components:
           type: string
           nullable: true
 
+    ArtifactScript:
+      type: object
+      required: [name, command]
+      description: A per-project command that renders visual artifacts (e.g. screenshots) of a checkout, shown side-by-side in the diff viewer
+      properties:
+        name:
+          type: string
+          description: Unique label, also used as the cache directory
+        command:
+          type: string
+          description: Shell command run via `sh -c` in the checkout directory
+        timeout_sec:
+          type: integer
+          description: Max seconds the command may run (0 = built-in default)
+        unsafe_host:
+          type: boolean
+          description: Run on the host with NO sandbox — full access to the machine and credentials (default false)
+
     ConfigResponse:
       type: object
       required: [defaults, agents]
@@ -1432,6 +1450,12 @@ components:
           type: object
           additionalProperties:
             $ref: '#/components/schemas/AgentConfig'
+        artifacts:
+          type: array
+          items:
+            $ref: '#/components/schemas/ArtifactScript'
+          nullable: true
+          description: Per-project visual-artifact generation scripts ([[artifacts]] in config.toml)
         default_pre_prompt:
           type: string
           description: Built-in default pre-prompt always prepended to agent prompts (read-only)

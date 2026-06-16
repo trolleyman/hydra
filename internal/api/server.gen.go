@@ -221,6 +221,21 @@ type ArtifactLogLine struct {
 // ArtifactLogLineStream Which stream the line came from; stderr is rendered in red
 type ArtifactLogLineStream string
 
+// ArtifactScript A per-project command that renders visual artifacts (e.g. screenshots) of a checkout, shown side-by-side in the diff viewer
+type ArtifactScript struct {
+	// Command Shell command run via `sh -c` in the checkout directory
+	Command string `json:"command"`
+
+	// Name Unique label, also used as the cache directory
+	Name string `json:"name"`
+
+	// TimeoutSec Max seconds the command may run (0 = built-in default)
+	TimeoutSec *int `json:"timeout_sec,omitempty"`
+
+	// UnsafeHost Run on the host with NO sandbox — full access to the machine and credentials (default false)
+	UnsafeHost *bool `json:"unsafe_host,omitempty"`
+}
+
 // ArtifactSet defines model for ArtifactSet.
 type ArtifactSet struct {
 	// Changed Whether any file differs between the two versions
@@ -286,6 +301,9 @@ type CommitInfo struct {
 // ConfigResponse defines model for ConfigResponse.
 type ConfigResponse struct {
 	Agents map[string]AgentConfig `json:"agents"`
+
+	// Artifacts Per-project visual-artifact generation scripts ([[artifacts]] in config.toml)
+	Artifacts *[]ArtifactScript `json:"artifacts"`
 
 	// DefaultPrePrompt Built-in default pre-prompt always prepended to agent prompts (read-only)
 	DefaultPrePrompt *string     `json:"default_pre_prompt,omitempty"`
