@@ -57,14 +57,48 @@ func questionText(input map[string]interface{}) string {
 	return ""
 }
 
+// userQuestionLeads are phrases that, appearing in the final sentence of a
+// turn, mark it as a question addressed to the user — asking them to choose,
+// confirm, or grant permission. They're what distinguishes "Should I proceed?"
+// (waiting on input) from the many finished turns that merely happen to end on
+// a '?' (rhetorical recaps, "Anything else?", "Could that be a caching bug?").
+// Matched case-insensitively as substrings of the last sentence.
+var userQuestionLeads = []string{
+	"should i",
+	"shall i",
+	"do you want",
+	"do you prefer",
+	"would you like",
+	"would you prefer",
+	"which would you",
+	"how would you like",
+	"what would you like",
+	"want me to",
+	"let me know",
+	"may i",
+	"can i proceed",
+}
+
 // stopStatus decides whether a finished turn means the agent is waiting on the
-// user or has genuinely finished. Heuristic: a trailing '?' in the agent's last
-// message signals it ended by asking a question, so it's waiting for an answer;
-// otherwise it completed its work. (Best-effort — agents don't expose an
-// explicit "I need input" signal on turn end.)
+// user or has genuinely finished. Agents don't expose an explicit "I need
+// input" signal on turn end, so this is best-effort. A trailing '?' alone is
+// NOT enough — plenty of finished agents end on a question — so we additionally
+// require the final sentence to read as a question put to the user (see
+// userQuestionLeads). Only then is it treated as waiting; otherwise finished.
 func stopStatus(lastMessage string) api.AgentStatus {
-	if strings.HasSuffix(strings.TrimRight(lastMessage, " \t\r\n"), "?") {
-		return api.Waiting
+	trimmed := strings.TrimRight(lastMessage, " \t\r\n")
+	if !strings.HasSuffix(trimmed, "?") {
+		return api.Finished
+	}
+	// Isolate the final sentence: the text after the last sentence terminator
+	// (or newline) that precedes the closing '?'.
+	body := strings.TrimSuffix(trimmed, "?")
+	start := strings.LastIndexAny(body, ".!?\n")
+	sentence := strings.ToLower(strings.TrimSpace(body[start+1:]))
+	for _, lead := range userQuestionLeads {
+		if strings.Contains(sentence, lead) {
+			return api.Waiting
+		}
 	}
 	return api.Finished
 }
