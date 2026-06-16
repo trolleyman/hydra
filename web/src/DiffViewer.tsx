@@ -13,6 +13,7 @@ import { Tooltip } from './components/Tooltip'
 import { ArtifactsPanel, IMAGE_DIFF_MODES, type ImageDiffMode } from './components/ArtifactsPanel'
 import { useDialogStore } from './stores/dialogStore'
 import { StorageKeys, readLocal, writeLocal } from './lib/storage'
+import { loadAgentViewPrefs, patchAgentViewPrefs } from './lib/agentViewPrefs'
 
 // ── Syntax highlighting helpers ───────────────────────────────────────────────
 
@@ -1342,7 +1343,11 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger }: { agent
 
   const [singleFileIdx, setSingleFileIdx] = useState(0)
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set())
-  const [collapsedFiles, setCollapsedFiles] = useState<Set<string>>(new Set())
+  // Collapsed diff files persist per agent so each agent's page restores which
+  // files were folded away.
+  const [collapsedFiles, setCollapsedFiles] = useState<Set<string>>(
+    () => new Set(loadAgentViewPrefs(projectId, agent.id).collapsedFiles ?? []),
+  )
   const [hiddenFiles, setHiddenFiles] = useState<Set<string>>(new Set())
   const userShownFilesRef = useRef<Set<string>>(new Set())
   // Per-file context (number of surrounding lines). Persists across polling refreshes.
@@ -1359,6 +1364,19 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger }: { agent
   useEffect(() => { writeLocal(StorageKeys.diffFileView, fileView) }, [fileView])
   useEffect(() => { writeLocal(StorageKeys.diffSidebarWidth, String(sidebarWidth)) }, [sidebarWidth])
   useEffect(() => { writeLocal(StorageKeys.diffImageMode, imageDiffMode) }, [imageDiffMode])
+
+  // DiffViewer is reused (not remounted) when switching agents, so reload the
+  // collapsed-file set when the agent changes. Reset during render (per React's
+  // "adjust state when a prop changes" guidance) so the persist effect below
+  // sees the new agent's set, not the old one.
+  const collapsedAgentRef = useRef(agent.id)
+  if (collapsedAgentRef.current !== agent.id) {
+    collapsedAgentRef.current = agent.id
+    setCollapsedFiles(new Set(loadAgentViewPrefs(projectId, agent.id).collapsedFiles ?? []))
+  }
+  useEffect(() => {
+    patchAgentViewPrefs(projectId, agent.id, { collapsedFiles: [...collapsedFiles] })
+  }, [projectId, agent.id, collapsedFiles])
 
   const toggleFolder = useCallback((path: string) => {
     setCollapsedFolders((prev) => {
