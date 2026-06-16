@@ -334,37 +334,45 @@ export function SpawnForm({
     const text = size === 'sm' ? 'text-[10px]' : 'text-xs'
     return (
       <div className={`flex flex-wrap gap-1.5 px-3 ${size === 'sm' ? 'pb-1.5' : 'pb-2'}`}>
-        {attachments.map((a) => (
-          <div
-            key={a.id}
-            className={`group relative flex items-center gap-1.5 rounded-md border px-1.5 py-1 ${text} ${a.error ? 'border-red-300 bg-red-50 dark:border-red-800 dark:bg-red-900/20' : 'border-gray-200 bg-gray-50 dark:border-gray-600 dark:bg-gray-700/60'}`}
-            title={a.error ? a.error : a.filename}
-          >
-            {a.previewUrl ? (
+        {attachments.map((a) => {
+          // Clicking anywhere on an image chip (the thumbnail or its filename)
+          // opens the lightbox — only the X stays separate. Non-image files
+          // aren't clickable. The cursor-zoom-in / role=button makes the chip's
+          // clickability obvious.
+          const isImage = !!a.previewUrl
+          const openLightbox = isImage
+            ? () => setLightboxIndex(imageAttachments.findIndex((img) => img.id === a.id))
+            : undefined
+          return (
+            <div
+              key={a.id}
+              onClick={openLightbox}
+              onKeyDown={openLightbox ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openLightbox() } } : undefined}
+              role={isImage ? 'button' : undefined}
+              tabIndex={isImage ? 0 : undefined}
+              className={`group relative flex items-center gap-1.5 rounded-md border px-1.5 py-1 ${text} ${isImage ? 'cursor-zoom-in' : ''} ${a.error ? 'border-red-300 bg-red-50 dark:border-red-800 dark:bg-red-900/20' : 'border-gray-200 bg-gray-50 dark:border-gray-600 dark:bg-gray-700/60'}`}
+              title={a.error ? a.error : isImage ? `View ${a.filename}` : a.filename}
+              aria-label={isImage ? `View ${a.filename}` : undefined}
+            >
+              {a.previewUrl ? (
+                <img src={a.previewUrl} alt={a.filename} className={`${thumb} rounded object-cover shrink-0`} />
+              ) : (
+                <FileText className={`${size === 'sm' ? 'w-3.5 h-3.5' : 'w-4 h-4'} text-gray-400 shrink-0`} />
+              )}
+              <span className="max-w-[120px] truncate text-gray-600 dark:text-gray-300">{a.filename}</span>
+              {a.uploading && <LoaderCircle className="w-3 h-3 animate-spin text-gray-400 shrink-0" />}
+              {a.error && <span className="text-red-500 shrink-0">failed</span>}
               <button
                 type="button"
-                onClick={() => setLightboxIndex(imageAttachments.findIndex((img) => img.id === a.id))}
-                className={`${thumb} rounded overflow-hidden cursor-zoom-in shrink-0`}
-                aria-label={`View ${a.filename}`}
+                onClick={(e) => { e.stopPropagation(); removeAttachment(a.id) }}
+                className="ml-0.5 rounded p-0.5 text-gray-400 hover:text-gray-700 hover:bg-gray-200 dark:hover:text-gray-100 dark:hover:bg-gray-600 cursor-pointer shrink-0"
+                aria-label={`Remove ${a.filename}`}
               >
-                <img src={a.previewUrl} alt={a.filename} className="w-full h-full object-cover" />
+                <X className="w-3 h-3" />
               </button>
-            ) : (
-              <FileText className={`${size === 'sm' ? 'w-3.5 h-3.5' : 'w-4 h-4'} text-gray-400 shrink-0`} />
-            )}
-            <span className="max-w-[120px] truncate text-gray-600 dark:text-gray-300">{a.filename}</span>
-            {a.uploading && <LoaderCircle className="w-3 h-3 animate-spin text-gray-400 shrink-0" />}
-            {a.error && <span className="text-red-500 shrink-0">failed</span>}
-            <button
-              type="button"
-              onClick={() => removeAttachment(a.id)}
-              className="ml-0.5 rounded p-0.5 text-gray-400 hover:text-gray-700 hover:bg-gray-200 dark:hover:text-gray-100 dark:hover:bg-gray-600 cursor-pointer shrink-0"
-              aria-label={`Remove ${a.filename}`}
-            >
-              <X className="w-3 h-3" />
-            </button>
-          </div>
-        ))}
+            </div>
+          )
+        })}
       </div>
     )
   }
