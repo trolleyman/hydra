@@ -13,6 +13,11 @@
 //   HYDRA_ARTIFACT_SOURCE  the checkout dir (repo root); cwd when run via sh -c
 //   HYDRA_ARTIFACT_REF     the resolved ref being rendered (informational)
 //
+// Tags: alongside each <name>.png we write a <name>.png.meta JSON sidecar
+// ({"tags": [...]}) that the diff viewer surfaces as labels + filters (see
+// internal/artifacts readTagsSidecar). Every shot is tagged with its theme,
+// viewport, and UI section as scoped "category::value" labels.
+//
 // Run with: bun take-screenshots.ts  (from scripts/screenshots/)
 //
 // Progress: each major step emits a one-line "::hydra:progress::" marker (build
@@ -24,7 +29,7 @@
 
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import { createServer } from 'node:net'
-import { mkdtempSync, existsSync, readFileSync } from 'node:fs'
+import { mkdtempSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chromium } from 'playwright'
@@ -48,6 +53,20 @@ function required(name: string): string {
 // prefix and shows the rest as the live progress header (see the file header).
 function progress(msg: string) {
   console.log(`::hydra:progress:: ${msg}`)
+}
+
+// sectionFor maps a page name to its UI area, emitted as a scoped "section::"
+// tag so the diff viewer can filter shots by the part of the app they cover
+// (repository browser, artifacts panel, …). Grouping by name prefix keeps the
+// page list (the source of truth) the only place a new shot must be declared.
+function sectionFor(name: string): string {
+  if (name.startsWith('repository')) return 'repository'
+  if (name.startsWith('artifact')) return 'artifacts'
+  if (name.startsWith('agent-')) return 'agent'
+  if (name.startsWith('spawn')) return 'spawn'
+  if (name === 'settings') return 'settings'
+  if (name === 'nested-folders') return 'diff'
+  return 'overview'
 }
 
 // run executes a command, inheriting stdio, and throws on a non-zero exit.
@@ -628,6 +647,16 @@ try {
         // header-focused shots and the hovered info tooltip (a fixed portal)
         // capture the viewport; others capture the full page.
         await page.screenshot({ path: out, fullPage: !pg.scrollTo && !pg.attachImages && !pg.viewportOnly && !pg.artifactInfo })
+        // Emit the tag sidecar (<file>.png.meta, {"tags":[...]}) that the diff
+        // viewer reads (internal/artifacts readTagsSidecar). theme + viewport +
+        // section are scoped "category::value" labels — the viewer keeps one
+        // value per category and offers each as a single-select filter — so a
+        // reviewer can, e.g., show only the dark-mode repository shots. The
+        // viewport axis is derived from the capture width (everything here is
+        // desktop-width today, but a phone-width shot would tag itself).
+        const viewport = (pg.viewport?.width ?? 1280) < 700 ? 'phone' : 'desktop'
+        const tags = [`theme::${theme}`, `viewport::${viewport}`, `section::${sectionFor(pg.name)}`]
+        writeFileSync(`${out}.meta`, JSON.stringify({ tags }))
         console.log(`wrote ${out}`)
         await ctx.close()
         done++
