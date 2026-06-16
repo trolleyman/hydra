@@ -499,35 +499,36 @@ function ArtifactSetCard({ set, mode, onRefresh }: { set: ArtifactSet; mode: Ima
               <PersistedLogView leftUrl={set.left_log_url} rightUrl={set.right_log_url} />
             </>
           )}
-          {status === 'ready' &&
-            (noChanges ? (
-              // No visual changes: show the (unchanged) artifacts anyway when
-              // expanded — useful for confirming a screenshot still renders.
-              <>
-                {set.files.length > 0 ? (
-                  <FileGrid files={set.files} mode={mode} />
-                ) : (
-                  <div className="my-2 text-xs text-gray-400 dark:text-gray-500">No artifacts produced.</div>
-                )}
-                <PersistedLogView leftUrl={set.left_log_url} rightUrl={set.right_log_url} />
-              </>
-            ) : (
-              <>
-                <FileGrid files={changedFiles} mode={mode} />
-                {unchangedFiles.length > 0 && (
-                  <div className="pt-2">
-                    <button
-                      onClick={() => setShowUnchanged((s) => !s)}
-                      className="text-[11px] text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 cursor-pointer"
-                    >
-                      {showUnchanged ? 'Hide' : 'Show'} {unchangedFiles.length} unchanged
-                    </button>
-                    {showUnchanged && <FileGrid files={unchangedFiles} mode={mode} />}
-                  </div>
-                )}
-                <PersistedLogView leftUrl={set.left_log_url} rightUrl={set.right_log_url} />
-              </>
-            ))}
+          {status === 'ready' && (
+            // Unified ready layout: the changed files (if any) up front, with the
+            // unchanged ones always behind a "Show N unchanged" toggle — so a card
+            // with no visual changes reads the same as a mixed one (the unchanged
+            // artifacts stay tucked away, not dumped on expand). This avoids the
+            // jarring case where a card expanded to view the log suddenly explodes
+            // all its unchanged artifacts onto the screen once a render settles to
+            // "no visual changes". Only the genuinely empty case gets a placeholder.
+            <>
+              {set.files.length === 0 ? (
+                <div className="my-2 text-xs text-gray-400 dark:text-gray-500">No artifacts produced.</div>
+              ) : (
+                <>
+                  <FileGrid files={changedFiles} mode={mode} />
+                  {unchangedFiles.length > 0 && (
+                    <div className="pt-2">
+                      <button
+                        onClick={() => setShowUnchanged((s) => !s)}
+                        className="text-[11px] text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 cursor-pointer"
+                      >
+                        {showUnchanged ? 'Hide' : 'Show'} {unchangedFiles.length} unchanged
+                      </button>
+                      {showUnchanged && <FileGrid files={unchangedFiles} mode={mode} />}
+                    </div>
+                  )}
+                </>
+              )}
+              <PersistedLogView leftUrl={set.left_log_url} rightUrl={set.right_log_url} />
+            </>
+          )}
         </div>
       )}
     </div>
