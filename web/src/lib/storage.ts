@@ -25,6 +25,11 @@ export const StorageKeys = {
   repoWrap: 'hydra-repo-wrap',
   repoIcons: 'hydra-repo-icons',
   repoSidebarWidth: 'hydra-repo-sidebar-width',
+
+  // IDs of projects the user has reviewed and trusted (JSON array of strings).
+  // Trust is a client-only concern: a project's .hydra/config.toml can run code,
+  // so the UI prompts on first open and records the decision here.
+  trustedProjects: 'hydra-trusted-projects',
 } as const
 
 // ── Dynamic keys (prefix + builder pair) ─────────────────────────────────────
@@ -68,4 +73,30 @@ export function writeLocal(key: string, value: string | null): void {
     if (value == null) localStorage.removeItem(key)
     else localStorage.setItem(key, value)
   } catch { /* ignore */ }
+}
+
+// ── Trusted projects ─────────────────────────────────────────────────────────
+// Trust is purely client-side: which projects the user has reviewed and accepted
+// is remembered here, never on the server.
+
+export function readTrustedProjects(): Set<string> {
+  const raw = readLocal(StorageKeys.trustedProjects)
+  if (!raw) return new Set()
+  try {
+    const ids = JSON.parse(raw)
+    return Array.isArray(ids) ? new Set(ids.filter((x): x is string => typeof x === 'string')) : new Set()
+  } catch {
+    return new Set()
+  }
+}
+
+export function isProjectTrusted(projectId: string): boolean {
+  return readTrustedProjects().has(projectId)
+}
+
+export function trustProject(projectId: string): void {
+  const ids = readTrustedProjects()
+  if (ids.has(projectId)) return
+  ids.add(projectId)
+  writeLocal(StorageKeys.trustedProjects, JSON.stringify([...ids]))
 }

@@ -134,7 +134,7 @@ export class DefaultService {
         });
     }
     /**
-     * Get the raw .hydra/config.toml content for the trust prompt
+     * Get the raw .hydra/config.toml content for the trust prompt the UI shows on first open
      * @param projectId
      * @returns ConfigTomlResponse OK
      * @throws ApiError
@@ -145,27 +145,6 @@ export class DefaultService {
         return this.httpRequest.request({
             method: 'GET',
             url: '/api/projects/{project_id}/config-toml',
-            path: {
-                'project_id': projectId,
-            },
-            errors: {
-                404: `Not Found`,
-                500: `Internal Server Error`,
-            },
-        });
-    }
-    /**
-     * Mark the project as trusted
-     * @param projectId
-     * @returns ProjectInfo OK
-     * @throws ApiError
-     */
-    public trustProject(
-        projectId: string,
-    ): CancelablePromise<ProjectInfo> {
-        return this.httpRequest.request({
-            method: 'POST',
-            url: '/api/projects/{project_id}/trust',
             path: {
                 'project_id': projectId,
             },
@@ -217,7 +196,6 @@ export class DefaultService {
             mediaType: 'application/json',
             errors: {
                 400: `Bad Request`,
-                403: `Project is not trusted`,
                 404: `Project Not Found`,
                 500: `Internal Server Error`,
             },

@@ -11,9 +11,5 @@ export type ConfigTomlResponse = {
      * Whether a .hydra/config.toml file is present in the project
      */
     exists: boolean;
-    /**
-     * Whether the user trusts this project
-     */
-    trusted: boolean;
 };
 

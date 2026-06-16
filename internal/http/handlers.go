@@ -141,28 +141,14 @@ func (s *Server) CheckHealth(_ context.Context, _ api.CheckHealthRequestObject) 
 	return api.CheckHealth200TextResponse("OK"), nil
 }
 
-// projectTrusted reports whether the given project is trusted by the user.
-// Trust is per-project, not keyed to the config content. A project with no
-// .hydra/config.toml is always trusted (nothing repo-controlled to run). A read
-// error is treated as untrusted so the user is prompted rather than silently
-// running unreviewed config.
-func projectTrusted(p projects.ProjectInfo) bool {
-	trusted, err := config.ProjectConfigTrusted(p.Path, p.Trusted)
-	if err != nil {
-		return false
-	}
-	return trusted
-}
-
 func (s *Server) ListProjects(_ context.Context, _ api.ListProjectsRequestObject) (api.ListProjectsResponseObject, error) {
 	ps := s.ProjectsManager.ListProjects()
 	resp := make(api.ListProjects200JSONResponse, len(ps))
 	for i, p := range ps {
 		resp[i] = api.ProjectInfo{
-			Id:      p.ID,
-			Path:    p.Path,
-			Name:    p.Name,
-			Trusted: projectTrusted(p),
+			Id:   p.ID,
+			Path: p.Path,
+			Name: p.Name,
 		}
 	}
 	return resp, nil
@@ -231,10 +217,9 @@ func (s *Server) AddProject(_ context.Context, request api.AddProjectRequestObje
 		return nil, errtrace.Wrap(err)
 	}
 	return api.AddProject201JSONResponse(api.ProjectInfo{
-		Id:      p.ID,
-		Path:    p.Path,
-		Name:    p.Name,
-		Trusted: projectTrusted(p),
+		Id:   p.ID,
+		Path: p.Path,
+		Name: p.Name,
 	}), nil
 }
 
@@ -258,41 +243,6 @@ func (s *Server) GetProjectConfigToml(_ context.Context, request api.GetProjectC
 	return api.GetProjectConfigToml200JSONResponse(api.ConfigTomlResponse{
 		Content: string(content),
 		Exists:  exists,
-		Trusted: projectTrusted(*p),
-	}), nil
-}
-
-func (s *Server) TrustProject(_ context.Context, request api.TrustProjectRequestObject) (api.TrustProjectResponseObject, error) {
-	p := s.ProjectsManager.GetByID(request.ProjectId)
-	if p == nil {
-		return api.TrustProject404JSONResponse{
-			Code:    404,
-			Error:   api.ErrorResponseErrorNotFound,
-			Details: "project not found",
-		}, nil
-	}
-	// Trust the project. Trust is per-project (not keyed to the config content),
-	// so it persists across later edits to .hydra/config.toml.
-	updated, found, err := s.ProjectsManager.SetTrusted(p.ID, true)
-	if err != nil {
-		return api.TrustProject500JSONResponse{
-			Code:    500,
-			Error:   api.ErrorResponseErrorInternalError,
-			Details: err.Error(),
-		}, nil
-	}
-	if !found {
-		return api.TrustProject404JSONResponse{
-			Code:    404,
-			Error:   api.ErrorResponseErrorNotFound,
-			Details: "project not found",
-		}, nil
-	}
-	return api.TrustProject200JSONResponse(api.ProjectInfo{
-		Id:      updated.ID,
-		Path:    updated.Path,
-		Name:    updated.Name,
-		Trusted: projectTrusted(updated),
 	}), nil
 }
 
@@ -510,13 +460,6 @@ func (s *Server) SaveConfig(_ context.Context, request api.SaveConfigRequestObje
 		return nil, errtrace.Wrap(err)
 	}
 
-	// Editing the project config in-app is itself an act of trust: the user
-	// authored the change, so trust the project rather than prompting them to
-	// trust their own edit. (User-scope config is global and never gated.)
-	if scope == api.SaveConfigParamsScopeProject {
-		_, _, _ = s.ProjectsManager.SetTrusted(request.ProjectId, true)
-	}
-
 	return api.SaveConfig200Response{}, nil
 }
 
@@ -548,16 +491,6 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 	projectRoot, err := s.resolveProjectRoot(request.ProjectId)
 	if err != nil {
 		return nil, errtrace.Wrap(err)
-	}
-	// Refuse to spawn until the project's config.toml is trusted: it can run
-	// arbitrary code (pre_spawn_script) and weaken the sandbox, so the user must
-	// review and accept it first (see the web trust prompt).
-	if proj := s.ProjectsManager.GetByID(request.ProjectId); proj != nil && !projectTrusted(*proj) {
-		return api.SpawnAgent403JSONResponse{
-			Code:    403,
-			Error:   api.ErrorResponseErrorUntrustedProject,
-			Details: "project config is not trusted; review and trust .hydra/config.toml before spawning agents",
-		}, nil
 	}
 	log.Printf("api: spawn agent request: id=%q, type=%v, project=%q", request.Body.Id, request.Body.AgentType, projectRoot)
 	var agentType sandbox.AgentType

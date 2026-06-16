@@ -67,15 +67,14 @@ const (
 
 // Defines values for ErrorResponseError.
 const (
-	ErrorResponseErrorBadRequest       ErrorResponseError = "bad_request"
-	ErrorResponseErrorConflict         ErrorResponseError = "conflict"
-	ErrorResponseErrorDockerConnect    ErrorResponseError = "docker_connect"
-	ErrorResponseErrorInternalError    ErrorResponseError = "internal_error"
-	ErrorResponseErrorNotAGitRepo      ErrorResponseError = "not_a_git_repo"
-	ErrorResponseErrorNotFound         ErrorResponseError = "not_found"
-	ErrorResponseErrorPathNotFound     ErrorResponseError = "path_not_found"
-	ErrorResponseErrorUnauthorized     ErrorResponseError = "unauthorized"
-	ErrorResponseErrorUntrustedProject ErrorResponseError = "untrusted_project"
+	ErrorResponseErrorBadRequest    ErrorResponseError = "bad_request"
+	ErrorResponseErrorConflict      ErrorResponseError = "conflict"
+	ErrorResponseErrorDockerConnect ErrorResponseError = "docker_connect"
+	ErrorResponseErrorInternalError ErrorResponseError = "internal_error"
+	ErrorResponseErrorNotAGitRepo   ErrorResponseError = "not_a_git_repo"
+	ErrorResponseErrorNotFound      ErrorResponseError = "not_found"
+	ErrorResponseErrorPathNotFound  ErrorResponseError = "path_not_found"
+	ErrorResponseErrorUnauthorized  ErrorResponseError = "unauthorized"
 )
 
 // Defines values for MergeConflictErrorError.
@@ -299,9 +298,6 @@ type ConfigTomlResponse struct {
 
 	// Exists Whether a .hydra/config.toml file is present in the project
 	Exists bool `json:"exists"`
-
-	// Trusted Whether the user trusts this project
-	Trusted bool `json:"trusted"`
 }
 
 // DiffFile defines model for DiffFile.
@@ -434,9 +430,6 @@ type ProjectInfo struct {
 
 	// Path Absolute filesystem path to the project root
 	Path string `json:"path"`
-
-	// Trusted Whether the user trusts this project. Trust is per-project (not keyed to the config content), so it persists across edits to .hydra/config.toml. True when there is no project config (nothing repo-controlled to execute) or when the user has trusted the project. False means the user must review and trust the config before agents can be spawned or host artifact commands can run.
-	Trusted bool `json:"trusted"`
 }
 
 // RepositoryBranch defines model for RepositoryBranch.
@@ -740,7 +733,7 @@ type ServerInterface interface {
 	// Save configuration changes
 	// (POST /api/projects/{project_id}/config)
 	SaveConfig(w http.ResponseWriter, r *http.Request, projectId string, params SaveConfigParams)
-	// Get the raw .hydra/config.toml content for the trust prompt
+	// Get the raw .hydra/config.toml content for the trust prompt the UI shows on first open
 	// (GET /api/projects/{project_id}/config-toml)
 	GetProjectConfigToml(w http.ResponseWriter, r *http.Request, projectId string)
 	// List the branches available for the project's repository
@@ -752,9 +745,6 @@ type ServerInterface interface {
 	// List the files tracked in the project's repository
 	// (GET /api/projects/{project_id}/repository/tree)
 	GetRepositoryTree(w http.ResponseWriter, r *http.Request, projectId string, params GetRepositoryTreeParams)
-	// Mark the project as trusted
-	// (POST /api/projects/{project_id}/trust)
-	TrustProject(w http.ResponseWriter, r *http.Request, projectId string)
 	// Get system status
 	// (GET /api/status)
 	GetStatus(w http.ResponseWriter, r *http.Request)
@@ -1565,31 +1555,6 @@ func (siw *ServerInterfaceWrapper) GetRepositoryTree(w http.ResponseWriter, r *h
 	handler.ServeHTTP(w, r)
 }
 
-// TrustProject operation middleware
-func (siw *ServerInterfaceWrapper) TrustProject(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-
-	// ------------- Path parameter "project_id" -------------
-	var projectId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
-		return
-	}
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.TrustProject(w, r, projectId)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
 // GetStatus operation middleware
 func (siw *ServerInterfaceWrapper) GetStatus(w http.ResponseWriter, r *http.Request) {
 
@@ -1761,7 +1726,6 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/repository/branches", wrapper.GetRepositoryBranches)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/repository/file", wrapper.GetRepositoryFile)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/repository/tree", wrapper.GetRepositoryTree)
-	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/trust", wrapper.TrustProject)
 	m.HandleFunc("GET "+options.BaseURL+"/api/status", wrapper.GetStatus)
 	m.HandleFunc("GET "+options.BaseURL+"/health", wrapper.CheckHealth)
 
@@ -1974,15 +1938,6 @@ type SpawnAgent400JSONResponse ErrorResponse
 func (response SpawnAgent400JSONResponse) VisitSpawnAgentResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(400)
-
-	return json.NewEncoder(w).Encode(response)
-}
-
-type SpawnAgent403JSONResponse ErrorResponse
-
-func (response SpawnAgent403JSONResponse) VisitSpawnAgentResponse(w http.ResponseWriter) error {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(403)
 
 	return json.NewEncoder(w).Encode(response)
 }
@@ -2624,41 +2579,6 @@ func (response GetRepositoryTree500JSONResponse) VisitGetRepositoryTreeResponse(
 	return json.NewEncoder(w).Encode(response)
 }
 
-type TrustProjectRequestObject struct {
-	ProjectId string `json:"project_id"`
-}
-
-type TrustProjectResponseObject interface {
-	VisitTrustProjectResponse(w http.ResponseWriter) error
-}
-
-type TrustProject200JSONResponse ProjectInfo
-
-func (response TrustProject200JSONResponse) VisitTrustProjectResponse(w http.ResponseWriter) error {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(200)
-
-	return json.NewEncoder(w).Encode(response)
-}
-
-type TrustProject404JSONResponse ErrorResponse
-
-func (response TrustProject404JSONResponse) VisitTrustProjectResponse(w http.ResponseWriter) error {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(404)
-
-	return json.NewEncoder(w).Encode(response)
-}
-
-type TrustProject500JSONResponse ErrorResponse
-
-func (response TrustProject500JSONResponse) VisitTrustProjectResponse(w http.ResponseWriter) error {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(500)
-
-	return json.NewEncoder(w).Encode(response)
-}
-
 type GetStatusRequestObject struct {
 }
 
@@ -2760,7 +2680,7 @@ type StrictServerInterface interface {
 	// Save configuration changes
 	// (POST /api/projects/{project_id}/config)
 	SaveConfig(ctx context.Context, request SaveConfigRequestObject) (SaveConfigResponseObject, error)
-	// Get the raw .hydra/config.toml content for the trust prompt
+	// Get the raw .hydra/config.toml content for the trust prompt the UI shows on first open
 	// (GET /api/projects/{project_id}/config-toml)
 	GetProjectConfigToml(ctx context.Context, request GetProjectConfigTomlRequestObject) (GetProjectConfigTomlResponseObject, error)
 	// List the branches available for the project's repository
@@ -2772,9 +2692,6 @@ type StrictServerInterface interface {
 	// List the files tracked in the project's repository
 	// (GET /api/projects/{project_id}/repository/tree)
 	GetRepositoryTree(ctx context.Context, request GetRepositoryTreeRequestObject) (GetRepositoryTreeResponseObject, error)
-	// Mark the project as trusted
-	// (POST /api/projects/{project_id}/trust)
-	TrustProject(ctx context.Context, request TrustProjectRequestObject) (TrustProjectResponseObject, error)
 	// Get system status
 	// (GET /api/status)
 	GetStatus(ctx context.Context, request GetStatusRequestObject) (GetStatusResponseObject, error)
@@ -3440,32 +3357,6 @@ func (sh *strictHandler) GetRepositoryTree(w http.ResponseWriter, r *http.Reques
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetRepositoryTreeResponseObject); ok {
 		if err := validResponse.VisitGetRepositoryTreeResponse(w); err != nil {
-			sh.options.ResponseErrorHandlerFunc(w, r, err)
-		}
-	} else if response != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
-	}
-}
-
-// TrustProject operation middleware
-func (sh *strictHandler) TrustProject(w http.ResponseWriter, r *http.Request, projectId string) {
-	var request TrustProjectRequestObject
-
-	request.ProjectId = projectId
-
-	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.TrustProject(ctx, request.(TrustProjectRequestObject))
-	}
-	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "TrustProject")
-	}
-
-	response, err := handler(r.Context(), w, r, request)
-
-	if err != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(TrustProjectResponseObject); ok {
-		if err := validResponse.VisitTrustProjectResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

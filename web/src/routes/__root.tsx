@@ -23,7 +23,7 @@ export const Route = createRootRoute({
 import { useDialogStore } from '../stores/dialogStore'
 import { pruneArtifactPrefs } from '../lib/artifactPrefs'
 import { pruneAgentViewPrefs } from '../lib/agentViewPrefs'
-import { StorageKeys, selectedAgentKey, readLocal, writeLocal } from '../lib/storage'
+import { StorageKeys, selectedAgentKey, readLocal, writeLocal, readTrustedProjects, trustProject } from '../lib/storage'
 
 function formatSpawnedAgo(ms: number): string {
   const seconds = Math.floor(ms / 1000)
@@ -298,6 +298,9 @@ function RootLayout() {
   const [development, setDevelopment] = useState(false)
   const [restarting, setRestarting] = useState(false)
   const [themeMode, setThemeMode] = useState<ThemeMode>(loadThemeMode)
+  // Which projects the user has trusted, mirrored from localStorage so the trust
+  // prompt re-evaluates reactively when one is accepted (see lib/storage).
+  const [trustedProjectIds, setTrustedProjectIds] = useState<Set<string>>(() => readTrustedProjects())
 
   const { projects, selectedProjectId, setProjects, setSelectedProjectId, setSystemStatus } = useProjectStore()
   const { agents, setAgents, addAgent } = useAgentStore()
@@ -599,14 +602,16 @@ function RootLayout() {
   const filteredAgents = agents.filter((a) => !a.ephemeral)
   const selectedProject = projects.find((p) => p.id === currentProjectId) ?? null
 
-  // The selected project's config.toml is read from the repo and can run code /
-  // weaken the sandbox, so prompt for trust before acting on it. Trust is
-  // per-project (a one-time decision), so this shows until the user trusts the
-  // project; later config edits don't re-prompt.
-  const untrustedProject = selectedProject && !selectedProject.trusted ? selectedProject : null
+  // A project's config.toml is read from the repo and can run code / weaken the
+  // sandbox, so the UI prompts the user to review it the first time they open a
+  // project. Trust is a client-side, one-time decision kept in localStorage, so
+  // this shows until the user accepts; later config edits don't re-prompt.
+  const untrustedProject = selectedProject && !trustedProjectIds.has(selectedProject.id) ? selectedProject : null
 
-  function handleProjectTrusted(updated: ProjectInfo) {
-    setProjects(projects.map((p) => (p.id === updated.id ? updated : p)))
+  function handleProjectTrusted() {
+    if (!untrustedProject) return
+    trustProject(untrustedProject.id)
+    setTrustedProjectIds((prev) => new Set(prev).add(untrustedProject.id))
   }
 
   function handleTrustDeclined() {

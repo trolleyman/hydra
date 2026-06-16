@@ -78,13 +78,6 @@ func (s *Server) resolveArtifactPlan(projectRoot string, head *heads.Head, param
 	if err != nil || head.Branch == nil {
 		return nil, nil //nolint:nilerr // a missing/unreadable config means "no artifacts"
 	}
-	// unsafe_host runs a command unconfined on the host and is authorized by the
-	// live config. For an untrusted project the live config is exactly the
-	// unreviewed, repo-supplied config.toml, so drop all host authorizations —
-	// these scripts still run, but confined in the sandbox like any other.
-	if p := s.ProjectsManager.GetByPath(projectRoot); p != nil && !projectTrusted(*p) {
-		liveCfg.Artifacts = nil
-	}
 	mgr := s.Artifacts.Manager(projectRoot)
 
 	// Left version: a committed ref. When no explicit base ref is requested we
