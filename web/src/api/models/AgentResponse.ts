@@ -21,7 +21,7 @@ export type AgentResponse = {
     prompt: string;
     base_branch: string;
     /**
-     * If true, the agent is temporary (runs in the project root, no dedicated branch).
+     * If true, the agent is a throwaway test agent whose worktree and branch are torn down when it stops.
      */
     ephemeral?: boolean;
     /**

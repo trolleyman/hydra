@@ -977,7 +977,7 @@ components:
           description: Base branch to create the worktree from (defaults to current branch)
         ephemeral:
           type: boolean
-          description: If true, the agent is temporary and its container will be removed on stop.
+          description: If true, the agent is a throwaway test agent whose worktree and branch are torn down when it stops.
 
     AgentStatus:
       type: string
@@ -1045,7 +1045,7 @@ components:
           type: string
         ephemeral:
           type: boolean
-          description: If true, the agent is temporary (runs in the project root, no dedicated branch).
+          description: If true, the agent is a throwaway test agent whose worktree and branch are torn down when it stops.
         created_at:
           type: integer
           format: int64

@@ -228,10 +228,20 @@ func resumeHeadsOnBoot(reg *session.Registry, store *db.Store, projectRoot strin
 		return
 	}
 	for _, h := range hs {
-		if h.Ephemeral || h.SessionStatus != "running" {
+		if reg.IsLive(h.ID) {
 			continue
 		}
-		if reg.IsLive(h.ID) {
+		// Ephemeral test agents never resume: a daemon restart means their test
+		// session is gone for good. Tear down the throwaway worktree/branch they
+		// left behind (e.g. a crash mid-test) so it doesn't linger.
+		if h.Ephemeral {
+			log.Printf("daemon: cleaning up orphaned ephemeral head %s after restart", h.ID)
+			if err := heads.KillHeadNoLock(context.Background(), reg, store, h); err != nil {
+				log.Printf("warn: cleanup ephemeral head %s: %v", h.ID, err)
+			}
+			continue
+		}
+		if h.SessionStatus != "running" {
 			continue
 		}
 		log.Printf("daemon: resuming head %s after restart", h.ID)

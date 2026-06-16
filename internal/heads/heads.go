@@ -171,7 +171,7 @@ type SpawnHeadOptions struct {
 	Prompt     string            // prompt
 	AgentType  sandbox.AgentType // empty = "claude"
 	BaseBranch string            // empty = current HEAD branch
-	Ephemeral  bool              // if true, runs in the project root, no worktree/branch
+	Ephemeral  bool              // if true, a throwaway test agent: torn down on close, not resumed or listed by default
 	Resume     bool              // if true, resume the agent's prior conversation
 	Rows       uint16
 	Cols       uint16
@@ -207,12 +207,12 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 		}
 	}
 
+	// Even ephemeral (test) agents get a real throwaway worktree + branch so the
+	// sandbox — and especially the pre-spawn script — runs against the same layout
+	// a real agent sees: HYDRA_WORKTREE distinct from HYDRA_PROJECT_ROOT, never the
+	// project root itself. The worktree/branch are torn down when the test closes.
 	branchName := "hydra/" + opts.ID
 	worktreePath := paths.GetWorktreeDirFromProjectRoot(projectRoot, opts.ID)
-	if opts.Ephemeral {
-		branchName = baseBranch
-		worktreePath = projectRoot
-	}
 
 	opts.PrePrompt = strings.NewReplacer(
 		"<branch>", branchName,
@@ -240,14 +240,12 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 		}
 	}
 
-	if !opts.Ephemeral {
-		if err := git.CreateWorktree(projectRoot, worktreePath, branchName, baseBranch); err != nil {
-			if store != nil {
-				_ = store.SoftDeleteAgent(opts.ID)
-			}
-			RemoveAgentStatusFiles(projectRoot, opts.ID)
-			return nil, errtrace.Wrap(err)
+	if err := git.CreateWorktree(projectRoot, worktreePath, branchName, baseBranch); err != nil {
+		if store != nil {
+			_ = store.SoftDeleteAgent(opts.ID)
 		}
+		RemoveAgentStatusFiles(projectRoot, opts.ID)
+		return nil, errtrace.Wrap(err)
 	}
 
 	currentUser, err := user.Current()
@@ -342,17 +340,10 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 		setStatus(api.Running)
 	}
 
-	var hBranch *string
-	var hWorktree *string
-	if !opts.Ephemeral {
-		hBranch = &branchName
-		hWorktree = &worktreePath
-	}
-
 	return &Head{
 		ID:            opts.ID,
-		Branch:        hBranch,
-		Worktree:      hWorktree,
+		Branch:        &branchName,
+		Worktree:      &worktreePath,
 		ProjectPath:   projectRoot,
 		SessionPID:    pid,
 		SessionStatus: "running",
@@ -368,10 +359,8 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 
 // spawnCleanup tears down a partially-created head after an early failure.
 func spawnCleanup(store *db.Store, projectRoot string, opts SpawnHeadOptions, worktreePath, branchName string) {
-	if !opts.Ephemeral {
-		_ = git.RemoveWorktree(projectRoot, worktreePath)
-		_ = git.DeleteBranch(projectRoot, branchName)
-	}
+	_ = git.RemoveWorktree(projectRoot, worktreePath)
+	_ = git.DeleteBranch(projectRoot, branchName)
 	if store != nil {
 		_ = store.SoftDeleteAgent(opts.ID)
 	}
