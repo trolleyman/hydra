@@ -82,6 +82,19 @@ async function waitForServer(url: string, timeoutMs: number) {
   throw new Error(`server did not become ready at ${url} within ${timeoutMs}ms`)
 }
 
+// settle waits for the page to be visually stable before a capture, without a
+// fixed sleep: web fonts finished loading, plus two animation frames so any
+// pending layout/paint (and React commit) has flushed. With CSS animations and
+// transitions disabled (see the injected stylesheet), this is deterministic and
+// far quicker than a blanket waitForTimeout. Note the page freezes short
+// setTimeouts but leaves requestAnimationFrame intact, so the rAF wait works.
+async function settle(page: import('playwright').Page) {
+  await page.evaluate(async () => {
+    if (document.fonts && document.fonts.ready) await document.fonts.ready
+    await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())))
+  })
+}
+
 console.log(`Rendering Hydra UI for ref ${REF} from ${SRC}`)
 
 // 1. Build the frontend. The Go binary embeds web/dist (web/embed.go), so this
@@ -166,6 +179,9 @@ try {
       // before the app boots, so the artifacts panel renders before/after pairs in
       // the chosen mode. Only meaningful on the artifacts (agent-1) page.
       imageDiffMode?: 'side-by-side' | 'ab' | 'slider' | 'onion'
+      // Expands the named artifact card (clicks its header) after load — used to
+      // document the in-flight card's live, scrollable generation log.
+      expandArtifact?: string
     }[] = [
       { name: 'home', path: '/' },
       // The repository view: a GitHub-style browser with a file/folder tree on
@@ -248,6 +264,18 @@ try {
         viewport: { width: 1280, height: 1800 },
         imageDiffMode: 'side-by-side',
       },
+      // The in-flight artifact card expanded to reveal its live generation log:
+      // a scrollable, monospaced stdout+stderr stream (stderr in red), with the
+      // header showing the latest line and elapsed time. agent-1's "components"
+      // set is the generating one (see internal/http/simulation.go simArtifactLog).
+      {
+        name: 'artifact-log',
+        path: '/project/sim-project/agent/agent-1',
+        scrollTo: 'Changes',
+        viewport: { width: 1280, height: 1280 },
+        imageDiffMode: 'side-by-side',
+        expandArtifact: 'components',
+      },
     ]
     // Capture every page in both themes. Dark mode has its own colours (e.g.
     // diff add/remove backgrounds), so a light-only render would miss visual
@@ -310,12 +338,36 @@ try {
           content:
             '*,*::before,*::after{animation:none!important;transition:none!important;caret-color:transparent!important}',
         })
-        // Let async data + layout settle before capturing.
-        await page.waitForTimeout(800)
+        // Let async data + layout settle before capturing (fonts + frames, no sleep).
+        await settle(page)
+        if (pg.imageDiffMode || pg.expandArtifact) {
+          // The artifacts panel populates from a WebSocket snapshot, which (unlike
+          // the HTTP fetches the goto's networkidle waits for) isn't tracked by
+          // networkidle. Wait for the always-present "screenshots" card so the
+          // panel is rendered before we capture it.
+          await page.waitForFunction(() =>
+            Array.from(document.querySelectorAll('button')).some((b) => b.textContent?.includes('screenshots')),
+          )
+          await settle(page)
+        }
+        if (pg.expandArtifact) {
+          // Expand the named artifact card so its body (e.g. the live generation
+          // log) is visible. The card only exists once the artifacts WS snapshot
+          // has populated it, so wait for the header button to appear first.
+          await page.waitForFunction(
+            (name) => Array.from(document.querySelectorAll('button')).some((b) => b.textContent?.includes(name)),
+            pg.expandArtifact,
+          )
+          await page.evaluate((name) => {
+            const btn = Array.from(document.querySelectorAll('button')).find((b) => b.textContent?.includes(name))
+            btn?.click()
+          }, pg.expandArtifact)
+          await settle(page)
+        }
         if (pg.click) {
           // Open a popover (e.g. the branch selector) so the capture documents it.
           await page.click(pg.click)
-          await page.waitForTimeout(200)
+          await settle(page)
         }
         if (pg.scrollTo) {
           // Pin the named section heading to the top of its scroll container. We
@@ -335,7 +387,22 @@ try {
             }
           }, pg.scrollTo)
           // Settle the scroll/sticky-header layout before capturing.
-          await page.waitForTimeout(300)
+          await settle(page)
+        }
+        if (pg.expandArtifact) {
+          // Pin the expanded card to the top so its live log is the focus of the
+          // shot (the default-expanded "screenshots" card above it is tall). Same
+          // sticky-aware offset technique as scrollTo, but targeting the card.
+          await page.evaluate((name) => {
+            const btn = Array.from(document.querySelectorAll('button')).find((b) => b.textContent?.includes(name))
+            const card = btn?.closest('div.rounded-lg') as HTMLElement | null | undefined
+            const cont = card?.closest('.overflow-auto') as HTMLElement | null | undefined
+            if (card && cont) {
+              const offset = card.getBoundingClientRect().top - cont.getBoundingClientRect().top + cont.scrollTop
+              cont.scrollTop = offset - 24
+            }
+          }, pg.expandArtifact)
+          await settle(page)
         }
         const out = join(OUT, `${pg.name}${suffix}.png`)
         // Scrolled pages capture the viewport (so the scroll is meaningful);
