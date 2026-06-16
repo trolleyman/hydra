@@ -81,3 +81,45 @@ func TestShowFile(t *testing.T) {
 		t.Errorf("absent path = %q, want nil", got)
 	}
 }
+
+func TestListBranches(t *testing.T) {
+	dir := gitInit(t)
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@e",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@e")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, "f.txt"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run("add", ".")
+	run("commit", "-qm", "first")
+	run("branch", "hydra/task-a")
+	run("branch", "release")
+
+	got, err := ListBranches(dir)
+	if err != nil {
+		t.Fatalf("ListBranches: %v", err)
+	}
+	// The initial branch name varies (main/master) by git config, so just assert
+	// the two we created are present alongside it.
+	want := map[string]bool{"hydra/task-a": false, "release": false}
+	for _, b := range got {
+		if _, ok := want[b]; ok {
+			want[b] = true
+		}
+	}
+	for name, seen := range want {
+		if !seen {
+			t.Errorf("ListBranches missing %q (got %v)", name, got)
+		}
+	}
+	if len(got) < 3 {
+		t.Errorf("ListBranches = %v, want at least 3 branches", got)
+	}
+}

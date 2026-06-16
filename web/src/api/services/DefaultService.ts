@@ -10,6 +10,7 @@ import type { CommitInfo } from '../models/CommitInfo';
 import type { ConfigResponse } from '../models/ConfigResponse';
 import type { DiffResponse } from '../models/DiffResponse';
 import type { ProjectInfo } from '../models/ProjectInfo';
+import type { RepositoryBranchesResponse } from '../models/RepositoryBranchesResponse';
 import type { RepositoryFileResponse } from '../models/RepositoryFileResponse';
 import type { RepositoryTreeResponse } from '../models/RepositoryTreeResponse';
 import type { SpawnAgentRequest } from '../models/SpawnAgentRequest';
@@ -529,6 +530,27 @@ export class DefaultService {
             },
             errors: {
                 404: `Project or file not found`,
+                500: `Internal Server Error`,
+            },
+        });
+    }
+    /**
+     * List the branches available for the project's repository
+     * @param projectId Project ID
+     * @returns RepositoryBranchesResponse OK
+     * @throws ApiError
+     */
+    public getRepositoryBranches(
+        projectId: string,
+    ): CancelablePromise<RepositoryBranchesResponse> {
+        return this.httpRequest.request({
+            method: 'GET',
+            url: '/api/projects/{project_id}/repository/branches',
+            path: {
+                'project_id': projectId,
+            },
+            errors: {
+                404: `Project Not Found`,
                 500: `Internal Server Error`,
             },
         });

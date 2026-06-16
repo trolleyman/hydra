@@ -15,6 +15,7 @@ import { Route as ProjectProjectIdRouteImport } from './routes/project.$projectI
 import { Route as ProjectProjectIdIndexRouteImport } from './routes/project.$projectId/index'
 import { Route as ProjectProjectIdSettingsRouteImport } from './routes/project.$projectId/settings'
 import { Route as ProjectProjectIdRepositoryRouteImport } from './routes/project.$projectId/repository'
+import { Route as ProjectProjectIdRepositorySplatRouteImport } from './routes/project.$projectId/repository.$'
 import { Route as ProjectProjectIdAgentAgentIdRouteImport } from './routes/project.$projectId/agent.$agentId'
 
 const SettingsRoute = SettingsRouteImport.update({
@@ -49,6 +50,12 @@ const ProjectProjectIdRepositoryRoute =
     path: '/repository',
     getParentRoute: () => ProjectProjectIdRoute,
   } as any)
+const ProjectProjectIdRepositorySplatRoute =
+  ProjectProjectIdRepositorySplatRouteImport.update({
+    id: '/$',
+    path: '/$',
+    getParentRoute: () => ProjectProjectIdRepositoryRoute,
+  } as any)
 const ProjectProjectIdAgentAgentIdRoute =
   ProjectProjectIdAgentAgentIdRouteImport.update({
     id: '/agent/$agentId',
@@ -60,28 +67,31 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/settings': typeof SettingsRoute
   '/project/$projectId': typeof ProjectProjectIdRouteWithChildren
-  '/project/$projectId/repository': typeof ProjectProjectIdRepositoryRoute
+  '/project/$projectId/repository': typeof ProjectProjectIdRepositoryRouteWithChildren
   '/project/$projectId/settings': typeof ProjectProjectIdSettingsRoute
   '/project/$projectId/': typeof ProjectProjectIdIndexRoute
   '/project/$projectId/agent/$agentId': typeof ProjectProjectIdAgentAgentIdRoute
+  '/project/$projectId/repository/$': typeof ProjectProjectIdRepositorySplatRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/settings': typeof SettingsRoute
-  '/project/$projectId/repository': typeof ProjectProjectIdRepositoryRoute
+  '/project/$projectId/repository': typeof ProjectProjectIdRepositoryRouteWithChildren
   '/project/$projectId/settings': typeof ProjectProjectIdSettingsRoute
   '/project/$projectId': typeof ProjectProjectIdIndexRoute
   '/project/$projectId/agent/$agentId': typeof ProjectProjectIdAgentAgentIdRoute
+  '/project/$projectId/repository/$': typeof ProjectProjectIdRepositorySplatRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/settings': typeof SettingsRoute
   '/project/$projectId': typeof ProjectProjectIdRouteWithChildren
-  '/project/$projectId/repository': typeof ProjectProjectIdRepositoryRoute
+  '/project/$projectId/repository': typeof ProjectProjectIdRepositoryRouteWithChildren
   '/project/$projectId/settings': typeof ProjectProjectIdSettingsRoute
   '/project/$projectId/': typeof ProjectProjectIdIndexRoute
   '/project/$projectId/agent/$agentId': typeof ProjectProjectIdAgentAgentIdRoute
+  '/project/$projectId/repository/$': typeof ProjectProjectIdRepositorySplatRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -93,6 +103,7 @@ export interface FileRouteTypes {
     | '/project/$projectId/settings'
     | '/project/$projectId/'
     | '/project/$projectId/agent/$agentId'
+    | '/project/$projectId/repository/$'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -101,6 +112,7 @@ export interface FileRouteTypes {
     | '/project/$projectId/settings'
     | '/project/$projectId'
     | '/project/$projectId/agent/$agentId'
+    | '/project/$projectId/repository/$'
   id:
     | '__root__'
     | '/'
@@ -110,6 +122,7 @@ export interface FileRouteTypes {
     | '/project/$projectId/settings'
     | '/project/$projectId/'
     | '/project/$projectId/agent/$agentId'
+    | '/project/$projectId/repository/$'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -162,6 +175,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ProjectProjectIdRepositoryRouteImport
       parentRoute: typeof ProjectProjectIdRoute
     }
+    '/project/$projectId/repository/$': {
+      id: '/project/$projectId/repository/$'
+      path: '/$'
+      fullPath: '/project/$projectId/repository/$'
+      preLoaderRoute: typeof ProjectProjectIdRepositorySplatRouteImport
+      parentRoute: typeof ProjectProjectIdRepositoryRoute
+    }
     '/project/$projectId/agent/$agentId': {
       id: '/project/$projectId/agent/$agentId'
       path: '/agent/$agentId'
@@ -172,15 +192,29 @@ declare module '@tanstack/react-router' {
   }
 }
 
+interface ProjectProjectIdRepositoryRouteChildren {
+  ProjectProjectIdRepositorySplatRoute: typeof ProjectProjectIdRepositorySplatRoute
+}
+
+const ProjectProjectIdRepositoryRouteChildren: ProjectProjectIdRepositoryRouteChildren =
+  {
+    ProjectProjectIdRepositorySplatRoute: ProjectProjectIdRepositorySplatRoute,
+  }
+
+const ProjectProjectIdRepositoryRouteWithChildren =
+  ProjectProjectIdRepositoryRoute._addFileChildren(
+    ProjectProjectIdRepositoryRouteChildren,
+  )
+
 interface ProjectProjectIdRouteChildren {
-  ProjectProjectIdRepositoryRoute: typeof ProjectProjectIdRepositoryRoute
+  ProjectProjectIdRepositoryRoute: typeof ProjectProjectIdRepositoryRouteWithChildren
   ProjectProjectIdSettingsRoute: typeof ProjectProjectIdSettingsRoute
   ProjectProjectIdIndexRoute: typeof ProjectProjectIdIndexRoute
   ProjectProjectIdAgentAgentIdRoute: typeof ProjectProjectIdAgentAgentIdRoute
 }
 
 const ProjectProjectIdRouteChildren: ProjectProjectIdRouteChildren = {
-  ProjectProjectIdRepositoryRoute: ProjectProjectIdRepositoryRoute,
+  ProjectProjectIdRepositoryRoute: ProjectProjectIdRepositoryRouteWithChildren,
   ProjectProjectIdSettingsRoute: ProjectProjectIdSettingsRoute,
   ProjectProjectIdIndexRoute: ProjectProjectIdIndexRoute,
   ProjectProjectIdAgentAgentIdRoute: ProjectProjectIdAgentAgentIdRoute,

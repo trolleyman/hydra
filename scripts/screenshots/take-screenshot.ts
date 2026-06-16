@@ -149,6 +149,10 @@ try {
       path: string
       scrollTo?: string
       viewport?: { width: number; height: number }
+      // CSS selector clicked once (after load, before capture) — used to open a
+      // popover such as the repository branch selector so the screenshot
+      // documents it.
+      click?: string
       // Seeds the diff viewer's image-diff comparison mode ('hydra-diff-image-mode')
       // before the app boots, so the artifacts panel renders before/after pairs in
       // the chosen mode. Only meaningful on the artifacts (agent-1) page.
@@ -161,6 +165,20 @@ try {
       // README.md by default, so the capture shows rendered markdown beside the
       // tree. Full-page; the layout fills the viewport with internal scroll.
       { name: 'repository', path: '/project/sim-project/repository' },
+      // The repository view showing a source file: a deep-linked URL
+      // (/repository/<ref>/<path>) renders the file with line numbers and the
+      // tree auto-expanded down to it (folders are otherwise collapsed). Demos
+      // PLAN.md #41a (line numbers) + #41d (wrapping) + #41f (URL routing).
+      { name: 'repository-code', path: '/project/sim-project/repository/main/internal/server/server.go' },
+      // The branch selector opened over the source-file view: Hydra agent
+      // branches (hydra/*) are listed first (PLAN.md #41b).
+      {
+        name: 'repository-branches',
+        path: '/project/sim-project/repository/main/internal/server/server.go',
+        click: 'button[title="Switch branch"]',
+      },
+      // A binary image file rendered inline via the raw blob route (PLAN.md #41k).
+      { name: 'repository-image', path: '/project/sim-project/repository/main/web/public/logo.png' },
       { name: 'nested-folders', path: '/project/sim-project/agent/agent-3', scrollTo: 'Changes' },
       // agent-1's diff carries simulated "screenshots" artifacts (mixed phone +
       // desktop shapes). Scroll to the "Changes" header — the artifacts panel
@@ -259,6 +277,11 @@ try {
         })
         // Let async data + layout settle before capturing.
         await page.waitForTimeout(800)
+        if (pg.click) {
+          // Open a popover (e.g. the branch selector) so the capture documents it.
+          await page.click(pg.click)
+          await page.waitForTimeout(200)
+        }
         if (pg.scrollTo) {
           // Pin the named section heading to the top of its scroll container. We
           // can't use scrollIntoViewIfNeeded: the diff header is position:sticky,

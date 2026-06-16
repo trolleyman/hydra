@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"net/http"
+	"path"
 	"strings"
 	"time"
 
@@ -857,19 +858,35 @@ func (s *SimulationServer) SendAgentInput(w http.ResponseWriter, r *http.Request
 // (lexical) order, so the browser renders a stable, GitHub-like tree.
 var simRepoOrder = []string{
 	".gitignore",
+	"CLAUDE.md",
+	"LICENSE",
 	"README.md",
 	"go.mod",
+	"hydra.toml",
 	"package.json",
 	"internal/server/server.go",
 	"internal/store/store.go",
+	"web/public/logo.png",
 	"web/src/App.tsx",
 	"web/src/components/Button.tsx",
 	"web/src/main.tsx",
 }
 
+// simRepoImage is the path of the one binary (image) file in the simulated repo,
+// served as raw PNG bytes by the simulation blob handler so the repository
+// browser's image preview (PLAN.md #41k) has something to render.
+const simRepoImage = "web/public/logo.png"
+
+// simLogoPNG is a small, deterministic PNG used as the simulated repo's binary
+// image file. Kept as a fixed blob so screenshot artifacts stay byte-stable.
+const simLogoPNGBase64 = "iVBORw0KGgoAAAANSUhEUgAAAIAAAABgCAIAAABaGO0eAAAC10lEQVR42u3dzVHDQAwF4Bw5URYVUQi0QjdUQQmQgZkcQuz900pP78njY5JZ6wPi3ecVl+86Qo9LlaAACuD3+Hz5mjufX9/Wz6f3D5PTZDAO47EEWGdQq/4WgGkDwervAphg0Kz+XoB+BtnqewA0DZSr7wRwwiBefVeA/wxV/QCAm0FV/xDg+im7Da5nVf8M4O8EZyCofgMA2YCj+m0ATAaa6ncB3F4KwsBU/TbA3avDDciq3wA4ek8UA1/1zwCa73RmoKz+IUDnm90MWKt//agHAKOf4sBAnLUZAKRggF35MANANkBed7IEwGQAX/UzBvCcPHNkbZYA/gsYBFmbGcDR6KMYsuQNNgDNy3BmSJT2GAB0XoybQa6sbRVg9Koqa7MEmL68ytoMABZ/xCprWwKw+jtbWdsMgPm3nHLWNgyw6R5DNmsbA9h9hyeYtQ0AuN1fS2VtvQDOsxudrK0LIGpuqZC1tQHCZ/bcWVsDAGRdhThrOwNAW9WizNoOAWDXFMmytscA4Cu6TFlb19PRmKtaHFnbLgC3++vsWdsWAOfZTeqszR4gam6ZNGszBgif2afL2iwBQJ5hzpW1mQGgPUGeJWuzAYB9fh8/azMAAN89AZ61rQJk2bsCm7UtAaTbOQSYtc0DJN23hZa1TQJk3zWHs7I9A0CzZxGBYRiAbMdouMEYAOt+3UCGAQDi3dKBAUMvAH31owy6AESqH8Iw0C9IrSu3D8NYvyC1rtwOBjP9gtS6cscAVPV9GJb6Bal15XYCqOp7MuwCoO9MDA0g0hcaFECtKzcWgGxPdAgA8Y70wQD1/wDmGJz6Bal15XYFqOqvGHj3C6qszRKgqr+etYX1C6qsbQmgqm+VtUH0C1LO2lD6BclmbVj9ggSzNsR+QVJ3AaD9gnS+h6D7BSn8LiboF8Q9nhz9gojHk6lfEOV48vULIhtPyn5BTON5AFBHyFEABaB9/ACuVNk1U+d1vQAAAABJRU5ErkJggg=="
+
 // simRepoFiles holds the simulated content for each path in simRepoOrder.
 var simRepoFiles = map[string]string{
 	".gitignore": "node_modules/\ndist/\n.env\n*.log\n",
+	"CLAUDE.md":  "# Project guidelines\n\nThis demo repo powers Hydra's **Repository** view.\n\n- Use `bun` instead of `npm`.\n- Run the formatter before committing.\n",
+	"LICENSE":    "MIT License\n\nCopyright (c) 2026 Hydra Demo\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction.\n",
+	"hydra.toml": "[defaults]\npre_prompt = \"\"\"\n- Use bun instead of npm\n\"\"\"\n\n[defaults.sandbox]\nwritable_paths = [\"~/.cache/go-build\"]\n",
 	"README.md": "# Hydra Demo\n\nA simulated repository powering the **Repository** view.\n\n" +
 		"This page is a lightweight, GitHub-style browser: pick a file or folder\n" +
 		"on the left, read it on the right. By default it opens `README.md`.\n\n" +
@@ -911,10 +928,34 @@ func (s *SimulationServer) GetRepositoryTree(w http.ResponseWriter, r *http.Requ
 	})
 }
 
+func (s *SimulationServer) GetRepositoryBranches(w http.ResponseWriter, r *http.Request, projectId string) {
+	api.WriteJSON(w, http.StatusOK, api.RepositoryBranchesResponse{
+		Current: "main",
+		Branches: []api.RepositoryBranch{
+			{Name: "hydra/add-line-numbers", IsAgent: true, IsCurrent: false},
+			{Name: "hydra/branch-selector", IsAgent: true, IsCurrent: false},
+			{Name: "main", IsAgent: false, IsCurrent: true},
+			{Name: "release", IsAgent: false, IsCurrent: false},
+		},
+	})
+}
+
 func (s *SimulationServer) GetRepositoryFile(w http.ResponseWriter, r *http.Request, projectId string, params api.GetRepositoryFileParams) {
 	ref := "HEAD"
 	if params.Ref != nil && *params.Ref != "" {
 		ref = *params.Ref
+	}
+	if params.Path == simRepoImage {
+		// Binary image: report it as binary with a size but no inline content, so
+		// the browser fetches it via the blob route and renders <img>.
+		png, _ := base64.StdEncoding.DecodeString(simLogoPNGBase64)
+		api.WriteJSON(w, http.StatusOK, api.RepositoryFileResponse{
+			Path:   params.Path,
+			Ref:    ref,
+			Size:   len(png),
+			Binary: true,
+		})
+		return
 	}
 	content, ok := simRepoFiles[params.Path]
 	if !ok {
@@ -928,6 +969,22 @@ func (s *SimulationServer) GetRepositoryFile(w http.ResponseWriter, r *http.Requ
 		Binary:  false,
 		Content: &content,
 	})
+}
+
+// HandleRepositoryBlob serves the simulated repo's binary image as raw PNG bytes.
+func (s *SimulationServer) HandleRepositoryBlob(w http.ResponseWriter, r *http.Request) {
+	if strings.TrimPrefix(path.Clean(r.URL.Query().Get("path")), "/") != simRepoImage {
+		http.NotFound(w, r)
+		return
+	}
+	png, err := base64.StdEncoding.DecodeString(simLogoPNGBase64)
+	if err != nil {
+		http.Error(w, "decode error", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "image/png")
+	w.Header().Set("Cache-Control", "public, max-age=300")
+	_, _ = w.Write(png)
 }
 
 func (s *SimulationServer) GetConfig(w http.ResponseWriter, r *http.Request, projectId string, params api.GetConfigParams) {

@@ -766,6 +766,37 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /api/projects/{project_id}/repository/branches:
+    get:
+      summary: List the branches available for the project's repository
+      operationId: getRepositoryBranches
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            type: string
+          description: Project ID
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RepositoryBranchesResponse'
+        '404':
+          description: Project Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /api/projects/{project_id}/agents/{id}:
     get:
       summary: Get a specific Hydra agent by ID
@@ -1077,6 +1108,33 @@ components:
           type: string
           nullable: true
           description: UTF-8 file content (omitted for binary files)
+
+    RepositoryBranch:
+      type: object
+      required: [name, is_agent, is_current]
+      properties:
+        name:
+          type: string
+          description: Branch name (e.g. main, hydra/my-task)
+        is_agent:
+          type: boolean
+          description: True for Hydra agent branches (hydra/*), which are listed first
+        is_current:
+          type: boolean
+          description: True for the repository's currently checked-out branch (HEAD)
+
+    RepositoryBranchesResponse:
+      type: object
+      required: [current, branches]
+      properties:
+        current:
+          type: string
+          description: The repository's currently checked-out branch (HEAD), or "" when detached
+        branches:
+          type: array
+          items:
+            $ref: '#/components/schemas/RepositoryBranch'
+          description: Branches ordered with Hydra agent branches first, then the rest
 
     DiffLine:
       type: object

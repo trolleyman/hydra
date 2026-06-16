@@ -3,7 +3,9 @@ package http
 import (
 	"bytes"
 	"context"
+	"net/http"
 	"path"
+	"sort"
 	"strings"
 
 	"braces.dev/errtrace"
@@ -79,6 +81,49 @@ func (s *Server) GetRepositoryTree(_ context.Context, request api.GetRepositoryT
 	return resp, nil
 }
 
+// GetRepositoryBranches lists the local branches of the project's repository,
+// ordering Hydra agent branches (hydra/*) first so the repository browser's
+// branch selector surfaces active agents' work at the top.
+func (s *Server) GetRepositoryBranches(_ context.Context, request api.GetRepositoryBranchesRequestObject) (api.GetRepositoryBranchesResponseObject, error) {
+	projectRoot, err := s.resolveProjectRoot(request.ProjectId)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+
+	names, err := git.ListBranches(projectRoot)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	current, err := git.GetCurrentBranch(projectRoot)
+	if err != nil {
+		// A detached HEAD reports an error/"HEAD"; treat it as "no current branch"
+		// rather than failing the whole listing.
+		current = ""
+	}
+	if current == "HEAD" {
+		current = ""
+	}
+
+	branches := make([]api.RepositoryBranch, 0, len(names))
+	for _, name := range names {
+		branches = append(branches, api.RepositoryBranch{
+			Name:      name,
+			IsAgent:   strings.HasPrefix(name, "hydra/"),
+			IsCurrent: name == current,
+		})
+	}
+	// Stable order: agent branches first, then the rest; preserve git's
+	// committerdate ordering within each group.
+	sort.SliceStable(branches, func(i, j int) bool {
+		return branches[i].IsAgent && !branches[j].IsAgent
+	})
+
+	return api.GetRepositoryBranches200JSONResponse{
+		Current:  current,
+		Branches: branches,
+	}, nil
+}
+
 // GetRepositoryFile returns the contents of a single repo-relative file at the
 // requested ref. Binary files report binary=true with no content; oversized
 // files are truncated with truncated=true.
@@ -127,4 +172,47 @@ func (s *Server) GetRepositoryFile(_ context.Context, request api.GetRepositoryF
 	content := string(data)
 	resp.Content = &content
 	return resp, nil
+}
+
+// HandleRepositoryBlob serves the raw bytes of a repo-relative file at a ref. It
+// is registered outside the OpenAPI mux because it returns raw bytes (so the
+// repository browser can render binary images via an <img> tag) rather than the
+// JSON envelope of GetRepositoryFile. Query: path (required), ref (optional).
+func (s *Server) HandleRepositoryBlob(w http.ResponseWriter, r *http.Request) {
+	projectRoot, err := s.resolveProjectRoot(r.PathValue("project_id"))
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	q := r.URL.Query()
+	ref := repoRef(ptrOrNil(q.Get("ref")))
+	filePath := strings.TrimPrefix(path.Clean(q.Get("path")), "/")
+	if filePath == "" || filePath == "." {
+		http.Error(w, "no file path given", http.StatusBadRequest)
+		return
+	}
+
+	data, err := git.ShowFile(projectRoot, ref, filePath)
+	if err != nil {
+		http.Error(w, "invalid blob request", http.StatusBadRequest)
+		return
+	}
+	if data == nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	ct := http.DetectContentType(data)
+	w.Header().Set("Content-Type", ct)
+	w.Header().Set("Cache-Control", "public, max-age=300")
+	_, _ = w.Write(data)
+}
+
+// ptrOrNil returns nil for an empty string, else a pointer to s. It adapts query
+// values to the *string ref helpers.
+func ptrOrNil(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
 }

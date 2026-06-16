@@ -50,6 +50,22 @@ func ListHydraBranches(projectRoot string) ([]string, error) {
 	return branches, nil
 }
 
+// ListBranches returns all local branch names, sorted by most recent commit
+// first (`git branch --sort=-committerdate`).
+func ListBranches(projectRoot string) ([]string, error) {
+	out, err := gitOutput(projectRoot, "branch", "--sort=-committerdate", "--format=%(refname:short)")
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	var branches []string
+	for _, b := range strings.Split(out, "\n") {
+		if b != "" {
+			branches = append(branches, b)
+		}
+	}
+	return branches, nil
+}
+
 // CreateWorktree runs `git worktree add -b <branchName> <path> <baseBranch>`.
 func CreateWorktree(projectRoot, worktreePath, branchName, baseBranch string) error {
 	if err := ValidateRef(branchName); err != nil {

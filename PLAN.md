@@ -148,18 +148,43 @@
 
 40. [ ] When clicking on the branch out of date button, you sometimes get 'An agent session is currently running — merging now may collide with work in progress'. However, I think I've seen this even if the status has been waiting - can this be resolved?
 
-41. [ ] Repository view
-    - a) [ ] add line numbers to files
-    - b) [ ] add branch selector. prioritise current agent branches in the list.
-    - c) [ ] collapse all folders by default
-    - d) [ ] have wrapping on by default (and make this work with the line numbers correctly)
-    - e) [ ] Add a little settings button to the right of the file size indicator for the file, similar to the diff viewer settings button. Give it a little pop up out thing same as the diff viewer settings. Ideally it should share the same code, but that may not be practical. It should just have one setting for now - wrapping on/off
-    - f) [ ] The URL should contain the current path, though to start with it can just be `project/X/repository`, rather than `project/X/repository/main/README.md`. However when clicking on something it should change. It should use the history stack - you should be able to go back etc. You should also be able to select a specific diff by visiting it in the URL - e.g. `project/X/repository/8a02d21475ab084/README.md` (either short form or long form).
-    - g) [ ] The scroll shouldn't be stored across files (clicking on a new file should reset the scroll)
-    - h) [ ] There should be a loading indicator when loading the new file.
-    - i) [ ] You should be able to change the size of the files sidebar.
-    - j) [ ] When showing `123 B` - it should instead show `123 bytes`
-    - k) [ ] It should show binary files correctly (well, some - only images)
-    - l) [ ] Each file should have an icon if it makes sense - e.g. (i) for README.md, TOML icon for TOML, Go for go, LICENSE, CLAUDE.md, GEMINI.md, .gitignore (git), *.md - markdown. Add a setting in the mini settings selector to disable these icons.
+41. [x] Repository view
+    - a) [x] add line numbers to files
+    - b) [x] add branch selector. prioritise current agent branches in the list.
+    - c) [x] collapse all folders by default
+    - d) [x] have wrapping on by default (and make this work with the line numbers correctly)
+    - e) [x] Add a little settings button to the right of the file size indicator for the file, similar to the diff viewer settings button. Give it a little pop up out thing same as the diff viewer settings. Ideally it should share the same code, but that may not be practical. It should just have one setting for now - wrapping on/off
+    - f) [x] The URL should contain the current path, though to start with it can just be `project/X/repository`, rather than `project/X/repository/main/README.md`. However when clicking on something it should change. It should use the history stack - you should be able to go back etc. You should also be able to select a specific diff by visiting it in the URL - e.g. `project/X/repository/8a02d21475ab084/README.md` (either short form or long form).
+    - g) [x] The scroll shouldn't be stored across files (clicking on a new file should reset the scroll)
+    - h) [x] There should be a loading indicator when loading the new file.
+    - i) [x] You should be able to change the size of the files sidebar.
+    - j) [x] When showing `123 B` - it should instead show `123 bytes`
+    - k) [x] It should show binary files correctly (well, some - only images)
+    - l) [x] Each file should have an icon if it makes sense - e.g. (i) for README.md, TOML icon for TOML, Go for go, LICENSE, CLAUDE.md, GEMINI.md, .gitignore (git), *.md - markdown. Add a setting in the mini settings selector to disable these icons.
+
+    _Done._ The view moved to a shared `web/src/components/RepositoryView.tsx`
+    rendered by two routes: `repository.tsx` (bare `/repository`) and the splat
+    child `repository.$.tsx` (`/repository/<ref>/<path>`). The parent stays
+    mounted for both and reads the splat from the pathname, so clicking a file
+    only updates the URL/params (history push → back/forward work) without
+    remounting/refetching. Backend additions: a `getRepositoryBranches` endpoint
+    (`current` + agent-first branch list) and a non-OpenAPI raw blob route
+    `/repository/projects/{id}/blob` serving image bytes for `<img>` previews
+    (mirrored in the simulation server, which gained a deterministic PNG, a few
+    extra files, and a branch list). Line numbers are rendered per-line via a
+    span-aware highlight.js HTML splitter so wrapping (default on) stays aligned;
+    a mini settings popup (styled like the diff viewer's) toggles wrapping +
+    file icons; the sidebar is resizable; sizes read `123 bytes`. The screenshot
+    generator (`scripts/screenshots/take-screenshot.ts`) gained `repository-code`
+    (line numbers), `repository-branches` (agent-branch-first selector, via a new
+    optional `click` step) and `repository-image` captures, in light + dark.
+
+    Design decisions (made without user input): branches live in a separate
+    endpoint rather than folded into the tree response; multi-segment branch refs
+    (e.g. `hydra/foo`) in the URL are disambiguated against the branch list
+    (longest-prefix match), otherwise the first path segment is treated as the
+    ref (commit SHA / single-segment branch); the bare `/repository` URL shows
+    the repo's README by default without rewriting the URL; markdown files keep
+    their rendered view (no line numbers); SVGs render via the image path too.
 
 42. [ ] Diff viewer - use the artifacts image diff viewer code to also let the user diff regular image diffs between branches

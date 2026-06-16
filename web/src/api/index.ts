@@ -29,6 +29,8 @@ export { ErrorResponse } from './models/ErrorResponse';
 export { MergeConflictError } from './models/MergeConflictError';
 export type { NetworkConfig } from './models/NetworkConfig';
 export type { ProjectInfo } from './models/ProjectInfo';
+export type { RepositoryBranch } from './models/RepositoryBranch';
+export type { RepositoryBranchesResponse } from './models/RepositoryBranchesResponse';
 export type { RepositoryFileResponse } from './models/RepositoryFileResponse';
 export type { RepositoryTreeResponse } from './models/RepositoryTreeResponse';
 export type { SandboxConfig } from './models/SandboxConfig';

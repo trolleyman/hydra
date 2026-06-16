@@ -384,6 +384,27 @@ type ProjectInfo struct {
 	Path string `json:"path"`
 }
 
+// RepositoryBranch defines model for RepositoryBranch.
+type RepositoryBranch struct {
+	// IsAgent True for Hydra agent branches (hydra/*), which are listed first
+	IsAgent bool `json:"is_agent"`
+
+	// IsCurrent True for the repository's currently checked-out branch (HEAD)
+	IsCurrent bool `json:"is_current"`
+
+	// Name Branch name (e.g. main, hydra/my-task)
+	Name string `json:"name"`
+}
+
+// RepositoryBranchesResponse defines model for RepositoryBranchesResponse.
+type RepositoryBranchesResponse struct {
+	// Branches Branches ordered with Hydra agent branches first, then the rest
+	Branches []RepositoryBranch `json:"branches"`
+
+	// Current The repository's currently checked-out branch (HEAD), or "" when detached
+	Current string `json:"current"`
+}
+
 // RepositoryFileResponse defines model for RepositoryFileResponse.
 type RepositoryFileResponse struct {
 	// Binary True when the file looks binary; content is then omitted
@@ -652,6 +673,9 @@ type ServerInterface interface {
 	// Save configuration changes
 	// (POST /api/projects/{project_id}/config)
 	SaveConfig(w http.ResponseWriter, r *http.Request, projectId string, params SaveConfigParams)
+	// List the branches available for the project's repository
+	// (GET /api/projects/{project_id}/repository/branches)
+	GetRepositoryBranches(w http.ResponseWriter, r *http.Request, projectId string)
 	// Read the contents of a file in the project's repository
 	// (GET /api/projects/{project_id}/repository/file)
 	GetRepositoryFile(w http.ResponseWriter, r *http.Request, projectId string, params GetRepositoryFileParams)
@@ -1323,6 +1347,31 @@ func (siw *ServerInterfaceWrapper) SaveConfig(w http.ResponseWriter, r *http.Req
 	handler.ServeHTTP(w, r)
 }
 
+// GetRepositoryBranches operation middleware
+func (siw *ServerInterfaceWrapper) GetRepositoryBranches(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetRepositoryBranches(w, r, projectId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetRepositoryFile operation middleware
 func (siw *ServerInterfaceWrapper) GetRepositoryFile(w http.ResponseWriter, r *http.Request) {
 
@@ -1577,6 +1626,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/update-from-base", wrapper.UpdateAgentFromBase)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/config", wrapper.GetConfig)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/config", wrapper.SaveConfig)
+	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/repository/branches", wrapper.GetRepositoryBranches)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/repository/file", wrapper.GetRepositoryFile)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/repository/tree", wrapper.GetRepositoryTree)
 	m.HandleFunc("GET "+options.BaseURL+"/api/status", wrapper.GetStatus)
@@ -2290,6 +2340,41 @@ func (response SaveConfig500JSONResponse) VisitSaveConfigResponse(w http.Respons
 	return json.NewEncoder(w).Encode(response)
 }
 
+type GetRepositoryBranchesRequestObject struct {
+	ProjectId string `json:"project_id"`
+}
+
+type GetRepositoryBranchesResponseObject interface {
+	VisitGetRepositoryBranchesResponse(w http.ResponseWriter) error
+}
+
+type GetRepositoryBranches200JSONResponse RepositoryBranchesResponse
+
+func (response GetRepositoryBranches200JSONResponse) VisitGetRepositoryBranchesResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetRepositoryBranches404JSONResponse ErrorResponse
+
+func (response GetRepositoryBranches404JSONResponse) VisitGetRepositoryBranchesResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetRepositoryBranches500JSONResponse ErrorResponse
+
+func (response GetRepositoryBranches500JSONResponse) VisitGetRepositoryBranchesResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 type GetRepositoryFileRequestObject struct {
 	ProjectId string `json:"project_id"`
 	Params    GetRepositoryFileParams
@@ -2463,6 +2548,9 @@ type StrictServerInterface interface {
 	// Save configuration changes
 	// (POST /api/projects/{project_id}/config)
 	SaveConfig(ctx context.Context, request SaveConfigRequestObject) (SaveConfigResponseObject, error)
+	// List the branches available for the project's repository
+	// (GET /api/projects/{project_id}/repository/branches)
+	GetRepositoryBranches(ctx context.Context, request GetRepositoryBranchesRequestObject) (GetRepositoryBranchesResponseObject, error)
 	// Read the contents of a file in the project's repository
 	// (GET /api/projects/{project_id}/repository/file)
 	GetRepositoryFile(ctx context.Context, request GetRepositoryFileRequestObject) (GetRepositoryFileResponseObject, error)
@@ -3028,6 +3116,32 @@ func (sh *strictHandler) SaveConfig(w http.ResponseWriter, r *http.Request, proj
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(SaveConfigResponseObject); ok {
 		if err := validResponse.VisitSaveConfigResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetRepositoryBranches operation middleware
+func (sh *strictHandler) GetRepositoryBranches(w http.ResponseWriter, r *http.Request, projectId string) {
+	var request GetRepositoryBranchesRequestObject
+
+	request.ProjectId = projectId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetRepositoryBranches(ctx, request.(GetRepositoryBranchesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetRepositoryBranches")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetRepositoryBranchesResponseObject); ok {
+		if err := validResponse.VisitGetRepositoryBranchesResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
