@@ -218,10 +218,10 @@ export function SpawnForm({
     return (
       <div
         onMouseDown={handleCardResizeStart}
-        className="group shrink-0 h-3 flex items-center justify-center cursor-ns-resize"
+        className="group shrink-0 h-2 -mt-1.5 flex items-center justify-center cursor-ns-resize"
         title="Drag to resize"
       >
-        <div className="h-1 w-10 rounded-full bg-gray-200 dark:bg-gray-600 group-hover:bg-blue-400/70 group-active:bg-blue-500 transition-colors" />
+        <div className="h-0.5 w-10 rounded-full bg-gray-200 dark:bg-gray-600 group-hover:bg-blue-400/70 group-active:bg-blue-500 transition-colors" />
       </div>
     )
   }
