@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/oapi-codegen/runtime"
 	strictnethttp "github.com/oapi-codegen/runtime/strictmiddleware/nethttp"
@@ -282,6 +283,36 @@ type ArtifactSetStatus string
 // ArtifactsResponse defines model for ArtifactsResponse.
 type ArtifactsResponse struct {
 	Scripts []ArtifactSet `json:"scripts"`
+}
+
+// ClaudeUsageResponse defines model for ClaudeUsageResponse.
+type ClaudeUsageResponse struct {
+	// AccountTier Detected plan, e.g. "Claude Max" or "Claude Pro".
+	AccountTier *string `json:"account_tier"`
+
+	// Available True when a usable usage snapshot was obtained.
+	Available bool `json:"available"`
+
+	// CapturedAt When the snapshot was probed.
+	CapturedAt *time.Time `json:"captured_at,omitempty"`
+
+	// Error Why usage is unavailable (CLI missing, not a subscription account, parse failure, …).
+	Error *string `json:"error"`
+
+	// SessionPercentUsed Percent of the current session ("4 hour") limit used (0-100).
+	SessionPercentUsed *float32 `json:"session_percent_used"`
+
+	// SessionResetText Raw session reset text, e.g. "Resets in 2h 15m".
+	SessionResetText *string `json:"session_reset_text"`
+
+	// SessionResetsAt When the current session limit resets (derived from the relative "Resets in …" text).
+	SessionResetsAt *time.Time `json:"session_resets_at"`
+
+	// WeeklyPercentUsed Percent of the weekly (all-models) limit used (0-100).
+	WeeklyPercentUsed *float32 `json:"weekly_percent_used"`
+
+	// WeeklyResetText Raw weekly reset text, e.g. "Resets Jan 15, 3:30pm".
+	WeeklyResetText *string `json:"weekly_reset_text"`
 }
 
 // CommitInfo defines model for CommitInfo.
@@ -690,6 +721,12 @@ type GetRepositoryTreeParams struct {
 	Ref *string `form:"ref,omitempty" json:"ref,omitempty"`
 }
 
+// GetClaudeUsageParams defines parameters for GetClaudeUsage.
+type GetClaudeUsageParams struct {
+	// Refresh Bypass the cache and re-probe the CLI.
+	Refresh *bool `form:"refresh,omitempty" json:"refresh,omitempty"`
+}
+
 // AddProjectJSONRequestBody defines body for AddProject for application/json ContentType.
 type AddProjectJSONRequestBody = AddProjectRequest
 
@@ -776,6 +813,9 @@ type ServerInterface interface {
 	// Get system status
 	// (GET /api/status)
 	GetStatus(w http.ResponseWriter, r *http.Request)
+	// Get cached Claude Code subscription usage
+	// (GET /api/usage/claude)
+	GetClaudeUsage(w http.ResponseWriter, r *http.Request, params GetClaudeUsageParams)
 	// Health check
 	// (GET /health)
 	CheckHealth(w http.ResponseWriter, r *http.Request)
@@ -1597,6 +1637,33 @@ func (siw *ServerInterfaceWrapper) GetStatus(w http.ResponseWriter, r *http.Requ
 	handler.ServeHTTP(w, r)
 }
 
+// GetClaudeUsage operation middleware
+func (siw *ServerInterfaceWrapper) GetClaudeUsage(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetClaudeUsageParams
+
+	// ------------- Optional query parameter "refresh" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "refresh", r.URL.Query(), &params.Refresh)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "refresh", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetClaudeUsage(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // CheckHealth operation middleware
 func (siw *ServerInterfaceWrapper) CheckHealth(w http.ResponseWriter, r *http.Request) {
 
@@ -1755,6 +1822,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/repository/file", wrapper.GetRepositoryFile)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/repository/tree", wrapper.GetRepositoryTree)
 	m.HandleFunc("GET "+options.BaseURL+"/api/status", wrapper.GetStatus)
+	m.HandleFunc("GET "+options.BaseURL+"/api/usage/claude", wrapper.GetClaudeUsage)
 	m.HandleFunc("GET "+options.BaseURL+"/health", wrapper.CheckHealth)
 
 	return m
@@ -2632,6 +2700,32 @@ func (response GetStatus500JSONResponse) VisitGetStatusResponse(w http.ResponseW
 	return json.NewEncoder(w).Encode(response)
 }
 
+type GetClaudeUsageRequestObject struct {
+	Params GetClaudeUsageParams
+}
+
+type GetClaudeUsageResponseObject interface {
+	VisitGetClaudeUsageResponse(w http.ResponseWriter) error
+}
+
+type GetClaudeUsage200JSONResponse ClaudeUsageResponse
+
+func (response GetClaudeUsage200JSONResponse) VisitGetClaudeUsageResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetClaudeUsage500JSONResponse ErrorResponse
+
+func (response GetClaudeUsage500JSONResponse) VisitGetClaudeUsageResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 type CheckHealthRequestObject struct {
 }
 
@@ -2723,6 +2817,9 @@ type StrictServerInterface interface {
 	// Get system status
 	// (GET /api/status)
 	GetStatus(ctx context.Context, request GetStatusRequestObject) (GetStatusResponseObject, error)
+	// Get cached Claude Code subscription usage
+	// (GET /api/usage/claude)
+	GetClaudeUsage(ctx context.Context, request GetClaudeUsageRequestObject) (GetClaudeUsageResponseObject, error)
 	// Health check
 	// (GET /health)
 	CheckHealth(ctx context.Context, request CheckHealthRequestObject) (CheckHealthResponseObject, error)
@@ -3409,6 +3506,32 @@ func (sh *strictHandler) GetStatus(w http.ResponseWriter, r *http.Request) {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetStatusResponseObject); ok {
 		if err := validResponse.VisitGetStatusResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetClaudeUsage operation middleware
+func (sh *strictHandler) GetClaudeUsage(w http.ResponseWriter, r *http.Request, params GetClaudeUsageParams) {
+	var request GetClaudeUsageRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetClaudeUsage(ctx, request.(GetClaudeUsageRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetClaudeUsage")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetClaudeUsageResponseObject); ok {
+		if err := validResponse.VisitGetClaudeUsageResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

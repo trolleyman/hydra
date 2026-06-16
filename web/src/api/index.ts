@@ -21,6 +21,7 @@ export { ArtifactLogLine } from './models/ArtifactLogLine';
 export type { ArtifactScript } from './models/ArtifactScript';
 export { ArtifactSet } from './models/ArtifactSet';
 export type { ArtifactsResponse } from './models/ArtifactsResponse';
+export type { ClaudeUsageResponse } from './models/ClaudeUsageResponse';
 export type { CommitInfo } from './models/CommitInfo';
 export type { ConfigResponse } from './models/ConfigResponse';
 export type { ConfigTomlResponse } from './models/ConfigTomlResponse';
