@@ -1314,6 +1314,12 @@ components:
         error:
           type: string
           nullable: true
+        progress:
+          type: string
+          nullable: true
+          description: >-
+            Latest stdout line of an in-flight generation (only set while
+            status is "generating"), surfaced as live progress.
         files:
           type: array
           items:

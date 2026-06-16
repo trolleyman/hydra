@@ -210,8 +210,11 @@ type ArtifactSet struct {
 	Files   []ArtifactFile `json:"files"`
 
 	// Name The configured artifact script name
-	Name   string            `json:"name"`
-	Status ArtifactSetStatus `json:"status"`
+	Name string `json:"name"`
+
+	// Progress Latest stdout line of an in-flight generation (only set while status is "generating"), surfaced as live progress.
+	Progress *string           `json:"progress"`
+	Status   ArtifactSetStatus `json:"status"`
 }
 
 // ArtifactSetStatus defines model for ArtifactSet.Status.
