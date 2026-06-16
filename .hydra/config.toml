@@ -1,7 +1,8 @@
 ## extra instructions appended to every agent's system prompt.
 pre_prompt = """
 - Use bun instead of npm, and bun x instead of npx
-- Check using mage build before committing"""
+- Check using mage build before committing
+"""
 
 [sandbox]
 ## extra paths made writable in the sandbox (added to the built-in defaults).
@@ -10,6 +11,8 @@ writable_paths = ["~/.cache/go-build", "~/.go/pkg", "~/.bun/install/cache", "~/.
 # masked_paths = ["~/.ssh", "~/.aws", "~/.azure", "~/.gnupg", "~/.docker", "~/.kube", "~/.password-store", "~/.config", "~/.netrc", "~/.git-credentials", "~/.npmrc", "~/.pypirc", "~/.zsh_history", "~/.bash_history", "~/.sh_history", "~/.config/mise/config.local.toml", "~/.dotfiles/mise/config.local.toml"]
 ## paths re-exposed read-only after a masked parent (added to the built-in defaults).
 # restore_ro = ["~/.config/git", "~/.config/gh", "~/.config/mise/config.toml"]
+## worktree-relative paths mounted copy-on-write from the project root (read source, writes kept per-head; e.g. large gitignored build dirs).
+# cow_paths = []
 ## shell script run in the sandbox once before each agent launches (e.g. mise trust).
 # pre_spawn_script = ""
 
@@ -38,6 +41,10 @@ writable_paths = ["~/.cache/go-build", "~/.go/pkg", "~/.bun/install/cache", "~/.
 ##                credentials; only for audited, self-contained commands (default false).
 ## The command is given: HYDRA_ARTIFACT_OUTPUT (directory to write images into),
 ## HYDRA_ARTIFACT_SOURCE (the checkout dir), HYDRA_ARTIFACT_REF (the resolved ref).
+## Tags: alongside an image foo.png the command may write a JSON sidecar foo.png.meta
+## like {"tags": ["theme::dark", "viewport::phone"]}. The diff viewer shows these as
+## labels and offers a filter. A "category::value" tag is a scoped label: only one
+## value per category is kept (the last one wins); plain tags are free-form.
 [[artifacts]]
 # Diff-viewer artifact generator (PLAN.md #17): renders Hydra's own web UI to
 # PNGs so visual changes show up side-by-side in the diff viewer. The script
