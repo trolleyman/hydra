@@ -9,6 +9,7 @@ import {
   Settings, Copy, Folder, FolderOpen, X, GitMerge, Bot,
   MoveRight, MessageSquarePlus, FolderSync,
 } from 'lucide-react'
+import { getFileIcon, changeTypeTextClass } from './lib/fileIcons'
 import { Tooltip } from './components/Tooltip'
 import { ArtifactsPanel, IMAGE_DIFF_MODES, type ImageDiffMode } from './components/ArtifactsPanel'
 import { useDialogStore } from './stores/dialogStore'
@@ -95,15 +96,6 @@ interface SideBySideLine {
   newLineNum: number | null
   newType: 'context' | 'addition' | 'empty'
   newContent: string | null
-}
-
-function ChangeTypeIcon({ type }: { type: string }) {
-  switch (type) {
-    case 'added': return <Plus className="w-3.5 h-3.5 text-green-500 shrink-0" />
-    case 'deleted': return <div className="w-3.5 h-3.5 flex items-center justify-center shrink-0"><div className="w-2.5 h-0.5 bg-red-500 rounded-full" /></div>
-    case 'renamed': return <GitMerge className="w-3.5 h-3.5 text-blue-500 shrink-0" />
-    default: return <div className="w-3.5 h-3.5 rounded-full bg-yellow-500 shrink-0" />
-  }
 }
 
 function buildSideBySide(hunkLines: DiffHunk['lines']): SideBySideLine[] {
@@ -435,9 +427,9 @@ const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onComment, 
         >
           <ChevronDown className={`w-4 h-4 transition-transform ${isCollapsed ? '-rotate-90' : ''}`} />
         </button>
-        <ChangeTypeIcon type={file.change_type} />
+        {(() => { const { Icon, className } = getFileIcon(file.path.split('/').pop() ?? file.path); return <Icon className={`w-3.5 h-3.5 shrink-0 ${className}`} /> })()}
         <span
-          className="font-mono text-xs text-gray-700 dark:text-gray-300 flex-1 min-w-0 truncate cursor-pointer hover:underline"
+          className={`font-mono text-xs flex-1 min-w-0 truncate cursor-pointer hover:underline ${changeTypeTextClass(file.change_type)}`}
         >
           {displayPath}
         </span>
@@ -1178,9 +1170,9 @@ function FileRow({ file, isActive, onClick, indent = 0 }: {
         }`}
       style={{ paddingLeft: `${10 + indent}px`, paddingRight: '10px' }}
     >
-      <ChangeTypeIcon type={file.change_type} />
+      {(() => { const { Icon, className } = getFileIcon(file.path.split('/').pop() ?? file.path); return <Icon className={`w-3.5 h-3.5 shrink-0 ${className}`} /> })()}
       <Tooltip content={file.path}>
-        <span className="font-mono text-[10px] text-gray-700 dark:text-gray-300 truncate flex-1 min-w-0">
+        <span className={`font-mono text-[10px] truncate flex-1 min-w-0 ${changeTypeTextClass(file.change_type)}`}>
           {file.path.split('/').pop()}
         </span>
       </Tooltip>
