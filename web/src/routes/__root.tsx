@@ -15,6 +15,7 @@ import { Dialog } from '../components/Dialog'
 import { Toaster } from '../components/Toaster'
 import { NotFound } from '../components/NotFound'
 import { Tooltip } from '../components/Tooltip'
+import { ClaudeUsageIndicator } from '../components/ClaudeUsageIndicator'
 import { TrustProjectModal } from '../components/TrustProjectModal'
 
 export const Route = createRootRoute({
@@ -744,6 +745,7 @@ function RootLayout() {
         )}
 
         <div className="ml-auto flex items-center gap-3 shrink-0 self-center">
+          <ClaudeUsageIndicator />
           {spawnedAt.current !== null && (
             <Tooltip content={`Spawned at ${new Date(spawnedAt.current).toUTCString()}`}>
               <span className="text-xs text-gray-400 dark:text-gray-500 cursor-default hidden md:block">

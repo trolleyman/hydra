@@ -6,6 +6,7 @@ import type { AddProjectRequest } from '../models/AddProjectRequest';
 import type { AgentInputRequest } from '../models/AgentInputRequest';
 import type { AgentResponse } from '../models/AgentResponse';
 import type { ArtifactsResponse } from '../models/ArtifactsResponse';
+import type { ClaudeUsageResponse } from '../models/ClaudeUsageResponse';
 import type { CommitInfo } from '../models/CommitInfo';
 import type { ConfigResponse } from '../models/ConfigResponse';
 import type { ConfigTomlResponse } from '../models/ConfigTomlResponse';
@@ -59,6 +60,28 @@ export class DefaultService {
         return this.httpRequest.request({
             method: 'GET',
             url: '/api/status',
+            errors: {
+                500: `Internal Server Error`,
+            },
+        });
+    }
+    /**
+     * Get cached Claude Code subscription usage
+     * Probes the locally-installed Claude CLI (`claude /usage`) for the account's subscription quota and returns a cached snapshot. The result is cached briefly (~30s); pass refresh=true to force a fresh probe.
+     *
+     * @param refresh Bypass the cache and re-probe the CLI.
+     * @returns ClaudeUsageResponse OK
+     * @throws ApiError
+     */
+    public getClaudeUsage(
+        refresh?: boolean,
+    ): CancelablePromise<ClaudeUsageResponse> {
+        return this.httpRequest.request({
+            method: 'GET',
+            url: '/api/usage/claude',
+            query: {
+                'refresh': refresh,
+            },
             errors: {
                 500: `Internal Server Error`,
             },

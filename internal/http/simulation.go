@@ -48,6 +48,26 @@ func (s *SimulationServer) GetStatus(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *SimulationServer) GetClaudeUsage(w http.ResponseWriter, r *http.Request, params api.GetClaudeUsageParams) {
+	// Fixed snapshot so the diff viewer's two server boots render identically.
+	// session_resets_at is intentionally omitted: a live countdown would differ
+	// between otherwise-identical renders (see GetStatus's uptime note).
+	available := true
+	tier := "Claude Max"
+	session := float32(38)
+	weekly := float32(65)
+	sessionText := "Resets in 2h 15m"
+	weeklyText := "Resets Jan 15, 3:30pm"
+	api.WriteJSON(w, http.StatusOK, api.ClaudeUsageResponse{
+		Available:          available,
+		AccountTier:        &tier,
+		SessionPercentUsed: &session,
+		SessionResetText:   &sessionText,
+		WeeklyPercentUsed:  &weekly,
+		WeeklyResetText:    &weeklyText,
+	})
+}
+
 func (s *SimulationServer) ListProjects(w http.ResponseWriter, r *http.Request) {
 	resp := api.ListProjects200JSONResponse{
 		{
