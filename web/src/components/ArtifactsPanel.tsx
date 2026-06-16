@@ -587,7 +587,9 @@ function ArtifactSetCard({ set, mode, onRefresh, projectId, agentId }: { set: Ar
             (noChanges ? (
               <span className="text-xs text-gray-400 dark:text-gray-500 shrink-0">no visual changes</span>
             ) : (
-              <span className="text-xs text-gray-400 dark:text-gray-500 shrink-0">{changedFiles.length} changed</span>
+              // Highlight the change count so a card with visual changes stands
+              // out at a glance from the muted "no visual changes" cards.
+              <span className="text-xs font-medium text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-900/40 rounded-full px-2 py-0.5 shrink-0">{changedFiles.length} changed</span>
             ))}
         </button>
         {/* Bust the per-commit cache and regenerate — chiefly to retry a failure,
