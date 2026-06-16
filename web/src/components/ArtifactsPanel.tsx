@@ -317,8 +317,9 @@ function ImageDiffView({ left, right, mode }: { left?: string | null; right?: st
 // A file's tags come from a sibling JSON sidecar (<file>.meta) the artifact
 // script writes; the backend normalizes them (see internal/artifacts). A
 // "category::value" tag is a GitLab-style scoped label — at most one value per
-// category — which the filter renders as a single-select dropdown; a plain tag
-// (no "::") is free-form, rendered as a toggle chip.
+// category on a given file — which the filter renders as a segmented control
+// where any number of values can be toggled on (matching any of them); a plain
+// tag (no "::") is free-form, rendered as a toggle chip.
 
 // parseScopedTag splits "category::value" into its parts, or returns null for a
 // free-form tag. Mirrors the backend's split (first "::", non-empty halves).
@@ -363,18 +364,19 @@ function collectTags(sets: ArtifactSet[]): CollectedTags {
 }
 
 // filterIsActive reports whether the filter would hide anything (any scoped
-// category pinned to a value, or any free tag selected).
+// category with a selected value, or any free tag selected).
 function filterIsActive(filter: ArtifactTagFilter): boolean {
-  return Object.values(filter.scoped).some(Boolean) || filter.free.length > 0
+  return Object.values(filter.scoped).some((vals) => vals.length > 0) || filter.free.length > 0
 }
 
-// fileMatchesFilter reports whether a file passes the active filter: it must
-// carry the selected value for every pinned scoped category (files lacking that
-// category are excluded), and must include every selected free tag.
+// fileMatchesFilter reports whether a file passes the active filter: for every
+// scoped category with selections it must carry at least one of the selected
+// values (an OR within a category; files lacking that category are excluded),
+// and it must include every selected free tag (an AND across categories/tags).
 function fileMatchesFilter(file: ArtifactFile, filter: ArtifactTagFilter): boolean {
   const tags = file.tags ?? []
-  for (const [cat, val] of Object.entries(filter.scoped)) {
-    if (val && !tags.includes(`${cat}::${val}`)) return false
+  for (const [cat, vals] of Object.entries(filter.scoped)) {
+    if (vals.length > 0 && !vals.some((v) => tags.includes(`${cat}::${v}`))) return false
   }
   for (const t of filter.free) {
     if (!tags.includes(t)) return false
@@ -398,30 +400,50 @@ function TagBadge({ tag }: { tag: string }) {
 }
 
 // TagFilterBar is the inline filter shown on the Artifacts header: one
-// single-select segmented control per scoped category (All + each value) and a
-// toggle chip per free-form tag. The selection is shared across every card.
+// multi-select segmented control per scoped category (All + each value, where
+// any number of values can be toggled on) and a toggle chip per free-form tag.
+// The selection is shared across every card. A "Clear" button on the left resets
+// the whole filter.
 function TagFilterBar({ tags, filter, onChange }: { tags: CollectedTags; filter: ArtifactTagFilter; onChange: (f: ArtifactTagFilter) => void }) {
   const seg = (active: boolean) =>
     `px-1.5 py-0.5 text-[11px] cursor-pointer transition-colors ${
       active ? 'bg-blue-500 text-white' : 'bg-gray-100 dark:bg-gray-700/60 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600'
     }`
-  const setScoped = (cat: string, val: string) => onChange({ ...filter, scoped: { ...filter.scoped, [cat]: val } })
+  // Toggle a value within its category (OR across the values), or clear the whole
+  // category back to "All".
+  const toggleScoped = (cat: string, val: string) => {
+    const cur = filter.scoped[cat] ?? []
+    const next = cur.includes(val) ? cur.filter((x) => x !== val) : [...cur, val]
+    onChange({ ...filter, scoped: { ...filter.scoped, [cat]: next } })
+  }
+  const clearScoped = (cat: string) => onChange({ ...filter, scoped: { ...filter.scoped, [cat]: [] } })
   const toggleFree = (t: string) =>
     onChange({ ...filter, free: filter.free.includes(t) ? filter.free.filter((x) => x !== t) : [...filter.free, t] })
 
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-      {tags.scoped.map(({ cat, values }) => (
-        <div key={cat} className="flex items-center gap-1">
-          <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">{cat}</span>
-          <div className="flex rounded border border-gray-200 dark:border-gray-700 overflow-hidden divide-x divide-gray-200 dark:divide-gray-700">
-            <button className={seg(!filter.scoped[cat])} onClick={() => setScoped(cat, '')}>All</button>
-            {values.map((v) => (
-              <button key={v} className={seg(filter.scoped[cat] === v)} onClick={() => setScoped(cat, v)}>{v}</button>
-            ))}
+      {filterIsActive(filter) && (
+        <button
+          onClick={() => onChange({ scoped: {}, free: [] })}
+          className="text-[11px] text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 cursor-pointer underline"
+        >
+          Clear
+        </button>
+      )}
+      {tags.scoped.map(({ cat, values }) => {
+        const sel = filter.scoped[cat] ?? []
+        return (
+          <div key={cat} className="flex items-center gap-1">
+            <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">{cat}</span>
+            <div className="flex rounded border border-gray-200 dark:border-gray-700 overflow-hidden divide-x divide-gray-200 dark:divide-gray-700">
+              <button className={seg(sel.length === 0)} onClick={() => clearScoped(cat)}>All</button>
+              {values.map((v) => (
+                <button key={v} className={seg(sel.includes(v))} onClick={() => toggleScoped(cat, v)}>{v}</button>
+              ))}
+            </div>
           </div>
-        </div>
-      ))}
+        )
+      })}
       {tags.free.map((t) => (
         <button
           key={t}
@@ -435,14 +457,6 @@ function TagFilterBar({ tags, filter, onChange }: { tags: CollectedTags; filter:
           {t}
         </button>
       ))}
-      {filterIsActive(filter) && (
-        <button
-          onClick={() => onChange({ scoped: {}, free: [] })}
-          className="text-[11px] text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 cursor-pointer underline"
-        >
-          Clear
-        </button>
-      )}
     </div>
   )
 }
@@ -467,7 +481,9 @@ function FileRow({ file, mode }: { file: ArtifactFile; mode: ImageDiffMode }) {
 // file's name + before + after stays a single, unbreakable block.
 function FileGrid({ files, mode }: { files: ArtifactFile[]; mode: ImageDiffMode }) {
   return (
-    <div className="flex flex-wrap gap-3 pt-1">
+    // pt-3 so the gap above the first file row matches the card body's px-3 left
+    // inset — the top and left spacing around the grid read as equal.
+    <div className="flex flex-wrap gap-3 pt-3">
       {files.map((f) => <FileRow key={f.name} file={f} mode={mode} />)}
     </div>
   )
@@ -1097,7 +1113,7 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
           <p>Configure them in <code className="text-blue-300">.hydra/config.toml</code> with <code className="text-blue-300">[[artifacts]]</code> blocks (<code className="text-blue-300">name</code>, <code className="text-blue-300">command</code>, optional <code className="text-blue-300">timeout_sec</code>) — for example a script that builds the app and screenshots a page, so visual UI changes show up here in the diff viewer.</p>
           <p>A script with no visual changes — or one still generating — collapses to a single header row; click it to expand. The two sides (base and head) build in parallel, so the expanded card shows their <strong>build logs side by side</strong> (Before / After, stderr in red); once finished, reopen them any time with <strong>Show build log</strong>. The refresh button (top-right of each card) re-runs a script — handy to retry a failure or re-render even when nothing visibly changed.</p>
           <p>The header shows each side's latest <code className="text-blue-300">stdout</code> line as live progress. To surface a cleaner message, print a line prefixed with <code className="text-blue-300">::hydra:progress::</code> (e.g. <code className="text-blue-300">echo "::hydra:progress:: capturing home 3/24"</code>) — Hydra strips the prefix, shows the rest as the progress line, and from then on ignores ordinary <code className="text-blue-300">stdout</code> for the header, so a noisy build can't hijack it. The full output still lands in the build log.</p>
-          <p><strong>Tags &amp; filter.</strong> Alongside an image <code className="text-blue-300">home.png</code> the script can write a JSON sidecar <code className="text-blue-300">home.png.meta</code> like <code className="text-blue-300">{'{'}"tags": ["theme::dark", "viewport::phone"]{'}'}</code>. Tags show as labels on each file and as a filter on this bar. A <code className="text-blue-300">category::value</code> tag is a <em>scoped</em> label — only one value per category is kept (the last wins) and it filters as a single-select dropdown; plain tags are free-form toggles. Handy when a script emits many shots (light/dark, phone/desktop) and you want to see just one slice.</p>
+          <p><strong>Tags &amp; filter.</strong> Alongside an image <code className="text-blue-300">home.png</code> the script can write a JSON sidecar <code className="text-blue-300">home.png.meta</code> like <code className="text-blue-300">{'{'}"tags": ["theme::dark", "viewport::phone"]{'}'}</code>. Tags show as labels on each file and as a filter on this bar. A <code className="text-blue-300">category::value</code> tag is a <em>scoped</em> label — only one value per category is kept on a file (the last wins), and the filter lets you toggle any number of a category's values (a file matches if it has any of them); plain tags are free-form toggles. Handy when a script emits many shots (light/dark, phone/desktop) and you want to see just one slice.</p>
         </InfoTooltip>
         {/* Filter lives right on the header bar (not behind a popover) so picking a
             theme / viewport / tag is a single click. Shown only once some file
