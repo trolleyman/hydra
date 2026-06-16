@@ -53,19 +53,9 @@ func (r *Registry) SetOnExit(fn func(Info)) {
 // Start builds the sandbox command, launches it under a PTY, and registers the
 // session. It returns ErrExists if a live session with the same ID exists.
 func (r *Registry) Start(opts StartOptions) (*Session, error) {
-	r.mu.Lock()
-	if existing, ok := r.sessions[opts.ID]; ok {
-		existing.mu.Lock()
-		live := existing.status != StatusExited
-		existing.mu.Unlock()
-		if live {
-			r.mu.Unlock()
-			return nil, errtrace.Wrap(ErrExists)
-		}
-		// Replace an exited session of the same ID.
-		delete(r.sessions, opts.ID)
+	if err := r.reserve(opts.ID); err != nil {
+		return nil, errtrace.Wrap(err)
 	}
-	r.mu.Unlock()
 
 	spec, err := sandbox.BuildSpec(opts.Sandbox)
 	if err != nil {
@@ -78,23 +68,58 @@ func (r *Registry) Start(opts StartOptions) (*Session, error) {
 		return nil, errtrace.Wrap(fmt.Errorf("start sandboxed process: %w", err))
 	}
 
+	return r.register(opts.ID, opts.Sandbox.AgentType, opts.Sandbox.WorktreePath, opts.Rows, opts.Cols, opts.Ephemeral, proc, spec.Cleanup), nil
+}
+
+// StartWithProc registers a session backed by an already-running PTY (e.g. a
+// child spawned inside a shared namespace host, whose master fd was passed back
+// to the daemon) instead of launching its own sandbox process. The proc is
+// closed when the session exits.
+func (r *Registry) StartWithProc(id string, agentType sandbox.AgentType, worktree string, rows, cols uint16, ephemeral bool, proc PTY) (*Session, error) {
+	if err := r.reserve(id); err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	return r.register(id, agentType, worktree, rows, cols, ephemeral, proc, func() { _ = proc.Close() }), nil
+}
+
+// reserve verifies no live session holds id, evicting an exited one so the id
+// can be reused. The brief unlocked gap before register mirrors the original
+// build-then-insert flow.
+func (r *Registry) reserve(id string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if existing, ok := r.sessions[id]; ok {
+		existing.mu.Lock()
+		live := existing.status != StatusExited
+		existing.mu.Unlock()
+		if live {
+			return errtrace.Wrap(ErrExists)
+		}
+		delete(r.sessions, id)
+	}
+	return nil
+}
+
+// register wires a started proc into a Session, stores it, and launches the
+// read loop. cleanup runs once after the process exits.
+func (r *Registry) register(id string, agentType sandbox.AgentType, worktree string, rows, cols uint16, ephemeral bool, proc PTY, cleanup func()) *Session {
 	s := &Session{
-		ID:           opts.ID,
-		AgentType:    opts.Sandbox.AgentType,
-		WorktreePath: opts.Sandbox.WorktreePath,
+		ID:           id,
+		AgentType:    agentType,
+		WorktreePath: worktree,
 		StartedAt:    time.Now(),
 		proc:         proc,
 		scroll:       newRing(defaultScrollback),
-		cleanup:      spec.Cleanup,
+		cleanup:      cleanup,
 		attachers:    make(map[*attacher]struct{}),
-		rows:         opts.Rows,
-		cols:         opts.Cols,
+		rows:         rows,
+		cols:         cols,
 		status:       StatusRunning,
-		ephemeral:    opts.Ephemeral,
+		ephemeral:    ephemeral,
 	}
 
 	r.mu.Lock()
-	r.sessions[opts.ID] = s
+	r.sessions[id] = s
 	r.mu.Unlock()
 
 	go s.readLoop(func(done *Session) {
@@ -111,7 +136,7 @@ func (r *Registry) Start(opts StartOptions) (*Session, error) {
 		}
 	})
 
-	return s, nil
+	return s
 }
 
 // Get returns the session for id, if present.

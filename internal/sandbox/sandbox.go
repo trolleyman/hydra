@@ -138,6 +138,14 @@ func withPreSpawn(script string, argv []string) []string {
 	return append(cmd, argv...)
 }
 
+// WrapPreSpawn exposes withPreSpawn for callers that spawn sandboxed children
+// outside BuildSpec (the namespace host supervisor), so a configured pre-spawn
+// script still runs in-sandbox before the agent. Returns argv unchanged when the
+// script is empty.
+func WrapPreSpawn(script string, argv []string) []string {
+	return withPreSpawn(script, argv)
+}
+
 // preSpawnInterp returns the interpreter command line for a pre-spawn script: the
 // fields of a leading `#!` shebang (e.g. ["/usr/bin/env", "zsh"]), or the default
 // ["/bin/bash"] when the script has none. Invoked as `<interp...> -c <script>`.

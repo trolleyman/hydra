@@ -18,6 +18,7 @@ import (
 	"github.com/trolleyman/hydra/internal/config"
 	"github.com/trolleyman/hydra/internal/db"
 	"github.com/trolleyman/hydra/internal/git"
+	"github.com/trolleyman/hydra/internal/nshost"
 	"github.com/trolleyman/hydra/internal/paths"
 	"github.com/trolleyman/hydra/internal/sandbox"
 	"github.com/trolleyman/hydra/internal/session"
@@ -308,27 +309,22 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 	env = append(env, sandbox.MiseTrustEnv(projectRoot, worktreePath)...)
 	env = append(env, headContextEnv(opts.ID, opts.AgentType, projectRoot, worktreePath, branchName, baseBranch)...)
 
-	sess, err := reg.Start(session.StartOptions{
-		ID:   opts.ID,
-		Rows: opts.Rows,
-		Cols: opts.Cols,
-		Sandbox: sandbox.Options{
-			AgentType:      opts.AgentType,
-			WorktreePath:   worktreePath,
-			GitCommonDir:   gitCommonDir(projectRoot),
-			Home:           home,
-			WritablePaths:  append(writable, seed.WritablePaths...),
-			MaskedPaths:    masked,
-			RestoreRO:      restore,
-			Network:        net,
-			Binds:          seed.Binds,
-			CowMounts:      cowMounts,
-			Env:            env,
-			Argv:           argv,
-			PreSpawnScript: preSpawn,
-			HardenGUI:      true,
-			Seccomp:        true,
-		},
+	sess, err := startAgentSession(reg, projectRoot, opts.ID, opts.AgentType, worktreePath, opts.Rows, opts.Cols, sandbox.Options{
+		AgentType:      opts.AgentType,
+		WorktreePath:   worktreePath,
+		GitCommonDir:   gitCommonDir(projectRoot),
+		Home:           home,
+		WritablePaths:  append(writable, seed.WritablePaths...),
+		MaskedPaths:    masked,
+		RestoreRO:      restore,
+		Network:        net,
+		Binds:          seed.Binds,
+		CowMounts:      cowMounts,
+		Env:            env,
+		Argv:           argv,
+		PreSpawnScript: preSpawn,
+		HardenGUI:      true,
+		Seccomp:        true,
 	})
 	if err != nil {
 		spawnFail(store, projectRoot, opts.ID, setStatus, fmt.Errorf("start session: %w", err))
@@ -370,6 +366,7 @@ func spawnCleanup(store *db.Store, projectRoot string, opts SpawnHeadOptions, wo
 		_ = store.SoftDeleteAgent(opts.ID)
 	}
 	RemoveAgentStatusFiles(projectRoot, opts.ID)
+	removeNamespaceHost(opts.ID)
 	removeCowDir(projectRoot, opts.ID)
 }
 
@@ -468,6 +465,29 @@ func StartShellSession(reg *session.Registry, projectRoot string, head Head, row
 	// the pre-spawn config it runs is the bash agent's.
 	env = append(env, headContextEnv(head.ID, sandbox.AgentTypeBash, projectRoot, worktreePath, derefStr(head.Branch), head.BaseBranch)...)
 
+	// Shared-namespace mode: if the head's agent is running inside a supervisor,
+	// spawn this bash terminal as a sibling child of that one bwrap. It then
+	// shares the agent's single writable COW overlay — the whole point of the
+	// namespace host — rather than getting the COW sources read-only.
+	if sandboxed && sharedNSEnabled() {
+		if host, ok := namespaceHostFor(head.ID); ok {
+			sp, err := host.client.Spawn(nshost.SpawnRequest{
+				Argv: []string{"/bin/bash"},
+				Env:  env,
+				Cwd:  worktreePath,
+				Rows: rows,
+				Cols: cols,
+			})
+			if err != nil {
+				return "", errtrace.Wrap(fmt.Errorf("spawn shell in namespace host: %w", err))
+			}
+			if _, err := reg.StartWithProc(shellID, sandbox.AgentTypeBash, worktreePath, rows, cols, true, sp); err != nil {
+				return "", errtrace.Wrap(err)
+			}
+			return shellID, nil
+		}
+	}
+
 	var sb sandbox.Options
 	if sandboxed {
 		cfg, _ := config.Load(projectRoot)
@@ -556,26 +576,21 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 	env = append(env, sandbox.MiseTrustEnv(projectRoot, worktreePath)...)
 	env = append(env, headContextEnv(head.ID, head.AgentType, projectRoot, worktreePath, derefStr(head.Branch), head.BaseBranch)...)
 
-	sess, err := reg.Start(session.StartOptions{
-		ID:   head.ID,
-		Rows: rows,
-		Cols: cols,
-		Sandbox: sandbox.Options{
-			AgentType:     head.AgentType,
-			WorktreePath:  worktreePath,
-			GitCommonDir:  gitCommonDir(projectRoot),
-			Home:          home,
-			WritablePaths: append(writable, seed.WritablePaths...),
-			MaskedPaths:   masked,
-			RestoreRO:     restore,
-			Network:       net,
-			Binds:         seed.Binds,
-			CowMounts:     cowMounts,
-			Env:           env,
-			Argv:          argv,
-			HardenGUI:     true,
-			Seccomp:       true,
-		},
+	sess, err := startAgentSession(reg, projectRoot, head.ID, head.AgentType, worktreePath, rows, cols, sandbox.Options{
+		AgentType:     head.AgentType,
+		WorktreePath:  worktreePath,
+		GitCommonDir:  gitCommonDir(projectRoot),
+		Home:          home,
+		WritablePaths: append(writable, seed.WritablePaths...),
+		MaskedPaths:   masked,
+		RestoreRO:     restore,
+		Network:       net,
+		Binds:         seed.Binds,
+		CowMounts:     cowMounts,
+		Env:           env,
+		Argv:          argv,
+		HardenGUI:     true,
+		Seccomp:       true,
 	})
 	if err != nil {
 		return errtrace.Wrap(err)
@@ -618,6 +633,9 @@ func KillHeadNoLock(ctx context.Context, reg *session.Registry, store *db.Store,
 		// which is about to be removed, so they must not outlive it.
 		reg.KillMatching(head.ID + "-shell")
 	}
+	// Stop the shared-namespace supervisor (if any) — once the agent and shells
+	// are gone, the single bwrap owning their writable COW overlay can go too.
+	removeNamespaceHost(head.ID)
 
 	if killErr == nil {
 		if head.Worktree != nil && head.ProjectPath != "" {

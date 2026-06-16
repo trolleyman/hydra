@@ -21,6 +21,20 @@ const (
 // defaultScrollback is the per-session scrollback ring capacity.
 const defaultScrollback = 512 * 1024
 
+// PTY is the terminal-attached process backing a session. It is satisfied both
+// by a locally-launched sandbox process (ptyProcess) and by a child spawned
+// inside a shared namespace host whose master fd was passed back to the daemon
+// (nshost.Spawned).
+type PTY interface {
+	Read(p []byte) (int, error)
+	Write(p []byte) (int, error)
+	Close() error
+	Resize(rows, cols uint16) error
+	Wait() error
+	Pid() int
+	Signal(sig os.Signal) error
+}
+
 // attacherBuffer is the per-attacher output channel depth (chunks).
 const attacherBuffer = 512
 
@@ -32,7 +46,7 @@ type Session struct {
 	WorktreePath string
 	StartedAt    time.Time
 
-	proc    *ptyProcess
+	proc    PTY
 	scroll  *ring
 	cleanup func() // releases sandbox temp resources after exit
 

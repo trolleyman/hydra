@@ -15,6 +15,11 @@ import (
 	"github.com/trolleyman/hydra/internal/sandbox"
 )
 
+// SandboxHydraBinPath is the well-known path the hydra binary is bound to inside
+// every sandbox (/tmp is always a fresh tmpfs in our bwrap config, so it is a
+// reliable mountpoint). Hooks and the namespace-host supervisor invoke it here.
+const SandboxHydraBinPath = "/tmp/hydra-internal"
+
 // seedResult holds the per-head sandbox inputs produced by seedHead.
 type seedResult struct {
 	// Binds are host->sandbox file binds for agent config (Linux only; macOS
@@ -80,9 +85,7 @@ func seedHead(projectRoot, id string, agentType sandbox.AgentType, worktreePath,
 		return nil, errtrace.Wrap(fmt.Errorf("resolve hydra binary: %w", err))
 	}
 	// Bind the hydra binary to a well-known path inside the sandbox.
-	// We use /tmp/hydra-internal because /tmp is always a fresh tmpfs in our
-	// bwrap config, making it a reliable mount point.
-	stableHydraBin := "/tmp/hydra-internal"
+	stableHydraBin := SandboxHydraBinPath
 	res.Binds = append(res.Binds, sandbox.Bind{
 		Source:   hydraBin,
 		Target:   stableHydraBin,
