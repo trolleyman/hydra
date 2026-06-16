@@ -359,9 +359,11 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 			checkAndEmit()
 		}
 
-		// Full worktree fingerprint poll (catches uncommitted edits) on a slower
-		// timer; cheap HEAD-only poll (catches new commits) on a faster one.
-		ticker := time.NewTicker(3 * time.Second)
+		// Full worktree fingerprint poll (catches uncommitted edits) on a slow
+		// timer; cheap HEAD-only poll (catches new commits) on a faster one. The
+		// expensive full poll can be infrequent because agent-driven edits already
+		// trigger an immediate re-check via the status-log git-command scan below.
+		ticker := time.NewTicker(10 * time.Second)
 		defer ticker.Stop()
 		headTicker := time.NewTicker(1 * time.Second)
 		defer headTicker.Stop()
