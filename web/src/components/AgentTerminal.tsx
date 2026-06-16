@@ -6,6 +6,7 @@ import { TerminalEvent, type TerminalStatusEvent, type TerminalDataEvent, AgentS
 import { RefreshCw, Plus, X, ChevronDown, Shield, ShieldOff } from 'lucide-react'
 import { Tooltip } from './Tooltip'
 import { uploadFile, extractFiles } from '../api/uploads'
+import { useAgentStore } from '../stores/agentStore'
 
 interface PaneProps {
   agentId: string
@@ -252,6 +253,16 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
       if (ws.readyState === WebSocket.OPEN) {
         const bytes = new TextEncoder().encode(data)
         ws.send(bytes)
+        // Optimistically flip the agent to "running" the moment a prompt is
+        // submitted. A bare CR (Enter) submits the agent's input; Shift+Enter
+        // sends ESC+CR straight over the socket (bypassing onData), so it never
+        // reaches here and doesn't falsely trigger. The backend UserPromptSubmit
+        // hook reports the real status shortly after; until then this avoids the
+        // badge lagging on "waiting"/"finished". Shells have no agent status.
+        if (!shell && data.includes('\r')) {
+          useAgentStore.getState().setOptimisticStatus(agentId, AgentStatus.RUNNING)
+          onStatusUpdate?.(AgentStatus.RUNNING)
+        }
       }
     })
 
