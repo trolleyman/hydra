@@ -119,6 +119,33 @@ type Config struct {
 	Artifacts []ArtifactScript `toml:"artifacts"`
 }
 
+// rawConfig is the intermediate decode target. It accepts BOTH the legacy
+// nested layout ([defaults], [defaults.sandbox], [agents.<name>]) and the new
+// flattened layout (top-level pre_prompt/[sandbox], and one top-level table per
+// agent, e.g. [claude]). decodeConfig folds it into a Config. The dynamic agent
+// tables of the new layout are not fields here — they are captured separately
+// via toml.Primitive (any top-level table whose name is not reserved).
+type rawConfig struct {
+	// Legacy layout.
+	Defaults *AgentConfig           `toml:"defaults"`
+	Agents   map[string]AgentConfig `toml:"agents"`
+	// New flattened defaults (top level).
+	PrePrompt *string        `toml:"pre_prompt"`
+	Sandbox   *SandboxConfig `toml:"sandbox"`
+	// Shared.
+	Artifacts []ArtifactScript `toml:"artifacts"`
+}
+
+// reservedTopLevel are the top-level TOML names that are NOT agent tables. Any
+// other top-level table is treated as an agent override, so new agent types
+// need no code change. Consequently an agent literally named one of these is
+// unrepresentable in the flattened layout — fine for real agent types
+// (claude/gemini/bash/copilot).
+var reservedTopLevel = map[string]bool{
+	"defaults": true, "agents": true,
+	"pre_prompt": true, "sandbox": true, "artifacts": true,
+}
+
 // GetUserConfigPath returns the path to the global user configuration file.
 func GetUserConfigPath() (string, error) {
 	configDir, err := os.UserConfigDir()
@@ -156,13 +183,73 @@ func BuildFinalPrePrompt(cfg Config, agentType string) string {
 	return strings.Join(parts, "\n") + "\n\nTask:\n"
 }
 
+// decodeConfig parses config.toml content, accepting BOTH the legacy nested
+// layout ([defaults]/[defaults.sandbox]/[agents.<name>]) and the new flattened
+// layout (top-level pre_prompt/[sandbox], one top-level table per agent). Empty
+// content decodes to a zero Config (not an error).
+func decodeConfig(data []byte) (Config, error) {
+	var cfg Config
+	if len(strings.TrimSpace(string(data))) == 0 {
+		return cfg, nil
+	}
+
+	// Pass 1: enumerate every top-level name as a primitive so we can find the
+	// new-layout agent tables (any name that is not reserved).
+	var prims map[string]toml.Primitive
+	md, err := toml.Decode(string(data), &prims)
+	if err != nil {
+		return cfg, errtrace.Wrap(err)
+	}
+	// Pass 2: decode the reserved keys with their full nested typing.
+	var raw rawConfig
+	if _, err := toml.Decode(string(data), &raw); err != nil {
+		return cfg, errtrace.Wrap(err)
+	}
+
+	cfg.Artifacts = raw.Artifacts
+
+	// Defaults: legacy [defaults] first, then the new top-level fields win.
+	if raw.Defaults != nil {
+		cfg.Defaults = *raw.Defaults
+	}
+	if raw.PrePrompt != nil {
+		cfg.Defaults.PrePrompt = raw.PrePrompt
+	}
+	if raw.Sandbox != nil {
+		cfg.Defaults.Sandbox = raw.Sandbox
+	}
+
+	// Agents: legacy [agents.*] map, then every non-reserved top-level table.
+	if raw.Agents != nil {
+		cfg.Agents = raw.Agents
+	}
+	for name := range prims {
+		if reservedTopLevel[name] {
+			continue
+		}
+		var ac AgentConfig
+		if err := md.PrimitiveDecode(prims[name], &ac); err != nil {
+			return cfg, errtrace.Wrap(fmt.Errorf("decode agent %q: %w", name, err))
+		}
+		if cfg.Agents == nil {
+			cfg.Agents = make(map[string]AgentConfig)
+		}
+		cfg.Agents[name] = ac
+	}
+
+	return cfg, nil
+}
+
 // LoadFile loads a configuration from a file.
 func LoadFile(path string) (*Config, error) {
-	if _, err := os.Stat(path); os.IsNotExist(err) {
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
 		return nil, nil
 	}
-	cfg := Config{}
-	_, err := toml.DecodeFile(path, &cfg)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	cfg, err := decodeConfig(data)
 	if err != nil {
 		return nil, errtrace.Wrap(fmt.Errorf("load config: %s: %w", path, err))
 	}
@@ -293,8 +380,8 @@ func ArtifactsAtProjectTOML(content []byte) ([]ArtifactScript, error) {
 		}
 	}
 
-	var projectCfg Config
-	if _, err := toml.Decode(string(content), &projectCfg); err != nil {
+	projectCfg, err := decodeConfig(content)
+	if err != nil {
 		return nil, errtrace.Wrap(fmt.Errorf("parse project config: %w", err))
 	}
 	cfg.Merge(projectCfg)
@@ -346,12 +433,19 @@ func Save(projectRoot string, cfg Config) error {
 	return errtrace.Wrap(SaveToFile(GetProjectConfigPath(projectRoot), cfg))
 }
 
-// SaveToFile saves a configuration to the given file path.
+// SaveToFile saves a configuration to the given file path. It reads any
+// existing file first and renders on top of it, so hand-written comments and
+// unmanaged content (e.g. [[artifacts]] blocks) survive the round-trip and a
+// legacy-format file is migrated to the new flattened layout.
 func SaveToFile(path string, cfg Config) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return errtrace.Wrap(fmt.Errorf("create config parent: %s: %w", path, err))
 	}
-	content := marshalConfig(cfg)
+	existing, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return errtrace.Wrap(fmt.Errorf("read existing config: %s: %w", path, err))
+	}
+	content := renderConfig(existing, cfg)
 	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
 		return errtrace.Wrap(fmt.Errorf("save config: %s: %w", path, err))
 	}
@@ -379,84 +473,553 @@ func tomlStringArray(vals []string) string {
 	return "[" + strings.Join(parts, ", ") + "]"
 }
 
-// writeAgentConfigFields writes the fields of an AgentConfig to buf under the
-// given table name (e.g. "defaults" or "agents.claude").
-func writeAgentConfigFields(buf *strings.Builder, table string, cfg AgentConfig) {
-	buf.WriteString("[" + table + "]\n")
-	if cfg.PrePrompt != nil {
-		buf.WriteString("pre_prompt = " + tomlStringValue(*cfg.PrePrompt) + "\n")
-	}
-	if sb := cfg.Sandbox; sb != nil {
-		buf.WriteString("\n[" + table + ".sandbox]\n")
-		if len(sb.WritablePaths) > 0 {
-			buf.WriteString("writable_paths = " + tomlStringArray(sb.WritablePaths) + "\n")
+// docPrefix marks Hydra-generated documentation comment lines. Using a distinct
+// prefix (instead of a plain "#") lets the renderer recognise and replace its
+// own docs on every save — so they update when Hydra updates — while leaving the
+// user's own "#" comments untouched.
+const docPrefix = "#:"
+
+// specEntry describes one managed default setting for the self-documenting
+// writer. The set of entries is the single source of truth for which default
+// settings exist, their order, their documentation, and the commented-out
+// default shown when they are unset.
+type specEntry struct {
+	table string // "" (root), "sandbox", or "sandbox.network"
+	key   string
+	doc   string        // one-line documentation (no leading marker)
+	def   func() string // TOML value text shown commented-out when unset
+	// get returns the TOML value text and whether the setting is set in cfg.
+	get func(AgentConfig) (string, bool)
+}
+
+// sandboxSlice builds a get func for a []string sandbox field.
+func sandboxSlice(pick func(*SandboxConfig) []string) func(AgentConfig) (string, bool) {
+	return func(a AgentConfig) (string, bool) {
+		if a.Sandbox == nil {
+			return "", false
 		}
-		if len(sb.MaskedPaths) > 0 {
-			buf.WriteString("masked_paths = " + tomlStringArray(sb.MaskedPaths) + "\n")
+		v := pick(a.Sandbox)
+		if len(v) == 0 {
+			return "", false
 		}
-		if len(sb.RestoreRO) > 0 {
-			buf.WriteString("restore_ro = " + tomlStringArray(sb.RestoreRO) + "\n")
-		}
-		if sb.PreSpawnScript != nil && *sb.PreSpawnScript != "" {
-			buf.WriteString("pre_spawn_script = " + tomlStringValue(*sb.PreSpawnScript) + "\n")
-		}
-		if sb.Network != nil {
-			buf.WriteString("\n[" + table + ".sandbox.network]\n")
-			if sb.Network.Enabled != nil {
-				buf.WriteString(fmt.Sprintf("enabled = %t\n", *sb.Network.Enabled))
-			}
-			if len(sb.Network.AllowedHosts) > 0 {
-				buf.WriteString("allowed_hosts = " + tomlStringArray(sb.Network.AllowedHosts) + "\n")
-			}
-		}
+		return tomlStringArray(v), true
 	}
 }
 
-func agentConfigEmpty(cfg AgentConfig) bool {
-	return cfg.Sandbox == nil && cfg.PrePrompt == nil
+// defaultsSpec is the ordered, declarative description of the managed default
+// settings. Root scalars come first because TOML requires root keys to precede
+// any table header. Adding an entry here makes it appear (commented-out) on the
+// next render of any existing file — the "intelligent update" behaviour.
+func defaultsSpec() []specEntry {
+	return []specEntry{
+		{
+			table: "", key: "pre_prompt",
+			doc: "pre_prompt: extra instructions appended to every agent's system prompt.",
+			def: func() string { return `""` },
+			get: func(a AgentConfig) (string, bool) {
+				if a.PrePrompt != nil {
+					return tomlStringValue(*a.PrePrompt), true
+				}
+				return "", false
+			},
+		},
+		{
+			table: "sandbox", key: "writable_paths",
+			doc: "writable_paths: extra paths made writable in the sandbox (added to the built-in defaults).",
+			def: func() string { return tomlStringArray(sandbox.Defaults().WritablePaths) },
+			get: sandboxSlice(func(s *SandboxConfig) []string { return s.WritablePaths }),
+		},
+		{
+			table: "sandbox", key: "masked_paths",
+			doc: "masked_paths: extra paths hidden in the sandbox (added to the built-in defaults).",
+			def: func() string { return tomlStringArray(sandbox.Defaults().MaskedPaths) },
+			get: sandboxSlice(func(s *SandboxConfig) []string { return s.MaskedPaths }),
+		},
+		{
+			table: "sandbox", key: "restore_ro",
+			doc: "restore_ro: paths re-exposed read-only after a masked parent (added to the built-in defaults).",
+			def: func() string { return tomlStringArray(sandbox.Defaults().RestoreRO) },
+			get: sandboxSlice(func(s *SandboxConfig) []string { return s.RestoreRO }),
+		},
+		{
+			table: "sandbox", key: "pre_spawn_script",
+			doc: "pre_spawn_script: shell script run in the sandbox once before each agent launches (e.g. mise trust).",
+			def: func() string { return `""` },
+			get: func(a AgentConfig) (string, bool) {
+				if a.Sandbox != nil && a.Sandbox.PreSpawnScript != nil && *a.Sandbox.PreSpawnScript != "" {
+					return tomlStringValue(*a.Sandbox.PreSpawnScript), true
+				}
+				return "", false
+			},
+		},
+		{
+			table: "sandbox.network", key: "enabled",
+			doc: "enabled: allow outbound network access from the sandbox (default true).",
+			def: func() string { return "true" },
+			get: func(a AgentConfig) (string, bool) {
+				if a.Sandbox != nil && a.Sandbox.Network != nil && a.Sandbox.Network.Enabled != nil {
+					return fmt.Sprintf("%t", *a.Sandbox.Network.Enabled), true
+				}
+				return "", false
+			},
+		},
+		{
+			table: "sandbox.network", key: "allowed_hosts",
+			doc: "allowed_hosts: reserved for a future proxy-based outbound host allow-list.",
+			def: func() string { return "[]" },
+			get: func(a AgentConfig) (string, bool) {
+				if a.Sandbox != nil && a.Sandbox.Network != nil && len(a.Sandbox.Network.AllowedHosts) > 0 {
+					return tomlStringArray(a.Sandbox.Network.AllowedHosts), true
+				}
+				return "", false
+			},
+		},
+	}
 }
 
-// marshalConfig serializes a Config to TOML.
-func marshalConfig(cfg Config) string {
-	var buf strings.Builder
+// managedKeySet returns the set of setting keys the renderer owns. A commented
+// assignment of one of these (e.g. "# masked_paths = [...]") in an existing file
+// is recognised as a regenerated default and dropped before re-rendering.
+func managedKeySet() map[string]bool {
+	m := map[string]bool{}
+	for _, e := range defaultsSpec() {
+		m[e.key] = true
+	}
+	return m
+}
 
-	if !agentConfigEmpty(cfg.Defaults) {
-		writeAgentConfigFields(&buf, "defaults", cfg.Defaults)
+// artifactsDocLines is the Hydra-owned documentation block emitted before the
+// [[artifacts]] section. Like every doc block it uses docPrefix, so it is
+// replaced (kept current) on each save.
+func artifactsDocLines() []string {
+	return []string{
+		docPrefix + " [[artifacts]]: per-project commands that render visual artifacts (e.g. screenshots)",
+		docPrefix + " of a checkout. The diff viewer runs each against both sides of a comparison and",
+		docPrefix + " shows the outputs that differ. Fields:",
+		docPrefix + "   name         unique label, also used as the cache directory (required).",
+		docPrefix + "   command      shell command run via `sh -c` in the checkout directory (required).",
+		docPrefix + "   timeout_sec  max seconds the command may run (0 = built-in default).",
+		docPrefix + "   unsafe_host  run on the host with NO sandbox — full access to your machine and",
+		docPrefix + "                credentials; only for audited, self-contained commands (default false).",
+		docPrefix + " The command is given: HYDRA_ARTIFACT_OUTPUT (directory to write images into),",
+		docPrefix + " HYDRA_ARTIFACT_SOURCE (the checkout dir), HYDRA_ARTIFACT_REF (the resolved ref).",
+	}
+}
+
+// artifactsExampleLines is a commented-out example shown when no artifacts exist.
+func artifactsExampleLines() []string {
+	return []string{
+		"# [[artifacts]]",
+		`# name = "screenshots"`,
+		`# command = "bun run screenshots.ts"`,
+		"# timeout_sec = 900",
+	}
+}
+
+// section is a top-level TOML section: an optional header line plus the lines
+// that follow it until the next header, with any comment lines that immediately
+// preceded the header captured as its leading comments.
+type section struct {
+	leading []string // comment/blank lines before the header
+	header  string   // raw "[...]" / "[[...]]" line, "" for the implicit root section
+	body    []string // raw lines after the header (verbatim)
+}
+
+func isTableHeader(trimmed string) bool {
+	return strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") && !strings.Contains(trimmed, "=")
+}
+
+func isArrayHeader(header string) bool {
+	return strings.HasPrefix(strings.TrimSpace(header), "[[")
+}
+
+// parseSections splits raw config content into ordered top-level sections,
+// preserving every line verbatim. Comment/blank lines preceding a header become
+// that header's leading comments.
+func parseSections(data []byte) []section {
+	if len(data) == 0 {
+		return nil
+	}
+	text := strings.ReplaceAll(string(data), "\r\n", "\n")
+	lines := strings.Split(text, "\n")
+	if n := len(lines); n > 0 && lines[n-1] == "" {
+		lines = lines[:n-1] // drop the empty element from a trailing newline
 	}
 
-	agentNames := make([]string, 0, len(cfg.Agents))
+	var sections []section
+	cur := section{}
+	var pending []string // comment/blank lines not yet attached
+	for _, ln := range lines {
+		t := strings.TrimSpace(ln)
+		switch {
+		case isTableHeader(t):
+			sections = append(sections, cur)
+			cur = section{header: ln, leading: trimBlankEdges(pending)}
+			pending = nil
+		case t == "" || strings.HasPrefix(t, "#"):
+			pending = append(pending, ln)
+		default: // a key line: pending comments belong to its section body
+			cur.body = append(cur.body, pending...)
+			pending = nil
+			cur.body = append(cur.body, ln)
+		}
+	}
+	cur.body = append(cur.body, pending...)
+	sections = append(sections, cur)
+	return sections
+}
+
+// trimBlankEdges removes leading and trailing blank lines from a slice.
+func trimBlankEdges(lines []string) []string {
+	start, end := 0, len(lines)
+	for start < end && strings.TrimSpace(lines[start]) == "" {
+		start++
+	}
+	for end > start && strings.TrimSpace(lines[end-1]) == "" {
+		end--
+	}
+	return lines[start:end]
+}
+
+// normalizeManagedTable maps a (legacy or new) table header to its canonical
+// new-layout name: "[defaults]"→"", "[defaults.sandbox]"→"sandbox",
+// "[agents.claude.sandbox]"→"claude.sandbox", "[sandbox]"→"sandbox", etc.
+func normalizeManagedTable(header string) string {
+	t := strings.TrimSpace(header)
+	if t == "" {
+		return ""
+	}
+	name := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(t, "["), "]"))
+	parts := strings.Split(name, ".")
+	if len(parts) > 0 && (parts[0] == "defaults" || parts[0] == "agents") {
+		parts = parts[1:]
+	}
+	return strings.Join(parts, ".")
+}
+
+// isManagedDoc reports whether a line is a Hydra-generated documentation comment.
+func isManagedDoc(line string) bool {
+	return strings.HasPrefix(strings.TrimSpace(line), docPrefix)
+}
+
+// isManagedCommentedAssign reports whether a line is a commented-out assignment
+// of a managed key (e.g. "# masked_paths = [...]"), i.e. a regenerated default.
+func isManagedCommentedAssign(line string, keys map[string]bool) bool {
+	t := strings.TrimSpace(line)
+	if !strings.HasPrefix(t, "#") || strings.HasPrefix(t, docPrefix) {
+		return false
+	}
+	t = strings.TrimSpace(strings.TrimPrefix(t, "#"))
+	if eq := strings.Index(t, "="); eq > 0 {
+		return keys[strings.TrimSpace(t[:eq])]
+	}
+	return false
+}
+
+// userComments keeps only the user's own comments, dropping Hydra-generated doc
+// and commented-default lines (which are regenerated) and any blank lines.
+func userComments(comments []string, keys map[string]bool) []string {
+	var out []string
+	for _, c := range comments {
+		if strings.TrimSpace(c) == "" || isManagedDoc(c) || isManagedCommentedAssign(c, keys) {
+			continue
+		}
+		out = append(out, c)
+	}
+	return out
+}
+
+// skipValue returns the index of the last line of the value starting at line i,
+// consuming multi-line triple-quoted strings and bracket-balanced arrays so a
+// "key =" or "#" inside a value is not mistaken for structure.
+func skipValue(lines []string, i int) int {
+	ln := lines[i]
+	_, after, ok := strings.Cut(ln, "=")
+	if !ok {
+		return i
+	}
+	val := strings.TrimSpace(after)
+	for _, q := range []string{`"""`, `'''`} {
+		if strings.HasPrefix(val, q) {
+			if strings.Contains(val[len(q):], q) {
+				return i
+			}
+			for j := i + 1; j < len(lines); j++ {
+				if strings.Contains(lines[j], q) {
+					return j
+				}
+			}
+			return len(lines) - 1
+		}
+	}
+	if strings.HasPrefix(val, "[") {
+		depth := strings.Count(val, "[") - strings.Count(val, "]")
+		if depth <= 0 {
+			return i
+		}
+		for j := i + 1; j < len(lines); j++ {
+			depth += strings.Count(lines[j], "[") - strings.Count(lines[j], "]")
+			if depth <= 0 {
+				return j
+			}
+		}
+		return len(lines) - 1
+	}
+	return i
+}
+
+// keyName extracts the key from a "key = value" line, or "" if it is not one.
+func keyName(line string) string {
+	t := strings.TrimSpace(line)
+	eq := strings.Index(t, "=")
+	if eq <= 0 {
+		return ""
+	}
+	return strings.Trim(strings.TrimSpace(t[:eq]), `"'`)
+}
+
+// extractKeyComments maps each key in a section body to the user comments that
+// immediately precede it (Hydra-generated docs/defaults stripped).
+func extractKeyComments(body []string, keys map[string]bool) map[string][]string {
+	res := map[string][]string{}
+	var pend []string
+	for i := 0; i < len(body); i++ {
+		t := strings.TrimSpace(body[i])
+		if t == "" {
+			continue
+		}
+		if strings.HasPrefix(t, "#") {
+			pend = append(pend, body[i])
+			continue
+		}
+		if k := keyName(body[i]); k != "" {
+			if uc := userComments(pend, keys); len(uc) > 0 {
+				res[k] = uc
+			}
+		}
+		pend = nil
+		i = skipValue(body, i)
+	}
+	return res
+}
+
+// renderConfig serializes cfg to the new flattened TOML layout, rendered on top
+// of the existing file content: user comments and unmanaged [[artifacts]] blocks
+// are preserved, managed values reflect cfg, and unset default settings are
+// emitted commented-out with up-to-date documentation.
+func renderConfig(existing []byte, cfg Config) string {
+	keys := managedKeySet()
+	keyComments := map[string][]string{} // "<table>\x00<key>" -> user comments
+	tableComments := map[string][]string{}
+	var artifactBlocks [][]string
+	existingArtifacts := map[string]bool{}
+
+	for _, sec := range parseSections(existing) {
+		if isArrayHeader(sec.header) {
+			block := append([]string{}, userComments(sec.leading, keys)...)
+			block = append(block, sec.header)
+			block = append(block, sec.body...)
+			artifactBlocks = append(artifactBlocks, block)
+			for _, bl := range sec.body {
+				if keyName(bl) == "name" {
+					existingArtifacts[artifactValue(bl)] = true
+				}
+			}
+			continue
+		}
+		norm := normalizeManagedTable(sec.header)
+		if uc := userComments(sec.leading, keys); len(uc) > 0 {
+			tableComments[norm] = append(tableComments[norm], uc...)
+		}
+		for k, c := range extractKeyComments(sec.body, keys) {
+			keyComments[norm+"\x00"+k] = c
+		}
+	}
+
+	var out []string
+	spec := defaultsSpec()
+
+	// Root defaults (pre_prompt) — must precede any table header.
+	if tc := tableComments[""]; len(tc) > 0 {
+		out = append(out, tc...)
+	}
+	emitSpecTable(&out, spec, "", "", cfg.Defaults, keyComments, tableComments)
+	emitSpecTable(&out, spec, "sandbox", "[sandbox]", cfg.Defaults, keyComments, tableComments)
+	emitSpecTable(&out, spec, "sandbox.network", "[sandbox.network]", cfg.Defaults, keyComments, tableComments)
+
+	// Per-agent overrides (only what is set), sorted for determinism.
+	names := make([]string, 0, len(cfg.Agents))
 	for name := range cfg.Agents {
-		agentNames = append(agentNames, name)
+		names = append(names, name)
 	}
-	sort.Strings(agentNames)
-
-	for _, name := range agentNames {
-		if agentConfigEmpty(cfg.Agents[name]) {
-			continue
-		}
-		if buf.Len() > 0 {
-			buf.WriteString("\n")
-		}
-		writeAgentConfigFields(&buf, "agents."+name, cfg.Agents[name])
+	sort.Strings(names)
+	for _, name := range names {
+		emitAgent(&out, name, cfg.Agents[name], keyComments, tableComments)
 	}
 
-	for _, a := range cfg.Artifacts {
-		if a.Name == "" && a.Command == "" {
-			continue
+	// Artifacts: documentation block, then preserved blocks / commented example.
+	out = appendBlank(out)
+	out = append(out, artifactsDocLines()...)
+	if len(artifactBlocks) == 0 && !hasRenderableArtifacts(cfg.Artifacts, existingArtifacts) {
+		out = append(out, artifactsExampleLines()...)
+	} else {
+		for i, block := range artifactBlocks {
+			if i > 0 {
+				out = append(out, "")
+			}
+			out = append(out, block...)
 		}
-		if buf.Len() > 0 {
-			buf.WriteString("\n")
-		}
-		buf.WriteString("[[artifacts]]\n")
-		buf.WriteString("name = " + tomlStringValue(a.Name) + "\n")
-		buf.WriteString("command = " + tomlStringValue(a.Command) + "\n")
-		if a.TimeoutSec > 0 {
-			buf.WriteString(fmt.Sprintf("timeout_sec = %d\n", a.TimeoutSec))
-		}
-		if a.UnsafeHost {
-			buf.WriteString("unsafe_host = true\n")
+		for _, a := range cfg.Artifacts {
+			if (a.Name == "" && a.Command == "") || existingArtifacts[a.Name] {
+				continue
+			}
+			out = append(out, "")
+			out = append(out, "[[artifacts]]")
+			out = append(out, "name = "+tomlStringValue(a.Name))
+			out = append(out, "command = "+tomlStringValue(a.Command))
+			if a.TimeoutSec > 0 {
+				out = append(out, fmt.Sprintf("timeout_sec = %d", a.TimeoutSec))
+			}
+			if a.UnsafeHost {
+				out = append(out, "unsafe_host = true")
+			}
 		}
 	}
 
-	return buf.String()
+	result := strings.Join(out, "\n")
+	if result != "" && !strings.HasSuffix(result, "\n") {
+		result += "\n"
+	}
+	return result
+}
+
+// emitSpecTable appends one defaults table to out: set values active (with any
+// preserved user comment), unset values commented-out with documentation.
+func emitSpecTable(out *[]string, spec []specEntry, table, header string, def AgentConfig, keyComments, tableComments map[string][]string) {
+	var entries []specEntry
+	for _, e := range spec {
+		if e.table == table {
+			entries = append(entries, e)
+		}
+	}
+	if len(entries) == 0 {
+		return
+	}
+	if header != "" {
+		*out = appendBlank(*out)
+		if tc := tableComments[table]; len(tc) > 0 {
+			*out = append(*out, tc...)
+		}
+		*out = append(*out, header)
+	}
+	for _, e := range entries {
+		text, isSet := e.get(def)
+		if isSet {
+			if uc := keyComments[table+"\x00"+e.key]; len(uc) > 0 {
+				*out = append(*out, uc...)
+			}
+			*out = append(*out, e.key+" = "+text)
+		} else {
+			*out = append(*out, docPrefix+" "+e.doc)
+			*out = append(*out, "# "+e.key+" = "+e.def())
+		}
+	}
+}
+
+// emitAgent appends a per-agent table, emitting only the settings that are set.
+func emitAgent(out *[]string, name string, a AgentConfig, keyComments, tableComments map[string][]string) {
+	if !agentHasContent(a) {
+		return
+	}
+	*out = appendBlank(*out)
+	if tc := tableComments[name]; len(tc) > 0 {
+		*out = append(*out, tc...)
+	}
+	*out = append(*out, "["+name+"]")
+	if a.PrePrompt != nil {
+		if uc := keyComments[name+"\x00pre_prompt"]; len(uc) > 0 {
+			*out = append(*out, uc...)
+		}
+		*out = append(*out, "pre_prompt = "+tomlStringValue(*a.PrePrompt))
+	}
+	sb := a.Sandbox
+	if sb == nil || !sandboxHasContent(sb) {
+		return
+	}
+	*out = appendBlank(*out)
+	if tc := tableComments[name+".sandbox"]; len(tc) > 0 {
+		*out = append(*out, tc...)
+	}
+	*out = append(*out, "["+name+".sandbox]")
+	emitSetField(out, name+".sandbox", "writable_paths", tomlStringArray(sb.WritablePaths), len(sb.WritablePaths) > 0, keyComments)
+	emitSetField(out, name+".sandbox", "masked_paths", tomlStringArray(sb.MaskedPaths), len(sb.MaskedPaths) > 0, keyComments)
+	emitSetField(out, name+".sandbox", "restore_ro", tomlStringArray(sb.RestoreRO), len(sb.RestoreRO) > 0, keyComments)
+	if sb.PreSpawnScript != nil && *sb.PreSpawnScript != "" {
+		emitSetField(out, name+".sandbox", "pre_spawn_script", tomlStringValue(*sb.PreSpawnScript), true, keyComments)
+	}
+	if nw := sb.Network; nw != nil && (nw.Enabled != nil || len(nw.AllowedHosts) > 0) {
+		*out = appendBlank(*out)
+		if tc := tableComments[name+".sandbox.network"]; len(tc) > 0 {
+			*out = append(*out, tc...)
+		}
+		*out = append(*out, "["+name+".sandbox.network]")
+		if nw.Enabled != nil {
+			emitSetField(out, name+".sandbox.network", "enabled", fmt.Sprintf("%t", *nw.Enabled), true, keyComments)
+		}
+		emitSetField(out, name+".sandbox.network", "allowed_hosts", tomlStringArray(nw.AllowedHosts), len(nw.AllowedHosts) > 0, keyComments)
+	}
+}
+
+// emitSetField appends "key = text" (with any preserved user comment) when set.
+func emitSetField(out *[]string, table, key, text string, set bool, keyComments map[string][]string) {
+	if !set {
+		return
+	}
+	if uc := keyComments[table+"\x00"+key]; len(uc) > 0 {
+		*out = append(*out, uc...)
+	}
+	*out = append(*out, key+" = "+text)
+}
+
+func agentHasContent(a AgentConfig) bool {
+	return a.PrePrompt != nil || (a.Sandbox != nil && sandboxHasContent(a.Sandbox))
+}
+
+func sandboxHasContent(sb *SandboxConfig) bool {
+	if sb == nil {
+		return false
+	}
+	if len(sb.WritablePaths) > 0 || len(sb.MaskedPaths) > 0 || len(sb.RestoreRO) > 0 {
+		return true
+	}
+	if sb.PreSpawnScript != nil && *sb.PreSpawnScript != "" {
+		return true
+	}
+	return sb.Network != nil && (sb.Network.Enabled != nil || len(sb.Network.AllowedHosts) > 0)
+}
+
+func hasRenderableArtifacts(arts []ArtifactScript, existing map[string]bool) bool {
+	for _, a := range arts {
+		if (a.Name != "" || a.Command != "") && !existing[a.Name] {
+			return true
+		}
+	}
+	return false
+}
+
+// appendBlank adds a single blank separator line if out is non-empty.
+func appendBlank(out []string) []string {
+	if len(out) > 0 {
+		return append(out, "")
+	}
+	return out
+}
+
+// artifactValue extracts the string value from an artifact "name = ..." line.
+func artifactValue(line string) string {
+	_, after, ok := strings.Cut(line, "=")
+	if !ok {
+		return ""
+	}
+	return strings.Trim(strings.TrimSpace(after), `"'`)
 }

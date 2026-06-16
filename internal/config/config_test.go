@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -17,7 +18,7 @@ func TestMarshalConfig_MultiLineStrings(t *testing.T) {
 		},
 	}
 
-	out := marshalConfig(cfg)
+	out := renderConfig(nil, cfg)
 
 	// Should contain triple-quoted strings
 	if !contains(out, `"""`) {
@@ -36,7 +37,7 @@ func TestMarshalConfig_NoIndentation(t *testing.T) {
 		Agents:   map[string]AgentConfig{"claude": {PrePrompt: ptr(prePrompt)}},
 	}
 
-	out := marshalConfig(cfg)
+	out := renderConfig(nil, cfg)
 
 	for _, line := range splitLines(out) {
 		if len(line) > 0 && (line[0] == ' ' || line[0] == '\t') {
@@ -192,6 +193,246 @@ timeout_sec = 30
 	// Malformed TOML surfaces an error.
 	if _, err := ArtifactsAtProjectTOML([]byte("this is not = = toml")); err == nil {
 		t.Error("expected error for malformed TOML, got nil")
+	}
+}
+
+const legacyConfig = `[defaults]
+pre_prompt = """
+- Use bun
+- Check mage build"""
+
+[defaults.sandbox]
+writable_paths = ["~/.cache/go-build", "~/.magefile"]
+
+[agents.claude]
+[agents.claude.sandbox]
+masked_paths = ["~/.secret"]
+
+# A hand-written note about screenshots.
+[[artifacts]]
+name = "screenshots"
+command = "bun shots.ts"
+timeout_sec = 900
+`
+
+func TestDecodeLegacyFormat(t *testing.T) {
+	cfg, err := decodeConfig([]byte(legacyConfig))
+	if err != nil {
+		t.Fatalf("decodeConfig: %v", err)
+	}
+	if cfg.Defaults.PrePrompt == nil || !strings.Contains(*cfg.Defaults.PrePrompt, "Use bun") {
+		t.Errorf("defaults pre_prompt not decoded: %+v", cfg.Defaults.PrePrompt)
+	}
+	if cfg.Defaults.Sandbox == nil || len(cfg.Defaults.Sandbox.WritablePaths) != 2 {
+		t.Errorf("defaults sandbox not decoded: %+v", cfg.Defaults.Sandbox)
+	}
+	claude := cfg.Agents["claude"]
+	if claude.Sandbox == nil || len(claude.Sandbox.MaskedPaths) != 1 || claude.Sandbox.MaskedPaths[0] != "~/.secret" {
+		t.Errorf("agent claude sandbox not decoded: %+v", claude.Sandbox)
+	}
+	if len(cfg.Artifacts) != 1 || cfg.Artifacts[0].Name != "screenshots" {
+		t.Errorf("artifacts not decoded: %+v", cfg.Artifacts)
+	}
+}
+
+func TestDecodeNewFormat(t *testing.T) {
+	const newCfg = `pre_prompt = "hello"
+
+[sandbox]
+writable_paths = ["~/.cache"]
+
+[sandbox.network]
+enabled = false
+
+[claude]
+pre_prompt = "claude-only"
+
+[claude.sandbox]
+masked_paths = ["~/.secret"]
+
+[[artifacts]]
+name = "shots"
+command = "run"
+`
+	cfg, err := decodeConfig([]byte(newCfg))
+	if err != nil {
+		t.Fatalf("decodeConfig: %v", err)
+	}
+	if cfg.Defaults.PrePrompt == nil || *cfg.Defaults.PrePrompt != "hello" {
+		t.Errorf("defaults pre_prompt: %+v", cfg.Defaults.PrePrompt)
+	}
+	if cfg.Defaults.Sandbox == nil || cfg.Defaults.Sandbox.Network == nil ||
+		cfg.Defaults.Sandbox.Network.Enabled == nil || *cfg.Defaults.Sandbox.Network.Enabled {
+		t.Errorf("defaults sandbox/network: %+v", cfg.Defaults.Sandbox)
+	}
+	claude := cfg.Agents["claude"]
+	if claude.PrePrompt == nil || *claude.PrePrompt != "claude-only" {
+		t.Errorf("agent pre_prompt: %+v", claude.PrePrompt)
+	}
+	if claude.Sandbox == nil || len(claude.Sandbox.MaskedPaths) != 1 {
+		t.Errorf("agent sandbox: %+v", claude.Sandbox)
+	}
+	if len(cfg.Artifacts) != 1 || cfg.Artifacts[0].Name != "shots" {
+		t.Errorf("artifacts: %+v", cfg.Artifacts)
+	}
+}
+
+func TestRenderMigratesLegacyToNew(t *testing.T) {
+	cfg, err := decodeConfig([]byte(legacyConfig))
+	if err != nil {
+		t.Fatalf("decodeConfig: %v", err)
+	}
+	out := renderConfig([]byte(legacyConfig), cfg)
+	t.Logf("rendered:\n%s", out)
+
+	for _, bad := range []string{"[defaults]", "[defaults.sandbox]", "[agents.claude]"} {
+		if strings.Contains(out, bad) {
+			t.Errorf("output still contains legacy table %q:\n%s", bad, out)
+		}
+	}
+	for _, want := range []string{"[sandbox]", "[claude]", "[claude.sandbox]", "[[artifacts]]"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output missing new-format table %q:\n%s", want, out)
+		}
+	}
+	// Managed value preserved, user artifact comment migrated with its block.
+	if !strings.Contains(out, `writable_paths = ["~/.cache/go-build", "~/.magefile"]`) {
+		t.Errorf("writable_paths not preserved:\n%s", out)
+	}
+	if !strings.Contains(out, "# A hand-written note about screenshots.") {
+		t.Errorf("user artifact comment not preserved:\n%s", out)
+	}
+	// Round-trips back to the same logical config.
+	reloaded, err := decodeConfig([]byte(out))
+	if err != nil {
+		t.Fatalf("decode rendered: %v", err)
+	}
+	if reloaded.Agents["claude"].Sandbox == nil || len(reloaded.Agents["claude"].Sandbox.MaskedPaths) != 1 {
+		t.Errorf("agent config lost in migration: %+v", reloaded.Agents["claude"])
+	}
+}
+
+func TestRenderIdempotent(t *testing.T) {
+	cfg, err := decodeConfig([]byte(legacyConfig))
+	if err != nil {
+		t.Fatalf("decodeConfig: %v", err)
+	}
+	first := renderConfig([]byte(legacyConfig), cfg)
+	cfg2, err := decodeConfig([]byte(first))
+	if err != nil {
+		t.Fatalf("decode first: %v", err)
+	}
+	second := renderConfig([]byte(first), cfg2)
+	if first != second {
+		t.Errorf("render not idempotent:\n--- first ---\n%s\n--- second ---\n%s", first, second)
+	}
+}
+
+func TestCommentPreservationAcrossSave(t *testing.T) {
+	const existing = `[sandbox]
+# keep this note
+writable_paths = ["~/.cache"]
+`
+	cfg, err := decodeConfig([]byte(existing))
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	out := renderConfig([]byte(existing), cfg)
+	if !strings.Contains(out, "# keep this note") {
+		t.Errorf("user comment dropped:\n%s", out)
+	}
+	idx := strings.Index(out, "# keep this note")
+	if w := strings.Index(out, "writable_paths ="); w < idx {
+		t.Errorf("comment not above its key:\n%s", out)
+	}
+}
+
+func TestArtifactsSurviveDefaultsOnlySave(t *testing.T) {
+	const existing = `[sandbox]
+writable_paths = ["~/.cache"]
+
+# my screenshot generator
+[[artifacts]]
+name = "shots"
+command = "bun shots.ts"
+timeout_sec = 900
+`
+	// Simulate a UI save: only defaults are sent, Artifacts is nil.
+	enabled := true
+	cfg := Config{Defaults: AgentConfig{Sandbox: &SandboxConfig{
+		WritablePaths: []string{"~/.cache", "/tmp"},
+		Network:       &NetworkConfig{Enabled: &enabled},
+	}}}
+	out := renderConfig([]byte(existing), cfg)
+	t.Logf("rendered:\n%s", out)
+
+	loaded, err := decodeConfig([]byte(out))
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(loaded.Artifacts) != 1 || loaded.Artifacts[0].Name != "shots" || loaded.Artifacts[0].TimeoutSec != 900 {
+		t.Fatalf("artifacts not preserved on defaults-only save: %+v", loaded.Artifacts)
+	}
+	if !strings.Contains(out, "# my screenshot generator") {
+		t.Errorf("artifact comment dropped:\n%s", out)
+	}
+	if !strings.Contains(out, `writable_paths = ["~/.cache", "/tmp"]`) {
+		t.Errorf("updated writable_paths missing:\n%s", out)
+	}
+}
+
+func TestCommentedDefaultsForUnsetSettings(t *testing.T) {
+	out := renderConfig(nil, Config{})
+	t.Logf("template:\n%s", out)
+
+	wants := []string{
+		"[sandbox]",
+		docPrefix + " writable_paths:",
+		"# writable_paths = [",
+		"# masked_paths = [",
+		"[sandbox.network]",
+		"# enabled = true",
+		// Artifacts documentation + commented example are always present.
+		docPrefix + " [[artifacts]]:",
+		"# [[artifacts]]",
+		`# name = "screenshots"`,
+	}
+	for _, w := range wants {
+		if !strings.Contains(out, w) {
+			t.Errorf("template missing %q:\n%s", w, out)
+		}
+	}
+	// A fully-commented template activates nothing: the (empty) tables decode
+	// but carry no values, and there are no artifacts.
+	cfg, err := decodeConfig([]byte(out))
+	if err != nil {
+		t.Fatalf("decode template: %v", err)
+	}
+	if cfg.Defaults.PrePrompt != nil || sandboxHasContent(cfg.Defaults.Sandbox) || len(cfg.Artifacts) != 0 {
+		t.Errorf("commented template should activate nothing, got: %+v", cfg)
+	}
+}
+
+func TestMultiLineValueParsing(t *testing.T) {
+	// A triple-quoted pre_prompt whose body contains '#' and 'key =' lines must
+	// not confuse the parser, and a following user comment must be preserved.
+	const existing = "[sandbox]\n" +
+		"pre_spawn_script = \"\"\"\n" +
+		"# not a comment\n" +
+		"writable_paths = tricky\n" +
+		"\"\"\"\n" +
+		"# real comment\n" +
+		"writable_paths = [\"~/.cache\"]\n"
+	cfg, err := decodeConfig([]byte(existing))
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	out := renderConfig([]byte(existing), cfg)
+	if !strings.Contains(out, "# real comment") {
+		t.Errorf("comment after multi-line value lost:\n%s", out)
+	}
+	if cfg.Defaults.Sandbox == nil || len(cfg.Defaults.Sandbox.WritablePaths) != 1 {
+		t.Errorf("writable_paths after multi-line value not decoded: %+v", cfg.Defaults.Sandbox)
 	}
 }
 

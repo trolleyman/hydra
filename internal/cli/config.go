@@ -7,7 +7,6 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/trolleyman/hydra/internal/config"
 	"github.com/trolleyman/hydra/internal/paths"
-	"github.com/trolleyman/hydra/internal/sandbox"
 )
 
 func init() {
@@ -22,35 +21,27 @@ var configCmd = &cobra.Command{
 
 var configInitCmd = &cobra.Command{
 	Use:   "init",
-	Short: "Initialize project configuration with the default sandbox policy",
-	Long: `Write the default sandbox policy (writable paths, masked credential
-locations, network policy) to .hydra/config.toml, which can then be edited to
-customize what agents in this project can read, write, and reach.`,
+	Short: "Initialize project configuration with a documented settings template",
+	Long: `Write a self-documenting .hydra/config.toml: every setting (writable
+paths, masked credential locations, network policy, pre-prompts, artifacts) is
+listed commented-out with its built-in default and an explanation, ready to be
+uncommented and customized. An existing config is migrated/updated in place,
+preserving your own comments and any [[artifacts]] blocks.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		projectRoot, err := paths.GetProjectRootFromCwd()
 		if err != nil {
 			return errtrace.Wrap(err)
 		}
 
-		def := sandbox.Defaults()
-		enabled := true
-		cfg := config.Config{
-			Defaults: config.AgentConfig{
-				Sandbox: &config.SandboxConfig{
-					WritablePaths: def.WritablePaths,
-					MaskedPaths:   def.MaskedPaths,
-					RestoreRO:     def.RestoreRO,
-					Network:       &config.NetworkConfig{Enabled: &enabled},
-				},
-			},
-		}
-
+		// An empty config renders the fully-documented, all-commented template.
+		// The baked-in sandbox defaults already apply, so there is nothing to
+		// activate here — the file exists to document and to be customized.
 		path := config.GetProjectConfigPath(projectRoot)
-		if err := config.SaveToFile(path, cfg); err != nil {
+		if err := config.SaveToFile(path, config.Config{}); err != nil {
 			return errtrace.Wrap(err)
 		}
 
-		fmt.Printf("Wrote default sandbox config to %s\n", path)
+		fmt.Printf("Wrote documented config template to %s\n", path)
 		return nil
 	},
 }

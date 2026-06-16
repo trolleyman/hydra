@@ -3,8 +3,6 @@ package config
 import (
 	"strings"
 	"testing"
-
-	"github.com/BurntSushi/toml"
 )
 
 func strPtr(s string) *string { return &s }
@@ -18,13 +16,13 @@ func TestPreSpawnScriptRoundTrip(t *testing.T) {
 		},
 	}
 
-	tomlStr := marshalConfig(cfg)
+	tomlStr := renderConfig(nil, cfg)
 	if !strings.Contains(tomlStr, "pre_spawn_script = ") {
-		t.Fatalf("marshalled config missing pre_spawn_script:\n%s", tomlStr)
+		t.Fatalf("rendered config missing pre_spawn_script:\n%s", tomlStr)
 	}
 
-	parsed := Config{}
-	if _, err := toml.Decode(tomlStr, &parsed); err != nil {
+	parsed, err := decodeConfig([]byte(tomlStr))
+	if err != nil {
 		t.Fatalf("decode: %v", err)
 	}
 	if parsed.Defaults.Sandbox == nil || parsed.Defaults.Sandbox.PreSpawnScript == nil {
