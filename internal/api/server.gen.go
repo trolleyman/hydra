@@ -152,7 +152,7 @@ type AgentResponse struct {
 	// CreatedAt Unix timestamp (seconds) when the session was started; 0 if not started
 	CreatedAt *int64 `json:"created_at,omitempty"`
 
-	// Ephemeral If true, the agent is temporary (runs in the project root, no dedicated branch).
+	// Ephemeral If true, the agent is a throwaway test agent whose worktree and branch are torn down when it stops.
 	Ephemeral   *bool  `json:"ephemeral,omitempty"`
 	Id          string `json:"id"`
 	PrePrompt   string `json:"pre_prompt"`
@@ -493,7 +493,7 @@ type SpawnAgentRequest struct {
 	// BaseBranch Base branch to create the worktree from (defaults to current branch)
 	BaseBranch *string `json:"base_branch,omitempty"`
 
-	// Ephemeral If true, the agent is temporary and its container will be removed on stop.
+	// Ephemeral If true, the agent is a throwaway test agent whose worktree and branch are torn down when it stops.
 	Ephemeral *bool `json:"ephemeral,omitempty"`
 
 	// Id Unique identifier for the agent (slug format, max 40 chars)

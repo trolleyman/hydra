@@ -20,7 +20,7 @@ export type SpawnAgentRequest = {
      */
     base_branch?: string;
     /**
-     * If true, the agent is temporary and its container will be removed on stop.
+     * If true, the agent is a throwaway test agent whose worktree and branch are torn down when it stops.
      */
     ephemeral?: boolean;
 };
