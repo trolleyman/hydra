@@ -49,11 +49,20 @@ func (s *SimulationServer) GetStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *SimulationServer) ListProjects(w http.ResponseWriter, r *http.Request) {
+	simUnread := 1     // matches the one unread agent in ListAgents
+	otherUnread := 3   // updates waiting in a project you're not looking at
 	resp := api.ListProjects200JSONResponse{
 		{
-			Id:   "sim-project",
-			Path: "/simulated/project",
-			Name: "simulated-project",
+			Id:          "sim-project",
+			Path:        "/simulated/project",
+			Name:        "simulated-project",
+			UnreadCount: &simUnread,
+		},
+		{
+			Id:          "mobile-app",
+			Path:        "/simulated/mobile-app",
+			Name:        "mobile-app",
+			UnreadCount: &otherUnread,
 		},
 	}
 	api.WriteJSON(w, http.StatusOK, resp)
@@ -78,6 +87,7 @@ func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, pr
 
 	running := api.Running
 	waiting := api.Waiting
+	unread := true
 
 	resp := api.ListAgents200JSONResponse{
 		{
@@ -94,16 +104,19 @@ func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, pr
 			},
 		},
 		{
-			Id:            "agent-2",
-			AgentType:     "gemini",
-			BaseBranch:    "main",
-			BranchName:    ptr("hydra/feat-2"),
-			SessionPid:    1002,
-			SessionStatus: "running",
-			CreatedAt:     &createdAt2,
+			// Finished while you were away → unread-changes dot lit.
+			Id:               "agent-2",
+			AgentType:        "gemini",
+			BaseBranch:       "main",
+			BranchName:       ptr("hydra/feat-2"),
+			SessionPid:       1002,
+			SessionStatus:    "running",
+			CreatedAt:        &createdAt2,
+			HasUnreadChanges: &unread,
 			AgentStatus: &api.AgentStatusInfo{
-				Status:    waiting,
-				Timestamp: time.Now().Format(time.RFC3339),
+				Status:      waiting,
+				Timestamp:   time.Now().Format(time.RFC3339),
+				LastMessage: ptr("The spike is built, tested, and committed. Here's what landed…"),
 			},
 		},
 		{

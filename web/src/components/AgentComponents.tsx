@@ -96,7 +96,7 @@ export function AgentSidebarItem({
         // the agent goes running→waiting/finished, cleared when it's opened.
         <span
           aria-label="unread changes"
-          className="absolute right-3 top-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full bg-pink-500 ring-2 ring-pink-500/20 shrink-0"
+          className="absolute right-3 top-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full bg-amber-400 ring-2 ring-amber-400/25 shrink-0"
         />
       )}
       <div className={`flex items-center gap-2 min-w-0 ${agent.has_unread_changes ? 'pr-4' : ''}`}>

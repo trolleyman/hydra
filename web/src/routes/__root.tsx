@@ -190,6 +190,7 @@ function ProjectDropdown({
   return (
     <div ref={dropdownRef} className="relative shrink-0">
       <button
+        aria-label="Select project"
         onClick={() => { setOpen((o) => !o); setShowAddInput(false); setAddError(null) }}
         className="flex items-center gap-1.5 h-8 px-2.5 rounded-md text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors max-w-xs cursor-pointer"
       >
@@ -198,7 +199,7 @@ function ProjectDropdown({
           {otherProjectsUnread > 0 && (
             <span
               aria-label="updates waiting in other projects"
-              className="absolute -top-1 -right-1 w-1.5 h-1.5 rounded-full bg-pink-500 ring-2 ring-white dark:ring-gray-900"
+              className="absolute -top-1 -right-1 w-1.5 h-1.5 rounded-full bg-amber-400 ring-2 ring-white dark:ring-gray-900"
             />
           )}
         </span>
@@ -235,7 +236,7 @@ function ProjectDropdown({
                   {(p.unread_count ?? 0) > 0 && hoveredId !== p.id && (
                     <span
                       aria-label={`${p.unread_count} agents with unread changes`}
-                      className="shrink-0 mt-0.5 min-w-[1.125rem] h-[1.125rem] px-1 inline-flex items-center justify-center rounded-full text-[10px] font-semibold bg-pink-500 text-white"
+                      className="shrink-0 mt-0.5 min-w-[1.125rem] h-[1.125rem] px-1 inline-flex items-center justify-center rounded-full text-[10px] font-semibold bg-amber-400 text-amber-950"
                     >
                       {p.unread_count}
                     </span>
