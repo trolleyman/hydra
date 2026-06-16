@@ -639,7 +639,12 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
   const tree = useMemo(() => compactTree(buildTree(files)), [files])
 
   // queryRef: the ref to actually fetch from. null/"" → server default (HEAD).
-  const queryRef = parsed.ref ?? undefined
+  // Selecting the current branch explicitly (e.g. /repository/main/README.md)
+  // resolves to the same tree/blob as the bare /repository URL, so collapse both
+  // to `undefined`. That keeps the tree-fetch key stable across the bare→branch
+  // transition, so the directory list isn't refetched (and the expand state
+  // isn't reset) just for moving from /repository to a file on the same branch.
+  const queryRef = parsed.ref && parsed.ref !== currentBranch ? parsed.ref : undefined
   // The ref string for blob URLs / display, resolved to something concrete.
   const refStr = parsed.ref || currentBranch || 'HEAD'
   // activeRef is what the branch selector shows as selected.
