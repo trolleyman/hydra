@@ -188,6 +188,13 @@ try {
       },
       // A binary image file rendered inline via the raw blob route (PLAN.md #41k).
       { name: 'repository-image', path: '/project/sim-project/repository/main/web/public/logo.png' },
+      // A symbolic link: opening server-link.go renders the file it points at
+      // (internal/server/server.go) with a "→ target" indicator in the header,
+      // demonstrating symlink support.
+      { name: 'repository-symlink', path: '/project/sim-project/repository/main/server-link.go' },
+      // The file-not-found state: a deep link to a path that doesn't exist at the
+      // ref renders a dedicated "File not found" page rather than a raw error.
+      { name: 'repository-not-found', path: '/project/sim-project/repository/main/does/not/exist.md' },
       // Compact folders: a single-child directory chain
       // (config/env/staging/region/eu) renders on one row, VS Code style, just
       // like the diff viewer's tree. Deep-linking the leaf file auto-expands the

@@ -123,6 +123,29 @@ func ShowFile(projectRoot, ref, path string) ([]byte, error) {
 	return out, nil
 }
 
+// LsTreeEntryMode returns the git tree mode of the entry at p under ref —
+// "100644"/"100755" for a regular/executable file, "120000" for a symbolic
+// link, "040000" for a directory — or "" when no entry exists at that path.
+// The "--" guards p against being read as a git option.
+func LsTreeEntryMode(projectRoot, ref, p string) (string, error) {
+	if err := ValidateRef(ref); err != nil {
+		return "", errtrace.Wrap(err)
+	}
+	out, err := gitOutput(projectRoot, "ls-tree", ref, "--", p)
+	if err != nil {
+		return "", errtrace.Wrap(err)
+	}
+	if out == "" {
+		return "", nil
+	}
+	// Format: "<mode> <type> <object>\t<path>"; the mode is the first field.
+	mode, _, ok := strings.Cut(out, " ")
+	if !ok {
+		return "", nil
+	}
+	return mode, nil
+}
+
 // ListTreeFiles returns the repo-relative paths of every file tracked at ref
 // (`git ls-tree -r --name-only <ref>`), sorted by git's default ordering. Paths
 // use forward slashes regardless of platform.

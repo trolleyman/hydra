@@ -27,5 +27,17 @@ export type RepositoryFileResponse = {
      * UTF-8 file content (omitted for binary files)
      */
     content?: string | null;
+    /**
+     * True when the requested path is a symbolic link; the other fields then describe the link's target
+     */
+    symlink: boolean;
+    /**
+     * The link's target exactly as stored (relative or absolute), set when symlink is true
+     */
+    symlink_target?: string | null;
+    /**
+     * Repo-relative path of the file the symlink ultimately resolves to (whose content is returned); null when the link is broken, escapes the repo, or points at a directory
+     */
+    target_path?: string | null;
 };
 
