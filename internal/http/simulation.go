@@ -51,9 +51,10 @@ func (s *SimulationServer) GetStatus(w http.ResponseWriter, r *http.Request) {
 func (s *SimulationServer) ListProjects(w http.ResponseWriter, r *http.Request) {
 	resp := api.ListProjects200JSONResponse{
 		{
-			Id:   "sim-project",
-			Path: "/simulated/project",
-			Name: "simulated-project",
+			Id:      "sim-project",
+			Path:    "/simulated/project",
+			Name:    "simulated-project",
+			Trusted: true,
 		},
 	}
 	api.WriteJSON(w, http.StatusOK, resp)
@@ -61,6 +62,19 @@ func (s *SimulationServer) ListProjects(w http.ResponseWriter, r *http.Request) 
 
 func (s *SimulationServer) AddProject(w http.ResponseWriter, r *http.Request) {
 	api.WriteError(w, http.StatusNotImplemented, "Not implemented in simulation mode")
+}
+
+func (s *SimulationServer) GetProjectConfigToml(w http.ResponseWriter, r *http.Request, projectId string) {
+	api.WriteJSON(w, http.StatusOK, api.ConfigTomlResponse{Content: "", Exists: false, Trusted: true})
+}
+
+func (s *SimulationServer) TrustProject(w http.ResponseWriter, r *http.Request, projectId string) {
+	api.WriteJSON(w, http.StatusOK, api.ProjectInfo{
+		Id:      "sim-project",
+		Path:    "/simulated/project",
+		Name:    "simulated-project",
+		Trusted: true,
+	})
 }
 
 func (s *SimulationServer) RemoveProject(w http.ResponseWriter, r *http.Request, projectId string) {

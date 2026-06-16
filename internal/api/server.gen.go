@@ -67,14 +67,15 @@ const (
 
 // Defines values for ErrorResponseError.
 const (
-	ErrorResponseErrorBadRequest    ErrorResponseError = "bad_request"
-	ErrorResponseErrorConflict      ErrorResponseError = "conflict"
-	ErrorResponseErrorDockerConnect ErrorResponseError = "docker_connect"
-	ErrorResponseErrorInternalError ErrorResponseError = "internal_error"
-	ErrorResponseErrorNotAGitRepo   ErrorResponseError = "not_a_git_repo"
-	ErrorResponseErrorNotFound      ErrorResponseError = "not_found"
-	ErrorResponseErrorPathNotFound  ErrorResponseError = "path_not_found"
-	ErrorResponseErrorUnauthorized  ErrorResponseError = "unauthorized"
+	ErrorResponseErrorBadRequest       ErrorResponseError = "bad_request"
+	ErrorResponseErrorConflict         ErrorResponseError = "conflict"
+	ErrorResponseErrorDockerConnect    ErrorResponseError = "docker_connect"
+	ErrorResponseErrorInternalError    ErrorResponseError = "internal_error"
+	ErrorResponseErrorNotAGitRepo      ErrorResponseError = "not_a_git_repo"
+	ErrorResponseErrorNotFound         ErrorResponseError = "not_found"
+	ErrorResponseErrorPathNotFound     ErrorResponseError = "path_not_found"
+	ErrorResponseErrorUnauthorized     ErrorResponseError = "unauthorized"
+	ErrorResponseErrorUntrustedProject ErrorResponseError = "untrusted_project"
 )
 
 // Defines values for MergeConflictErrorError.
@@ -291,6 +292,18 @@ type ConfigResponse struct {
 	Defaults         AgentConfig `json:"defaults"`
 }
 
+// ConfigTomlResponse defines model for ConfigTomlResponse.
+type ConfigTomlResponse struct {
+	// Content Raw text of the project's .hydra/config.toml (empty when absent)
+	Content string `json:"content"`
+
+	// Exists Whether a .hydra/config.toml file is present in the project
+	Exists bool `json:"exists"`
+
+	// Trusted Whether this exact config content is currently trusted
+	Trusted bool `json:"trusted"`
+}
+
 // DiffFile defines model for DiffFile.
 type DiffFile struct {
 	// Additions Number of added lines
@@ -421,6 +434,9 @@ type ProjectInfo struct {
 
 	// Path Absolute filesystem path to the project root
 	Path string `json:"path"`
+
+	// Trusted Whether the project's .hydra/config.toml is currently trusted by the user. True when there is no project config (nothing repo-controlled to execute) or when the current config's content matches what the user accepted. False means the user must review and trust the config before agents can be spawned or host artifact commands can run.
+	Trusted bool `json:"trusted"`
 }
 
 // RepositoryBranch defines model for RepositoryBranch.
@@ -724,6 +740,9 @@ type ServerInterface interface {
 	// Save configuration changes
 	// (POST /api/projects/{project_id}/config)
 	SaveConfig(w http.ResponseWriter, r *http.Request, projectId string, params SaveConfigParams)
+	// Get the raw .hydra/config.toml content for the trust prompt
+	// (GET /api/projects/{project_id}/config-toml)
+	GetProjectConfigToml(w http.ResponseWriter, r *http.Request, projectId string)
 	// List the branches available for the project's repository
 	// (GET /api/projects/{project_id}/repository/branches)
 	GetRepositoryBranches(w http.ResponseWriter, r *http.Request, projectId string)
@@ -733,6 +752,9 @@ type ServerInterface interface {
 	// List the files tracked in the project's repository
 	// (GET /api/projects/{project_id}/repository/tree)
 	GetRepositoryTree(w http.ResponseWriter, r *http.Request, projectId string, params GetRepositoryTreeParams)
+	// Mark the project's current .hydra/config.toml as trusted
+	// (POST /api/projects/{project_id}/trust)
+	TrustProject(w http.ResponseWriter, r *http.Request, projectId string)
 	// Get system status
 	// (GET /api/status)
 	GetStatus(w http.ResponseWriter, r *http.Request)
@@ -1406,6 +1428,31 @@ func (siw *ServerInterfaceWrapper) SaveConfig(w http.ResponseWriter, r *http.Req
 	handler.ServeHTTP(w, r)
 }
 
+// GetProjectConfigToml operation middleware
+func (siw *ServerInterfaceWrapper) GetProjectConfigToml(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetProjectConfigToml(w, r, projectId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetRepositoryBranches operation middleware
 func (siw *ServerInterfaceWrapper) GetRepositoryBranches(w http.ResponseWriter, r *http.Request) {
 
@@ -1509,6 +1556,31 @@ func (siw *ServerInterfaceWrapper) GetRepositoryTree(w http.ResponseWriter, r *h
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetRepositoryTree(w, r, projectId, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// TrustProject operation middleware
+func (siw *ServerInterfaceWrapper) TrustProject(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.TrustProject(w, r, projectId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1685,9 +1757,11 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/update-from-base", wrapper.UpdateAgentFromBase)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/config", wrapper.GetConfig)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/config", wrapper.SaveConfig)
+	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/config-toml", wrapper.GetProjectConfigToml)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/repository/branches", wrapper.GetRepositoryBranches)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/repository/file", wrapper.GetRepositoryFile)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/repository/tree", wrapper.GetRepositoryTree)
+	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/trust", wrapper.TrustProject)
 	m.HandleFunc("GET "+options.BaseURL+"/api/status", wrapper.GetStatus)
 	m.HandleFunc("GET "+options.BaseURL+"/health", wrapper.CheckHealth)
 
@@ -1900,6 +1974,15 @@ type SpawnAgent400JSONResponse ErrorResponse
 func (response SpawnAgent400JSONResponse) VisitSpawnAgentResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type SpawnAgent403JSONResponse ErrorResponse
+
+func (response SpawnAgent403JSONResponse) VisitSpawnAgentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
 
 	return json.NewEncoder(w).Encode(response)
 }
@@ -2399,6 +2482,41 @@ func (response SaveConfig500JSONResponse) VisitSaveConfigResponse(w http.Respons
 	return json.NewEncoder(w).Encode(response)
 }
 
+type GetProjectConfigTomlRequestObject struct {
+	ProjectId string `json:"project_id"`
+}
+
+type GetProjectConfigTomlResponseObject interface {
+	VisitGetProjectConfigTomlResponse(w http.ResponseWriter) error
+}
+
+type GetProjectConfigToml200JSONResponse ConfigTomlResponse
+
+func (response GetProjectConfigToml200JSONResponse) VisitGetProjectConfigTomlResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetProjectConfigToml404JSONResponse ErrorResponse
+
+func (response GetProjectConfigToml404JSONResponse) VisitGetProjectConfigTomlResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetProjectConfigToml500JSONResponse ErrorResponse
+
+func (response GetProjectConfigToml500JSONResponse) VisitGetProjectConfigTomlResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 type GetRepositoryBranchesRequestObject struct {
 	ProjectId string `json:"project_id"`
 }
@@ -2506,6 +2624,41 @@ func (response GetRepositoryTree500JSONResponse) VisitGetRepositoryTreeResponse(
 	return json.NewEncoder(w).Encode(response)
 }
 
+type TrustProjectRequestObject struct {
+	ProjectId string `json:"project_id"`
+}
+
+type TrustProjectResponseObject interface {
+	VisitTrustProjectResponse(w http.ResponseWriter) error
+}
+
+type TrustProject200JSONResponse ProjectInfo
+
+func (response TrustProject200JSONResponse) VisitTrustProjectResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type TrustProject404JSONResponse ErrorResponse
+
+func (response TrustProject404JSONResponse) VisitTrustProjectResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type TrustProject500JSONResponse ErrorResponse
+
+func (response TrustProject500JSONResponse) VisitTrustProjectResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 type GetStatusRequestObject struct {
 }
 
@@ -2607,6 +2760,9 @@ type StrictServerInterface interface {
 	// Save configuration changes
 	// (POST /api/projects/{project_id}/config)
 	SaveConfig(ctx context.Context, request SaveConfigRequestObject) (SaveConfigResponseObject, error)
+	// Get the raw .hydra/config.toml content for the trust prompt
+	// (GET /api/projects/{project_id}/config-toml)
+	GetProjectConfigToml(ctx context.Context, request GetProjectConfigTomlRequestObject) (GetProjectConfigTomlResponseObject, error)
 	// List the branches available for the project's repository
 	// (GET /api/projects/{project_id}/repository/branches)
 	GetRepositoryBranches(ctx context.Context, request GetRepositoryBranchesRequestObject) (GetRepositoryBranchesResponseObject, error)
@@ -2616,6 +2772,9 @@ type StrictServerInterface interface {
 	// List the files tracked in the project's repository
 	// (GET /api/projects/{project_id}/repository/tree)
 	GetRepositoryTree(ctx context.Context, request GetRepositoryTreeRequestObject) (GetRepositoryTreeResponseObject, error)
+	// Mark the project's current .hydra/config.toml as trusted
+	// (POST /api/projects/{project_id}/trust)
+	TrustProject(ctx context.Context, request TrustProjectRequestObject) (TrustProjectResponseObject, error)
 	// Get system status
 	// (GET /api/status)
 	GetStatus(ctx context.Context, request GetStatusRequestObject) (GetStatusResponseObject, error)
@@ -3182,6 +3341,32 @@ func (sh *strictHandler) SaveConfig(w http.ResponseWriter, r *http.Request, proj
 	}
 }
 
+// GetProjectConfigToml operation middleware
+func (sh *strictHandler) GetProjectConfigToml(w http.ResponseWriter, r *http.Request, projectId string) {
+	var request GetProjectConfigTomlRequestObject
+
+	request.ProjectId = projectId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetProjectConfigToml(ctx, request.(GetProjectConfigTomlRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetProjectConfigToml")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetProjectConfigTomlResponseObject); ok {
+		if err := validResponse.VisitGetProjectConfigTomlResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // GetRepositoryBranches operation middleware
 func (sh *strictHandler) GetRepositoryBranches(w http.ResponseWriter, r *http.Request, projectId string) {
 	var request GetRepositoryBranchesRequestObject
@@ -3255,6 +3440,32 @@ func (sh *strictHandler) GetRepositoryTree(w http.ResponseWriter, r *http.Reques
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetRepositoryTreeResponseObject); ok {
 		if err := validResponse.VisitGetRepositoryTreeResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// TrustProject operation middleware
+func (sh *strictHandler) TrustProject(w http.ResponseWriter, r *http.Request, projectId string) {
+	var request TrustProjectRequestObject
+
+	request.ProjectId = projectId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.TrustProject(ctx, request.(TrustProjectRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "TrustProject")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(TrustProjectResponseObject); ok {
+		if err := validResponse.VisitTrustProjectResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

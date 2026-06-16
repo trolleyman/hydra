@@ -43,6 +43,14 @@ type ProjectInfo struct {
 	ID   string `json:"id"`
 	Path string `json:"path"`
 	Name string `json:"name"`
+	// TrustedConfigHash is the hex SHA-256 of the project's .hydra/config.toml
+	// content at the moment the user accepted the trust prompt. Empty means the
+	// project's config has never been trusted. The config can run arbitrary code
+	// (pre_spawn_script, unsafe_host artifact commands) and weaken the sandbox,
+	// so it must be reviewed and trusted before Hydra acts on it. Trust is keyed
+	// to the content hash, so editing the config (or switching to a branch with a
+	// different one) re-prompts. A project with no config.toml needs no trust.
+	TrustedConfigHash string `json:"trusted_config_hash,omitempty"`
 }
 
 // Manager persists the list of known projects to ~/.config/hydra/projects.json.
@@ -148,6 +156,26 @@ func (m *Manager) RemoveProject(id string) (bool, error) {
 		}
 	}
 	return false, nil
+}
+
+// SetTrustedConfigHash records the config hash the user accepted for the project
+// with the given ID and persists it. Returns the updated ProjectInfo, or false
+// if no project has that ID.
+func (m *Manager) SetTrustedConfigHash(id, hash string) (ProjectInfo, bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for i := range m.projects {
+		if m.projects[i].ID == id {
+			prev := m.projects[i].TrustedConfigHash
+			m.projects[i].TrustedConfigHash = hash
+			if err := m.save(); err != nil {
+				m.projects[i].TrustedConfigHash = prev
+				return ProjectInfo{}, false, errtrace.Wrap(err)
+			}
+			return m.projects[i], true, nil
+		}
+	}
+	return ProjectInfo{}, false, nil
 }
 
 // AddProject registers the given absolute path as a project (idempotent by path).

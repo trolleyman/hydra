@@ -149,6 +149,66 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /api/projects/{project_id}/config-toml:
+    get:
+      summary: Get the raw .hydra/config.toml content for the trust prompt
+      operationId: getProjectConfigToml
+      parameters:
+        - name: project_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConfigTomlResponse'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/projects/{project_id}/trust:
+    post:
+      summary: Mark the project's current .hydra/config.toml as trusted
+      operationId: trustProject
+      parameters:
+        - name: project_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectInfo'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /api/projects/{project_id}/agents:
     get:
       summary: List all Hydra agents (heads)
@@ -206,6 +266,12 @@ paths:
                 $ref: '#/components/schemas/AgentResponse'
         '400':
           description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Project is not trusted
           content:
             application/json:
               schema:
@@ -887,7 +953,7 @@ components:
         error:
           type: string
           description: "Machine-readable error type (e.g. internal_error, not_found, unauthorized, docker_connect)"
-          enum: [not_found, unauthorized, internal_error, docker_connect, path_not_found, not_a_git_repo, bad_request, conflict]
+          enum: [not_found, unauthorized, internal_error, docker_connect, path_not_found, not_a_git_repo, bad_request, conflict, untrusted_project]
         code:
           type: integer
           description: "HTTP status code"
@@ -933,7 +999,7 @@ components:
 
     ProjectInfo:
       type: object
-      required: [id, path, name]
+      required: [id, path, name, trusted]
       properties:
         id:
           type: string
@@ -944,6 +1010,28 @@ components:
         name:
           type: string
           description: Human-readable project name (last path component)
+        trusted:
+          type: boolean
+          description: >-
+            Whether the project's .hydra/config.toml is currently trusted by the
+            user. True when there is no project config (nothing repo-controlled
+            to execute) or when the current config's content matches what the
+            user accepted. False means the user must review and trust the config
+            before agents can be spawned or host artifact commands can run.
+
+    ConfigTomlResponse:
+      type: object
+      required: [content, exists, trusted]
+      properties:
+        content:
+          type: string
+          description: Raw text of the project's .hydra/config.toml (empty when absent)
+        exists:
+          type: boolean
+          description: Whether a .hydra/config.toml file is present in the project
+        trusted:
+          type: boolean
+          description: Whether this exact config content is currently trusted
 
     AddProjectRequest:
       type: object

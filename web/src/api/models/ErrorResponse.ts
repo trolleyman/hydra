@@ -29,6 +29,7 @@ export namespace ErrorResponse {
         NOT_A_GIT_REPO = 'not_a_git_repo',
         BAD_REQUEST = 'bad_request',
         CONFLICT = 'conflict',
+        UNTRUSTED_PROJECT = 'untrusted_project',
     }
 }
 
