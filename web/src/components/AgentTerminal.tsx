@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
@@ -21,6 +21,7 @@ interface PaneProps {
   reconnectAttempt: number
   onStatusUpdate?: (status: string) => void
   onDiffRefresh?: () => void
+  onMetrics?: (m: { cols: number; rows: number; cellHeight: number }) => void
 }
 
 function getWsUrl(agentId: string, projectId: string | null, shell?: boolean, sandboxed?: boolean, shellId?: string): string {
@@ -39,7 +40,7 @@ function getWsUrl(agentId: string, projectId: string | null, shell?: boolean, sa
   return `${protocol}//${host}/ws/projects/${pid}/agents/${encodeURIComponent(agentId)}/terminal${qs}`
 }
 
-function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, reconnectAttempt, onStatusUpdate, onDiffRefresh }: PaneProps) {
+function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, reconnectAttempt, onStatusUpdate, onDiffRefresh, onMetrics }: PaneProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<Terminal | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
@@ -73,6 +74,18 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
     if (!fitAddon || !term) return
     fitAddon.fit()
     const { cols, rows } = term
+    // Report geometry + measured cell height to the parent so it can snap the
+    // panel to whole rows and show the size indicator. Only the active pane is
+    // visible/sized, so ignore background panes (their measurements are stale).
+    if (active && onMetrics && rows > 0 && containerRef.current) {
+      const core = (term as unknown as { _core?: { _renderService?: { dimensions?: { css?: { cell?: { height?: number } } } } } })._core
+      let cellHeight = core?._renderService?.dimensions?.css?.cell?.height ?? 0
+      if (!cellHeight) {
+        const screen = containerRef.current.querySelector('.xterm-screen') as HTMLElement | null
+        if (screen) cellHeight = screen.clientHeight / rows
+      }
+      if (cellHeight > 0) onMetrics({ cols, rows, cellHeight })
+    }
     if (ws?.readyState !== WebSocket.OPEN || cols <= 0 || rows <= 0) return
     if (!force && cols === lastSentSize.current.cols && rows === lastSentSize.current.rows) return
     ws.send(JSON.stringify({ type: 'resize', cols, rows }))
@@ -365,9 +378,23 @@ export function AgentTerminal({ agentId, projectId, onRefresh, onStatusUpdate, o
   // Persist the height the user drags the terminal panel to, per agent, so each
   // agent's page restores its own layout.
   const rootRef = useRef<HTMLDivElement>(null)
+  const paneWrapRef = useRef<HTMLDivElement>(null)
   const [height, setHeight] = useState(
     () => loadAgentViewPrefs(projectId, agentId).terminalHeight ?? DEFAULT_TERMINAL_HEIGHT,
   )
+  const lastHeightRef = useRef(height)
+
+  // Latest terminal geometry, reported by the active pane. cellHeight drives the
+  // row-snapping below; cols/rows feed the "WxH" indicator shown while resizing.
+  const metricsRef = useRef({ cellHeight: 0 })
+  const [dims, setDims] = useState({ cols: 0, rows: 0 })
+  const [isResizing, setIsResizing] = useState(false)
+  const resizeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const reportMetrics = useCallback((m: { cols: number; rows: number; cellHeight: number }) => {
+    metricsRef.current.cellHeight = m.cellHeight
+    setDims(prev => (prev.cols === m.cols && prev.rows === m.rows ? prev : { cols: m.cols, rows: m.rows }))
+  }, [])
 
   // This component is reused (not remounted) when switching agents, so reload
   // the height when the agent changes. Done during render per React's "adjust
@@ -375,24 +402,50 @@ export function AgentTerminal({ agentId, projectId, onRefresh, onStatusUpdate, o
   const heightAgentRef = useRef(agentId)
   if (heightAgentRef.current !== agentId) {
     heightAgentRef.current = agentId
-    setHeight(loadAgentViewPrefs(projectId, agentId).terminalHeight ?? DEFAULT_TERMINAL_HEIGHT)
+    const h = loadAgentViewPrefs(projectId, agentId).terminalHeight ?? DEFAULT_TERMINAL_HEIGHT
+    lastHeightRef.current = h
+    setHeight(h)
   }
 
   // The CSS `resize-y` handle writes directly to the element's inline height, so
   // we observe size changes, mirror them into state (otherwise a later re-render
-  // would revert the drag) and save them for this agent. Setting height to the
-  // measured offsetHeight produces no further size change, so this can't loop.
+  // would revert the drag) and save them for this agent. We snap the height so
+  // the terminal viewport is a whole number of rows: the pane fills everything
+  // below the title bar, so `overhead` (title bar + borders) is held constant and
+  // only the viewport portion is rounded to the nearest cell. Setting height to a
+  // value that re-snaps to itself produces no further change, so this can't loop.
   useEffect(() => {
     const el = rootRef.current
     if (!el) return
+    let first = true
     const observer = new ResizeObserver(() => {
-      const h = Math.round(el.offsetHeight)
-      if (h <= 0) return
-      setHeight(h)
-      patchAgentViewPrefs(projectId, agentId, { terminalHeight: h })
+      const raw = Math.round(el.offsetHeight)
+      if (raw <= 0) return
+      let target = raw
+      const { cellHeight } = metricsRef.current
+      const pane = paneWrapRef.current
+      if (cellHeight > 0 && pane) {
+        const overhead = raw - pane.offsetHeight
+        const rows = Math.max(1, Math.round(pane.offsetHeight / cellHeight))
+        target = Math.max(150, Math.round(overhead + rows * cellHeight))
+      }
+      if (target !== lastHeightRef.current) {
+        lastHeightRef.current = target
+        setHeight(target)
+        patchAgentViewPrefs(projectId, agentId, { terminalHeight: target })
+      }
+      // The first observation is the initial mount/layout, not a user drag, so
+      // don't flash the size indicator for it.
+      if (first) { first = false; return }
+      setIsResizing(true)
+      if (resizeTimeoutRef.current) clearTimeout(resizeTimeoutRef.current)
+      resizeTimeoutRef.current = setTimeout(() => setIsResizing(false), 600)
     })
     observer.observe(el)
-    return () => observer.disconnect()
+    return () => {
+      observer.disconnect()
+      if (resizeTimeoutRef.current) clearTimeout(resizeTimeoutRef.current)
+    }
   }, [agentId, projectId])
 
   function handleStatusUpdate(newStatus: string) {
@@ -451,7 +504,14 @@ export function AgentTerminal({ agentId, projectId, onRefresh, onStatusUpdate, o
   const isLoading = status === AgentStatus.PENDING || status === AgentStatus.BUILDING
 
   return (
-    <div ref={rootRef} className="rounded-lg overflow-hidden border border-gray-700 dark:border-gray-600 flex flex-col resize-y" style={{ background: '#111827', height: `${height}px`, minHeight: '150px' }}>
+    <div ref={rootRef} className="relative rounded-lg overflow-hidden border border-gray-700 dark:border-gray-600 flex flex-col resize-y" style={{ background: '#111827', height: `${height}px`, minHeight: '150px' }}>
+      {/* Size indicator shown while dragging the resize handle; fades out when
+          the drag stops. Snapping keeps rows whole, so this reads cleanly. */}
+      <div
+        className={`absolute top-10 right-2 px-2 py-1 bg-gray-900/90 text-gray-200 text-[11px] font-mono rounded border border-gray-600 shadow-lg pointer-events-none z-20 transition-opacity duration-500 ${isResizing ? 'opacity-100' : 'opacity-0'}`}
+      >
+        {dims.cols}×{dims.rows}
+      </div>
       {/* Title bar with inline tabs */}
       <div className="flex items-center gap-1 px-3 py-2 border-b border-gray-700 dark:border-gray-600 bg-gray-800/80 shrink-0">
         {/* Traffic lights */}
@@ -555,6 +615,7 @@ export function AgentTerminal({ agentId, projectId, onRefresh, onStatusUpdate, o
       {tabs.map(tab => (
         <div
           key={tab.id}
+          ref={activeTabId === tab.id ? paneWrapRef : undefined}
           className="flex-1 min-h-0 overflow-hidden"
           style={{ display: activeTabId === tab.id ? 'flex' : 'none', flexDirection: 'column' }}
         >
@@ -568,6 +629,7 @@ export function AgentTerminal({ agentId, projectId, onRefresh, onStatusUpdate, o
             reconnectAttempt={reconnectKeys[tab.id] ?? 0}
             onStatusUpdate={tab.id === 'terminal' ? handleStatusUpdate : undefined}
             onDiffRefresh={tab.id === 'terminal' ? onDiffRefresh : undefined}
+            onMetrics={reportMetrics}
           />
         </div>
       ))}
