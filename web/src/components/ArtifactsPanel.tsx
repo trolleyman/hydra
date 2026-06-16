@@ -294,7 +294,7 @@ function ElapsedTime({ startedAt }: { startedAt: number }) {
 // LogView shows the live stdout+stderr log of a generating artifact: scrollable,
 // monospaced, auto-following the tail unless the user scrolls up, with stderr
 // lines in red.
-function LogView({ log }: { log: ArtifactLogLine[] }) {
+function LogView({ log, emptyText = 'Waiting for output…' }: { log: ArtifactLogLine[]; emptyText?: string }) {
   const ref = useRef<HTMLDivElement>(null)
   // Whether to keep pinned to the bottom; flips off when the user scrolls up.
   const stick = useRef(true)
@@ -317,7 +317,7 @@ function LogView({ log }: { log: ArtifactLogLine[] }) {
       className="h-64 max-h-64 overflow-auto rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/60 p-2 font-mono text-[11px] leading-relaxed"
     >
       {log.length === 0 ? (
-        <div className="text-gray-400 dark:text-gray-500">Waiting for output…</div>
+        <div className="text-gray-400 dark:text-gray-500">{emptyText}</div>
       ) : (
         log.map((l, i) => (
           <div
@@ -334,31 +334,93 @@ function LogView({ log }: { log: ArtifactLogLine[] }) {
   )
 }
 
-// LogColumn is one side's labelled log pane. A null log means the side is absent
-// (the script was added/removed on the branch), shown as a "No log" placeholder
-// so the side-by-side layout stays balanced.
-function LogColumn({ label, log }: { label: string; log: ArtifactLogLine[] | null }) {
+// LogColumnFrame is one side's labelled column wrapper, shared by the live and
+// persisted log panes so both lay out identically.
+function LogColumnFrame({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="flex-1 min-w-0">
       <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-1">{label}</div>
-      {log === null ? (
-        <div className="my-2 flex items-center justify-center h-16 rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/60 text-[11px] text-gray-400 dark:text-gray-500">
-          No log
-        </div>
-      ) : (
-        <LogView log={log} />
-      )}
+      {children}
     </div>
   )
 }
 
-// LogPanes shows the two builds (before/after) side by side, so the left and
-// right generations read as separate streams instead of interleaving.
+// NoLog is the placeholder for an absent side (the script was added/removed on
+// the branch). Sized to match the log box so the side-by-side layout stays
+// balanced when only one side has a log.
+function NoLog() {
+  return (
+    <div className="my-2 flex items-center justify-center h-64 rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/60 text-[11px] text-gray-400 dark:text-gray-500">
+      No log
+    </div>
+  )
+}
+
+// LogColumn is one side's labelled log pane for the persisted (already-fetched)
+// view. A null log means the side is absent, shown as the "No log" placeholder.
+function LogColumn({ label, log }: { label: string; log: ArtifactLogLine[] | null }) {
+  return (
+    <LogColumnFrame label={label}>
+      {log === null ? <NoLog /> : <LogView log={log} />}
+    </LogColumnFrame>
+  )
+}
+
+// LiveLogColumn renders one side's log while the set is still generating. Once a
+// side settles, the backend clears its live `log` (it lives only in memory while
+// in-flight) and exposes the persisted log at `logUrl` — but the OTHER side may
+// still be building, so the set as a whole stays "generating". Rather than revert
+// the finished side to "Waiting for output…", fetch its persisted log and keep
+// showing the final output until the whole set settles.
+function LiveLogColumn({ label, log, logUrl }: { label: string; log: ArtifactLogLine[]; logUrl?: string | null }) {
+  // This side has finished if it has no live lines left but a persisted log URL.
+  const settled = log.length === 0 && !!logUrl
+  const [settledLog, setSettledLog] = useState<ArtifactLogLine[] | null>(null)
+
+  useEffect(() => {
+    if (!settled || !logUrl) {
+      setSettledLog(null)
+      return
+    }
+    let cancelled = false
+    fetch(logUrl)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j: { lines?: ArtifactLogLine[] } | null) => {
+        if (!cancelled && j) setSettledLog(j.lines ?? [])
+      })
+      .catch(() => { /* ignore; fall back to the loading placeholder */ })
+    return () => { cancelled = true }
+  }, [settled, logUrl])
+
+  return (
+    <LogColumnFrame label={label}>
+      {settled ? (
+        <LogView log={settledLog ?? []} emptyText="Loading log…" />
+      ) : (
+        <LogView log={log} />
+      )}
+    </LogColumnFrame>
+  )
+}
+
+// LogPanes shows two persisted (already-fetched) logs side by side, so the left
+// and right generations read as separate streams instead of interleaving.
 function LogPanes({ left, right }: { left: ArtifactLogLine[] | null; right: ArtifactLogLine[] | null }) {
   return (
     <div className="flex gap-2 my-2">
       <LogColumn label="Before" log={left} />
       <LogColumn label="After" log={right} />
+    </div>
+  )
+}
+
+// LiveLogPanes shows both in-flight builds side by side while the set generates,
+// each side falling back to its persisted log once it finishes (see LiveLogColumn).
+function LiveLogPanes({ set }: { set: ArtifactSet }) {
+  return (
+    <div className="flex gap-2 my-2">
+      <LiveLogColumn label="Before" log={set.left_log ?? []} logUrl={set.left_log_url} />
+      <LiveLogColumn label="After" log={set.right_log ?? []} logUrl={set.right_log_url} />
     </div>
   )
 }
@@ -489,8 +551,9 @@ function ArtifactSetCard({ set, mode, onRefresh }: { set: ArtifactSet; mode: Ima
 
       {!collapsed && (
         <div className="px-3 pb-2">
-          {/* While generating, stream both builds' live logs side by side. */}
-          {status === 'generating' && <LogPanes left={set.left_log ?? []} right={set.right_log ?? []} />}
+          {/* While generating, stream both builds' live logs side by side; a side
+              that finishes first shows its final log instead of "waiting". */}
+          {status === 'generating' && <LiveLogPanes set={set} />}
           {status === 'error' && (
             <>
               <div className="my-2 px-3 py-2 rounded-md bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 font-mono text-xs text-red-600 dark:text-red-400 whitespace-pre-wrap break-words">
