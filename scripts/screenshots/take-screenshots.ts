@@ -203,6 +203,10 @@ try {
       // numbered-paste naming. Captures the viewport (the lightbox is a fixed
       // overlay), and the upload request is stubbed so the chips settle instantly.
       attachImages?: string[]
+      // Captures only the viewport (not the full page), unscrolled, so the shot
+      // focuses on a page's header region — e.g. the agent detail title bar —
+      // rather than the long content (terminal, diff) below it.
+      viewportOnly?: boolean
     }[] = [
       { name: 'home', path: '/' },
       // The spawn form's image lightbox: two images attached to the prompt, the
@@ -258,6 +262,17 @@ try {
       // in a viewport-height scroll container, so use a tall viewport to fit the
       // whole page (the pre-spawn editor sits at the very bottom).
       { name: 'settings', path: '/project/sim-project/settings', viewport: { width: 1280, height: 1360 } },
+      // The agent detail header showing the new user-facing title: the sidebar
+      // and header render the mutable title (e.g. "Add renameable agent titles")
+      // in place of the stable ID, with a rename (pencil) button beside it and
+      // the Copy-ID button still exposing the underlying id. Viewport-only so the
+      // shot focuses on the title bar rather than the terminal/diff below.
+      { name: 'agent-title', path: '/project/sim-project/agent/agent-1', viewportOnly: true },
+      // The inline rename in progress: clicking the pencil swaps the title for an
+      // editable input seeded with the current title (Enter saves via PATCH, Esc
+      // cancels). Documents the rename UX. The pencil is the only lucide-pencil
+      // icon on the page, so the :has() selector targets it unambiguously.
+      { name: 'agent-rename', path: '/project/sim-project/agent/agent-1', viewportOnly: true, click: 'button:has(svg.lucide-pencil)' },
       { name: 'nested-folders', path: '/project/sim-project/agent/agent-3', scrollTo: 'Changes' },
       // agent-1's diff carries simulated "screenshots" artifacts (mixed phone +
       // desktop shapes). Scroll to the "Changes" header — the artifacts panel
@@ -522,9 +537,9 @@ try {
           await settle(page)
         }
         const out = join(OUT, `${pg.name}${suffix}.png`)
-        // Scrolled pages and the lightbox (a fixed, viewport-filling overlay)
-        // capture the viewport; others capture the full page.
-        await page.screenshot({ path: out, fullPage: !pg.scrollTo && !pg.attachImages })
+        // Scrolled pages, the lightbox (a fixed, viewport-filling overlay) and
+        // header-focused shots capture the viewport; others capture the full page.
+        await page.screenshot({ path: out, fullPage: !pg.scrollTo && !pg.attachImages && !pg.viewportOnly })
         console.log(`wrote ${out}`)
         await ctx.close()
         done++

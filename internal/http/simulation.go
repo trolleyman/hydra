@@ -82,6 +82,7 @@ func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, pr
 	resp := api.ListAgents200JSONResponse{
 		{
 			Id:            "agent-1",
+			Title:         ptr("Add renameable agent titles"),
 			AgentType:     "claude",
 			BaseBranch:    "main",
 			BranchName:    ptr("hydra/feat-1"),
@@ -95,6 +96,7 @@ func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, pr
 		},
 		{
 			Id:            "agent-2",
+			Title:         ptr("Migrate auth providers to OAuth"),
 			AgentType:     "gemini",
 			BaseBranch:    "main",
 			BranchName:    ptr("hydra/feat-2"),
@@ -110,6 +112,7 @@ func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, pr
 			// Deeply-nested refactor — exercises the diff tree's VS Code-style
 			// "compact folders" rendering (see GetAgentDiff for agent-3).
 			Id:            "agent-3",
+			Title:         ptr("Refactor auth into nested packages"),
 			AgentType:     "claude",
 			BaseBranch:    "main",
 			BranchName:    ptr("hydra/feat-3"),
@@ -130,6 +133,7 @@ func (s *SimulationServer) GetAgent(w http.ResponseWriter, r *http.Request, proj
 		createdAt := time.Now().Add(-1 * time.Hour).Unix()
 		api.WriteJSON(w, http.StatusOK, api.AgentResponse{
 			Id:            "agent-1",
+			Title:         ptr("Add renameable agent titles"),
 			AgentType:     "claude",
 			BaseBranch:    "main",
 			BranchName:    ptr("hydra/feat-1"),
@@ -147,6 +151,7 @@ func (s *SimulationServer) GetAgent(w http.ResponseWriter, r *http.Request, proj
 		createdAt := time.Now().Add(-3 * time.Hour).Unix()
 		api.WriteJSON(w, http.StatusOK, api.AgentResponse{
 			Id:            "agent-3",
+			Title:         ptr("Refactor auth into nested packages"),
 			AgentType:     "claude",
 			BaseBranch:    "main",
 			BranchName:    ptr("hydra/feat-3"),
