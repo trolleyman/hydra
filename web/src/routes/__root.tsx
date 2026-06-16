@@ -381,7 +381,7 @@ function RootLayout() {
   const [trustedProjectIds, setTrustedProjectIds] = useState<Set<string>>(() => readTrustedProjects())
 
   const { projects, selectedProjectId, setProjects, setSelectedProjectId, setSystemStatus } = useProjectStore()
-  const { agents, setAgents, addAgent, markRead } = useAgentStore()
+  const { agents, loading: agentsLoading, setAgents, addAgent, markRead } = useAgentStore()
   const dialog = useDialogStore()
   const navigate = useNavigate()
   const location = useLocation()
@@ -592,17 +592,22 @@ function RootLayout() {
       saveProjectView(projectId, currentViewFromRoute(projectId, undefined, location.pathname))
       return
     }
-    // `agents` is loaded for this project once every entry's project_path matches
-    // it; until then (e.g. mid project-switch) keep the optimistic value.
+    // `agents` is loaded for this project once the fetch has settled (loading
+    // false) and every entry's project_path matches it; until then (e.g. mid
+    // project-switch, while the stale list still holds the previous project's
+    // agents) keep the optimistic value. We key off `loading` rather than a
+    // non-empty list so a project with ZERO agents still counts as loaded —
+    // otherwise a remembered-but-dead agent in an empty project would never be
+    // detected and you'd stay stuck on "Agent Not Found".
     const proj = projects.find((p) => p.id === projectId)
-    const agentsLoaded = proj != null && agents.length > 0 && agents.every((a) => a.project_path === proj.path)
+    const agentsLoaded = proj != null && !agentsLoading && agents.every((a) => a.project_path === proj.path)
     if (agentsLoaded && !agents.some((a) => a.id === agentId)) {
       saveProjectView(projectId, { kind: 'project' })
       navigate({ to: '/project/$projectId', params: { projectId } })
     } else {
       saveProjectView(projectId, { kind: 'agent', agentId })
     }
-  }, [routeParams.projectId, routeParams.agentId, location.pathname, agents, projects, navigate])
+  }, [routeParams.projectId, routeParams.agentId, location.pathname, agents, agentsLoading, projects, navigate])
 
   // Drop expired per-artifact and per-agent-view UI prefs once on boot.
   useEffect(() => { pruneArtifactPrefs(); pruneAgentViewPrefs() }, [])
