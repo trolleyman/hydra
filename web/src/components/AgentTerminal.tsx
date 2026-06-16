@@ -469,46 +469,56 @@ export function AgentTerminal({ agentId, projectId, onRefresh, onStatusUpdate, o
     })
   }, [tabs, activeTabId, projectId, agentId])
 
-  // The CSS `resize-y` handle writes directly to the element's inline height, so
-  // we observe size changes, mirror them into state (otherwise a later re-render
-  // would revert the drag) and save them for this agent. We snap the height so
-  // the terminal viewport is a whole number of rows: the pane fills everything
-  // below the title bar, so `overhead` (title bar + borders) is held constant and
-  // only the viewport portion is rounded to the nearest cell. Setting height to a
-  // value that re-snaps to itself produces no further change, so this can't loop.
-  useEffect(() => {
+  // Custom drag handle for vertical resize. We deliberately avoid CSS `resize-y`,
+  // which changes the height pixel-by-pixel; instead we snap to whole rows on
+  // every pointer move so the terminal grows/shrinks one character cell at a time,
+  // like GNOME Terminal. `overhead` (title bar + borders) is captured once at drag
+  // start and held constant; only the viewport portion is rounded to the nearest
+  // cell. Pointer capture routes moves to the handle even when the cursor leaves
+  // it, and is released automatically if the component unmounts mid-drag.
+  const dragRef = useRef<{ startY: number; startHeight: number; overhead: number; cellHeight: number } | null>(null)
+
+  function onResizeStart(e: React.PointerEvent<HTMLDivElement>) {
+    e.preventDefault()
     const el = rootRef.current
     if (!el) return
-    let first = true
-    const observer = new ResizeObserver(() => {
-      const raw = Math.round(el.offsetHeight)
-      if (raw <= 0) return
-      let target = raw
-      const { cellHeight } = metricsRef.current
-      const pane = paneWrapRef.current
-      if (cellHeight > 0 && pane) {
-        const overhead = raw - pane.offsetHeight
-        const rows = Math.max(1, Math.round(pane.offsetHeight / cellHeight))
-        target = Math.max(150, Math.round(overhead + rows * cellHeight))
-      }
-      if (target !== lastHeightRef.current) {
-        lastHeightRef.current = target
-        setHeight(target)
-        patchAgentViewPrefs(projectId, agentId, { terminalHeight: target })
-      }
-      // The first observation is the initial mount/layout, not a user drag, so
-      // don't flash the size indicator for it.
-      if (first) { first = false; return }
-      setIsResizing(true)
-      if (resizeTimeoutRef.current) clearTimeout(resizeTimeoutRef.current)
-      resizeTimeoutRef.current = setTimeout(() => setIsResizing(false), 600)
-    })
-    observer.observe(el)
-    return () => {
-      observer.disconnect()
-      if (resizeTimeoutRef.current) clearTimeout(resizeTimeoutRef.current)
+    const pane = paneWrapRef.current
+    const overhead = pane ? el.offsetHeight - pane.offsetHeight : 0
+    dragRef.current = { startY: e.clientY, startHeight: el.offsetHeight, overhead, cellHeight: metricsRef.current.cellHeight }
+    e.currentTarget.setPointerCapture(e.pointerId)
+    if (resizeTimeoutRef.current) clearTimeout(resizeTimeoutRef.current)
+    setIsResizing(true)
+  }
+
+  function onResizeMove(e: React.PointerEvent<HTMLDivElement>) {
+    const d = dragRef.current
+    if (!d) return
+    const raw = d.startHeight + (e.clientY - d.startY)
+    let target = Math.max(150, Math.round(raw))
+    if (d.cellHeight > 0) {
+      const rows = Math.max(1, Math.round((raw - d.overhead) / d.cellHeight))
+      target = Math.max(150, Math.round(d.overhead + rows * d.cellHeight))
     }
-  }, [agentId, projectId])
+    if (target !== lastHeightRef.current) {
+      lastHeightRef.current = target
+      setHeight(target)
+    }
+  }
+
+  function onResizeEnd(e: React.PointerEvent<HTMLDivElement>) {
+    if (!dragRef.current) return
+    dragRef.current = null
+    e.currentTarget.releasePointerCapture(e.pointerId)
+    // Let the indicator linger briefly after the drag, then fade out.
+    if (resizeTimeoutRef.current) clearTimeout(resizeTimeoutRef.current)
+    resizeTimeoutRef.current = setTimeout(() => setIsResizing(false), 600)
+    patchAgentViewPrefs(projectId, agentId, { terminalHeight: lastHeightRef.current })
+  }
+
+  // Clear the indicator fade timer on unmount.
+  useEffect(() => () => {
+    if (resizeTimeoutRef.current) clearTimeout(resizeTimeoutRef.current)
+  }, [])
 
   function handleStatusUpdate(newStatus: string) {
     setStatus(newStatus)
@@ -566,11 +576,12 @@ export function AgentTerminal({ agentId, projectId, onRefresh, onStatusUpdate, o
   const isLoading = status === AgentStatus.PENDING || status === AgentStatus.BUILDING
 
   return (
-    <div ref={rootRef} className="relative rounded-lg overflow-hidden border border-gray-700 dark:border-gray-600 flex flex-col resize-y" style={{ background: '#111827', height: `${height}px`, minHeight: '150px' }}>
+    <div ref={rootRef} className="relative rounded-lg overflow-hidden border border-gray-700 dark:border-gray-600 flex flex-col" style={{ background: '#111827', height: `${height}px`, minHeight: '150px' }}>
       {/* Size indicator shown while dragging the resize handle; fades out when
-          the drag stops. Snapping keeps rows whole, so this reads cleanly. */}
+          the drag stops. Snapping keeps rows whole, so this reads cleanly. Inset
+          a bit from the top-right corner so it sits clearly inside the terminal. */}
       <div
-        className={`absolute top-10 right-2 px-2 py-1 bg-gray-900/90 text-gray-200 text-[11px] font-mono rounded border border-gray-600 shadow-lg pointer-events-none z-20 transition-opacity duration-500 ${isResizing ? 'opacity-100' : 'opacity-0'}`}
+        className={`absolute top-14 right-4 px-2 py-1 bg-gray-900/90 text-gray-200 text-[11px] font-mono rounded border border-gray-600 shadow-lg pointer-events-none z-20 transition-opacity duration-500 ${isResizing ? 'opacity-100' : 'opacity-0'}`}
       >
         {dims.cols}×{dims.rows}
       </div>
@@ -695,6 +706,18 @@ export function AgentTerminal({ agentId, projectId, onRefresh, onStatusUpdate, o
           />
         </div>
       ))}
+
+      {/* Custom resize handle: a thin strip along the bottom edge. Dragging it
+          snaps the height to whole rows (see onResizeMove), so the terminal
+          steps one character cell at a time rather than resizing smoothly. */}
+      <div
+        onPointerDown={onResizeStart}
+        onPointerMove={onResizeMove}
+        onPointerUp={onResizeEnd}
+        className="group absolute bottom-0 left-0 right-0 h-2 cursor-ns-resize z-20 touch-none"
+      >
+        <div className="mx-auto mt-1 h-0.5 w-10 rounded-full bg-gray-600/0 group-hover:bg-gray-500 transition-colors" />
+      </div>
     </div>
   )
 }
