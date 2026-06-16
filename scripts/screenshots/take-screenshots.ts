@@ -224,6 +224,14 @@ try {
       // like the diff viewer's tree. Deep-linking the leaf file auto-expands the
       // chain so the compacted row is visible.
       { name: 'repository-compact-folders', path: '/project/sim-project/repository/main/config/env/staging/region/eu/settings.toml' },
+      // The project settings page, landing on the "All Agents" / Global Defaults
+      // tab. Simulation seeds a multi-line pre-spawn script (GetConfig in
+      // internal/http/simulation.go), so the capture documents the sandbox
+      // policy editor with the ShellEditor's bash highlighting + line-number
+      // gutter, the typed text and the highlight layer aligned. The form lives
+      // in a viewport-height scroll container, so use a tall viewport to fit the
+      // whole page (the pre-spawn editor sits at the very bottom).
+      { name: 'settings', path: '/project/sim-project/settings', viewport: { width: 1280, height: 1360 } },
       { name: 'nested-folders', path: '/project/sim-project/agent/agent-3', scrollTo: 'Changes' },
       // agent-1's diff carries simulated "screenshots" artifacts (mixed phone +
       // desktop shapes). Scroll to the "Changes" header — the artifacts panel

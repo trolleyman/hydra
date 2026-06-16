@@ -1111,6 +1111,17 @@ func (s *SimulationServer) GetConfig(w http.ResponseWriter, r *http.Request, pro
 			},
 		},
 	}
+	// Seed a multi-line pre-spawn script so the settings screenshot exercises
+	// the ShellEditor's bash highlighting and line-number gutter. Only the
+	// project scope carries it; the user scope (fetched as the *inherited*
+	// config when editing the project) leaves it empty, matching a realistic
+	// setup where a project overrides the global default — so the editor isn't
+	// shadowed by a redundant "Inherited:" echo of its own value.
+	if params.Scope == nil || *params.Scope != api.GetConfigParamsScopeUser {
+		resp.Defaults.Sandbox = &api.SandboxConfig{
+			PreSpawnScript: ptr("#!/bin/bash\nset -euo pipefail\ncp -r \"$HYDRA_PROJECT_ROOT/pipeline/out\" \"$HYDRA_WORKTREE/pipeline/out\"\n"),
+		}
+	}
 	api.WriteJSON(w, http.StatusOK, resp)
 }
 

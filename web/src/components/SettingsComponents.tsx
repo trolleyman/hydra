@@ -289,7 +289,7 @@ export function ConfigForm({
             value={sandbox.pre_spawn_script ?? ''}
             onChange={(val) => updateSandbox({ pre_spawn_script: val || null })}
             placeholder={'# e.g.\nmise trust'}
-            rows={3}
+            rows={8}
           />
         </div>
       </div>
