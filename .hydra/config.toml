@@ -14,5 +14,5 @@ writable_paths = ["~/.cache/go-build", "~/.go/pkg", "~/.bun/install/cache", "~/.
 # cached per resolved ref).
 [[artifacts]]
 name = "screenshots"
-command = "cd scripts/screenshots && bun install && bun take-screenshot.ts"
+command = "cd scripts/screenshots && bun install && bun take-screenshots.ts"
 timeout_sec = 900

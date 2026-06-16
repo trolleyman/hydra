@@ -202,60 +202,20 @@ function FileGrid({ files, mode }: { files: ArtifactFile[]; mode: ImageDiffMode 
 }
 
 function ArtifactSetCard({ set, mode, onRefresh }: { set: ArtifactSet; mode: ImageDiffMode; onRefresh: (name: string) => void }) {
-  const [collapsed, setCollapsed] = useState(false)
-  const [showUnchanged, setShowUnchanged] = useState(false)
-
   const status = set.status as string
   const changedFiles = set.files.filter((f) => f.change_type !== 'unchanged')
   const unchangedFiles = set.files.filter((f) => f.change_type === 'unchanged')
+  const noChanges = status === 'ready' && !set.changed
 
-  // While generating, show the same compact single line we use for the
-  // "no visual changes" case. The common outcome is no changes, so matching
-  // that layout means the transition doesn't shift the diffs below.
-  if (status === 'generating') {
-    return (
-      <div className="px-3 py-2 text-xs text-gray-400 dark:text-gray-500 flex items-center gap-2">
-        <LoaderCircle className="w-3.5 h-3.5 shrink-0 animate-spin" />
-        <span className="font-medium text-gray-500 dark:text-gray-400">{set.name}</span>
-        <span>· generating…</span>
-      </div>
-    )
-  }
-
-  // Hide artifact sets with no visual changes behind a single muted line, but
-  // let the user expand it to view the (unchanged) artifacts anyway — useful for
-  // confirming a screenshot still renders even when nothing visibly moved. When
-  // the script produced no files at all there is nothing to expand, so the line
-  // stays static.
-  if (status === 'ready' && !set.changed) {
-    const expandable = set.files.length > 0
-    return (
-      <div>
-        <button
-          onClick={expandable ? () => setShowUnchanged((s) => !s) : undefined}
-          disabled={!expandable}
-          className={`w-full px-3 py-2 text-xs text-gray-400 dark:text-gray-500 flex items-center gap-2 text-left ${
-            expandable ? 'hover:text-gray-600 dark:hover:text-gray-300 cursor-pointer' : 'cursor-default'
-          }`}
-        >
-          {expandable &&
-            (showUnchanged ? (
-              <ChevronDown className="w-3.5 h-3.5 shrink-0" />
-            ) : (
-              <ChevronRight className="w-3.5 h-3.5 shrink-0" />
-            ))}
-          <ImageIcon className="w-3.5 h-3.5 shrink-0" />
-          <span className="font-medium text-gray-500 dark:text-gray-400">{set.name}</span>
-          <span>· no visual changes</span>
-        </button>
-        {expandable && showUnchanged && (
-          <div className="px-3 pb-2">
-            <FileGrid files={set.files} mode={mode} />
-          </div>
-        )}
-      </div>
-    )
-  }
+  // Every state (generating / error / no-changes / changed) renders inside the
+  // same bordered card so switching between them never shifts the layout (e.g.
+  // hitting refresh after a failure) and the refresh button is always reachable —
+  // including when there are no visual changes. Default to collapsed only for the
+  // no-changes case, where there's nothing worth showing until asked; the initial
+  // status is evaluated once on mount, and the card stays mounted across status
+  // changes (keyed by name) so a manual regenerate keeps its expanded state.
+  const [collapsed, setCollapsed] = useState(() => status === 'ready' && !set.changed)
+  const [showUnchanged, setShowUnchanged] = useState(false)
 
   return (
     <div className="border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 overflow-hidden">
@@ -264,22 +224,34 @@ function ArtifactSetCard({ set, mode, onRefresh }: { set: ArtifactSet; mode: Ima
           onClick={() => setCollapsed((c) => !c)}
           className="flex-1 min-w-0 flex items-center gap-2 px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors cursor-pointer text-left"
         >
-          {collapsed ? <ChevronRight className="w-3.5 h-3.5 text-gray-400" /> : <ChevronDown className="w-3.5 h-3.5 text-gray-400" />}
+          {collapsed ? <ChevronRight className="w-3.5 h-3.5 text-gray-400 shrink-0" /> : <ChevronDown className="w-3.5 h-3.5 text-gray-400 shrink-0" />}
           <ImageIcon className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400 shrink-0" />
-          <span className="text-sm font-medium text-gray-700 dark:text-gray-300 truncate">{set.name}</span>
+          <span className="text-sm font-medium text-gray-700 dark:text-gray-300 truncate shrink-0">{set.name}</span>
+          {status === 'generating' && (
+            // Live progress: the latest stdout line from the running script
+            // (e.g. "wrote artifacts-ab-dark.png 7/12"), or a fallback before the
+            // first line lands. min-w-0 + truncate keeps a long line from pushing
+            // the refresh button off the row.
+            <span className="flex items-center gap-1.5 min-w-0 text-xs text-gray-400 dark:text-gray-500">
+              <LoaderCircle className="w-3 h-3 shrink-0 animate-spin" />
+              <span className="truncate">{set.progress || 'generating…'}</span>
+            </span>
+          )}
           {status === 'error' && (
             <span className="flex items-center gap-1 text-xs text-red-500 dark:text-red-400 shrink-0">
               <TriangleAlert className="w-3 h-3" /> failed
             </span>
           )}
-          {status === 'ready' && changedFiles.length > 0 && (
-            <span className="text-xs text-gray-400 dark:text-gray-500 shrink-0">
-              {changedFiles.length} changed
-            </span>
-          )}
+          {status === 'ready' &&
+            (noChanges ? (
+              <span className="text-xs text-gray-400 dark:text-gray-500 shrink-0">no visual changes</span>
+            ) : (
+              <span className="text-xs text-gray-400 dark:text-gray-500 shrink-0">{changedFiles.length} changed</span>
+            ))}
         </button>
         {/* Bust the per-commit cache and regenerate — chiefly to retry a failure,
-            whose error is otherwise cached until the ref changes. */}
+            whose error is otherwise cached until the ref changes, but always
+            available (even with no visual changes) so a render can be re-run. */}
         <button
           onClick={() => onRefresh(set.name)}
           title="Regenerate this artifact"
@@ -292,27 +264,41 @@ function ArtifactSetCard({ set, mode, onRefresh }: { set: ArtifactSet; mode: Ima
 
       {!collapsed && (
         <div className="px-3 pb-2">
+          {status === 'generating' && (
+            <div className="my-2 font-mono text-xs text-gray-400 dark:text-gray-500 whitespace-pre-wrap break-words">
+              {set.progress || 'Generating…'}
+            </div>
+          )}
           {status === 'error' && (
             <div className="my-2 px-3 py-2 rounded-md bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 font-mono text-xs text-red-600 dark:text-red-400 whitespace-pre-wrap break-words">
               {set.error || 'Artifact generation failed.'}
             </div>
           )}
-          {status === 'ready' && (
-            <>
-              <FileGrid files={changedFiles} mode={mode} />
-              {unchangedFiles.length > 0 && (
-                <div className="pt-2">
-                  <button
-                    onClick={() => setShowUnchanged((s) => !s)}
-                    className="text-[11px] text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 cursor-pointer"
-                  >
-                    {showUnchanged ? 'Hide' : 'Show'} {unchangedFiles.length} unchanged
-                  </button>
-                  {showUnchanged && <FileGrid files={unchangedFiles} mode={mode} />}
-                </div>
-              )}
-            </>
-          )}
+          {status === 'ready' &&
+            (noChanges ? (
+              // No visual changes: show the (unchanged) artifacts anyway when
+              // expanded — useful for confirming a screenshot still renders.
+              set.files.length > 0 ? (
+                <FileGrid files={set.files} mode={mode} />
+              ) : (
+                <div className="my-2 text-xs text-gray-400 dark:text-gray-500">No artifacts produced.</div>
+              )
+            ) : (
+              <>
+                <FileGrid files={changedFiles} mode={mode} />
+                {unchangedFiles.length > 0 && (
+                  <div className="pt-2">
+                    <button
+                      onClick={() => setShowUnchanged((s) => !s)}
+                      className="text-[11px] text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 cursor-pointer"
+                    >
+                      {showUnchanged ? 'Hide' : 'Show'} {unchangedFiles.length} unchanged
+                    </button>
+                    {showUnchanged && <FileGrid files={unchangedFiles} mode={mode} />}
+                  </div>
+                )}
+              </>
+            ))}
         </div>
       )}
     </div>
@@ -405,7 +391,7 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
           <p>Artifacts are visual snapshots — typically screenshots — rendered from your code so you can see what a change <em>looks like</em>, side by side with the base branch.</p>
           <p>Each one is produced by a project-defined <strong>artifact script</strong>. Hydra checks out both the base ref and the head ref (or your uncommitted working tree), runs the script against each with <code className="text-blue-300">$HYDRA_ARTIFACT_OUTPUT</code>, <code className="text-blue-300">$HYDRA_ARTIFACT_SOURCE</code> and <code className="text-blue-300">$HYDRA_ARTIFACT_REF</code> set, and compares the images it writes. Results are cached per commit, so re-viewing a diff is free.</p>
           <p>Configure them in <code className="text-blue-300">.hydra/config.toml</code> with <code className="text-blue-300">[[artifacts]]</code> blocks (<code className="text-blue-300">name</code>, <code className="text-blue-300">command</code>, optional <code className="text-blue-300">timeout_sec</code>) — for example a script that builds the app and screenshots a page, so visual UI changes show up here in the diff viewer.</p>
-          <p>A script with no visual changes collapses to a single muted line; click it to expand and view the artifacts anyway.</p>
+          <p>A script with no visual changes collapses to a single header row; click it to expand and view the artifacts anyway. The refresh button (top-right of each card) re-runs a script — handy to retry a failure or re-render even when nothing visibly changed.</p>
         </InfoTooltip>
       </div>
       <div className="flex flex-col gap-2">

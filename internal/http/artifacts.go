@@ -232,6 +232,13 @@ func (s *Server) buildArtifactSet(projectID, name string, leftSpec, rightSpec *c
 	switch {
 	case leftMeta.Status == artifacts.StatusGenerating || rightMeta.Status == artifacts.StatusGenerating:
 		set.Status = api.Generating
+		// Surface whichever side has a live progress line (prefer the right/head
+		// side, the one a user is usually watching regenerate).
+		if p := rightMeta.Progress; p != "" {
+			set.Progress = &p
+		} else if p := leftMeta.Progress; p != "" {
+			set.Progress = &p
+		}
 		return set
 	case leftMeta.Status == artifacts.StatusError || rightMeta.Status == artifacts.StatusError:
 		set.Status = api.Error
