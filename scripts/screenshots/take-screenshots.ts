@@ -208,6 +208,11 @@ try {
       // (e.g. theme=light) — documents the header tag filter actively in use plus
       // the per-file tag badges. Only meaningful on the artifacts (agent-1) page.
       tagFilter?: { scoped?: Record<string, string>; free?: string[] }
+      // Hovers the artifacts panel's info (i) icon so its tooltip opens, after
+      // scrolling the "Artifacts" heading to mid-viewport to give the upward-
+      // opening tooltip room. Captures the viewport (the tooltip is a fixed
+      // portal). Only meaningful on the artifacts (agent-1) page.
+      artifactInfo?: boolean
     }[] = [
       { name: 'home', path: '/' },
       // The spawn form's image lightbox: two images attached to the prompt, the
@@ -321,6 +326,17 @@ try {
         viewport: { width: 1280, height: 1280 },
         imageDiffMode: 'side-by-side',
         tagFilter: { scoped: { theme: 'light' } },
+      },
+      // The artifacts panel's info (i) tooltip, opened — documents what artifacts
+      // are, the script contract, the progress marker, and the tags/filter rules
+      // (the tooltip's last paragraph). Hovered open and captured against the
+      // diff page so it reads in context.
+      {
+        name: 'artifact-info',
+        path: '/project/sim-project/agent/agent-1',
+        viewport: { width: 1280, height: 1280 },
+        imageDiffMode: 'side-by-side',
+        artifactInfo: true,
       },
       // Every render state of the artifacts panel in one shot. agent-1's
       // simulated response (internal/http/simulation.go) carries four sets —
@@ -558,10 +574,38 @@ try {
           }, pg.expandArtifact)
           await settle(page)
         }
+        if (pg.artifactInfo) {
+          // Place the "Artifacts" heading at mid-viewport so the tooltip — which
+          // opens upward from the (i) icon into a fixed portal — has room above it,
+          // then hover the icon to open it. (Same sticky-aware offset technique as
+          // scrollTo, but centering rather than pinning to the top.)
+          await page.waitForFunction(() =>
+            Array.from(document.querySelectorAll('h3')).some((h) => h.textContent?.trim() === 'Artifacts'),
+          )
+          await page.evaluate(() => {
+            const h3 = Array.from(document.querySelectorAll('h3')).find((e) => e.textContent?.trim() === 'Artifacts')
+            const cont = h3?.closest('.overflow-auto') as HTMLElement | null | undefined
+            if (h3 && cont) {
+              const offset = h3.getBoundingClientRect().top - cont.getBoundingClientRect().top + cont.scrollTop
+              // Put the heading ~60% down the container: the tooltip opens upward,
+              // so the lower the icon sits, the more room it has (and the less risk
+              // of clipping at the top of the viewport).
+              cont.scrollTop = offset - cont.clientHeight * 0.6
+            }
+          })
+          await settle(page)
+          // Hover the info icon next to the "Artifacts" heading (the InfoTooltip's
+          // Info svg carries cursor-help) so React's onMouseEnter opens the portal.
+          await page
+            .locator('xpath=//h3[normalize-space()="Artifacts"]/parent::*//*[name()="svg" and contains(@class,"cursor-help")]')
+            .hover()
+          await settle(page)
+        }
         const out = join(OUT, `${pg.name}${suffix}.png`)
-        // Scrolled pages and the lightbox (a fixed, viewport-filling overlay)
-        // capture the viewport; others capture the full page.
-        await page.screenshot({ path: out, fullPage: !pg.scrollTo && !pg.attachImages })
+        // Scrolled pages, the lightbox (a fixed, viewport-filling overlay) and the
+        // hovered info tooltip (a fixed portal) capture the viewport; others
+        // capture the full page.
+        await page.screenshot({ path: out, fullPage: !pg.scrollTo && !pg.attachImages && !pg.artifactInfo })
         console.log(`wrote ${out}`)
         await ctx.close()
         done++

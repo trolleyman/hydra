@@ -9,7 +9,7 @@
 //      regenerated) the stale entry is ignored, so the card falls back to its
 //      status-derived defaults instead of restoring a now-irrelevant toggle.
 
-import { ARTIFACT_PREFS_PREFIX, artifactPrefsKey, artifactTagFilterKey, readLocal, writeLocal } from './storage'
+import { ARTIFACT_PREFS_PREFIX, ARTIFACT_TAG_FILTER_PREFIX, artifactPrefsKey, artifactTagFilterKey, readLocal, writeLocal } from './storage'
 
 export type ArtifactPrefs = {
   collapsed?: boolean
@@ -98,6 +98,9 @@ export function pruneArtifactPrefs(): void {
     for (let i = 0; i < localStorage.length; i++) {
       const k = localStorage.key(i)
       if (!k || !k.startsWith(ARTIFACT_PREFS_PREFIX)) continue
+      // The tag-filter key shares the artifact prefix but is a different shape
+      // (no status/timestamp), so don't treat it as a stale/corrupt prefs entry.
+      if (k.startsWith(ARTIFACT_TAG_FILTER_PREFIX)) continue
       const stored = readStored(k)
       if (!stored || now - stored.t > ARTIFACT_TTL_MS) stale.push(k)
     }
