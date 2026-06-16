@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { api } from '../stores/apiClient'
 import type { ArtifactSet, ArtifactFile, ArtifactLogLine } from '../api'
-import { LoaderCircle, Image as ImageIcon, ImageOff, ChevronDown, ChevronRight, TriangleAlert, RefreshCw } from 'lucide-react'
+import { LoaderCircle, Image as ImageIcon, ImageOff, ChevronDown, ChevronRight, TriangleAlert, RefreshCw, Maximize2 } from 'lucide-react'
 import { InfoTooltip } from './InfoTooltip'
 import { loadArtifactPrefs, saveArtifactPrefs } from '../lib/artifactPrefs'
 import { stripAnsi } from '../lib/ansi'
@@ -64,25 +64,81 @@ function makeAuxOpen(pick: (e: React.MouseEvent) => string) {
   }
 }
 
-function ImageCell({ url, label }: { url?: string | null; label: string }) {
+// Default/bounds for the draggable image height (see useImageResize). The base
+// matches IMG_CLASS's max-h-[480px] so a card opens at the same size as before.
+const DEFAULT_IMG_MAX_H = 480
+const MIN_IMG_MAX_H = 160
+const MAX_IMG_MAX_H = 1600
+
+// Shared drag-to-resize for a before/after pair: dragging the grip on EITHER
+// image adjusts a single max-height that's applied to BOTH sides, so they always
+// grow by the same amount even though only one was dragged. The pointermove
+// listener lives on the window so the drag keeps tracking outside the grip.
+function useImageResize() {
+  const [maxHeight, setMaxHeight] = useState(DEFAULT_IMG_MAX_H)
+  // Hold the latest value so a drag can read its start height without re-creating
+  // the (stable) onResizeStart callback on every resize tick.
+  const current = useRef(maxHeight)
+  current.current = maxHeight
+  const onResizeStart = useCallback((e: React.PointerEvent) => {
+    if (e.button !== 0) return
+    // Suppress the click/drag from selecting text or following the image's <a> link.
+    e.preventDefault()
+    e.stopPropagation()
+    const startY = e.clientY
+    const startH = current.current
+    const onMove = (ev: PointerEvent) => {
+      const next = startH + (ev.clientY - startY)
+      setMaxHeight(Math.max(MIN_IMG_MAX_H, Math.min(MAX_IMG_MAX_H, next)))
+    }
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+  }, [])
+  return { maxHeight, onResizeStart }
+}
+
+// A corner grip (revealed on hover) that the user drags down/up to resize the
+// image. Sits as a sibling of the <a>, so a normal click on the image still
+// opens it in a new tab; only the grip starts a resize.
+function ResizeGrip({ onPointerDown }: { onPointerDown: (e: React.PointerEvent) => void }) {
+  return (
+    <div
+      onPointerDown={onPointerDown}
+      title="Drag to resize both images"
+      className="absolute bottom-1 right-1 z-10 flex items-center justify-center w-5 h-5 rounded bg-black/45 text-white/90 opacity-0 group-hover:opacity-100 transition-opacity cursor-nwse-resize touch-none select-none"
+    >
+      <Maximize2 className="w-3 h-3" />
+    </div>
+  )
+}
+
+function ImageCell({ url, label, maxHeight, onResizeStart }: { url?: string | null; label: string; maxHeight: number; onResizeStart: (e: React.PointerEvent) => void }) {
   return (
     <div className="min-w-0">
       <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-1">{label}</div>
       {url ? (
-        <a href={url} target="_blank" rel="noreferrer" className="block">
-          <img
-            src={url}
-            loading="lazy"
-            style={checkerStyle}
-            className={IMG_CLASS}
-          />
-        </a>
+        <div className="group relative inline-block">
+          <a href={url} target="_blank" rel="noreferrer" className="block">
+            <img
+              src={url}
+              loading="lazy"
+              style={{ ...checkerStyle, maxHeight: `${maxHeight}px` }}
+              className={IMG_CLASS}
+            />
+          </a>
+          <ResizeGrip onPointerDown={onResizeStart} />
+        </div>
       ) : (
         // No image on this side (the file was added or removed). Render a panel of
         // similar visual weight to the present image — same framing, a clear "No
         // image" empty state — rather than a tiny dashed box, so the added/removed
         // (none↔image) layout doesn't look lopsided next to its counterpart.
-        <div className="flex flex-col items-center justify-center gap-1 w-44 h-32 rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 text-gray-400 dark:text-gray-500">
+        // select-none so rapid clicking near it never highlights the label text.
+        <div className="select-none flex flex-col items-center justify-center gap-1 w-44 h-32 rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 text-gray-400 dark:text-gray-500">
           <ImageOff className="w-5 h-5" />
           <span className="text-[11px] font-medium">No image</span>
         </div>
@@ -101,7 +157,7 @@ function LayerNode({ url, style }: { url?: string | null; style?: React.CSSPrope
     return <img src={url} style={{ ...checkerStyle, ...style }} className={OVERLAY_CLASS} draggable={false} />
   }
   return (
-    <div style={style} className={`${OVERLAY_CLASS} flex flex-col items-center justify-center gap-1 bg-gray-50 dark:bg-gray-800/50 text-gray-400 dark:text-gray-500`}>
+    <div style={style} className={`${OVERLAY_CLASS} select-none flex flex-col items-center justify-center gap-1 bg-gray-50 dark:bg-gray-800/50 text-gray-400 dark:text-gray-500`}>
       <ImageOff className="w-5 h-5" />
       <span className="text-[11px] font-medium">No image</span>
     </div>
@@ -128,7 +184,9 @@ function ABSwitch({ left, right }: { left?: string | null; right?: string | null
         <button onClick={() => setShowAfter(true)} className={btn(showAfter)}>After</button>
       </div>
       <div
-        className="relative inline-block cursor-pointer"
+        // select-none: flipping the A/B view is a rapid click target, so without
+        // this a quick double-click would highlight the "No image" placeholder text.
+        className="relative inline-block cursor-pointer select-none"
         onClick={() => setShowAfter((s) => !s)}
         onAuxClick={makeAuxOpen(() => (showAfter ? right : left) || sizer)}
       >
@@ -229,18 +287,25 @@ function OnionCompare({ left, right }: { left?: string | null; right?: string | 
   )
 }
 
+// The default side-by-side pair. Holds one shared resize state so dragging the
+// grip on either image grows both before/after cells by the same amount.
+function SideBySide({ left, right }: { left?: string | null; right?: string | null }) {
+  const { maxHeight, onResizeStart } = useImageResize()
+  return (
+    <div className="flex gap-3">
+      <ImageCell url={left} label="Before" maxHeight={maxHeight} onResizeStart={onResizeStart} />
+      <ImageCell url={right} label="After" maxHeight={maxHeight} onResizeStart={onResizeStart} />
+    </div>
+  )
+}
+
 // Render a before/after image pair in the selected comparison mode. The overlay
 // modes keep their own layout even when one side is missing (added/removed file),
 // substituting a "No image" placeholder; we only fall back to the side-by-side
 // pair for that mode itself, or the degenerate case of no images at all.
 function ImageDiffView({ left, right, mode }: { left?: string | null; right?: string | null; mode: ImageDiffMode }) {
   if (mode === 'side-by-side' || (!left && !right)) {
-    return (
-      <div className="flex gap-3">
-        <ImageCell url={left} label="Before" />
-        <ImageCell url={right} label="After" />
-      </div>
-    )
+    return <SideBySide left={left} right={right} />
   }
   if (mode === 'ab') return <ABSwitch left={left} right={right} />
   if (mode === 'slider') return <SliderCompare left={left} right={right} />
