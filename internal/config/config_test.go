@@ -387,11 +387,18 @@ func TestCommentedDefaultsForUnsetSettings(t *testing.T) {
 
 	wants := []string{
 		"[sandbox]",
-		docPrefix + " writable_paths:",
+		docPrefix + " extra paths made writable in the sandbox",
 		"# writable_paths = [",
 		"# masked_paths = [",
 		"[sandbox.network]",
 		"# enabled = true",
+		// Each well-known agent type gets a documented, commented-out mention.
+		docPrefix + " Claude-specific overrides",
+		"# [claude]",
+		docPrefix + " Gemini-specific overrides",
+		"# [gemini]",
+		docPrefix + " Copilot-specific overrides",
+		"# [copilot]",
 		// Artifacts documentation + commented example are always present.
 		docPrefix + " [[artifacts]]:",
 		"# [[artifacts]]",
@@ -410,6 +417,34 @@ func TestCommentedDefaultsForUnsetSettings(t *testing.T) {
 	}
 	if cfg.Defaults.PrePrompt != nil || sandboxHasContent(cfg.Defaults.Sandbox) || len(cfg.Artifacts) != 0 {
 		t.Errorf("commented template should activate nothing, got: %+v", cfg)
+	}
+}
+
+func TestDocAboveSetValuesAndConfiguredAgent(t *testing.T) {
+	cfg := Config{
+		Defaults: AgentConfig{Sandbox: &SandboxConfig{WritablePaths: []string{"~/.cache"}}},
+		Agents:   map[string]AgentConfig{"claude": {PrePrompt: strPtr("be terse")}},
+	}
+	out := renderConfig(nil, cfg)
+	t.Logf("rendered:\n%s", out)
+
+	// A set value still carries its Hydra doc line directly above it.
+	docIdx := strings.Index(out, docPrefix+" extra paths made writable in the sandbox")
+	valIdx := strings.Index(out, "writable_paths = [")
+	if docIdx < 0 || valIdx < 0 || docIdx > valIdx {
+		t.Errorf("doc line not directly above set writable_paths:\n%s", out)
+	}
+	// A configured agent gets its real table preceded by the agent doc line, and
+	// no commented-out placeholder for it.
+	if !strings.Contains(out, docPrefix+" Claude-specific overrides") || !strings.Contains(out, "[claude]") {
+		t.Errorf("configured claude table/doc missing:\n%s", out)
+	}
+	if strings.Contains(out, "# [claude]") {
+		t.Errorf("configured claude should not also have a commented placeholder:\n%s", out)
+	}
+	// The other known agents still get commented placeholders.
+	if !strings.Contains(out, "# [gemini]") || !strings.Contains(out, "# [copilot]") {
+		t.Errorf("unconfigured agent placeholders missing:\n%s", out)
 	}
 }
 

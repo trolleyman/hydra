@@ -474,16 +474,15 @@ func tomlStringArray(vals []string) string {
 }
 
 // docPrefix marks Hydra-generated documentation comment lines. Using a distinct
-// prefix (instead of a plain "#") lets the renderer recognise and replace its
-// own docs on every save — so they update when Hydra updates — while leaving the
-// user's own "#" comments untouched. The space after "#" keeps editors from
-// syntax-highlighting it as a special directive (a bare "#:" is mishighlighted).
-const docPrefix = "# :"
+// prefix ("##" — a doubled comment marker, rendered above each setting) lets the
+// renderer recognise and replace its own docs on every save — so they update when
+// Hydra updates — while leaving the user's own single-"#" comments untouched.
+const docPrefix = "##"
 
-// legacyDocPrefix is the previous docPrefix ("#:"). It is still recognised when
-// reading so older files have their doc lines replaced (not duplicated) on the
-// next render.
-const legacyDocPrefix = "#:"
+// legacyDocPrefixes are the earlier docPrefix spellings ("# :" then "#:"). They
+// are still recognised when reading so older files have their doc lines replaced
+// (not duplicated) on the next render.
+var legacyDocPrefixes = []string{"# :", "#:"}
 
 // specEntry describes one managed default setting for the self-documenting
 // writer. The set of entries is the single source of truth for which default
@@ -520,7 +519,7 @@ func defaultsSpec() []specEntry {
 	return []specEntry{
 		{
 			table: "", key: "pre_prompt",
-			doc: "pre_prompt: extra instructions appended to every agent's system prompt.",
+			doc: "extra instructions appended to every agent's system prompt.",
 			def: func() string { return `""` },
 			get: func(a AgentConfig) (string, bool) {
 				if a.PrePrompt != nil {
@@ -531,25 +530,25 @@ func defaultsSpec() []specEntry {
 		},
 		{
 			table: "sandbox", key: "writable_paths",
-			doc: "writable_paths: extra paths made writable in the sandbox (added to the built-in defaults).",
+			doc: "extra paths made writable in the sandbox (added to the built-in defaults).",
 			def: func() string { return tomlStringArray(sandbox.Defaults().WritablePaths) },
 			get: sandboxSlice(func(s *SandboxConfig) []string { return s.WritablePaths }),
 		},
 		{
 			table: "sandbox", key: "masked_paths",
-			doc: "masked_paths: extra paths hidden in the sandbox (added to the built-in defaults).",
+			doc: "extra paths hidden in the sandbox (added to the built-in defaults).",
 			def: func() string { return tomlStringArray(sandbox.Defaults().MaskedPaths) },
 			get: sandboxSlice(func(s *SandboxConfig) []string { return s.MaskedPaths }),
 		},
 		{
 			table: "sandbox", key: "restore_ro",
-			doc: "restore_ro: paths re-exposed read-only after a masked parent (added to the built-in defaults).",
+			doc: "paths re-exposed read-only after a masked parent (added to the built-in defaults).",
 			def: func() string { return tomlStringArray(sandbox.Defaults().RestoreRO) },
 			get: sandboxSlice(func(s *SandboxConfig) []string { return s.RestoreRO }),
 		},
 		{
 			table: "sandbox", key: "pre_spawn_script",
-			doc: "pre_spawn_script: shell script run in the sandbox once before each agent launches (e.g. mise trust).",
+			doc: "shell script run in the sandbox once before each agent launches (e.g. mise trust).",
 			def: func() string { return `""` },
 			get: func(a AgentConfig) (string, bool) {
 				if a.Sandbox != nil && a.Sandbox.PreSpawnScript != nil && *a.Sandbox.PreSpawnScript != "" {
@@ -560,7 +559,7 @@ func defaultsSpec() []specEntry {
 		},
 		{
 			table: "sandbox.network", key: "enabled",
-			doc: "enabled: allow outbound network access from the sandbox (default true).",
+			doc: "allow outbound network access from the sandbox (default true).",
 			def: func() string { return "true" },
 			get: func(a AgentConfig) (string, bool) {
 				if a.Sandbox != nil && a.Sandbox.Network != nil && a.Sandbox.Network.Enabled != nil {
@@ -571,7 +570,7 @@ func defaultsSpec() []specEntry {
 		},
 		{
 			table: "sandbox.network", key: "allowed_hosts",
-			doc: "allowed_hosts: reserved for a future proxy-based outbound host allow-list.",
+			doc: "reserved for a future proxy-based outbound host allow-list.",
 			def: func() string { return "[]" },
 			get: func(a AgentConfig) (string, bool) {
 				if a.Sandbox != nil && a.Sandbox.Network != nil && len(a.Sandbox.Network.AllowedHosts) > 0 {
@@ -706,7 +705,15 @@ func normalizeManagedTable(header string) string {
 // isManagedDoc reports whether a line is a Hydra-generated documentation comment.
 func isManagedDoc(line string) bool {
 	t := strings.TrimSpace(line)
-	return strings.HasPrefix(t, docPrefix) || strings.HasPrefix(t, legacyDocPrefix)
+	if strings.HasPrefix(t, docPrefix) {
+		return true
+	}
+	for _, p := range legacyDocPrefixes {
+		if strings.HasPrefix(t, p) {
+			return true
+		}
+	}
+	return false
 }
 
 // isManagedCommentedAssign reports whether a line is a commented-out assignment
@@ -728,7 +735,7 @@ func isManagedCommentedAssign(line string, keys map[string]bool) bool {
 func userComments(comments []string, keys map[string]bool) []string {
 	var out []string
 	for _, c := range comments {
-		if strings.TrimSpace(c) == "" || isManagedDoc(c) || isManagedCommentedAssign(c, keys) {
+		if strings.TrimSpace(c) == "" || isManagedDoc(c) || isManagedCommentedAssign(c, keys) || isManagedCommentedAgentHeader(c) {
 			continue
 		}
 		out = append(out, c)
@@ -854,10 +861,25 @@ func renderConfig(existing []byte, cfg Config) string {
 	emitSpecTable(&out, spec, "sandbox", "[sandbox]", cfg.Defaults, keyComments, tableComments)
 	emitSpecTable(&out, spec, "sandbox.network", "[sandbox.network]", cfg.Defaults, keyComments, tableComments)
 
-	// Per-agent overrides (only what is set), sorted for determinism.
+	// Per-agent overrides. The well-known agent types always get a documented
+	// mention: their real table when configured, otherwise a commented-out header
+	// so the file self-documents that per-agent overrides are possible.
+	emitted := map[string]bool{}
+	for _, name := range docAgents {
+		emitted[name] = true
+		if a, ok := cfg.Agents[name]; ok && agentHasContent(a) {
+			emitAgent(&out, name, a, keyComments, tableComments)
+		} else {
+			emitAgentDoc(&out, name, tableComments)
+			out = append(out, "# ["+name+"]")
+		}
+	}
+	// Any other configured agents (e.g. bash), sorted for determinism.
 	names := make([]string, 0, len(cfg.Agents))
 	for name := range cfg.Agents {
-		names = append(names, name)
+		if !emitted[name] {
+			names = append(names, name)
+		}
 	}
 	sort.Strings(names)
 	for _, name := range names {
@@ -921,16 +943,74 @@ func emitSpecTable(out *[]string, spec []specEntry, table, header string, def Ag
 	}
 	for _, e := range entries {
 		text, isSet := e.get(def)
+		// The Hydra doc line is shown above every setting, set or not, with any
+		// preserved user comment above the doc.
+		if uc := keyComments[table+"\x00"+e.key]; len(uc) > 0 {
+			*out = append(*out, uc...)
+		}
+		*out = append(*out, docPrefix+" "+e.doc)
 		if isSet {
-			if uc := keyComments[table+"\x00"+e.key]; len(uc) > 0 {
-				*out = append(*out, uc...)
-			}
 			*out = append(*out, e.key+" = "+text)
 		} else {
-			*out = append(*out, docPrefix+" "+e.doc)
 			*out = append(*out, "# "+e.key+" = "+e.def())
 		}
 	}
+}
+
+// docAgents are the agent types that always get a documented mention in the
+// rendered config (a commented-out [name] header when they have no overrides).
+// Order matches the Settings UI tabs.
+var docAgents = []string{"claude", "gemini", "copilot"}
+
+// agentLabel returns a human-friendly capitalised name for an agent type.
+func agentLabel(name string) string {
+	switch name {
+	case "claude":
+		return "Claude"
+	case "gemini":
+		return "Gemini"
+	case "copilot":
+		return "Copilot"
+	default:
+		if name == "" {
+			return name
+		}
+		return strings.ToUpper(name[:1]) + name[1:]
+	}
+}
+
+// agentDoc is the one-line documentation shown above an agent's table.
+func agentDoc(name string) string {
+	label := agentLabel(name)
+	return label + "-specific overrides: any of the settings above, applied only to " + name + " agents."
+}
+
+// isManagedCommentedAgentHeader reports whether a line is a regenerated
+// commented-out agent header (e.g. "# [gemini]") for one of the docAgents, so it
+// is dropped on read and re-emitted rather than accumulating as a user comment.
+func isManagedCommentedAgentHeader(line string) bool {
+	t := strings.TrimSpace(line)
+	if !strings.HasPrefix(t, "#") || isManagedDoc(t) {
+		return false
+	}
+	t = strings.TrimSpace(strings.TrimPrefix(t, "#"))
+	for _, name := range docAgents {
+		if t == "["+name+"]" {
+			return true
+		}
+	}
+	return false
+}
+
+// emitAgentDoc appends a blank separator, any preserved user comment, and the
+// Hydra doc line for the given agent — the shared prefix of a real or commented
+// agent table.
+func emitAgentDoc(out *[]string, name string, tableComments map[string][]string) {
+	*out = appendBlank(*out)
+	if tc := tableComments[name]; len(tc) > 0 {
+		*out = append(*out, tc...)
+	}
+	*out = append(*out, docPrefix+" "+agentDoc(name))
 }
 
 // emitAgent appends a per-agent table, emitting only the settings that are set.
@@ -938,10 +1018,7 @@ func emitAgent(out *[]string, name string, a AgentConfig, keyComments, tableComm
 	if !agentHasContent(a) {
 		return
 	}
-	*out = appendBlank(*out)
-	if tc := tableComments[name]; len(tc) > 0 {
-		*out = append(*out, tc...)
-	}
+	emitAgentDoc(out, name, tableComments)
 	*out = append(*out, "["+name+"]")
 	if a.PrePrompt != nil {
 		if uc := keyComments[name+"\x00pre_prompt"]; len(uc) > 0 {
