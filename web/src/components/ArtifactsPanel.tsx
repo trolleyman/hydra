@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { api } from '../stores/apiClient'
-import type { ArtifactSet, ArtifactFile } from '../api'
-import { LoaderCircle, Image as ImageIcon, ChevronDown, ChevronRight, TriangleAlert, RefreshCw } from 'lucide-react'
+import type { ArtifactSet, ArtifactFile, ArtifactLogLine } from '../api'
+import { LoaderCircle, Image as ImageIcon, ImageOff, ChevronDown, ChevronRight, TriangleAlert, RefreshCw } from 'lucide-react'
 import { InfoTooltip } from './InfoTooltip'
 
 const CHANGE_LABEL: Record<string, string> = {
@@ -32,7 +32,7 @@ export type ImageDiffMode = 'side-by-side' | 'ab' | 'slider' | 'onion'
 
 export const IMAGE_DIFF_MODES: { value: ImageDiffMode; label: string }[] = [
   { value: 'side-by-side', label: 'Side by side' },
-  { value: 'ab', label: 'A/B switch' },
+  { value: 'ab', label: 'Before/After' },
   { value: 'slider', label: 'Before/after slider' },
   { value: 'onion', label: 'Onion skin' },
 ]
@@ -42,6 +42,25 @@ const IMG_CLASS = 'max-w-full max-h-[480px] rounded-md border border-gray-200 da
 // stretched to fill that same box so the two align pixel-for-pixel.
 const OVERLAY_CLASS = 'absolute inset-0 w-full h-full object-contain rounded-md border border-gray-200 dark:border-gray-700'
 const TAG_CLASS = 'absolute top-1 z-10 text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-black/55 text-white pointer-events-none'
+
+// Open an image in a new tab. In side-by-side mode the image is a target=_blank
+// link, so left-click already does this; the overlay modes bind left-click/drag
+// to comparison gestures, so they route the new-tab affordance to the middle
+// mouse button (matching a browser's middle-click-to-open-in-new-tab on links).
+function openInNewTab(url: string) {
+  window.open(url, '_blank', 'noopener,noreferrer')
+}
+
+// makeAuxOpen builds an onAuxClick handler that opens `pick()` in a new tab on a
+// middle click. `pick` is a function so the chosen image can depend on state
+// (e.g. which side is currently shown) or the cursor position at click time.
+function makeAuxOpen(pick: (e: React.MouseEvent) => string) {
+  return (e: React.MouseEvent) => {
+    if (e.button !== 1) return
+    e.preventDefault()
+    openInNewTab(pick(e))
+  }
+}
 
 function ImageCell({ url, label }: { url?: string | null; label: string }) {
   return (
@@ -57,8 +76,13 @@ function ImageCell({ url, label }: { url?: string | null; label: string }) {
           />
         </a>
       ) : (
-        <div className="flex items-center justify-center w-40 h-24 rounded-md border border-dashed border-gray-200 dark:border-gray-700 text-xs text-gray-400 dark:text-gray-500">
-          (none)
+        // No image on this side (the file was added or removed). Render a panel of
+        // similar visual weight to the present image — same framing, a clear "No
+        // image" empty state — rather than a tiny dashed box, so the added/removed
+        // (none↔image) layout doesn't look lopsided next to its counterpart.
+        <div className="flex flex-col items-center justify-center gap-1 w-44 h-32 rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 text-gray-400 dark:text-gray-500">
+          <ImageOff className="w-5 h-5" />
+          <span className="text-[11px] font-medium">No image</span>
         </div>
       )}
     </div>
@@ -67,6 +91,7 @@ function ImageCell({ url, label }: { url?: string | null; label: string }) {
 
 // A/B switch: both images stay mounted and stacked; clicking (or the Before/After
 // buttons) flips which one is shown for an instant, flicker-free hard switch.
+// Middle-click opens the currently-shown image in a new tab.
 function ABSwitch({ left, right }: { left: string; right: string }) {
   const [showAfter, setShowAfter] = useState(true)
   const btn = (active: boolean) =>
@@ -79,7 +104,11 @@ function ABSwitch({ left, right }: { left: string; right: string }) {
         <button onClick={() => setShowAfter(false)} className={btn(!showAfter)}>Before</button>
         <button onClick={() => setShowAfter(true)} className={btn(showAfter)}>After</button>
       </div>
-      <div className="relative inline-block cursor-pointer" onClick={() => setShowAfter((s) => !s)}>
+      <div
+        className="relative inline-block cursor-pointer"
+        onClick={() => setShowAfter((s) => !s)}
+        onAuxClick={makeAuxOpen(() => (showAfter ? right : left))}
+      >
         <img src={right} style={{ ...checkerStyle, visibility: showAfter ? 'visible' : 'hidden' }} className={`${IMG_CLASS} block`} draggable={false} />
         <img src={left} style={{ ...checkerStyle, visibility: showAfter ? 'hidden' : 'visible' }} className={OVERLAY_CLASS} draggable={false} />
       </div>
@@ -89,6 +118,7 @@ function ABSwitch({ left, right }: { left: string; right: string }) {
 
 // Before/after slider: "after" is the base layer; "before" sits on top, clipped to
 // the region left of the draggable handle, giving a sharp (hard-cut) boundary.
+// Middle-click opens whichever image is currently visible under the cursor.
 function SliderCompare({ left, right }: { left: string; right: string }) {
   const [pos, setPos] = useState(50)
   const [dragging, setDragging] = useState(false)
@@ -118,7 +148,18 @@ function SliderCompare({ left, right }: { left: string; right: string }) {
     <div
       ref={ref}
       className="relative inline-block select-none touch-none cursor-ew-resize"
-      onPointerDown={(e) => { setDragging(true); update(e.clientX) }}
+      onPointerDown={(e) => {
+        if (e.button !== 0) return // leave middle/right for the new-tab handler
+        setDragging(true)
+        update(e.clientX)
+      }}
+      onAuxClick={makeAuxOpen((e) => {
+        const el = ref.current
+        if (!el) return right
+        const r = el.getBoundingClientRect()
+        const x = ((e.clientX - r.left) / r.width) * 100
+        return x < pos ? left : right
+      })}
     >
       <span className={`${TAG_CLASS} left-1`}>Before</span>
       <span className={`${TAG_CLASS} right-1`}>After</span>
@@ -138,11 +179,15 @@ function SliderCompare({ left, right }: { left: string; right: string }) {
 
 // Onion skin: "before" is the base layer with "after" blended over it; the range
 // slider controls the opacity of the "after" image (0 = before, 1 = after).
+// Middle-click opens the "after" image in a new tab.
 function OnionCompare({ left, right }: { left: string; right: string }) {
   const [opacity, setOpacity] = useState(50)
   return (
     <div className="min-w-0">
-      <div className="relative inline-block">
+      <div
+        className="relative inline-block"
+        onAuxClick={makeAuxOpen(() => (opacity >= 50 ? right : left))}
+      >
         <img src={left} style={checkerStyle} className={`${IMG_CLASS} block`} draggable={false} />
         <img src={right} style={{ opacity: opacity / 100 }} className={OVERLAY_CLASS} draggable={false} />
       </div>
@@ -201,6 +246,70 @@ function FileGrid({ files, mode }: { files: ArtifactFile[]; mode: ImageDiffMode 
   )
 }
 
+// formatElapsed renders a running duration compactly: "12s", or "1m 05s" once it
+// passes a minute.
+function formatElapsed(secs: number): string {
+  if (secs < 60) return `${secs}s`
+  const m = Math.floor(secs / 60)
+  const s = secs % 60
+  return `${m}m ${s.toString().padStart(2, '0')}s`
+}
+
+// ElapsedTime shows how long an in-flight generation has been running, ticking
+// once a second. startedAt is a Unix time in seconds (from the backend, so it
+// survives reloads/reconnects).
+function ElapsedTime({ startedAt }: { startedAt: number }) {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(id)
+  }, [])
+  return <>{formatElapsed(Math.max(0, Math.floor(now / 1000 - startedAt)))}</>
+}
+
+// LogView shows the live stdout+stderr log of a generating artifact: scrollable,
+// monospaced, auto-following the tail unless the user scrolls up, with stderr
+// lines in red.
+function LogView({ log }: { log: ArtifactLogLine[] }) {
+  const ref = useRef<HTMLDivElement>(null)
+  // Whether to keep pinned to the bottom; flips off when the user scrolls up.
+  const stick = useRef(true)
+
+  useEffect(() => {
+    const el = ref.current
+    if (el && stick.current) el.scrollTop = el.scrollHeight
+  }, [log.length])
+
+  const onScroll = () => {
+    const el = ref.current
+    if (!el) return
+    stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24
+  }
+
+  return (
+    <div
+      ref={ref}
+      onScroll={onScroll}
+      className="my-2 max-h-64 overflow-auto rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/60 p-2 font-mono text-[11px] leading-relaxed"
+    >
+      {log.length === 0 ? (
+        <div className="text-gray-400 dark:text-gray-500">Waiting for output…</div>
+      ) : (
+        log.map((l, i) => (
+          <div
+            key={i}
+            className={`whitespace-pre-wrap break-words ${
+              (l.stream as string) === 'stderr' ? 'text-red-600 dark:text-red-400' : 'text-gray-600 dark:text-gray-300'
+            }`}
+          >
+            {l.text}
+          </div>
+        ))
+      )}
+    </div>
+  )
+}
+
 function ArtifactSetCard({ set, mode, onRefresh }: { set: ArtifactSet; mode: ImageDiffMode; onRefresh: (name: string) => void }) {
   const status = set.status as string
   const changedFiles = set.files.filter((f) => f.change_type !== 'unchanged')
@@ -210,11 +319,12 @@ function ArtifactSetCard({ set, mode, onRefresh }: { set: ArtifactSet; mode: Ima
   // Every state (generating / error / no-changes / changed) renders inside the
   // same bordered card so switching between them never shifts the layout (e.g.
   // hitting refresh after a failure) and the refresh button is always reachable —
-  // including when there are no visual changes. Default to collapsed only for the
-  // no-changes case, where there's nothing worth showing until asked; the initial
-  // status is evaluated once on mount, and the card stays mounted across status
-  // changes (keyed by name) so a manual regenerate keeps its expanded state.
-  const [collapsed, setCollapsed] = useState(() => status === 'ready' && !set.changed)
+  // including when there are no visual changes. Default to collapsed for the
+  // no-changes case (nothing worth showing until asked) and while generating
+  // (the live log is opt-in, not in your face); the initial status is evaluated
+  // once on mount, and the card stays mounted across status changes (keyed by
+  // name) so a manual expand/collapse or regenerate keeps its state.
+  const [collapsed, setCollapsed] = useState(() => (status === 'ready' && !set.changed) || status === 'generating')
   const [showUnchanged, setShowUnchanged] = useState(false)
 
   return (
@@ -228,13 +338,15 @@ function ArtifactSetCard({ set, mode, onRefresh }: { set: ArtifactSet; mode: Ima
           <ImageIcon className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400 shrink-0" />
           <span className="text-sm font-medium text-gray-700 dark:text-gray-300 truncate shrink-0">{set.name}</span>
           {status === 'generating' && (
-            // Live progress: the latest stdout line from the running script
-            // (e.g. "wrote artifacts-ab-dark.png 7/12"), or a fallback before the
-            // first line lands. min-w-0 + truncate keeps a long line from pushing
-            // the refresh button off the row.
+            // Live header: spinner, the latest stdout line as progress (truncated so
+            // it can't push the refresh button off the row), then how long the job
+            // has been running, separated by a "·". Expand the card for the full log.
             <span className="flex items-center gap-1.5 min-w-0 text-xs text-gray-400 dark:text-gray-500">
               <LoaderCircle className="w-3 h-3 shrink-0 animate-spin" />
               <span className="truncate">{set.progress || 'generating…'}</span>
+              {set.started_at ? (
+                <span className="shrink-0">· <ElapsedTime startedAt={set.started_at} /></span>
+              ) : null}
             </span>
           )}
           {status === 'error' && (
@@ -264,11 +376,7 @@ function ArtifactSetCard({ set, mode, onRefresh }: { set: ArtifactSet; mode: Ima
 
       {!collapsed && (
         <div className="px-3 pb-2">
-          {status === 'generating' && (
-            <div className="my-2 font-mono text-xs text-gray-400 dark:text-gray-500 whitespace-pre-wrap break-words">
-              {set.progress || 'Generating…'}
-            </div>
-          )}
+          {status === 'generating' && <LogView log={set.log ?? []} />}
           {status === 'error' && (
             <div className="my-2 px-3 py-2 rounded-md bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 font-mono text-xs text-red-600 dark:text-red-400 whitespace-pre-wrap break-words">
               {set.error || 'Artifact generation failed.'}
@@ -305,6 +413,24 @@ function ArtifactSetCard({ set, mode, onRefresh }: { set: ArtifactSet; mode: Ima
   )
 }
 
+// Server→client message on the artifacts WebSocket. Mirrors internal/http/artifacts_ws.go.
+type ArtifactWSMessage =
+  | { type: 'snapshot'; scripts: ArtifactSet[] }
+  | { type: 'set'; set: ArtifactSet }
+  | { type: 'log'; script: string; line: ArtifactLogLine }
+
+function artifactsWsUrl(projectId: string | null, agentId: string, baseRef?: string, headRef?: string, includeUncommitted?: boolean): string {
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  const host = window.location.host
+  const pid = projectId ? encodeURIComponent(projectId) : '_'
+  const params = new URLSearchParams()
+  if (baseRef) params.set('base_ref', baseRef)
+  if (headRef) params.set('head_ref', headRef)
+  if (includeUncommitted) params.set('include_uncommitted', 'true')
+  const qs = params.toString() ? `?${params.toString()}` : ''
+  return `${protocol}//${host}/ws/projects/${pid}/agents/${encodeURIComponent(agentId)}/artifacts${qs}`
+}
+
 export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUncommitted, refreshKey, imageDiffMode }: {
   projectId: string | null
   agentId: string
@@ -316,40 +442,75 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
 }) {
   const [sets, setSets] = useState<ArtifactSet[] | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  // A manual refresh stashes the script name here and bumps refreshNonce, which
-  // re-runs the polling effect; the first fetch of that run forwards the name to
-  // the API so the backend discards the cached (possibly errored) result.
+  // Connection mode: WS while live, polling if the socket can't connect or drops.
+  const [mode, setMode] = useState<'connecting' | 'ws' | 'poll'>('connecting')
+  const wsRef = useRef<WebSocket | null>(null)
+  const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Manual-refresh state for the polling fallback (the WS path sends a message
+  // instead): stash the script name and bump the nonce to re-run the poll effect.
   const [refreshNonce, setRefreshNonce] = useState(0)
   const refreshScriptRef = useRef<string | null>(null)
 
-  const fetchArtifacts = useCallback(async (refreshScript?: string): Promise<boolean> => {
-    const resp = await api.default.getAgentArtifacts(projectId ?? '', agentId, baseRef, headRef, includeUncommitted, refreshScript)
-    setSets(resp.scripts)
+  // Apply a server→client WS message to local state.
+  const applyMessage = useCallback((msg: ArtifactWSMessage) => {
     setError(null)
-    // Keep polling while anything is still generating.
-    return resp.scripts.some((s) => (s.status as string) === 'generating')
-  }, [projectId, agentId, baseRef, headRef, includeUncommitted])
-
-  const requestRefresh = useCallback((name: string) => {
-    refreshScriptRef.current = name
-    // Optimistically flip the card to "generating" so the spinner/progress shows
-    // immediately, before the (re)started poll returns.
-    setSets((prev) => prev?.map((s) => (s.name === name ? { ...s, status: 'generating' as unknown as ArtifactSet['status'] } : s)) ?? prev)
-    setRefreshNonce((n) => n + 1)
+    if (msg.type === 'snapshot') {
+      setSets(msg.scripts ?? [])
+    } else if (msg.type === 'set') {
+      setSets((prev) => (prev ? prev.map((s) => (s.name === msg.set.name ? msg.set : s)) : [msg.set]))
+    } else if (msg.type === 'log') {
+      setSets((prev) => prev?.map((s) => (s.name === msg.script ? { ...s, log: [...(s.log ?? []), msg.line] } : s)) ?? prev)
+    }
   }, [])
 
+  // Primary path: stream updates over a WebSocket so progress/log update instantly.
+  // Falls back to polling (below) if the socket fails to open or later drops.
   useEffect(() => {
     let cancelled = false
-    const clear = () => { if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null } }
+    setMode('connecting')
+    let ws: WebSocket
+    try {
+      ws = new WebSocket(artifactsWsUrl(projectId, agentId, baseRef, headRef, includeUncommitted))
+    } catch {
+      setMode('poll')
+      return
+    }
+    wsRef.current = ws
+    ws.onopen = () => { if (!cancelled) setMode('ws') }
+    ws.onmessage = (e) => {
+      if (cancelled) return
+      try { applyMessage(JSON.parse(e.data) as ArtifactWSMessage) } catch { /* ignore malformed frames */ }
+    }
+    ws.onclose = () => {
+      wsRef.current = null
+      // Fall back to polling on any non-deliberate close (initial-connect failure
+      // or a mid-session drop, e.g. the daemon restarting).
+      if (!cancelled) setMode('poll')
+    }
+    return () => {
+      cancelled = true
+      ws.onclose = null
+      ws.close()
+      if (wsRef.current === ws) wsRef.current = null
+    }
+  }, [projectId, agentId, baseRef, headRef, includeUncommitted, refreshKey, applyMessage])
+
+  // Fallback path: poll the HTTP endpoint while the WS is unavailable.
+  useEffect(() => {
+    if (mode !== 'poll') return
+    let cancelled = false
+    const clear = () => { if (pollTimerRef.current) { clearTimeout(pollTimerRef.current); pollTimerRef.current = null } }
     const refreshScript = refreshScriptRef.current
     refreshScriptRef.current = null
 
     const tick = async (first: boolean) => {
       try {
-        const stillGenerating = await fetchArtifacts(first ? refreshScript ?? undefined : undefined)
-        if (!cancelled && stillGenerating) {
-          timerRef.current = setTimeout(() => tick(false), 2500)
+        const resp = await api.default.getAgentArtifacts(projectId ?? '', agentId, baseRef, headRef, includeUncommitted, first ? refreshScript ?? undefined : undefined)
+        if (cancelled) return
+        setSets(resp.scripts)
+        setError(null)
+        if (resp.scripts.some((s) => (s.status as string) === 'generating')) {
+          pollTimerRef.current = setTimeout(() => tick(false), 2500)
         }
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e))
@@ -358,9 +519,25 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
     clear()
     tick(true)
     return () => { cancelled = true; clear() }
-  }, [fetchArtifacts, refreshKey, refreshNonce])
+  }, [mode, projectId, agentId, baseRef, headRef, includeUncommitted, refreshKey, refreshNonce])
 
-  // Render nothing until we know there are configured scripts.
+  const requestRefresh = useCallback((name: string) => {
+    // Optimistically flip the card to a fresh "generating" state so the spinner,
+    // a zeroed elapsed clock and an empty log show immediately.
+    setSets((prev) => prev?.map((s) => (s.name === name
+      ? { ...s, status: 'generating' as unknown as ArtifactSet['status'], error: null, progress: null, log: [], started_at: Math.floor(Date.now() / 1000) }
+      : s)) ?? prev)
+    const ws = wsRef.current
+    if (mode === 'ws' && ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'refresh', script: name }))
+    } else {
+      // Polling fallback: forward the name to the next poll so the backend
+      // discards the cached (possibly errored) result and regenerates.
+      refreshScriptRef.current = name
+      setRefreshNonce((n) => n + 1)
+    }
+  }, [mode])
+
   if (error) {
     return (
       <div className="mb-4 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-xs text-red-600 dark:text-red-400">
@@ -368,11 +545,12 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
       </div>
     )
   }
+  // Render nothing until we know there are configured scripts.
   if (!sets || sets.length === 0) return null
 
   // Generation progress (#38): how many artifact scripts have settled (ready or
   // failed) versus how many are still generating. Shown only while work is in
-  // flight; the poll above keeps it ticking until everything settles.
+  // flight; WS pushes (or the poll above) keep it ticking until everything settles.
   const generatingCount = sets.filter((s) => (s.status as string) === 'generating').length
   const settledCount = sets.length - generatingCount
 
@@ -391,7 +569,7 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
           <p>Artifacts are visual snapshots — typically screenshots — rendered from your code so you can see what a change <em>looks like</em>, side by side with the base branch.</p>
           <p>Each one is produced by a project-defined <strong>artifact script</strong>. Hydra checks out both the base ref and the head ref (or your uncommitted working tree), runs the script against each with <code className="text-blue-300">$HYDRA_ARTIFACT_OUTPUT</code>, <code className="text-blue-300">$HYDRA_ARTIFACT_SOURCE</code> and <code className="text-blue-300">$HYDRA_ARTIFACT_REF</code> set, and compares the images it writes. Results are cached per commit, so re-viewing a diff is free.</p>
           <p>Configure them in <code className="text-blue-300">.hydra/config.toml</code> with <code className="text-blue-300">[[artifacts]]</code> blocks (<code className="text-blue-300">name</code>, <code className="text-blue-300">command</code>, optional <code className="text-blue-300">timeout_sec</code>) — for example a script that builds the app and screenshots a page, so visual UI changes show up here in the diff viewer.</p>
-          <p>A script with no visual changes collapses to a single header row; click it to expand and view the artifacts anyway. The refresh button (top-right of each card) re-runs a script — handy to retry a failure or re-render even when nothing visibly changed.</p>
+          <p>A script with no visual changes — or one still generating — collapses to a single header row; click it to expand (and, while generating, watch the live log). The refresh button (top-right of each card) re-runs a script — handy to retry a failure or re-render even when nothing visibly changed.</p>
         </InfoTooltip>
       </div>
       <div className="flex flex-col gap-2">
