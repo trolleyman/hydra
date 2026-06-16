@@ -32,9 +32,18 @@ export async function uploadFile(projectId: string | null, file: File): Promise<
 const IMAGE_RE = /^image\//
 
 /**
- * Pulls real files out of a clipboard/drag DataTransfer. Pasted screenshots
- * arrive as `items` of kind "file" (with no entry in `files` on some browsers),
- * while dragged/attached files arrive in `files`; we union both and dedupe.
+ * Pulls real files out of a clipboard/drag DataTransfer.
+ *
+ * `items` (kind "file") and `files` often BOTH carry the same pasted screenshot
+ * on Chromium browsers, so we must not naively union them: each source yields a
+ * distinct File object stamped with its own `lastModified` (set when the object
+ * is materialized). Those stamps usually match, but if a millisecond boundary is
+ * crossed between reading the two lists they differ by 1ms and any dedupe keyed
+ * on `lastModified` lets the duplicate through — pasting one image twice.
+ *
+ * So we prefer `items` (the reliable source for pastes) and only fall back to
+ * `files` when `items` yielded nothing — some browsers populate only `files`.
+ * A `seen` set still guards against duplicates within a single source.
  */
 export function extractFiles(dt: DataTransfer | null): File[] {
   if (!dt) return []
@@ -52,7 +61,7 @@ export function extractFiles(dt: DataTransfer | null): File[] {
       if (item.kind === 'file') add(item.getAsFile())
     }
   }
-  if (dt.files) {
+  if (out.length === 0 && dt.files) {
     for (const f of Array.from(dt.files)) add(f)
   }
   return out
