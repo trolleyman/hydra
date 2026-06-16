@@ -6,7 +6,8 @@ import { useAgentStore } from '../stores/agentStore'
 import type { ProjectInfo, AgentResponse } from '../api'
 import { ApiError, ErrorResponse } from '../api'
 import { formatError } from '../api/format_error'
-import { Sun, Moon, Monitor, ChevronDown, Folder, FolderGit2, Plus, Settings, Check, X } from 'lucide-react'
+import { Sun, Moon, Monitor, ChevronDown, Folder, FolderGit2, FolderOpen, Plus, Settings, Check, X } from 'lucide-react'
+import { folderPickerAvailable, openFolderPicker } from '../api/folderPicker'
 import { AgentSidebarItem } from '../components/AgentComponents'
 import { SpawnForm } from '../components/SpawnForm'
 
@@ -83,6 +84,11 @@ function ProjectDropdown({
   const [newPath, setNewPath] = useState('')
   const [adding, setAdding] = useState(false)
   const [addError, setAddError] = useState<string | null>(null)
+  // Native folder picker: only offered to local clients on a system with a
+  // dialog tool (the daemon checks both). `browsing` is true while the OS
+  // dialog is open and we're awaiting the user's pick.
+  const [pickerAvailable, setPickerAvailable] = useState(false)
+  const [browsing, setBrowsing] = useState(false)
   const [hoveredId, setHoveredId] = useState<string | null>(null)
   const dropdownRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -107,6 +113,34 @@ function ProjectDropdown({
       inputRef.current?.focus()
     }
   }, [showAddInput])
+
+  useEffect(() => {
+    let cancelled = false
+    void folderPickerAvailable().then((a) => {
+      if (!cancelled) setPickerAvailable(a)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  // Open the native OS folder dialog, then add the picked project immediately.
+  async function handleBrowse() {
+    if (browsing) return
+    setBrowsing(true)
+    setAddError(null)
+    try {
+      const res = await openFolderPicker()
+      if (res.cancelled || !res.path) return
+      await onAddProject(res.path)
+      setShowAddInput(false)
+      setOpen(false)
+    } catch (err) {
+      setAddError(formatError(err))
+    } finally {
+      setBrowsing(false)
+    }
+  }
 
   async function handleAdd(e: React.FormEvent) {
     e.preventDefault()
@@ -201,13 +235,28 @@ function ProjectDropdown({
           )}
 
           <div className="py-1">
+            {pickerAvailable && !showAddInput && (
+              <>
+                <button
+                  onClick={handleBrowse}
+                  disabled={browsing}
+                  className="w-full flex items-center gap-2 px-3 py-2 cursor-pointer text-left text-sm text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors disabled:opacity-50 disabled:cursor-default"
+                >
+                  <FolderOpen className="w-3 h-3" />
+                  {browsing ? 'Waiting for folder…' : 'Browse…'}
+                </button>
+                {addError && (
+                  <p className="text-[10px] text-red-500 px-3 pb-1 leading-snug">{addError}</p>
+                )}
+              </>
+            )}
             {!showAddInput ? (
               <button
-                onClick={() => setShowAddInput(true)}
+                onClick={() => { setShowAddInput(true); setAddError(null) }}
                 className="w-full flex items-center gap-2 px-3 py-2 cursor-pointer text-left text-sm text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
               >
                 <Plus className="w-3 h-3" />
-                Open folder…
+                {pickerAvailable ? 'Enter path manually…' : 'Open folder…'}
               </button>
             ) : (
               <form onSubmit={handleAdd} className="px-3 py-2">
