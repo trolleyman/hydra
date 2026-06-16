@@ -185,7 +185,7 @@ function CommentRow({ onSubmit, onCancel }: { onSubmit: (text: string) => Promis
         value={text}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={handleKeyDown}
-        className="w-full h-20 p-2 text-xs bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded focus:ring-1 focus:ring-blue-500 outline-none resize-none"
+        className="w-full h-20 p-2 text-xs font-sans bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded focus:ring-1 focus:ring-blue-500 outline-none resize-none"
         placeholder="Write a comment… (Ctrl+Enter to submit)"
       />
       <div className="flex justify-end gap-2 mt-2">

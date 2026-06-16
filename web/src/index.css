@@ -7,14 +7,6 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
-/* Default all regular UI text to a serif stack (looks cooler). Only the page's
-   default font is changed; `--font-sans`/`--font-mono` keep their real meaning,
-   so code stays monospace via the `font-mono` utility (or the terminal's own
-   explicit monospace fontFamily). */
-@theme {
-  --default-font-family: var(--font-serif);
-}
-
 :root {
   color-scheme: light;
 }

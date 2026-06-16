@@ -25,7 +25,7 @@ function PromptBlock({ prompt }: { prompt: string }) {
           className="overflow-hidden transition-[max-height] duration-300 ease-in-out"
           style={{ maxHeight: isLong && !expanded ? '4.5rem' : '1000px' }}
         >
-          <p className="text-sm text-gray-800 dark:text-gray-200 whitespace-pre-wrap">{prompt}</p>
+          <p className="text-sm text-gray-800 dark:text-gray-200 whitespace-pre-wrap font-serif">{prompt}</p>
         </div>
         {isLong && !expanded && (
           <div className="absolute bottom-0 left-0 right-0 h-8 bg-gradient-to-t from-gray-50 dark:from-gray-800 to-transparent pointer-events-none" />
@@ -424,7 +424,7 @@ export function AgentDetail({
 
           {/* Live activity / last message */}
           {agentStatusDetail(agent.agent_status) && (
-            <div className="mt-2 text-xs text-gray-500 dark:text-gray-400 truncate">
+            <div className="mt-2 text-xs text-gray-500 dark:text-gray-400 truncate font-serif">
               {agent.agent_status?.status === 'running' ? '⏳ ' : '💬 '}
               {agentStatusDetail(agent.agent_status)}
             </div>
