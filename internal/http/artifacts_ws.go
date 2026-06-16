@@ -17,13 +17,16 @@ import (
 // artifactWSMessage is a server→client message on the artifacts WebSocket.
 //   - "snapshot": the full set list (sent on connect and after a reconnect).
 //   - "set":      one script's set changed (a generation settled or was refreshed).
-//   - "log":      one new captured log line for a generating script.
+//   - "log":      one new captured log line for one side ("left"/"right") of a script.
+//   - "progress": the header progress line changed for one side of a script.
 type artifactWSMessage struct {
-	Type    string               `json:"type"`
-	Scripts []api.ArtifactSet    `json:"scripts,omitempty"`
-	Set     *api.ArtifactSet     `json:"set,omitempty"`
-	Script  string               `json:"script,omitempty"`
-	Line    *api.ArtifactLogLine `json:"line,omitempty"`
+	Type     string               `json:"type"`
+	Scripts  []api.ArtifactSet    `json:"scripts,omitempty"`
+	Set      *api.ArtifactSet     `json:"set,omitempty"`
+	Script   string               `json:"script,omitempty"`
+	Side     string               `json:"side,omitempty"`
+	Line     *api.ArtifactLogLine `json:"line,omitempty"`
+	Progress *string              `json:"progress,omitempty"`
 }
 
 // artifactClientMessage is a client→server message. Only "refresh" (regenerate
@@ -110,19 +113,22 @@ func (s *Server) streamArtifacts(ctx context.Context, conn *safeConn, projectRoo
 		return
 	}
 
-	// Map each side's on-disk entry dir back to its script name, so an incoming
-	// event (keyed by dir) tells us which set to rebuild / which log to forward.
-	dirToScript := map[string]string{}
+	// Map each side's on-disk entry dir back to its script name AND which side it
+	// is, so an incoming event (keyed by dir) tells us which set to rebuild and —
+	// for log/progress — which side's pane to update. Left and right have distinct
+	// entry dirs, so their logs stay separate (no interleaving into one stream).
+	type dirRef struct{ script, side string }
+	dirToRef := map[string]dirRef{}
 	for _, name := range plan.names {
 		leftSpec, rightSpec := plan.specsFor(name)
 		if leftSpec != nil {
 			if d, err := plan.mgr.EntryDir(name, plan.left); err == nil {
-				dirToScript[d] = name
+				dirToRef[d] = dirRef{script: name, side: "left"}
 			}
 		}
 		if rightSpec != nil {
 			if d, err := plan.mgr.EntryDir(name, plan.right); err == nil {
-				dirToScript[d] = name
+				dirToRef[d] = dirRef{script: name, side: "right"}
 			}
 		}
 	}
@@ -184,18 +190,23 @@ func (s *Server) streamArtifacts(ctx context.Context, conn *safeConn, projectRoo
 			if !ok {
 				return
 			}
-			name, known := dirToScript[ev.Dir]
+			ref, known := dirToRef[ev.Dir]
 			if !known {
 				continue
 			}
 			switch ev.Kind {
 			case "log":
 				line := api.ArtifactLogLine{Text: ev.Line.Text, Stream: api.ArtifactLogLineStream(ev.Line.Stream)}
-				if err := writeMsg(artifactWSMessage{Type: "log", Script: name, Line: &line}); err != nil {
+				if err := writeMsg(artifactWSMessage{Type: "log", Script: ref.script, Side: ref.side, Line: &line}); err != nil {
+					return
+				}
+			case "progress":
+				p := ev.Progress
+				if err := writeMsg(artifactWSMessage{Type: "progress", Script: ref.script, Side: ref.side, Progress: &p}); err != nil {
 					return
 				}
 			case "settled":
-				set := plan.buildSet(s, projectID, name)
+				set := plan.buildSet(s, projectID, ref.script)
 				if err := writeMsg(artifactWSMessage{Type: "set", Set: &set}); err != nil {
 					return
 				}

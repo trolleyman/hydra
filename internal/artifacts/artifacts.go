@@ -62,7 +62,11 @@ import (
 )
 
 const (
-	metaFile       = "meta.json"
+	metaFile = "meta.json"
+	// logFile holds one settled generation's captured output as JSON-lines (one
+	// {text,stream} object per line) next to meta.json, so the build log can be
+	// reopened after generation finishes. Wiped with the entry on regenerate.
+	logFile        = "build.log"
 	defaultTimeout = 5 * time.Minute
 	// DefaultMaxAge and DefaultMaxBytes bound the on-disk artifact cache.
 	DefaultMaxAge   = 7 * 24 * time.Hour
@@ -84,6 +88,15 @@ const (
 	StreamStderr = "stderr"
 )
 
+// ProgressMarker prefixes a stdout line a script emits to set the live progress
+// header explicitly, e.g. `echo "::hydra:progress:: capturing home 3/24"`. The
+// manager strips the prefix, uses the remainder as the header progress, and —
+// once any marker is seen for a generation — stops treating ordinary stdout
+// lines as progress, so a noisy build (bun install, vite output, …) can't hijack
+// the header. The line still lands in the full log, with the prefix stripped.
+// Documented in the artifacts panel's info tooltip (web ArtifactsPanel.tsx).
+const ProgressMarker = "::hydra:progress::"
+
 // LogLine is one captured output line of an in-flight generation, tagged with
 // the stream it came from so the UI can render stderr distinctly (in red).
 type LogLine struct {
@@ -93,13 +106,15 @@ type LogLine struct {
 
 // Event is broadcast to subscribers as an in-flight generation progresses, so a
 // WebSocket client can update live instead of polling. It is keyed by the entry
-// dir (the caller maps that back to a script + side). Kind is "log" (a new line
-// landed, carried in Line) or "settled" (generation finished — the caller should
-// re-read the now-written meta).
+// dir (the caller maps that back to a script + side). Kind is one of:
+//   - "log":      a new line landed, carried in Line.
+//   - "progress": the header progress changed, carried in Progress.
+//   - "settled":  generation finished — the caller should re-read the now-written meta.
 type Event struct {
-	Dir  string
-	Kind string
-	Line LogLine
+	Dir      string
+	Kind     string
+	Line     LogLine
+	Progress string
 }
 
 // imageExts maps collectible output extensions to their content types.
@@ -327,14 +342,15 @@ type Version struct {
 type Manager struct {
 	projectRoot string
 
-	mu        sync.Mutex
-	gens      map[string]struct{}  // entry dirs with an in-flight generation
-	progress  map[string]string    // entry dir -> latest stdout line of its in-flight gen
-	startedAt map[string]int64     // entry dir -> Unix time its in-flight gen started
-	logs      map[string][]LogLine // entry dir -> captured log of its in-flight gen
-	subs      map[int]chan Event   // event subscribers (live progress streaming)
-	nextSub   int                  // next subscriber id
-	sem       chan struct{}        // bounds concurrent generations (maxConcurrentGen)
+	mu         sync.Mutex
+	gens       map[string]struct{}  // entry dirs with an in-flight generation
+	progress   map[string]string    // entry dir -> latest progress line of its in-flight gen
+	startedAt  map[string]int64     // entry dir -> Unix time its in-flight gen started
+	logs       map[string][]LogLine // entry dir -> captured log of its in-flight gen
+	markerSeen map[string]bool      // entry dir -> a ProgressMarker line has been seen (stop stdout-as-progress)
+	subs       map[int]chan Event   // event subscribers (live progress streaming)
+	nextSub    int                  // next subscriber id
+	sem        chan struct{}        // bounds concurrent generations (maxConcurrentGen)
 }
 
 // NewManager returns a Manager for the given project root.
@@ -345,6 +361,7 @@ func NewManager(projectRoot string) *Manager {
 		progress:    map[string]string{},
 		startedAt:   map[string]int64{},
 		logs:        map[string][]LogLine{},
+		markerSeen:  map[string]bool{},
 		subs:        map[int]chan Event{},
 		sem:         make(chan struct{}, maxConcurrentGen),
 	}
@@ -500,14 +517,19 @@ func (m *Manager) Get(spec config.ArtifactScript, v Version) (Meta, error) {
 			_ = err
 		}
 		m.mu.Lock()
+		// Grab the captured log before dropping it from memory, so it can be
+		// persisted next to meta.json and reopened after generation finishes.
+		logCopy := append([]LogLine(nil), m.logs[dir]...)
 		delete(m.gens, dir)
 		delete(m.progress, dir)
 		delete(m.startedAt, dir)
 		delete(m.logs, dir)
+		delete(m.markerSeen, dir)
 		// Notify subscribers the entry settled (meta is already written above) so
 		// they re-read it instead of waiting for the next poll.
 		m.broadcastLocked(Event{Dir: dir, Kind: "settled"})
 		m.mu.Unlock()
+		writeLogFile(dir, logCopy) // best-effort; dir exists from generate()
 	}()
 
 	return Meta{Script: spec.Name, Key: key, Ref: ref, Status: StatusGenerating, StartedAt: started}, nil
@@ -535,10 +557,15 @@ func (m *Manager) Invalidate(script string, v Version) error {
 }
 
 // appendLog records one captured output line of an in-flight generation: it
-// appends to the live log (bounded by maxLogLines), updates the latest-stdout
-// progress line, and broadcasts to subscribers. It is a no-op once the entry is
-// no longer in-flight, so a late line can't resurrect a settled entry.
-func (m *Manager) appendLog(dir, text, stream string) {
+// appends to the live log (bounded by maxLogLines), updates the header progress,
+// and broadcasts to subscribers. isMarker reports that the line was an explicit
+// [ProgressMarker] line (already stripped of its prefix by the caller); such a
+// line always becomes the progress and, from then on, disables stdout-derived
+// progress for this generation so a noisy build can't hijack the header. Until
+// the first marker, the latest stdout line is used (back-compat for marker-less
+// scripts). It is a no-op once the entry is no longer in-flight, so a late line
+// can't resurrect a settled entry.
+func (m *Manager) appendLog(dir, text, stream string, isMarker bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if _, inFlight := m.gens[dir]; !inFlight {
@@ -549,10 +576,25 @@ func (m *Manager) appendLog(dir, text, stream string) {
 	if over := len(m.logs[dir]) - maxLogLines; over > 0 {
 		m.logs[dir] = m.logs[dir][over:]
 	}
-	if stream == StreamStdout {
-		m.progress[dir] = text
-	}
 	m.broadcastLocked(Event{Dir: dir, Kind: "log", Line: line})
+
+	switch {
+	case isMarker:
+		m.markerSeen[dir] = true
+		m.setProgressLocked(dir, text)
+	case stream == StreamStdout && !m.markerSeen[dir]:
+		m.setProgressLocked(dir, text)
+	}
+}
+
+// setProgressLocked updates the header progress for an in-flight entry and
+// broadcasts a "progress" event when it changes. Callers must hold m.mu.
+func (m *Manager) setProgressLocked(dir, text string) {
+	if m.progress[dir] == text {
+		return
+	}
+	m.progress[dir] = text
+	m.broadcastLocked(Event{Dir: dir, Kind: "progress", Progress: text})
 }
 
 // generate runs the script for one version and returns the resulting Meta.
@@ -637,8 +679,18 @@ func (m *Manager) generate(spec config.ArtifactScript, v Version, key, ref strin
 				stderrBuf.WriteByte('\n')
 				stderrMu.Unlock()
 			}
+			// A stdout line tagged with the progress marker sets the header
+			// progress explicitly; strip the marker so the log shows a clean line.
+			if stream == StreamStdout {
+				if rest, ok := strings.CutPrefix(strings.TrimSpace(line), ProgressMarker); ok {
+					if text := strings.TrimSpace(rest); text != "" {
+						m.appendLog(dir, text, stream, true)
+					}
+					continue
+				}
+			}
 			if strings.TrimSpace(line) != "" {
-				m.appendLog(dir, line, stream)
+				m.appendLog(dir, line, stream, false)
 			}
 		}
 		_ = sc.Err() // best-effort: the log is non-critical
@@ -849,6 +901,58 @@ func readMeta(dir string) (Meta, bool) {
 		return Meta{}, false
 	}
 	return meta, true
+}
+
+// writeLogFile persists a settled generation's captured log next to meta.json as
+// JSON-lines (one {text,stream} object per line), so it can be reopened after
+// generation finishes. Best-effort: a missing dir or write error just means the
+// log can't be reopened (the next regenerate rewrites it).
+func writeLogFile(dir string, lines []LogLine) {
+	if len(lines) == 0 {
+		return
+	}
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	for _, l := range lines {
+		if err := enc.Encode(l); err != nil {
+			return
+		}
+	}
+	_ = os.WriteFile(filepath.Join(dir, logFile), buf.Bytes(), 0o644)
+}
+
+// HasLog reports whether a persisted build log exists for a settled (script, key)
+// entry, so the API only advertises a log URL when there is something to fetch
+// (older cache entries predate the persisted log).
+func (m *Manager) HasLog(script, key string) bool {
+	if !keyRe.MatchString(key) {
+		return false
+	}
+	_, err := os.Stat(filepath.Join(m.entryDir(script, key), logFile))
+	return err == nil
+}
+
+// ReadLog returns the persisted build log for a settled (script, key) entry, or
+// (nil, false) if none exists. Used to reopen a log after generation finishes.
+// key is validated against keyRe to keep the path inside the cache.
+func (m *Manager) ReadLog(script, key string) ([]LogLine, bool) {
+	if !keyRe.MatchString(key) {
+		return nil, false
+	}
+	data, err := os.ReadFile(filepath.Join(m.entryDir(script, key), logFile))
+	if err != nil {
+		return nil, false
+	}
+	var out []LogLine
+	dec := json.NewDecoder(bytes.NewReader(data))
+	for {
+		var l LogLine
+		if err := dec.Decode(&l); err != nil {
+			break // EOF or a truncated trailing line; return what parsed
+		}
+		out = append(out, l)
+	}
+	return out, true
 }
 
 func writeMeta(dir string, meta Meta) error {

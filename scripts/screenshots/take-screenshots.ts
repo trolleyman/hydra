@@ -15,10 +15,12 @@
 //
 // Run with: bun take-screenshots.ts  (from scripts/screenshots/)
 //
-// Progress: each major step prints a one-line marker on stdout (build phases and,
-// during capture, "<name>.png <n>/<total>"). Hydra surfaces the latest stdout
-// line as live progress in the artifacts panel while this runs, so keep these
-// lines short and human-readable.
+// Progress: each major step emits a one-line "::hydra:progress::" marker (build
+// phases and, during capture, "<name>.png <n>/<total>"). Hydra strips the prefix
+// and surfaces the rest as the live progress header — and, once it sees a marker,
+// stops treating ordinary stdout as progress, so the noisy subprocess output
+// (bun install, vite build) below can't hijack the header. Keep markers short and
+// human-readable; everything still lands in the full build log.
 
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import { createServer } from 'node:net'
@@ -40,6 +42,12 @@ function required(name: string): string {
     process.exit(2)
   }
   return v
+}
+
+// progress emits a Hydra progress marker. Hydra strips the "::hydra:progress::"
+// prefix and shows the rest as the live progress header (see the file header).
+function progress(msg: string) {
+  console.log(`::hydra:progress:: ${msg}`)
 }
 
 // run executes a command, inheriting stdio, and throws on a non-zero exit.
@@ -103,13 +111,13 @@ console.log(`Rendering Hydra UI for ref ${REF} from ${SRC}`)
 //    (a type error in some checkout shouldn't block a screenshot) and the
 //    openapi/router codegen (their outputs are committed).
 const webDir = join(SRC, 'web')
-console.log('building frontend')
+progress('building frontend')
 run('bun', ['install'], webDir)
 run('bun', ['x', 'vite', 'build'], webDir)
 run('bun', ['scripts/generate-routes-regex.ts'], webDir)
 
 // 2. Build the hydra binary from the checkout into a throwaway dir.
-console.log('building hydra binary')
+progress('building hydra binary')
 const binDir = mkdtempSync(join(tmpdir(), 'hydra-shot-'))
 const bin = join(binDir, 'hydra')
 run('go', ['build', '-o', bin, './'], SRC)
@@ -127,9 +135,9 @@ const server: ChildProcess = spawn(bin, ['server', '--simulation'], {
 })
 
 try {
-  console.log('booting simulation server')
+  progress('booting simulation server')
   await waitForServer(base + '/', 30_000)
-  console.log('capturing screenshots')
+  progress('capturing screenshots')
 
   // 4. Screenshot the pages. The home page ("/") shows the full app shell:
   //    header, project dropdown, agent sidebar (populated with mock data) and
@@ -271,10 +279,11 @@ try {
         viewport: { width: 1280, height: 1800 },
         imageDiffMode: 'side-by-side',
       },
-      // The in-flight artifact card expanded to reveal its live generation log:
-      // a scrollable, monospaced stdout+stderr stream (stderr in red), with the
-      // header showing the latest line and elapsed time. agent-1's "components"
-      // set is the generating one (see internal/http/simulation.go simArtifactLog).
+      // The in-flight artifact card expanded to reveal its live generation logs:
+      // the two sides (Before / After) build in parallel, each a scrollable,
+      // monospaced stdout+stderr stream (stderr in red), with the header showing
+      // both sides' progress joined by "·" and elapsed time. agent-1's
+      // "components" set is the generating one (internal/http/simulation.go).
       {
         name: 'artifact-log',
         path: '/project/sim-project/agent/agent-1',
@@ -299,10 +308,10 @@ try {
       for (const theme of themes) {
         const suffix = theme === 'dark' ? '-dark' : ''
         shot++
-        // Progress line surfaced live by Hydra (it shows the latest stdout line
-        // while generating): e.g. "artifacts-ab-dark.png 7/12". Logged at the
-        // start of the (slow) capture so it persists while the shot is taken.
-        console.log(`${pg.name}${suffix}.png ${shot}/${totalShots}`)
+        // Progress marker surfaced live by Hydra as the header: e.g.
+        // "artifacts-ab-dark.png 7/12". Emitted at the start of the (slow) capture
+        // so it persists while the shot is taken.
+        progress(`${pg.name}${suffix}.png ${shot}/${totalShots}`)
         const ctx = await browser.newContext({
           viewport: pg.viewport ?? { width: 1280, height: 800 },
           deviceScaleFactor: 1,
@@ -428,4 +437,4 @@ try {
   server.kill('SIGTERM')
 }
 
-console.log('done')
+progress('done')

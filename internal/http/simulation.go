@@ -844,21 +844,25 @@ func simArtifactSets(id string) []api.ArtifactSet {
 	if id != "agent-1" {
 		return []api.ArtifactSet{}
 	}
-	progress := "artifacts-ab-dark.png 7/12"
+	leftProgress := "building frontend"
+	rightProgress := "artifacts-ab-dark.png 7/12"
 	startedAt := time.Now().Add(-8 * time.Second).Unix()
-	log := simArtifactLog()
+	leftLog := simArtifactLog()
+	rightLog := simArtifactLog()
 	return []api.ArtifactSet{
 		simReadyChangedSet(),
-		// In-flight generation: the header shows a spinner, the latest stdout line
-		// as live progress, and how long it has been running; expanding the card
-		// reveals the full stdout+stderr log (stderr in red).
+		// In-flight generation: the header shows a spinner, both sides' progress
+		// lines joined by "·", and how long it has been running; expanding the card
+		// reveals the two side-by-side stdout+stderr logs (stderr in red).
 		{
-			Name:      "components",
-			Status:    api.Generating,
-			Progress:  &progress,
-			StartedAt: &startedAt,
-			Log:       &log,
-			Files:     []api.ArtifactFile{},
+			Name:          "components",
+			Status:        api.Generating,
+			LeftProgress:  &leftProgress,
+			RightProgress: &rightProgress,
+			StartedAt:     &startedAt,
+			LeftLog:       &leftLog,
+			RightLog:      &rightLog,
+			Files:         []api.ArtifactFile{},
 		},
 		// Failure: the error (script stderr tail) renders monospaced; refresh retries.
 		{

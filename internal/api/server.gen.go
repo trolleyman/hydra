@@ -227,16 +227,28 @@ type ArtifactSet struct {
 	Error   *string        `json:"error"`
 	Files   []ArtifactFile `json:"files"`
 
-	// Log Captured stdout+stderr lines of an in-flight generation (only populated while status is "generating"), surfaced as a live log.
-	Log *[]ArtifactLogLine `json:"log"`
+	// LeftLog Captured stdout+stderr lines of the in-flight LEFT (before) generation, surfaced as a live log. Only populated while that side is generating; once settled, fetch left_log_url instead.
+	LeftLog *[]ArtifactLogLine `json:"left_log"`
+
+	// LeftLogUrl URL to fetch the persisted build log of the LEFT (before) side once it has settled (ready or error), so the log can be reopened after generation finishes. Null while generating or if no log was captured.
+	LeftLogUrl *string `json:"left_log_url"`
+
+	// LeftProgress Latest progress line of the in-flight LEFT (before) generation. Taken from `::hydra:progress::` marker lines the script emits, falling back to the latest stdout line until the first marker is seen. Only set while that side is generating.
+	LeftProgress *string `json:"left_progress"`
 
 	// Name The configured artifact script name
 	Name string `json:"name"`
 
-	// Progress Latest stdout line of an in-flight generation (only set while status is "generating"), surfaced as live progress.
-	Progress *string `json:"progress"`
+	// RightLog As left_log, for the RIGHT (after) generation.
+	RightLog *[]ArtifactLogLine `json:"right_log"`
 
-	// StartedAt Unix time (seconds) the in-flight generation started, so the UI can show how long it has been running. Only set while status is "generating".
+	// RightLogUrl As left_log_url, for the RIGHT (after) side.
+	RightLogUrl *string `json:"right_log_url"`
+
+	// RightProgress As left_progress, for the RIGHT (after) generation.
+	RightProgress *string `json:"right_progress"`
+
+	// StartedAt Unix time (seconds) the earliest in-flight side started, so the UI can show how long it has been running. Only set while status is "generating".
 	StartedAt *int64            `json:"started_at"`
 	Status    ArtifactSetStatus `json:"status"`
 }
