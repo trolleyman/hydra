@@ -10,6 +10,7 @@ import { LoaderCircle, Merge, Trash2, Tag, RotateCcw, FolderSync, Copy, Check } 
 import { Tooltip } from './Tooltip'
 
 import { useDialogStore } from '../stores/dialogStore'
+import { useToastStore } from '../stores/toastStore'
 
 function PromptBlock({ prompt }: { prompt: string }) {
   const [expanded, setExpanded] = useState(false)
@@ -136,6 +137,7 @@ export function AgentDetail({
         setKilling(true)
         try {
           await api.default.killAgent(projectId ?? '', agent.id)
+          useToastStore.getState().show({ message: `Agent "${agent.id}" killed`, type: 'info' })
           onKilled(agent.id)
         } catch (err) {
           useDialogStore.getState().show({
@@ -171,6 +173,10 @@ export function AgentDetail({
         setMerging(true)
         try {
           await api.default.mergeAgent(projectId ?? '', agent.id)
+          useToastStore.getState().show({
+            message: `Agent "${agent.id}" merged into ${agent.base_branch}`,
+            type: 'success',
+          })
           onKilled(agent.id)
         } catch (err: any) {
           const errorData = (err.body && typeof err.body === 'object') ? err.body : err
