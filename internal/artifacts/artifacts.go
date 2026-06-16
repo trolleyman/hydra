@@ -408,6 +408,27 @@ func (m *Manager) Get(spec config.ArtifactScript, v Version) (Meta, error) {
 	return Meta{Script: spec.Name, Key: key, Ref: ref, Status: StatusGenerating}, nil
 }
 
+// Invalidate drops the cached entry for (script, v) so the next Get regenerates
+// it from scratch. This is how a user-initiated "refresh" busts a stale result —
+// most importantly a cached StatusError, which otherwise sticks until the version
+// key changes or the entry is pruned. It is a no-op when a generation for that
+// entry is already in flight (that run will write a fresh result) or when nothing
+// is cached.
+func (m *Manager) Invalidate(script string, v Version) error {
+	key, _, err := m.versionKey(v)
+	if err != nil {
+		return errtrace.Wrap(err)
+	}
+	dir := m.entryDir(script, key)
+	m.mu.Lock()
+	_, inFlight := m.gens[dir]
+	m.mu.Unlock()
+	if inFlight {
+		return nil
+	}
+	return errtrace.Wrap(os.RemoveAll(dir))
+}
+
 // generate runs the script for one version and returns the resulting Meta.
 func (m *Manager) generate(spec config.ArtifactScript, v Version, key, ref string) Meta {
 	meta := Meta{Script: spec.Name, Key: key, Ref: ref, UpdatedAt: time.Now().Unix()}

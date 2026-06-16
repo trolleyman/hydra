@@ -513,6 +513,9 @@ type GetAgentArtifactsParams struct {
 
 	// IncludeUncommitted Use the agent's uncommitted working tree as the right version.
 	IncludeUncommitted *bool `form:"include_uncommitted,omitempty" json:"include_uncommitted,omitempty"`
+
+	// Refresh Name of a single artifact script whose cached result (including a cached failure) should be discarded and regenerated for both sides of the comparison before responding.
+	Refresh *string `form:"refresh,omitempty" json:"refresh,omitempty"`
 }
 
 // GetAgentDiffParams defines parameters for GetAgentDiff.
@@ -921,6 +924,14 @@ func (siw *ServerInterfaceWrapper) GetAgentArtifacts(w http.ResponseWriter, r *h
 	err = runtime.BindQueryParameter("form", true, false, "include_uncommitted", r.URL.Query(), &params.IncludeUncommitted)
 	if err != nil {
 		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "include_uncommitted", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "refresh" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "refresh", r.URL.Query(), &params.Refresh)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "refresh", Err: err})
 		return
 	}
 

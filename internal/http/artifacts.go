@@ -105,6 +105,17 @@ func (s *Server) GetAgentArtifacts(ctx context.Context, request api.GetAgentArti
 	}
 	sort.Strings(names)
 
+	// A refresh request names one script whose cached result the user wants
+	// discarded and regenerated — chiefly to retry a cached failure. Drop both
+	// sides' cache entries before generating so the Get calls below kick off a
+	// fresh run instead of returning the stale (errored) meta.
+	if request.Params.Refresh != nil {
+		if _, ok := nameSet[*request.Params.Refresh]; ok {
+			_ = mgr.Invalidate(*request.Params.Refresh, left)
+			_ = mgr.Invalidate(*request.Params.Refresh, right)
+		}
+	}
+
 	sets := make([]api.ArtifactSet, 0, len(names))
 	for _, name := range names {
 		var leftSpec, rightSpec *config.ArtifactScript

@@ -552,6 +552,15 @@ paths:
           schema:
             type: boolean
           description: Use the agent's uncommitted working tree as the right version.
+        - in: query
+          name: refresh
+          required: false
+          schema:
+            type: string
+          description: >
+            Name of a single artifact script whose cached result (including a
+            cached failure) should be discarded and regenerated for both sides
+            of the comparison before responding.
       responses:
         '200':
           description: OK

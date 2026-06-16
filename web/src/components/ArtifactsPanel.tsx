@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { api } from '../stores/apiClient'
 import type { ArtifactSet, ArtifactFile } from '../api'
-import { LoaderCircle, Image as ImageIcon, ChevronDown, ChevronRight, TriangleAlert } from 'lucide-react'
+import { LoaderCircle, Image as ImageIcon, ChevronDown, ChevronRight, TriangleAlert, RefreshCw } from 'lucide-react'
 import { InfoTooltip } from './InfoTooltip'
 
 const CHANGE_LABEL: Record<string, string> = {
@@ -201,7 +201,7 @@ function FileGrid({ files, mode }: { files: ArtifactFile[]; mode: ImageDiffMode 
   )
 }
 
-function ArtifactSetCard({ set, mode }: { set: ArtifactSet; mode: ImageDiffMode }) {
+function ArtifactSetCard({ set, mode, onRefresh }: { set: ArtifactSet; mode: ImageDiffMode; onRefresh: (name: string) => void }) {
   const [collapsed, setCollapsed] = useState(false)
   const [showUnchanged, setShowUnchanged] = useState(false)
 
@@ -259,29 +259,41 @@ function ArtifactSetCard({ set, mode }: { set: ArtifactSet; mode: ImageDiffMode 
 
   return (
     <div className="border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 overflow-hidden">
-      <button
-        onClick={() => setCollapsed((c) => !c)}
-        className="w-full flex items-center gap-2 px-3 py-2 bg-gray-50 dark:bg-gray-800/60 hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors cursor-pointer text-left"
-      >
-        {collapsed ? <ChevronRight className="w-3.5 h-3.5 text-gray-400" /> : <ChevronDown className="w-3.5 h-3.5 text-gray-400" />}
-        <ImageIcon className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400 shrink-0" />
-        <span className="text-sm font-medium text-gray-700 dark:text-gray-300">{set.name}</span>
-        {status === 'error' && (
-          <span className="flex items-center gap-1 text-xs text-red-500 dark:text-red-400">
-            <TriangleAlert className="w-3 h-3" /> failed
-          </span>
-        )}
-        {status === 'ready' && changedFiles.length > 0 && (
-          <span className="text-xs text-gray-400 dark:text-gray-500">
-            {changedFiles.length} changed
-          </span>
-        )}
-      </button>
+      <div className="flex items-stretch bg-gray-50 dark:bg-gray-800/60">
+        <button
+          onClick={() => setCollapsed((c) => !c)}
+          className="flex-1 min-w-0 flex items-center gap-2 px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors cursor-pointer text-left"
+        >
+          {collapsed ? <ChevronRight className="w-3.5 h-3.5 text-gray-400" /> : <ChevronDown className="w-3.5 h-3.5 text-gray-400" />}
+          <ImageIcon className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400 shrink-0" />
+          <span className="text-sm font-medium text-gray-700 dark:text-gray-300 truncate">{set.name}</span>
+          {status === 'error' && (
+            <span className="flex items-center gap-1 text-xs text-red-500 dark:text-red-400 shrink-0">
+              <TriangleAlert className="w-3 h-3" /> failed
+            </span>
+          )}
+          {status === 'ready' && changedFiles.length > 0 && (
+            <span className="text-xs text-gray-400 dark:text-gray-500 shrink-0">
+              {changedFiles.length} changed
+            </span>
+          )}
+        </button>
+        {/* Bust the per-commit cache and regenerate — chiefly to retry a failure,
+            whose error is otherwise cached until the ref changes. */}
+        <button
+          onClick={() => onRefresh(set.name)}
+          title="Regenerate this artifact"
+          aria-label="Regenerate this artifact"
+          className="shrink-0 px-3 flex items-center text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors cursor-pointer"
+        >
+          <RefreshCw className="w-3.5 h-3.5" />
+        </button>
+      </div>
 
       {!collapsed && (
         <div className="px-3 pb-2">
           {status === 'error' && (
-            <div className="my-2 px-3 py-2 rounded-md bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-xs text-red-600 dark:text-red-400 whitespace-pre-wrap break-words">
+            <div className="my-2 px-3 py-2 rounded-md bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 font-mono text-xs text-red-600 dark:text-red-400 whitespace-pre-wrap break-words">
               {set.error || 'Artifact generation failed.'}
             </div>
           )}
@@ -319,33 +331,48 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
   const [sets, setSets] = useState<ArtifactSet[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // A manual refresh stashes the script name here and bumps refreshNonce, which
+  // re-runs the polling effect; the first fetch of that run forwards the name to
+  // the API so the backend discards the cached (possibly errored) result.
+  const [refreshNonce, setRefreshNonce] = useState(0)
+  const refreshScriptRef = useRef<string | null>(null)
 
-  const fetchArtifacts = useCallback(async (): Promise<boolean> => {
-    const resp = await api.default.getAgentArtifacts(projectId ?? '', agentId, baseRef, headRef, includeUncommitted)
+  const fetchArtifacts = useCallback(async (refreshScript?: string): Promise<boolean> => {
+    const resp = await api.default.getAgentArtifacts(projectId ?? '', agentId, baseRef, headRef, includeUncommitted, refreshScript)
     setSets(resp.scripts)
     setError(null)
     // Keep polling while anything is still generating.
     return resp.scripts.some((s) => (s.status as string) === 'generating')
   }, [projectId, agentId, baseRef, headRef, includeUncommitted])
 
+  const requestRefresh = useCallback((name: string) => {
+    refreshScriptRef.current = name
+    // Optimistically flip the card to "generating" so the spinner/progress shows
+    // immediately, before the (re)started poll returns.
+    setSets((prev) => prev?.map((s) => (s.name === name ? { ...s, status: 'generating' as unknown as ArtifactSet['status'] } : s)) ?? prev)
+    setRefreshNonce((n) => n + 1)
+  }, [])
+
   useEffect(() => {
     let cancelled = false
     const clear = () => { if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null } }
+    const refreshScript = refreshScriptRef.current
+    refreshScriptRef.current = null
 
-    const tick = async () => {
+    const tick = async (first: boolean) => {
       try {
-        const stillGenerating = await fetchArtifacts()
+        const stillGenerating = await fetchArtifacts(first ? refreshScript ?? undefined : undefined)
         if (!cancelled && stillGenerating) {
-          timerRef.current = setTimeout(tick, 2500)
+          timerRef.current = setTimeout(() => tick(false), 2500)
         }
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e))
       }
     }
     clear()
-    tick()
+    tick(true)
     return () => { cancelled = true; clear() }
-  }, [fetchArtifacts, refreshKey])
+  }, [fetchArtifacts, refreshKey, refreshNonce])
 
   // Render nothing until we know there are configured scripts.
   if (error) {
@@ -357,11 +384,23 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
   }
   if (!sets || sets.length === 0) return null
 
+  // Generation progress (#38): how many artifact scripts have settled (ready or
+  // failed) versus how many are still generating. Shown only while work is in
+  // flight; the poll above keeps it ticking until everything settles.
+  const generatingCount = sets.filter((s) => (s.status as string) === 'generating').length
+  const settledCount = sets.length - generatingCount
+
   return (
     <div className="mb-4">
       <div className="flex items-center gap-2 mb-2">
         <ImageIcon className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400" />
         <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Artifacts</h3>
+        {generatingCount > 0 && (
+          <span className="flex items-center gap-1.5 text-[11px] font-normal text-gray-400 dark:text-gray-500">
+            <LoaderCircle className="w-3 h-3 animate-spin" />
+            Generating {settledCount}/{sets.length}
+          </span>
+        )}
         <InfoTooltip title="Artifacts">
           <p>Artifacts are visual snapshots — typically screenshots — rendered from your code so you can see what a change <em>looks like</em>, side by side with the base branch.</p>
           <p>Each one is produced by a project-defined <strong>artifact script</strong>. Hydra checks out both the base ref and the head ref (or your uncommitted working tree), runs the script against each with <code className="text-blue-300">$HYDRA_ARTIFACT_OUTPUT</code>, <code className="text-blue-300">$HYDRA_ARTIFACT_SOURCE</code> and <code className="text-blue-300">$HYDRA_ARTIFACT_REF</code> set, and compares the images it writes. Results are cached per commit, so re-viewing a diff is free.</p>
@@ -370,7 +409,7 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
         </InfoTooltip>
       </div>
       <div className="flex flex-col gap-2">
-        {sets.map((s) => <ArtifactSetCard key={s.name} set={s} mode={imageDiffMode} />)}
+        {sets.map((s) => <ArtifactSetCard key={s.name} set={s} mode={imageDiffMode} onRefresh={requestRefresh} />)}
       </div>
     </div>
   )
