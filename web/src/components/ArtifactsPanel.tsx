@@ -296,18 +296,42 @@ function ElapsedTime({ startedAt }: { startedAt: number }) {
 // lines in red.
 function LogView({ log, emptyText = 'Waiting for output…' }: { log: ArtifactLogLine[]; emptyText?: string }) {
   const ref = useRef<HTMLDivElement>(null)
-  // Whether to keep pinned to the bottom; flips off when the user scrolls up.
+  const contentRef = useRef<HTMLDivElement>(null)
+  // Whether to keep pinned to the bottom; flips off only when the user scrolls up.
   const stick = useRef(true)
+  // Last observed scrollTop, so onScroll can tell a user scroll-up (which should
+  // unstick) from content growth pushing the gap open (which must not).
+  const lastTop = useRef(0)
 
+  // Re-pin to the tail whenever the content's height changes — a new line OR an
+  // existing line wrapping/reflowing (e.g. when the vertical scrollbar appears and
+  // narrows the box). Keying off height instead of log.length catches the reflow
+  // cases that don't add a line, so streaming never drifts off the bottom.
   useEffect(() => {
-    const el = ref.current
-    if (el && stick.current) el.scrollTop = el.scrollHeight
-  }, [log.length])
+    const content = contentRef.current
+    if (!content) return
+    const ro = new ResizeObserver(() => {
+      const el = ref.current
+      if (el && stick.current) {
+        el.scrollTop = el.scrollHeight
+        lastTop.current = el.scrollTop
+      }
+    })
+    ro.observe(content)
+    return () => ro.disconnect()
+  }, [])
 
   const onScroll = () => {
     const el = ref.current
     if (!el) return
-    stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 24
+    // Re-stick once the user scrolls back to the bottom. Only an actual upward
+    // scroll unsticks — content growth widens the gap without moving scrollTop, so
+    // a queued scroll event seeing that gap must NOT unclamp, or a fast log (or a
+    // single wrapped line) would unstick itself from the tail.
+    if (atBottom) stick.current = true
+    else if (el.scrollTop < lastTop.current - 1) stick.current = false
+    lastTop.current = el.scrollTop
   }
 
   return (
@@ -316,20 +340,22 @@ function LogView({ log, emptyText = 'Waiting for output…' }: { log: ArtifactLo
       onScroll={onScroll}
       className="h-64 max-h-64 overflow-auto rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/60 p-2 font-mono text-[11px] leading-relaxed"
     >
-      {log.length === 0 ? (
-        <div className="text-gray-400 dark:text-gray-500">{emptyText}</div>
-      ) : (
-        log.map((l, i) => (
-          <div
-            key={i}
-            className={`whitespace-pre-wrap break-words ${
-              (l.stream as string) === 'stderr' ? 'text-red-600 dark:text-red-400' : 'text-gray-600 dark:text-gray-300'
-            }`}
-          >
-            {l.text}
-          </div>
-        ))
-      )}
+      <div ref={contentRef}>
+        {log.length === 0 ? (
+          <div className="text-gray-400 dark:text-gray-500">{emptyText}</div>
+        ) : (
+          log.map((l, i) => (
+            <div
+              key={i}
+              className={`whitespace-pre-wrap break-words ${
+                (l.stream as string) === 'stderr' ? 'text-red-600 dark:text-red-400' : 'text-gray-600 dark:text-gray-300'
+              }`}
+            >
+              {l.text}
+            </div>
+          ))
+        )}
+      </div>
     </div>
   )
 }
