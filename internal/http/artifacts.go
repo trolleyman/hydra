@@ -36,16 +36,49 @@ func (s *Server) GetAgentArtifacts(ctx context.Context, request api.GetAgentArti
 		}, nil
 	}
 
-	empty := api.ArtifactsResponse{Scripts: []api.ArtifactSet{}}
-	if s.Artifacts == nil {
-		return api.GetAgentArtifacts200JSONResponse(empty), nil
+	plan, err := s.resolveArtifactPlan(projectRoot, head, request.Params)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
 	}
-	mgr := s.Artifacts.Manager(projectRoot)
+	if plan == nil {
+		return api.GetAgentArtifacts200JSONResponse(api.ArtifactsResponse{Scripts: []api.ArtifactSet{}}), nil
+	}
 
+	// A refresh request names one script whose cached result the user wants
+	// discarded and regenerated — chiefly to retry a cached failure. Drop both
+	// sides' cache entries before generating so the Get calls below kick off a
+	// fresh run instead of returning the stale (errored) meta.
+	if request.Params.Refresh != nil {
+		plan.invalidate(*request.Params.Refresh)
+	}
+
+	return api.GetAgentArtifacts200JSONResponse(api.ArtifactsResponse{Scripts: plan.buildSets(s, request.ProjectId)}), nil
+}
+
+// artifactPlan captures everything needed to (re)build the artifact sets for one
+// comparison: the manager, the two resolved versions, and the per-side scripts
+// indexed by name. Shared by the HTTP poll handler and the WS streaming handler.
+type artifactPlan struct {
+	mgr         *artifacts.Manager
+	left, right artifacts.Version
+	names       []string
+	leftByName  map[string]config.ArtifactScript
+	rightByName map[string]config.ArtifactScript
+}
+
+// resolveArtifactPlan resolves the comparison's two versions and the artifact
+// scripts defined on each side. It returns (nil, nil) when there is nothing to
+// compare (no artifacts manager, the head has no branch, or no scripts on either
+// side) so callers can short-circuit to an empty response.
+func (s *Server) resolveArtifactPlan(projectRoot string, head *heads.Head, params api.GetAgentArtifactsParams) (*artifactPlan, error) {
+	if s.Artifacts == nil {
+		return nil, nil
+	}
 	liveCfg, err := config.Load(projectRoot)
 	if err != nil || head.Branch == nil {
-		return api.GetAgentArtifacts200JSONResponse(empty), nil
+		return nil, nil //nolint:nilerr // a missing/unreadable config means "no artifacts"
 	}
+	mgr := s.Artifacts.Manager(projectRoot)
 
 	// Left version: a committed ref. When no explicit base ref is requested we
 	// baseline against the *merge-base* (fork point) of the base branch and the
@@ -55,8 +88,8 @@ func (s *Server) GetAgentArtifacts(ctx context.Context, request api.GetAgentArti
 	// regenerate the "before" artifact from newer state, producing spurious
 	// before/after differences (e.g. a screenshot's clock) unrelated to the work.
 	leftRef := head.BaseBranch
-	if request.Params.BaseRef != nil && *request.Params.BaseRef != "" {
-		leftRef = *request.Params.BaseRef
+	if params.BaseRef != nil && *params.BaseRef != "" {
+		leftRef = *params.BaseRef
 	} else if mb, err := git.GetMergeBase(projectRoot, head.BaseBranch, *head.Branch); err == nil && mb != "" {
 		leftRef = mb
 	}
@@ -64,12 +97,12 @@ func (s *Server) GetAgentArtifacts(ctx context.Context, request api.GetAgentArti
 
 	// Right version: uncommitted working tree, an explicit ref, or the branch tip.
 	var right artifacts.Version
-	includeUncommitted := request.Params.IncludeUncommitted != nil && *request.Params.IncludeUncommitted
+	includeUncommitted := params.IncludeUncommitted != nil && *params.IncludeUncommitted
 	switch {
 	case includeUncommitted && head.Worktree != nil:
 		right = artifacts.Version{WorktreeDir: *head.Worktree}
-	case request.Params.HeadRef != nil && *request.Params.HeadRef != "":
-		right = artifacts.Version{Ref: *request.Params.HeadRef}
+	case params.HeadRef != nil && *params.HeadRef != "":
+		right = artifacts.Version{Ref: *params.HeadRef}
 	default:
 		right = artifacts.Version{Ref: *head.Branch}
 	}
@@ -88,7 +121,7 @@ func (s *Server) GetAgentArtifacts(ctx context.Context, request api.GetAgentArti
 		return nil, errtrace.Wrap(err)
 	}
 	if len(leftByName) == 0 && len(rightByName) == 0 {
-		return api.GetAgentArtifacts200JSONResponse(empty), nil
+		return nil, nil
 	}
 
 	// Union of names present on either side, sorted for stable output.
@@ -105,30 +138,50 @@ func (s *Server) GetAgentArtifacts(ctx context.Context, request api.GetAgentArti
 	}
 	sort.Strings(names)
 
-	// A refresh request names one script whose cached result the user wants
-	// discarded and regenerated — chiefly to retry a cached failure. Drop both
-	// sides' cache entries before generating so the Get calls below kick off a
-	// fresh run instead of returning the stale (errored) meta.
-	if request.Params.Refresh != nil {
-		if _, ok := nameSet[*request.Params.Refresh]; ok {
-			_ = mgr.Invalidate(*request.Params.Refresh, left)
-			_ = mgr.Invalidate(*request.Params.Refresh, right)
+	return &artifactPlan{mgr: mgr, left: left, right: right, names: names, leftByName: leftByName, rightByName: rightByName}, nil
+}
+
+// specsFor returns the (possibly nil) left and right specs for one script name.
+func (p *artifactPlan) specsFor(name string) (left, right *config.ArtifactScript) {
+	if spec, ok := p.leftByName[name]; ok {
+		left = &spec
+	}
+	if spec, ok := p.rightByName[name]; ok {
+		right = &spec
+	}
+	return left, right
+}
+
+// buildSet generates/loads one script (by name) and folds it into the API shape.
+func (p *artifactPlan) buildSet(s *Server, projectID, name string) api.ArtifactSet {
+	leftSpec, rightSpec := p.specsFor(name)
+	return s.buildArtifactSet(projectID, name, leftSpec, rightSpec, p.mgr, p.left, p.right)
+}
+
+// buildSets builds every script's set, in stable name order.
+func (p *artifactPlan) buildSets(s *Server, projectID string) []api.ArtifactSet {
+	sets := make([]api.ArtifactSet, 0, len(p.names))
+	for _, name := range p.names {
+		sets = append(sets, p.buildSet(s, projectID, name))
+	}
+	return sets
+}
+
+// invalidate drops both sides' cache for one script so the next build regenerates
+// it (a no-op if the name isn't part of this comparison).
+func (p *artifactPlan) invalidate(name string) {
+	found := false
+	for _, n := range p.names {
+		if n == name {
+			found = true
+			break
 		}
 	}
-
-	sets := make([]api.ArtifactSet, 0, len(names))
-	for _, name := range names {
-		var leftSpec, rightSpec *config.ArtifactScript
-		if spec, ok := leftByName[name]; ok {
-			leftSpec = &spec
-		}
-		if spec, ok := rightByName[name]; ok {
-			rightSpec = &spec
-		}
-		sets = append(sets, s.buildArtifactSet(request.ProjectId, name, leftSpec, rightSpec, mgr, left, right))
+	if !found {
+		return
 	}
-
-	return api.GetAgentArtifacts200JSONResponse(api.ArtifactsResponse{Scripts: sets}), nil
+	_ = p.mgr.Invalidate(name, p.left)
+	_ = p.mgr.Invalidate(name, p.right)
 }
 
 // artifactSpecsByName loads the artifact scripts that apply to one side of the
@@ -232,13 +285,22 @@ func (s *Server) buildArtifactSet(projectID, name string, leftSpec, rightSpec *c
 	switch {
 	case leftMeta.Status == artifacts.StatusGenerating || rightMeta.Status == artifacts.StatusGenerating:
 		set.Status = api.Generating
-		// Surface whichever side has a live progress line (prefer the right/head
-		// side, the one a user is usually watching regenerate).
-		if p := rightMeta.Progress; p != "" {
-			set.Progress = &p
-		} else if p := leftMeta.Progress; p != "" {
+		// Surface whichever side is generating (prefer the right/head side, the one
+		// a user is usually watching regenerate): its progress line, the live
+		// stdout+stderr log, and when it started so the UI can show elapsed time.
+		live := rightMeta
+		if rightMeta.Status != artifacts.StatusGenerating {
+			live = leftMeta
+		}
+		if live.Progress != "" {
+			p := live.Progress
 			set.Progress = &p
 		}
+		if live.StartedAt > 0 {
+			t := live.StartedAt
+			set.StartedAt = &t
+		}
+		set.Log = ptr(toAPILog(live.Log))
 		return set
 	case leftMeta.Status == artifacts.StatusError || rightMeta.Status == artifacts.StatusError:
 		set.Status = api.Error
@@ -262,6 +324,16 @@ func (s *Server) buildArtifactSet(projectID, name string, leftSpec, rightSpec *c
 		set.Files = append(set.Files, f)
 	}
 	return set
+}
+
+// toAPILog converts the manager's captured log lines into the API shape. It
+// always returns a non-nil (possibly empty) slice so the field serializes as [].
+func toAPILog(lines []artifacts.LogLine) []api.ArtifactLogLine {
+	out := make([]api.ArtifactLogLine, 0, len(lines))
+	for _, l := range lines {
+		out = append(out, api.ArtifactLogLine{Text: l.Text, Stream: api.ArtifactLogLineStream(l.Stream)})
+	}
+	return out
 }
 
 // blobURL builds the (same-origin) URL the frontend fetches an artifact file from.

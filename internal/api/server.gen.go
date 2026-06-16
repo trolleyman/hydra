@@ -36,6 +36,12 @@ const (
 	ArtifactFileChangeTypeUnchanged ArtifactFileChangeType = "unchanged"
 )
 
+// Defines values for ArtifactLogLineStream.
+const (
+	Stderr ArtifactLogLineStream = "stderr"
+	Stdout ArtifactLogLineStream = "stdout"
+)
+
 // Defines values for ArtifactSetStatus.
 const (
 	Error      ArtifactSetStatus = "error"
@@ -202,6 +208,18 @@ type ArtifactFile struct {
 // ArtifactFileChangeType defines model for ArtifactFile.ChangeType.
 type ArtifactFileChangeType string
 
+// ArtifactLogLine defines model for ArtifactLogLine.
+type ArtifactLogLine struct {
+	// Stream Which stream the line came from; stderr is rendered in red
+	Stream ArtifactLogLineStream `json:"stream"`
+
+	// Text One captured output line (no trailing newline)
+	Text string `json:"text"`
+}
+
+// ArtifactLogLineStream Which stream the line came from; stderr is rendered in red
+type ArtifactLogLineStream string
+
 // ArtifactSet defines model for ArtifactSet.
 type ArtifactSet struct {
 	// Changed Whether any file differs between the two versions
@@ -209,12 +227,18 @@ type ArtifactSet struct {
 	Error   *string        `json:"error"`
 	Files   []ArtifactFile `json:"files"`
 
+	// Log Captured stdout+stderr lines of an in-flight generation (only populated while status is "generating"), surfaced as a live log.
+	Log *[]ArtifactLogLine `json:"log"`
+
 	// Name The configured artifact script name
 	Name string `json:"name"`
 
 	// Progress Latest stdout line of an in-flight generation (only set while status is "generating"), surfaced as live progress.
-	Progress *string           `json:"progress"`
-	Status   ArtifactSetStatus `json:"status"`
+	Progress *string `json:"progress"`
+
+	// StartedAt Unix time (seconds) the in-flight generation started, so the UI can show how long it has been running. Only set while status is "generating".
+	StartedAt *int64            `json:"started_at"`
+	Status    ArtifactSetStatus `json:"status"`
 }
 
 // ArtifactSetStatus defines model for ArtifactSet.Status.

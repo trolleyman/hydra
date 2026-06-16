@@ -109,6 +109,9 @@ func runSimulationServer() error {
 	// Mock WebSocket terminal endpoint
 	mux.HandleFunc("/ws/projects/{project_id}/agents/{id}/terminal", server.HandleTerminalWS)
 
+	// Mock WebSocket artifacts endpoint (streams the simulated artifact states).
+	mux.HandleFunc("/ws/projects/{project_id}/agents/{id}/artifacts", server.HandleArtifactsWS)
+
 	// Raw repository image blob (mirrors the real server's non-OpenAPI route).
 	mux.HandleFunc("/repository/projects/{project_id}/blob", server.HandleRepositoryBlob)
 

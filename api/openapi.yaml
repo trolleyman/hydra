@@ -1378,10 +1378,38 @@ components:
           description: >-
             Latest stdout line of an in-flight generation (only set while
             status is "generating"), surfaced as live progress.
+        started_at:
+          type: integer
+          format: int64
+          nullable: true
+          description: >-
+            Unix time (seconds) the in-flight generation started, so the UI can
+            show how long it has been running. Only set while status is
+            "generating".
+        log:
+          type: array
+          nullable: true
+          description: >-
+            Captured stdout+stderr lines of an in-flight generation (only
+            populated while status is "generating"), surfaced as a live log.
+          items:
+            $ref: '#/components/schemas/ArtifactLogLine'
         files:
           type: array
           items:
             $ref: '#/components/schemas/ArtifactFile'
+
+    ArtifactLogLine:
+      type: object
+      required: [text, stream]
+      properties:
+        text:
+          type: string
+          description: One captured output line (no trailing newline)
+        stream:
+          type: string
+          enum: [stdout, stderr]
+          description: Which stream the line came from; stderr is rendered in red
 
     ArtifactsResponse:
       type: object

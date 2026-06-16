@@ -17,6 +17,7 @@ export type { AgentResponse } from './models/AgentResponse';
 export { AgentStatus } from './models/AgentStatus';
 export type { AgentStatusInfo } from './models/AgentStatusInfo';
 export { ArtifactFile } from './models/ArtifactFile';
+export { ArtifactLogLine } from './models/ArtifactLogLine';
 export { ArtifactSet } from './models/ArtifactSet';
 export type { ArtifactsResponse } from './models/ArtifactsResponse';
 export type { CommitInfo } from './models/CommitInfo';

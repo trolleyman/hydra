@@ -72,7 +72,35 @@ const (
 	// must not fan out without bound. A normal diff view (left+right of one
 	// script) saturates this; further requests queue behind the per-entry lock.
 	maxConcurrentGen = 2
+	// maxLogLines bounds the in-memory live log kept per in-flight generation so
+	// a chatty build can't grow it without bound. Once exceeded, oldest lines are
+	// dropped (the latest output is what the UI is watching).
+	maxLogLines = 5000
 )
+
+// Stream names for a captured log line.
+const (
+	StreamStdout = "stdout"
+	StreamStderr = "stderr"
+)
+
+// LogLine is one captured output line of an in-flight generation, tagged with
+// the stream it came from so the UI can render stderr distinctly (in red).
+type LogLine struct {
+	Text   string `json:"text"`
+	Stream string `json:"stream"`
+}
+
+// Event is broadcast to subscribers as an in-flight generation progresses, so a
+// WebSocket client can update live instead of polling. It is keyed by the entry
+// dir (the caller maps that back to a script + side). Kind is "log" (a new line
+// landed, carried in Line) or "settled" (generation finished — the caller should
+// re-read the now-written meta).
+type Event struct {
+	Dir  string
+	Kind string
+	Line LogLine
+}
 
 // imageExts maps collectible output extensions to their content types.
 var imageExts = map[string]string{
@@ -117,6 +145,12 @@ type Meta struct {
 	// screenshot it's on). It is transient: never persisted (only StatusGenerating
 	// metas carry it, and those are never written to disk).
 	Progress string `json:"-"`
+	// StartedAt is the Unix time (seconds) an in-flight generation began, so the
+	// UI can show how long it has been running. Transient, like Progress.
+	StartedAt int64 `json:"-"`
+	// Log is the captured stdout+stderr lines of an in-flight generation, surfaced
+	// live so the UI can show a full scrollable log. Transient, like Progress.
+	Log []LogLine `json:"-"`
 }
 
 // ChangeType classifies an artifact file across the two compared versions.
@@ -293,10 +327,14 @@ type Version struct {
 type Manager struct {
 	projectRoot string
 
-	mu       sync.Mutex
-	gens     map[string]struct{} // entry dirs with an in-flight generation
-	progress map[string]string   // entry dir -> latest stdout line of its in-flight gen
-	sem      chan struct{}       // bounds concurrent generations (maxConcurrentGen)
+	mu        sync.Mutex
+	gens      map[string]struct{}  // entry dirs with an in-flight generation
+	progress  map[string]string    // entry dir -> latest stdout line of its in-flight gen
+	startedAt map[string]int64     // entry dir -> Unix time its in-flight gen started
+	logs      map[string][]LogLine // entry dir -> captured log of its in-flight gen
+	subs      map[int]chan Event   // event subscribers (live progress streaming)
+	nextSub   int                  // next subscriber id
+	sem       chan struct{}        // bounds concurrent generations (maxConcurrentGen)
 }
 
 // NewManager returns a Manager for the given project root.
@@ -305,10 +343,57 @@ func NewManager(projectRoot string) *Manager {
 		projectRoot: projectRoot,
 		gens:        map[string]struct{}{},
 		progress:    map[string]string{},
+		startedAt:   map[string]int64{},
+		logs:        map[string][]LogLine{},
+		subs:        map[int]chan Event{},
 		sem:         make(chan struct{}, maxConcurrentGen),
 	}
 	_ = paths.CreateGitignoreAllInDir(m.root())
 	return m
+}
+
+// Subscribe registers a listener for generation events and returns the event
+// channel plus a function to unsubscribe (which also closes the channel). Events
+// are delivered best-effort: a slow consumer whose buffer fills drops "log"
+// events, but "settled" events let the consumer recover by re-reading meta.
+func (m *Manager) Subscribe() (<-chan Event, func()) {
+	ch := make(chan Event, 512)
+	m.mu.Lock()
+	id := m.nextSub
+	m.nextSub++
+	m.subs[id] = ch
+	m.mu.Unlock()
+	return ch, func() {
+		m.mu.Lock()
+		if c, ok := m.subs[id]; ok {
+			delete(m.subs, id)
+			close(c)
+		}
+		m.mu.Unlock()
+	}
+}
+
+// broadcastLocked delivers ev to every subscriber without blocking. Callers must
+// hold m.mu — that serializes against Subscribe's close, so we never send on a
+// closed channel.
+func (m *Manager) broadcastLocked(ev Event) {
+	for _, ch := range m.subs {
+		select {
+		case ch <- ev:
+		default: // subscriber buffer full; drop (best-effort, see Subscribe)
+		}
+	}
+}
+
+// EntryDir returns the on-disk cache directory for (script, v). Exposed so the
+// WS handler can map generation events (keyed by entry dir) back to a script and
+// side without duplicating the version-key resolution.
+func (m *Manager) EntryDir(script string, v Version) (string, error) {
+	key, _, err := m.versionKey(v)
+	if err != nil {
+		return "", errtrace.Wrap(err)
+	}
+	return m.entryDir(script, key), nil
 }
 
 // Registry lazily creates and caches one Manager per project root. A single
@@ -391,10 +476,15 @@ func (m *Manager) Get(spec config.ArtifactScript, v Version) (Meta, error) {
 	}
 	if _, inFlight := m.gens[dir]; inFlight {
 		prog := m.progress[dir]
+		started := m.startedAt[dir]
+		logCopy := append([]LogLine(nil), m.logs[dir]...)
 		m.mu.Unlock()
-		return Meta{Script: spec.Name, Key: key, Ref: ref, Status: StatusGenerating, Progress: prog}, nil
+		return Meta{Script: spec.Name, Key: key, Ref: ref, Status: StatusGenerating, Progress: prog, StartedAt: started, Log: logCopy}, nil
 	}
+	started := time.Now().Unix()
 	m.gens[dir] = struct{}{}
+	m.startedAt[dir] = started
+	m.logs[dir] = nil
 	m.mu.Unlock()
 
 	go func() {
@@ -412,10 +502,15 @@ func (m *Manager) Get(spec config.ArtifactScript, v Version) (Meta, error) {
 		m.mu.Lock()
 		delete(m.gens, dir)
 		delete(m.progress, dir)
+		delete(m.startedAt, dir)
+		delete(m.logs, dir)
+		// Notify subscribers the entry settled (meta is already written above) so
+		// they re-read it instead of waiting for the next poll.
+		m.broadcastLocked(Event{Dir: dir, Kind: "settled"})
 		m.mu.Unlock()
 	}()
 
-	return Meta{Script: spec.Name, Key: key, Ref: ref, Status: StatusGenerating}, nil
+	return Meta{Script: spec.Name, Key: key, Ref: ref, Status: StatusGenerating, StartedAt: started}, nil
 }
 
 // Invalidate drops the cached entry for (script, v) so the next Get regenerates
@@ -439,15 +534,25 @@ func (m *Manager) Invalidate(script string, v Version) error {
 	return errtrace.Wrap(os.RemoveAll(dir))
 }
 
-// setProgress records the latest stdout line of an in-flight generation so a
-// concurrent Get can surface it. It is a no-op once the entry is no longer
-// in-flight, so a late line can't resurrect a settled entry's progress.
-func (m *Manager) setProgress(dir, line string) {
+// appendLog records one captured output line of an in-flight generation: it
+// appends to the live log (bounded by maxLogLines), updates the latest-stdout
+// progress line, and broadcasts to subscribers. It is a no-op once the entry is
+// no longer in-flight, so a late line can't resurrect a settled entry.
+func (m *Manager) appendLog(dir, text, stream string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if _, inFlight := m.gens[dir]; inFlight {
-		m.progress[dir] = line
+	if _, inFlight := m.gens[dir]; !inFlight {
+		return
 	}
+	line := LogLine{Text: text, Stream: stream}
+	m.logs[dir] = append(m.logs[dir], line)
+	if over := len(m.logs[dir]) - maxLogLines; over > 0 {
+		m.logs[dir] = m.logs[dir][over:]
+	}
+	if stream == StreamStdout {
+		m.progress[dir] = text
+	}
+	m.broadcastLocked(Event{Dir: dir, Kind: "log", Line: line})
 }
 
 // generate runs the script for one version and returns the resulting Meta.
@@ -500,12 +605,16 @@ func (m *Manager) generate(spec config.ArtifactScript, v Version, key, ref strin
 	cmd.Dir = launch.Dir
 	cmd.Env = launch.Env
 	cmd.ExtraFiles = launch.ExtraFiles
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	// Stream stdout so the latest non-blank line becomes live progress (e.g.
-	// "wrote artifacts-ab-dark.png 7/12") that a polling Get can surface, instead
-	// of discarding it. Errors still report from stderr.
+	// Stream both stdout and stderr line-by-line into the live log (the UI shows
+	// it as a scrollable, auto-updating log, stderr in red), while still keeping
+	// stderr for the error tail. The latest non-blank stdout line also becomes the
+	// header progress (e.g. "wrote artifacts-ab-dark.png 7/12").
 	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		meta.Status, meta.Error = StatusError, err.Error()
+		return meta
+	}
+	stderrPipe, err := cmd.StderrPipe()
 	if err != nil {
 		meta.Status, meta.Error = StatusError, err.Error()
 		return meta
@@ -514,26 +623,40 @@ func (m *Manager) generate(spec config.ArtifactScript, v Version, key, ref strin
 		meta.Status, meta.Error = StatusError, err.Error()
 		return meta
 	}
-	var scanWG sync.WaitGroup
-	scanWG.Go(func() {
-		sc := bufio.NewScanner(stdout)
+	var stderrBuf bytes.Buffer
+	var stderrMu sync.Mutex
+	scan := func(r io.Reader, stream string) {
+		sc := bufio.NewScanner(r)
 		// Allow long lines (build tools can emit verbose single lines).
 		sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 		for sc.Scan() {
-			if line := strings.TrimSpace(sc.Text()); line != "" {
-				m.setProgress(dir, line)
+			line := strings.TrimRight(sc.Text(), "\r")
+			if stream == StreamStderr {
+				stderrMu.Lock()
+				stderrBuf.WriteString(line)
+				stderrBuf.WriteByte('\n')
+				stderrMu.Unlock()
+			}
+			if strings.TrimSpace(line) != "" {
+				m.appendLog(dir, line, stream)
 			}
 		}
-		_ = sc.Err() // best-effort: progress is non-critical, errors fall back to stderr
-	})
+		_ = sc.Err() // best-effort: the log is non-critical
+	}
+	var scanWG sync.WaitGroup
+	scanWG.Go(func() { scan(stdout, StreamStdout) })
+	scanWG.Go(func() { scan(stderrPipe, StreamStderr) })
 	err = cmd.Wait()
-	scanWG.Wait() // drain the pipe before reading stderr / returning
+	scanWG.Wait() // drain both pipes before reading stderr / returning
 	if err != nil {
 		msg := err.Error()
 		if ctx.Err() == context.DeadlineExceeded {
 			msg = "timed out after " + timeout.String()
 		}
-		if tail := strings.TrimSpace(stderr.String()); tail != "" {
+		stderrMu.Lock()
+		tail := strings.TrimSpace(stderrBuf.String())
+		stderrMu.Unlock()
+		if tail != "" {
 			msg += ": " + lastLines(tail, 15)
 		}
 		meta.Status, meta.Error = StatusError, msg
@@ -743,7 +866,7 @@ func scanOutputs(dir string) ([]FileMeta, error) {
 	var out []FileMeta
 	err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
-			return err
+			return errtrace.Wrap(err)
 		}
 		if d.IsDir() || d.Name() == metaFile {
 			return nil
@@ -753,7 +876,7 @@ func scanOutputs(dir string) ([]FileMeta, error) {
 		}
 		hash, size, err := hashFile(p)
 		if err != nil {
-			return err
+			return errtrace.Wrap(err)
 		}
 		rel, _ := filepath.Rel(dir, p)
 		out = append(out, FileMeta{Name: filepath.ToSlash(rel), Size: size, Hash: hash})

@@ -2,6 +2,7 @@ package http
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"path"
@@ -804,60 +805,60 @@ func simSVG(label, color string, w, h int) string {
 	return "data:image/svg+xml;base64," + base64.StdEncoding.EncodeToString([]byte(doc))
 }
 
-func (s *SimulationServer) GetAgentArtifacts(w http.ResponseWriter, r *http.Request, projectId string, id string, params api.GetAgentArtifactsParams) {
-	if id != "agent-1" {
-		api.WriteJSON(w, http.StatusOK, api.ArtifactsResponse{Scripts: []api.ArtifactSet{}})
-		return
+// simArtifactLog is a believable multi-line generation log for the in-flight
+// artifact set, so the diff viewer can document the expanded live-log view
+// (stdout plus a couple of stderr warnings rendered in red). The final stdout
+// line matches the header progress.
+func simArtifactLog() []api.ArtifactLogLine {
+	out := func(t string) api.ArtifactLogLine { return api.ArtifactLogLine{Text: t, Stream: api.Stdout} }
+	errLine := func(t string) api.ArtifactLogLine { return api.ArtifactLogLine{Text: t, Stream: api.Stderr} }
+	return []api.ArtifactLogLine{
+		out("Rendering Hydra UI for ref a1b2c3d from /checkout"),
+		out("building frontend"),
+		out("+ (/checkout/web) bun install"),
+		out("bun install v1.1.34"),
+		out("+ playwright@1.49.0"),
+		out("120 packages installed [2.31s]"),
+		out("+ (/checkout/web) bun x vite build"),
+		out("vite v6.0.7 building for production..."),
+		errLine("warning: \"motion\" is imported by src/App.tsx but never used"),
+		out("✓ 1432 modules transformed."),
+		out("✓ built in 4.21s"),
+		out("building hydra binary"),
+		out("booting simulation server"),
+		out("capturing screenshots"),
+		out("home.png 1/12"),
+		out("wrote /out/home.png"),
+		out("repository.png 2/12"),
+		out("wrote /out/repository.png"),
+		errLine("[chromium] Failed to decode font hint table (non-fatal)"),
+		out("artifacts-side-by-side.png 5/12"),
+		out("wrote /out/artifacts-side-by-side.png"),
+		out("artifacts-ab-dark.png 7/12"),
 	}
-	// Four artifact sets, one per render state, so the diff viewer documents every
-	// stage of the artifacts panel side by side: a finished comparison with visual
-	// changes, an in-flight generation (with a live progress line), a failure, and a
-	// settled "no visual changes" run. Every set renders inside the same card, so
-	// switching between them never shifts the layout and refresh is always reachable.
-	resp := api.ArtifactsResponse{Scripts: []api.ArtifactSet{
+}
+
+// simArtifactSets returns the mock artifact sets for the simulated agent, shared
+// by the HTTP poll handler and the streaming WS handler.
+func simArtifactSets(id string) []api.ArtifactSet {
+	if id != "agent-1" {
+		return []api.ArtifactSet{}
+	}
+	progress := "artifacts-ab-dark.png 7/12"
+	startedAt := time.Now().Add(-8 * time.Second).Unix()
+	log := simArtifactLog()
+	return []api.ArtifactSet{
+		simReadyChangedSet(),
+		// In-flight generation: the header shows a spinner, the latest stdout line
+		// as live progress, and how long it has been running; expanding the card
+		// reveals the full stdout+stderr log (stderr in red).
 		{
-			Name:    "screenshots",
-			Status:  api.Ready,
-			Changed: true,
-			Files: []api.ArtifactFile{
-				{
-					Name:       "home.png",
-					ChangeType: api.ArtifactFileChangeTypeModified,
-					LeftUrl:    ptr(simSVG("Home (before)", "#b91c1c", 360, 220)),
-					RightUrl:   ptr(simSVG("Home (after)", "#15803d", 360, 220)),
-				},
-				{
-					Name:       "login-phone.png",
-					ChangeType: api.ArtifactFileChangeTypeModified,
-					LeftUrl:    ptr(simSVG("Login (before)", "#b91c1c", 240, 480)),
-					RightUrl:   ptr(simSVG("Login (after)", "#15803d", 240, 480)),
-				},
-				{
-					Name:       "profile-phone.png",
-					ChangeType: api.ArtifactFileChangeTypeModified,
-					LeftUrl:    ptr(simSVG("Profile (before)", "#b91c1c", 240, 480)),
-					RightUrl:   ptr(simSVG("Profile (after)", "#15803d", 240, 480)),
-				},
-				{
-					Name:       "settings-phone.png",
-					ChangeType: api.ArtifactFileChangeTypeAdded,
-					RightUrl:   ptr(simSVG("Settings (new)", "#15803d", 240, 480)),
-				},
-				{
-					Name:       "about.png",
-					ChangeType: api.ArtifactFileChangeTypeUnchanged,
-					LeftUrl:    ptr(simSVG("About", "#334155", 360, 220)),
-					RightUrl:   ptr(simSVG("About", "#334155", 360, 220)),
-				},
-			},
-		},
-		// In-flight generation: the header shows a spinner and the latest stdout
-		// line of the running script as live progress.
-		{
-			Name:     "components",
-			Status:   api.Generating,
-			Progress: ptr("artifacts-ab-dark.png 7/12"),
-			Files:    []api.ArtifactFile{},
+			Name:      "components",
+			Status:    api.Generating,
+			Progress:  &progress,
+			StartedAt: &startedAt,
+			Log:       &log,
+			Files:     []api.ArtifactFile{},
 		},
 		// Failure: the error (script stderr tail) renders monospaced; refresh retries.
 		{
@@ -881,8 +882,52 @@ func (s *SimulationServer) GetAgentArtifacts(w http.ResponseWriter, r *http.Requ
 				},
 			},
 		},
-	}}
-	api.WriteJSON(w, http.StatusOK, resp)
+	}
+}
+
+// simReadyChangedSet is the finished comparison with visual changes (including an
+// added file with no "before", to document the missing-image placeholder).
+func simReadyChangedSet() api.ArtifactSet {
+	return api.ArtifactSet{
+		Name:    "screenshots",
+		Status:  api.Ready,
+		Changed: true,
+		Files: []api.ArtifactFile{
+			{
+				Name:       "home.png",
+				ChangeType: api.ArtifactFileChangeTypeModified,
+				LeftUrl:    ptr(simSVG("Home (before)", "#b91c1c", 360, 220)),
+				RightUrl:   ptr(simSVG("Home (after)", "#15803d", 360, 220)),
+			},
+			{
+				Name:       "login-phone.png",
+				ChangeType: api.ArtifactFileChangeTypeModified,
+				LeftUrl:    ptr(simSVG("Login (before)", "#b91c1c", 240, 480)),
+				RightUrl:   ptr(simSVG("Login (after)", "#15803d", 240, 480)),
+			},
+			{
+				Name:       "profile-phone.png",
+				ChangeType: api.ArtifactFileChangeTypeModified,
+				LeftUrl:    ptr(simSVG("Profile (before)", "#b91c1c", 240, 480)),
+				RightUrl:   ptr(simSVG("Profile (after)", "#15803d", 240, 480)),
+			},
+			{
+				Name:       "settings-phone.png",
+				ChangeType: api.ArtifactFileChangeTypeAdded,
+				RightUrl:   ptr(simSVG("Settings (new)", "#15803d", 240, 480)),
+			},
+			{
+				Name:       "about.png",
+				ChangeType: api.ArtifactFileChangeTypeUnchanged,
+				LeftUrl:    ptr(simSVG("About", "#334155", 360, 220)),
+				RightUrl:   ptr(simSVG("About", "#334155", 360, 220)),
+			},
+		},
+	}
+}
+
+func (s *SimulationServer) GetAgentArtifacts(w http.ResponseWriter, r *http.Request, projectId string, id string, params api.GetAgentArtifactsParams) {
+	api.WriteJSON(w, http.StatusOK, api.ArtifactsResponse{Scripts: simArtifactSets(id)})
 }
 
 func (s *SimulationServer) SendAgentInput(w http.ResponseWriter, r *http.Request, projectId string, id string) {
@@ -1115,6 +1160,30 @@ func (s *SimulationServer) HandleTerminalWS(w http.ResponseWriter, r *http.Reque
 			} else {
 				_ = conn.WriteMessage(websocket.BinaryMessage, data)
 			}
+		}
+	}
+}
+
+// HandleArtifactsWS streams the mock artifact sets over a WebSocket, mirroring
+// the real server's endpoint. It sends one snapshot (the simulated states,
+// including the in-flight set's live log) and then keeps the connection open,
+// ignoring client messages, until the peer closes it.
+func (s *SimulationServer) HandleArtifactsWS(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	rawConn, err := wsUpgrader.Upgrade(w, r, nil)
+	if err != nil {
+		return
+	}
+	conn := &safeConn{Conn: rawConn}
+	defer conn.Close()
+
+	msg := artifactWSMessage{Type: "snapshot", Scripts: simArtifactSets(id)}
+	data, _ := json.Marshal(msg)
+	_ = conn.WriteMessage(websocket.TextMessage, data)
+
+	for {
+		if _, _, err := conn.ReadMessage(); err != nil {
+			return
 		}
 	}
 }
