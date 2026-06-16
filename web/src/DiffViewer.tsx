@@ -250,7 +250,7 @@ const UnifiedHunk = memo(function UnifiedHunk({ hunk, highlightedOld, highlighte
         return (
           <Fragment key={idx}>
             <div className={`flex items-stretch hover:brightness-95 dark:hover:brightness-110 relative group ${bgClass}`}>
-              <div className="relative flex shrink-0">
+              <div className="relative flex shrink-0 select-none">
                 <span className={UNIFIED_LINE_NUM_CLASS}>{line.old_line_num ?? ''}</span>
                 <span className={UNIFIED_LINE_NUM_CLASS}>{line.new_line_num ?? ''}</span>
                 {!isNoNewline && (
@@ -314,7 +314,7 @@ const SideBySideHunk = memo(function SideBySideHunk({ hunk, highlightedOld, high
           <Fragment key={idx}>
             <div className="flex items-stretch divide-x divide-gray-200 dark:divide-gray-700">
               <div className={`flex items-start flex-1 min-w-0 group relative ${oldBg}`}>
-                <div className="relative flex shrink-0">
+                <div className="relative flex shrink-0 select-none">
                   <span className={SBS_LINE_NUM}>{line.oldLineNum ?? ''}</span>
                   {line.oldLineNum != null && (
                     <Tooltip content="Add comment">
@@ -336,7 +336,7 @@ const SideBySideHunk = memo(function SideBySideHunk({ hunk, highlightedOld, high
                 }
               </div>
               <div className={`flex items-start flex-1 min-w-0 group relative ${newBg}`}>
-                <div className="relative flex shrink-0">
+                <div className="relative flex shrink-0 select-none">
                   <span className={SBS_LINE_NUM}>{line.newLineNum ?? ''}</span>
                   {line.newLineNum != null && (
                     <Tooltip content="Add comment">

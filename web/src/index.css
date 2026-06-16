@@ -57,6 +57,13 @@ body {
   animation: fade-in-out 2s ease-in-out forwards;
 }
 
+/* highlight.js v11's github theme sets `code.hljs { padding: 3px 5px }`. The
+   repository file view renders one `<code class="hljs">` per line, so that
+   vertical padding pushed each line below its line-number gutter (numbers looked
+   off-centre / too high) and added extra row spacing. Reset it for per-line code
+   while leaving markdown's `pre code.hljs` (1em padding) untouched. */
+code.hljs.hljs-line { padding: 0 0 0 0.75rem; }
+
 /* Highlight.js dark mode overrides (used within .dark class context) */
 .dark .hljs { color: #abb2bf; background: transparent; }
 .dark .hljs-comment, .dark .hljs-quote { color: #5c6370; font-style: italic; }

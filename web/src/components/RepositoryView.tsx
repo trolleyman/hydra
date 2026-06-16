@@ -492,7 +492,7 @@ function CodeView({ content, lang, wrap }: { content: string; lang: string; wrap
   const gutterWidth = `${Math.max(2, String(lines.length).length)}ch`
 
   return (
-    <div className={`text-xs font-mono leading-5 ${wrap ? 'w-full' : 'w-max min-w-full'}`}>
+    <div className={`text-xs font-mono leading-snug ${wrap ? 'w-full' : 'w-max min-w-full'}`}>
       {lines.map((html, i) => (
         <div key={i} className="flex hover:bg-gray-50 dark:hover:bg-gray-800/40">
           <span
@@ -502,7 +502,7 @@ function CodeView({ content, lang, wrap }: { content: string; lang: string; wrap
             {i + 1}
           </span>
           <code
-            className={`hljs bg-transparent pl-3 flex-1 ${wrap ? 'whitespace-pre-wrap break-words' : 'whitespace-pre'}`}
+            className={`hljs hljs-line bg-transparent flex-1 ${wrap ? 'whitespace-pre-wrap break-words' : 'whitespace-pre'}`}
             dangerouslySetInnerHTML={{ __html: html || ' ' }}
           />
         </div>
