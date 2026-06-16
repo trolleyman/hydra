@@ -89,11 +89,32 @@ function ImageCell({ url, label }: { url?: string | null; label: string }) {
   )
 }
 
-// A/B switch: both images stay mounted and stacked; clicking (or the Before/After
-// buttons) flips which one is shown for an instant, flicker-free hard switch.
-// Middle-click opens the currently-shown image in a new tab.
-function ABSwitch({ left, right }: { left: string; right: string }) {
+// A stacked layer for the overlay comparison modes: the image when present, or a
+// "No image" placeholder filling the same box when this side is absent (an
+// added/removed file). Keeping a placeholder layer — rather than dropping to a
+// side-by-side pair — lets the overlay modes preserve their own layout (the A/B
+// buttons, the slider handle, the opacity blend) when only one side exists.
+function LayerNode({ url, style }: { url?: string | null; style?: React.CSSProperties }) {
+  if (url) {
+    return <img src={url} style={{ ...checkerStyle, ...style }} className={OVERLAY_CLASS} draggable={false} />
+  }
+  return (
+    <div style={style} className={`${OVERLAY_CLASS} flex flex-col items-center justify-center gap-1 bg-gray-50 dark:bg-gray-800/50 text-gray-400 dark:text-gray-500`}>
+      <ImageOff className="w-5 h-5" />
+      <span className="text-[11px] font-medium">No image</span>
+    </div>
+  )
+}
+
+// A/B switch: both sides stay mounted and stacked; clicking (or the Before/After
+// buttons) flips which one is shown for an instant, flicker-free hard switch. A
+// missing side shows the "No image" placeholder in its slot. Middle-click opens
+// the currently-shown image in a new tab.
+function ABSwitch({ left, right }: { left?: string | null; right?: string | null }) {
   const [showAfter, setShowAfter] = useState(true)
+  // At least one side is present (ImageDiffView only routes here otherwise); the
+  // present image is the invisible sizer that gives the stacked box its size.
+  const sizer = (right ?? left) as string
   const btn = (active: boolean) =>
     `text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded cursor-pointer transition-colors ${
       active ? 'bg-blue-500 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600'
@@ -107,22 +128,25 @@ function ABSwitch({ left, right }: { left: string; right: string }) {
       <div
         className="relative inline-block cursor-pointer"
         onClick={() => setShowAfter((s) => !s)}
-        onAuxClick={makeAuxOpen(() => (showAfter ? right : left))}
+        onAuxClick={makeAuxOpen(() => (showAfter ? right : left) || sizer)}
       >
-        <img src={right} style={{ ...checkerStyle, visibility: showAfter ? 'visible' : 'hidden' }} className={`${IMG_CLASS} block`} draggable={false} />
-        <img src={left} style={{ ...checkerStyle, visibility: showAfter ? 'hidden' : 'visible' }} className={OVERLAY_CLASS} draggable={false} />
+        <img src={sizer} style={{ visibility: 'hidden' }} className={`${IMG_CLASS} block`} draggable={false} />
+        <LayerNode url={right} style={{ visibility: showAfter ? 'visible' : 'hidden' }} />
+        <LayerNode url={left} style={{ visibility: showAfter ? 'hidden' : 'visible' }} />
       </div>
     </div>
   )
 }
 
 // Before/after slider: "after" is the base layer; "before" sits on top, clipped to
-// the region left of the draggable handle, giving a sharp (hard-cut) boundary.
-// Middle-click opens whichever image is currently visible under the cursor.
-function SliderCompare({ left, right }: { left: string; right: string }) {
+// the region left of the draggable handle, giving a sharp (hard-cut) boundary. A
+// missing side shows the "No image" placeholder in its slot. Middle-click opens
+// whichever side is currently visible under the cursor.
+function SliderCompare({ left, right }: { left?: string | null; right?: string | null }) {
   const [pos, setPos] = useState(50)
   const [dragging, setDragging] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
+  const sizer = (right ?? left) as string
 
   const update = useCallback((clientX: number) => {
     const el = ref.current
@@ -155,21 +179,17 @@ function SliderCompare({ left, right }: { left: string; right: string }) {
       }}
       onAuxClick={makeAuxOpen((e) => {
         const el = ref.current
-        if (!el) return right
+        if (!el) return sizer
         const r = el.getBoundingClientRect()
         const x = ((e.clientX - r.left) / r.width) * 100
-        return x < pos ? left : right
+        return (x < pos ? left : right) || sizer
       })}
     >
       <span className={`${TAG_CLASS} left-1`}>Before</span>
       <span className={`${TAG_CLASS} right-1`}>After</span>
-      <img src={right} style={checkerStyle} className={`${IMG_CLASS} block`} draggable={false} />
-      <img
-        src={left}
-        style={{ ...checkerStyle, clipPath: `inset(0 ${100 - pos}% 0 0)` }}
-        className={OVERLAY_CLASS}
-        draggable={false}
-      />
+      <img src={sizer} style={{ visibility: 'hidden' }} className={`${IMG_CLASS} block`} draggable={false} />
+      <LayerNode url={right} />
+      <LayerNode url={left} style={{ clipPath: `inset(0 ${100 - pos}% 0 0)` }} />
       <div className="absolute inset-y-0 w-0.5 bg-white shadow-[0_0_0_1px_rgba(0,0,0,0.4)] pointer-events-none" style={{ left: `${pos}%` }}>
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-5 h-5 rounded-full bg-white shadow ring-1 ring-black/30" />
       </div>
@@ -178,18 +198,21 @@ function SliderCompare({ left, right }: { left: string; right: string }) {
 }
 
 // Onion skin: "before" is the base layer with "after" blended over it; the range
-// slider controls the opacity of the "after" image (0 = before, 1 = after).
-// Middle-click opens the "after" image in a new tab.
-function OnionCompare({ left, right }: { left: string; right: string }) {
+// slider controls the opacity of the "after" image (0 = before, 1 = after). A
+// missing side shows the "No image" placeholder in its slot. Middle-click opens
+// the side currently weighted by the blend.
+function OnionCompare({ left, right }: { left?: string | null; right?: string | null }) {
   const [opacity, setOpacity] = useState(50)
+  const sizer = (right ?? left) as string
   return (
     <div className="min-w-0">
       <div
         className="relative inline-block"
-        onAuxClick={makeAuxOpen(() => (opacity >= 50 ? right : left))}
+        onAuxClick={makeAuxOpen(() => (opacity >= 50 ? right : left) || sizer)}
       >
-        <img src={left} style={checkerStyle} className={`${IMG_CLASS} block`} draggable={false} />
-        <img src={right} style={{ opacity: opacity / 100 }} className={OVERLAY_CLASS} draggable={false} />
+        <img src={sizer} style={{ visibility: 'hidden' }} className={`${IMG_CLASS} block`} draggable={false} />
+        <LayerNode url={left} />
+        <LayerNode url={right} style={{ opacity: opacity / 100 }} />
       </div>
       <div className="flex items-center gap-2 mt-1">
         <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">Before</span>
@@ -205,10 +228,11 @@ function OnionCompare({ left, right }: { left: string; right: string }) {
 }
 
 // Render a before/after image pair in the selected comparison mode. The overlay
-// modes need both images, so when one side is missing (added/removed file) we fall
-// back to the plain side-by-side layout regardless of the requested mode.
+// modes keep their own layout even when one side is missing (added/removed file),
+// substituting a "No image" placeholder; we only fall back to the side-by-side
+// pair for that mode itself, or the degenerate case of no images at all.
 function ImageDiffView({ left, right, mode }: { left?: string | null; right?: string | null; mode: ImageDiffMode }) {
-  if (mode === 'side-by-side' || !left || !right) {
+  if (mode === 'side-by-side' || (!left && !right)) {
     return (
       <div className="flex gap-3">
         <ImageCell url={left} label="Before" />

@@ -399,7 +399,9 @@ try {
             const cont = card?.closest('.overflow-auto') as HTMLElement | null | undefined
             if (card && cont) {
               const offset = card.getBoundingClientRect().top - cont.getBoundingClientRect().top + cont.scrollTop
-              cont.scrollTop = offset - 24
+              // Leave generous headroom so the card's top clears the sticky
+              // "Changes" header that floats over the top of the scroll container.
+              cont.scrollTop = offset - 96
             }
           }, pg.expandArtifact)
           await settle(page)
