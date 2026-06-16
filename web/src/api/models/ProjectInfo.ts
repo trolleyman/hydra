@@ -15,5 +15,9 @@ export type ProjectInfo = {
      * Human-readable project name (last path component)
      */
     name: string;
+    /**
+     * Number of this project's agents with unread changes. Drives the cross-project "updates waiting" indicator.
+     */
+    unread_count?: number;
 };
 

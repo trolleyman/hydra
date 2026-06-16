@@ -153,11 +153,14 @@ type AgentResponse struct {
 	CreatedAt *int64 `json:"created_at,omitempty"`
 
 	// Ephemeral If true, the agent is a throwaway test agent whose worktree and branch are torn down when it stops.
-	Ephemeral   *bool  `json:"ephemeral,omitempty"`
-	Id          string `json:"id"`
-	PrePrompt   string `json:"pre_prompt"`
-	ProjectPath string `json:"project_path"`
-	Prompt      string `json:"prompt"`
+	Ephemeral *bool `json:"ephemeral,omitempty"`
+
+	// HasUnreadChanges True if the agent has changes the user has not yet looked at (set on a running→waiting/finished transition, cleared when the agent is opened).
+	HasUnreadChanges *bool  `json:"has_unread_changes,omitempty"`
+	Id               string `json:"id"`
+	PrePrompt        string `json:"pre_prompt"`
+	ProjectPath      string `json:"project_path"`
+	Prompt           string `json:"prompt"`
 
 	// SessionPid PID of the running sandbox session, or 0 if not running
 	SessionPid int `json:"session_pid"`
@@ -456,6 +459,9 @@ type ProjectInfo struct {
 
 	// Path Absolute filesystem path to the project root
 	Path string `json:"path"`
+
+	// UnreadCount Number of this project's agents with unread changes. Drives the cross-project "updates waiting" indicator.
+	UnreadCount *int `json:"unread_count,omitempty"`
 }
 
 // RepositoryBranch defines model for RepositoryBranch.
@@ -749,6 +755,9 @@ type ServerInterface interface {
 	// Merge a Hydra agent's branch into its base branch and kill it
 	// (POST /api/projects/{project_id}/agents/{id}/merge)
 	MergeAgent(w http.ResponseWriter, r *http.Request, projectId string, id string)
+	// Mark an agent as read, clearing its unread-changes flag
+	// (POST /api/projects/{project_id}/agents/{id}/read)
+	MarkAgentRead(w http.ResponseWriter, r *http.Request, projectId string, id string)
 	// Restart a Hydra agent (kill and respawn with the same prompt)
 	// (POST /api/projects/{project_id}/agents/{id}/restart)
 	RestartAgent(w http.ResponseWriter, r *http.Request, projectId string, id string)
@@ -1306,6 +1315,40 @@ func (siw *ServerInterfaceWrapper) MergeAgent(w http.ResponseWriter, r *http.Req
 	handler.ServeHTTP(w, r)
 }
 
+// MarkAgentRead operation middleware
+func (siw *ServerInterfaceWrapper) MarkAgentRead(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.MarkAgentRead(w, r, projectId, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // RestartAgent operation middleware
 func (siw *ServerInterfaceWrapper) RestartAgent(w http.ResponseWriter, r *http.Request) {
 
@@ -1746,6 +1789,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/diff-files", wrapper.GetAgentDiffFiles)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/input", wrapper.SendAgentInput)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/merge", wrapper.MergeAgent)
+	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/read", wrapper.MarkAgentRead)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/restart", wrapper.RestartAgent)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/update-from-base", wrapper.UpdateAgentFromBase)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/config", wrapper.GetConfig)
@@ -2304,6 +2348,41 @@ func (response MergeAgent500JSONResponse) VisitMergeAgentResponse(w http.Respons
 	return json.NewEncoder(w).Encode(response)
 }
 
+type MarkAgentReadRequestObject struct {
+	ProjectId string `json:"project_id"`
+	Id        string `json:"id"`
+}
+
+type MarkAgentReadResponseObject interface {
+	VisitMarkAgentReadResponse(w http.ResponseWriter) error
+}
+
+type MarkAgentRead204Response struct {
+}
+
+func (response MarkAgentRead204Response) VisitMarkAgentReadResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type MarkAgentRead404JSONResponse ErrorResponse
+
+func (response MarkAgentRead404JSONResponse) VisitMarkAgentReadResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type MarkAgentRead500JSONResponse ErrorResponse
+
+func (response MarkAgentRead500JSONResponse) VisitMarkAgentReadResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 type RestartAgentRequestObject struct {
 	ProjectId string `json:"project_id"`
 	Id        string `json:"id"`
@@ -2696,6 +2775,9 @@ type StrictServerInterface interface {
 	// Merge a Hydra agent's branch into its base branch and kill it
 	// (POST /api/projects/{project_id}/agents/{id}/merge)
 	MergeAgent(ctx context.Context, request MergeAgentRequestObject) (MergeAgentResponseObject, error)
+	// Mark an agent as read, clearing its unread-changes flag
+	// (POST /api/projects/{project_id}/agents/{id}/read)
+	MarkAgentRead(ctx context.Context, request MarkAgentReadRequestObject) (MarkAgentReadResponseObject, error)
 	// Restart a Hydra agent (kill and respawn with the same prompt)
 	// (POST /api/projects/{project_id}/agents/{id}/restart)
 	RestartAgent(ctx context.Context, request RestartAgentRequestObject) (RestartAgentResponseObject, error)
@@ -3164,6 +3246,33 @@ func (sh *strictHandler) MergeAgent(w http.ResponseWriter, r *http.Request, proj
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(MergeAgentResponseObject); ok {
 		if err := validResponse.VisitMergeAgentResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// MarkAgentRead operation middleware
+func (sh *strictHandler) MarkAgentRead(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+	var request MarkAgentReadRequestObject
+
+	request.ProjectId = projectId
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.MarkAgentRead(ctx, request.(MarkAgentReadRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "MarkAgentRead")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(MarkAgentReadResponseObject); ok {
+		if err := validResponse.VisitMarkAgentReadResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

@@ -85,13 +85,21 @@ export function AgentSidebarItem({
   return (
     <button
       onClick={onClick}
-      className={`w-full text-left px-3 py-2.5 rounded-lg transition-colors cursor-pointer ${
+      className={`relative w-full text-left px-3 py-2.5 rounded-lg transition-colors cursor-pointer ${
         selected
           ? 'bg-blue-50 border border-blue-200 dark:bg-blue-900/30 dark:border-blue-800'
           : 'hover:bg-gray-100 dark:hover:bg-gray-700 border border-transparent'
       }`}
     >
-      <div className="flex items-center gap-2 min-w-0">
+      {agent.has_unread_changes && (
+        // Unread-changes marker: vertically centered on the right edge. Set when
+        // the agent goes running→waiting/finished, cleared when it's opened.
+        <span
+          aria-label="unread changes"
+          className="absolute right-3 top-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full bg-pink-500 ring-2 ring-pink-500/20 shrink-0"
+        />
+      )}
+      <div className={`flex items-center gap-2 min-w-0 ${agent.has_unread_changes ? 'pr-4' : ''}`}>
         <span
           className={`w-2 h-2 rounded-full shrink-0 ${agentDotClass(agent)}`}
         />

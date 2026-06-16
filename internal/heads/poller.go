@@ -111,7 +111,12 @@ func pollJSONStatusOnce(store *db.Store, projectRoot string) {
 		if agentStatus == "" {
 			continue
 		}
-		if err := store.UpdateAgentStatus(a.ID, agentStatus, info.Timestamp); err != nil {
+		// Raise the unread-changes flag on a running→waiting/finished transition
+		// (the moments the user wants to be drawn back to). Only that specific
+		// transition counts, so e.g. a starting→waiting flicker doesn't mark it.
+		markUnread := a.AgentStatus != nil && *a.AgentStatus == "running" &&
+			(agentStatus == "waiting" || agentStatus == "finished")
+		if err := store.UpdateAgentStatus(a.ID, agentStatus, info.Timestamp, markUnread); err != nil {
 			log.Printf("warn: json status poller: update agent status for %s: %v", a.ID, err)
 		}
 	}

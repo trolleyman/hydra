@@ -29,5 +29,9 @@ export type AgentResponse = {
      */
     created_at?: number;
     agent_status?: AgentStatusInfo;
+    /**
+     * True if the agent has changes the user has not yet looked at (set on a running→waiting/finished transition, cleared when the agent is opened).
+     */
+    has_unread_changes?: boolean;
 };
 

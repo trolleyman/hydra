@@ -95,6 +95,11 @@ function ProjectDropdown({
   const inputRef = useRef<HTMLInputElement>(null)
 
   const selected = projects.find((p) => p.id === selectedId)
+  // Unread agents sitting in projects other than the one you're looking at —
+  // drives the dot on the folder button ("updates waiting elsewhere").
+  const otherProjectsUnread = projects
+    .filter((p) => p.id !== selectedId)
+    .reduce((n, p) => n + (p.unread_count ?? 0), 0)
 
   useEffect(() => {
     if (!open) return
@@ -188,7 +193,15 @@ function ProjectDropdown({
         onClick={() => { setOpen((o) => !o); setShowAddInput(false); setAddError(null) }}
         className="flex items-center gap-1.5 h-8 px-2.5 rounded-md text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors max-w-xs cursor-pointer"
       >
-        <Folder className="w-3.5 h-3.5" />
+        <span className="relative shrink-0">
+          <Folder className="w-3.5 h-3.5" />
+          {otherProjectsUnread > 0 && (
+            <span
+              aria-label="updates waiting in other projects"
+              className="absolute -top-1 -right-1 w-1.5 h-1.5 rounded-full bg-pink-500 ring-2 ring-white dark:ring-gray-900"
+            />
+          )}
+        </span>
         <span className="truncate max-w-[160px]">{selected?.name ?? 'Select project'}</span>
         <ChevronDown className="w-3 h-3" />
       </button>
@@ -219,6 +232,14 @@ function ProjectDropdown({
                     <div className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{p.name}</div>
                     <div className="text-xs font-mono text-gray-400 dark:text-gray-500 truncate">{p.path}</div>
                   </div>
+                  {(p.unread_count ?? 0) > 0 && hoveredId !== p.id && (
+                    <span
+                      aria-label={`${p.unread_count} agents with unread changes`}
+                      className="shrink-0 mt-0.5 min-w-[1.125rem] h-[1.125rem] px-1 inline-flex items-center justify-center rounded-full text-[10px] font-semibold bg-pink-500 text-white"
+                    >
+                      {p.unread_count}
+                    </span>
+                  )}
                   {p.id === selectedId && hoveredId !== p.id && (
                     <Check className="w-3.5 h-3.5 text-blue-500 shrink-0 mt-0.5" />
                   )}
@@ -360,7 +381,7 @@ function RootLayout() {
   const [trustedProjectIds, setTrustedProjectIds] = useState<Set<string>>(() => readTrustedProjects())
 
   const { projects, selectedProjectId, setProjects, setSelectedProjectId, setSystemStatus } = useProjectStore()
-  const { agents, setAgents, addAgent } = useAgentStore()
+  const { agents, setAgents, addAgent, markRead } = useAgentStore()
   const dialog = useDialogStore()
   const navigate = useNavigate()
   const location = useLocation()
@@ -462,6 +483,19 @@ function RootLayout() {
   useEffect(() => {
     if (!currentProjectId) setAgents([])
   }, [currentProjectId, setAgents])
+
+  // Auto-clear an agent's unread dot when it's the one currently open. Covers
+  // both opening an unread agent (the click) and an already-open agent
+  // transitioning to waiting/finished while you watch it (the next poll marks it
+  // unread, this clears it again). Optimistic locally + a fire-and-forget POST.
+  useEffect(() => {
+    if (!currentProjectId || !selectedAgentId) return
+    const sel = agents.find((a) => a.id === selectedAgentId)
+    if (sel?.has_unread_changes) {
+      markRead(selectedAgentId)
+      api.default.markAgentRead(currentProjectId, selectedAgentId).catch(() => {})
+    }
+  }, [agents, selectedAgentId, currentProjectId, markRead])
 
   useEffect(() => {
     let cancelled = false

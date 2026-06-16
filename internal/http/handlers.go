@@ -143,12 +143,19 @@ func (s *Server) CheckHealth(_ context.Context, _ api.CheckHealthRequestObject) 
 
 func (s *Server) ListProjects(_ context.Context, _ api.ListProjectsRequestObject) (api.ListProjectsResponseObject, error) {
 	ps := s.ProjectsManager.ListProjects()
+	// One DB query gives unread counts for every project; missing keys mean zero.
+	unread, err := s.DB.CountUnreadByProject()
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
 	resp := make(api.ListProjects200JSONResponse, len(ps))
 	for i, p := range ps {
+		count := unread[p.Path]
 		resp[i] = api.ProjectInfo{
-			Id:   p.ID,
-			Path: p.Path,
-			Name: p.Name,
+			Id:          p.ID,
+			Path:        p.Path,
+			Name:        p.Name,
+			UnreadCount: &count,
 		}
 	}
 	return resp, nil
@@ -295,9 +302,10 @@ func (s *Server) ListAgents(ctx context.Context, request api.ListAgentsRequestOb
 			PrePrompt:     h.PrePrompt,
 			Prompt:        h.Prompt,
 			BaseBranch:    h.BaseBranch,
-			Ephemeral:     &h.Ephemeral,
-			CreatedAt:     createdAt,
-			AgentStatus:   h.AgentStatus,
+			Ephemeral:        &h.Ephemeral,
+			CreatedAt:        createdAt,
+			AgentStatus:      h.AgentStatus,
+			HasUnreadChanges: &h.HasUnreadChanges,
 		}
 	}
 	return resp, nil
@@ -635,10 +643,33 @@ func (s *Server) GetAgent(ctx context.Context, request api.GetAgentRequestObject
 		PrePrompt:     head.PrePrompt,
 		Prompt:        head.Prompt,
 		BaseBranch:    head.BaseBranch,
-		Ephemeral:     &head.Ephemeral,
-		CreatedAt:     getCreatedAt,
-		AgentStatus:   head.AgentStatus,
+		Ephemeral:        &head.Ephemeral,
+		CreatedAt:        getCreatedAt,
+		AgentStatus:      head.AgentStatus,
+		HasUnreadChanges: &head.HasUnreadChanges,
 	}), nil
+}
+
+func (s *Server) MarkAgentRead(ctx context.Context, request api.MarkAgentReadRequestObject) (api.MarkAgentReadResponseObject, error) {
+	projectRoot, err := s.resolveProjectRoot(request.ProjectId)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	head, err := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, request.Id)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	if head == nil {
+		return api.MarkAgentRead404JSONResponse{
+			Code:    404,
+			Error:   api.ErrorResponseErrorNotFound,
+			Details: "agent not found",
+		}, nil
+	}
+	if err := s.DB.MarkAgentRead(request.Id); err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	return api.MarkAgentRead204Response{}, nil
 }
 
 func (s *Server) MergeAgent(ctx context.Context, request api.MergeAgentRequestObject) (api.MergeAgentResponseObject, error) {

@@ -42,6 +42,8 @@ type Head struct {
 	// AgentStatus holds the computed status for display.
 	AgentStatus *api.AgentStatusInfo
 	CreatedAt   int64 // Unix timestamp; 0 if not started
+	// HasUnreadChanges drives the "unread changes" dot in the UI.
+	HasUnreadChanges bool
 }
 
 // ListHeads returns all Hydra heads from the DB, cross-referenced with live
@@ -94,6 +96,7 @@ func ListHeads(ctx context.Context, reg *session.Registry, store *db.Store, proj
 			Ephemeral:     a.Ephemeral,
 			CreatedAt:     a.CreatedAt.Unix(),
 			AgentStatus:   computeAgentStatus(&a),
+			HasUnreadChanges: a.HasUnreadChanges,
 		}
 		enrichAgentStatus(a.ProjectPath, a.ID, h.AgentStatus)
 		result = append(result, h)
