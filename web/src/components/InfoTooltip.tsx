@@ -101,7 +101,7 @@ export function InfoTooltip({ title, children, width = 384 }: InfoTooltipProps) 
       />
       {isOpen && createPortal(
         <div
-          className="fixed z-[9999] -translate-x-1/2 -translate-y-full p-3 bg-gray-900 dark:bg-gray-800 text-white text-[11px] rounded-lg shadow-xl animate-in fade-in zoom-in-95 duration-100 border border-gray-700"
+          className="fixed z-[9999] -translate-x-1/2 -translate-y-full p-3 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100 text-[11px] rounded-lg shadow-xl animate-in fade-in zoom-in-95 duration-100 border border-gray-200 dark:border-gray-700"
           style={{
             width,
             top: coords.top - 8,
@@ -111,13 +111,17 @@ export function InfoTooltip({ title, children, width = 384 }: InfoTooltipProps) 
           onMouseEnter={handleMouseEnterTooltip}
           onMouseLeave={handleMouseLeaveTooltip}
         >
-          {title && <p className="font-bold mb-1.5 border-b border-gray-700 pb-1">{title}</p>}
-          <div className="text-gray-300 space-y-2">
+          {title && <p className="font-bold mb-1.5 border-b border-gray-200 dark:border-gray-700 pb-1">{title}</p>}
+          {/* Body text + code spans. Callers tag <code> with text-blue-300 (sized
+              for a dark tooltip); re-tint to a darker blue in light mode here so it
+              stays readable on the white surface (descendant selector wins on
+              specificity, no caller changes needed). */}
+          <div className="text-gray-600 dark:text-gray-300 space-y-2 [&_code]:text-blue-700 dark:[&_code]:text-blue-300">
             {children}
           </div>
           {/* Arrow */}
           <div
-            className="absolute top-full -translate-x-1/2 border-8 border-transparent border-t-gray-900 dark:border-t-gray-800"
+            className="absolute top-full -translate-x-1/2 border-8 border-transparent border-t-white dark:border-t-gray-800"
             style={{ left: coords.arrowX }}
           />
         </div>,
