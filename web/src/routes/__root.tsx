@@ -43,7 +43,7 @@ function formatSpawnedAgo(ms: number): string {
 
 const SIDEBAR_MIN = 160
 const SIDEBAR_MAX = 600
-const SIDEBAR_DEFAULT = 224
+const SIDEBAR_DEFAULT = 264
 
 // When the agents sidebar can't consume a wheel event (no scrollbar, or already
 // at the top/bottom edge), forward the scroll to the main content area (e.g. the
