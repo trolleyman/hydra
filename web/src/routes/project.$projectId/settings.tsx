@@ -6,6 +6,7 @@ import { useProjectStore } from '../../stores/projectStore'
 import type { ConfigResponse, AgentResponse } from '../../api'
 import { AlertCircle, Save } from 'lucide-react'
 import { useDialogStore } from '../../stores/dialogStore'
+import { useToastStore } from '../../stores/toastStore'
 import {
   type SettingsSection,
   SettingsContent,
@@ -89,7 +90,7 @@ function ProjectSettingsPage() {
     try {
       await api.default.saveConfig(projectId, config, scope)
       setBaseConfig(JSON.stringify(config))
-      useDialogStore.getState().show({ title: 'Settings Saved', message: `Configuration saved to ${scope} successfully!`, type: 'info' })
+      useToastStore.getState().show({ message: `Configuration saved to ${scope} successfully!`, type: 'success' })
     } catch (err) {
       useDialogStore.getState().show({ title: 'Save Failed', message: `Failed to save configuration: ${formatError(err)}`, type: 'error' })
     } finally {

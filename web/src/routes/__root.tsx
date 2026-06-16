@@ -11,6 +11,7 @@ import { AgentSidebarItem } from '../components/AgentComponents'
 import { SpawnForm } from '../components/SpawnForm'
 
 import { Dialog } from '../components/Dialog'
+import { Toaster } from '../components/Toaster'
 import { NotFound } from '../components/NotFound'
 import { Tooltip } from '../components/Tooltip'
 import { TrustProjectModal } from '../components/TrustProjectModal'
@@ -797,6 +798,7 @@ function RootLayout() {
         <Outlet />
       </div>
       <Dialog />
+      <Toaster />
       {untrustedProject && (
         <TrustProjectModal
           project={untrustedProject}
