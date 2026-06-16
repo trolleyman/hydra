@@ -334,6 +334,10 @@ func (s *Server) buildArtifactSet(projectID, name string, leftSpec, rightSpec *c
 	set.Changed = artifacts.AnyChanged(deltas)
 	for _, d := range deltas {
 		f := api.ArtifactFile{Name: d.Name, ChangeType: api.ArtifactFileChangeType(d.Change)}
+		if len(d.Tags) > 0 {
+			tags := append([]string(nil), d.Tags...)
+			f.Tags = &tags
+		}
 		if d.InLeft {
 			f.LeftUrl = ptr(blobURL(projectID, name, leftMeta.Key, d.Name))
 		}

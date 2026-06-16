@@ -203,6 +203,11 @@ try {
       // numbered-paste naming. Captures the viewport (the lightbox is a fixed
       // overlay), and the upload request is stubbed so the chips settle instantly.
       attachImages?: string[]
+      // Seeds the artifact tag filter (localStorage key built from project+agent)
+      // before the app boots, so the artifacts panel renders with a filter applied
+      // (e.g. theme=light) — documents the header tag filter actively in use plus
+      // the per-file tag badges. Only meaningful on the artifacts (agent-1) page.
+      tagFilter?: { scoped?: Record<string, string>; free?: string[] }
     }[] = [
       { name: 'home', path: '/' },
       // The spawn form's image lightbox: two images attached to the prompt, the
@@ -256,8 +261,11 @@ try {
       // policy editor with the ShellEditor's bash highlighting + line-number
       // gutter, the typed text and the highlight layer aligned. The form lives
       // in a viewport-height scroll container, so use a tall viewport to fit the
-      // whole page (the pre-spawn editor sits at the very bottom).
-      { name: 'settings', path: '/project/sim-project/settings', viewport: { width: 1280, height: 1360 } },
+      // whole page: the pre-spawn editor sits near the bottom and the "Diff
+      // Artifacts" editor (the [[artifacts]] scripts, rendered below the tab on
+      // every tab) sits below that, so the viewport must be tall enough to reach
+      // it (simulation seeds one screenshots script there).
+      { name: 'settings', path: '/project/sim-project/settings', viewport: { width: 1280, height: 1900 } },
       { name: 'nested-folders', path: '/project/sim-project/agent/agent-3', scrollTo: 'Changes' },
       // agent-1's diff carries simulated "screenshots" artifacts (mixed phone +
       // desktop shapes). Scroll to the "Changes" header — the artifacts panel
@@ -299,6 +307,20 @@ try {
         scrollTo: 'Changes',
         viewport: { width: 1280, height: 1280 },
         imageDiffMode: 'onion',
+      },
+      // The artifacts tag filter in use. agent-1's "screenshots" set tags each
+      // shot by theme + viewport (scoped labels) plus a free-form "new" (see
+      // simReadyChangedSet in internal/http/simulation.go), so the header shows
+      // the single-select theme/viewport filters and each file shows tag badges.
+      // We pin theme=light so the capture documents an ACTIVE filter: the
+      // dark-only shots drop out and the header count reads "shown/total changed".
+      {
+        name: 'artifacts-tags',
+        path: '/project/sim-project/agent/agent-1',
+        scrollTo: 'Changes',
+        viewport: { width: 1280, height: 1280 },
+        imageDiffMode: 'side-by-side',
+        tagFilter: { scoped: { theme: 'light' } },
       },
       // Every render state of the artifacts panel in one shot. agent-1's
       // simulated response (internal/http/simulation.go) carries four sets —
@@ -375,6 +397,21 @@ try {
               // ignore storage failures
             }
           }, pg.imageDiffMode)
+        }
+        // Seed the artifact tag filter so the panel renders with a filter applied.
+        // The key must match web/src/lib/storage.ts artifactTagFilterKey(projectId,
+        // agentId); these pages are all the sim project's agent-1.
+        if (pg.tagFilter) {
+          await ctx.addInitScript((f) => {
+            try {
+              localStorage.setItem(
+                'hydra-artifact-tagfilter-sim-project-agent-1',
+                JSON.stringify({ scoped: f.scoped ?? {}, free: f.free ?? [] }),
+              )
+            } catch {
+              // ignore storage failures
+            }
+          }, pg.tagFilter)
         }
         await ctx.addInitScript(() => {
           // Pre-trust the simulated project so the first-open "Trust this

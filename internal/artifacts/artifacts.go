@@ -144,6 +144,11 @@ type FileMeta struct {
 	Name string `json:"name"` // path relative to the entry dir, forward-slashed
 	Size int64  `json:"size"`
 	Hash string `json:"hash"` // sha256 hex of the file contents
+	// Tags are labels read from the file's sibling JSON sidecar (<file>.meta,
+	// {"tags": [...]}) — see readTagsSidecar/normalizeTags. They drive the diff
+	// viewer's tag badges and filter. Already normalized: deduped, sorted, and
+	// with GitLab-style scoped labels collapsed to one value per category.
+	Tags []string `json:"tags,omitempty"`
 }
 
 // Meta is the persisted (and returned) description of one cache entry.
@@ -185,20 +190,24 @@ type FileDelta struct {
 	Change  ChangeType
 	InLeft  bool
 	InRight bool
+	// Tags are the file's labels, taken from the head (right) side when the file
+	// is present there, else the base (left) side — the head is the current
+	// source of truth for what a file is tagged as.
+	Tags []string
 }
 
 // Compare matches files by name across two versions' file lists and classifies
 // each as added/removed/modified/unchanged. The result is sorted by name.
 func Compare(left, right []FileMeta) []FileDelta {
-	leftHash := make(map[string]string, len(left))
-	rightHash := make(map[string]string, len(right))
+	leftByName := make(map[string]FileMeta, len(left))
+	rightByName := make(map[string]FileMeta, len(right))
 	names := map[string]struct{}{}
 	for _, f := range left {
-		leftHash[f.Name] = f.Hash
+		leftByName[f.Name] = f
 		names[f.Name] = struct{}{}
 	}
 	for _, f := range right {
-		rightHash[f.Name] = f.Hash
+		rightByName[f.Name] = f
 		names[f.Name] = struct{}{}
 	}
 	ordered := make([]string, 0, len(names))
@@ -209,15 +218,22 @@ func Compare(left, right []FileMeta) []FileDelta {
 
 	out := make([]FileDelta, 0, len(ordered))
 	for _, name := range ordered {
-		lh, inLeft := leftHash[name]
-		rh, inRight := rightHash[name]
+		lf, inLeft := leftByName[name]
+		rf, inRight := rightByName[name]
 		d := FileDelta{Name: name, InLeft: inLeft, InRight: inRight}
+		// Surface the head side's tags when the file exists there; otherwise the
+		// base side's (a removed file only exists on the left).
+		if inRight {
+			d.Tags = rf.Tags
+		} else {
+			d.Tags = lf.Tags
+		}
 		switch {
 		case inLeft && !inRight:
 			d.Change = ChangeRemoved
 		case !inLeft && inRight:
 			d.Change = ChangeAdded
-		case lh != rh:
+		case lf.Hash != rf.Hash:
 			d.Change = ChangeModified
 		default:
 			d.Change = ChangeUnchanged
@@ -715,10 +731,15 @@ func (m *Manager) generate(spec config.ArtifactScript, v Version, key, ref strin
 		return meta
 	}
 
-	files, err := scanOutputs(dir)
+	files, tagWarnings, err := scanOutputs(dir)
 	if err != nil {
 		meta.Status, meta.Error = StatusError, err.Error()
 		return meta
+	}
+	// Surface tag-sidecar problems in the build log (entry is still in-flight here,
+	// so appendLog records and persists them) without failing the generation.
+	for _, w := range tagWarnings {
+		m.appendLog(dir, w, StreamStderr, false)
 	}
 	meta.Files = files
 	meta.Status = StatusReady
@@ -966,8 +987,13 @@ func writeMeta(dir string, meta Meta) error {
 	return errtrace.Wrap(os.WriteFile(filepath.Join(dir, metaFile), data, 0o644))
 }
 
-func scanOutputs(dir string) ([]FileMeta, error) {
+// scanOutputs collects the image files a generation wrote, reading each file's
+// optional <file>.meta tag sidecar. It also returns human-readable warnings
+// (malformed sidecar JSON, a scoped-label category set more than once) for the
+// caller to fold into the build log so the script author sees them.
+func scanOutputs(dir string) ([]FileMeta, []string, error) {
 	var out []FileMeta
+	var warnings []string
 	err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return errtrace.Wrap(err)
@@ -976,21 +1002,85 @@ func scanOutputs(dir string) ([]FileMeta, error) {
 			return nil
 		}
 		if _, ok := imageExts[strings.ToLower(filepath.Ext(d.Name()))]; !ok {
-			return nil
+			return nil // skips .meta sidecars too (not an image extension)
 		}
 		hash, size, err := hashFile(p)
 		if err != nil {
 			return errtrace.Wrap(err)
 		}
 		rel, _ := filepath.Rel(dir, p)
-		out = append(out, FileMeta{Name: filepath.ToSlash(rel), Size: size, Hash: hash})
+		name := filepath.ToSlash(rel)
+		tags, warns := readTagsSidecar(p)
+		for _, w := range warns {
+			warnings = append(warnings, name+": "+w)
+		}
+		out = append(out, FileMeta{Name: name, Size: size, Hash: hash, Tags: tags})
 		return nil
 	})
 	if err != nil {
-		return nil, errtrace.Wrap(err)
+		return nil, nil, errtrace.Wrap(err)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
-	return out, nil
+	return out, warnings, nil
+}
+
+// readTagsSidecar reads the optional tag sidecar for an image file: a sibling
+// JSON file named "<image>.meta" of the form {"tags": ["a", "theme::dark"]}.
+// A missing/unreadable sidecar yields no tags and no warnings; malformed JSON
+// yields a warning (and no tags). The "meta" extension keeps a single, extensible
+// home for any future per-file metadata beyond tags.
+func readTagsSidecar(imagePath string) (tags, warnings []string) {
+	data, err := os.ReadFile(imagePath + ".meta")
+	if err != nil {
+		return nil, nil // no sidecar → no tags (the common case)
+	}
+	var sc struct {
+		Tags []string `json:"tags"`
+	}
+	if err := json.Unmarshal(data, &sc); err != nil {
+		return nil, []string{fmt.Sprintf("tags: ignoring malformed sidecar %s.meta: %v", filepath.Base(imagePath), err)}
+	}
+	return normalizeTags(sc.Tags)
+}
+
+// normalizeTags cleans a raw tag list and enforces GitLab-style scoped labels.
+// A tag of the form "category::value" is scoped: at most one value per category
+// survives, and the LAST one declared wins (with a warning naming the discarded
+// ones). Free-form tags (no "::") are kept as a deduped set. The result is sorted
+// for stable output. A scoped tag with an empty category or value is malformed
+// and kept verbatim as a free tag.
+func normalizeTags(raw []string) (tags, warnings []string) {
+	free := map[string]struct{}{}
+	scopedVal := map[string]string{}   // category -> chosen (last) "category::value"
+	scopedAll := map[string][]string{} // category -> every "category::value" seen, for the warning
+	for _, t := range raw {
+		t = strings.TrimSpace(t)
+		if t == "" {
+			continue
+		}
+		cat, val, isScoped := strings.Cut(t, "::")
+		cat, val = strings.TrimSpace(cat), strings.TrimSpace(val)
+		if !isScoped || cat == "" || val == "" {
+			free[t] = struct{}{} // free-form or malformed scoped tag
+			continue
+		}
+		full := cat + "::" + val
+		scopedAll[cat] = append(scopedAll[cat], full)
+		scopedVal[cat] = full // last declared wins
+	}
+	for t := range free {
+		tags = append(tags, t)
+	}
+	for cat, all := range scopedAll {
+		tags = append(tags, scopedVal[cat])
+		if len(all) > 1 {
+			warnings = append(warnings, fmt.Sprintf("tags: category %q set %d times (%s); keeping last (%s)",
+				cat, len(all), strings.Join(all, ", "), scopedVal[cat]))
+		}
+	}
+	sort.Strings(tags)
+	sort.Strings(warnings)
+	return tags, warnings
 }
 
 func hashFile(path string) (string, int64, error) {

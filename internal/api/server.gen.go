@@ -203,6 +203,9 @@ type ArtifactFile struct {
 
 	// RightUrl URL of the file for the right version (null if absent on the right)
 	RightUrl *string `json:"right_url"`
+
+	// Tags Labels for this file, read from a sibling JSON sidecar (<file>.meta, {"tags": [...]}). A "category::value" tag is a scoped label — only one value per category survives. Drives the artifacts panel's tag badges and filter. Null/absent when the file has no tags.
+	Tags *[]string `json:"tags"`
 }
 
 // ArtifactFileChangeType defines model for ArtifactFile.ChangeType.

@@ -9,7 +9,7 @@
 //      regenerated) the stale entry is ignored, so the card falls back to its
 //      status-derived defaults instead of restoring a now-irrelevant toggle.
 
-import { ARTIFACT_PREFS_PREFIX, artifactPrefsKey, readLocal, writeLocal } from './storage'
+import { ARTIFACT_PREFS_PREFIX, artifactPrefsKey, artifactTagFilterKey, readLocal, writeLocal } from './storage'
 
 export type ArtifactPrefs = {
   collapsed?: boolean
@@ -60,6 +60,33 @@ export function saveArtifactPrefs(
 ): void {
   const value: StoredArtifactPrefs = { ...prefs, status, t: Date.now() }
   writeLocal(artifactPrefsKey(projectId, agentId, name), JSON.stringify(value))
+}
+
+// The artifact tag filter, shared across an agent's cards. `scoped` maps a label
+// category (e.g. "theme") to the single selected value (e.g. "dark"); an absent
+// or empty value means "all". `free` is the set of selected free-form tags. An
+// empty filter (no scoped values, no free tags) means "show everything".
+export type ArtifactTagFilter = {
+  scoped: Record<string, string>
+  free: string[]
+}
+
+export function loadTagFilter(projectId: string | null, agentId: string): ArtifactTagFilter {
+  const raw = readLocal(artifactTagFilterKey(projectId, agentId))
+  if (!raw) return { scoped: {}, free: [] }
+  try {
+    const parsed = JSON.parse(raw) as Partial<ArtifactTagFilter>
+    return {
+      scoped: parsed.scoped && typeof parsed.scoped === 'object' ? parsed.scoped : {},
+      free: Array.isArray(parsed.free) ? parsed.free.filter((t): t is string => typeof t === 'string') : [],
+    }
+  } catch {
+    return { scoped: {}, free: [] }
+  }
+}
+
+export function saveTagFilter(projectId: string | null, agentId: string, filter: ArtifactTagFilter): void {
+  writeLocal(artifactTagFilterKey(projectId, agentId), JSON.stringify(filter))
 }
 
 // Drop expired artifact-pref entries. Cheap to call once on app boot; iterating
