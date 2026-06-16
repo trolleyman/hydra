@@ -4,6 +4,7 @@ import type { ArtifactSet, ArtifactFile, ArtifactLogLine } from '../api'
 import { LoaderCircle, Image as ImageIcon, ImageOff, ChevronDown, ChevronRight, TriangleAlert, RefreshCw } from 'lucide-react'
 import { InfoTooltip } from './InfoTooltip'
 import { loadArtifactPrefs, saveArtifactPrefs } from '../lib/artifactPrefs'
+import { stripAnsi } from '../lib/ansi'
 
 const CHANGE_LABEL: Record<string, string> = {
   added: 'added',
@@ -352,7 +353,7 @@ function LogView({ log, emptyText = 'Waiting for output…' }: { log: ArtifactLo
                 (l.stream as string) === 'stderr' ? 'text-red-600 dark:text-red-400' : 'text-gray-600 dark:text-gray-300'
               }`}
             >
-              {l.text}
+              {stripAnsi(l.text)}
             </div>
           ))
         )}
@@ -613,7 +614,7 @@ function ArtifactSetCard({ set, mode, onRefresh, projectId, agentId }: { set: Ar
           {status === 'error' && (
             <>
               <div className="my-2 px-3 py-2 rounded-md bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 font-mono text-xs text-red-600 dark:text-red-400 whitespace-pre-wrap break-words">
-                {set.error || 'Artifact generation failed.'}
+                {set.error ? stripAnsi(set.error) : 'Artifact generation failed.'}
               </div>
               <PersistedLogView leftUrl={set.left_log_url} rightUrl={set.right_log_url} open={buildLogOpen} onOpenChange={setBuildLogOpen} />
             </>
