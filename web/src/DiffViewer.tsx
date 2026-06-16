@@ -372,6 +372,21 @@ const SideBySideHunk = memo(function SideBySideHunk({ hunk, highlightedOld, high
 
 // ── File diff card ────────────────────────────────────────────────────────────
 
+// PathName renders a file path with the change-type colour applied only to the
+// filename (last segment); the leading directory part is shown in a lowlit grey
+// so the eye lands on the file that actually changed.
+function PathName({ path, nameClass }: { path: string; nameClass: string }) {
+  const idx = path.lastIndexOf('/')
+  const dir = idx === -1 ? '' : path.slice(0, idx + 1)
+  const base = idx === -1 ? path : path.slice(idx + 1)
+  return (
+    <>
+      {dir && <span className="text-gray-400 dark:text-gray-500">{dir}</span>}
+      <span className={nameClass}>{base}</span>
+    </>
+  )
+}
+
 const EXPANDER_ROW = 'flex items-center bg-blue-50 dark:bg-blue-950/30 border-y border-blue-100 dark:border-blue-900/50 px-2 py-0.5'
 const EXPANDER_BTN = 'p-0.5 rounded hover:bg-blue-100 dark:hover:bg-blue-900/50 text-blue-500 cursor-pointer'
 
@@ -412,9 +427,6 @@ const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onComment, 
 
   const expand = (newCtx: number) => onExpand(file.path, newCtx)
 
-  const displayPath = file.change_type === 'renamed' && file.old_path
-    ? `${file.old_path} → ${file.path}` : file.path
-
   return (
     <div ref={fileRef} className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden mb-4 bg-white dark:bg-gray-900 shadow-sm">
       <div
@@ -428,10 +440,16 @@ const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onComment, 
           <ChevronDown className={`w-4 h-4 transition-transform ${isCollapsed ? '-rotate-90' : ''}`} />
         </button>
         {(() => { const { Icon, className } = getFileIcon(file.path.split('/').pop() ?? file.path); return <Icon className={`w-3.5 h-3.5 shrink-0 ${className}`} /> })()}
-        <span
-          className={`font-mono text-xs flex-1 min-w-0 truncate cursor-pointer hover:underline ${changeTypeTextClass(file.change_type)}`}
-        >
-          {displayPath}
+        <span className="font-mono text-xs flex-1 min-w-0 truncate cursor-pointer hover:underline">
+          {file.change_type === 'renamed' && file.old_path ? (
+            <>
+              <PathName path={file.old_path} nameClass={changeTypeTextClass('renamed')} />
+              <span className="text-gray-400 dark:text-gray-500"> → </span>
+              <PathName path={file.path} nameClass={changeTypeTextClass('renamed')} />
+            </>
+          ) : (
+            <PathName path={file.path} nameClass={changeTypeTextClass(file.change_type)} />
+          )}
         </span>
         <CopyButton text={file.path} />
         {!file.binary && (
