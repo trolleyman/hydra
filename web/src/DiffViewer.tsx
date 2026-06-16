@@ -12,6 +12,7 @@ import {
 import { Tooltip } from './components/Tooltip'
 import { ArtifactsPanel, IMAGE_DIFF_MODES, type ImageDiffMode } from './components/ArtifactsPanel'
 import { useDialogStore } from './stores/dialogStore'
+import { StorageKeys, readLocal, writeLocal } from './lib/storage'
 
 // ── Syntax highlighting helpers ───────────────────────────────────────────────
 
@@ -1296,34 +1297,22 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger }: { agent
   const [diffError, setDiffError] = useState<string | null>(null)
   const [refreshKey, setRefreshKey] = useState(0)
 
-  const [sideBySide, setSideBySide] = useState(() => {
-    try { return localStorage.getItem('hydra-diff-side-by-side') === 'true' } catch { return false }
-  })
-  const [ignoreWhitespace, setIgnoreWhitespace] = useState(() => {
-    try { return localStorage.getItem('hydra-diff-ignore-whitespace') === 'true' } catch { return false }
-  })
-  const [singleFile, setSingleFile] = useState(() => {
-    try { return localStorage.getItem('hydra-diff-single-file') === 'true' } catch { return false }
-  })
+  const [sideBySide, setSideBySide] = useState(() => readLocal(StorageKeys.diffSideBySide) === 'true')
+  const [ignoreWhitespace, setIgnoreWhitespace] = useState(() => readLocal(StorageKeys.diffIgnoreWhitespace) === 'true')
+  const [singleFile, setSingleFile] = useState(() => readLocal(StorageKeys.diffSingleFile) === 'true')
   const [fileView, setFileView] = useState<FileView>(() => {
-    try {
-      const stored = localStorage.getItem('hydra-diff-file-view')
-      if (stored === 'tree' || stored === 'flat' || stored === 'grouped') return stored
-    } catch { }
+    const stored = readLocal(StorageKeys.diffFileView)
+    if (stored === 'tree' || stored === 'flat' || stored === 'grouped') return stored
     return 'tree'
   })
   const [sidebarWidth, setSidebarWidth] = useState(() => {
-    try {
-      const stored = localStorage.getItem('hydra-diff-sidebar-width')
-      if (stored) return parseInt(stored, 10)
-    } catch { }
+    const stored = readLocal(StorageKeys.diffSidebarWidth)
+    if (stored) return parseInt(stored, 10)
     return 220
   })
   const [imageDiffMode, setImageDiffMode] = useState<ImageDiffMode>(() => {
-    try {
-      const stored = localStorage.getItem('hydra-diff-image-mode')
-      if (stored === 'side-by-side' || stored === 'ab' || stored === 'slider' || stored === 'onion') return stored
-    } catch { }
+    const stored = readLocal(StorageKeys.diffImageMode)
+    if (stored === 'side-by-side' || stored === 'ab' || stored === 'slider' || stored === 'onion') return stored
     return 'side-by-side'
   })
 
@@ -1340,12 +1329,12 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger }: { agent
   const sidebarRef = useRef<HTMLDivElement>(null)
   const commitsRef = useRef<CommitInfo[]>([])
 
-  useEffect(() => { try { localStorage.setItem('hydra-diff-side-by-side', String(sideBySide)) } catch { } }, [sideBySide])
-  useEffect(() => { try { localStorage.setItem('hydra-diff-ignore-whitespace', String(ignoreWhitespace)) } catch { } }, [ignoreWhitespace])
-  useEffect(() => { try { localStorage.setItem('hydra-diff-single-file', String(singleFile)) } catch { } }, [singleFile])
-  useEffect(() => { try { localStorage.setItem('hydra-diff-file-view', fileView) } catch { } }, [fileView])
-  useEffect(() => { try { localStorage.setItem('hydra-diff-sidebar-width', String(sidebarWidth)) } catch { } }, [sidebarWidth])
-  useEffect(() => { try { localStorage.setItem('hydra-diff-image-mode', imageDiffMode) } catch { } }, [imageDiffMode])
+  useEffect(() => { writeLocal(StorageKeys.diffSideBySide, String(sideBySide)) }, [sideBySide])
+  useEffect(() => { writeLocal(StorageKeys.diffIgnoreWhitespace, String(ignoreWhitespace)) }, [ignoreWhitespace])
+  useEffect(() => { writeLocal(StorageKeys.diffSingleFile, String(singleFile)) }, [singleFile])
+  useEffect(() => { writeLocal(StorageKeys.diffFileView, fileView) }, [fileView])
+  useEffect(() => { writeLocal(StorageKeys.diffSidebarWidth, String(sidebarWidth)) }, [sidebarWidth])
+  useEffect(() => { writeLocal(StorageKeys.diffImageMode, imageDiffMode) }, [imageDiffMode])
 
   const toggleFolder = useCallback((path: string) => {
     setCollapsedFolders((prev) => {

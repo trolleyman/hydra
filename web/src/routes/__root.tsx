@@ -21,6 +21,7 @@ export const Route = createRootRoute({
 
 import { useDialogStore } from '../stores/dialogStore'
 import { pruneArtifactPrefs } from '../lib/artifactPrefs'
+import { StorageKeys, selectedAgentKey, readLocal, writeLocal } from '../lib/storage'
 
 function formatSpawnedAgo(ms: number): string {
   const seconds = Math.floor(ms / 1000)
@@ -250,7 +251,6 @@ function ProjectDropdown({
 // Theme preference: an explicit light/dark choice, or `system` to follow the OS
 // `prefers-color-scheme` and react to changes while the app is open.
 type ThemeMode = 'light' | 'dark' | 'system'
-const THEME_MODE_KEY = 'hydra-theme-mode'
 // Cycle order used by the header selector button.
 const NEXT_THEME_MODE: Record<ThemeMode, ThemeMode> = {
   light: 'dark',
@@ -269,34 +269,22 @@ const THEME_MODE_LABEL: Record<ThemeMode, string> = {
 }
 
 function loadThemeMode(): ThemeMode {
-  const stored = localStorage.getItem(THEME_MODE_KEY)
+  const stored = readLocal(StorageKeys.themeMode)
   if (stored === 'light' || stored === 'dark' || stored === 'system') return stored
   // Migrate the legacy boolean preference (`hydra-dark-mode`) if present.
-  const legacy = localStorage.getItem('hydra-dark-mode')
+  const legacy = readLocal(StorageKeys.darkModeLegacy)
   if (legacy !== null) return legacy === 'true' ? 'dark' : 'light'
   return 'system'
 }
 
 // Per-project memory of the last-selected agent, so switching back to a project
 // restores its agent view rather than dropping you on the bare project page.
-const SELECTED_AGENT_KEY_PREFIX = 'hydra-selected-agent-'
-
 function loadSelectedAgentId(projectId: string): string | null {
-  try {
-    return localStorage.getItem(SELECTED_AGENT_KEY_PREFIX + projectId)
-  } catch {
-    return null
-  }
+  return readLocal(selectedAgentKey(projectId))
 }
 
 function saveSelectedAgentId(projectId: string, agentId: string | null) {
-  try {
-    if (agentId == null) {
-      localStorage.removeItem(SELECTED_AGENT_KEY_PREFIX + projectId)
-    } else {
-      localStorage.setItem(SELECTED_AGENT_KEY_PREFIX + projectId, agentId)
-    }
-  } catch { /* ignore */ }
+  writeLocal(selectedAgentKey(projectId), agentId)
 }
 
 function RootLayout() {
@@ -318,10 +306,8 @@ function RootLayout() {
   const selectedAgentId = routeParams.agentId
 
   const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
-    try {
-      const saved = localStorage.getItem('hydra-sidebar-width')
-      if (saved) return Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, parseInt(saved, 10)))
-    } catch { /* ignore */ }
+    const saved = readLocal(StorageKeys.sidebarWidth)
+    if (saved) return Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, parseInt(saved, 10)))
     return SIDEBAR_DEFAULT
   })
   const sidebarWidthRef = useRef(sidebarWidth)
@@ -342,7 +328,7 @@ function RootLayout() {
     function onUp() {
       document.body.style.cursor = ''
       document.body.style.userSelect = ''
-      try { localStorage.setItem('hydra-sidebar-width', String(sidebarWidthRef.current)) } catch { /* ignore */ }
+      writeLocal(StorageKeys.sidebarWidth, String(sidebarWidthRef.current))
       document.removeEventListener('mousemove', onMove)
       document.removeEventListener('mouseup', onUp)
     }
@@ -351,8 +337,8 @@ function RootLayout() {
   }, [])
 
   useEffect(() => {
-    localStorage.setItem(THEME_MODE_KEY, themeMode)
-    localStorage.removeItem('hydra-dark-mode') // drop the migrated legacy key
+    writeLocal(StorageKeys.themeMode, themeMode)
+    writeLocal(StorageKeys.darkModeLegacy, null) // drop the migrated legacy key
     const mql = window.matchMedia('(prefers-color-scheme: dark)')
     const apply = () => {
       const isDark = themeMode === 'dark' || (themeMode === 'system' && mql.matches)
