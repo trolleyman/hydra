@@ -5,6 +5,7 @@ import { api } from '../stores/apiClient'
 import { formatError } from '../api/format_error'
 import { ApiError } from '../api'
 import type { RepositoryFileResponse, RepositoryBranch } from '../api'
+import { StorageKeys, readLocal, writeLocal } from '../lib/storage'
 import {
   ChevronDown, ChevronRight, File as FileIcon, Folder, FolderOpen, FileText,
   FileCode, FileJson, FileImage, FileCog, Info, Scale, Bot, GitBranch, Braces,
@@ -606,11 +607,9 @@ function FileNotFound({ path, refStr }: { path: string; refStr: string }) {
 // ── Settings persistence ──────────────────────────────────────────────────────
 
 function loadBool(key: string, def: boolean): boolean {
-  try {
-    const v = localStorage.getItem(key)
-    if (v === 'true') return true
-    if (v === 'false') return false
-  } catch { /* ignore */ }
+  const v = readLocal(key)
+  if (v === 'true') return true
+  if (v === 'false') return false
   return def
 }
 
@@ -652,18 +651,18 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
 
   // Settings (PLAN.md #41d wrap-on-by-default, #41e popup, #41l icons).
   const [settings, setSettings] = useState<RepoSettings>(() => ({
-    wrap: loadBool('hydra-repo-wrap', true),
-    showIcons: loadBool('hydra-repo-icons', true),
+    wrap: loadBool(StorageKeys.repoWrap, true),
+    showIcons: loadBool(StorageKeys.repoIcons, true),
   }))
-  useEffect(() => { try { localStorage.setItem('hydra-repo-wrap', String(settings.wrap)) } catch { /* ignore */ } }, [settings.wrap])
-  useEffect(() => { try { localStorage.setItem('hydra-repo-icons', String(settings.showIcons)) } catch { /* ignore */ } }, [settings.showIcons])
+  useEffect(() => { writeLocal(StorageKeys.repoWrap, String(settings.wrap)) }, [settings.wrap])
+  useEffect(() => { writeLocal(StorageKeys.repoIcons, String(settings.showIcons)) }, [settings.showIcons])
 
   // Resizable sidebar (PLAN.md #41i).
   const [sidebarWidth, setSidebarWidth] = useState(() => {
-    const n = parseInt(localStorage.getItem('hydra-repo-sidebar-width') ?? '', 10)
+    const n = parseInt(readLocal(StorageKeys.repoSidebarWidth) ?? '', 10)
     return Number.isFinite(n) && n >= 160 && n <= 640 ? n : 256
   })
-  useEffect(() => { try { localStorage.setItem('hydra-repo-sidebar-width', String(sidebarWidth)) } catch { /* ignore */ } }, [sidebarWidth])
+  useEffect(() => { writeLocal(StorageKeys.repoSidebarWidth, String(sidebarWidth)) }, [sidebarWidth])
   const [isResizing, setIsResizing] = useState(false)
   const sidebarRef = useRef<HTMLDivElement>(null)
   const startResizing = useCallback((e: React.MouseEvent) => { e.preventDefault(); setIsResizing(true) }, [])

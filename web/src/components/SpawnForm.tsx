@@ -5,6 +5,7 @@ import { formatError } from '../api/format_error'
 import { uploadFile, extractFiles, isImageFile } from '../api/uploads'
 import { Zap, LoaderCircle, Paperclip, X, FileText } from 'lucide-react'
 import { Tooltip } from './Tooltip'
+import { StorageKeys, promptDraftKey, readLocal, writeLocal } from '../lib/storage'
 
 type AgentTypeOption = 'claude' | 'gemini' | 'copilot'
 
@@ -121,12 +122,10 @@ export function SpawnForm({
   const [agentId, setAgentId] = useState('')
   const [idManuallyEdited, setIdManuallyEdited] = useState(false)
   const [agentType, setAgentType] = useState<AgentTypeOption>(() => {
-    try {
-      const saved = localStorage.getItem('hydra-default-agent-type')
-      if (saved && (saved === 'claude' || saved === 'gemini' || saved === 'copilot')) {
-        return saved as AgentTypeOption
-      }
-    } catch { /* ignore */ }
+    const saved = readLocal(StorageKeys.defaultAgentType)
+    if (saved && (saved === 'claude' || saved === 'gemini' || saved === 'copilot')) {
+      return saved as AgentTypeOption
+    }
     return 'claude'
   })
   const [loading, setLoading] = useState(false)
@@ -148,9 +147,7 @@ export function SpawnForm({
   }, [])
 
   useEffect(() => {
-    try {
-      localStorage.setItem('hydra-default-agent-type', agentType)
-    } catch { /* ignore */ }
+    writeLocal(StorageKeys.defaultAgentType, agentType)
   }, [agentType])
 
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -159,14 +156,11 @@ export function SpawnForm({
   useEffect(() => {
     if (!compact || !textareaRef.current) return
 
-    const key = 'hydra-sidebar-spawn-height'
     const textarea = textareaRef.current
-    try {
-      const savedHeight = localStorage.getItem(key)
-      if (savedHeight) {
-        textarea.style.height = `${savedHeight}px`
-      }
-    } catch { /* ignore */ }
+    const savedHeight = readLocal(StorageKeys.spawnHeight)
+    if (savedHeight) {
+      textarea.style.height = `${savedHeight}px`
+    }
 
     let timer: ReturnType<typeof setTimeout>
     const observer = new ResizeObserver((entries) => {
@@ -175,9 +169,7 @@ export function SpawnForm({
         if (height > 0) {
           clearTimeout(timer)
           timer = setTimeout(() => {
-            try {
-              localStorage.setItem(key, String(height))
-            } catch { /* ignore */ }
+            writeLocal(StorageKeys.spawnHeight, String(height))
           }, 200)
         }
       }
@@ -197,7 +189,7 @@ export function SpawnForm({
   // Persist the in-progress prompt as a per-project draft so it survives page
   // reloads and project switches. The compact (sidebar) and full-page boxes use
   // distinct keys so their drafts never bleed into one another.
-  const draftKey = projectId ? `hydra-prompt-draft-${compact ? 'compact' : 'full'}-${projectId}` : null
+  const draftKey = projectId ? promptDraftKey(projectId, compact) : null
 
   // Load the saved draft on mount and whenever the project changes, clearing the
   // box when the new project has no draft.
@@ -206,20 +198,13 @@ export function SpawnForm({
       setPrompt('')
       return
     }
-    try {
-      setPrompt(localStorage.getItem(draftKey) ?? '')
-    } catch {
-      setPrompt('')
-    }
+    setPrompt(readLocal(draftKey) ?? '')
   }, [draftKey])
 
   function handlePromptChange(value: string) {
     setPrompt(value)
     if (!draftKey) return
-    try {
-      if (value) localStorage.setItem(draftKey, value)
-      else localStorage.removeItem(draftKey)
-    } catch { /* ignore */ }
+    writeLocal(draftKey, value || null)
   }
 
   function handleIdChange(value: string) {
@@ -299,9 +284,7 @@ export function SpawnForm({
       }
       const agent = await api.default.spawnAgent(projectId ?? '', req)
       setPrompt('')
-      if (draftKey) {
-        try { localStorage.removeItem(draftKey) } catch { /* ignore */ }
-      }
+      if (draftKey) writeLocal(draftKey, null)
       setAgentId('')
       setIdManuallyEdited(false)
       attachments.forEach((a) => a.previewUrl && URL.revokeObjectURL(a.previewUrl))

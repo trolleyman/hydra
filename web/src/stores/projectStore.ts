@@ -1,7 +1,6 @@
 import { create } from 'zustand'
 import type { ProjectInfo, StatusResponse } from '../api'
-
-const STORAGE_KEY = 'hydra-project-id'
+import { StorageKeys, readLocal, writeLocal } from '../lib/storage'
 
 interface ProjectState {
   projects: ProjectInfo[]
@@ -14,23 +13,11 @@ interface ProjectState {
 
 export const useProjectStore = create<ProjectState>((set) => ({
   projects: [],
-  selectedProjectId: (() => {
-    try {
-      return localStorage.getItem(STORAGE_KEY)
-    } catch {
-      return null
-    }
-  })(),
+  selectedProjectId: readLocal(StorageKeys.projectId),
   systemStatus: null,
   setProjects: (projects) => set({ projects }),
   setSelectedProjectId: (id) => {
-    try {
-      if (id == null) {
-        localStorage.removeItem(STORAGE_KEY)
-      } else {
-        localStorage.setItem(STORAGE_KEY, id)
-      }
-    } catch { /* ignore */ }
+    writeLocal(StorageKeys.projectId, id)
     set({ selectedProjectId: id })
   },
   setSystemStatus: (systemStatus) => set({ systemStatus }),

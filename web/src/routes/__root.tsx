@@ -20,6 +20,8 @@ export const Route = createRootRoute({
 })
 
 import { useDialogStore } from '../stores/dialogStore'
+import { pruneArtifactPrefs } from '../lib/artifactPrefs'
+import { StorageKeys, selectedAgentKey, readLocal, writeLocal } from '../lib/storage'
 
 function formatSpawnedAgo(ms: number): string {
   const seconds = Math.floor(ms / 1000)
@@ -249,7 +251,6 @@ function ProjectDropdown({
 // Theme preference: an explicit light/dark choice, or `system` to follow the OS
 // `prefers-color-scheme` and react to changes while the app is open.
 type ThemeMode = 'light' | 'dark' | 'system'
-const THEME_MODE_KEY = 'hydra-theme-mode'
 // Cycle order used by the header selector button.
 const NEXT_THEME_MODE: Record<ThemeMode, ThemeMode> = {
   light: 'dark',
@@ -268,12 +269,22 @@ const THEME_MODE_LABEL: Record<ThemeMode, string> = {
 }
 
 function loadThemeMode(): ThemeMode {
-  const stored = localStorage.getItem(THEME_MODE_KEY)
+  const stored = readLocal(StorageKeys.themeMode)
   if (stored === 'light' || stored === 'dark' || stored === 'system') return stored
   // Migrate the legacy boolean preference (`hydra-dark-mode`) if present.
-  const legacy = localStorage.getItem('hydra-dark-mode')
+  const legacy = readLocal(StorageKeys.darkModeLegacy)
   if (legacy !== null) return legacy === 'true' ? 'dark' : 'light'
   return 'system'
+}
+
+// Per-project memory of the last-selected agent, so switching back to a project
+// restores its agent view rather than dropping you on the bare project page.
+function loadSelectedAgentId(projectId: string): string | null {
+  return readLocal(selectedAgentKey(projectId))
+}
+
+function saveSelectedAgentId(projectId: string, agentId: string | null) {
+  writeLocal(selectedAgentKey(projectId), agentId)
 }
 
 function RootLayout() {
@@ -295,10 +306,8 @@ function RootLayout() {
   const selectedAgentId = routeParams.agentId
 
   const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
-    try {
-      const saved = localStorage.getItem('hydra-sidebar-width')
-      if (saved) return Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, parseInt(saved, 10)))
-    } catch { /* ignore */ }
+    const saved = readLocal(StorageKeys.sidebarWidth)
+    if (saved) return Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, parseInt(saved, 10)))
     return SIDEBAR_DEFAULT
   })
   const sidebarWidthRef = useRef(sidebarWidth)
@@ -319,7 +328,7 @@ function RootLayout() {
     function onUp() {
       document.body.style.cursor = ''
       document.body.style.userSelect = ''
-      try { localStorage.setItem('hydra-sidebar-width', String(sidebarWidthRef.current)) } catch { /* ignore */ }
+      writeLocal(StorageKeys.sidebarWidth, String(sidebarWidthRef.current))
       document.removeEventListener('mousemove', onMove)
       document.removeEventListener('mouseup', onUp)
     }
@@ -328,8 +337,8 @@ function RootLayout() {
   }, [])
 
   useEffect(() => {
-    localStorage.setItem(THEME_MODE_KEY, themeMode)
-    localStorage.removeItem('hydra-dark-mode') // drop the migrated legacy key
+    writeLocal(StorageKeys.themeMode, themeMode)
+    writeLocal(StorageKeys.darkModeLegacy, null) // drop the migrated legacy key
     const mql = window.matchMedia('(prefers-color-scheme: dark)')
     const apply = () => {
       const isDark = themeMode === 'dark' || (themeMode === 'system' && mql.matches)
@@ -443,9 +452,45 @@ function RootLayout() {
     }
     if (selectedProjectId != null && projects.some((p) => p.id === selectedProjectId)) {
       didAutoNavigate.current = true
-      navigate({ to: '/project/$projectId', params: { projectId: selectedProjectId } })
+      // Restore the agent that was last open in this project, if any (read the
+      // saved id up front so the save effect below — which momentarily sees the
+      // bare project route — can't wipe it before we navigate).
+      const savedAgentId = loadSelectedAgentId(selectedProjectId)
+      if (savedAgentId) {
+        navigate({ to: '/project/$projectId/agent/$agentId', params: { projectId: selectedProjectId, agentId: savedAgentId } })
+      } else {
+        navigate({ to: '/project/$projectId', params: { projectId: selectedProjectId } })
+      }
     }
   }, [selectedProjectId, projects, navigate])
+
+  // Persist which agent is selected per project so switching back restores it.
+  // Keyed off the actual route params (not currentProjectId, which falls back to
+  // the stored project on "/" and would let this wipe the memory before the boot
+  // restore below runs). Single writer: clear on the bare project page, and avoid
+  // persisting an id that isn't in the project's loaded agent list — so a
+  // killed/expired agent doesn't keep routing you to "not found".
+  useEffect(() => {
+    const projectId = routeParams.projectId
+    if (!projectId) return // not on a project route ("/", "/settings") — leave storage alone
+    const agentId = routeParams.agentId
+    if (agentId == null) {
+      saveSelectedAgentId(projectId, null)
+      return
+    }
+    // `agents` is loaded for this project once every entry's project_path matches
+    // it; until then (e.g. mid project-switch) keep the optimistic value.
+    const proj = projects.find((p) => p.id === projectId)
+    const agentsLoaded = proj != null && agents.length > 0 && agents.every((a) => a.project_path === proj.path)
+    if (agentsLoaded && !agents.some((a) => a.id === agentId)) {
+      saveSelectedAgentId(projectId, null)
+    } else {
+      saveSelectedAgentId(projectId, agentId)
+    }
+  }, [routeParams.projectId, routeParams.agentId, agents, projects])
+
+  // Drop expired per-artifact UI prefs once on boot (see lib/artifactPrefs).
+  useEffect(() => { pruneArtifactPrefs() }, [])
 
   async function handleRestart() {
     setRestarting(true)
@@ -576,7 +621,19 @@ function RootLayout() {
           onSelect={(id) => {
             setSelectedProjectId(id)
             const isOnSettings = window.location.pathname.endsWith('/settings')
-            navigate({ to: isOnSettings ? '/project/$projectId/settings' : '/project/$projectId', params: { projectId: id } })
+            if (isOnSettings) {
+              navigate({ to: '/project/$projectId/settings', params: { projectId: id } })
+              return
+            }
+            // Restore the agent last open in the project we're switching to;
+            // navigate straight to it so the agent view comes back, not the bare
+            // project page. Falls back to the project page when none is remembered.
+            const savedAgentId = loadSelectedAgentId(id)
+            if (savedAgentId) {
+              navigate({ to: '/project/$projectId/agent/$agentId', params: { projectId: id, agentId: savedAgentId } })
+            } else {
+              navigate({ to: '/project/$projectId', params: { projectId: id } })
+            }
           }}
           onDeselect={() => {
             setSelectedProjectId(null)
