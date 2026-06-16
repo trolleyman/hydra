@@ -223,9 +223,14 @@ type ArtifactLogLineStream string
 // ArtifactSet defines model for ArtifactSet.
 type ArtifactSet struct {
 	// Changed Whether any file differs between the two versions
-	Changed bool           `json:"changed"`
-	Error   *string        `json:"error"`
-	Files   []ArtifactFile `json:"files"`
+	Changed bool `json:"changed"`
+
+	// Error Set only when the whole set failed (status "error") — i.e. both sides failed, or a side could not be loaded at all. When just one side fails while the other renders, status stays "ready" and the failure is reported in left_error / right_error instead.
+	Error *string        `json:"error"`
+	Files []ArtifactFile `json:"files"`
+
+	// LeftError Error message from the LEFT (before) generation when that side failed but the RIGHT side still rendered, so the panel can show the available images alongside a warning. Null when the left side succeeded (or when the whole set failed — see error).
+	LeftError *string `json:"left_error"`
 
 	// LeftLog Captured stdout+stderr lines of the in-flight LEFT (before) generation, surfaced as a live log. Only populated while that side is generating; once settled, fetch left_log_url instead.
 	LeftLog *[]ArtifactLogLine `json:"left_log"`
@@ -238,6 +243,9 @@ type ArtifactSet struct {
 
 	// Name The configured artifact script name
 	Name string `json:"name"`
+
+	// RightError As left_error, for the RIGHT (after) side.
+	RightError *string `json:"right_error"`
 
 	// RightLog As left_log, for the RIGHT (after) generation.
 	RightLog *[]ArtifactLogLine `json:"right_log"`

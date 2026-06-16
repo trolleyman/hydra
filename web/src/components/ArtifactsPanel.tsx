@@ -527,6 +527,11 @@ function ArtifactSetCard({ set, mode, onRefresh, projectId, agentId }: { set: Ar
   const changedFiles = set.files.filter((f) => f.change_type !== 'unchanged')
   const unchangedFiles = set.files.filter((f) => f.change_type === 'unchanged')
   const noChanges = status === 'ready' && !set.changed
+  // One side failed while the other rendered (status stays "ready"): surface a
+  // warning but still show the surviving side's images. Both-sides-failed is the
+  // whole-set "error" status instead, so at most one of these is set here.
+  const failedSide: 'left' | 'right' | null = set.left_error ? 'left' : set.right_error ? 'right' : null
+  const failedSideError = set.left_error || set.right_error
 
   // Restore any saved view prefs for this card (persisted per project+agent+name).
   // loadArtifactPrefs returns null when the saved status no longer matches the
@@ -592,6 +597,13 @@ function ArtifactSetCard({ set, mode, onRefresh, projectId, agentId }: { set: Ar
               // out at a glance from the muted "no visual changes" cards.
               <span className="text-xs font-medium text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-900/40 rounded-full px-2 py-0.5 shrink-0">{changedFiles.length} changed</span>
             ))}
+          {status === 'ready' && failedSide && (
+            // One side failed to render; flag it in the header so it's visible
+            // even while the card is collapsed (the images shown are one-sided).
+            <span className="flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400 shrink-0">
+              <TriangleAlert className="w-3 h-3" /> {failedSide === 'left' ? 'before' : 'after'} failed
+            </span>
+          )}
         </button>
         {/* Bust the per-commit cache and regenerate — chiefly to retry a failure,
             whose error is otherwise cached until the ref changes, but always
@@ -628,6 +640,19 @@ function ArtifactSetCard({ set, mode, onRefresh, projectId, agentId }: { set: Ar
             // all its unchanged artifacts onto the screen once a render settles to
             // "no visual changes". Only the genuinely empty case gets a placeholder.
             <>
+              {failedSide && (
+                // One side died; show its error but keep rendering the side that
+                // succeeded (its files surface as added/removed in the grid).
+                <div className="my-2 px-3 py-2 rounded-md bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 text-xs text-amber-700 dark:text-amber-300">
+                  <div className="flex items-center gap-1.5 font-medium">
+                    <TriangleAlert className="w-3.5 h-3.5 shrink-0" />
+                    The {failedSide === 'left' ? 'before (left)' : 'after (right)'} side failed to render — showing the {failedSide === 'left' ? 'after' : 'before'} side only.
+                  </div>
+                  {failedSideError && (
+                    <pre className="mt-1.5 font-mono whitespace-pre-wrap break-words text-amber-800/90 dark:text-amber-200/80">{stripAnsi(failedSideError)}</pre>
+                  )}
+                </div>
+              )}
               {set.files.length === 0 ? (
                 <div className="my-2 text-xs text-gray-400 dark:text-gray-500">No artifacts produced.</div>
               ) : (
