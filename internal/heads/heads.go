@@ -281,12 +281,16 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 
 	// Build the sandbox launch options.
 	cfg, _ := config.Load(projectRoot)
-	writable, masked, restore, net, preSpawn := cfg.ResolveSandboxOptions(string(opts.AgentType))
+	writable, masked, restore, cowPaths, net, preSpawn := cfg.ResolveSandboxOptions(string(opts.AgentType))
 	// Pre-spawn is a once-per-head hook: it runs only when a head is first
 	// spawned, never on a resume (where the prior conversation is restored).
 	if opts.Resume {
 		preSpawn = ""
 	}
+	// COW mounts are re-applied on every launch (they are mount-time, not
+	// persistent), with a per-head writable upper so the agent's overwrites
+	// persist across resumes but never touch the real source.
+	cowMounts := buildCowMounts(projectRoot, worktreePath, opts.ID, cowPaths, true)
 
 	seed, err := seedHead(projectRoot, opts.ID, opts.AgentType, worktreePath, home, opts.PrePrompt)
 	if err != nil {
@@ -318,6 +322,7 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 			RestoreRO:      restore,
 			Network:        net,
 			Binds:          seed.Binds,
+			CowMounts:      cowMounts,
 			Env:            env,
 			Argv:           argv,
 			PreSpawnScript: preSpawn,
@@ -365,6 +370,7 @@ func spawnCleanup(store *db.Store, projectRoot string, opts SpawnHeadOptions, wo
 		_ = store.SoftDeleteAgent(opts.ID)
 	}
 	RemoveAgentStatusFiles(projectRoot, opts.ID)
+	removeCowDir(projectRoot, opts.ID)
 }
 
 // spawnFail records a spawn failure in the status file + DB.
@@ -470,12 +476,17 @@ func StartShellSession(reg *session.Registry, projectRoot string, head Head, row
 		// repeatedly over a head's life. Running it here also made a failing
 		// script (e.g. a bashism error) abort the shell before /bin/bash ever
 		// exec'd, closing the terminal instantly.
-		writable, masked, restore, net, _ := cfg.ResolveSandboxOptions("bash")
+		writable, masked, restore, cowPaths, net, _ := cfg.ResolveSandboxOptions("bash")
 		// Bash is an interactive shell, not an agent — no system prompt to inject.
 		seed, err := seedHead(projectRoot, shellID, sandbox.AgentTypeBash, worktreePath, home, "")
 		if err != nil {
 			return "", errtrace.Wrap(err)
 		}
+		// Expose the head's COW sources read-only here: this shell shares the
+		// head's worktree, and a live agent may already own a writable overlay on
+		// the same upperdir — two overlays must never share one, so the shell only
+		// gets to read.
+		cowMounts := buildCowMounts(projectRoot, worktreePath, head.ID, cowPaths, false)
 		sb = sandbox.Options{
 			AgentType:     sandbox.AgentTypeBash,
 			WorktreePath:  worktreePath,
@@ -486,6 +497,7 @@ func StartShellSession(reg *session.Registry, projectRoot string, head Head, row
 			RestoreRO:     restore,
 			Network:       net,
 			Binds:         seed.Binds,
+			CowMounts:     cowMounts,
 			Env:           append(env, seed.Env...),
 			Argv:          []string{"/bin/bash"},
 			HardenGUI:     true,
@@ -527,11 +539,14 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 	cfg, _ := config.Load(projectRoot)
 	// Pre-spawn runs once, at the head's initial spawn — not on resume (the agent
 	// is being restored, not freshly created), so the returned script is ignored.
-	writable, masked, restore, net, _ := cfg.ResolveSandboxOptions(string(head.AgentType))
+	writable, masked, restore, cowPaths, net, _ := cfg.ResolveSandboxOptions(string(head.AgentType))
 	seed, err := seedHead(projectRoot, head.ID, head.AgentType, worktreePath, home, head.PrePrompt)
 	if err != nil {
 		return errtrace.Wrap(err)
 	}
+	// Re-apply the writable COW mounts; the per-head upper persists the agent's
+	// earlier overwrites across this resume.
+	cowMounts := buildCowMounts(projectRoot, worktreePath, head.ID, cowPaths, true)
 	argv, err := sandbox.AgentArgv(head.AgentType, true, head.PrePrompt, "")
 	if err != nil {
 		return errtrace.Wrap(err)
@@ -555,6 +570,7 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 			RestoreRO:     restore,
 			Network:       net,
 			Binds:         seed.Binds,
+			CowMounts:     cowMounts,
 			Env:           env,
 			Argv:          argv,
 			HardenGUI:     true,
@@ -623,6 +639,7 @@ func KillHeadNoLock(ctx context.Context, reg *session.Registry, store *db.Store,
 		}
 
 		RemoveAgentStatusFiles(head.ProjectPath, head.ID)
+		removeCowDir(head.ProjectPath, head.ID)
 	}
 
 	if store != nil {

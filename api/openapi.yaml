@@ -1357,6 +1357,12 @@ components:
           items:
             type: string
           nullable: true
+        cow_paths:
+          type: array
+          items:
+            type: string
+          nullable: true
+          description: Worktree-relative paths mounted copy-on-write from the project root. The agent reads the real files and may overwrite them, but writes are kept per-head and never touch the source. For large gitignored build dirs too big to copy. On Linux needs an overlay-capable bwrap.
         pre_spawn_script:
           type: string
           nullable: true

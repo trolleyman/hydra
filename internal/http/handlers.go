@@ -418,6 +418,7 @@ func toAPIAgentConfig(c config.AgentConfig) api.AgentConfig {
 			WritablePaths:  &c.Sandbox.WritablePaths,
 			MaskedPaths:    &c.Sandbox.MaskedPaths,
 			RestoreRo:      &c.Sandbox.RestoreRO,
+			CowPaths:       &c.Sandbox.CowPaths,
 			PreSpawnScript: c.Sandbox.PreSpawnScript,
 		}
 		if c.Sandbox.Network != nil {
@@ -443,6 +444,9 @@ func fromAPIAgentConfig(a api.AgentConfig) config.AgentConfig {
 		}
 		if a.Sandbox.RestoreRo != nil {
 			sb.RestoreRO = *a.Sandbox.RestoreRo
+		}
+		if a.Sandbox.CowPaths != nil {
+			sb.CowPaths = *a.Sandbox.CowPaths
 		}
 		if a.Sandbox.PreSpawnScript != nil && *a.Sandbox.PreSpawnScript != "" {
 			sb.PreSpawnScript = a.Sandbox.PreSpawnScript

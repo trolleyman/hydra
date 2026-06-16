@@ -125,6 +125,7 @@ export function ConfigForm({
       !next.writable_paths?.length &&
       !next.masked_paths?.length &&
       !next.restore_ro?.length &&
+      !next.cow_paths?.length &&
       !next.pre_spawn_script &&
       !next.network
     onChange({ ...value, sandbox: empty ? null : next })
@@ -256,6 +257,24 @@ export function ConfigForm({
           inheritedPaths={inheritedSandbox?.restore_ro ?? undefined}
           onChange={(restore_ro) => updateSandbox({ restore_ro })}
           placeholder="e.g. ~/.config/git"
+        />
+
+        <SandboxPathSection
+          icon={<Layers className="w-3.5 h-3.5 text-purple-500 dark:text-purple-400" />}
+          label="Copy-on-Write Paths"
+          tooltipTitle="Copy-on-Write Paths"
+          tooltip={
+            <>
+              <p>Worktree-relative paths mounted copy-on-write from the project root. The agent sees the real files at the same path under its worktree and may <strong>overwrite</strong> them, but writes are kept in a per-head layer and <strong>never touch the source</strong>.</p>
+              <p className="mt-1.5">Ideal for large gitignored build inputs/outputs (e.g. <code className="text-blue-300">pipeline/out</code>) that are too big to copy. Nothing is copied up front — reads come straight from the source; only files the agent modifies cost space.</p>
+              <p className="mt-1.5 text-gray-400 italic">Linux uses overlayfs, macOS an APFS clone. Bash shells get read-only access to the same paths.</p>
+              <p className="mt-1.5 text-gray-400 italic">Overlay needs an overlay-capable bwrap; some distros (e.g. Ubuntu) ship it without. Point the daemon at one with <code className="text-blue-300">HYDRA_BWRAP=/path/to/bwrap</code> — otherwise COW falls back to read-only.</p>
+            </>
+          }
+          paths={sandbox.cow_paths ?? []}
+          inheritedPaths={inheritedSandbox?.cow_paths ?? undefined}
+          onChange={(cow_paths) => updateSandbox({ cow_paths })}
+          placeholder="e.g. pipeline/out"
         />
 
         {/* Pre-spawn script */}

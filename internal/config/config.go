@@ -36,6 +36,7 @@ const DefaultPrePrompt = "You are a head (AI agent) of Hydra, an AI orchestratio
 	"- `writable_paths` — extra paths made writable inside the sandbox.\n" +
 	"- `masked_paths` — extra paths hidden inside the sandbox.\n" +
 	"- `restore_ro` — paths re-exposed read-only after a parent was masked.\n" +
+	"- `cow_paths` — worktree-relative paths mounted copy-on-write from the project root (you can read and overwrite them; writes stay in your worktree and never touch the real files).\n" +
 	"- `network.enabled` / `network.allowed_hosts` — outbound network access and its host allow-list.\n" +
 	"- `pre_spawn_script` — a bash script run inside the sandbox once, when the agent is first spawned (e.g. `mise trust`).\n" +
 	"- `pre_prompt` — the standing instructions you are reading now.\n" +
@@ -64,6 +65,12 @@ type SandboxConfig struct {
 	MaskedPaths []string `toml:"masked_paths"`
 	// RestoreRO re-exposes paths read-only after masking their parent.
 	RestoreRO []string `toml:"restore_ro"`
+	// CowPaths are worktree-relative paths mounted copy-on-write: the agent sees
+	// the same path under the project root (read-only) and may overwrite it, but
+	// writes land in a per-head layer and never touch the real files. Useful for
+	// large gitignored build inputs/outputs that are too big to copy. See
+	// sandbox.CowMount; on Linux this needs an overlay-capable bwrap.
+	CowPaths []string `toml:"cow_paths"`
 	// Network is the network policy.
 	Network *NetworkConfig `toml:"network"`
 	// PreSpawnScript is an optional shell script run inside the sandbox
@@ -337,6 +344,9 @@ func (s *SandboxConfig) Merge(other SandboxConfig) {
 	if other.RestoreRO != nil {
 		s.RestoreRO = other.RestoreRO
 	}
+	if other.CowPaths != nil {
+		s.CowPaths = other.CowPaths
+	}
 	if other.Network != nil {
 		if s.Network == nil {
 			s.Network = &NetworkConfig{}
@@ -421,7 +431,7 @@ func (c Config) GetResolvedConfig(agentType string) AgentConfig {
 // ResolveSandboxOptions merges the baked-in sandbox defaults with the resolved
 // per-agent config into concrete path lists + network policy. User config is
 // additive for the path lists.
-func (c Config) ResolveSandboxOptions(agentType string) (writable, masked, restore []string, net sandbox.NetworkPolicy, preSpawn string) {
+func (c Config) ResolveSandboxOptions(agentType string) (writable, masked, restore, cow []string, net sandbox.NetworkPolicy, preSpawn string) {
 	def := sandbox.Defaults()
 	writable = append([]string{}, def.WritablePaths...)
 	masked = append([]string{}, def.MaskedPaths...)
@@ -433,6 +443,7 @@ func (c Config) ResolveSandboxOptions(agentType string) (writable, masked, resto
 		writable = append(writable, sb.WritablePaths...)
 		masked = append(masked, sb.MaskedPaths...)
 		restore = append(restore, sb.RestoreRO...)
+		cow = append(cow, sb.CowPaths...)
 		if sb.Network != nil {
 			if sb.Network.Enabled != nil {
 				net.Enabled = *sb.Network.Enabled
@@ -443,7 +454,7 @@ func (c Config) ResolveSandboxOptions(agentType string) (writable, masked, resto
 			preSpawn = *sb.PreSpawnScript
 		}
 	}
-	return writable, masked, restore, net, preSpawn
+	return writable, masked, restore, cow, net, preSpawn
 }
 
 // Save saves a configuration to the project-specific configuration file.
@@ -563,6 +574,12 @@ func defaultsSpec() []specEntry {
 			doc: "paths re-exposed read-only after a masked parent (added to the built-in defaults).",
 			def: func() string { return tomlStringArray(sandbox.Defaults().RestoreRO) },
 			get: sandboxSlice(func(s *SandboxConfig) []string { return s.RestoreRO }),
+		},
+		{
+			table: "sandbox", key: "cow_paths",
+			doc: "worktree-relative paths mounted copy-on-write from the project root (read source, writes kept per-head; e.g. large gitignored build dirs).",
+			def: func() string { return "[]" },
+			get: sandboxSlice(func(s *SandboxConfig) []string { return s.CowPaths }),
 		},
 		{
 			table: "sandbox", key: "pre_spawn_script",
@@ -1110,6 +1127,7 @@ func emitAgent(out *[]string, name string, a AgentConfig, keyComments, tableComm
 	emitSetField(out, name+".sandbox", "writable_paths", tomlStringArray(sb.WritablePaths), len(sb.WritablePaths) > 0, keyComments)
 	emitSetField(out, name+".sandbox", "masked_paths", tomlStringArray(sb.MaskedPaths), len(sb.MaskedPaths) > 0, keyComments)
 	emitSetField(out, name+".sandbox", "restore_ro", tomlStringArray(sb.RestoreRO), len(sb.RestoreRO) > 0, keyComments)
+	emitSetField(out, name+".sandbox", "cow_paths", tomlStringArray(sb.CowPaths), len(sb.CowPaths) > 0, keyComments)
 	if sb.PreSpawnScript != nil && *sb.PreSpawnScript != "" {
 		emitSetField(out, name+".sandbox", "pre_spawn_script", tomlStringValue(*sb.PreSpawnScript), true, keyComments)
 	}
@@ -1145,7 +1163,7 @@ func sandboxHasContent(sb *SandboxConfig) bool {
 	if sb == nil {
 		return false
 	}
-	if len(sb.WritablePaths) > 0 || len(sb.MaskedPaths) > 0 || len(sb.RestoreRO) > 0 {
+	if len(sb.WritablePaths) > 0 || len(sb.MaskedPaths) > 0 || len(sb.RestoreRO) > 0 || len(sb.CowPaths) > 0 {
 		return true
 	}
 	if sb.PreSpawnScript != nil && *sb.PreSpawnScript != "" {

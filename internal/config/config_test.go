@@ -57,6 +57,7 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 				WritablePaths: []string{"~/.cache", "/tmp"},
 				MaskedPaths:   []string{"~/.ssh"},
 				RestoreRO:     []string{"~/.config/git"},
+				CowPaths:      []string{"pipeline/out", "pipeline/build/input"},
 				Network:       &NetworkConfig{Enabled: &enabled, AllowedHosts: []string{"example.com"}},
 			},
 		},
@@ -86,6 +87,9 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	}
 	if len(loaded.Defaults.Sandbox.MaskedPaths) != 1 || loaded.Defaults.Sandbox.MaskedPaths[0] != "~/.ssh" {
 		t.Errorf("MaskedPaths mismatch: %v", loaded.Defaults.Sandbox.MaskedPaths)
+	}
+	if got := loaded.Defaults.Sandbox.CowPaths; len(got) != 2 || got[0] != "pipeline/out" || got[1] != "pipeline/build/input" {
+		t.Errorf("CowPaths not round-tripped: %v", got)
 	}
 	if loaded.Defaults.Sandbox.Network == nil || loaded.Defaults.Sandbox.Network.Enabled == nil || *loaded.Defaults.Sandbox.Network.Enabled != false {
 		t.Errorf("network policy not round-tripped: %+v", loaded.Defaults.Sandbox.Network)
