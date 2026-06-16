@@ -5,6 +5,7 @@ import { formatError } from '../api/format_error'
 import { uploadFile, extractFiles, isImageFile } from '../api/uploads'
 import { Zap, LoaderCircle, Paperclip, X, FileText } from 'lucide-react'
 import { Tooltip } from './Tooltip'
+import { ImageLightbox } from './ImageLightbox'
 import { StorageKeys, promptDraftKey, readLocal, writeLocal } from '../lib/storage'
 
 type AgentTypeOption = 'claude' | 'gemini' | 'copilot'
@@ -16,6 +17,7 @@ interface Attachment {
   filename: string
   path: string | null
   previewUrl?: string
+  size: number
   uploading: boolean
   error?: string
 }
@@ -132,7 +134,14 @@ export function SpawnForm({
   const [error, setError] = useState<string | null>(null)
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const [dragOver, setDragOver] = useState(false)
+  // Index into the image-only attachment list while the lightbox is open; null
+  // when closed.
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
   const attachIdRef = useRef(0)
+  // Numbers generically-named pasted images (image.png, image.png, …) as
+  // image1.png, image2.png, … so each can be referred to distinctly in the
+  // prompt. Reset after a successful spawn.
+  const imageCounterRef = useRef(0)
   const fileInputRef = useRef<HTMLInputElement>(null)
   // Tracks every image preview object URL we create, so they can all be revoked
   // on unmount without relying on the (stale) attachments closure.
@@ -256,14 +265,29 @@ export function SpawnForm({
     setIdManuallyEdited(true)
   }
 
+  // Clipboard screenshots all arrive named "image.png", so a multi-image prompt
+  // ends up with several indistinguishable attachments. Rename those generic
+  // (or unnamed) images to image1.png, image2.png, … so the on-disk path — and
+  // therefore the reference the user can type in the prompt — is unique. Files
+  // with a real name (e.g. a dragged "diagram.png") keep it.
+  function numberGenericImage(file: File): File {
+    if (!isImageFile(file)) return file
+    const stem = file.name.replace(/\.[^.]*$/, '')
+    if (stem !== '' && stem.toLowerCase() !== 'image') return file
+    const ext = (file.name.match(/\.([^.]+)$/)?.[1] || file.type.split('/')[1] || 'png').toLowerCase()
+    const n = ++imageCounterRef.current
+    return new File([file], `image${n}.${ext}`, { type: file.type, lastModified: file.lastModified })
+  }
+
   // Upload each file, tracking it as an attachment chip. The uploaded path is
   // appended to the prompt on submit (and so wired through to the agent).
-  function addFiles(files: File[]) {
+  function addFiles(rawFiles: File[]) {
+    const files = rawFiles.map(numberGenericImage)
     for (const file of files) {
       const id = attachIdRef.current++
       const previewUrl = isImageFile(file) ? URL.createObjectURL(file) : undefined
       if (previewUrl) objectUrlsRef.current.add(previewUrl)
-      setAttachments((prev) => [...prev, { id, filename: file.name || 'pasted-image', path: null, previewUrl, uploading: true }])
+      setAttachments((prev) => [...prev, { id, filename: file.name || 'pasted-image', path: null, previewUrl, size: file.size, uploading: true }])
       uploadFile(projectId, file)
         .then((res) => {
           setAttachments((prev) => prev.map((a) => (a.id === id ? { ...a, path: res.path, uploading: false } : a)))
@@ -307,6 +331,10 @@ export function SpawnForm({
 
   const uploading = attachments.some((a) => a.uploading)
   const readyAttachments = attachments.filter((a) => a.path && !a.error)
+  // Image attachments (those with a preview), in chip order — the lightbox
+  // navigates this list, and each thumbnail opens its own index here.
+  const imageAttachments = attachments.filter((a) => a.previewUrl)
+  const lightboxImages = imageAttachments.map((a) => ({ url: a.previewUrl!, filename: a.filename, size: a.size }))
   const canSubmit = (!!prompt.trim() || readyAttachments.length > 0) && !uploading
 
   async function handleSubmit(e: React.FormEvent) {
@@ -334,6 +362,8 @@ export function SpawnForm({
       attachments.forEach((a) => a.previewUrl && URL.revokeObjectURL(a.previewUrl))
       objectUrlsRef.current.clear()
       setAttachments([])
+      setLightboxIndex(null)
+      imageCounterRef.current = 0
       onSpawned?.(agent)
     } catch (err) {
       setError(formatError(err))
@@ -349,30 +379,45 @@ export function SpawnForm({
     const text = size === 'sm' ? 'text-[10px]' : 'text-xs'
     return (
       <div className={`flex flex-wrap gap-1.5 px-3 ${size === 'sm' ? 'pb-1.5' : 'pb-2'}`}>
-        {attachments.map((a) => (
-          <div
-            key={a.id}
-            className={`group relative flex items-center gap-1.5 rounded-md border px-1.5 py-1 ${text} ${a.error ? 'border-red-300 bg-red-50 dark:border-red-800 dark:bg-red-900/20' : 'border-gray-200 bg-gray-50 dark:border-gray-600 dark:bg-gray-700/60'}`}
-            title={a.error ? a.error : a.filename}
-          >
-            {a.previewUrl ? (
-              <img src={a.previewUrl} alt={a.filename} className={`${thumb} rounded object-cover`} />
-            ) : (
-              <FileText className={`${size === 'sm' ? 'w-3.5 h-3.5' : 'w-4 h-4'} text-gray-400 shrink-0`} />
-            )}
-            <span className="max-w-[120px] truncate text-gray-600 dark:text-gray-300">{a.filename}</span>
-            {a.uploading && <LoaderCircle className="w-3 h-3 animate-spin text-gray-400 shrink-0" />}
-            {a.error && <span className="text-red-500 shrink-0">failed</span>}
-            <button
-              type="button"
-              onClick={() => removeAttachment(a.id)}
-              className="ml-0.5 rounded p-0.5 text-gray-400 hover:text-gray-700 hover:bg-gray-200 dark:hover:text-gray-100 dark:hover:bg-gray-600 cursor-pointer shrink-0"
-              aria-label={`Remove ${a.filename}`}
+        {attachments.map((a) => {
+          // Clicking anywhere on an image chip (the thumbnail or its filename)
+          // opens the lightbox — only the X stays separate. Non-image files
+          // aren't clickable. The cursor-zoom-in / role=button makes the chip's
+          // clickability obvious.
+          const isImage = !!a.previewUrl
+          const openLightbox = isImage
+            ? () => setLightboxIndex(imageAttachments.findIndex((img) => img.id === a.id))
+            : undefined
+          return (
+            <div
+              key={a.id}
+              onClick={openLightbox}
+              onKeyDown={openLightbox ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openLightbox() } } : undefined}
+              role={isImage ? 'button' : undefined}
+              tabIndex={isImage ? 0 : undefined}
+              className={`group relative flex items-center gap-1.5 rounded-md border px-1.5 py-1 ${text} ${isImage ? 'cursor-zoom-in' : ''} ${a.error ? 'border-red-300 bg-red-50 dark:border-red-800 dark:bg-red-900/20' : 'border-gray-200 bg-gray-50 dark:border-gray-600 dark:bg-gray-700/60'}`}
+              title={a.error ? a.error : isImage ? `View ${a.filename}` : a.filename}
+              aria-label={isImage ? `View ${a.filename}` : undefined}
             >
-              <X className="w-3 h-3" />
-            </button>
-          </div>
-        ))}
+              {a.previewUrl ? (
+                <img src={a.previewUrl} alt={a.filename} className={`${thumb} rounded object-cover shrink-0`} />
+              ) : (
+                <FileText className={`${size === 'sm' ? 'w-3.5 h-3.5' : 'w-4 h-4'} text-gray-400 shrink-0`} />
+              )}
+              <span className="max-w-[120px] truncate text-gray-600 dark:text-gray-300">{a.filename}</span>
+              {a.uploading && <LoaderCircle className="w-3 h-3 animate-spin text-gray-400 shrink-0" />}
+              {a.error && <span className="text-red-500 shrink-0">failed</span>}
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); removeAttachment(a.id) }}
+                className="ml-0.5 rounded p-0.5 text-gray-400 hover:text-gray-700 hover:bg-gray-200 dark:hover:text-gray-100 dark:hover:bg-gray-600 cursor-pointer shrink-0"
+                aria-label={`Remove ${a.filename}`}
+              >
+                <X className="w-3 h-3" />
+              </button>
+            </div>
+          )
+        })}
       </div>
     )
   }
@@ -387,8 +432,21 @@ export function SpawnForm({
   const derivedIdPlaceholder = generateId(prompt) || 'auto-generated…'
   const submitHint = isMac ? '⌘↵ to spawn' : 'Ctrl+Enter to spawn'
 
+  // Shared across both layout variants. The index can fall out of range if an
+  // image is removed while open, so clamp it and close when there are none left.
+  const lightbox =
+    lightboxIndex !== null && lightboxImages.length > 0 ? (
+      <ImageLightbox
+        images={lightboxImages}
+        index={Math.min(lightboxIndex, lightboxImages.length - 1)}
+        onIndexChange={setLightboxIndex}
+        onClose={() => setLightboxIndex(null)}
+      />
+    ) : null
+
   if (compact) {
     return (
+      <>
       <form onSubmit={handleSubmit} className="px-3 py-3 border-b border-gray-100 dark:border-gray-700">
         <input ref={fileInputRef} type="file" multiple className="hidden" onChange={handleFileInput} />
         <div className={`relative rounded-xl p-[1.5px] transition-colors duration-200 ${disabled ? 'bg-gray-100 dark:bg-gray-700' : 'bg-gray-200 dark:bg-gray-600 focus-within:bg-gradient-to-br focus-within:from-blue-500 focus-within:via-indigo-500 focus-within:to-purple-600 focus-within:shadow-md focus-within:shadow-blue-500/20'}`}>
@@ -451,11 +509,14 @@ export function SpawnForm({
           <p className="mt-1.5 text-[10px] text-red-500 leading-snug">{error}</p>
         )}
       </form>
+      {lightbox}
+      </>
     )
   }
 
   // Full-page (empty state) variant
   return (
+    <>
     <div className="flex-1 flex flex-col items-center justify-center p-8">
       <div className="w-full max-w-4xl">
         <div className="text-center mb-8">
@@ -574,5 +635,7 @@ export function SpawnForm({
         </form>
       </div>
     </div>
+    {lightbox}
+    </>
   )
 }
