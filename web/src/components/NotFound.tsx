@@ -1,5 +1,6 @@
-import { Link } from '@tanstack/react-router'
+import { useNavigate } from '@tanstack/react-router'
 import { FileQuestion, Home, ArrowLeft } from 'lucide-react'
+import { useProjectStore } from '../stores/projectStore'
 
 interface NotFoundProps {
   title?: string
@@ -16,6 +17,19 @@ export function NotFound({
   showBack = true,
   errorCode = '404',
 }: NotFoundProps) {
+  const navigate = useNavigate()
+  const setSelectedProjectId = useProjectStore((s) => s.setSelectedProjectId)
+
+  // "Return Home" lands on the bare root ("/"), whose index view shows
+  // "Select a project to get started". Clear the selected project too so the
+  // sidebar dropdown matches that empty state — otherwise it keeps showing the
+  // project from the not-found URL as selected. Mirrors the deliberate-deselect
+  // pattern in __root.tsx (setSelectedProjectId(null) + navigate to "/").
+  const goHome = () => {
+    setSelectedProjectId(null)
+    navigate({ to: '/' })
+  }
+
   return (
     <div className="flex-1 flex items-center justify-center p-6 bg-gray-50 dark:bg-gray-900">
       <div className="max-w-md w-full text-center">
@@ -43,13 +57,13 @@ export function NotFound({
           )}
 
           {showHome && (
-            <Link
-              to="/"
+            <button
+              onClick={goHome}
               className="w-full sm:w-auto px-5 py-2.5 rounded-lg bg-blue-600 text-sm font-medium text-white hover:bg-blue-700 transition-all shadow-sm flex items-center justify-center gap-2 cursor-pointer"
             >
               <Home className="w-4 h-4" />
               Return Home
-            </Link>
+            </button>
           )}
         </div>
 
