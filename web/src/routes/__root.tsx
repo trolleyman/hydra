@@ -600,8 +600,9 @@ function RootLayout() {
   const selectedProject = projects.find((p) => p.id === currentProjectId) ?? null
 
   // The selected project's config.toml is read from the repo and can run code /
-  // weaken the sandbox, so prompt for trust before acting on it. Shown on a fresh
-  // open and whenever the config changed since it was last trusted.
+  // weaken the sandbox, so prompt for trust before acting on it. Trust is
+  // per-project (a one-time decision), so this shows until the user trusts the
+  // project; later config edits don't re-prompt.
   const untrustedProject = selectedProject && !selectedProject.trusted ? selectedProject : null
 
   function handleProjectTrusted(updated: ProjectInfo) {

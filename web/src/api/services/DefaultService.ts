@@ -155,7 +155,7 @@ export class DefaultService {
         });
     }
     /**
-     * Mark the project's current .hydra/config.toml as trusted
+     * Mark the project as trusted
      * @param projectId
      * @returns ProjectInfo OK
      * @throws ApiError

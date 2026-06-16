@@ -1,8 +1,6 @@
 package config
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"os"
 
 	"braces.dev/errtrace"
@@ -10,8 +8,8 @@ import (
 
 // ReadProjectConfigTOML returns the raw bytes of the project's .hydra/config.toml
 // and whether the file exists. An absent file is (nil, false, nil) — not an error.
-// The raw bytes (rather than the parsed config) are what the user reviews and
-// trusts, and what the trust hash is computed over.
+// The raw bytes (rather than the parsed config) are what the user reviews when
+// deciding whether to trust the project.
 func ReadProjectConfigTOML(projectRoot string) ([]byte, bool, error) {
 	if projectRoot == "" {
 		return nil, false, nil
@@ -26,26 +24,18 @@ func ReadProjectConfigTOML(projectRoot string) ([]byte, bool, error) {
 	return data, true, nil
 }
 
-// ConfigHash returns the hex-encoded SHA-256 of the given config content. It is
-// used to key project trust to the exact config the user accepted, so any later
-// edit (or a branch carrying a different config) re-triggers the trust prompt.
-func ConfigHash(content []byte) string {
-	sum := sha256.Sum256(content)
-	return hex.EncodeToString(sum[:])
-}
-
-// ProjectConfigTrusted reports whether the project's current .hydra/config.toml
-// is trusted given the hash the user previously accepted (empty if never). A
-// project with no config.toml is always trusted — there is nothing
-// repo-controlled to execute. Otherwise the current content's hash must match
-// the accepted hash.
-func ProjectConfigTrusted(projectRoot, trustedHash string) (bool, error) {
-	content, exists, err := ReadProjectConfigTOML(projectRoot)
+// ProjectConfigTrusted reports whether the project is trusted. Trust is keyed to
+// the project path (the user trusts the project once), not to the config
+// content — so editing .hydra/config.toml does not re-trigger the trust prompt.
+// A project with no config.toml is always trusted: there is nothing
+// repo-controlled to execute. Otherwise the project must have been trusted.
+func ProjectConfigTrusted(projectRoot string, trusted bool) (bool, error) {
+	_, exists, err := ReadProjectConfigTOML(projectRoot)
 	if err != nil {
 		return false, errtrace.Wrap(err)
 	}
 	if !exists {
 		return true, nil
 	}
-	return ConfigHash(content) == trustedHash, nil
+	return trusted, nil
 }

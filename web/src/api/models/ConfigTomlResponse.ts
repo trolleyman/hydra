@@ -12,7 +12,7 @@ export type ConfigTomlResponse = {
      */
     exists: boolean;
     /**
-     * Whether this exact config content is currently trusted
+     * Whether the user trusts this project
      */
     trusted: boolean;
 };

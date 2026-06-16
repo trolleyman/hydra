@@ -141,12 +141,13 @@ func (s *Server) CheckHealth(_ context.Context, _ api.CheckHealthRequestObject) 
 	return api.CheckHealth200TextResponse("OK"), nil
 }
 
-// projectTrusted reports whether the given project's current .hydra/config.toml
-// is trusted by the user. A project with no config.toml is always trusted
-// (nothing repo-controlled to run). A read error is treated as untrusted so the
-// user is prompted rather than silently running unreviewed config.
+// projectTrusted reports whether the given project is trusted by the user.
+// Trust is per-project, not keyed to the config content. A project with no
+// .hydra/config.toml is always trusted (nothing repo-controlled to run). A read
+// error is treated as untrusted so the user is prompted rather than silently
+// running unreviewed config.
 func projectTrusted(p projects.ProjectInfo) bool {
-	trusted, err := config.ProjectConfigTrusted(p.Path, p.TrustedConfigHash)
+	trusted, err := config.ProjectConfigTrusted(p.Path, p.Trusted)
 	if err != nil {
 		return false
 	}
@@ -270,18 +271,9 @@ func (s *Server) TrustProject(_ context.Context, request api.TrustProjectRequest
 			Details: "project not found",
 		}, nil
 	}
-	// Record the hash of the config the user just reviewed. An absent config
-	// hashes the empty content; either way the project becomes trusted until the
-	// config next changes.
-	content, _, err := config.ReadProjectConfigTOML(p.Path)
-	if err != nil {
-		return api.TrustProject500JSONResponse{
-			Code:    500,
-			Error:   api.ErrorResponseErrorInternalError,
-			Details: err.Error(),
-		}, nil
-	}
-	updated, found, err := s.ProjectsManager.SetTrustedConfigHash(p.ID, config.ConfigHash(content))
+	// Trust the project. Trust is per-project (not keyed to the config content),
+	// so it persists across later edits to .hydra/config.toml.
+	updated, found, err := s.ProjectsManager.SetTrusted(p.ID, true)
 	if err != nil {
 		return api.TrustProject500JSONResponse{
 			Code:    500,
@@ -519,15 +511,10 @@ func (s *Server) SaveConfig(_ context.Context, request api.SaveConfigRequestObje
 	}
 
 	// Editing the project config in-app is itself an act of trust: the user
-	// authored the change, so re-trust it rather than immediately prompting them
-	// to trust their own edit. (User-scope config is global and never gated.)
+	// authored the change, so trust the project rather than prompting them to
+	// trust their own edit. (User-scope config is global and never gated.)
 	if scope == api.SaveConfigParamsScopeProject {
-		if proj := s.ProjectsManager.GetByID(request.ProjectId); proj != nil {
-			content, _, err := config.ReadProjectConfigTOML(proj.Path)
-			if err == nil {
-				_, _, _ = s.ProjectsManager.SetTrustedConfigHash(proj.ID, config.ConfigHash(content))
-			}
-		}
+		_, _, _ = s.ProjectsManager.SetTrusted(request.ProjectId, true)
 	}
 
 	return api.SaveConfig200Response{}, nil

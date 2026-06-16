@@ -300,7 +300,7 @@ type ConfigTomlResponse struct {
 	// Exists Whether a .hydra/config.toml file is present in the project
 	Exists bool `json:"exists"`
 
-	// Trusted Whether this exact config content is currently trusted
+	// Trusted Whether the user trusts this project
 	Trusted bool `json:"trusted"`
 }
 
@@ -435,7 +435,7 @@ type ProjectInfo struct {
 	// Path Absolute filesystem path to the project root
 	Path string `json:"path"`
 
-	// Trusted Whether the project's .hydra/config.toml is currently trusted by the user. True when there is no project config (nothing repo-controlled to execute) or when the current config's content matches what the user accepted. False means the user must review and trust the config before agents can be spawned or host artifact commands can run.
+	// Trusted Whether the user trusts this project. Trust is per-project (not keyed to the config content), so it persists across edits to .hydra/config.toml. True when there is no project config (nothing repo-controlled to execute) or when the user has trusted the project. False means the user must review and trust the config before agents can be spawned or host artifact commands can run.
 	Trusted bool `json:"trusted"`
 }
 
@@ -752,7 +752,7 @@ type ServerInterface interface {
 	// List the files tracked in the project's repository
 	// (GET /api/projects/{project_id}/repository/tree)
 	GetRepositoryTree(w http.ResponseWriter, r *http.Request, projectId string, params GetRepositoryTreeParams)
-	// Mark the project's current .hydra/config.toml as trusted
+	// Mark the project as trusted
 	// (POST /api/projects/{project_id}/trust)
 	TrustProject(w http.ResponseWriter, r *http.Request, projectId string)
 	// Get system status
@@ -2772,7 +2772,7 @@ type StrictServerInterface interface {
 	// List the files tracked in the project's repository
 	// (GET /api/projects/{project_id}/repository/tree)
 	GetRepositoryTree(ctx context.Context, request GetRepositoryTreeRequestObject) (GetRepositoryTreeResponseObject, error)
-	// Mark the project's current .hydra/config.toml as trusted
+	// Mark the project as trusted
 	// (POST /api/projects/{project_id}/trust)
 	TrustProject(ctx context.Context, request TrustProjectRequestObject) (TrustProjectResponseObject, error)
 	// Get system status

@@ -43,13 +43,20 @@ type ProjectInfo struct {
 	ID   string `json:"id"`
 	Path string `json:"path"`
 	Name string `json:"name"`
-	// TrustedConfigHash is the hex SHA-256 of the project's .hydra/config.toml
-	// content at the moment the user accepted the trust prompt. Empty means the
-	// project's config has never been trusted. The config can run arbitrary code
-	// (pre_spawn_script, unsafe_host artifact commands) and weaken the sandbox,
-	// so it must be reviewed and trusted before Hydra acts on it. Trust is keyed
-	// to the content hash, so editing the config (or switching to a branch with a
-	// different one) re-prompts. A project with no config.toml needs no trust.
+	// Trusted records whether the user has accepted the trust prompt for this
+	// project. The config can run arbitrary code (pre_spawn_script, unsafe_host
+	// artifact commands) and weaken the sandbox, so it must be reviewed and
+	// trusted before Hydra acts on it. Trust is keyed to the project path (a
+	// one-time decision), not the config content, so editing .hydra/config.toml
+	// does not re-prompt. A project with no config.toml needs no trust.
+	Trusted bool `json:"trusted,omitempty"`
+}
+
+// projectInfoOnDisk mirrors ProjectInfo plus the deprecated trusted_config_hash
+// field, used only to read older projects.json files during migration: a
+// non-empty hash means the project was previously trusted.
+type projectInfoOnDisk struct {
+	ProjectInfo
 	TrustedConfigHash string `json:"trusted_config_hash,omitempty"`
 }
 
@@ -86,8 +93,19 @@ func (m *Manager) load() error {
 	if err != nil {
 		return errtrace.Wrap(fmt.Errorf("read projects file: %w", err))
 	}
-	if err := json.Unmarshal(data, &m.projects); err != nil {
+	var onDisk []projectInfoOnDisk
+	if err := json.Unmarshal(data, &onDisk); err != nil {
 		return errtrace.Wrap(err)
+	}
+	m.projects = make([]ProjectInfo, len(onDisk))
+	for i, d := range onDisk {
+		p := d.ProjectInfo
+		// Migrate older entries: a recorded config hash meant the project was
+		// trusted. Path-based trust drops the hash but keeps the decision.
+		if d.TrustedConfigHash != "" {
+			p.Trusted = true
+		}
+		m.projects[i] = p
 	}
 
 	return nil
@@ -158,18 +176,18 @@ func (m *Manager) RemoveProject(id string) (bool, error) {
 	return false, nil
 }
 
-// SetTrustedConfigHash records the config hash the user accepted for the project
-// with the given ID and persists it. Returns the updated ProjectInfo, or false
-// if no project has that ID.
-func (m *Manager) SetTrustedConfigHash(id, hash string) (ProjectInfo, bool, error) {
+// SetTrusted records whether the user trusts the project with the given ID and
+// persists it. Trust is per-project, not keyed to the config content. Returns
+// the updated ProjectInfo, or false if no project has that ID.
+func (m *Manager) SetTrusted(id string, trusted bool) (ProjectInfo, bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for i := range m.projects {
 		if m.projects[i].ID == id {
-			prev := m.projects[i].TrustedConfigHash
-			m.projects[i].TrustedConfigHash = hash
+			prev := m.projects[i].Trusted
+			m.projects[i].Trusted = trusted
 			if err := m.save(); err != nil {
-				m.projects[i].TrustedConfigHash = prev
+				m.projects[i].Trusted = prev
 				return ProjectInfo{}, false, errtrace.Wrap(err)
 			}
 			return m.projects[i], true, nil

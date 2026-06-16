@@ -181,7 +181,7 @@ paths:
 
   /api/projects/{project_id}/trust:
     post:
-      summary: Mark the project's current .hydra/config.toml as trusted
+      summary: Mark the project as trusted
       operationId: trustProject
       parameters:
         - name: project_id
@@ -1013,11 +1013,12 @@ components:
         trusted:
           type: boolean
           description: >-
-            Whether the project's .hydra/config.toml is currently trusted by the
-            user. True when there is no project config (nothing repo-controlled
-            to execute) or when the current config's content matches what the
-            user accepted. False means the user must review and trust the config
-            before agents can be spawned or host artifact commands can run.
+            Whether the user trusts this project. Trust is per-project (not keyed
+            to the config content), so it persists across edits to
+            .hydra/config.toml. True when there is no project config (nothing
+            repo-controlled to execute) or when the user has trusted the project.
+            False means the user must review and trust the config before agents
+            can be spawned or host artifact commands can run.
 
     ConfigTomlResponse:
       type: object
@@ -1031,7 +1032,7 @@ components:
           description: Whether a .hydra/config.toml file is present in the project
         trusted:
           type: boolean
-          description: Whether this exact config content is currently trusted
+          description: Whether the user trusts this project
 
     AddProjectRequest:
       type: object

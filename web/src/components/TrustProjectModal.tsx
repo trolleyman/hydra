@@ -10,7 +10,8 @@ import { formatError } from '../api/format_error'
 // artifact commands) and weaken the sandbox, so an unreviewed project is gated:
 // no agents can be spawned and host artifact commands are forced back into the
 // sandbox until the user accepts. Shown whenever the selected project is
-// untrusted (a fresh open, or after the config changed since it was trusted).
+// untrusted. Trust is per-project (a one-time decision), so later edits to the
+// config don't re-prompt.
 export function TrustProjectModal({
   project,
   onTrusted,
@@ -88,8 +89,8 @@ export function TrustProjectModal({
             sandbox. Only trust it if you recognize this project and its config.
           </p>
           <p className="text-xs text-gray-500 dark:text-gray-400 mt-3">
-            Until you trust it, agents can't be spawned and artifact commands stay sandboxed. You'll be asked again if
-            the config changes.
+            Until you trust it, agents can't be spawned and artifact commands stay sandboxed. You trust the project
+            once; later edits to the config won't ask again.
           </p>
 
           <div className="mt-4">
