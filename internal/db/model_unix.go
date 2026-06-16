@@ -21,6 +21,10 @@ type Agent struct {
 	AgentType string `gorm:"not null"` // "claude" | "gemini"
 	PrePrompt string
 	Prompt    string
+	// Title is the mutable, user-facing display name. The ID stays the stable
+	// identity (primary key, branch, worktree path, session key); renaming only
+	// touches this field. Seeded from the prompt, optionally refined by an LLM.
+	Title     string
 	Ephemeral bool `gorm:"default:false"`
 
 	// Session — updated by the liveness reconciler

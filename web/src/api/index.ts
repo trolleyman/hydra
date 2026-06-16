@@ -21,6 +21,7 @@ export { ArtifactLogLine } from './models/ArtifactLogLine';
 export type { ArtifactScript } from './models/ArtifactScript';
 export { ArtifactSet } from './models/ArtifactSet';
 export type { ArtifactsResponse } from './models/ArtifactsResponse';
+export type { ClaudeUsageResponse } from './models/ClaudeUsageResponse';
 export type { CommitInfo } from './models/CommitInfo';
 export type { ConfigResponse } from './models/ConfigResponse';
 export type { ConfigTomlResponse } from './models/ConfigTomlResponse';
@@ -43,5 +44,6 @@ export type { TerminalDataEvent } from './models/TerminalDataEvent';
 export { TerminalEvent } from './models/TerminalEvent';
 export type { TerminalStatusEvent } from './models/TerminalStatusEvent';
 export type { UncommittedSummary } from './models/UncommittedSummary';
+export type { UpdateAgentRequest } from './models/UpdateAgentRequest';
 
 export { DefaultService } from './services/DefaultService';

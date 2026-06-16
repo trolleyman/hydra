@@ -5,6 +5,10 @@
 import type { AgentStatusInfo } from './AgentStatusInfo';
 export type AgentResponse = {
     id: string;
+    /**
+     * Mutable, user-facing display name. May be empty before it is seeded; clients should fall back to id.
+     */
+    title?: string;
     branch_name?: string | null;
     worktree_path?: string | null;
     project_path: string;

@@ -6,11 +6,12 @@ import type { AgentResponse } from '../api'
 import { AgentTerminal } from './AgentTerminal'
 import { DiffViewer } from '../DiffViewer'
 import { formatStartedAgo, agentStatusBadge, agentStatusDetail } from './AgentComponents'
-import { LoaderCircle, Merge, Trash2, Tag, RotateCcw, FolderSync, Copy, Check } from 'lucide-react'
+import { LoaderCircle, Merge, Trash2, Tag, RotateCcw, FolderSync, Copy, Check, Pencil } from 'lucide-react'
 import { Tooltip } from './Tooltip'
 
 import { useDialogStore } from '../stores/dialogStore'
 import { useToastStore } from '../stores/toastStore'
+import { useAgentStore } from '../stores/agentStore'
 
 function PromptBlock({ prompt }: { prompt: string }) {
   const [expanded, setExpanded] = useState(false)
@@ -60,6 +61,10 @@ export function AgentDetail({
   const [updating, setUpdating] = useState(false)
   const [restarting, setRestarting] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [editingTitle, setEditingTitle] = useState(false)
+  const [titleDraft, setTitleDraft] = useState('')
+  const [savingTitle, setSavingTitle] = useState(false)
+  const updateAgentInStore = useAgentStore((s) => s.updateAgent)
   const [, setTick] = useState(0)
   const [diffRefreshTrigger, setDiffRefreshTrigger] = useState(0)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -255,6 +260,30 @@ export function AgentDetail({
     })
   }
 
+  function startEditingTitle() {
+    setTitleDraft(agent.title || agent.id)
+    setEditingTitle(true)
+  }
+
+  async function saveTitle() {
+    const next = titleDraft.trim()
+    // No-op edits (empty, or unchanged) just close the editor without a request.
+    if (!next || next === (agent.title || '')) {
+      setEditingTitle(false)
+      return
+    }
+    setSavingTitle(true)
+    try {
+      const updated = await api.default.updateAgent(projectId ?? '', agent.id, { title: next })
+      updateAgentInStore(updated)
+      setEditingTitle(false)
+    } catch (err) {
+      useToastStore.getState().show({ message: `Failed to rename agent: ${formatError(err)}`, type: 'error' })
+    } finally {
+      setSavingTitle(false)
+    }
+  }
+
   return (
     <div ref={scrollRef} className="flex-1 flex flex-col overflow-auto p-6 min-w-0 min-h-0" data-main-scroll>
       <div className="w-full">
@@ -262,7 +291,43 @@ export function AgentDetail({
         <div className="mb-6">
           {/* Title row */}
           <div className="flex items-center gap-2 mb-2">
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">{agent.id}</h1>
+            {editingTitle ? (
+              <input
+                autoFocus
+                value={titleDraft}
+                disabled={savingTitle}
+                onChange={(e) => setTitleDraft(e.target.value)}
+                onBlur={saveTitle}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    void saveTitle()
+                  } else if (e.key === 'Escape') {
+                    e.preventDefault()
+                    setEditingTitle(false)
+                  }
+                }}
+                className="text-2xl font-bold text-gray-900 dark:text-gray-100 bg-transparent border-b border-blue-400 focus:outline-none min-w-0 flex-1 disabled:opacity-50"
+              />
+            ) : (
+              <h1
+                onDoubleClick={startEditingTitle}
+                className="text-2xl font-bold text-gray-900 dark:text-gray-100 truncate"
+                title={agent.id}
+              >
+                {agent.title || agent.id}
+              </h1>
+            )}
+            {!editingTitle && (
+              <Tooltip content="Rename agent">
+                <button
+                  onClick={startEditingTitle}
+                  className="w-6 h-6 flex items-center justify-center rounded-md border border-gray-200 text-gray-400 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-500 dark:hover:bg-gray-700 transition-colors cursor-pointer shrink-0"
+                >
+                  <Pencil className="w-3 h-3" />
+                </button>
+              </Tooltip>
+            )}
             <Tooltip content="Copy ID">
               <button
                 onClick={() => {

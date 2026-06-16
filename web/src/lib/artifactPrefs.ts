@@ -9,7 +9,7 @@
 //      regenerated) the stale entry is ignored, so the card falls back to its
 //      status-derived defaults instead of restoring a now-irrelevant toggle.
 
-import { ARTIFACT_PREFS_PREFIX, artifactPrefsKey, readLocal, writeLocal } from './storage'
+import { ARTIFACT_PREFS_PREFIX, ARTIFACT_TAG_FILTER_PREFIX, artifactPrefsKey, artifactTagFilterKey, readLocal, writeLocal } from './storage'
 
 export type ArtifactPrefs = {
   collapsed?: boolean
@@ -62,6 +62,33 @@ export function saveArtifactPrefs(
   writeLocal(artifactPrefsKey(projectId, agentId, name), JSON.stringify(value))
 }
 
+// The artifact tag filter, shared across an agent's cards. `scoped` maps a label
+// category (e.g. "theme") to the single selected value (e.g. "dark"); an absent
+// or empty value means "all". `free` is the set of selected free-form tags. An
+// empty filter (no scoped values, no free tags) means "show everything".
+export type ArtifactTagFilter = {
+  scoped: Record<string, string>
+  free: string[]
+}
+
+export function loadTagFilter(projectId: string | null, agentId: string): ArtifactTagFilter {
+  const raw = readLocal(artifactTagFilterKey(projectId, agentId))
+  if (!raw) return { scoped: {}, free: [] }
+  try {
+    const parsed = JSON.parse(raw) as Partial<ArtifactTagFilter>
+    return {
+      scoped: parsed.scoped && typeof parsed.scoped === 'object' ? parsed.scoped : {},
+      free: Array.isArray(parsed.free) ? parsed.free.filter((t): t is string => typeof t === 'string') : [],
+    }
+  } catch {
+    return { scoped: {}, free: [] }
+  }
+}
+
+export function saveTagFilter(projectId: string | null, agentId: string, filter: ArtifactTagFilter): void {
+  writeLocal(artifactTagFilterKey(projectId, agentId), JSON.stringify(filter))
+}
+
 // Drop expired artifact-pref entries. Cheap to call once on app boot; iterating
 // localStorage is fine given the small number of keys Hydra writes.
 export function pruneArtifactPrefs(): void {
@@ -71,6 +98,9 @@ export function pruneArtifactPrefs(): void {
     for (let i = 0; i < localStorage.length; i++) {
       const k = localStorage.key(i)
       if (!k || !k.startsWith(ARTIFACT_PREFS_PREFIX)) continue
+      // The tag-filter key shares the artifact prefix but is a different shape
+      // (no status/timestamp), so don't treat it as a stale/corrupt prefs entry.
+      if (k.startsWith(ARTIFACT_TAG_FILTER_PREFIX)) continue
       const stored = readStored(k)
       if (!stored || now - stored.t > ARTIFACT_TTL_MS) stale.push(k)
     }

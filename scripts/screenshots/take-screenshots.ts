@@ -203,6 +203,20 @@ try {
       // numbered-paste naming. Captures the viewport (the lightbox is a fixed
       // overlay), and the upload request is stubbed so the chips settle instantly.
       attachImages?: string[]
+      // Captures only the viewport (not the full page), unscrolled, so the shot
+      // focuses on a page's header region — e.g. the agent detail title bar —
+      // rather than the long content (terminal, diff) below it.
+      viewportOnly?: boolean
+      // Seeds the artifact tag filter (localStorage key built from project+agent)
+      // before the app boots, so the artifacts panel renders with a filter applied
+      // (e.g. theme=light) — documents the header tag filter actively in use plus
+      // the per-file tag badges. Only meaningful on the artifacts (agent-1) page.
+      tagFilter?: { scoped?: Record<string, string>; free?: string[] }
+      // Hovers the artifacts panel's info (i) icon so its tooltip opens, after
+      // scrolling the "Artifacts" heading to mid-viewport to give the upward-
+      // opening tooltip room. Captures the viewport (the tooltip is a fixed
+      // portal). Only meaningful on the artifacts (agent-1) page.
+      artifactInfo?: boolean
     }[] = [
       { name: 'home', path: '/' },
       // The unread-changes indicator: the agent sidebar shows an amber dot on the
@@ -263,8 +277,22 @@ try {
       // policy editor with the ShellEditor's bash highlighting + line-number
       // gutter, the typed text and the highlight layer aligned. The form lives
       // in a viewport-height scroll container, so use a tall viewport to fit the
-      // whole page (the pre-spawn editor sits at the very bottom).
-      { name: 'settings', path: '/project/sim-project/settings', viewport: { width: 1280, height: 1360 } },
+      // whole page: the pre-spawn editor sits near the bottom and the "Diff
+      // Artifacts" editor (the [[artifacts]] scripts, rendered below the tab on
+      // every tab) sits below that, so the viewport must be tall enough to reach
+      // it (simulation seeds one screenshots script there).
+      { name: 'settings', path: '/project/sim-project/settings', viewport: { width: 1280, height: 1900 } },
+      // The agent detail header showing the new user-facing title: the sidebar
+      // and header render the mutable title (e.g. "Add renameable agent titles")
+      // in place of the stable ID, with a rename (pencil) button beside it and
+      // the Copy-ID button still exposing the underlying id. Viewport-only so the
+      // shot focuses on the title bar rather than the terminal/diff below.
+      { name: 'agent-title', path: '/project/sim-project/agent/agent-1', viewportOnly: true },
+      // The inline rename in progress: clicking the pencil swaps the title for an
+      // editable input seeded with the current title (Enter saves via PATCH, Esc
+      // cancels). Documents the rename UX. The pencil is the only lucide-pencil
+      // icon on the page, so the :has() selector targets it unambiguously.
+      { name: 'agent-rename', path: '/project/sim-project/agent/agent-1', viewportOnly: true, click: 'button:has(svg.lucide-pencil)' },
       { name: 'nested-folders', path: '/project/sim-project/agent/agent-3', scrollTo: 'Changes' },
       // agent-1's diff carries simulated "screenshots" artifacts (mixed phone +
       // desktop shapes). Scroll to the "Changes" header — the artifacts panel
@@ -307,6 +335,31 @@ try {
         viewport: { width: 1280, height: 1280 },
         imageDiffMode: 'onion',
       },
+      // The artifacts tag filter in use. agent-1's "screenshots" set tags each
+      // shot by theme + viewport (scoped labels) plus a free-form "new" (see
+      // simReadyChangedSet in internal/http/simulation.go), so the header shows
+      // the single-select theme/viewport filters and each file shows tag badges.
+      // We pin theme=light so the capture documents an ACTIVE filter: the
+      // dark-only shots drop out and the header count reads "shown/total changed".
+      {
+        name: 'artifacts-tags',
+        path: '/project/sim-project/agent/agent-1',
+        scrollTo: 'Changes',
+        viewport: { width: 1280, height: 1280 },
+        imageDiffMode: 'side-by-side',
+        tagFilter: { scoped: { theme: 'light' } },
+      },
+      // The artifacts panel's info (i) tooltip, opened — documents what artifacts
+      // are, the script contract, the progress marker, and the tags/filter rules
+      // (the tooltip's last paragraph). Hovered open and captured against the
+      // diff page so it reads in context.
+      {
+        name: 'artifact-info',
+        path: '/project/sim-project/agent/agent-1',
+        viewport: { width: 1280, height: 1280 },
+        imageDiffMode: 'side-by-side',
+        artifactInfo: true,
+      },
       // Every render state of the artifacts panel in one shot. agent-1's
       // simulated response (internal/http/simulation.go) carries four sets —
       // changed, generating (with a live progress line), error, and no-visual-
@@ -340,8 +393,8 @@ try {
     // preference in localStorage ('hydra-theme-mode') and toggles a `dark`
     // class on <html>; we seed that key before the app boots so each capture
     // renders the chosen theme deterministically (no reliance on the OS
-    // `prefers-color-scheme`). Light renders keep their original filenames; dark
-    // renders get a `-dark` suffix.
+    // `prefers-color-scheme`). Each render is tagged by theme in its filename:
+    // light renders get a `-light` suffix, dark renders a `-dark` suffix.
     const themes = ['light', 'dark'] as const
     // Each (page, theme) capture is fully independent — its own browser context
     // (isolated localStorage/cookies) hitting the shared read-only simulation
@@ -358,7 +411,7 @@ try {
     let nextTask = 0
 
     const captureShot = async (pg: (typeof pages)[number], theme: (typeof themes)[number]) => {
-        const suffix = theme === 'dark' ? '-dark' : ''
+        const suffix = theme === 'dark' ? '-dark' : '-light'
         const ctx = await browser.newContext({
           viewport: pg.viewport ?? { width: 1280, height: 800 },
           deviceScaleFactor: 1,
@@ -382,6 +435,21 @@ try {
               // ignore storage failures
             }
           }, pg.imageDiffMode)
+        }
+        // Seed the artifact tag filter so the panel renders with a filter applied.
+        // The key must match web/src/lib/storage.ts artifactTagFilterKey(projectId,
+        // agentId); these pages are all the sim project's agent-1.
+        if (pg.tagFilter) {
+          await ctx.addInitScript((f) => {
+            try {
+              localStorage.setItem(
+                'hydra-artifact-tagfilter-sim-project-agent-1',
+                JSON.stringify({ scoped: f.scoped ?? {}, free: f.free ?? [] }),
+              )
+            } catch {
+              // ignore storage failures
+            }
+          }, pg.tagFilter)
         }
         await ctx.addInitScript(() => {
           // Pre-trust the simulated project so the first-open "Trust this
@@ -528,10 +596,38 @@ try {
           }, pg.expandArtifact)
           await settle(page)
         }
+        if (pg.artifactInfo) {
+          // Place the "Artifacts" heading at mid-viewport so the tooltip — which
+          // opens upward from the (i) icon into a fixed portal — has room above it,
+          // then hover the icon to open it. (Same sticky-aware offset technique as
+          // scrollTo, but centering rather than pinning to the top.)
+          await page.waitForFunction(() =>
+            Array.from(document.querySelectorAll('h3')).some((h) => h.textContent?.trim() === 'Artifacts'),
+          )
+          await page.evaluate(() => {
+            const h3 = Array.from(document.querySelectorAll('h3')).find((e) => e.textContent?.trim() === 'Artifacts')
+            const cont = h3?.closest('.overflow-auto') as HTMLElement | null | undefined
+            if (h3 && cont) {
+              const offset = h3.getBoundingClientRect().top - cont.getBoundingClientRect().top + cont.scrollTop
+              // Put the heading ~60% down the container: the tooltip opens upward,
+              // so the lower the icon sits, the more room it has (and the less risk
+              // of clipping at the top of the viewport).
+              cont.scrollTop = offset - cont.clientHeight * 0.6
+            }
+          })
+          await settle(page)
+          // Hover the info icon next to the "Artifacts" heading (the InfoTooltip's
+          // Info svg carries cursor-help) so React's onMouseEnter opens the portal.
+          await page
+            .locator('xpath=//h3[normalize-space()="Artifacts"]/parent::*//*[name()="svg" and contains(@class,"cursor-help")]')
+            .hover()
+          await settle(page)
+        }
         const out = join(OUT, `${pg.name}${suffix}.png`)
-        // Scrolled pages and the lightbox (a fixed, viewport-filling overlay)
+        // Scrolled pages, the lightbox (a fixed, viewport-filling overlay),
+        // header-focused shots and the hovered info tooltip (a fixed portal)
         // capture the viewport; others capture the full page.
-        await page.screenshot({ path: out, fullPage: !pg.scrollTo && !pg.attachImages })
+        await page.screenshot({ path: out, fullPage: !pg.scrollTo && !pg.attachImages && !pg.viewportOnly && !pg.artifactInfo })
         console.log(`wrote ${out}`)
         await ctx.close()
         done++

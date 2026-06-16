@@ -61,6 +61,35 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /api/usage/claude:
+    get:
+      summary: Get cached Claude Code subscription usage
+      description: >
+        Probes the locally-installed Claude CLI (`claude /usage`) for the
+        account's subscription quota and returns a cached snapshot. The result
+        is cached briefly (~30s); pass refresh=true to force a fresh probe.
+      operationId: getClaudeUsage
+      parameters:
+        - name: refresh
+          in: query
+          required: false
+          description: Bypass the cache and re-probe the CLI.
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClaudeUsageResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /api/dev/restart:
     post:
       summary: Trigger a server rebuild and restart (dev mode only)
@@ -903,6 +932,52 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+    patch:
+      summary: Update a Hydra agent's mutable fields (currently its title)
+      operationId: updateAgent
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            type: string
+          description: Project ID
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateAgentRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentResponse'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
     delete:
       summary: Kill a Hydra agent by ID
       operationId: killAgent
@@ -993,6 +1068,49 @@ components:
           type: boolean
           description: Whether the server is running in development mode
 
+    ClaudeUsageResponse:
+      type: object
+      required: [available]
+      properties:
+        available:
+          type: boolean
+          description: True when a usable usage snapshot was obtained.
+        error:
+          type: string
+          nullable: true
+          description: Why usage is unavailable (CLI missing, not a subscription account, parse failure, …).
+        captured_at:
+          type: string
+          format: date-time
+          description: When the snapshot was probed.
+        account_tier:
+          type: string
+          nullable: true
+          description: Detected plan, e.g. "Claude Max" or "Claude Pro".
+        session_percent_used:
+          type: number
+          format: float
+          nullable: true
+          description: Percent of the current session ("4 hour") limit used (0-100).
+        session_resets_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the current session limit resets (derived from the relative "Resets in …" text).
+        session_reset_text:
+          type: string
+          nullable: true
+          description: Raw session reset text, e.g. "Resets in 2h 15m".
+        weekly_percent_used:
+          type: number
+          format: float
+          nullable: true
+          description: Percent of the weekly (all-models) limit used (0-100).
+        weekly_reset_text:
+          type: string
+          nullable: true
+          description: Raw weekly reset text, e.g. "Resets Jan 15, 3:30pm".
+
     ProjectInfo:
       type: object
       required: [id, path, name]
@@ -1055,6 +1173,14 @@ components:
           type: boolean
           description: If true, the agent is a throwaway test agent whose worktree and branch are torn down when it stops.
 
+    UpdateAgentRequest:
+      type: object
+      required: [title]
+      properties:
+        title:
+          type: string
+          description: New user-facing display name for the agent. Trimmed; must be non-empty.
+
     AgentStatus:
       type: string
       enum:
@@ -1097,6 +1223,9 @@ components:
       properties:
         id:
           type: string
+        title:
+          type: string
+          description: Mutable, user-facing display name. May be empty before it is seeded; clients should fall back to id.
         branch_name:
           type: string
           nullable: true
@@ -1475,6 +1604,17 @@ components:
           type: string
           nullable: true
           description: URL of the file for the right version (null if absent on the right)
+        tags:
+          type: array
+          nullable: true
+          items:
+            type: string
+          description: >-
+            Labels for this file, read from a sibling JSON sidecar
+            (<file>.meta, {"tags": [...]}). A "category::value" tag is a
+            scoped label — only one value per category survives. Drives the
+            artifacts panel's tag badges and filter. Null/absent when the file
+            has no tags.
 
     ArtifactSet:
       type: object

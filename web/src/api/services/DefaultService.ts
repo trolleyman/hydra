@@ -6,6 +6,7 @@ import type { AddProjectRequest } from '../models/AddProjectRequest';
 import type { AgentInputRequest } from '../models/AgentInputRequest';
 import type { AgentResponse } from '../models/AgentResponse';
 import type { ArtifactsResponse } from '../models/ArtifactsResponse';
+import type { ClaudeUsageResponse } from '../models/ClaudeUsageResponse';
 import type { CommitInfo } from '../models/CommitInfo';
 import type { ConfigResponse } from '../models/ConfigResponse';
 import type { ConfigTomlResponse } from '../models/ConfigTomlResponse';
@@ -16,6 +17,7 @@ import type { RepositoryFileResponse } from '../models/RepositoryFileResponse';
 import type { RepositoryTreeResponse } from '../models/RepositoryTreeResponse';
 import type { SpawnAgentRequest } from '../models/SpawnAgentRequest';
 import type { StatusResponse } from '../models/StatusResponse';
+import type { UpdateAgentRequest } from '../models/UpdateAgentRequest';
 import type { CancelablePromise } from '../core/CancelablePromise';
 import type { BaseHttpRequest } from '../core/BaseHttpRequest';
 export class DefaultService {
@@ -59,6 +61,28 @@ export class DefaultService {
         return this.httpRequest.request({
             method: 'GET',
             url: '/api/status',
+            errors: {
+                500: `Internal Server Error`,
+            },
+        });
+    }
+    /**
+     * Get cached Claude Code subscription usage
+     * Probes the locally-installed Claude CLI (`claude /usage`) for the account's subscription quota and returns a cached snapshot. The result is cached briefly (~30s); pass refresh=true to force a fresh probe.
+     *
+     * @param refresh Bypass the cache and re-probe the CLI.
+     * @returns ClaudeUsageResponse OK
+     * @throws ApiError
+     */
+    public getClaudeUsage(
+        refresh?: boolean,
+    ): CancelablePromise<ClaudeUsageResponse> {
+        return this.httpRequest.request({
+            method: 'GET',
+            url: '/api/usage/claude',
+            query: {
+                'refresh': refresh,
+            },
             errors: {
                 500: `Internal Server Error`,
             },
@@ -624,6 +648,35 @@ export class DefaultService {
                 'id': id,
             },
             errors: {
+                404: `Not Found`,
+                500: `Internal Server Error`,
+            },
+        });
+    }
+    /**
+     * Update a Hydra agent's mutable fields (currently its title)
+     * @param projectId Project ID
+     * @param id
+     * @param requestBody
+     * @returns AgentResponse OK
+     * @throws ApiError
+     */
+    public updateAgent(
+        projectId: string,
+        id: string,
+        requestBody: UpdateAgentRequest,
+    ): CancelablePromise<AgentResponse> {
+        return this.httpRequest.request({
+            method: 'PATCH',
+            url: '/api/projects/{project_id}/agents/{id}',
+            path: {
+                'project_id': projectId,
+                'id': id,
+            },
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                400: `Bad Request`,
                 404: `Not Found`,
                 500: `Internal Server Error`,
             },

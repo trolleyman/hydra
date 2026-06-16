@@ -48,6 +48,26 @@ func (s *SimulationServer) GetStatus(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *SimulationServer) GetClaudeUsage(w http.ResponseWriter, r *http.Request, params api.GetClaudeUsageParams) {
+	// Fixed snapshot so the diff viewer's two server boots render identically.
+	// session_resets_at is intentionally omitted: a live countdown would differ
+	// between otherwise-identical renders (see GetStatus's uptime note).
+	available := true
+	tier := "Claude Max"
+	session := float32(38)
+	weekly := float32(65)
+	sessionText := "Resets in 2h 15m"
+	weeklyText := "Resets Jan 15, 3:30pm"
+	api.WriteJSON(w, http.StatusOK, api.ClaudeUsageResponse{
+		Available:          available,
+		AccountTier:        &tier,
+		SessionPercentUsed: &session,
+		SessionResetText:   &sessionText,
+		WeeklyPercentUsed:  &weekly,
+		WeeklyResetText:    &weeklyText,
+	})
+}
+
 func (s *SimulationServer) ListProjects(w http.ResponseWriter, r *http.Request) {
 	simUnread := 1     // matches the one unread agent in ListAgents
 	otherUnread := 3   // updates waiting in a project you're not looking at
@@ -92,6 +112,7 @@ func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, pr
 	resp := api.ListAgents200JSONResponse{
 		{
 			Id:            "agent-1",
+			Title:         ptr("Add renameable agent titles"),
 			AgentType:     "claude",
 			BaseBranch:    "main",
 			BranchName:    ptr("hydra/feat-1"),
@@ -106,6 +127,7 @@ func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, pr
 		{
 			// Finished while you were away → unread-changes dot lit.
 			Id:               "agent-2",
+			Title:            ptr("Migrate auth providers to OAuth"),
 			AgentType:        "gemini",
 			BaseBranch:       "main",
 			BranchName:       ptr("hydra/feat-2"),
@@ -123,6 +145,7 @@ func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, pr
 			// Deeply-nested refactor — exercises the diff tree's VS Code-style
 			// "compact folders" rendering (see GetAgentDiff for agent-3).
 			Id:            "agent-3",
+			Title:         ptr("Refactor auth into nested packages"),
 			AgentType:     "claude",
 			BaseBranch:    "main",
 			BranchName:    ptr("hydra/feat-3"),
@@ -143,6 +166,7 @@ func (s *SimulationServer) GetAgent(w http.ResponseWriter, r *http.Request, proj
 		createdAt := time.Now().Add(-1 * time.Hour).Unix()
 		api.WriteJSON(w, http.StatusOK, api.AgentResponse{
 			Id:            "agent-1",
+			Title:         ptr("Add renameable agent titles"),
 			AgentType:     "claude",
 			BaseBranch:    "main",
 			BranchName:    ptr("hydra/feat-1"),
@@ -160,6 +184,7 @@ func (s *SimulationServer) GetAgent(w http.ResponseWriter, r *http.Request, proj
 		createdAt := time.Now().Add(-3 * time.Hour).Unix()
 		api.WriteJSON(w, http.StatusOK, api.AgentResponse{
 			Id:            "agent-3",
+			Title:         ptr("Refactor auth into nested packages"),
 			AgentType:     "claude",
 			BaseBranch:    "main",
 			BranchName:    ptr("hydra/feat-3"),
@@ -183,6 +208,10 @@ func (s *SimulationServer) SpawnAgent(w http.ResponseWriter, r *http.Request, pr
 
 func (s *SimulationServer) KillAgent(w http.ResponseWriter, r *http.Request, projectId string, id string) {
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *SimulationServer) UpdateAgent(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+	api.WriteError(w, http.StatusNotImplemented, "Not implemented in simulation mode")
 }
 
 func (s *SimulationServer) RestartAgent(w http.ResponseWriter, r *http.Request, projectId string, id string) {
@@ -932,8 +961,19 @@ func simArtifactSets(id string) []api.ArtifactSet {
 	}
 }
 
+// artTags returns a pointer to a tag slice for a simulated artifact file. The
+// "theme::*" / "viewport::*" tags are scoped labels (one value per category),
+// so the diff viewer renders them as single-select dropdowns; "new" is a plain
+// free-form tag, rendered as a toggle chip.
+func artTags(tags ...string) *[]string {
+	s := append([]string{}, tags...)
+	return &s
+}
+
 // simReadyChangedSet is the finished comparison with visual changes (including an
-// added file with no "before", to document the missing-image placeholder).
+// added file with no "before", to document the missing-image placeholder). Its
+// files carry scoped (theme/viewport) and free-form tags so the panel documents
+// its tag badges and the tag filter.
 func simReadyChangedSet() api.ArtifactSet {
 	return api.ArtifactSet{
 		Name:    "screenshots",
@@ -943,29 +983,41 @@ func simReadyChangedSet() api.ArtifactSet {
 			{
 				Name:       "home.png",
 				ChangeType: api.ArtifactFileChangeTypeModified,
+				Tags:       artTags("theme::light", "viewport::desktop"),
 				LeftUrl:    ptr(simSVG("Home (before)", "#b91c1c", 360, 220)),
 				RightUrl:   ptr(simSVG("Home (after)", "#15803d", 360, 220)),
 			},
 			{
+				Name:       "home-dark.png",
+				ChangeType: api.ArtifactFileChangeTypeModified,
+				Tags:       artTags("theme::dark", "viewport::desktop"),
+				LeftUrl:    ptr(simSVG("Home dark (before)", "#7f1d1d", 360, 220)),
+				RightUrl:   ptr(simSVG("Home dark (after)", "#166534", 360, 220)),
+			},
+			{
 				Name:       "login-phone.png",
 				ChangeType: api.ArtifactFileChangeTypeModified,
+				Tags:       artTags("theme::light", "viewport::phone"),
 				LeftUrl:    ptr(simSVG("Login (before)", "#b91c1c", 240, 480)),
 				RightUrl:   ptr(simSVG("Login (after)", "#15803d", 240, 480)),
 			},
 			{
-				Name:       "profile-phone.png",
+				Name:       "profile-phone-dark.png",
 				ChangeType: api.ArtifactFileChangeTypeModified,
-				LeftUrl:    ptr(simSVG("Profile (before)", "#b91c1c", 240, 480)),
-				RightUrl:   ptr(simSVG("Profile (after)", "#15803d", 240, 480)),
+				Tags:       artTags("theme::dark", "viewport::phone"),
+				LeftUrl:    ptr(simSVG("Profile (before)", "#7f1d1d", 240, 480)),
+				RightUrl:   ptr(simSVG("Profile (after)", "#166534", 240, 480)),
 			},
 			{
 				Name:       "settings-phone.png",
 				ChangeType: api.ArtifactFileChangeTypeAdded,
+				Tags:       artTags("theme::dark", "viewport::phone", "new"),
 				RightUrl:   ptr(simSVG("Settings (new)", "#15803d", 240, 480)),
 			},
 			{
 				Name:       "about.png",
 				ChangeType: api.ArtifactFileChangeTypeUnchanged,
+				Tags:       artTags("theme::light", "viewport::desktop"),
 				LeftUrl:    ptr(simSVG("About", "#334155", 360, 220)),
 				RightUrl:   ptr(simSVG("About", "#334155", 360, 220)),
 			},

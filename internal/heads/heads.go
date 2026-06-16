@@ -27,6 +27,7 @@ import (
 // running sandbox session.
 type Head struct {
 	ID          string
+	Title       string  // mutable, user-facing display name (empty falls back to ID)
 	Branch      *string // "hydra/<id>", nil if the git branch does not exist
 	Worktree    *string // path to the worktree directory, nil if it does not exist
 	ProjectPath string
@@ -84,6 +85,7 @@ func ListHeads(ctx context.Context, reg *session.Registry, store *db.Store, proj
 
 		h := Head{
 			ID:            a.ID,
+			Title:         a.Title,
 			Branch:        branch,
 			Worktree:      worktree,
 			ProjectPath:   a.ProjectPath,
@@ -224,6 +226,10 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 
 	now := time.Now()
 
+	// Seed the user-facing title from the prompt immediately; an optional
+	// best-effort LLM pass (below) may refine it once the agent is up.
+	title := DeriveTitle(opts.Prompt)
+
 	if store != nil {
 		agent := &db.Agent{
 			ID:            opts.ID,
@@ -233,6 +239,7 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 			AgentType:     string(opts.AgentType),
 			PrePrompt:     opts.PrePrompt,
 			Prompt:        opts.Prompt,
+			Title:         title,
 			Ephemeral:     opts.Ephemeral,
 			SessionStatus: "pending",
 			HeadStatus:    "idle",
@@ -348,8 +355,16 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 		setStatus(api.Running)
 	}
 
+	// Best-effort: refine the prompt-derived title via a cheap one-shot LLM call
+	// in the background. Skipped for resumes (title already set) and ephemeral
+	// test agents (never displayed). The next agent-list poll surfaces the result.
+	if !opts.Resume && !opts.Ephemeral {
+		generateTitleAsync(store, opts.ID, opts.Prompt)
+	}
+
 	return &Head{
 		ID:            opts.ID,
+		Title:         title,
 		Branch:        &branchName,
 		Worktree:      &worktreePath,
 		ProjectPath:   projectRoot,

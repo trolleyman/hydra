@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/oapi-codegen/runtime"
 	strictnethttp "github.com/oapi-codegen/runtime/strictmiddleware/nethttp"
@@ -166,8 +167,11 @@ type AgentResponse struct {
 	SessionPid int `json:"session_pid"`
 
 	// SessionStatus Sandbox session status (pending|starting|running|stopped)
-	SessionStatus string  `json:"session_status"`
-	WorktreePath  *string `json:"worktree_path"`
+	SessionStatus string `json:"session_status"`
+
+	// Title Mutable, user-facing display name. May be empty before it is seeded; clients should fall back to id.
+	Title        *string `json:"title,omitempty"`
+	WorktreePath *string `json:"worktree_path"`
 }
 
 // AgentStatus The computed status of the agent (derived from container, agent, and head status)
@@ -206,6 +210,9 @@ type ArtifactFile struct {
 
 	// RightUrl URL of the file for the right version (null if absent on the right)
 	RightUrl *string `json:"right_url"`
+
+	// Tags Labels for this file, read from a sibling JSON sidecar (<file>.meta, {"tags": [...]}). A "category::value" tag is a scoped label — only one value per category survives. Drives the artifacts panel's tag badges and filter. Null/absent when the file has no tags.
+	Tags *[]string `json:"tags"`
 }
 
 // ArtifactFileChangeType defines model for ArtifactFile.ChangeType.
@@ -285,6 +292,36 @@ type ArtifactSetStatus string
 // ArtifactsResponse defines model for ArtifactsResponse.
 type ArtifactsResponse struct {
 	Scripts []ArtifactSet `json:"scripts"`
+}
+
+// ClaudeUsageResponse defines model for ClaudeUsageResponse.
+type ClaudeUsageResponse struct {
+	// AccountTier Detected plan, e.g. "Claude Max" or "Claude Pro".
+	AccountTier *string `json:"account_tier"`
+
+	// Available True when a usable usage snapshot was obtained.
+	Available bool `json:"available"`
+
+	// CapturedAt When the snapshot was probed.
+	CapturedAt *time.Time `json:"captured_at,omitempty"`
+
+	// Error Why usage is unavailable (CLI missing, not a subscription account, parse failure, …).
+	Error *string `json:"error"`
+
+	// SessionPercentUsed Percent of the current session ("4 hour") limit used (0-100).
+	SessionPercentUsed *float32 `json:"session_percent_used"`
+
+	// SessionResetText Raw session reset text, e.g. "Resets in 2h 15m".
+	SessionResetText *string `json:"session_reset_text"`
+
+	// SessionResetsAt When the current session limit resets (derived from the relative "Resets in …" text).
+	SessionResetsAt *time.Time `json:"session_resets_at"`
+
+	// WeeklyPercentUsed Percent of the weekly (all-models) limit used (0-100).
+	WeeklyPercentUsed *float32 `json:"weekly_percent_used"`
+
+	// WeeklyResetText Raw weekly reset text, e.g. "Resets Jan 15, 3:30pm".
+	WeeklyResetText *string `json:"weekly_reset_text"`
 }
 
 // CommitInfo defines model for CommitInfo.
@@ -615,6 +652,12 @@ type UncommittedSummary struct {
 	UntrackedCount int `json:"untracked_count"`
 }
 
+// UpdateAgentRequest defines model for UpdateAgentRequest.
+type UpdateAgentRequest struct {
+	// Title New user-facing display name for the agent. Trimmed; must be non-empty.
+	Title string `json:"title"`
+}
+
 // GetAgentArtifactsParams defines parameters for GetAgentArtifacts.
 type GetAgentArtifactsParams struct {
 	// BaseRef Left (base) commit SHA or ref. Defaults to the agent's base branch.
@@ -696,11 +739,20 @@ type GetRepositoryTreeParams struct {
 	Ref *string `form:"ref,omitempty" json:"ref,omitempty"`
 }
 
+// GetClaudeUsageParams defines parameters for GetClaudeUsage.
+type GetClaudeUsageParams struct {
+	// Refresh Bypass the cache and re-probe the CLI.
+	Refresh *bool `form:"refresh,omitempty" json:"refresh,omitempty"`
+}
+
 // AddProjectJSONRequestBody defines body for AddProject for application/json ContentType.
 type AddProjectJSONRequestBody = AddProjectRequest
 
 // SpawnAgentJSONRequestBody defines body for SpawnAgent for application/json ContentType.
 type SpawnAgentJSONRequestBody = SpawnAgentRequest
+
+// UpdateAgentJSONRequestBody defines body for UpdateAgent for application/json ContentType.
+type UpdateAgentJSONRequestBody = UpdateAgentRequest
 
 // SendAgentInputJSONRequestBody defines body for SendAgentInput for application/json ContentType.
 type SendAgentInputJSONRequestBody = AgentInputRequest
@@ -737,6 +789,9 @@ type ServerInterface interface {
 	// Get a specific Hydra agent by ID
 	// (GET /api/projects/{project_id}/agents/{id})
 	GetAgent(w http.ResponseWriter, r *http.Request, projectId string, id string)
+	// Update a Hydra agent's mutable fields (currently its title)
+	// (PATCH /api/projects/{project_id}/agents/{id})
+	UpdateAgent(w http.ResponseWriter, r *http.Request, projectId string, id string)
 	// Get generated visual artifacts (e.g. screenshots) for both sides of a diff
 	// (GET /api/projects/{project_id}/agents/{id}/artifacts)
 	GetAgentArtifacts(w http.ResponseWriter, r *http.Request, projectId string, id string, params GetAgentArtifactsParams)
@@ -785,6 +840,9 @@ type ServerInterface interface {
 	// Get system status
 	// (GET /api/status)
 	GetStatus(w http.ResponseWriter, r *http.Request)
+	// Get cached Claude Code subscription usage
+	// (GET /api/usage/claude)
+	GetClaudeUsage(w http.ResponseWriter, r *http.Request, params GetClaudeUsageParams)
 	// Health check
 	// (GET /health)
 	CheckHealth(w http.ResponseWriter, r *http.Request)
@@ -989,6 +1047,40 @@ func (siw *ServerInterfaceWrapper) GetAgent(w http.ResponseWriter, r *http.Reque
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetAgent(w, r, projectId, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateAgent operation middleware
+func (siw *ServerInterfaceWrapper) UpdateAgent(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateAgent(w, r, projectId, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1640,6 +1732,33 @@ func (siw *ServerInterfaceWrapper) GetStatus(w http.ResponseWriter, r *http.Requ
 	handler.ServeHTTP(w, r)
 }
 
+// GetClaudeUsage operation middleware
+func (siw *ServerInterfaceWrapper) GetClaudeUsage(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetClaudeUsageParams
+
+	// ------------- Optional query parameter "refresh" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "refresh", r.URL.Query(), &params.Refresh)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "refresh", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetClaudeUsage(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // CheckHealth operation middleware
 func (siw *ServerInterfaceWrapper) CheckHealth(w http.ResponseWriter, r *http.Request) {
 
@@ -1783,6 +1902,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents", wrapper.SpawnAgent)
 	m.HandleFunc("DELETE "+options.BaseURL+"/api/projects/{project_id}/agents/{id}", wrapper.KillAgent)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/{id}", wrapper.GetAgent)
+	m.HandleFunc("PATCH "+options.BaseURL+"/api/projects/{project_id}/agents/{id}", wrapper.UpdateAgent)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/artifacts", wrapper.GetAgentArtifacts)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/commits", wrapper.GetAgentCommits)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/diff", wrapper.GetAgentDiff)
@@ -1799,6 +1919,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/repository/file", wrapper.GetRepositoryFile)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/repository/tree", wrapper.GetRepositoryTree)
 	m.HandleFunc("GET "+options.BaseURL+"/api/status", wrapper.GetStatus)
+	m.HandleFunc("GET "+options.BaseURL+"/api/usage/claude", wrapper.GetClaudeUsage)
 	m.HandleFunc("GET "+options.BaseURL+"/health", wrapper.CheckHealth)
 
 	return m
@@ -2106,6 +2227,52 @@ func (response GetAgent404JSONResponse) VisitGetAgentResponse(w http.ResponseWri
 type GetAgent500JSONResponse ErrorResponse
 
 func (response GetAgent500JSONResponse) VisitGetAgentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type UpdateAgentRequestObject struct {
+	ProjectId string `json:"project_id"`
+	Id        string `json:"id"`
+	Body      *UpdateAgentJSONRequestBody
+}
+
+type UpdateAgentResponseObject interface {
+	VisitUpdateAgentResponse(w http.ResponseWriter) error
+}
+
+type UpdateAgent200JSONResponse AgentResponse
+
+func (response UpdateAgent200JSONResponse) VisitUpdateAgentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type UpdateAgent400JSONResponse ErrorResponse
+
+func (response UpdateAgent400JSONResponse) VisitUpdateAgentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type UpdateAgent404JSONResponse ErrorResponse
+
+func (response UpdateAgent404JSONResponse) VisitUpdateAgentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type UpdateAgent500JSONResponse ErrorResponse
+
+func (response UpdateAgent500JSONResponse) VisitUpdateAgentResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(500)
 
@@ -2711,6 +2878,32 @@ func (response GetStatus500JSONResponse) VisitGetStatusResponse(w http.ResponseW
 	return json.NewEncoder(w).Encode(response)
 }
 
+type GetClaudeUsageRequestObject struct {
+	Params GetClaudeUsageParams
+}
+
+type GetClaudeUsageResponseObject interface {
+	VisitGetClaudeUsageResponse(w http.ResponseWriter) error
+}
+
+type GetClaudeUsage200JSONResponse ClaudeUsageResponse
+
+func (response GetClaudeUsage200JSONResponse) VisitGetClaudeUsageResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetClaudeUsage500JSONResponse ErrorResponse
+
+func (response GetClaudeUsage500JSONResponse) VisitGetClaudeUsageResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 type CheckHealthRequestObject struct {
 }
 
@@ -2757,6 +2950,9 @@ type StrictServerInterface interface {
 	// Get a specific Hydra agent by ID
 	// (GET /api/projects/{project_id}/agents/{id})
 	GetAgent(ctx context.Context, request GetAgentRequestObject) (GetAgentResponseObject, error)
+	// Update a Hydra agent's mutable fields (currently its title)
+	// (PATCH /api/projects/{project_id}/agents/{id})
+	UpdateAgent(ctx context.Context, request UpdateAgentRequestObject) (UpdateAgentResponseObject, error)
 	// Get generated visual artifacts (e.g. screenshots) for both sides of a diff
 	// (GET /api/projects/{project_id}/agents/{id}/artifacts)
 	GetAgentArtifacts(ctx context.Context, request GetAgentArtifactsRequestObject) (GetAgentArtifactsResponseObject, error)
@@ -2805,6 +3001,9 @@ type StrictServerInterface interface {
 	// Get system status
 	// (GET /api/status)
 	GetStatus(ctx context.Context, request GetStatusRequestObject) (GetStatusResponseObject, error)
+	// Get cached Claude Code subscription usage
+	// (GET /api/usage/claude)
+	GetClaudeUsage(ctx context.Context, request GetClaudeUsageRequestObject) (GetClaudeUsageResponseObject, error)
 	// Health check
 	// (GET /health)
 	CheckHealth(ctx context.Context, request CheckHealthRequestObject) (CheckHealthResponseObject, error)
@@ -3074,6 +3273,40 @@ func (sh *strictHandler) GetAgent(w http.ResponseWriter, r *http.Request, projec
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetAgentResponseObject); ok {
 		if err := validResponse.VisitGetAgentResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdateAgent operation middleware
+func (sh *strictHandler) UpdateAgent(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+	var request UpdateAgentRequestObject
+
+	request.ProjectId = projectId
+	request.Id = id
+
+	var body UpdateAgentJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateAgent(ctx, request.(UpdateAgentRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateAgent")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdateAgentResponseObject); ok {
+		if err := validResponse.VisitUpdateAgentResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -3518,6 +3751,32 @@ func (sh *strictHandler) GetStatus(w http.ResponseWriter, r *http.Request) {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetStatusResponseObject); ok {
 		if err := validResponse.VisitGetStatusResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetClaudeUsage operation middleware
+func (sh *strictHandler) GetClaudeUsage(w http.ResponseWriter, r *http.Request, params GetClaudeUsageParams) {
+	var request GetClaudeUsageRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetClaudeUsage(ctx, request.(GetClaudeUsageRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetClaudeUsage")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetClaudeUsageResponseObject); ok {
+		if err := validResponse.VisitGetClaudeUsageResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

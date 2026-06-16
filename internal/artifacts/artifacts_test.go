@@ -398,11 +398,11 @@ func TestManagerComparePixelEqual(t *testing.T) {
 	writeArtifact(t, m, script, "cright", "diff.png", otherPNG)
 	writeArtifact(t, m, script, "cright", "note.svg", []byte("<svg>b</svg>"))
 
-	leftFiles, err := scanOutputs(m.entryDir(script, "cleft"))
+	leftFiles, _, err := scanOutputs(m.entryDir(script, "cleft"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	rightFiles, err := scanOutputs(m.entryDir(script, "cright"))
+	rightFiles, _, err := scanOutputs(m.entryDir(script, "cright"))
 	if err != nil {
 		t.Fatal(err)
 	}

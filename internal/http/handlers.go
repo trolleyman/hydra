@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -23,6 +24,7 @@ import (
 	"github.com/trolleyman/hydra/internal/projects"
 	"github.com/trolleyman/hydra/internal/sandbox"
 	"github.com/trolleyman/hydra/internal/session"
+	"github.com/trolleyman/hydra/internal/usage"
 )
 
 const version = "0.1.0"
@@ -54,6 +56,29 @@ type Server struct {
 	Artifacts *artifacts.Registry
 
 	lastSandboxError atomic.Value // holds string
+
+	// claudeUsage caches the account-global Claude Code usage snapshot, lazily
+	// initialised on first request (the probe is host-account-wide, so it's not
+	// scoped per project).
+	claudeUsageOnce sync.Once
+	claudeUsage     *usage.Cache
+}
+
+// claudeUsageTTL is how long a probed usage snapshot is served before re-probing.
+const claudeUsageTTL = 30 * time.Second
+
+// claudeUsageCache returns the lazily-created usage cache. The probe runs the
+// host `claude` CLI in the default project root (a directory the user's real
+// Claude is most likely to already trust); the probe also auto-accepts the
+// trust prompt, so an untrusted dir still works without mutating ~/.claude.json.
+func (s *Server) claudeUsageCache() *usage.Cache {
+	s.claudeUsageOnce.Do(func() {
+		root := s.ProjectRoot
+		s.claudeUsage = usage.NewCache(claudeUsageTTL, func(ctx context.Context) (usage.Snapshot, error) {
+			return usage.Probe(ctx, "claude", root, usage.HostEnv())
+		})
+	})
+	return s.claudeUsage
 }
 
 // SetSandboxError records the most recent sandbox-availability error (or clears
@@ -272,6 +297,33 @@ func (s *Server) RemoveProject(_ context.Context, request api.RemoveProjectReque
 	return api.RemoveProject204Response{}, nil
 }
 
+// agentResponse converts a heads.Head into its API representation. Centralised
+// so every endpoint returns an identically-shaped agent (id, title, status, …).
+func agentResponse(h heads.Head) api.AgentResponse {
+	var createdAt *int64
+	if h.CreatedAt != 0 {
+		createdAt = &h.CreatedAt
+	}
+	title := h.Title
+	return api.AgentResponse{
+		Id:            h.ID,
+		Title:         &title,
+		BranchName:    h.Branch,
+		WorktreePath:  h.Worktree,
+		ProjectPath:   h.ProjectPath,
+		SessionPid:    h.SessionPID,
+		SessionStatus: h.SessionStatus,
+		AgentType:     string(h.AgentType),
+		PrePrompt:     h.PrePrompt,
+		Prompt:        h.Prompt,
+		BaseBranch:       h.BaseBranch,
+		Ephemeral:        &h.Ephemeral,
+		CreatedAt:        createdAt,
+		AgentStatus:      h.AgentStatus,
+		HasUnreadChanges: &h.HasUnreadChanges,
+	}
+}
+
 func (s *Server) ListAgents(ctx context.Context, request api.ListAgentsRequestObject) (api.ListAgentsResponseObject, error) {
 	projectRoot, err := s.resolveProjectRoot(request.ProjectId)
 	if err != nil {
@@ -287,26 +339,7 @@ func (s *Server) ListAgents(ctx context.Context, request api.ListAgentsRequestOb
 	}
 	resp := make(api.ListAgents200JSONResponse, len(headList))
 	for i, h := range headList {
-		var createdAt *int64
-		if h.CreatedAt != 0 {
-			createdAt = &h.CreatedAt
-		}
-		resp[i] = api.AgentResponse{
-			Id:            h.ID,
-			BranchName:    h.Branch,
-			WorktreePath:  h.Worktree,
-			ProjectPath:   h.ProjectPath,
-			SessionPid:    h.SessionPID,
-			SessionStatus: h.SessionStatus,
-			AgentType:     string(h.AgentType),
-			PrePrompt:     h.PrePrompt,
-			Prompt:        h.Prompt,
-			BaseBranch:    h.BaseBranch,
-			Ephemeral:        &h.Ephemeral,
-			CreatedAt:        createdAt,
-			AgentStatus:      h.AgentStatus,
-			HasUnreadChanges: &h.HasUnreadChanges,
-		}
+		resp[i] = agentResponse(h)
 	}
 	return resp, nil
 }
@@ -334,6 +367,55 @@ func (s *Server) GetStatus(_ context.Context, _ api.GetStatusRequestObject) (api
 		DefaultProjectId: &defaultProjectID,
 		Development:      &development,
 	}), nil
+}
+
+func (s *Server) GetClaudeUsage(ctx context.Context, request api.GetClaudeUsageRequestObject) (api.GetClaudeUsageResponseObject, error) {
+	force := request.Params.Refresh != nil && *request.Params.Refresh
+	snap, err := s.claudeUsageCache().Get(ctx, force)
+	if err != nil {
+		// No snapshot at all (CLI never produced one): report unavailable rather
+		// than 500, so the indicator can quietly hide.
+		msg := err.Error()
+		return api.GetClaudeUsage200JSONResponse(api.ClaudeUsageResponse{
+			Available: false,
+			Error:     &msg,
+		}), nil
+	}
+
+	resp := api.ClaudeUsageResponse{Available: snap.Available}
+	if snap.Error != "" {
+		e := snap.Error
+		resp.Error = &e
+	}
+	if !snap.CapturedAt.IsZero() {
+		t := snap.CapturedAt
+		resp.CapturedAt = &t
+	}
+	if snap.AccountTier != "" {
+		tier := snap.AccountTier
+		resp.AccountTier = &tier
+	}
+	resp.SessionPercentUsed = f64ToF32(snap.SessionPercentUsed)
+	resp.SessionResetsAt = snap.SessionResetsAt
+	if snap.SessionResetText != "" {
+		txt := snap.SessionResetText
+		resp.SessionResetText = &txt
+	}
+	resp.WeeklyPercentUsed = f64ToF32(snap.WeeklyPercentUsed)
+	if snap.WeeklyResetText != "" {
+		txt := snap.WeeklyResetText
+		resp.WeeklyResetText = &txt
+	}
+	return api.GetClaudeUsage200JSONResponse(resp), nil
+}
+
+// f64ToF32 converts an optional float64 to an optional float32 for the API.
+func f64ToF32(v *float64) *float32 {
+	if v == nil {
+		return nil
+	}
+	f := float32(*v)
+	return &f
 }
 
 func (s *Server) GetConfig(_ context.Context, request api.GetConfigRequestObject) (api.GetConfigResponseObject, error) {
@@ -591,25 +673,7 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
-	var spawnCreatedAt *int64
-	if head.CreatedAt != 0 {
-		spawnCreatedAt = &head.CreatedAt
-	}
-	return api.SpawnAgent201JSONResponse(api.AgentResponse{
-		Id:            head.ID,
-		BranchName:    head.Branch,
-		WorktreePath:  head.Worktree,
-		ProjectPath:   head.ProjectPath,
-		SessionPid:    head.SessionPID,
-		SessionStatus: head.SessionStatus,
-		AgentType:     string(head.AgentType),
-		PrePrompt:     head.PrePrompt,
-		Prompt:        head.Prompt,
-		BaseBranch:    head.BaseBranch,
-		Ephemeral:     &head.Ephemeral,
-		CreatedAt:     spawnCreatedAt,
-		AgentStatus:   head.AgentStatus,
-	}), nil
+	return api.SpawnAgent201JSONResponse(agentResponse(*head)), nil
 }
 
 func (s *Server) GetAgent(ctx context.Context, request api.GetAgentRequestObject) (api.GetAgentResponseObject, error) {
@@ -628,26 +692,50 @@ func (s *Server) GetAgent(ctx context.Context, request api.GetAgentRequestObject
 			Details: "agent not found",
 		}, nil
 	}
-	var getCreatedAt *int64
-	if head.CreatedAt != 0 {
-		getCreatedAt = &head.CreatedAt
+	return api.GetAgent200JSONResponse(agentResponse(*head)), nil
+}
+
+// UpdateAgent renames an agent's user-facing title. This is a display-only
+// change: the agent's stable ID, branch, worktree and live session are
+// untouched, so it is cheap and safe even while the agent is running.
+func (s *Server) UpdateAgent(ctx context.Context, request api.UpdateAgentRequestObject) (api.UpdateAgentResponseObject, error) {
+	if request.Body == nil {
+		return api.UpdateAgent400JSONResponse{
+			Code:    400,
+			Error:   api.ErrorResponseErrorBadRequest,
+			Details: "request body is required",
+		}, nil
 	}
-	return api.GetAgent200JSONResponse(api.AgentResponse{
-		Id:            head.ID,
-		BranchName:    head.Branch,
-		WorktreePath:  head.Worktree,
-		ProjectPath:   head.ProjectPath,
-		SessionPid:    head.SessionPID,
-		SessionStatus: head.SessionStatus,
-		AgentType:     string(head.AgentType),
-		PrePrompt:     head.PrePrompt,
-		Prompt:        head.Prompt,
-		BaseBranch:    head.BaseBranch,
-		Ephemeral:        &head.Ephemeral,
-		CreatedAt:        getCreatedAt,
-		AgentStatus:      head.AgentStatus,
-		HasUnreadChanges: &head.HasUnreadChanges,
-	}), nil
+	title := strings.TrimSpace(request.Body.Title)
+	if title == "" {
+		return api.UpdateAgent400JSONResponse{
+			Code:    400,
+			Error:   api.ErrorResponseErrorBadRequest,
+			Details: "title must not be empty",
+		}, nil
+	}
+
+	projectRoot, err := s.resolveProjectRoot(request.ProjectId)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	head, err := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, request.Id)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	if head == nil {
+		return api.UpdateAgent404JSONResponse{
+			Code:    404,
+			Error:   api.ErrorResponseErrorNotFound,
+			Details: "agent not found",
+		}, nil
+	}
+
+	if err := s.DB.UpdateAgentTitle(request.Id, title); err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	head.Title = title
+	return api.UpdateAgent200JSONResponse(agentResponse(*head)), nil
 }
 
 func (s *Server) MarkAgentRead(ctx context.Context, request api.MarkAgentReadRequestObject) (api.MarkAgentReadResponseObject, error) {
@@ -846,25 +934,7 @@ func (s *Server) RestartAgent(ctx context.Context, request api.RestartAgentReque
 		return nil, errtrace.Wrap(err)
 	}
 
-	var restartCreatedAt *int64
-	if newHead.CreatedAt != 0 {
-		restartCreatedAt = &newHead.CreatedAt
-	}
-	return api.RestartAgent200JSONResponse(api.AgentResponse{
-		Id:            newHead.ID,
-		BranchName:    newHead.Branch,
-		WorktreePath:  newHead.Worktree,
-		ProjectPath:   newHead.ProjectPath,
-		SessionPid:    newHead.SessionPID,
-		SessionStatus: newHead.SessionStatus,
-		AgentType:     string(newHead.AgentType),
-		PrePrompt:     newHead.PrePrompt,
-		Prompt:        newHead.Prompt,
-		BaseBranch:    newHead.BaseBranch,
-		Ephemeral:     &newHead.Ephemeral,
-		CreatedAt:     restartCreatedAt,
-		AgentStatus:   newHead.AgentStatus,
-	}), nil
+	return api.RestartAgent200JSONResponse(agentResponse(*newHead)), nil
 }
 
 func (s *Server) KillAgent(ctx context.Context, request api.KillAgentRequestObject) (api.KillAgentResponseObject, error) {
