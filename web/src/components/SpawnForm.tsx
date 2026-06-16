@@ -194,8 +194,32 @@ export function SpawnForm({
     if (!compact) textareaRef.current?.focus()
   }, [compact])
 
+  // Persist the in-progress prompt as a per-project draft so it survives page
+  // reloads and project switches. The compact (sidebar) and full-page boxes use
+  // distinct keys so their drafts never bleed into one another.
+  const draftKey = projectId ? `hydra-prompt-draft-${compact ? 'compact' : 'full'}-${projectId}` : null
+
+  // Load the saved draft on mount and whenever the project changes, clearing the
+  // box when the new project has no draft.
+  useEffect(() => {
+    if (!draftKey) {
+      setPrompt('')
+      return
+    }
+    try {
+      setPrompt(localStorage.getItem(draftKey) ?? '')
+    } catch {
+      setPrompt('')
+    }
+  }, [draftKey])
+
   function handlePromptChange(value: string) {
     setPrompt(value)
+    if (!draftKey) return
+    try {
+      if (value) localStorage.setItem(draftKey, value)
+      else localStorage.removeItem(draftKey)
+    } catch { /* ignore */ }
   }
 
   function handleIdChange(value: string) {
@@ -275,6 +299,9 @@ export function SpawnForm({
       }
       const agent = await api.default.spawnAgent(projectId ?? '', req)
       setPrompt('')
+      if (draftKey) {
+        try { localStorage.removeItem(draftKey) } catch { /* ignore */ }
+      }
       setAgentId('')
       setIdManuallyEdited(false)
       attachments.forEach((a) => a.previewUrl && URL.revokeObjectURL(a.previewUrl))
