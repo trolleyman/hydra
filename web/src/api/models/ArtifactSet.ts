@@ -16,17 +16,33 @@ export type ArtifactSet = {
     changed: boolean;
     error?: string | null;
     /**
-     * Latest stdout line of an in-flight generation (only set while status is "generating"), surfaced as live progress.
-     */
-    progress?: string | null;
-    /**
-     * Unix time (seconds) the in-flight generation started, so the UI can show how long it has been running. Only set while status is "generating".
+     * Unix time (seconds) the earliest in-flight side started, so the UI can show how long it has been running. Only set while status is "generating".
      */
     started_at?: number | null;
     /**
-     * Captured stdout+stderr lines of an in-flight generation (only populated while status is "generating"), surfaced as a live log.
+     * Latest progress line of the in-flight LEFT (before) generation. Taken from `::hydra:progress::` marker lines the script emits, falling back to the latest stdout line until the first marker is seen. Only set while that side is generating.
      */
-    log?: Array<ArtifactLogLine> | null;
+    left_progress?: string | null;
+    /**
+     * As left_progress, for the RIGHT (after) generation.
+     */
+    right_progress?: string | null;
+    /**
+     * Captured stdout+stderr lines of the in-flight LEFT (before) generation, surfaced as a live log. Only populated while that side is generating; once settled, fetch left_log_url instead.
+     */
+    left_log?: Array<ArtifactLogLine> | null;
+    /**
+     * As left_log, for the RIGHT (after) generation.
+     */
+    right_log?: Array<ArtifactLogLine> | null;
+    /**
+     * URL to fetch the persisted build log of the LEFT (before) side once it has settled (ready or error), so the log can be reopened after generation finishes. Null while generating or if no log was captured.
+     */
+    left_log_url?: string | null;
+    /**
+     * As left_log_url, for the RIGHT (after) side.
+     */
+    right_log_url?: string | null;
     files: Array<ArtifactFile>;
 };
 export namespace ArtifactSet {

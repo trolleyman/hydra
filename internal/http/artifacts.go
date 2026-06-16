@@ -281,26 +281,29 @@ func (s *Server) buildArtifactSet(projectID, name string, leftSpec, rightSpec *c
 		return set
 	}
 
+	// Per-side fields, so the panel can show two side-by-side logs, a "left ·
+	// right" progress header, and reopen each log after generation. While a side
+	// generates it carries a live progress line + log; once it settles (ready or
+	// error) it carries a URL to its persisted log instead. A nil spec means the
+	// side is absent on that version (script added/removed) and contributes none.
+	set.LeftProgress = nonEmptyPtr(leftMeta.Progress)
+	set.RightProgress = nonEmptyPtr(rightMeta.Progress)
+	set.LeftLog = ptr(toAPILog(leftMeta.Log))
+	set.RightLog = ptr(toAPILog(rightMeta.Log))
+	if t := earliestStart(leftMeta.StartedAt, rightMeta.StartedAt); t > 0 {
+		set.StartedAt = &t
+	}
+	if leftSpec != nil && leftMeta.Status != artifacts.StatusGenerating && mgr.HasLog(name, leftMeta.Key) {
+		set.LeftLogUrl = ptr(logURL(projectID, name, leftMeta.Key))
+	}
+	if rightSpec != nil && rightMeta.Status != artifacts.StatusGenerating && mgr.HasLog(name, rightMeta.Key) {
+		set.RightLogUrl = ptr(logURL(projectID, name, rightMeta.Key))
+	}
+
 	// Overall status: generating dominates, then error, else ready.
 	switch {
 	case leftMeta.Status == artifacts.StatusGenerating || rightMeta.Status == artifacts.StatusGenerating:
 		set.Status = api.Generating
-		// Surface whichever side is generating (prefer the right/head side, the one
-		// a user is usually watching regenerate): its progress line, the live
-		// stdout+stderr log, and when it started so the UI can show elapsed time.
-		live := rightMeta
-		if rightMeta.Status != artifacts.StatusGenerating {
-			live = leftMeta
-		}
-		if live.Progress != "" {
-			p := live.Progress
-			set.Progress = &p
-		}
-		if live.StartedAt > 0 {
-			t := live.StartedAt
-			set.StartedAt = &t
-		}
-		set.Log = ptr(toAPILog(live.Log))
 		return set
 	case leftMeta.Status == artifacts.StatusError || rightMeta.Status == artifacts.StatusError:
 		set.Status = api.Error
@@ -343,6 +346,63 @@ func blobURL(projectID, script, key, file string) string {
 	q.Set("key", key)
 	q.Set("file", file)
 	return fmt.Sprintf("/artifacts/projects/%s/blob?%s", url.PathEscape(projectID), q.Encode())
+}
+
+// logURL builds the (same-origin) URL the frontend fetches a settled side's
+// persisted build log from (see HandleArtifactLog).
+func logURL(projectID, script, key string) string {
+	q := url.Values{}
+	q.Set("script", script)
+	q.Set("key", key)
+	return fmt.Sprintf("/artifacts/projects/%s/log?%s", url.PathEscape(projectID), q.Encode())
+}
+
+// nonEmptyPtr returns &s, or nil when s is empty, so an absent progress line
+// serializes as null rather than "".
+func nonEmptyPtr(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
+}
+
+// earliestStart returns the earliest non-zero of two Unix start times (0 if both
+// are zero), so the elapsed-time header counts from whichever side began first.
+func earliestStart(a, b int64) int64 {
+	switch {
+	case a == 0:
+		return b
+	case b == 0:
+		return a
+	case b < a:
+		return b
+	default:
+		return a
+	}
+}
+
+// HandleArtifactLog serves the persisted build log (JSON {lines:[...]}) for one
+// settled side of a script, so the panel can reopen the log after generation
+// finishes. Registered outside the OpenAPI mux (like HandleArtifactBlob) because
+// it is addressed by the opaque (script, key) URL the set hands out.
+func (s *Server) HandleArtifactLog(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("project_id")
+	projectRoot, err := s.resolveProjectRoot(projectID)
+	if err != nil || s.Artifacts == nil {
+		http.NotFound(w, r)
+		return
+	}
+	q := r.URL.Query()
+	mgr := s.Artifacts.Manager(projectRoot)
+	lines, ok := mgr.ReadLog(q.Get("script"), q.Get("key"))
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Cache-Control", "public, max-age=300")
+	api.WriteJSON(w, http.StatusOK, struct {
+		Lines []api.ArtifactLogLine `json:"lines"`
+	}{Lines: toAPILog(lines)})
 }
 
 // HandleArtifactBlob serves a single generated artifact file. It is registered

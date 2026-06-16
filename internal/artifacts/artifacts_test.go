@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -151,6 +152,99 @@ func TestInvalidateRegenerates(t *testing.T) {
 	// Invalidating a never-generated script is a no-op, not an error.
 	if err := m.Invalidate("nope", v); err != nil {
 		t.Fatalf("Invalidate of absent entry: %v", err)
+	}
+}
+
+// TestProgressMarkerGating drives appendLog directly to verify the header
+// progress rules: ordinary stdout sets the progress until the first
+// ProgressMarker line, after which only markers do (so noisy build output can't
+// hijack the header). stderr never sets progress.
+func TestProgressMarkerGating(t *testing.T) {
+	m := NewManager(t.TempDir())
+	dir := "entry"
+	m.mu.Lock()
+	m.gens[dir] = struct{}{} // mark in-flight so appendLog isn't a no-op
+	m.mu.Unlock()
+
+	progressOf := func() string {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		return m.progress[dir]
+	}
+
+	m.appendLog(dir, "noise before", StreamStdout, false)
+	if got := progressOf(); got != "noise before" {
+		t.Fatalf("pre-marker stdout should set progress, got %q", got)
+	}
+	m.appendLog(dir, "err line", StreamStderr, false)
+	if got := progressOf(); got != "noise before" {
+		t.Fatalf("stderr must not set progress, got %q", got)
+	}
+	m.appendLog(dir, "real step", StreamStdout, true) // marker (already stripped)
+	if got := progressOf(); got != "real step" {
+		t.Fatalf("marker should set progress, got %q", got)
+	}
+	m.appendLog(dir, "noise after", StreamStdout, false)
+	if got := progressOf(); got != "real step" {
+		t.Fatalf("post-marker stdout must not hijack progress, got %q", got)
+	}
+
+	m.mu.Lock()
+	logged := append([]LogLine(nil), m.logs[dir]...)
+	m.mu.Unlock()
+	if len(logged) != 4 {
+		t.Fatalf("expected all 4 lines logged, got %d: %+v", len(logged), logged)
+	}
+}
+
+// TestPersistedLogRoundTrip verifies that a settled generation's output is
+// persisted (build.log) and readable via ReadLog, that the ProgressMarker prefix
+// is stripped in the stored log, and that stream tags survive.
+func TestPersistedLogRoundTrip(t *testing.T) {
+	repo := initRepo(t)
+	m := NewManager(repo)
+	spec := config.ArtifactScript{
+		Name: "shots",
+		Command: "echo plain-out; " +
+			`echo '` + ProgressMarker + ` capturing 1/1'; ` +
+			"echo a-warning >&2; " +
+			`printf 'P' > "$HYDRA_ARTIFACT_OUTPUT/home.png"`,
+		UnsafeHost: true,
+	}
+	v := Version{Ref: "HEAD"}
+	if meta := waitReady(t, m, spec, v); meta.Status != StatusReady {
+		t.Fatalf("status = %s, error = %s", meta.Status, meta.Error)
+	}
+
+	key, _, err := m.versionKey(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !m.HasLog("shots", key) {
+		t.Fatal("HasLog = false after generation")
+	}
+	lines, ok := m.ReadLog("shots", key)
+	if !ok {
+		t.Fatal("ReadLog returned ok = false")
+	}
+
+	var sawPlain, sawMarkerStripped, sawWarn bool
+	for _, l := range lines {
+		switch {
+		case l.Text == "plain-out" && l.Stream == StreamStdout:
+			sawPlain = true
+		case l.Text == "capturing 1/1" && l.Stream == StreamStdout:
+			sawMarkerStripped = true
+		case l.Text == "a-warning" && l.Stream == StreamStderr:
+			sawWarn = true
+		}
+		if strings.Contains(l.Text, ProgressMarker) {
+			t.Errorf("marker prefix not stripped in persisted log: %q", l.Text)
+		}
+	}
+	if !sawPlain || !sawMarkerStripped || !sawWarn {
+		t.Fatalf("persisted log missing lines (plain=%v markerStripped=%v warn=%v): %+v",
+			sawPlain, sawMarkerStripped, sawWarn, lines)
 	}
 }
 

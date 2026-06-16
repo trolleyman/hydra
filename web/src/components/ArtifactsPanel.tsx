@@ -314,7 +314,7 @@ function LogView({ log }: { log: ArtifactLogLine[] }) {
     <div
       ref={ref}
       onScroll={onScroll}
-      className="my-2 max-h-64 overflow-auto rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/60 p-2 font-mono text-[11px] leading-relaxed"
+      className="max-h-64 overflow-auto rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/60 p-2 font-mono text-[11px] leading-relaxed"
     >
       {log.length === 0 ? (
         <div className="text-gray-400 dark:text-gray-500">Waiting for output…</div>
@@ -329,6 +329,91 @@ function LogView({ log }: { log: ArtifactLogLine[] }) {
             {l.text}
           </div>
         ))
+      )}
+    </div>
+  )
+}
+
+// LogColumn is one side's labelled log pane. A null log means the side is absent
+// (the script was added/removed on the branch), shown as a "No log" placeholder
+// so the side-by-side layout stays balanced.
+function LogColumn({ label, log }: { label: string; log: ArtifactLogLine[] | null }) {
+  return (
+    <div className="flex-1 min-w-0">
+      <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-1">{label}</div>
+      {log === null ? (
+        <div className="my-2 flex items-center justify-center h-16 rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/60 text-[11px] text-gray-400 dark:text-gray-500">
+          No log
+        </div>
+      ) : (
+        <LogView log={log} />
+      )}
+    </div>
+  )
+}
+
+// LogPanes shows the two builds (before/after) side by side, so the left and
+// right generations read as separate streams instead of interleaving.
+function LogPanes({ left, right }: { left: ArtifactLogLine[] | null; right: ArtifactLogLine[] | null }) {
+  return (
+    <div className="flex gap-2 my-2">
+      <LogColumn label="Before" log={left} />
+      <LogColumn label="After" log={right} />
+    </div>
+  )
+}
+
+// PersistedLogView lets a settled card reopen its build log: a "Show build log"
+// toggle that lazily fetches each side's persisted log (left_log_url /
+// right_log_url) and renders them in the same side-by-side panes as the live log.
+function PersistedLogView({ leftUrl, rightUrl }: { leftUrl?: string | null; rightUrl?: string | null }) {
+  const [open, setOpen] = useState(false)
+  const [logs, setLogs] = useState<{ left: ArtifactLogLine[] | null; right: ArtifactLogLine[] | null } | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+
+  if (!leftUrl && !rightUrl) return null
+
+  const toggle = async () => {
+    if (open) { setOpen(false); return }
+    setOpen(true)
+    if (logs || loading) return
+    setLoading(true)
+    setErr(null)
+    try {
+      // A side with no URL (absent on that version) stays null → "No log" pane.
+      const fetchSide = async (u?: string | null): Promise<ArtifactLogLine[] | null> => {
+        if (!u) return null // side absent or no log → "No log" pane
+        const r = await fetch(u)
+        if (!r.ok) return null
+        const j = (await r.json()) as { lines?: ArtifactLogLine[] }
+        return j.lines ?? []
+      }
+      const [left, right] = await Promise.all([fetchSide(leftUrl), fetchSide(rightUrl)])
+      setLogs({ left, right })
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="pt-2">
+      <button
+        onClick={toggle}
+        className="text-[11px] text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 cursor-pointer"
+      >
+        {open ? 'Hide' : 'Show'} build log
+      </button>
+      {open && (
+        loading ? (
+          <div className="my-2 text-xs text-gray-400 dark:text-gray-500">Loading log…</div>
+        ) : err ? (
+          <div className="my-2 text-xs text-red-500 dark:text-red-400">Failed to load log: {err}</div>
+        ) : (
+          <LogPanes left={logs?.left ?? null} right={logs?.right ?? null} />
+        )
       )}
     </div>
   )
@@ -351,6 +436,10 @@ function ArtifactSetCard({ set, mode, onRefresh }: { set: ArtifactSet; mode: Ima
   const [collapsed, setCollapsed] = useState(() => (status === 'ready' && !set.changed) || status === 'generating')
   const [showUnchanged, setShowUnchanged] = useState(false)
 
+  // Header progress while generating: both sides' latest progress lines joined by
+  // a "·" (the two builds run in parallel), e.g. "building frontend · home 7/24".
+  const progressText = [set.left_progress, set.right_progress].filter(Boolean).join(' · ')
+
   return (
     <div className="border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 overflow-hidden">
       <div className="flex items-stretch bg-gray-50 dark:bg-gray-800/60">
@@ -367,7 +456,7 @@ function ArtifactSetCard({ set, mode, onRefresh }: { set: ArtifactSet; mode: Ima
             // has been running, separated by a "·". Expand the card for the full log.
             <span className="flex items-center gap-1.5 min-w-0 text-xs text-gray-400 dark:text-gray-500">
               <LoaderCircle className="w-3 h-3 shrink-0 animate-spin" />
-              <span className="truncate">{set.progress || 'generating…'}</span>
+              <span className="truncate">{progressText || 'generating…'}</span>
               {set.started_at ? (
                 <span className="shrink-0">· <ElapsedTime startedAt={set.started_at} /></span>
               ) : null}
@@ -400,21 +489,28 @@ function ArtifactSetCard({ set, mode, onRefresh }: { set: ArtifactSet; mode: Ima
 
       {!collapsed && (
         <div className="px-3 pb-2">
-          {status === 'generating' && <LogView log={set.log ?? []} />}
+          {/* While generating, stream both builds' live logs side by side. */}
+          {status === 'generating' && <LogPanes left={set.left_log ?? []} right={set.right_log ?? []} />}
           {status === 'error' && (
-            <div className="my-2 px-3 py-2 rounded-md bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 font-mono text-xs text-red-600 dark:text-red-400 whitespace-pre-wrap break-words">
-              {set.error || 'Artifact generation failed.'}
-            </div>
+            <>
+              <div className="my-2 px-3 py-2 rounded-md bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 font-mono text-xs text-red-600 dark:text-red-400 whitespace-pre-wrap break-words">
+                {set.error || 'Artifact generation failed.'}
+              </div>
+              <PersistedLogView leftUrl={set.left_log_url} rightUrl={set.right_log_url} />
+            </>
           )}
           {status === 'ready' &&
             (noChanges ? (
               // No visual changes: show the (unchanged) artifacts anyway when
               // expanded — useful for confirming a screenshot still renders.
-              set.files.length > 0 ? (
-                <FileGrid files={set.files} mode={mode} />
-              ) : (
-                <div className="my-2 text-xs text-gray-400 dark:text-gray-500">No artifacts produced.</div>
-              )
+              <>
+                {set.files.length > 0 ? (
+                  <FileGrid files={set.files} mode={mode} />
+                ) : (
+                  <div className="my-2 text-xs text-gray-400 dark:text-gray-500">No artifacts produced.</div>
+                )}
+                <PersistedLogView leftUrl={set.left_log_url} rightUrl={set.right_log_url} />
+              </>
             ) : (
               <>
                 <FileGrid files={changedFiles} mode={mode} />
@@ -429,6 +525,7 @@ function ArtifactSetCard({ set, mode, onRefresh }: { set: ArtifactSet; mode: Ima
                     {showUnchanged && <FileGrid files={unchangedFiles} mode={mode} />}
                   </div>
                 )}
+                <PersistedLogView leftUrl={set.left_log_url} rightUrl={set.right_log_url} />
               </>
             ))}
         </div>
@@ -437,11 +534,16 @@ function ArtifactSetCard({ set, mode, onRefresh }: { set: ArtifactSet; mode: Ima
   )
 }
 
+type ArtifactSide = 'left' | 'right'
+
 // Server→client message on the artifacts WebSocket. Mirrors internal/http/artifacts_ws.go.
+// log/progress carry a `side` so the two builds (before/after) stay in separate
+// panes instead of interleaving into one stream.
 type ArtifactWSMessage =
   | { type: 'snapshot'; scripts: ArtifactSet[] }
   | { type: 'set'; set: ArtifactSet }
-  | { type: 'log'; script: string; line: ArtifactLogLine }
+  | { type: 'log'; script: string; side: ArtifactSide; line: ArtifactLogLine }
+  | { type: 'progress'; script: string; side: ArtifactSide; progress: string }
 
 function artifactsWsUrl(projectId: string | null, agentId: string, baseRef?: string, headRef?: string, includeUncommitted?: boolean): string {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -483,7 +585,17 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
     } else if (msg.type === 'set') {
       setSets((prev) => (prev ? prev.map((s) => (s.name === msg.set.name ? msg.set : s)) : [msg.set]))
     } else if (msg.type === 'log') {
-      setSets((prev) => prev?.map((s) => (s.name === msg.script ? { ...s, log: [...(s.log ?? []), msg.line] } : s)) ?? prev)
+      setSets((prev) => prev?.map((s) => {
+        if (s.name !== msg.script) return s
+        return msg.side === 'left'
+          ? { ...s, left_log: [...(s.left_log ?? []), msg.line] }
+          : { ...s, right_log: [...(s.right_log ?? []), msg.line] }
+      }) ?? prev)
+    } else if (msg.type === 'progress') {
+      setSets((prev) => prev?.map((s) => {
+        if (s.name !== msg.script) return s
+        return msg.side === 'left' ? { ...s, left_progress: msg.progress } : { ...s, right_progress: msg.progress }
+      }) ?? prev)
     }
   }, [])
 
@@ -549,7 +661,18 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
     // Optimistically flip the card to a fresh "generating" state so the spinner,
     // a zeroed elapsed clock and an empty log show immediately.
     setSets((prev) => prev?.map((s) => (s.name === name
-      ? { ...s, status: 'generating' as unknown as ArtifactSet['status'], error: null, progress: null, log: [], started_at: Math.floor(Date.now() / 1000) }
+      ? {
+          ...s,
+          status: 'generating' as unknown as ArtifactSet['status'],
+          error: null,
+          left_progress: null,
+          right_progress: null,
+          left_log: [],
+          right_log: [],
+          left_log_url: null,
+          right_log_url: null,
+          started_at: Math.floor(Date.now() / 1000),
+        }
       : s)) ?? prev)
     const ws = wsRef.current
     if (mode === 'ws' && ws && ws.readyState === WebSocket.OPEN) {
@@ -593,7 +716,8 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
           <p>Artifacts are visual snapshots — typically screenshots — rendered from your code so you can see what a change <em>looks like</em>, side by side with the base branch.</p>
           <p>Each one is produced by a project-defined <strong>artifact script</strong>. Hydra checks out both the base ref and the head ref (or your uncommitted working tree), runs the script against each with <code className="text-blue-300">$HYDRA_ARTIFACT_OUTPUT</code>, <code className="text-blue-300">$HYDRA_ARTIFACT_SOURCE</code> and <code className="text-blue-300">$HYDRA_ARTIFACT_REF</code> set, and compares the images it writes. Results are cached per commit, so re-viewing a diff is free.</p>
           <p>Configure them in <code className="text-blue-300">.hydra/config.toml</code> with <code className="text-blue-300">[[artifacts]]</code> blocks (<code className="text-blue-300">name</code>, <code className="text-blue-300">command</code>, optional <code className="text-blue-300">timeout_sec</code>) — for example a script that builds the app and screenshots a page, so visual UI changes show up here in the diff viewer.</p>
-          <p>A script with no visual changes — or one still generating — collapses to a single header row; click it to expand (and, while generating, watch the live log). The refresh button (top-right of each card) re-runs a script — handy to retry a failure or re-render even when nothing visibly changed.</p>
+          <p>A script with no visual changes — or one still generating — collapses to a single header row; click it to expand. The two sides (base and head) build in parallel, so the expanded card shows their <strong>build logs side by side</strong> (Before / After, stderr in red); once finished, reopen them any time with <strong>Show build log</strong>. The refresh button (top-right of each card) re-runs a script — handy to retry a failure or re-render even when nothing visibly changed.</p>
+          <p>The header shows each side's latest <code className="text-blue-300">stdout</code> line as live progress. To surface a cleaner message, print a line prefixed with <code className="text-blue-300">::hydra:progress::</code> (e.g. <code className="text-blue-300">echo "::hydra:progress:: capturing home 3/24"</code>) — Hydra strips the prefix, shows the rest as the progress line, and from then on ignores ordinary <code className="text-blue-300">stdout</code> for the header, so a noisy build can't hijack it. The full output still lands in the build log.</p>
         </InfoTooltip>
       </div>
       <div className="flex flex-col gap-2">

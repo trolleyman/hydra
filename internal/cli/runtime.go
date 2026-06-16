@@ -162,6 +162,7 @@ func buildMux(server *httppkg.Server) *http.ServeMux {
 	mux.HandleFunc("/ws/projects/{project_id}/agents/{id}/artifacts", server.HandleArtifactsWS)
 	mux.HandleFunc("POST /shells/projects/{project_id}/agents/{id}/close", server.HandleShellClose)
 	mux.HandleFunc("/artifacts/projects/{project_id}/blob", server.HandleArtifactBlob)
+	mux.HandleFunc("/artifacts/projects/{project_id}/log", server.HandleArtifactLog)
 	mux.HandleFunc("/repository/projects/{project_id}/blob", server.HandleRepositoryBlob)
 	mux.HandleFunc("/uploads/projects/{project_id}", server.HandleUpload)
 	mux.Handle("/.well-known/", apiHandler)

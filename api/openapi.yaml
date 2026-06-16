@@ -1383,28 +1383,52 @@ components:
         error:
           type: string
           nullable: true
-        progress:
-          type: string
-          nullable: true
-          description: >-
-            Latest stdout line of an in-flight generation (only set while
-            status is "generating"), surfaced as live progress.
         started_at:
           type: integer
           format: int64
           nullable: true
           description: >-
-            Unix time (seconds) the in-flight generation started, so the UI can
-            show how long it has been running. Only set while status is
+            Unix time (seconds) the earliest in-flight side started, so the UI
+            can show how long it has been running. Only set while status is
             "generating".
-        log:
+        left_progress:
+          type: string
+          nullable: true
+          description: >-
+            Latest progress line of the in-flight LEFT (before) generation. Taken
+            from `::hydra:progress::` marker lines the script emits, falling back
+            to the latest stdout line until the first marker is seen. Only set
+            while that side is generating.
+        right_progress:
+          type: string
+          nullable: true
+          description: As left_progress, for the RIGHT (after) generation.
+        left_log:
           type: array
           nullable: true
           description: >-
-            Captured stdout+stderr lines of an in-flight generation (only
-            populated while status is "generating"), surfaced as a live log.
+            Captured stdout+stderr lines of the in-flight LEFT (before)
+            generation, surfaced as a live log. Only populated while that side is
+            generating; once settled, fetch left_log_url instead.
           items:
             $ref: '#/components/schemas/ArtifactLogLine'
+        right_log:
+          type: array
+          nullable: true
+          description: As left_log, for the RIGHT (after) generation.
+          items:
+            $ref: '#/components/schemas/ArtifactLogLine'
+        left_log_url:
+          type: string
+          nullable: true
+          description: >-
+            URL to fetch the persisted build log of the LEFT (before) side once
+            it has settled (ready or error), so the log can be reopened after
+            generation finishes. Null while generating or if no log was captured.
+        right_log_url:
+          type: string
+          nullable: true
+          description: As left_log_url, for the RIGHT (after) side.
         files:
           type: array
           items:
