@@ -202,6 +202,19 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
       const isCopyShortcut = (isMac ? e.metaKey : e.ctrlKey) && !e.shiftKey && e.code === 'KeyC'
       const isPasteShortcut = (isMac ? e.metaKey : e.ctrlKey) && !e.shiftKey && e.code === 'KeyV'
       const isLiteralVShortcut = (isMac ? e.metaKey : e.ctrlKey) && e.shiftKey && e.code === 'KeyV'
+      const isShiftEnter = e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey && (e.code === 'Enter' || e.code === 'NumpadEnter')
+
+      // Shift+Enter -> insert a newline instead of submitting. A terminal can't
+      // tell Shift+Enter apart from Enter on its own (both yield a bare CR), so
+      // the agent submits. Send ESC+CR (\x1b\r), the same sequence Claude Code's
+      // `/terminal-setup` configures iTerm2/VSCode to emit; the agent's input
+      // editor reads it as a newline rather than a submit.
+      if (isShiftEnter) {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(new Uint8Array([0x1b, 0x0d]))
+        }
+        return false
+      }
 
       // Copy with selection -> copy and clear selection (no ^C sent)
       if (isCopyShortcut) {
