@@ -22,6 +22,7 @@ export { ArtifactSet } from './models/ArtifactSet';
 export type { ArtifactsResponse } from './models/ArtifactsResponse';
 export type { CommitInfo } from './models/CommitInfo';
 export type { ConfigResponse } from './models/ConfigResponse';
+export type { ConfigTomlResponse } from './models/ConfigTomlResponse';
 export { DiffFile } from './models/DiffFile';
 export type { DiffHunk } from './models/DiffHunk';
 export { DiffLine } from './models/DiffLine';

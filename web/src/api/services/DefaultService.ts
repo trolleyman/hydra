@@ -8,6 +8,7 @@ import type { AgentResponse } from '../models/AgentResponse';
 import type { ArtifactsResponse } from '../models/ArtifactsResponse';
 import type { CommitInfo } from '../models/CommitInfo';
 import type { ConfigResponse } from '../models/ConfigResponse';
+import type { ConfigTomlResponse } from '../models/ConfigTomlResponse';
 import type { DiffResponse } from '../models/DiffResponse';
 import type { ProjectInfo } from '../models/ProjectInfo';
 import type { RepositoryBranchesResponse } from '../models/RepositoryBranchesResponse';
@@ -133,6 +134,48 @@ export class DefaultService {
         });
     }
     /**
+     * Get the raw .hydra/config.toml content for the trust prompt
+     * @param projectId
+     * @returns ConfigTomlResponse OK
+     * @throws ApiError
+     */
+    public getProjectConfigToml(
+        projectId: string,
+    ): CancelablePromise<ConfigTomlResponse> {
+        return this.httpRequest.request({
+            method: 'GET',
+            url: '/api/projects/{project_id}/config-toml',
+            path: {
+                'project_id': projectId,
+            },
+            errors: {
+                404: `Not Found`,
+                500: `Internal Server Error`,
+            },
+        });
+    }
+    /**
+     * Mark the project's current .hydra/config.toml as trusted
+     * @param projectId
+     * @returns ProjectInfo OK
+     * @throws ApiError
+     */
+    public trustProject(
+        projectId: string,
+    ): CancelablePromise<ProjectInfo> {
+        return this.httpRequest.request({
+            method: 'POST',
+            url: '/api/projects/{project_id}/trust',
+            path: {
+                'project_id': projectId,
+            },
+            errors: {
+                404: `Not Found`,
+                500: `Internal Server Error`,
+            },
+        });
+    }
+    /**
      * List all Hydra agents (heads)
      * @param projectId Project ID to scope the agent list
      * @returns AgentResponse OK
@@ -174,6 +217,7 @@ export class DefaultService {
             mediaType: 'application/json',
             errors: {
                 400: `Bad Request`,
+                403: `Project is not trusted`,
                 404: `Project Not Found`,
                 500: `Internal Server Error`,
             },
