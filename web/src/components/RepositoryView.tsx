@@ -735,6 +735,9 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
   useEffect(() => {
     if (!ready || !viewPath) { setFile(null); return }
     let cancelled = false
+    // Clear the previously-shown file so the pane shows a loading icon instead
+    // of the stale file while the new one is fetched.
+    setFile(null)
     setFileLoading(true)
     setError(null)
     setNotFound(false)
