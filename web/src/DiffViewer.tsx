@@ -8,8 +8,9 @@ import {
   ChevronDown, ChevronRight, ChevronLeft, Check, LoaderCircle, RefreshCw, RotateCcw,
   Settings, Copy, Folder, FolderOpen, X, GitMerge, Bot,
   MoveRight, MessageSquarePlus, FolderSync,
+  SquarePlus, SquareMinus, SquareArrowRight,
 } from 'lucide-react'
-import { getFileIcon, changeTypeTextClass } from './lib/fileIcons'
+import { getFileIcon } from './lib/fileIcons'
 import { Tooltip } from './components/Tooltip'
 import { ArtifactsPanel, IMAGE_DIFF_MODES, type ImageDiffMode } from './components/ArtifactsPanel'
 import { useDialogStore } from './stores/dialogStore'
@@ -372,6 +373,40 @@ const SideBySideHunk = memo(function SideBySideHunk({ hunk, highlightedOld, high
 
 // ── File diff card ────────────────────────────────────────────────────────────
 
+// PathName renders a file path with the leading directory part lowlit so the eye
+// lands on the filename (last segment), which keeps the normal text colour. The
+// git change type is conveyed by a ChangeTypeIcon badge next to the name rather
+// than by colouring the text.
+function PathName({ path }: { path: string }) {
+  const idx = path.lastIndexOf('/')
+  const dir = idx === -1 ? '' : path.slice(0, idx + 1)
+  const base = idx === -1 ? path : path.slice(idx + 1)
+  return (
+    <>
+      {dir && <span className="text-gray-400 dark:text-gray-500">{dir}</span>}
+      <span className="text-gray-700 dark:text-gray-300">{base}</span>
+    </>
+  )
+}
+
+// ChangeTypeIcon marks a file's git change type next to its name (in the diff
+// header and the sidebar file list): green [+] added, red [-] removed, cyan [→]
+// renamed. Modified files (the common case) get no badge. The change type is
+// conveyed by this coloured icon rather than by colouring the filename text.
+function ChangeTypeIcon({ type, className = 'w-3.5 h-3.5' }: { type: string; className?: string }) {
+  const cls = `${className} shrink-0`
+  switch (type) {
+    case 'added':
+      return <SquarePlus className={`${cls} text-green-600 dark:text-green-400`} />
+    case 'deleted':
+      return <SquareMinus className={`${cls} text-red-600 dark:text-red-400`} />
+    case 'renamed':
+      return <SquareArrowRight className={`${cls} text-cyan-600 dark:text-cyan-400`} />
+    default:
+      return null
+  }
+}
+
 const EXPANDER_ROW = 'flex items-center bg-blue-50 dark:bg-blue-950/30 border-y border-blue-100 dark:border-blue-900/50 px-2 py-0.5'
 const EXPANDER_BTN = 'p-0.5 rounded hover:bg-blue-100 dark:hover:bg-blue-900/50 text-blue-500 cursor-pointer'
 
@@ -412,9 +447,6 @@ const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onComment, 
 
   const expand = (newCtx: number) => onExpand(file.path, newCtx)
 
-  const displayPath = file.change_type === 'renamed' && file.old_path
-    ? `${file.old_path} → ${file.path}` : file.path
-
   return (
     <div ref={fileRef} className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden mb-4 bg-white dark:bg-gray-900 shadow-sm">
       <div
@@ -428,11 +460,20 @@ const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onComment, 
           <ChevronDown className={`w-4 h-4 transition-transform ${isCollapsed ? '-rotate-90' : ''}`} />
         </button>
         {(() => { const { Icon, className } = getFileIcon(file.path.split('/').pop() ?? file.path); return <Icon className={`w-3.5 h-3.5 shrink-0 ${className}`} /> })()}
-        <span
-          className={`font-mono text-xs flex-1 min-w-0 truncate cursor-pointer hover:underline ${changeTypeTextClass(file.change_type)}`}
-        >
-          {displayPath}
-        </span>
+        <div className="flex items-center gap-1.5 flex-1 min-w-0">
+          <span className="font-mono text-xs min-w-0 truncate cursor-pointer hover:underline">
+            {file.change_type === 'renamed' && file.old_path ? (
+              <>
+                <PathName path={file.old_path} />
+                <span className="text-gray-400 dark:text-gray-500"> → </span>
+                <PathName path={file.path} />
+              </>
+            ) : (
+              <PathName path={file.path} />
+            )}
+          </span>
+          <ChangeTypeIcon type={file.change_type} />
+        </div>
         <CopyButton text={file.path} />
         {!file.binary && (
           <div className="flex items-center gap-1.5 shrink-0 ml-1">
@@ -1172,10 +1213,11 @@ function FileRow({ file, isActive, onClick, indent = 0 }: {
     >
       {(() => { const { Icon, className } = getFileIcon(file.path.split('/').pop() ?? file.path); return <Icon className={`w-3.5 h-3.5 shrink-0 ${className}`} /> })()}
       <Tooltip content={file.path}>
-        <span className={`font-mono text-[10px] truncate flex-1 min-w-0 ${changeTypeTextClass(file.change_type)}`}>
+        <span className="font-mono text-[10px] truncate flex-1 min-w-0 text-gray-700 dark:text-gray-300">
           {file.path.split('/').pop()}
         </span>
       </Tooltip>
+      <ChangeTypeIcon type={file.change_type} className="w-3 h-3" />
       <div className="flex items-center gap-1 shrink-0">
         {file.additions > 0 && <span className="text-[10px] text-green-600 dark:text-green-400">+{file.additions}</span>}
         {file.deletions > 0 && <span className="text-[10px] text-red-600 dark:text-red-400">−{file.deletions}</span>}

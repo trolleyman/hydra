@@ -66,16 +66,3 @@ export function getFileIcon(name: string): IconSpec {
   if (CODE_EXTS.has(ext)) return { Icon: FileCode, className: 'text-gray-400' }
   return { Icon: FileIcon, className: 'text-gray-400' }
 }
-
-// changeTypeTextClass colours a filename in the diff viewer to convey its git
-// change type (the diff list no longer uses a change-type icon now that the
-// file-type icon matches the repo view): green = added, red+strikethrough =
-// deleted, blue = renamed, default grey = modified.
-export function changeTypeTextClass(type: string): string {
-  switch (type) {
-    case 'added': return 'text-green-600 dark:text-green-400'
-    case 'deleted': return 'text-red-600 dark:text-red-400 line-through'
-    case 'renamed': return 'text-blue-600 dark:text-blue-400'
-    default: return 'text-gray-700 dark:text-gray-300'
-  }
-}

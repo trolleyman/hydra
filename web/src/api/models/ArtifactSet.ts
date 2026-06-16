@@ -14,7 +14,18 @@ export type ArtifactSet = {
      * Whether any file differs between the two versions
      */
     changed: boolean;
+    /**
+     * Set only when the whole set failed (status "error") — i.e. both sides failed, or a side could not be loaded at all. When just one side fails while the other renders, status stays "ready" and the failure is reported in left_error / right_error instead.
+     */
     error?: string | null;
+    /**
+     * Error message from the LEFT (before) generation when that side failed but the RIGHT side still rendered, so the panel can show the available images alongside a warning. Null when the left side succeeded (or when the whole set failed — see error).
+     */
+    left_error?: string | null;
+    /**
+     * As left_error, for the RIGHT (after) side.
+     */
+    right_error?: string | null;
     /**
      * Unix time (seconds) the earliest in-flight side started, so the UI can show how long it has been running. Only set while status is "generating".
      */

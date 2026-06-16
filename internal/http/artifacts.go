@@ -300,18 +300,34 @@ func (s *Server) buildArtifactSet(projectID, name string, leftSpec, rightSpec *c
 		set.RightLogUrl = ptr(logURL(projectID, name, rightMeta.Key))
 	}
 
-	// Overall status: generating dominates, then error, else ready.
+	leftErrored := leftMeta.Status == artifacts.StatusError
+	rightErrored := rightMeta.Status == artifacts.StatusError
+
+	// Overall status: generating dominates; then a whole-set error only when
+	// BOTH sides failed (nothing to show); otherwise ready. A single side's
+	// failure is surfaced per-side (below) while the other side's images still
+	// render, so a broken "before" build doesn't hide the "after" screenshots.
 	switch {
 	case leftMeta.Status == artifacts.StatusGenerating || rightMeta.Status == artifacts.StatusGenerating:
 		set.Status = api.Generating
 		return set
-	case leftMeta.Status == artifacts.StatusError || rightMeta.Status == artifacts.StatusError:
+	case leftErrored && rightErrored:
 		set.Status = api.Error
 		msg := joinMetaErrs(leftMeta, rightMeta)
 		set.Error = &msg
 		return set
 	default:
 		set.Status = api.Ready
+	}
+
+	// One side failed but the other rendered: report that side's error so the
+	// panel can warn, and fall through to Compare — the errored side carries no
+	// files, so the surviving side's artifacts surface as added/removed.
+	if leftErrored {
+		set.LeftError = nonEmptyPtr(leftMeta.Error)
+	}
+	if rightErrored {
+		set.RightError = nonEmptyPtr(rightMeta.Error)
 	}
 
 	deltas := mgr.Compare(leftMeta, rightMeta)

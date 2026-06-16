@@ -875,6 +875,28 @@ func simArtifactSets(id string) []api.ArtifactSet {
 			Error:  ptr("exited 1: error: Cannot find module 'playwright'\n  at file:///app/scripts/screenshots/take-screenshots.ts:21:1"),
 			Files:  []api.ArtifactFile{},
 		},
+		// Partial failure: the LEFT (before) side died, but the RIGHT (after) side
+		// rendered, so the card stays "ready" and shows an amber warning plus the
+		// surviving side's images (here surfacing as "added") instead of hiding
+		// everything behind a whole-set error.
+		{
+			Name:      "dashboard",
+			Status:    api.Ready,
+			Changed:   true,
+			LeftError: ptr("exited 1: Error: page.goto: net::ERR_CONNECTION_REFUSED at http://localhost:3000/dashboard\n  at /app/scripts/screenshots/take-screenshots.ts:88:14"),
+			Files: []api.ArtifactFile{
+				{
+					Name:       "overview.png",
+					ChangeType: api.ArtifactFileChangeTypeAdded,
+					RightUrl:   ptr(simSVG("Overview (after)", "#15803d", 360, 220)),
+				},
+				{
+					Name:       "metrics.png",
+					ChangeType: api.ArtifactFileChangeTypeAdded,
+					RightUrl:   ptr(simSVG("Metrics (after)", "#15803d", 240, 320)),
+				},
+			},
+		},
 		// Settled with no visual changes: collapses to a single header row, but is
 		// still a card (expandable, refreshable). Its file is unchanged across sides.
 		{
