@@ -31,6 +31,7 @@
 package artifacts
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/sha256"
@@ -111,6 +112,11 @@ type Meta struct {
 	Error     string     `json:"error,omitempty"`
 	Files     []FileMeta `json:"files,omitempty"`
 	UpdatedAt int64      `json:"updated_at"`
+	// Progress is the latest non-blank stdout line of an in-flight generation,
+	// surfaced live so the UI can show what the script is doing (e.g. which
+	// screenshot it's on). It is transient: never persisted (only StatusGenerating
+	// metas carry it, and those are never written to disk).
+	Progress string `json:"-"`
 }
 
 // ChangeType classifies an artifact file across the two compared versions.
@@ -287,9 +293,10 @@ type Version struct {
 type Manager struct {
 	projectRoot string
 
-	mu   sync.Mutex
-	gens map[string]struct{} // entry dirs with an in-flight generation
-	sem  chan struct{}       // bounds concurrent generations (maxConcurrentGen)
+	mu       sync.Mutex
+	gens     map[string]struct{} // entry dirs with an in-flight generation
+	progress map[string]string   // entry dir -> latest stdout line of its in-flight gen
+	sem      chan struct{}       // bounds concurrent generations (maxConcurrentGen)
 }
 
 // NewManager returns a Manager for the given project root.
@@ -297,6 +304,7 @@ func NewManager(projectRoot string) *Manager {
 	m := &Manager{
 		projectRoot: projectRoot,
 		gens:        map[string]struct{}{},
+		progress:    map[string]string{},
 		sem:         make(chan struct{}, maxConcurrentGen),
 	}
 	_ = paths.CreateGitignoreAllInDir(m.root())
@@ -382,8 +390,9 @@ func (m *Manager) Get(spec config.ArtifactScript, v Version) (Meta, error) {
 		return meta, nil
 	}
 	if _, inFlight := m.gens[dir]; inFlight {
+		prog := m.progress[dir]
 		m.mu.Unlock()
-		return Meta{Script: spec.Name, Key: key, Ref: ref, Status: StatusGenerating}, nil
+		return Meta{Script: spec.Name, Key: key, Ref: ref, Status: StatusGenerating, Progress: prog}, nil
 	}
 	m.gens[dir] = struct{}{}
 	m.mu.Unlock()
@@ -402,10 +411,43 @@ func (m *Manager) Get(spec config.ArtifactScript, v Version) (Meta, error) {
 		}
 		m.mu.Lock()
 		delete(m.gens, dir)
+		delete(m.progress, dir)
 		m.mu.Unlock()
 	}()
 
 	return Meta{Script: spec.Name, Key: key, Ref: ref, Status: StatusGenerating}, nil
+}
+
+// Invalidate drops the cached entry for (script, v) so the next Get regenerates
+// it from scratch. This is how a user-initiated "refresh" busts a stale result —
+// most importantly a cached StatusError, which otherwise sticks until the version
+// key changes or the entry is pruned. It is a no-op when a generation for that
+// entry is already in flight (that run will write a fresh result) or when nothing
+// is cached.
+func (m *Manager) Invalidate(script string, v Version) error {
+	key, _, err := m.versionKey(v)
+	if err != nil {
+		return errtrace.Wrap(err)
+	}
+	dir := m.entryDir(script, key)
+	m.mu.Lock()
+	_, inFlight := m.gens[dir]
+	m.mu.Unlock()
+	if inFlight {
+		return nil
+	}
+	return errtrace.Wrap(os.RemoveAll(dir))
+}
+
+// setProgress records the latest stdout line of an in-flight generation so a
+// concurrent Get can surface it. It is a no-op once the entry is no longer
+// in-flight, so a late line can't resurrect a settled entry's progress.
+func (m *Manager) setProgress(dir, line string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, inFlight := m.gens[dir]; inFlight {
+		m.progress[dir] = line
+	}
 }
 
 // generate runs the script for one version and returns the resulting Meta.
@@ -459,9 +501,34 @@ func (m *Manager) generate(spec config.ArtifactScript, v Version, key, ref strin
 	cmd.Env = launch.Env
 	cmd.ExtraFiles = launch.ExtraFiles
 	var stderr bytes.Buffer
-	cmd.Stdout = io.Discard
 	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
+	// Stream stdout so the latest non-blank line becomes live progress (e.g.
+	// "wrote artifacts-ab-dark.png 7/12") that a polling Get can surface, instead
+	// of discarding it. Errors still report from stderr.
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		meta.Status, meta.Error = StatusError, err.Error()
+		return meta
+	}
+	if err := cmd.Start(); err != nil {
+		meta.Status, meta.Error = StatusError, err.Error()
+		return meta
+	}
+	var scanWG sync.WaitGroup
+	scanWG.Go(func() {
+		sc := bufio.NewScanner(stdout)
+		// Allow long lines (build tools can emit verbose single lines).
+		sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+		for sc.Scan() {
+			if line := strings.TrimSpace(sc.Text()); line != "" {
+				m.setProgress(dir, line)
+			}
+		}
+		_ = sc.Err() // best-effort: progress is non-critical, errors fall back to stderr
+	})
+	err = cmd.Wait()
+	scanWG.Wait() // drain the pipe before reading stderr / returning
+	if err != nil {
 		msg := err.Error()
 		if ctx.Err() == context.DeadlineExceeded {
 			msg = "timed out after " + timeout.String()

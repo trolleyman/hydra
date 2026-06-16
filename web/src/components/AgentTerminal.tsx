@@ -12,13 +12,14 @@ interface PaneProps {
   projectId: string | null
   shell: boolean
   sandboxed: boolean
+  shellId: string
   active: boolean
   reconnectAttempt: number
   onStatusUpdate?: (status: string) => void
   onDiffRefresh?: () => void
 }
 
-function getWsUrl(agentId: string, projectId: string | null, shell?: boolean, sandboxed?: boolean): string {
+function getWsUrl(agentId: string, projectId: string | null, shell?: boolean, sandboxed?: boolean, shellId?: string): string {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
   const host = window.location.host
   const params = new URLSearchParams()
@@ -26,13 +27,15 @@ function getWsUrl(agentId: string, projectId: string | null, shell?: boolean, sa
     params.set('shell', 'true')
     // Default is sandboxed; only signal when the user opted into a host shell.
     if (sandboxed === false) params.set('sandboxed', 'false')
+    // Per-tab id: each shell tab is its own process; a refresh reuses the same id.
+    if (shellId) params.set('shell_id', shellId)
   }
   const qs = params.toString() ? `?${params.toString()}` : ''
   const pid = projectId ? encodeURIComponent(projectId) : '_'
   return `${protocol}//${host}/ws/projects/${pid}/agents/${encodeURIComponent(agentId)}/terminal${qs}`
 }
 
-function TerminalPane({ agentId, projectId, shell, sandboxed, active, reconnectAttempt, onStatusUpdate, onDiffRefresh }: PaneProps) {
+function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, reconnectAttempt, onStatusUpdate, onDiffRefresh }: PaneProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<Terminal | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
@@ -135,7 +138,7 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, active, reconnectA
     termRef.current = term
     fitAddonRef.current = fitAddon
 
-    const url = getWsUrl(agentId, projectId, shell, sandboxed)
+    const url = getWsUrl(agentId, projectId, shell, sandboxed, shellId)
     const ws = new WebSocket(url)
     ws.binaryType = 'arraybuffer'
     wsRef.current = ws
@@ -348,6 +351,18 @@ export function AgentTerminal({ agentId, projectId, onRefresh, onStatusUpdate, o
   }
 
   function closeTab(id: string) {
+    // Closing a shell tab is a deliberate close, so kill its process now rather
+    // than letting it idle out the grace period (which exists for reloads /
+    // transient disconnects, where the pane unmounts without a real close).
+    const tab = tabs.find(t => t.id === id)
+    if (tab?.shell) {
+      const pid = projectId ? encodeURIComponent(projectId) : '_'
+      const params = new URLSearchParams({ shell_id: id })
+      if (tab.sandboxed === false) params.set('sandboxed', 'false')
+      void fetch(`/shells/projects/${pid}/agents/${encodeURIComponent(agentId)}/close?${params.toString()}`, {
+        method: 'POST',
+      }).catch(() => { /* best-effort; the idle reaper is the backstop */ })
+    }
     setTabs(prev => {
       const newTabs = prev.filter(t => t.id !== id)
       if (activeTabId === id && newTabs.length > 0) {
@@ -488,6 +503,7 @@ export function AgentTerminal({ agentId, projectId, onRefresh, onStatusUpdate, o
             projectId={projectId}
             shell={tab.shell}
             sandboxed={tab.sandboxed}
+            shellId={tab.id}
             active={activeTabId === tab.id}
             reconnectAttempt={reconnectKeys[tab.id] ?? 0}
             onStatusUpdate={tab.id === 'terminal' ? handleStatusUpdate : undefined}

@@ -2,6 +2,7 @@ package session
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -22,6 +23,11 @@ type StartOptions struct {
 	Sandbox sandbox.Options
 	Rows    uint16
 	Cols    uint16
+	// Ephemeral marks a throwaway session (e.g. a web bash shell) that should be
+	// terminated once its last attacher disconnects and nobody reattaches within
+	// a short grace period, and removed from the registry as soon as it exits.
+	// Unlike agents, it is not meant to outlive its terminal.
+	Ephemeral bool
 }
 
 // Registry owns all live agent sessions for the daemon.
@@ -84,6 +90,7 @@ func (r *Registry) Start(opts StartOptions) (*Session, error) {
 		rows:         opts.Rows,
 		cols:         opts.Cols,
 		status:       StatusRunning,
+		ephemeral:    opts.Ephemeral,
 	}
 
 	r.mu.Lock()
@@ -96,6 +103,11 @@ func (r *Registry) Start(opts StartOptions) (*Session, error) {
 		r.mu.RUnlock()
 		if fn != nil {
 			fn(done.info())
+		}
+		// Ephemeral sessions (web bash shells) don't outlive their process, so
+		// drop them from the registry immediately rather than lingering as exited.
+		if done.ephemeral {
+			r.Remove(done.ID)
 		}
 	})
 
@@ -177,6 +189,25 @@ func (r *Registry) Remove(id string) {
 	r.mu.Lock()
 	delete(r.sessions, id)
 	r.mu.Unlock()
+}
+
+// KillMatching terminates and removes every session whose ID has the given
+// prefix. Used to tear down a head's web bash shells (`<head>-shell…`) when the
+// head itself is killed, so they don't outlive the agent (and its worktree).
+// Best-effort.
+func (r *Registry) KillMatching(prefix string) {
+	r.mu.RLock()
+	var ids []string
+	for id := range r.sessions {
+		if strings.HasPrefix(id, prefix) {
+			ids = append(ids, id)
+		}
+	}
+	r.mu.RUnlock()
+	for _, id := range ids {
+		_ = r.Kill(id)
+		r.Remove(id)
+	}
 }
 
 // Snapshot returns info for all known sessions.

@@ -112,6 +112,48 @@ func TestGenerateError(t *testing.T) {
 	}
 }
 
+// TestInvalidateRegenerates verifies that a cached failure is discarded by
+// Invalidate so the next Get re-runs the script (the "refresh" path), and that a
+// successful result regenerates the same way.
+func TestInvalidateRegenerates(t *testing.T) {
+	repo := initRepo(t)
+	m := NewManager(repo)
+	v := Version{Ref: "HEAD"}
+
+	// First run fails and the failure is cached on disk.
+	failSpec := config.ArtifactScript{Name: "shots", Command: "exit 3", UnsafeHost: true}
+	if meta := waitReady(t, m, failSpec, v); meta.Status != StatusError {
+		t.Fatalf("expected cached error, got %s", meta.Status)
+	}
+	key, _, err := m.versionKey(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := readMeta(m.entryDir("shots", key)); !ok {
+		t.Fatal("expected meta on disk after failed generation")
+	}
+
+	// Invalidate drops the cached entry...
+	if err := m.Invalidate("shots", v); err != nil {
+		t.Fatalf("Invalidate: %v", err)
+	}
+	if _, ok := readMeta(m.entryDir("shots", key)); ok {
+		t.Fatal("expected cache entry removed after Invalidate")
+	}
+
+	// ...so the next Get regenerates. Use a now-succeeding command (same name) to
+	// confirm the result is freshly produced, not served from the stale failure.
+	okSpec := config.ArtifactScript{Name: "shots", Command: `printf 'PNGDATA' > "$HYDRA_ARTIFACT_OUTPUT/home.png"`, UnsafeHost: true}
+	if meta := waitReady(t, m, okSpec, v); meta.Status != StatusReady {
+		t.Fatalf("expected ready after refresh, got %s (%s)", meta.Status, meta.Error)
+	}
+
+	// Invalidating a never-generated script is a no-op, not an error.
+	if err := m.Invalidate("nope", v); err != nil {
+		t.Fatalf("Invalidate of absent entry: %v", err)
+	}
+}
+
 // TestGenerateSandboxed exercises the default (sandboxed) path: the command runs
 // inside bwrap with the output dir bound writable. Skipped where unprivileged
 // user namespaces are unavailable (e.g. nested sandboxes / hardened kernels).

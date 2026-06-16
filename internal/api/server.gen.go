@@ -210,8 +210,11 @@ type ArtifactSet struct {
 	Files   []ArtifactFile `json:"files"`
 
 	// Name The configured artifact script name
-	Name   string            `json:"name"`
-	Status ArtifactSetStatus `json:"status"`
+	Name string `json:"name"`
+
+	// Progress Latest stdout line of an in-flight generation (only set while status is "generating"), surfaced as live progress.
+	Progress *string           `json:"progress"`
+	Status   ArtifactSetStatus `json:"status"`
 }
 
 // ArtifactSetStatus defines model for ArtifactSet.Status.
@@ -443,7 +446,7 @@ type SandboxConfig struct {
 	MaskedPaths *[]string      `json:"masked_paths"`
 	Network     *NetworkConfig `json:"network,omitempty"`
 
-	// PreSpawnScript Shell script run inside the sandbox immediately before each agent is launched (e.g. `mise trust`)
+	// PreSpawnScript Bash script run inside the sandbox once, when the agent is first spawned — not on resume or for bash shells (e.g. `mise trust`)
 	PreSpawnScript *string   `json:"pre_spawn_script"`
 	RestoreRo      *[]string `json:"restore_ro"`
 	WritablePaths  *[]string `json:"writable_paths"`
@@ -534,6 +537,9 @@ type GetAgentArtifactsParams struct {
 
 	// IncludeUncommitted Use the agent's uncommitted working tree as the right version.
 	IncludeUncommitted *bool `form:"include_uncommitted,omitempty" json:"include_uncommitted,omitempty"`
+
+	// Refresh Name of a single artifact script whose cached result (including a cached failure) should be discarded and regenerated for both sides of the comparison before responding.
+	Refresh *string `form:"refresh,omitempty" json:"refresh,omitempty"`
 }
 
 // GetAgentDiffParams defines parameters for GetAgentDiff.
@@ -945,6 +951,14 @@ func (siw *ServerInterfaceWrapper) GetAgentArtifacts(w http.ResponseWriter, r *h
 	err = runtime.BindQueryParameter("form", true, false, "include_uncommitted", r.URL.Query(), &params.IncludeUncommitted)
 	if err != nil {
 		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "include_uncommitted", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "refresh" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "refresh", r.URL.Query(), &params.Refresh)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "refresh", Err: err})
 		return
 	}
 

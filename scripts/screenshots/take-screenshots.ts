@@ -13,7 +13,12 @@
 //   HYDRA_ARTIFACT_SOURCE  the checkout dir (repo root); cwd when run via sh -c
 //   HYDRA_ARTIFACT_REF     the resolved ref being rendered (informational)
 //
-// Run with: bun take-screenshot.ts  (from scripts/screenshots/)
+// Run with: bun take-screenshots.ts  (from scripts/screenshots/)
+//
+// Progress: each major step prints a one-line marker on stdout (build phases and,
+// during capture, "<name>.png <n>/<total>"). Hydra surfaces the latest stdout
+// line as live progress in the artifacts panel while this runs, so keep these
+// lines short and human-readable.
 
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import { createServer } from 'node:net'
@@ -85,11 +90,13 @@ console.log(`Rendering Hydra UI for ref ${REF} from ${SRC}`)
 //    (a type error in some checkout shouldn't block a screenshot) and the
 //    openapi/router codegen (their outputs are committed).
 const webDir = join(SRC, 'web')
+console.log('building frontend')
 run('bun', ['install'], webDir)
 run('bun', ['x', 'vite', 'build'], webDir)
 run('bun', ['scripts/generate-routes-regex.ts'], webDir)
 
 // 2. Build the hydra binary from the checkout into a throwaway dir.
+console.log('building hydra binary')
 const binDir = mkdtempSync(join(tmpdir(), 'hydra-shot-'))
 const bin = join(binDir, 'hydra')
 run('go', ['build', '-o', bin, './'], SRC)
@@ -107,7 +114,9 @@ const server: ChildProcess = spawn(bin, ['server', '--simulation'], {
 })
 
 try {
+  console.log('booting simulation server')
   await waitForServer(base + '/', 30_000)
+  console.log('capturing screenshots')
 
   // 4. Screenshot the pages. The home page ("/") shows the full app shell:
   //    header, project dropdown, agent sidebar (populated with mock data) and
@@ -226,6 +235,19 @@ try {
         viewport: { width: 1280, height: 1280 },
         imageDiffMode: 'onion',
       },
+      // Every render state of the artifacts panel in one shot. agent-1's
+      // simulated response (internal/http/simulation.go) carries four sets —
+      // changed, generating (with a live progress line), error, and no-visual-
+      // changes — each in the same card. A taller viewport fits all four so the
+      // states document side by side. Documents that switching states never
+      // changes the card shell and refresh stays reachable in every state.
+      {
+        name: 'artifact-states',
+        path: '/project/sim-project/agent/agent-1',
+        scrollTo: 'Changes',
+        viewport: { width: 1280, height: 1800 },
+        imageDiffMode: 'side-by-side',
+      },
     ]
     // Capture every page in both themes. Dark mode has its own colours (e.g.
     // diff add/remove backgrounds), so a light-only render would miss visual
@@ -236,8 +258,16 @@ try {
     // `prefers-color-scheme`). Light renders keep their original filenames; dark
     // renders get a `-dark` suffix.
     const themes = ['light', 'dark'] as const
+    let shot = 0
+    const totalShots = pages.length * themes.length
     for (const pg of pages) {
       for (const theme of themes) {
+        const suffix = theme === 'dark' ? '-dark' : ''
+        shot++
+        // Progress line surfaced live by Hydra (it shows the latest stdout line
+        // while generating): e.g. "artifacts-ab-dark.png 7/12". Logged at the
+        // start of the (slow) capture so it persists while the shot is taken.
+        console.log(`${pg.name}${suffix}.png ${shot}/${totalShots}`)
         const ctx = await browser.newContext({
           viewport: pg.viewport ?? { width: 1280, height: 800 },
           deviceScaleFactor: 1,
@@ -307,7 +337,6 @@ try {
           // Settle the scroll/sticky-header layout before capturing.
           await page.waitForTimeout(300)
         }
-        const suffix = theme === 'dark' ? '-dark' : ''
         const out = join(OUT, `${pg.name}${suffix}.png`)
         // Scrolled pages capture the viewport (so the scroll is meaningful);
         // others capture the full page.

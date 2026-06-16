@@ -809,6 +809,11 @@ func (s *SimulationServer) GetAgentArtifacts(w http.ResponseWriter, r *http.Requ
 		api.WriteJSON(w, http.StatusOK, api.ArtifactsResponse{Scripts: []api.ArtifactSet{}})
 		return
 	}
+	// Four artifact sets, one per render state, so the diff viewer documents every
+	// stage of the artifacts panel side by side: a finished comparison with visual
+	// changes, an in-flight generation (with a live progress line), a failure, and a
+	// settled "no visual changes" run. Every set renders inside the same card, so
+	// switching between them never shifts the layout and refresh is always reachable.
 	resp := api.ArtifactsResponse{Scripts: []api.ArtifactSet{
 		{
 			Name:    "screenshots",
@@ -843,6 +848,36 @@ func (s *SimulationServer) GetAgentArtifacts(w http.ResponseWriter, r *http.Requ
 					ChangeType: api.ArtifactFileChangeTypeUnchanged,
 					LeftUrl:    ptr(simSVG("About", "#334155", 360, 220)),
 					RightUrl:   ptr(simSVG("About", "#334155", 360, 220)),
+				},
+			},
+		},
+		// In-flight generation: the header shows a spinner and the latest stdout
+		// line of the running script as live progress.
+		{
+			Name:     "components",
+			Status:   api.Generating,
+			Progress: ptr("artifacts-ab-dark.png 7/12"),
+			Files:    []api.ArtifactFile{},
+		},
+		// Failure: the error (script stderr tail) renders monospaced; refresh retries.
+		{
+			Name:   "storybook",
+			Status: api.Error,
+			Error:  ptr("exited 1: error: Cannot find module 'playwright'\n  at file:///app/scripts/screenshots/take-screenshots.ts:21:1"),
+			Files:  []api.ArtifactFile{},
+		},
+		// Settled with no visual changes: collapses to a single header row, but is
+		// still a card (expandable, refreshable). Its file is unchanged across sides.
+		{
+			Name:    "emails",
+			Status:  api.Ready,
+			Changed: false,
+			Files: []api.ArtifactFile{
+				{
+					Name:       "welcome.png",
+					ChangeType: api.ArtifactFileChangeTypeUnchanged,
+					LeftUrl:    ptr(simSVG("Welcome", "#334155", 360, 220)),
+					RightUrl:   ptr(simSVG("Welcome", "#334155", 360, 220)),
 				},
 			},
 		},

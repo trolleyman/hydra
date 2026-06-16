@@ -14,6 +14,10 @@ export type ArtifactSet = {
      */
     changed: boolean;
     error?: string | null;
+    /**
+     * Latest stdout line of an in-flight generation (only set while status is "generating"), surfaced as live progress.
+     */
+    progress?: string | null;
     files: Array<ArtifactFile>;
 };
 export namespace ArtifactSet {

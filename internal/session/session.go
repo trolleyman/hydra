@@ -42,7 +42,22 @@ type Session struct {
 	cols      uint16
 	status    Status
 	exitErr   error
+
+	// ephemeral sessions (web bash shells) self-terminate shortly after their
+	// last attacher leaves; reapTimer is the pending grace-period kill, cancelled
+	// if a new attacher arrives (e.g. a terminal refresh reconnecting). Both are
+	// guarded by mu.
+	ephemeral bool
+	reapTimer *time.Timer
 }
+
+// shellReapGrace is how long an ephemeral session waits, attacher-less, before
+// terminating itself. Generous enough to survive a browser reload, navigating
+// away and back, or a transient disconnect — the shell (and its scrollback) is
+// still there when you return — while a tab you actually closed and abandoned is
+// eventually reaped. (Killing the head terminates its shells immediately,
+// independent of this grace; see Registry.KillMatching.)
+const shellReapGrace = 5 * time.Minute
 
 // attacher receives a copy of the session's output stream.
 type attacher struct {
@@ -128,10 +143,22 @@ func (s *Session) readLoop(onExit func(*Session)) {
 	onExit(s)
 }
 
-// detach removes an attacher.
+// detach removes an attacher. For an ephemeral session whose last attacher just
+// left, it schedules a grace-period self-termination (cancelled if someone
+// reattaches first) so a closed shell tab doesn't leak a live process.
 func (s *Session) detach(a *attacher) {
 	s.mu.Lock()
 	delete(s.attachers, a)
+	if s.ephemeral && len(s.attachers) == 0 && s.status != StatusExited && s.reapTimer == nil {
+		s.reapTimer = time.AfterFunc(shellReapGrace, func() {
+			s.mu.Lock()
+			idle := len(s.attachers) == 0 && s.status != StatusExited
+			s.mu.Unlock()
+			if idle {
+				s.stop()
+			}
+		})
+	}
 	s.mu.Unlock()
 	a.close()
 }
@@ -148,6 +175,12 @@ func (s *Session) attach(rows, cols uint16) *Attachment {
 	exited := s.status == StatusExited
 	if !exited {
 		s.attachers[a] = struct{}{}
+		// A new attacher cancels any pending ephemeral reap (e.g. a refresh
+		// reconnecting before the grace period elapsed).
+		if s.reapTimer != nil {
+			s.reapTimer.Stop()
+			s.reapTimer = nil
+		}
 		// Adopt the newest requested size.
 		if rows > 0 && cols > 0 {
 			s.rows, s.cols = rows, cols
