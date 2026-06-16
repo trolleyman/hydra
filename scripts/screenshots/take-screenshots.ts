@@ -447,6 +447,12 @@ try {
           )
           // Open the lightbox on the first image.
           await page.click('[aria-label^="View "]')
+          // Wait for the figure's caption to show the pixel dimensions ("W × H"),
+          // which only render after the image's onLoad fires — so the capture
+          // always includes them.
+          await page.waitForFunction(() =>
+            !!document.querySelector('figure figcaption')?.textContent?.includes('×'),
+          )
           await settle(page)
         }
         if (pg.imageDiffMode || pg.expandArtifact) {

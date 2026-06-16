@@ -1,4 +1,4 @@
-import { useCallback, useEffect } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { X, ChevronLeft, ChevronRight } from 'lucide-react'
 
 export interface LightboxImage {
@@ -23,6 +23,10 @@ export function ImageLightbox({
   const count = images.length
   const prev = useCallback(() => onIndexChange((index - 1 + count) % count), [index, count, onIndexChange])
   const next = useCallback(() => onIndexChange((index + 1) % count), [index, count, onIndexChange])
+  // Natural pixel dimensions of the current image, read once it loads. Cleared
+  // on navigation so a stale size never flashes against the next image.
+  const [dims, setDims] = useState<{ w: number; h: number } | null>(null)
+  useEffect(() => { setDims(null) }, [index])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -74,11 +78,13 @@ export function ImageLightbox({
         <img
           src={current.url}
           alt={current.filename}
+          onLoad={(e) => setDims({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })}
           className="max-h-[85vh] max-w-[90vw] object-contain rounded-lg shadow-2xl"
         />
-        <figcaption className="text-xs text-white/70 font-mono">
-          {current.filename}
-          {count > 1 && <span className="ml-2 text-white/40">{index + 1} / {count}</span>}
+        <figcaption className="flex items-center gap-2 text-xs text-white/70 font-mono">
+          <span>{current.filename}</span>
+          {dims && <span className="text-white/40">{dims.w} × {dims.h}</span>}
+          {count > 1 && <span className="text-white/40">{index + 1} / {count}</span>}
         </figcaption>
       </figure>
 
