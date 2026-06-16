@@ -1,9 +1,9 @@
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { api } from '../stores/apiClient'
 import type { ArtifactSet, ArtifactFile, ArtifactLogLine } from '../api'
 import { LoaderCircle, Image as ImageIcon, ImageOff, ChevronDown, ChevronRight, TriangleAlert, RefreshCw, Maximize2 } from 'lucide-react'
 import { InfoTooltip } from './InfoTooltip'
-import { loadArtifactPrefs, saveArtifactPrefs } from '../lib/artifactPrefs'
+import { loadArtifactPrefs, saveArtifactPrefs, loadTagFilter, saveTagFilter, type ArtifactTagFilter } from '../lib/artifactPrefs'
 import { stripAnsi } from '../lib/ansi'
 
 const CHANGE_LABEL: Record<string, string> = {
@@ -312,13 +312,149 @@ function ImageDiffView({ left, right, mode }: { left?: string | null; right?: st
   return <OnionCompare left={left} right={right} />
 }
 
+// --- Tags & filtering ---
+//
+// A file's tags come from a sibling JSON sidecar (<file>.meta) the artifact
+// script writes; the backend normalizes them (see internal/artifacts). A
+// "category::value" tag is a GitLab-style scoped label — at most one value per
+// category — which the filter renders as a single-select dropdown; a plain tag
+// (no "::") is free-form, rendered as a toggle chip.
+
+// parseScopedTag splits "category::value" into its parts, or returns null for a
+// free-form tag. Mirrors the backend's split (first "::", non-empty halves).
+function parseScopedTag(tag: string): { cat: string; val: string } | null {
+  const i = tag.indexOf('::')
+  if (i <= 0) return null
+  const cat = tag.slice(0, i)
+  const val = tag.slice(i + 2)
+  if (!cat || !val) return null
+  return { cat, val }
+}
+
+type CollectedTags = {
+  scoped: { cat: string; values: string[] }[]
+  free: string[]
+}
+
+// collectTags gathers every tag across all files into the scoped categories (with
+// their distinct values) and free-form tags that the filter bar offers.
+function collectTags(sets: ArtifactSet[]): CollectedTags {
+  const scoped = new Map<string, Set<string>>()
+  const free = new Set<string>()
+  for (const s of sets) {
+    for (const f of s.files) {
+      for (const t of f.tags ?? []) {
+        const p = parseScopedTag(t)
+        if (p) {
+          if (!scoped.has(p.cat)) scoped.set(p.cat, new Set())
+          scoped.get(p.cat)!.add(p.val)
+        } else {
+          free.add(t)
+        }
+      }
+    }
+  }
+  return {
+    scoped: [...scoped.entries()]
+      .map(([cat, vals]) => ({ cat, values: [...vals].sort() }))
+      .sort((a, b) => a.cat.localeCompare(b.cat)),
+    free: [...free].sort(),
+  }
+}
+
+// filterIsActive reports whether the filter would hide anything (any scoped
+// category pinned to a value, or any free tag selected).
+function filterIsActive(filter: ArtifactTagFilter): boolean {
+  return Object.values(filter.scoped).some(Boolean) || filter.free.length > 0
+}
+
+// fileMatchesFilter reports whether a file passes the active filter: it must
+// carry the selected value for every pinned scoped category (files lacking that
+// category are excluded), and must include every selected free tag.
+function fileMatchesFilter(file: ArtifactFile, filter: ArtifactTagFilter): boolean {
+  const tags = file.tags ?? []
+  for (const [cat, val] of Object.entries(filter.scoped)) {
+    if (val && !tags.includes(`${cat}::${val}`)) return false
+  }
+  for (const t of filter.free) {
+    if (!tags.includes(t)) return false
+  }
+  return true
+}
+
+// TagBadge renders one of a file's tags: a scoped label as a two-tone
+// category/value pill, a free-form tag as a single solid pill.
+function TagBadge({ tag }: { tag: string }) {
+  const scoped = parseScopedTag(tag)
+  if (scoped) {
+    return (
+      <span className="inline-flex items-center text-[10px] rounded overflow-hidden border border-gray-200 dark:border-gray-600">
+        <span className="px-1 py-0.5 bg-gray-100 dark:bg-gray-700/70 text-gray-500 dark:text-gray-400">{scoped.cat}</span>
+        <span className="px-1 py-0.5 bg-gray-200/70 dark:bg-gray-600/60 text-gray-700 dark:text-gray-200 font-medium">{scoped.val}</span>
+      </span>
+    )
+  }
+  return <span className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-300">{tag}</span>
+}
+
+// TagFilterBar is the inline filter shown on the Artifacts header: one
+// single-select segmented control per scoped category (All + each value) and a
+// toggle chip per free-form tag. The selection is shared across every card.
+function TagFilterBar({ tags, filter, onChange }: { tags: CollectedTags; filter: ArtifactTagFilter; onChange: (f: ArtifactTagFilter) => void }) {
+  const seg = (active: boolean) =>
+    `px-1.5 py-0.5 text-[11px] cursor-pointer transition-colors ${
+      active ? 'bg-blue-500 text-white' : 'bg-gray-100 dark:bg-gray-700/60 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600'
+    }`
+  const setScoped = (cat: string, val: string) => onChange({ ...filter, scoped: { ...filter.scoped, [cat]: val } })
+  const toggleFree = (t: string) =>
+    onChange({ ...filter, free: filter.free.includes(t) ? filter.free.filter((x) => x !== t) : [...filter.free, t] })
+
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+      {tags.scoped.map(({ cat, values }) => (
+        <div key={cat} className="flex items-center gap-1">
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">{cat}</span>
+          <div className="flex rounded border border-gray-200 dark:border-gray-700 overflow-hidden divide-x divide-gray-200 dark:divide-gray-700">
+            <button className={seg(!filter.scoped[cat])} onClick={() => setScoped(cat, '')}>All</button>
+            {values.map((v) => (
+              <button key={v} className={seg(filter.scoped[cat] === v)} onClick={() => setScoped(cat, v)}>{v}</button>
+            ))}
+          </div>
+        </div>
+      ))}
+      {tags.free.map((t) => (
+        <button
+          key={t}
+          onClick={() => toggleFree(t)}
+          className={`text-[11px] px-1.5 py-0.5 rounded border cursor-pointer transition-colors ${
+            filter.free.includes(t)
+              ? 'bg-blue-500 border-blue-500 text-white'
+              : 'border-gray-200 dark:border-gray-700 bg-gray-100 dark:bg-gray-700/60 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600'
+          }`}
+        >
+          {t}
+        </button>
+      ))}
+      {filterIsActive(filter) && (
+        <button
+          onClick={() => onChange({ scoped: {}, free: [] })}
+          className="text-[11px] text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 cursor-pointer underline"
+        >
+          Clear
+        </button>
+      )}
+    </div>
+  )
+}
+
 function FileRow({ file, mode }: { file: ArtifactFile; mode: ImageDiffMode }) {
   const ct = file.change_type as string
   return (
     <div className="p-3 min-w-0 max-w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40">
-      <div className="flex items-center gap-2 mb-2">
+      <div className="flex flex-wrap items-center gap-1.5 mb-2">
         <span className="text-xs font-medium text-gray-700 dark:text-gray-300 truncate">{file.name}</span>
         <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${CHANGE_COLOR[ct] ?? ''}`}>{CHANGE_LABEL[ct] ?? ct}</span>
+        {(file.tags ?? []).map((t) => <TagBadge key={t} tag={t} />)}
       </div>
       <ImageDiffView left={file.left_url} right={file.right_url} mode={mode} />
     </div>
@@ -587,10 +723,17 @@ function PersistedLogView({ leftUrl, rightUrl, open, onOpenChange }: { leftUrl?:
   )
 }
 
-function ArtifactSetCard({ set, mode, onRefresh, projectId, agentId }: { set: ArtifactSet; mode: ImageDiffMode; onRefresh: (name: string) => void; projectId: string | null; agentId: string }) {
+function ArtifactSetCard({ set, mode, filter, onRefresh, projectId, agentId }: { set: ArtifactSet; mode: ImageDiffMode; filter: ArtifactTagFilter; onRefresh: (name: string) => void; projectId: string | null; agentId: string }) {
   const status = set.status as string
-  const changedFiles = set.files.filter((f) => f.change_type !== 'unchanged')
-  const unchangedFiles = set.files.filter((f) => f.change_type === 'unchanged')
+  // Apply the (shared) tag filter to this card's files. The grid shows only
+  // matches; the header still reports the true diff size so "x/y changed" makes
+  // it obvious the filter is hiding some.
+  const isFiltered = filterIsActive(filter)
+  const visibleFiles = isFiltered ? set.files.filter((f) => fileMatchesFilter(f, filter)) : set.files
+  const changedFiles = visibleFiles.filter((f) => f.change_type !== 'unchanged')
+  const unchangedFiles = visibleFiles.filter((f) => f.change_type === 'unchanged')
+  const totalChanged = set.files.filter((f) => f.change_type !== 'unchanged').length
+  const changedLabel = isFiltered && changedFiles.length !== totalChanged ? `${changedFiles.length}/${totalChanged} changed` : `${totalChanged} changed`
   const noChanges = status === 'ready' && !set.changed
   // One side failed while the other rendered (status stays "ready"): surface a
   // warning but still show the surviving side's images. Both-sides-failed is the
@@ -662,8 +805,9 @@ function ArtifactSetCard({ set, mode, onRefresh, projectId, agentId }: { set: Ar
               <span className="text-xs text-gray-400 dark:text-gray-500 shrink-0">no visual changes</span>
             ) : (
               // Highlight the change count so a card with visual changes stands
-              // out at a glance from the muted "no visual changes" cards.
-              <span className="text-xs font-medium text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-900/40 rounded-full px-2 py-0.5 shrink-0">{changedFiles.length} changed</span>
+              // out at a glance from the muted "no visual changes" cards. When the
+              // filter hides some, the label reads "shown/total changed".
+              <span className="text-xs font-medium text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-900/40 rounded-full px-2 py-0.5 shrink-0">{changedLabel}</span>
             ))}
           {status === 'ready' && failedSide && (
             // One side failed to render; flag it in the header so it's visible
@@ -723,6 +867,8 @@ function ArtifactSetCard({ set, mode, onRefresh, projectId, agentId }: { set: Ar
               )}
               {set.files.length === 0 ? (
                 <div className="my-2 text-xs text-gray-400 dark:text-gray-500">No artifacts produced.</div>
+              ) : visibleFiles.length === 0 ? (
+                <div className="my-2 text-xs text-gray-400 dark:text-gray-500">No files match the current tag filter.</div>
               ) : (
                 <>
                   {/* Skip the grid entirely when nothing changed — an empty
@@ -794,6 +940,16 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
   // instead): stash the script name and bump the nonce to re-run the poll effect.
   const [refreshNonce, setRefreshNonce] = useState(0)
   const refreshScriptRef = useRef<string | null>(null)
+
+  // Tag filter, shared across every card for this agent. Reload it when the
+  // project/agent changes; persist it only on an explicit user change (a save
+  // effect would race the reload and clobber the new key with the old value).
+  const [tagFilter, setTagFilter] = useState<ArtifactTagFilter>(() => loadTagFilter(projectId, agentId))
+  useEffect(() => { setTagFilter(loadTagFilter(projectId, agentId)) }, [projectId, agentId])
+  const updateTagFilter = useCallback((f: ArtifactTagFilter) => {
+    setTagFilter(f)
+    saveTagFilter(projectId, agentId, f)
+  }, [projectId, agentId])
 
   // Apply a server→client WS message to local state.
   const applyMessage = useCallback((msg: ArtifactWSMessage) => {
@@ -903,6 +1059,11 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
     }
   }, [mode])
 
+  // Every tag offered by any file, partitioned into scoped categories and
+  // free-form tags. Drives the filter bar; empty → no filter bar is shown.
+  const collectedTags = useMemo(() => collectTags(sets ?? []), [sets])
+  const hasTags = collectedTags.scoped.length > 0 || collectedTags.free.length > 0
+
   if (error) {
     return (
       <div className="mb-4 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-xs text-red-600 dark:text-red-400">
@@ -921,7 +1082,7 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
 
   return (
     <div className="mb-4">
-      <div className="flex items-center gap-2 mb-2">
+      <div className="flex flex-wrap items-center gap-2 mb-2">
         <ImageIcon className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400" />
         <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Artifacts</h3>
         {generatingCount > 0 && (
@@ -930,16 +1091,25 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
             Generating {settledCount}/{sets.length}
           </span>
         )}
-        <InfoTooltip title="Artifacts">
+        <InfoTooltip title="Artifacts" width={440}>
           <p>Artifacts are visual snapshots — typically screenshots — rendered from your code so you can see what a change <em>looks like</em>, side by side with the base branch.</p>
           <p>Each one is produced by a project-defined <strong>artifact script</strong>. Hydra checks out both the base ref and the head ref (or your uncommitted working tree), runs the script against each with <code className="text-blue-300">$HYDRA_ARTIFACT_OUTPUT</code>, <code className="text-blue-300">$HYDRA_ARTIFACT_SOURCE</code> and <code className="text-blue-300">$HYDRA_ARTIFACT_REF</code> set, and compares the images it writes. Results are cached per commit, so re-viewing a diff is free.</p>
           <p>Configure them in <code className="text-blue-300">.hydra/config.toml</code> with <code className="text-blue-300">[[artifacts]]</code> blocks (<code className="text-blue-300">name</code>, <code className="text-blue-300">command</code>, optional <code className="text-blue-300">timeout_sec</code>) — for example a script that builds the app and screenshots a page, so visual UI changes show up here in the diff viewer.</p>
           <p>A script with no visual changes — or one still generating — collapses to a single header row; click it to expand. The two sides (base and head) build in parallel, so the expanded card shows their <strong>build logs side by side</strong> (Before / After, stderr in red); once finished, reopen them any time with <strong>Show build log</strong>. The refresh button (top-right of each card) re-runs a script — handy to retry a failure or re-render even when nothing visibly changed.</p>
           <p>The header shows each side's latest <code className="text-blue-300">stdout</code> line as live progress. To surface a cleaner message, print a line prefixed with <code className="text-blue-300">::hydra:progress::</code> (e.g. <code className="text-blue-300">echo "::hydra:progress:: capturing home 3/24"</code>) — Hydra strips the prefix, shows the rest as the progress line, and from then on ignores ordinary <code className="text-blue-300">stdout</code> for the header, so a noisy build can't hijack it. The full output still lands in the build log.</p>
+          <p><strong>Tags &amp; filter.</strong> Alongside an image <code className="text-blue-300">home.png</code> the script can write a JSON sidecar <code className="text-blue-300">home.png.meta</code> like <code className="text-blue-300">{'{'}"tags": ["theme::dark", "viewport::phone"]{'}'}</code>. Tags show as labels on each file and as a filter on this bar. A <code className="text-blue-300">category::value</code> tag is a <em>scoped</em> label — only one value per category is kept (the last wins) and it filters as a single-select dropdown; plain tags are free-form toggles. Handy when a script emits many shots (light/dark, phone/desktop) and you want to see just one slice.</p>
         </InfoTooltip>
+        {/* Filter lives right on the header bar (not behind a popover) so picking a
+            theme / viewport / tag is a single click. Shown only once some file
+            carries tags; ml-auto floats it to the right of the bar. */}
+        {hasTags && (
+          <div className="ml-auto">
+            <TagFilterBar tags={collectedTags} filter={tagFilter} onChange={updateTagFilter} />
+          </div>
+        )}
       </div>
       <div className="flex flex-col gap-2">
-        {sets.map((s) => <ArtifactSetCard key={s.name} set={s} mode={imageDiffMode} onRefresh={requestRefresh} projectId={projectId} agentId={agentId} />)}
+        {sets.map((s) => <ArtifactSetCard key={s.name} set={s} mode={imageDiffMode} filter={tagFilter} onRefresh={requestRefresh} projectId={projectId} agentId={agentId} />)}
       </div>
     </div>
   )

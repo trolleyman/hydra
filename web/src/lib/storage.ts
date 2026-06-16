@@ -52,6 +52,13 @@ export const ARTIFACT_PREFS_PREFIX = 'hydra-artifact-'
 export const artifactPrefsKey = (projectId: string | null, agentId: string, name: string): string =>
   `${ARTIFACT_PREFS_PREFIX}${projectId ?? '_'}-${agentId}-${name}`
 
+// Artifact tag filter, keyed by project + agent (one selection shared across all
+// of an agent's artifact cards — see artifactPrefs.ts loadTagFilter/saveTagFilter).
+// projectId may be null → '_' keeps the key shape stable.
+export const ARTIFACT_TAG_FILTER_PREFIX = 'hydra-artifact-tagfilter-'
+export const artifactTagFilterKey = (projectId: string | null, agentId: string): string =>
+  `${ARTIFACT_TAG_FILTER_PREFIX}${projectId ?? '_'}-${agentId}`
+
 // Per-agent view prefs (terminal height, page scroll, collapsed diff files) so
 // each agent's detail page restores its own layout (see agentViewPrefs.ts).
 // projectId may be null → '_' keeps the key shape stable.

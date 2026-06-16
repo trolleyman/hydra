@@ -16,6 +16,10 @@ export type ArtifactFile = {
      * URL of the file for the right version (null if absent on the right)
      */
     right_url?: string | null;
+    /**
+     * Labels for this file, read from a sibling JSON sidecar (<file>.meta, {"tags": [...]}). A "category::value" tag is a scoped label — only one value per category survives. Drives the artifacts panel's tag badges and filter. Null/absent when the file has no tags.
+     */
+    tags?: Array<string> | null;
 };
 export namespace ArtifactFile {
     export enum change_type {

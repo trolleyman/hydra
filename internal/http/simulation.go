@@ -924,8 +924,19 @@ func simArtifactSets(id string) []api.ArtifactSet {
 	}
 }
 
+// artTags returns a pointer to a tag slice for a simulated artifact file. The
+// "theme::*" / "viewport::*" tags are scoped labels (one value per category),
+// so the diff viewer renders them as single-select dropdowns; "new" is a plain
+// free-form tag, rendered as a toggle chip.
+func artTags(tags ...string) *[]string {
+	s := append([]string{}, tags...)
+	return &s
+}
+
 // simReadyChangedSet is the finished comparison with visual changes (including an
-// added file with no "before", to document the missing-image placeholder).
+// added file with no "before", to document the missing-image placeholder). Its
+// files carry scoped (theme/viewport) and free-form tags so the panel documents
+// its tag badges and the tag filter.
 func simReadyChangedSet() api.ArtifactSet {
 	return api.ArtifactSet{
 		Name:    "screenshots",
@@ -935,29 +946,41 @@ func simReadyChangedSet() api.ArtifactSet {
 			{
 				Name:       "home.png",
 				ChangeType: api.ArtifactFileChangeTypeModified,
+				Tags:       artTags("theme::light", "viewport::desktop"),
 				LeftUrl:    ptr(simSVG("Home (before)", "#b91c1c", 360, 220)),
 				RightUrl:   ptr(simSVG("Home (after)", "#15803d", 360, 220)),
 			},
 			{
+				Name:       "home-dark.png",
+				ChangeType: api.ArtifactFileChangeTypeModified,
+				Tags:       artTags("theme::dark", "viewport::desktop"),
+				LeftUrl:    ptr(simSVG("Home dark (before)", "#7f1d1d", 360, 220)),
+				RightUrl:   ptr(simSVG("Home dark (after)", "#166534", 360, 220)),
+			},
+			{
 				Name:       "login-phone.png",
 				ChangeType: api.ArtifactFileChangeTypeModified,
+				Tags:       artTags("theme::light", "viewport::phone"),
 				LeftUrl:    ptr(simSVG("Login (before)", "#b91c1c", 240, 480)),
 				RightUrl:   ptr(simSVG("Login (after)", "#15803d", 240, 480)),
 			},
 			{
-				Name:       "profile-phone.png",
+				Name:       "profile-phone-dark.png",
 				ChangeType: api.ArtifactFileChangeTypeModified,
-				LeftUrl:    ptr(simSVG("Profile (before)", "#b91c1c", 240, 480)),
-				RightUrl:   ptr(simSVG("Profile (after)", "#15803d", 240, 480)),
+				Tags:       artTags("theme::dark", "viewport::phone"),
+				LeftUrl:    ptr(simSVG("Profile (before)", "#7f1d1d", 240, 480)),
+				RightUrl:   ptr(simSVG("Profile (after)", "#166534", 240, 480)),
 			},
 			{
 				Name:       "settings-phone.png",
 				ChangeType: api.ArtifactFileChangeTypeAdded,
+				Tags:       artTags("theme::dark", "viewport::phone", "new"),
 				RightUrl:   ptr(simSVG("Settings (new)", "#15803d", 240, 480)),
 			},
 			{
 				Name:       "about.png",
 				ChangeType: api.ArtifactFileChangeTypeUnchanged,
+				Tags:       artTags("theme::light", "viewport::desktop"),
 				LeftUrl:    ptr(simSVG("About", "#334155", 360, 220)),
 				RightUrl:   ptr(simSVG("About", "#334155", 360, 220)),
 			},

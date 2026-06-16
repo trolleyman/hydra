@@ -643,6 +643,10 @@ func artifactsDocLines() []string {
 		docPrefix + "                credentials; only for audited, self-contained commands (default false).",
 		docPrefix + " The command is given: HYDRA_ARTIFACT_OUTPUT (directory to write images into),",
 		docPrefix + " HYDRA_ARTIFACT_SOURCE (the checkout dir), HYDRA_ARTIFACT_REF (the resolved ref).",
+		docPrefix + " Tags: alongside an image foo.png the command may write a JSON sidecar foo.png.meta",
+		docPrefix + ` like {"tags": ["theme::dark", "viewport::phone"]}. The diff viewer shows these as`,
+		docPrefix + " labels and offers a filter. A \"category::value\" tag is a scoped label: only one",
+		docPrefix + " value per category is kept (the last one wins); plain tags are free-form.",
 	}
 }
 

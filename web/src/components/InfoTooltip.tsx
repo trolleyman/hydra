@@ -5,9 +5,12 @@ import { Info } from 'lucide-react'
 interface InfoTooltipProps {
   title?: string
   children: React.ReactNode
+  // Tooltip width in px. Defaults to 384 (the old w-96). Used for both the box
+  // itself and the off-screen-clamping math in updateCoords, so they stay in sync.
+  width?: number
 }
 
-export function InfoTooltip({ title, children }: InfoTooltipProps) {
+export function InfoTooltip({ title, children, width = 384 }: InfoTooltipProps) {
   const [isOpen, setIsOpen] = useState(false)
   const [isTooltipHovered, setIsTooltipHovered] = useState(false)
   const [coords, setCoords] = useState({ top: 0, left: 0, arrowX: '50%' })
@@ -18,7 +21,7 @@ export function InfoTooltip({ title, children }: InfoTooltipProps) {
     if (iconRef.current) {
       const rect = iconRef.current.getBoundingClientRect()
       const centerX = rect.left + rect.width / 2
-      const tooltipWidth = 384 // w-96
+      const tooltipWidth = width
       const padding = 16
 
       let left = centerX
@@ -98,8 +101,9 @@ export function InfoTooltip({ title, children }: InfoTooltipProps) {
       />
       {isOpen && createPortal(
         <div
-          className="fixed z-[9999] -translate-x-1/2 -translate-y-full w-96 p-3 bg-gray-900 dark:bg-gray-800 text-white text-[11px] rounded-lg shadow-xl animate-in fade-in zoom-in-95 duration-100 border border-gray-700"
+          className="fixed z-[9999] -translate-x-1/2 -translate-y-full p-3 bg-gray-900 dark:bg-gray-800 text-white text-[11px] rounded-lg shadow-xl animate-in fade-in zoom-in-95 duration-100 border border-gray-700"
           style={{
+            width,
             top: coords.top - 8,
             left: coords.left,
             visibility: coords.top === 0 ? 'hidden' : 'visible'
