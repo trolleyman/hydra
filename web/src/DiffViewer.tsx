@@ -1011,7 +1011,12 @@ function BehindBaseButton({ diff, agent, projectId, onUpdated }: {
   if (behind <= 0 || !agent.branch_name) return null
 
   const baseBranch = agent.base_branch
-  const running = agent.session_status === 'running'
+  // Warn about a collision only when the agent is *actively working*, not merely
+  // alive. `session_status` is "running" for the whole life of the PTY session —
+  // including while the agent sits idle waiting for input — so gating on it
+  // showed the "work in progress" warning even for a waiting/finished agent.
+  // The activity status (running|waiting|finished|…) reflects what it's doing.
+  const running = agent.agent_status?.status === 'running'
   const hasUncommitted = diff?.uncommitted_changes ?? false
 
   const handleClick = () => {

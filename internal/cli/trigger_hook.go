@@ -214,6 +214,14 @@ func runTriggerHook(agentType string, eventOverride string, logFile *os.File) er
 	switch event {
 	case "SessionStart", "sessionStart":
 		status = api.Running
+	case "UserPromptSubmit", "userPromptSubmit", "BeforeAgent", "beforeAgent":
+		// The user just submitted a prompt (Claude's UserPromptSubmit) or the
+		// agent's turn is beginning (Gemini's BeforeAgent). Either way the agent
+		// is now working, so flip to running immediately rather than waiting for
+		// the first tool call (PreToolUse) to report it. These hooks were already
+		// registered but unhandled, so a freshly-submitted message lingered as
+		// waiting/finished until the agent happened to run a tool.
+		status = api.Running
 	case "Stop", "AfterAgent":
 		// The turn finished. Distinguish "waiting on the user" (the agent ended
 		// by asking a question) from "finished" (it completed its work).

@@ -1,8 +1,12 @@
 package cli
 
 import (
+	"encoding/json"
+	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/trolleyman/hydra/internal/api"
 )
 
 func TestStatusFilePathHonorsEnv(t *testing.T) {
@@ -67,6 +71,73 @@ func TestIsUserInputTool(t *testing.T) {
 	for _, tool := range []string{"Bash", "Edit", "Read", ""} {
 		if isUserInputTool(tool) {
 			t.Errorf("isUserInputTool(%q) = true, want false", tool)
+		}
+	}
+}
+
+// runTriggerHookForTest feeds payload on stdin to runTriggerHook with status
+// files redirected into a temp dir, and returns the resulting status.json
+// status (or "" if none was written).
+func runTriggerHookForTest(t *testing.T, agentType, event string, payload map[string]interface{}) api.AgentStatus {
+	t.Helper()
+	dir := t.TempDir()
+	statusPath := filepath.Join(dir, "status.json")
+	t.Setenv("HYDRA_STATUS_PATH", statusPath)
+	t.Setenv("HYDRA_STATUS_LOG_PATH", filepath.Join(dir, "status_log.jsonl"))
+
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := filepath.Join(dir, "stdin.json")
+	if err := os.WriteFile(in, raw, 0644); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.Open(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	orig := os.Stdin
+	os.Stdin = f
+	defer func() { os.Stdin = orig }()
+
+	if err := runTriggerHook(agentType, event, nil); err != nil {
+		t.Fatalf("runTriggerHook(%q): %v", event, err)
+	}
+
+	data, err := os.ReadFile(statusPath)
+	if os.IsNotExist(err) {
+		return ""
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	var info api.AgentStatusInfo
+	if err := json.Unmarshal(data, &info); err != nil {
+		t.Fatal(err)
+	}
+	return info.Status
+}
+
+// TestTriggerHookPromptSubmitRunning covers issue #39: submitting a prompt must
+// flip the agent to "running" immediately. UserPromptSubmit (Claude) and
+// BeforeAgent (Gemini) were registered hooks but previously unhandled, so a
+// freshly-submitted message lingered as waiting/finished until a tool ran.
+func TestTriggerHookPromptSubmitRunning(t *testing.T) {
+	cases := []struct {
+		event string
+		want  api.AgentStatus
+	}{
+		{"UserPromptSubmit", api.Running},
+		{"BeforeAgent", api.Running},
+		{"SessionStart", api.Running},
+		{"PreCompact", ""}, // unhandled event leaves status untouched
+	}
+	for _, c := range cases {
+		payload := map[string]interface{}{"hook_event_name": c.event}
+		if got := runTriggerHookForTest(t, "claude", "", payload); got != c.want {
+			t.Errorf("event %q: status = %q, want %q", c.event, got, c.want)
 		}
 	}
 }
