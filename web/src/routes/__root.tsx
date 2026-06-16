@@ -21,6 +21,7 @@ export const Route = createRootRoute({
 
 import { useDialogStore } from '../stores/dialogStore'
 import { pruneArtifactPrefs } from '../lib/artifactPrefs'
+import { pruneAgentViewPrefs } from '../lib/agentViewPrefs'
 import { StorageKeys, selectedAgentKey, readLocal, writeLocal } from '../lib/storage'
 
 function formatSpawnedAgo(ms: number): string {
@@ -489,8 +490,8 @@ function RootLayout() {
     }
   }, [routeParams.projectId, routeParams.agentId, agents, projects])
 
-  // Drop expired per-artifact UI prefs once on boot (see lib/artifactPrefs).
-  useEffect(() => { pruneArtifactPrefs() }, [])
+  // Drop expired per-artifact and per-agent-view UI prefs once on boot.
+  useEffect(() => { pruneArtifactPrefs(); pruneAgentViewPrefs() }, [])
 
   async function handleRestart() {
     setRestarting(true)

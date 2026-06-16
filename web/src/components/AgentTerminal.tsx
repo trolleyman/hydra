@@ -7,6 +7,9 @@ import { RefreshCw, Plus, X, ChevronDown, Shield, ShieldOff } from 'lucide-react
 import { Tooltip } from './Tooltip'
 import { uploadFile, extractFiles } from '../api/uploads'
 import { useAgentStore } from '../stores/agentStore'
+import { loadAgentViewPrefs, patchAgentViewPrefs } from '../lib/agentViewPrefs'
+
+const DEFAULT_TERMINAL_HEIGHT = 450
 
 interface PaneProps {
   agentId: string
@@ -359,6 +362,39 @@ export function AgentTerminal({ agentId, projectId, onRefresh, onStatusUpdate, o
   const [status, setStatus] = useState<string>('pending')
   const [shellMenuOpen, setShellMenuOpen] = useState(false)
 
+  // Persist the height the user drags the terminal panel to, per agent, so each
+  // agent's page restores its own layout.
+  const rootRef = useRef<HTMLDivElement>(null)
+  const [height, setHeight] = useState(
+    () => loadAgentViewPrefs(projectId, agentId).terminalHeight ?? DEFAULT_TERMINAL_HEIGHT,
+  )
+
+  // This component is reused (not remounted) when switching agents, so reload
+  // the height when the agent changes. Done during render per React's "adjust
+  // state when a prop changes" guidance, so the right height paints immediately.
+  const heightAgentRef = useRef(agentId)
+  if (heightAgentRef.current !== agentId) {
+    heightAgentRef.current = agentId
+    setHeight(loadAgentViewPrefs(projectId, agentId).terminalHeight ?? DEFAULT_TERMINAL_HEIGHT)
+  }
+
+  // The CSS `resize-y` handle writes directly to the element's inline height, so
+  // we observe size changes, mirror them into state (otherwise a later re-render
+  // would revert the drag) and save them for this agent. Setting height to the
+  // measured offsetHeight produces no further size change, so this can't loop.
+  useEffect(() => {
+    const el = rootRef.current
+    if (!el) return
+    const observer = new ResizeObserver(() => {
+      const h = Math.round(el.offsetHeight)
+      if (h <= 0) return
+      setHeight(h)
+      patchAgentViewPrefs(projectId, agentId, { terminalHeight: h })
+    })
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [agentId, projectId])
+
   function handleStatusUpdate(newStatus: string) {
     setStatus(newStatus)
     onStatusUpdate?.(newStatus)
@@ -415,7 +451,7 @@ export function AgentTerminal({ agentId, projectId, onRefresh, onStatusUpdate, o
   const isLoading = status === AgentStatus.PENDING || status === AgentStatus.BUILDING
 
   return (
-    <div className="rounded-lg overflow-hidden border border-gray-700 dark:border-gray-600 flex flex-col resize-y" style={{ background: '#111827', height: '450px', minHeight: '150px' }}>
+    <div ref={rootRef} className="rounded-lg overflow-hidden border border-gray-700 dark:border-gray-600 flex flex-col resize-y" style={{ background: '#111827', height: `${height}px`, minHeight: '150px' }}>
       {/* Title bar with inline tabs */}
       <div className="flex items-center gap-1 px-3 py-2 border-b border-gray-700 dark:border-gray-600 bg-gray-800/80 shrink-0">
         {/* Traffic lights */}
