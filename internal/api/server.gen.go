@@ -523,6 +523,8 @@ type RepositoryTreeResponse struct {
 
 // SandboxConfig User-editable sandbox policy, additive on top of baked-in defaults
 type SandboxConfig struct {
+	// CowPaths Worktree-relative paths mounted copy-on-write from the project root. The agent reads the real files and may overwrite them, but writes are kept per-head and never touch the source. For large gitignored build dirs too big to copy. On Linux needs an overlay-capable bwrap.
+	CowPaths    *[]string      `json:"cow_paths"`
 	MaskedPaths *[]string      `json:"masked_paths"`
 	Network     *NetworkConfig `json:"network,omitempty"`
 
