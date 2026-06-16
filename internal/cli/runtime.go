@@ -73,6 +73,7 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 		StartTime:       time.Now(),
 		Development:     os.Getenv("HYDRA_DEV_RESTART") == "1",
 		Artifacts:       artifactReg,
+		BackgroundCtx:   ctx,
 	}
 
 	if ok, reason := sandbox.Available(); !ok {

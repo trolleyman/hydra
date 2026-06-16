@@ -180,6 +180,12 @@ type SpawnHeadOptions struct {
 	Resume     bool              // if true, resume the agent's prior conversation
 	Rows       uint16
 	Cols       uint16
+	// BackgroundCtx is the server-lifetime context for detached best-effort work
+	// kicked off by the spawn (currently the async title-refinement claude call),
+	// so that work is cancelled on shutdown rather than orphaning a child process.
+	// It must NOT be the request context (which ends when the spawn handler
+	// returns). nil falls back to context.Background().
+	BackgroundCtx context.Context
 }
 
 // SpawnHead creates a new git worktree, branch, and sandbox session for an agent.
@@ -359,7 +365,11 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 	// in the background. Skipped for resumes (title already set) and ephemeral
 	// test agents (never displayed). The next agent-list poll surfaces the result.
 	if !opts.Resume && !opts.Ephemeral {
-		generateTitleAsync(store, opts.ID, opts.Prompt)
+		bgCtx := opts.BackgroundCtx
+		if bgCtx == nil {
+			bgCtx = context.Background()
+		}
+		generateTitleAsync(bgCtx, store, opts.ID, opts.Prompt)
 	}
 
 	return &Head{
