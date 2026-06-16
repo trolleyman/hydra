@@ -48,6 +48,7 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
   const isRefreshing = useRef(false)
   const killTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastSentSize = useRef({ cols: 0, rows: 0 })
+  const stabilizeRafRef = useRef<number | null>(null)
   const [showCopiedAt, setShowCopiedAt] = useState(0)
   const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
@@ -161,11 +162,30 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
     wsRef.current = ws
 
     ws.onopen = () => {
-      // Re-fit now that we're connected (layout has had a chance to settle) and
-      // send the real geometry so the agent's PTY matches what the user sees.
-      // The backend replays the session's scrollback on attach, so content
-      // renders without any buffer wiggling.
-      requestAnimationFrame(() => fitAndSend.current(true))
+      // Wait for the container to reach a stable width before telling the
+      // backend PTY our geometry. On a fresh mount (e.g. navigating back to an
+      // agent) the flex layout can still be settling when the socket opens;
+      // measuring then yields too few columns, and sending that reflows the
+      // agent's output narrow — which sticks in the scrollback and stays narrow
+      // while detached. Poll until the width repeats across two frames (or we've
+      // waited long enough) so we only ever send the final, correct size. The
+      // backend replays the session's scrollback on attach, so content renders
+      // without any buffer wiggling.
+      let lastWidth = -1
+      let frames = 0
+      const tick = () => {
+        const node = containerRef.current
+        if (!node || ws.readyState !== WebSocket.OPEN) return
+        const w = node.clientWidth
+        if ((w > 0 && w === lastWidth) || frames > 30) {
+          fitAndSend.current(true)
+          return
+        }
+        lastWidth = w
+        frames++
+        stabilizeRafRef.current = requestAnimationFrame(tick)
+      }
+      stabilizeRafRef.current = requestAnimationFrame(tick)
     }
 
     ws.onmessage = (e: MessageEvent) => {
@@ -320,6 +340,7 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
 
     return () => {
       observer.disconnect()
+      if (stabilizeRafRef.current != null) cancelAnimationFrame(stabilizeRafRef.current)
       inputDisposable.dispose()
       textarea?.removeEventListener('paste', onPaste, true)
       ws.close()
