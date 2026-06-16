@@ -10,7 +10,7 @@ import {
   MoveRight, MessageSquarePlus, FolderSync,
   SquarePlus, SquareMinus, SquareArrowRight,
 } from 'lucide-react'
-import { getFileIcon, changeTypeTextClass } from './lib/fileIcons'
+import { getFileIcon } from './lib/fileIcons'
 import { Tooltip } from './components/Tooltip'
 import { ArtifactsPanel, IMAGE_DIFF_MODES, type ImageDiffMode } from './components/ArtifactsPanel'
 import { useDialogStore } from './stores/dialogStore'
@@ -389,17 +389,19 @@ function PathName({ path }: { path: string }) {
   )
 }
 
-// ChangeTypeIcon marks a file's git change type next to its name in the diff
-// header: green [+] added, red [-] removed, cyan [→] renamed. Modified files
-// (the common case) get no badge.
-function ChangeTypeIcon({ type }: { type: string }) {
+// ChangeTypeIcon marks a file's git change type next to its name (in the diff
+// header and the sidebar file list): green [+] added, red [-] removed, cyan [→]
+// renamed. Modified files (the common case) get no badge. The change type is
+// conveyed by this coloured icon rather than by colouring the filename text.
+function ChangeTypeIcon({ type, className = 'w-3.5 h-3.5' }: { type: string; className?: string }) {
+  const cls = `${className} shrink-0`
   switch (type) {
     case 'added':
-      return <SquarePlus className="w-3.5 h-3.5 shrink-0 text-green-600 dark:text-green-400" />
+      return <SquarePlus className={`${cls} text-green-600 dark:text-green-400`} />
     case 'deleted':
-      return <SquareMinus className="w-3.5 h-3.5 shrink-0 text-red-600 dark:text-red-400" />
+      return <SquareMinus className={`${cls} text-red-600 dark:text-red-400`} />
     case 'renamed':
-      return <SquareArrowRight className="w-3.5 h-3.5 shrink-0 text-cyan-600 dark:text-cyan-400" />
+      return <SquareArrowRight className={`${cls} text-cyan-600 dark:text-cyan-400`} />
     default:
       return null
   }
@@ -1211,10 +1213,11 @@ function FileRow({ file, isActive, onClick, indent = 0 }: {
     >
       {(() => { const { Icon, className } = getFileIcon(file.path.split('/').pop() ?? file.path); return <Icon className={`w-3.5 h-3.5 shrink-0 ${className}`} /> })()}
       <Tooltip content={file.path}>
-        <span className={`font-mono text-[10px] truncate flex-1 min-w-0 ${changeTypeTextClass(file.change_type)}`}>
+        <span className="font-mono text-[10px] truncate flex-1 min-w-0 text-gray-700 dark:text-gray-300">
           {file.path.split('/').pop()}
         </span>
       </Tooltip>
+      <ChangeTypeIcon type={file.change_type} className="w-3 h-3" />
       <div className="flex items-center gap-1 shrink-0">
         {file.additions > 0 && <span className="text-[10px] text-green-600 dark:text-green-400">+{file.additions}</span>}
         {file.deletions > 0 && <span className="text-[10px] text-red-600 dark:text-red-400">−{file.deletions}</span>}
