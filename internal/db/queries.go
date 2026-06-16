@@ -78,6 +78,12 @@ func (s *Store) UpdateAgentStatus(id, agentStatus, timestamp string) error {
 	return errtrace.Wrap(result.Error)
 }
 
+// UpdateAgentTitle updates the user-facing display title for an agent.
+func (s *Store) UpdateAgentTitle(id, title string) error {
+	result := s.db.Model(&Agent{}).Where("id = ?", id).Update("title", title)
+	return errtrace.Wrap(result.Error)
+}
+
 // SoftDeleteAgent soft-deletes the agent with the given ID.
 func (s *Store) SoftDeleteAgent(id string) error {
 	result := s.db.Delete(&Agent{}, "id = ?", id)

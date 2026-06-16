@@ -95,7 +95,7 @@ export function AgentSidebarItem({
         <span
           className={`w-2 h-2 rounded-full shrink-0 ${agentDotClass(agent)}`}
         />
-        <span className="font-medium text-sm text-gray-900 dark:text-gray-100 truncate">{agent.id}</span>
+        <span className="font-medium text-sm text-gray-900 dark:text-gray-100 truncate">{agent.title || agent.id}</span>
       </div>
       <div className="flex items-center gap-1.5 mt-0.5 ml-4">
         <span className={`text-xs ${agentTypeColor(agent.agent_type)}`}>

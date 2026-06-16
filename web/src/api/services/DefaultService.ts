@@ -16,6 +16,7 @@ import type { RepositoryFileResponse } from '../models/RepositoryFileResponse';
 import type { RepositoryTreeResponse } from '../models/RepositoryTreeResponse';
 import type { SpawnAgentRequest } from '../models/SpawnAgentRequest';
 import type { StatusResponse } from '../models/StatusResponse';
+import type { UpdateAgentRequest } from '../models/UpdateAgentRequest';
 import type { CancelablePromise } from '../core/CancelablePromise';
 import type { BaseHttpRequest } from '../core/BaseHttpRequest';
 export class DefaultService {
@@ -600,6 +601,35 @@ export class DefaultService {
                 'id': id,
             },
             errors: {
+                404: `Not Found`,
+                500: `Internal Server Error`,
+            },
+        });
+    }
+    /**
+     * Update a Hydra agent's mutable fields (currently its title)
+     * @param projectId Project ID
+     * @param id
+     * @param requestBody
+     * @returns AgentResponse OK
+     * @throws ApiError
+     */
+    public updateAgent(
+        projectId: string,
+        id: string,
+        requestBody: UpdateAgentRequest,
+    ): CancelablePromise<AgentResponse> {
+        return this.httpRequest.request({
+            method: 'PATCH',
+            url: '/api/projects/{project_id}/agents/{id}',
+            path: {
+                'project_id': projectId,
+                'id': id,
+            },
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                400: `Bad Request`,
                 404: `Not Found`,
                 500: `Internal Server Error`,
             },

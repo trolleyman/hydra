@@ -43,5 +43,6 @@ export type { TerminalDataEvent } from './models/TerminalDataEvent';
 export { TerminalEvent } from './models/TerminalEvent';
 export type { TerminalStatusEvent } from './models/TerminalStatusEvent';
 export type { UncommittedSummary } from './models/UncommittedSummary';
+export type { UpdateAgentRequest } from './models/UpdateAgentRequest';
 
 export { DefaultService } from './services/DefaultService';

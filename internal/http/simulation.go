@@ -172,6 +172,10 @@ func (s *SimulationServer) KillAgent(w http.ResponseWriter, r *http.Request, pro
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (s *SimulationServer) UpdateAgent(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+	api.WriteError(w, http.StatusNotImplemented, "Not implemented in simulation mode")
+}
+
 func (s *SimulationServer) RestartAgent(w http.ResponseWriter, r *http.Request, projectId string, id string) {
 	api.WriteError(w, http.StatusNotImplemented, "Not implemented in simulation mode")
 }

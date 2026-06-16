@@ -871,6 +871,52 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+    patch:
+      summary: Update a Hydra agent's mutable fields (currently its title)
+      operationId: updateAgent
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            type: string
+          description: Project ID
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateAgentRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentResponse'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
     delete:
       summary: Kill a Hydra agent by ID
       operationId: killAgent
@@ -1020,6 +1066,14 @@ components:
           type: boolean
           description: If true, the agent is a throwaway test agent whose worktree and branch are torn down when it stops.
 
+    UpdateAgentRequest:
+      type: object
+      required: [title]
+      properties:
+        title:
+          type: string
+          description: New user-facing display name for the agent. Trimmed; must be non-empty.
+
     AgentStatus:
       type: string
       enum:
@@ -1062,6 +1116,9 @@ components:
       properties:
         id:
           type: string
+        title:
+          type: string
+          description: Mutable, user-facing display name. May be empty before it is seeded; clients should fall back to id.
         branch_name:
           type: string
           nullable: true

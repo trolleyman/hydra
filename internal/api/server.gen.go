@@ -163,8 +163,11 @@ type AgentResponse struct {
 	SessionPid int `json:"session_pid"`
 
 	// SessionStatus Sandbox session status (pending|starting|running|stopped)
-	SessionStatus string  `json:"session_status"`
-	WorktreePath  *string `json:"worktree_path"`
+	SessionStatus string `json:"session_status"`
+
+	// Title Mutable, user-facing display name. May be empty before it is seeded; clients should fall back to id.
+	Title        *string `json:"title,omitempty"`
+	WorktreePath *string `json:"worktree_path"`
 }
 
 // AgentStatus The computed status of the agent (derived from container, agent, and head status)
@@ -609,6 +612,12 @@ type UncommittedSummary struct {
 	UntrackedCount int `json:"untracked_count"`
 }
 
+// UpdateAgentRequest defines model for UpdateAgentRequest.
+type UpdateAgentRequest struct {
+	// Title New user-facing display name for the agent. Trimmed; must be non-empty.
+	Title string `json:"title"`
+}
+
 // GetAgentArtifactsParams defines parameters for GetAgentArtifacts.
 type GetAgentArtifactsParams struct {
 	// BaseRef Left (base) commit SHA or ref. Defaults to the agent's base branch.
@@ -696,6 +705,9 @@ type AddProjectJSONRequestBody = AddProjectRequest
 // SpawnAgentJSONRequestBody defines body for SpawnAgent for application/json ContentType.
 type SpawnAgentJSONRequestBody = SpawnAgentRequest
 
+// UpdateAgentJSONRequestBody defines body for UpdateAgent for application/json ContentType.
+type UpdateAgentJSONRequestBody = UpdateAgentRequest
+
 // SendAgentInputJSONRequestBody defines body for SendAgentInput for application/json ContentType.
 type SendAgentInputJSONRequestBody = AgentInputRequest
 
@@ -731,6 +743,9 @@ type ServerInterface interface {
 	// Get a specific Hydra agent by ID
 	// (GET /api/projects/{project_id}/agents/{id})
 	GetAgent(w http.ResponseWriter, r *http.Request, projectId string, id string)
+	// Update a Hydra agent's mutable fields (currently its title)
+	// (PATCH /api/projects/{project_id}/agents/{id})
+	UpdateAgent(w http.ResponseWriter, r *http.Request, projectId string, id string)
 	// Get generated visual artifacts (e.g. screenshots) for both sides of a diff
 	// (GET /api/projects/{project_id}/agents/{id}/artifacts)
 	GetAgentArtifacts(w http.ResponseWriter, r *http.Request, projectId string, id string, params GetAgentArtifactsParams)
@@ -980,6 +995,40 @@ func (siw *ServerInterfaceWrapper) GetAgent(w http.ResponseWriter, r *http.Reque
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetAgent(w, r, projectId, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateAgent operation middleware
+func (siw *ServerInterfaceWrapper) UpdateAgent(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateAgent(w, r, projectId, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1740,6 +1789,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents", wrapper.SpawnAgent)
 	m.HandleFunc("DELETE "+options.BaseURL+"/api/projects/{project_id}/agents/{id}", wrapper.KillAgent)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/{id}", wrapper.GetAgent)
+	m.HandleFunc("PATCH "+options.BaseURL+"/api/projects/{project_id}/agents/{id}", wrapper.UpdateAgent)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/artifacts", wrapper.GetAgentArtifacts)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/commits", wrapper.GetAgentCommits)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/diff", wrapper.GetAgentDiff)
@@ -2062,6 +2112,52 @@ func (response GetAgent404JSONResponse) VisitGetAgentResponse(w http.ResponseWri
 type GetAgent500JSONResponse ErrorResponse
 
 func (response GetAgent500JSONResponse) VisitGetAgentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type UpdateAgentRequestObject struct {
+	ProjectId string `json:"project_id"`
+	Id        string `json:"id"`
+	Body      *UpdateAgentJSONRequestBody
+}
+
+type UpdateAgentResponseObject interface {
+	VisitUpdateAgentResponse(w http.ResponseWriter) error
+}
+
+type UpdateAgent200JSONResponse AgentResponse
+
+func (response UpdateAgent200JSONResponse) VisitUpdateAgentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type UpdateAgent400JSONResponse ErrorResponse
+
+func (response UpdateAgent400JSONResponse) VisitUpdateAgentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type UpdateAgent404JSONResponse ErrorResponse
+
+func (response UpdateAgent404JSONResponse) VisitUpdateAgentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type UpdateAgent500JSONResponse ErrorResponse
+
+func (response UpdateAgent500JSONResponse) VisitUpdateAgentResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(500)
 
@@ -2678,6 +2774,9 @@ type StrictServerInterface interface {
 	// Get a specific Hydra agent by ID
 	// (GET /api/projects/{project_id}/agents/{id})
 	GetAgent(ctx context.Context, request GetAgentRequestObject) (GetAgentResponseObject, error)
+	// Update a Hydra agent's mutable fields (currently its title)
+	// (PATCH /api/projects/{project_id}/agents/{id})
+	UpdateAgent(ctx context.Context, request UpdateAgentRequestObject) (UpdateAgentResponseObject, error)
 	// Get generated visual artifacts (e.g. screenshots) for both sides of a diff
 	// (GET /api/projects/{project_id}/agents/{id}/artifacts)
 	GetAgentArtifacts(ctx context.Context, request GetAgentArtifactsRequestObject) (GetAgentArtifactsResponseObject, error)
@@ -2992,6 +3091,40 @@ func (sh *strictHandler) GetAgent(w http.ResponseWriter, r *http.Request, projec
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetAgentResponseObject); ok {
 		if err := validResponse.VisitGetAgentResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdateAgent operation middleware
+func (sh *strictHandler) UpdateAgent(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+	var request UpdateAgentRequestObject
+
+	request.ProjectId = projectId
+	request.Id = id
+
+	var body UpdateAgentJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateAgent(ctx, request.(UpdateAgentRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateAgent")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdateAgentResponseObject); ok {
+		if err := validResponse.VisitUpdateAgentResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
