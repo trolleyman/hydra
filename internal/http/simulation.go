@@ -993,7 +993,7 @@ var simRepoFiles = map[string]string{
 	".gitignore": "node_modules/\ndist/\n.env\n*.log\n",
 	"CLAUDE.md":  "# Project guidelines\n\nThis demo repo powers Hydra's **Repository** view.\n\n- Use `bun` instead of `npm`.\n- Run the formatter before committing.\n",
 	"LICENSE":    "MIT License\n\nCopyright (c) 2026 Hydra Demo\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction.\n",
-	"hydra.toml": "[defaults]\npre_prompt = \"\"\"\n- Use bun instead of npm\n\"\"\"\n\n[defaults.sandbox]\nwritable_paths = [\"~/.cache/go-build\"]\n",
+	"hydra.toml": "pre_prompt = \"\"\"\n- Use bun instead of npm\n\"\"\"\n\n[sandbox]\nwritable_paths = [\"~/.cache/go-build\"]\n",
 	// A deeply-nested single-child chain; each folder holds only the next, so the
 	// tree compacts config/env/staging/region/eu onto one row (PLAN.md #41 compact
 	// folders, like the diff viewer).
