@@ -425,7 +425,7 @@ type SandboxConfig struct {
 	MaskedPaths *[]string      `json:"masked_paths"`
 	Network     *NetworkConfig `json:"network,omitempty"`
 
-	// PreSpawnScript Shell script run inside the sandbox immediately before each agent is launched (e.g. `mise trust`)
+	// PreSpawnScript Bash script run inside the sandbox once, when the agent is first spawned — not on resume or for bash shells (e.g. `mise trust`)
 	PreSpawnScript *string   `json:"pre_spawn_script"`
 	RestoreRo      *[]string `json:"restore_ro"`
 	WritablePaths  *[]string `json:"writable_paths"`

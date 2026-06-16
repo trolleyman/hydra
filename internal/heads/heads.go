@@ -284,6 +284,11 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 	// Build the sandbox launch options.
 	cfg, _ := config.Load(projectRoot)
 	writable, masked, restore, net, preSpawn := cfg.ResolveSandboxOptions(string(opts.AgentType))
+	// Pre-spawn is a once-per-head hook: it runs only when a head is first
+	// spawned, never on a resume (where the prior conversation is restored).
+	if opts.Resume {
+		preSpawn = ""
+	}
 
 	seed, err := seedHead(projectRoot, opts.ID, opts.AgentType, worktreePath, home, opts.PrePrompt)
 	if err != nil {
@@ -306,14 +311,14 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 		Rows: opts.Rows,
 		Cols: opts.Cols,
 		Sandbox: sandbox.Options{
-			AgentType:     opts.AgentType,
-			WorktreePath:  worktreePath,
-			GitCommonDir:  gitCommonDir(projectRoot),
-			Home:          home,
-			WritablePaths: append(writable, seed.WritablePaths...),
-			MaskedPaths:   masked,
-			RestoreRO:     restore,
-			Network:       net,
+			AgentType:      opts.AgentType,
+			WorktreePath:   worktreePath,
+			GitCommonDir:   gitCommonDir(projectRoot),
+			Home:           home,
+			WritablePaths:  append(writable, seed.WritablePaths...),
+			MaskedPaths:    masked,
+			RestoreRO:      restore,
+			Network:        net,
 			Binds:          seed.Binds,
 			Env:            env,
 			Argv:           argv,
@@ -396,17 +401,59 @@ func gitCommonDir(projectRoot string) string {
 	return dir
 }
 
+// ShellSessionID derives the registry session ID for a head's web bash shell
+// from its head ID, sandbox mode and per-tab token. The same inputs always yield
+// the same ID, so a tab's reconnect reattaches and an explicit close can target
+// it. Mirrors the `<head>-shell[-host][-<token>]` shape KillMatching tears down.
+func ShellSessionID(headID string, sandboxed bool, token string) string {
+	id := headID + "-shell"
+	if !sandboxed {
+		id += "-host"
+	}
+	if tok := sanitizeShellToken(token); tok != "" {
+		id += "-" + tok
+	}
+	return id
+}
+
+// KillShellSession terminates a single web bash shell immediately (used when the
+// user closes its terminal tab, rather than waiting out the idle grace period).
+// Best-effort: a no-op if the session is already gone.
+func KillShellSession(reg *session.Registry, headID string, sandboxed bool, token string) {
+	id := ShellSessionID(headID, sandboxed, token)
+	_ = reg.Kill(id)
+	reg.Remove(id)
+}
+
+// sanitizeShellToken reduces a client-supplied terminal-tab token to a safe
+// session-ID suffix: alphanumerics, '-' and '_' only, capped in length. The
+// token becomes part of a session ID and seed directory name, so anything else
+// (path separators, '..') is dropped to prevent traversal.
+func sanitizeShellToken(token string) string {
+	var b strings.Builder
+	for _, r := range token {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_' {
+			b.WriteRune(r)
+		}
+		if b.Len() >= 64 {
+			break
+		}
+	}
+	return b.String()
+}
+
 // StartShellSession opens an interactive bash session sharing the head's
 // worktree. When sandboxed is true the shell runs inside the same OS sandbox as
 // the agent; when false it runs directly on the host with no confinement (an
-// explicit user opt-in). The two modes get distinct session IDs so both can be
-// open at once.
-func StartShellSession(reg *session.Registry, projectRoot string, head Head, rows, cols uint16, sandboxed bool) (string, error) {
-	shellID := head.ID + "-shell"
-	if !sandboxed {
-		shellID = head.ID + "-shell-host"
-	}
-	if _, ok := reg.Get(shellID); ok {
+// explicit user opt-in).
+//
+// token uniquely identifies a terminal tab so each opened shell gets its own
+// independent process (rather than all tabs sharing one), and is stable across a
+// tab's reconnects (a refresh reattaches to the same shell). Shells are started
+// ephemeral: closing the tab terminates the process after a short grace period.
+func StartShellSession(reg *session.Registry, projectRoot string, head Head, rows, cols uint16, sandboxed bool, token string) (string, error) {
+	shellID := ShellSessionID(head.ID, sandboxed, token)
+	if reg.IsLive(shellID) {
 		return shellID, nil
 	}
 
@@ -429,27 +476,31 @@ func StartShellSession(reg *session.Registry, projectRoot string, head Head, row
 	var sb sandbox.Options
 	if sandboxed {
 		cfg, _ := config.Load(projectRoot)
-		writable, masked, restore, net, preSpawn := cfg.ResolveSandboxOptions("bash")
+		// The pre-spawn script is intentionally NOT run for bash shells: it is a
+		// once-per-head agent-spawn hook, and these interactive shells open
+		// repeatedly over a head's life. Running it here also made a failing
+		// script (e.g. a bashism error) abort the shell before /bin/bash ever
+		// exec'd, closing the terminal instantly.
+		writable, masked, restore, net, _ := cfg.ResolveSandboxOptions("bash")
 		// Bash is an interactive shell, not an agent — no system prompt to inject.
 		seed, err := seedHead(projectRoot, shellID, sandbox.AgentTypeBash, worktreePath, home, "")
 		if err != nil {
 			return "", errtrace.Wrap(err)
 		}
 		sb = sandbox.Options{
-			AgentType:      sandbox.AgentTypeBash,
-			WorktreePath:   worktreePath,
-			GitCommonDir:   gitCommonDir(projectRoot),
-			Home:           home,
-			WritablePaths:  append(writable, seed.WritablePaths...),
-			MaskedPaths:    masked,
-			RestoreRO:      restore,
-			Network:        net,
-			Binds:          seed.Binds,
-			Env:            append(env, seed.Env...),
-			Argv:           []string{"/bin/bash"},
-			PreSpawnScript: preSpawn,
-			HardenGUI:      true,
-			Seccomp:        true,
+			AgentType:     sandbox.AgentTypeBash,
+			WorktreePath:  worktreePath,
+			GitCommonDir:  gitCommonDir(projectRoot),
+			Home:          home,
+			WritablePaths: append(writable, seed.WritablePaths...),
+			MaskedPaths:   masked,
+			RestoreRO:     restore,
+			Network:       net,
+			Binds:         seed.Binds,
+			Env:           append(env, seed.Env...),
+			Argv:          []string{"/bin/bash"},
+			HardenGUI:     true,
+			Seccomp:       true,
 		}
 	} else {
 		// Regular shell: plain host bash in the worktree, no confinement.
@@ -463,7 +514,7 @@ func StartShellSession(reg *session.Registry, projectRoot string, head Head, row
 		}
 	}
 
-	if _, err = reg.Start(session.StartOptions{ID: shellID, Rows: rows, Cols: cols, Sandbox: sb}); err != nil {
+	if _, err = reg.Start(session.StartOptions{ID: shellID, Rows: rows, Cols: cols, Sandbox: sb, Ephemeral: true}); err != nil {
 		return "", errtrace.Wrap(err)
 	}
 	return shellID, nil
@@ -485,7 +536,9 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 	home := currentUser.HomeDir
 
 	cfg, _ := config.Load(projectRoot)
-	writable, masked, restore, net, preSpawn := cfg.ResolveSandboxOptions(string(head.AgentType))
+	// Pre-spawn runs once, at the head's initial spawn — not on resume (the agent
+	// is being restored, not freshly created), so the returned script is ignored.
+	writable, masked, restore, net, _ := cfg.ResolveSandboxOptions(string(head.AgentType))
 	seed, err := seedHead(projectRoot, head.ID, head.AgentType, worktreePath, home, head.PrePrompt)
 	if err != nil {
 		return errtrace.Wrap(err)
@@ -504,20 +557,19 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 		Rows: rows,
 		Cols: cols,
 		Sandbox: sandbox.Options{
-			AgentType:      head.AgentType,
-			WorktreePath:   worktreePath,
-			GitCommonDir:   gitCommonDir(projectRoot),
-			Home:           home,
-			WritablePaths:  append(writable, seed.WritablePaths...),
-			MaskedPaths:    masked,
-			RestoreRO:      restore,
-			Network:        net,
-			Binds:          seed.Binds,
-			Env:            env,
-			Argv:           argv,
-			PreSpawnScript: preSpawn,
-			HardenGUI:      true,
-			Seccomp:        true,
+			AgentType:     head.AgentType,
+			WorktreePath:  worktreePath,
+			GitCommonDir:  gitCommonDir(projectRoot),
+			Home:          home,
+			WritablePaths: append(writable, seed.WritablePaths...),
+			MaskedPaths:   masked,
+			RestoreRO:     restore,
+			Network:       net,
+			Binds:         seed.Binds,
+			Env:           env,
+			Argv:          argv,
+			HardenGUI:     true,
+			Seccomp:       true,
 		},
 	})
 	if err != nil {
@@ -557,6 +609,9 @@ func KillHeadNoLock(ctx context.Context, reg *session.Registry, store *db.Store,
 			killErr = errtrace.Wrap(err)
 		}
 		reg.Remove(head.ID)
+		// Tear down any web bash shells for this head — they share its worktree,
+		// which is about to be removed, so they must not outlive it.
+		reg.KillMatching(head.ID + "-shell")
 	}
 
 	if killErr == nil {
