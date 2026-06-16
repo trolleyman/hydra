@@ -4,36 +4,36 @@ pre_prompt = """
 
 [sandbox]
 writable_paths = ["~/.cache/go-build", "~/.go/pkg", "~/.bun/install/cache", "~/.cache/goimports", "~/.magefile"]
-# : masked_paths: extra paths hidden in the sandbox (added to the built-in defaults).
+## extra paths hidden in the sandbox (added to the built-in defaults).
 # masked_paths = ["~/.ssh", "~/.aws", "~/.azure", "~/.gnupg", "~/.docker", "~/.kube", "~/.password-store", "~/.config", "~/.netrc", "~/.git-credentials", "~/.npmrc", "~/.pypirc", "~/.zsh_history", "~/.bash_history", "~/.sh_history", "~/.config/mise/config.local.toml", "~/.dotfiles/mise/config.local.toml"]
-# : restore_ro: paths re-exposed read-only after a masked parent (added to the built-in defaults).
+## paths re-exposed read-only after a masked parent (added to the built-in defaults).
 # restore_ro = ["~/.config/git", "~/.config/gh", "~/.config/mise/config.toml"]
-# : pre_spawn_script: shell script run in the sandbox once before each agent launches (e.g. mise trust).
+## shell script run in the sandbox once before each agent launches (e.g. mise trust).
 # pre_spawn_script = ""
 
 [sandbox.network]
-# : enabled: allow outbound network access from the sandbox (default true).
+## allow outbound network access from the sandbox (default true).
 # enabled = true
-# : allowed_hosts: reserved for a future proxy-based outbound host allow-list.
+## reserved for a future proxy-based outbound host allow-list.
 # allowed_hosts = []
 
-# : [[artifacts]]: per-project commands that render visual artifacts (e.g. screenshots)
-# : of a checkout. The diff viewer runs each against both sides of a comparison and
-# : shows the outputs that differ. Fields:
-# :   name         unique label, also used as the cache directory (required).
-# :   command      shell command run via `sh -c` in the checkout directory (required).
-# :   timeout_sec  max seconds the command may run (0 = built-in default).
-# :   unsafe_host  run on the host with NO sandbox — full access to your machine and
-# :                credentials; only for audited, self-contained commands (default false).
-# : The command is given: HYDRA_ARTIFACT_OUTPUT (directory to write images into),
-# : HYDRA_ARTIFACT_SOURCE (the checkout dir), HYDRA_ARTIFACT_REF (the resolved ref).
+## [[artifacts]]: per-project commands that render visual artifacts (e.g. screenshots)
+## of a checkout. The diff viewer runs each against both sides of a comparison and
+## shows the outputs that differ. Fields:
+##   name         unique label, also used as the cache directory (required).
+##   command      shell command run via `sh -c` in the checkout directory (required).
+##   timeout_sec  max seconds the command may run (0 = built-in default).
+##   unsafe_host  run on the host with NO sandbox — full access to your machine and
+##                credentials; only for audited, self-contained commands (default false).
+## The command is given: HYDRA_ARTIFACT_OUTPUT (directory to write images into),
+## HYDRA_ARTIFACT_SOURCE (the checkout dir), HYDRA_ARTIFACT_REF (the resolved ref).
+[[artifacts]]
 # Diff-viewer artifact generator (PLAN.md #17): renders Hydra's own web UI to
 # PNGs so visual changes show up side-by-side in the diff viewer. The script
 # builds the checkout's frontend, boots `hydra server --simulation` and
 # screenshots several pages (home, the repository browser, agent diff views).
 # Building Go + the frontend is slow, so allow a generous timeout (results are
 # cached per resolved ref).
-[[artifacts]]
 name = "screenshots"
 command = "cd scripts/screenshots && bun install && bun take-screenshots.ts"
 timeout_sec = 900
