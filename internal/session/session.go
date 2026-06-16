@@ -52,9 +52,12 @@ type Session struct {
 }
 
 // shellReapGrace is how long an ephemeral session waits, attacher-less, before
-// terminating itself. Long enough to ride out a terminal refresh (which closes
-// then reopens the WebSocket) but short enough to promptly reap a closed tab.
-const shellReapGrace = 10 * time.Second
+// terminating itself. Generous enough to survive a browser reload, navigating
+// away and back, or a transient disconnect — the shell (and its scrollback) is
+// still there when you return — while a tab you actually closed and abandoned is
+// eventually reaped. (Killing the head terminates its shells immediately,
+// independent of this grace; see Registry.KillMatching.)
+const shellReapGrace = 5 * time.Minute
 
 // attacher receives a copy of the session's output stream.
 type attacher struct {

@@ -95,6 +95,23 @@ func sendTerminalEvent(conn *safeConn, eventType string) {
 	_ = conn.WriteMessage(websocket.TextMessage, data)
 }
 
+// HandleShellClose terminates a single web bash shell immediately, so closing a
+// terminal tab kills its process now instead of waiting out the idle grace
+// period (which only covers reloads / transient disconnects).
+// URL pattern: POST /shells/projects/{project_id}/agents/{id}/close?shell_id=…&sandboxed=…
+func (s *Server) HandleShellClose(w http.ResponseWriter, r *http.Request) {
+	agentID := r.PathValue("id")
+	if agentID == "" {
+		http.Error(w, "agent ID required", http.StatusBadRequest)
+		return
+	}
+	token := r.URL.Query().Get("shell_id")
+	sandboxed := r.URL.Query().Get("sandboxed") != "false"
+	log.Printf("shell close: agent=%q shell_id=%q sandboxed=%v", agentID, token, sandboxed)
+	heads.KillShellSession(s.Sessions, agentID, sandboxed, token)
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // HandleTerminalWS handles WebSocket connections for agent terminal access.
 // URL pattern: /ws/projects/{project_id}/agents/{id}/terminal
 func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {

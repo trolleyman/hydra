@@ -351,6 +351,18 @@ export function AgentTerminal({ agentId, projectId, onRefresh, onStatusUpdate, o
   }
 
   function closeTab(id: string) {
+    // Closing a shell tab is a deliberate close, so kill its process now rather
+    // than letting it idle out the grace period (which exists for reloads /
+    // transient disconnects, where the pane unmounts without a real close).
+    const tab = tabs.find(t => t.id === id)
+    if (tab?.shell) {
+      const pid = projectId ? encodeURIComponent(projectId) : '_'
+      const params = new URLSearchParams({ shell_id: id })
+      if (tab.sandboxed === false) params.set('sandboxed', 'false')
+      void fetch(`/shells/projects/${pid}/agents/${encodeURIComponent(agentId)}/close?${params.toString()}`, {
+        method: 'POST',
+      }).catch(() => { /* best-effort; the idle reaper is the backstop */ })
+    }
     setTabs(prev => {
       const newTabs = prev.filter(t => t.id !== id)
       if (activeTabId === id && newTabs.length > 0) {

@@ -2,6 +2,7 @@ package session
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -188,6 +189,25 @@ func (r *Registry) Remove(id string) {
 	r.mu.Lock()
 	delete(r.sessions, id)
 	r.mu.Unlock()
+}
+
+// KillMatching terminates and removes every session whose ID has the given
+// prefix. Used to tear down a head's web bash shells (`<head>-shell…`) when the
+// head itself is killed, so they don't outlive the agent (and its worktree).
+// Best-effort.
+func (r *Registry) KillMatching(prefix string) {
+	r.mu.RLock()
+	var ids []string
+	for id := range r.sessions {
+		if strings.HasPrefix(id, prefix) {
+			ids = append(ids, id)
+		}
+	}
+	r.mu.RUnlock()
+	for _, id := range ids {
+		_ = r.Kill(id)
+		r.Remove(id)
+	}
 }
 
 // Snapshot returns info for all known sessions.

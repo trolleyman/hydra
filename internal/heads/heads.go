@@ -401,6 +401,30 @@ func gitCommonDir(projectRoot string) string {
 	return dir
 }
 
+// ShellSessionID derives the registry session ID for a head's web bash shell
+// from its head ID, sandbox mode and per-tab token. The same inputs always yield
+// the same ID, so a tab's reconnect reattaches and an explicit close can target
+// it. Mirrors the `<head>-shell[-host][-<token>]` shape KillMatching tears down.
+func ShellSessionID(headID string, sandboxed bool, token string) string {
+	id := headID + "-shell"
+	if !sandboxed {
+		id += "-host"
+	}
+	if tok := sanitizeShellToken(token); tok != "" {
+		id += "-" + tok
+	}
+	return id
+}
+
+// KillShellSession terminates a single web bash shell immediately (used when the
+// user closes its terminal tab, rather than waiting out the idle grace period).
+// Best-effort: a no-op if the session is already gone.
+func KillShellSession(reg *session.Registry, headID string, sandboxed bool, token string) {
+	id := ShellSessionID(headID, sandboxed, token)
+	_ = reg.Kill(id)
+	reg.Remove(id)
+}
+
 // sanitizeShellToken reduces a client-supplied terminal-tab token to a safe
 // session-ID suffix: alphanumerics, '-' and '_' only, capped in length. The
 // token becomes part of a session ID and seed directory name, so anything else
@@ -428,13 +452,7 @@ func sanitizeShellToken(token string) string {
 // tab's reconnects (a refresh reattaches to the same shell). Shells are started
 // ephemeral: closing the tab terminates the process after a short grace period.
 func StartShellSession(reg *session.Registry, projectRoot string, head Head, rows, cols uint16, sandboxed bool, token string) (string, error) {
-	shellID := head.ID + "-shell"
-	if !sandboxed {
-		shellID += "-host"
-	}
-	if tok := sanitizeShellToken(token); tok != "" {
-		shellID += "-" + tok
-	}
+	shellID := ShellSessionID(head.ID, sandboxed, token)
 	if reg.IsLive(shellID) {
 		return shellID, nil
 	}
@@ -591,6 +609,9 @@ func KillHeadNoLock(ctx context.Context, reg *session.Registry, store *db.Store,
 			killErr = errtrace.Wrap(err)
 		}
 		reg.Remove(head.ID)
+		// Tear down any web bash shells for this head — they share its worktree,
+		// which is about to be removed, so they must not outlive it.
+		reg.KillMatching(head.ID + "-shell")
 	}
 
 	if killErr == nil {
