@@ -8,6 +8,7 @@ import {
   ChevronDown, ChevronRight, ChevronLeft, Check, LoaderCircle, RefreshCw, RotateCcw,
   Settings, Copy, Folder, FolderOpen, X, GitMerge, Bot,
   MoveRight, MessageSquarePlus, FolderSync,
+  SquarePlus, SquareMinus, SquareArrowRight,
 } from 'lucide-react'
 import { getFileIcon, changeTypeTextClass } from './lib/fileIcons'
 import { Tooltip } from './components/Tooltip'
@@ -372,19 +373,36 @@ const SideBySideHunk = memo(function SideBySideHunk({ hunk, highlightedOld, high
 
 // ── File diff card ────────────────────────────────────────────────────────────
 
-// PathName renders a file path with the change-type colour applied only to the
-// filename (last segment); the leading directory part is shown in a lowlit grey
-// so the eye lands on the file that actually changed.
-function PathName({ path, nameClass }: { path: string; nameClass: string }) {
+// PathName renders a file path with the leading directory part lowlit so the eye
+// lands on the filename (last segment), which keeps the normal text colour. The
+// git change type is conveyed by a ChangeTypeIcon badge next to the name rather
+// than by colouring the text.
+function PathName({ path }: { path: string }) {
   const idx = path.lastIndexOf('/')
   const dir = idx === -1 ? '' : path.slice(0, idx + 1)
   const base = idx === -1 ? path : path.slice(idx + 1)
   return (
     <>
       {dir && <span className="text-gray-400 dark:text-gray-500">{dir}</span>}
-      <span className={nameClass}>{base}</span>
+      <span className="text-gray-700 dark:text-gray-300">{base}</span>
     </>
   )
+}
+
+// ChangeTypeIcon marks a file's git change type next to its name in the diff
+// header: green [+] added, red [-] removed, cyan [→] renamed. Modified files
+// (the common case) get no badge.
+function ChangeTypeIcon({ type }: { type: string }) {
+  switch (type) {
+    case 'added':
+      return <SquarePlus className="w-3.5 h-3.5 shrink-0 text-green-600 dark:text-green-400" />
+    case 'deleted':
+      return <SquareMinus className="w-3.5 h-3.5 shrink-0 text-red-600 dark:text-red-400" />
+    case 'renamed':
+      return <SquareArrowRight className="w-3.5 h-3.5 shrink-0 text-cyan-600 dark:text-cyan-400" />
+    default:
+      return null
+  }
 }
 
 const EXPANDER_ROW = 'flex items-center bg-blue-50 dark:bg-blue-950/30 border-y border-blue-100 dark:border-blue-900/50 px-2 py-0.5'
@@ -440,17 +458,20 @@ const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onComment, 
           <ChevronDown className={`w-4 h-4 transition-transform ${isCollapsed ? '-rotate-90' : ''}`} />
         </button>
         {(() => { const { Icon, className } = getFileIcon(file.path.split('/').pop() ?? file.path); return <Icon className={`w-3.5 h-3.5 shrink-0 ${className}`} /> })()}
-        <span className="font-mono text-xs flex-1 min-w-0 truncate cursor-pointer hover:underline">
-          {file.change_type === 'renamed' && file.old_path ? (
-            <>
-              <PathName path={file.old_path} nameClass={changeTypeTextClass('renamed')} />
-              <span className="text-gray-400 dark:text-gray-500"> → </span>
-              <PathName path={file.path} nameClass={changeTypeTextClass('renamed')} />
-            </>
-          ) : (
-            <PathName path={file.path} nameClass={changeTypeTextClass(file.change_type)} />
-          )}
-        </span>
+        <div className="flex items-center gap-1.5 flex-1 min-w-0">
+          <span className="font-mono text-xs min-w-0 truncate cursor-pointer hover:underline">
+            {file.change_type === 'renamed' && file.old_path ? (
+              <>
+                <PathName path={file.old_path} />
+                <span className="text-gray-400 dark:text-gray-500"> → </span>
+                <PathName path={file.path} />
+              </>
+            ) : (
+              <PathName path={file.path} />
+            )}
+          </span>
+          <ChangeTypeIcon type={file.change_type} />
+        </div>
         <CopyButton text={file.path} />
         {!file.binary && (
           <div className="flex items-center gap-1.5 shrink-0 ml-1">
