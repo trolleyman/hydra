@@ -359,6 +359,12 @@ try {
           }, pg.imageDiffMode)
         }
         await ctx.addInitScript(() => {
+          // Pre-trust the simulated project so the first-open "Trust this
+          // project?" modal (web/src/components/TrustProjectModal.tsx) never
+          // pops up — it's a fixed inset-0 overlay that otherwise intercepts
+          // every click/scroll the capture flow performs. Trust is client-side
+          // localStorage keyed by project id (lib/storage StorageKeys.trustedProjects).
+          try { window.localStorage.setItem('hydra-trusted-projects', '["sim-project"]') } catch { /* ignore */ }
           // Deterministic shuffle (spawn-form placeholder order).
           ;(Math as unknown as { random: () => number }).random = () => 0.5
           // Freeze short-lived timers (the typewriter placeholder animation runs
