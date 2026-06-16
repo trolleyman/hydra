@@ -476,8 +476,14 @@ func tomlStringArray(vals []string) string {
 // docPrefix marks Hydra-generated documentation comment lines. Using a distinct
 // prefix (instead of a plain "#") lets the renderer recognise and replace its
 // own docs on every save — so they update when Hydra updates — while leaving the
-// user's own "#" comments untouched.
-const docPrefix = "#:"
+// user's own "#" comments untouched. The space after "#" keeps editors from
+// syntax-highlighting it as a special directive (a bare "#:" is mishighlighted).
+const docPrefix = "# :"
+
+// legacyDocPrefix is the previous docPrefix ("#:"). It is still recognised when
+// reading so older files have their doc lines replaced (not duplicated) on the
+// next render.
+const legacyDocPrefix = "#:"
 
 // specEntry describes one managed default setting for the self-documenting
 // writer. The set of entries is the single source of truth for which default
@@ -699,14 +705,15 @@ func normalizeManagedTable(header string) string {
 
 // isManagedDoc reports whether a line is a Hydra-generated documentation comment.
 func isManagedDoc(line string) bool {
-	return strings.HasPrefix(strings.TrimSpace(line), docPrefix)
+	t := strings.TrimSpace(line)
+	return strings.HasPrefix(t, docPrefix) || strings.HasPrefix(t, legacyDocPrefix)
 }
 
 // isManagedCommentedAssign reports whether a line is a commented-out assignment
 // of a managed key (e.g. "# masked_paths = [...]"), i.e. a regenerated default.
 func isManagedCommentedAssign(line string, keys map[string]bool) bool {
 	t := strings.TrimSpace(line)
-	if !strings.HasPrefix(t, "#") || strings.HasPrefix(t, docPrefix) {
+	if !strings.HasPrefix(t, "#") || isManagedDoc(t) {
 		return false
 	}
 	t = strings.TrimSpace(strings.TrimPrefix(t, "#"))

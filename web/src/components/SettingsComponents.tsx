@@ -288,7 +288,7 @@ export function ConfigForm({
           <ShellEditor
             value={sandbox.pre_spawn_script ?? ''}
             onChange={(val) => updateSandbox({ pre_spawn_script: val || null })}
-            placeholder={'# e.g.\nmise trust'}
+            placeholder={'# e.g. mise trust'}
             rows={8}
           />
         </div>
