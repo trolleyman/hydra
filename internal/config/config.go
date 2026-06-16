@@ -160,6 +160,24 @@ func GetProjectConfigPath(projectRoot string) string {
 	return filepath.Join(projectRoot, ".hydra", "config.toml")
 }
 
+// ReadProjectConfigTOML returns the raw bytes of the project's .hydra/config.toml
+// and whether the file exists. An absent file is (nil, false, nil) — not an error.
+// The raw bytes (rather than the parsed config) are what the UI shows the user
+// when they open a project, so they can review what they're about to run.
+func ReadProjectConfigTOML(projectRoot string) ([]byte, bool, error) {
+	if projectRoot == "" {
+		return nil, false, nil
+	}
+	data, err := os.ReadFile(GetProjectConfigPath(projectRoot))
+	if os.IsNotExist(err) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, errtrace.Wrap(err)
+	}
+	return data, true, nil
+}
+
 // LoadInternalDefaults returns the hardcoded internal default configuration.
 // Note: DefaultPrePrompt is not stored here — it is always prepended by BuildFinalPrePrompt.
 func LoadInternalDefaults() Config {

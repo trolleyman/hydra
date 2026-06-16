@@ -4,26 +4,25 @@ import { api } from '../stores/apiClient'
 import type { ProjectInfo } from '../api'
 import { formatError } from '../api/format_error'
 
-// TrustProjectModal asks the user to review and trust a project's
-// .hydra/config.toml before Hydra acts on it. That file is read straight from
-// the repository and can run arbitrary code (pre_spawn_script, unsafe_host
-// artifact commands) and weaken the sandbox, so an unreviewed project is gated:
-// no agents can be spawned and host artifact commands are forced back into the
-// sandbox until the user accepts. Shown whenever the selected project is
-// untrusted (a fresh open, or after the config changed since it was trusted).
+// TrustProjectModal asks the user to review a project's .hydra/config.toml the
+// first time they open it. That file is read straight from the repository and
+// can run arbitrary code (pre_spawn_script, unsafe_host artifact commands) and
+// weaken the sandbox, so the user should recognize the project before using it.
+// Trust is a client-side, one-time decision remembered in localStorage (see
+// lib/storage); accepting just dismisses the prompt and opens the project,
+// declining backs out. Later edits to the config don't re-prompt.
 export function TrustProjectModal({
   project,
   onTrusted,
   onCancel,
 }: {
   project: ProjectInfo
-  onTrusted: (updated: ProjectInfo) => void
+  onTrusted: () => void
   onCancel: () => void
 }) {
   const [content, setContent] = useState<string | null>(null)
   const [exists, setExists] = useState(false)
   const [loading, setLoading] = useState(true)
-  const [trusting, setTrusting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -47,19 +46,6 @@ export function TrustProjectModal({
       cancelled = true
     }
   }, [project.id])
-
-  async function handleTrust() {
-    if (trusting) return
-    setTrusting(true)
-    setError(null)
-    try {
-      const updated = await api.default.trustProject(project.id)
-      onTrusted(updated)
-    } catch (err) {
-      setError(formatError(err))
-      setTrusting(false)
-    }
-  }
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
@@ -88,8 +74,7 @@ export function TrustProjectModal({
             sandbox. Only trust it if you recognize this project and its config.
           </p>
           <p className="text-xs text-gray-500 dark:text-gray-400 mt-3">
-            Until you trust it, agents can't be spawned and artifact commands stay sandboxed. You'll be asked again if
-            the config changes.
+            You're asked once per project, the first time you open it; later edits to the config won't ask again.
           </p>
 
           <div className="mt-4">
@@ -116,17 +101,16 @@ export function TrustProjectModal({
         <div className="px-6 py-4 bg-gray-50 dark:bg-gray-800/50 flex justify-end gap-3 border-t border-gray-100 dark:border-gray-700">
           <button
             onClick={onCancel}
-            disabled={trusting}
             className="px-4 py-2 rounded-lg text-sm font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors cursor-pointer disabled:opacity-50"
           >
             Don't trust
           </button>
           <button
-            onClick={handleTrust}
-            disabled={loading || trusting}
+            onClick={onTrusted}
+            disabled={loading}
             className="px-4 py-2 rounded-lg text-sm font-medium bg-amber-600 hover:bg-amber-700 text-white transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {trusting ? 'Trusting…' : 'Trust project'}
+            Trust project
           </button>
         </div>
       </div>

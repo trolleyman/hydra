@@ -51,10 +51,9 @@ func (s *SimulationServer) GetStatus(w http.ResponseWriter, r *http.Request) {
 func (s *SimulationServer) ListProjects(w http.ResponseWriter, r *http.Request) {
 	resp := api.ListProjects200JSONResponse{
 		{
-			Id:      "sim-project",
-			Path:    "/simulated/project",
-			Name:    "simulated-project",
-			Trusted: true,
+			Id:   "sim-project",
+			Path: "/simulated/project",
+			Name: "simulated-project",
 		},
 	}
 	api.WriteJSON(w, http.StatusOK, resp)
@@ -65,16 +64,7 @@ func (s *SimulationServer) AddProject(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *SimulationServer) GetProjectConfigToml(w http.ResponseWriter, r *http.Request, projectId string) {
-	api.WriteJSON(w, http.StatusOK, api.ConfigTomlResponse{Content: "", Exists: false, Trusted: true})
-}
-
-func (s *SimulationServer) TrustProject(w http.ResponseWriter, r *http.Request, projectId string) {
-	api.WriteJSON(w, http.StatusOK, api.ProjectInfo{
-		Id:      "sim-project",
-		Path:    "/simulated/project",
-		Name:    "simulated-project",
-		Trusted: true,
-	})
+	api.WriteJSON(w, http.StatusOK, api.ConfigTomlResponse{Content: "", Exists: false})
 }
 
 func (s *SimulationServer) RemoveProject(w http.ResponseWriter, r *http.Request, projectId string) {
