@@ -324,16 +324,22 @@ try {
     // `prefers-color-scheme`). Light renders keep their original filenames; dark
     // renders get a `-dark` suffix.
     const themes = ['light', 'dark'] as const
-    let shot = 0
-    const totalShots = pages.length * themes.length
-    for (const pg of pages) {
-      for (const theme of themes) {
+    // Each (page, theme) capture is fully independent — its own browser context
+    // (isolated localStorage/cookies) hitting the shared read-only simulation
+    // server — so we run several at once rather than serially. Wall-clock is
+    // dominated by per-shot navigation + networkidle + settle waits, so a small
+    // pool cuts it roughly N-fold. Concurrency is capped (override with
+    // HYDRA_SHOT_CONCURRENCY) to bound peak memory and avoid starving renders of
+    // CPU; the captured pixels are per-context deterministic regardless of how
+    // many run in parallel, so this doesn't affect the diff-hash reproducibility.
+    const tasks = pages.flatMap((pg) => themes.map((theme) => ({ pg, theme })))
+    const totalShots = tasks.length
+    const concurrency = Math.max(1, Math.min(Number(process.env.HYDRA_SHOT_CONCURRENCY) || 4, totalShots))
+    let done = 0
+    let nextTask = 0
+
+    const captureShot = async (pg: (typeof pages)[number], theme: (typeof themes)[number]) => {
         const suffix = theme === 'dark' ? '-dark' : ''
-        shot++
-        // Progress marker surfaced live by Hydra as the header: e.g.
-        // "artifacts-ab-dark.png 7/12". Emitted at the start of the (slow) capture
-        // so it persists while the shot is taken.
-        progress(`${pg.name}${suffix}.png ${shot}/${totalShots}`)
         const ctx = await browser.newContext({
           viewport: pg.viewport ?? { width: 1280, height: 800 },
           deviceScaleFactor: 1,
@@ -470,8 +476,23 @@ try {
         await page.screenshot({ path: out, fullPage: !pg.scrollTo })
         console.log(`wrote ${out}`)
         await ctx.close()
+        done++
+        // Progress marker surfaced live by Hydra as the header, e.g.
+        // "artifact-log-dark.png 7/24". Emitted as each shot finishes (order is
+        // nondeterministic under the pool) so the count climbs steadily.
+        progress(`${pg.name}${suffix}.png ${done}/${totalShots}`)
+    }
+
+    // Worker pool: each worker pulls the next task index until the list drains.
+    // JS is single-threaded between awaits, so nextTask++/done++ never race.
+    const worker = async () => {
+      while (nextTask < tasks.length) {
+        const { pg, theme } = tasks[nextTask++]
+        await captureShot(pg, theme)
       }
     }
+    progress(`capturing ${totalShots} screenshots (${concurrency} at a time)`)
+    await Promise.all(Array.from({ length: concurrency }, () => worker()))
   } finally {
     await browser.close()
   }
