@@ -314,7 +314,7 @@ function LogView({ log }: { log: ArtifactLogLine[] }) {
     <div
       ref={ref}
       onScroll={onScroll}
-      className="max-h-64 overflow-auto rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/60 p-2 font-mono text-[11px] leading-relaxed"
+      className="h-64 max-h-64 overflow-auto rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/60 p-2 font-mono text-[11px] leading-relaxed"
     >
       {log.length === 0 ? (
         <div className="text-gray-400 dark:text-gray-500">Waiting for output…</div>
