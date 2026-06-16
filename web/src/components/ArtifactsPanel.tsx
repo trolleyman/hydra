@@ -767,12 +767,12 @@ function ArtifactSetCard({ set, mode, filter, onRefresh, projectId, agentId }: {
   // Every state (generating / error / no-changes / changed) renders inside the
   // same bordered card so switching between them never shifts the layout (e.g.
   // hitting refresh after a failure) and the refresh button is always reachable —
-  // including when there are no visual changes. Default to collapsed for the
-  // no-changes case (nothing worth showing until asked) and while generating
-  // (the live log is opt-in, not in your face); the initial status is evaluated
-  // once on mount, and the card stays mounted across status changes (keyed by
-  // name) so a manual expand/collapse or regenerate keeps its state.
-  const [collapsed, setCollapsed] = useState(() => loadPrefs()?.collapsed ?? ((status === 'ready' && !set.changed) || status === 'generating'))
+  // including when there are no visual changes. Default to collapsed (the card is
+  // opt-in: click to expand) when nothing is saved for this agent; the saved
+  // per-agent state, when present, wins. The card is keyed by project+agent+name
+  // at the call site, so switching agents remounts it and re-reads that agent's
+  // saved state instead of leaking the previous agent's toggle.
+  const [collapsed, setCollapsed] = useState(() => loadPrefs()?.collapsed ?? true)
   const [showUnchanged, setShowUnchanged] = useState(() => loadPrefs()?.showUnchanged ?? false)
   const [buildLogOpen, setBuildLogOpen] = useState(() => loadPrefs()?.buildLogOpen ?? false)
 
@@ -1125,7 +1125,12 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
         )}
       </div>
       <div className="flex flex-col gap-2">
-        {sets.map((s) => <ArtifactSetCard key={s.name} set={s} mode={imageDiffMode} filter={tagFilter} onRefresh={requestRefresh} projectId={projectId} agentId={agentId} />)}
+        {/* Key by project+agent+name (not just name): switching agents reuses
+            this same mounted panel, so a name-only key would let one agent's
+            cards keep the previous agent's expand/collapse state (and its save
+            effect would then clobber the new agent's saved prefs). Re-keying per
+            agent remounts each card so it re-reads that agent's saved state. */}
+        {sets.map((s) => <ArtifactSetCard key={`${projectId ?? '_'}-${agentId}-${s.name}`} set={s} mode={imageDiffMode} filter={tagFilter} onRefresh={requestRefresh} projectId={projectId} agentId={agentId} />)}
       </div>
     </div>
   )
