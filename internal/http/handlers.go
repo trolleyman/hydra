@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -23,6 +24,7 @@ import (
 	"github.com/trolleyman/hydra/internal/projects"
 	"github.com/trolleyman/hydra/internal/sandbox"
 	"github.com/trolleyman/hydra/internal/session"
+	"github.com/trolleyman/hydra/internal/usage"
 )
 
 const version = "0.1.0"
@@ -54,6 +56,29 @@ type Server struct {
 	Artifacts *artifacts.Registry
 
 	lastSandboxError atomic.Value // holds string
+
+	// claudeUsage caches the account-global Claude Code usage snapshot, lazily
+	// initialised on first request (the probe is host-account-wide, so it's not
+	// scoped per project).
+	claudeUsageOnce sync.Once
+	claudeUsage     *usage.Cache
+}
+
+// claudeUsageTTL is how long a probed usage snapshot is served before re-probing.
+const claudeUsageTTL = 30 * time.Second
+
+// claudeUsageCache returns the lazily-created usage cache. The probe runs the
+// host `claude` CLI in the default project root (a directory the user's real
+// Claude is most likely to already trust); the probe also auto-accepts the
+// trust prompt, so an untrusted dir still works without mutating ~/.claude.json.
+func (s *Server) claudeUsageCache() *usage.Cache {
+	s.claudeUsageOnce.Do(func() {
+		root := s.ProjectRoot
+		s.claudeUsage = usage.NewCache(claudeUsageTTL, func(ctx context.Context) (usage.Snapshot, error) {
+			return usage.Probe(ctx, "claude", root, usage.HostEnv())
+		})
+	})
+	return s.claudeUsage
 }
 
 // SetSandboxError records the most recent sandbox-availability error (or clears
@@ -334,6 +359,55 @@ func (s *Server) GetStatus(_ context.Context, _ api.GetStatusRequestObject) (api
 		DefaultProjectId: &defaultProjectID,
 		Development:      &development,
 	}), nil
+}
+
+func (s *Server) GetClaudeUsage(ctx context.Context, request api.GetClaudeUsageRequestObject) (api.GetClaudeUsageResponseObject, error) {
+	force := request.Params.Refresh != nil && *request.Params.Refresh
+	snap, err := s.claudeUsageCache().Get(ctx, force)
+	if err != nil {
+		// No snapshot at all (CLI never produced one): report unavailable rather
+		// than 500, so the indicator can quietly hide.
+		msg := err.Error()
+		return api.GetClaudeUsage200JSONResponse(api.ClaudeUsageResponse{
+			Available: false,
+			Error:     &msg,
+		}), nil
+	}
+
+	resp := api.ClaudeUsageResponse{Available: snap.Available}
+	if snap.Error != "" {
+		e := snap.Error
+		resp.Error = &e
+	}
+	if !snap.CapturedAt.IsZero() {
+		t := snap.CapturedAt
+		resp.CapturedAt = &t
+	}
+	if snap.AccountTier != "" {
+		tier := snap.AccountTier
+		resp.AccountTier = &tier
+	}
+	resp.SessionPercentUsed = f64ToF32(snap.SessionPercentUsed)
+	resp.SessionResetsAt = snap.SessionResetsAt
+	if snap.SessionResetText != "" {
+		txt := snap.SessionResetText
+		resp.SessionResetText = &txt
+	}
+	resp.WeeklyPercentUsed = f64ToF32(snap.WeeklyPercentUsed)
+	if snap.WeeklyResetText != "" {
+		txt := snap.WeeklyResetText
+		resp.WeeklyResetText = &txt
+	}
+	return api.GetClaudeUsage200JSONResponse(resp), nil
+}
+
+// f64ToF32 converts an optional float64 to an optional float32 for the API.
+func f64ToF32(v *float64) *float32 {
+	if v == nil {
+		return nil
+	}
+	f := float32(*v)
+	return &f
 }
 
 func (s *Server) GetConfig(_ context.Context, request api.GetConfigRequestObject) (api.GetConfigResponseObject, error) {
