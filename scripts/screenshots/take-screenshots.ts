@@ -34,6 +34,16 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chromium } from 'playwright'
 
+// A fixed instant the browser clock is pinned to for every capture, so any
+// duration the UI derives from "now" — an agent's "spawned X ago", the artifacts
+// panel's elapsed timer — renders deterministically and doesn't make two
+// otherwise-identical renders diff (see the nondeterminism note below). It MUST
+// match the simulation server's fixed clock (internal/http/simulation.go simNow),
+// which dates its mock timestamps relative to this same instant, so e.g. an
+// artifact "started 8s ago" reliably reads "8s" rather than 8s/9s by sub-second
+// luck.
+const SIM_NOW = new Date('2025-01-01T12:00:00Z')
+
 const OUT = required('HYDRA_ARTIFACT_OUTPUT')
 // HYDRA_ARTIFACT_SOURCE is the checkout root. Fall back to the repo root two
 // levels up from this script so it also works when run by hand.
@@ -167,7 +177,7 @@ try {
   //
   //    The diff viewer compares versions by hashing the output bytes and only
   //    surfaces files that differ, so the render MUST be byte-reproducible —
-  //    otherwise unchanged UI would always look "modified". Two sources of
+  //    otherwise unchanged UI would always look "modified". Three sources of
   //    nondeterminism are neutralized:
   //      * Chromium font anti-aliasing: pinned with the flags below
   //        (no GPU, no LCD/subpixel text, fixed hinting + color profile).
@@ -175,6 +185,10 @@ try {
   //        form shuffles its placeholder phrases) and no-ops the short timers
   //        that drive the typewriter placeholder, and a stylesheet disables CSS
   //        animations/transitions and the text caret.
+  //      * Wall-clock-derived labels (elapsed timers, "spawned X ago"): the
+  //        browser clock is pinned to a fixed instant (ctx.clock.setFixedTime,
+  //        below) matching the simulation server's fixed clock, so a duration
+  //        shown in seconds reads identically in both renders.
   const flags = [
     '--no-sandbox',
     '--disable-gpu',
@@ -211,7 +225,7 @@ try {
       // Seeds the diff viewer's image-diff comparison mode ('hydra-diff-image-mode')
       // before the app boots, so the artifacts panel renders before/after pairs in
       // the chosen mode. Only meaningful on the artifacts (agent-1) page.
-      imageDiffMode?: 'side-by-side' | 'ab' | 'slider' | 'onion'
+      imageDiffMode?: 'side-by-side' | 'ab' | 'difference' | 'slider' | 'onion'
       // Expands the named artifact card (clicks its header) after load — used to
       // document the in-flight card's live, scrollable generation log.
       expandArtifact?: string
@@ -436,6 +450,12 @@ try {
           deviceScaleFactor: 1,
           colorScheme: theme,
         })
+        // Pin Date/now to a fixed instant (matching the server's simNow) so the
+        // UI's "elapsed"/"X ago" labels are byte-stable across the two renders.
+        // setFixedTime only freezes the wall clock — timers and requestAnimationFrame
+        // keep running, so the settle() rAF wait and the setTimeout freeze below are
+        // unaffected.
+        await ctx.clock.setFixedTime(SIM_NOW)
         // Seed the theme preference before any app code runs.
         await ctx.addInitScript((mode) => {
           try {

@@ -18,6 +18,19 @@ type SimulationServer struct {
 	Development bool
 }
 
+// simNow is the fixed wall-clock instant ALL time-derived simulation values are
+// computed from, instead of time.Now(). The diff viewer renders the two sides of
+// a comparison in separate server boots and hashes the resulting screenshots, so
+// any value that moves with the real clock (an agent's "spawned X ago", the
+// artifacts panel's elapsed timer) would make otherwise-identical renders differ
+// and show up as a spurious visual change. Pinning the server's clock — together
+// with the screenshot script pinning the browser's clock to the SAME instant
+// (scripts/screenshots/take-screenshots.ts, page.clock) — makes every duration
+// label deterministic, down to the second. Keep the two instants in sync.
+func simNow() time.Time {
+	return time.Date(2025, 1, 1, 12, 0, 0, 0, time.UTC)
+}
+
 func (s *SimulationServer) CheckHealth(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("OK"))
@@ -101,9 +114,9 @@ func (s *SimulationServer) RemoveProject(w http.ResponseWriter, r *http.Request,
 }
 
 func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, projectId string) {
-	createdAt1 := time.Now().Add(-1 * time.Hour).Unix()
-	createdAt2 := time.Now().Add(-2 * time.Hour).Unix()
-	createdAt3 := time.Now().Add(-3 * time.Hour).Unix()
+	createdAt1 := simNow().Add(-1 * time.Hour).Unix()
+	createdAt2 := simNow().Add(-2 * time.Hour).Unix()
+	createdAt3 := simNow().Add(-3 * time.Hour).Unix()
 
 	running := api.Running
 	waiting := api.Waiting
@@ -121,7 +134,7 @@ func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, pr
 			CreatedAt:     &createdAt1,
 			AgentStatus: &api.AgentStatusInfo{
 				Status:    running,
-				Timestamp: time.Now().Format(time.RFC3339),
+				Timestamp: simNow().Format(time.RFC3339),
 			},
 		},
 		{
@@ -137,7 +150,7 @@ func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, pr
 			HasUnreadChanges: &unread,
 			AgentStatus: &api.AgentStatusInfo{
 				Status:      waiting,
-				Timestamp:   time.Now().Format(time.RFC3339),
+				Timestamp:   simNow().Format(time.RFC3339),
 				LastMessage: ptr("The spike is built, tested, and committed. Here's what landed…"),
 			},
 		},
@@ -154,7 +167,7 @@ func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, pr
 			CreatedAt:     &createdAt3,
 			AgentStatus: &api.AgentStatusInfo{
 				Status:    running,
-				Timestamp: time.Now().Format(time.RFC3339),
+				Timestamp: simNow().Format(time.RFC3339),
 			},
 		},
 	}
@@ -163,7 +176,7 @@ func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, pr
 
 func (s *SimulationServer) GetAgent(w http.ResponseWriter, r *http.Request, projectId string, id string) {
 	if id == "agent-1" {
-		createdAt := time.Now().Add(-1 * time.Hour).Unix()
+		createdAt := simNow().Add(-1 * time.Hour).Unix()
 		api.WriteJSON(w, http.StatusOK, api.AgentResponse{
 			Id:            "agent-1",
 			Title:         ptr("Add renameable agent titles"),
@@ -175,13 +188,13 @@ func (s *SimulationServer) GetAgent(w http.ResponseWriter, r *http.Request, proj
 			CreatedAt:     &createdAt,
 			AgentStatus: &api.AgentStatusInfo{
 				Status:    api.Running,
-				Timestamp: time.Now().Format(time.RFC3339),
+				Timestamp: simNow().Format(time.RFC3339),
 			},
 		})
 		return
 	}
 	if id == "agent-3" {
-		createdAt := time.Now().Add(-3 * time.Hour).Unix()
+		createdAt := simNow().Add(-3 * time.Hour).Unix()
 		api.WriteJSON(w, http.StatusOK, api.AgentResponse{
 			Id:            "agent-3",
 			Title:         ptr("Refactor auth into nested packages"),
@@ -194,7 +207,7 @@ func (s *SimulationServer) GetAgent(w http.ResponseWriter, r *http.Request, proj
 			Prompt:        "Refactor the auth providers into a deeply nested package layout so the diff tree shows VS Code-style compacted folders.",
 			AgentStatus: &api.AgentStatusInfo{
 				Status:    api.Running,
-				Timestamp: time.Now().Format(time.RFC3339),
+				Timestamp: simNow().Format(time.RFC3339),
 			},
 		})
 		return
@@ -240,7 +253,7 @@ func (s *SimulationServer) GetAgentCommits(w http.ResponseWriter, r *http.Reques
 				Message:     "Add feature X\n\nMore details about feature X",
 				AuthorName:  "Agent Claude",
 				AuthorEmail: "claude@hydra.ai",
-				Timestamp:   time.Now().Add(-10 * time.Minute).Format(time.RFC3339),
+				Timestamp:   simNow().Add(-10 * time.Minute).Format(time.RFC3339),
 			},
 			{
 				Sha:         "bcde1234efgh5678ijkl9012mnop3456qrst7890",
@@ -249,7 +262,7 @@ func (s *SimulationServer) GetAgentCommits(w http.ResponseWriter, r *http.Reques
 				Message:     "Fix bug Y",
 				AuthorName:  "Agent Claude",
 				AuthorEmail: "claude@hydra.ai",
-				Timestamp:   time.Now().Add(-20 * time.Minute).Format(time.RFC3339),
+				Timestamp:   simNow().Add(-20 * time.Minute).Format(time.RFC3339),
 			},
 			{
 				Sha:         "cdef1234efgh5678ijkl9012mnop3456qrst7890",
@@ -258,7 +271,7 @@ func (s *SimulationServer) GetAgentCommits(w http.ResponseWriter, r *http.Reques
 				Message:     "Refactor Z",
 				AuthorName:  "Agent Claude",
 				AuthorEmail: "claude@hydra.ai",
-				Timestamp:   time.Now().Add(-30 * time.Minute).Format(time.RFC3339),
+				Timestamp:   simNow().Add(-30 * time.Minute).Format(time.RFC3339),
 			},
 			{
 				Sha:         "defg1234efgh5678ijkl9012mnop3456qrst7890",
@@ -267,7 +280,7 @@ func (s *SimulationServer) GetAgentCommits(w http.ResponseWriter, r *http.Reques
 				Message:     "Initial work for feature X",
 				AuthorName:  "Agent Claude",
 				AuthorEmail: "claude@hydra.ai",
-				Timestamp:   time.Now().Add(-40 * time.Minute).Format(time.RFC3339),
+				Timestamp:   simNow().Add(-40 * time.Minute).Format(time.RFC3339),
 			},
 		}
 		api.WriteJSON(w, http.StatusOK, resp)
@@ -896,7 +909,7 @@ func simArtifactSets(id string) []api.ArtifactSet {
 	}
 	leftProgress := "building frontend"
 	rightProgress := "artifacts-ab-dark.png 7/12"
-	startedAt := time.Now().Add(-8 * time.Second).Unix()
+	startedAt := simNow().Add(-8 * time.Second).Unix()
 	leftLog := simArtifactLog()
 	rightLog := simArtifactLog()
 	return []api.ArtifactSet{
