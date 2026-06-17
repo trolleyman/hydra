@@ -71,6 +71,13 @@ type Server struct {
 // claudeUsageTTL is how long a probed usage snapshot is served before re-probing.
 const claudeUsageTTL = 30 * time.Second
 
+// claudeUsageEnabled gates the /api/usage/claude probe. Disabled for now: the
+// probe drives `claude /usage` under a PTY (up to ~20s) and a never-settling TUI
+// could spike CPU / make the daemon feel stuck. When disabled the endpoint still
+// responds, but reports "unavailable" without probing, so the UI indicator just
+// hides. Flip back to true to re-enable.
+const claudeUsageEnabled = false
+
 // claudeUsageCache returns the lazily-created usage cache. The probe runs the
 // host `claude` CLI in the default project root (a directory the user's real
 // Claude is most likely to already trust); the probe also auto-accepts the
@@ -374,6 +381,16 @@ func (s *Server) GetStatus(_ context.Context, _ api.GetStatusRequestObject) (api
 }
 
 func (s *Server) GetClaudeUsage(ctx context.Context, request api.GetClaudeUsageRequestObject) (api.GetClaudeUsageResponseObject, error) {
+	if !claudeUsageEnabled {
+		// Probe disabled: respond without spawning `claude /usage`. Reported as
+		// unavailable so the frontend indicator quietly hides.
+		msg := "Claude usage probe is disabled"
+		return api.GetClaudeUsage200JSONResponse(api.ClaudeUsageResponse{
+			Available: false,
+			Error:     &msg,
+		}), nil
+	}
+
 	force := request.Params.Refresh != nil && *request.Params.Refresh
 	snap, err := s.claudeUsageCache().Get(ctx, force)
 	if err != nil {
