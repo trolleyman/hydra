@@ -346,13 +346,14 @@ export function ArtifactsEditor({
         </div>
         <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">Diff Artifacts</h2>
         <InfoTooltip title="Diff Artifacts">
-          <p>Per-project commands that render visual artifacts (e.g. screenshots) of a checkout. The diff viewer runs each against both sides of a comparison and shows the outputs that differ.</p>
+          <p>Per-project commands that render visual artifacts (e.g. screenshots or screen recordings) of a checkout. The diff viewer runs each against both sides of a comparison and shows the outputs that differ.</p>
           <p className="mt-1.5">The command runs via <code className="text-blue-300">bash -c</code> in the checkout directory with these variables set:</p>
           <ul className="mt-1 space-y-0.5 list-none">
             <li><code className="text-blue-300">HYDRA_ARTIFACT_OUTPUT</code> — directory to write images into</li>
             <li><code className="text-blue-300">HYDRA_ARTIFACT_SOURCE</code> — the checkout directory</li>
             <li><code className="text-blue-300">HYDRA_ARTIFACT_REF</code> — the resolved git ref</li>
           </ul>
+          <p className="mt-1.5"><code className="text-blue-300">.png .jpg .gif</code> are diffed pixel-by-pixel; <code className="text-blue-300">.webm</code> video is diffed frame-by-frame when <strong>ffmpeg</strong> is installed (else by byte hash); other types (<code className="text-blue-300">.webp .avif .svg .bmp .pdf</code>) are compared by byte hash. Encode video as <strong>lossless</strong> <code className="text-blue-300">.webm</code> (e.g. <code className="text-blue-300">libvpx-vp9 -lossless 1</code>) so identical frames stay identical — a lossy encode changes pixels and reads as changed.</p>
         </InfoTooltip>
       </div>
       <p className="text-xs text-gray-500 dark:text-gray-400 mb-4 ml-10">

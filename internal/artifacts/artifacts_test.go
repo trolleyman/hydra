@@ -424,3 +424,98 @@ func TestManagerComparePixelEqual(t *testing.T) {
 		}
 	}
 }
+
+// encodeTestWebM renders a 1s lossless VP9 .webm from an ffmpeg lavfi source
+// (e.g. "testsrc", "testsrc2"). The title metadata is muxed into the container
+// only — it changes the file bytes without touching the decoded frames, so two
+// calls with the same source but different titles model "identical video, different
+// container" (the case byte-hash gets wrong and the frame check gets right).
+func encodeTestWebM(t *testing.T, source, title string) []byte {
+	t.Helper()
+	out := filepath.Join(t.TempDir(), "v.webm")
+	cmd := exec.Command("ffmpeg", "-nostdin", "-loglevel", "error", "-y",
+		"-f", "lavfi", "-i", source+"=duration=1:size=128x96:rate=10",
+		"-c:v", "libvpx-vp9", "-lossless", "1", "-metadata", "title="+title, out)
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("encode webm: %v", err)
+	}
+	b, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+// TestManagerCompareVideoFrames checks that .webm video is compared by decoded
+// frames (via ffmpeg), so two lossless encodes with identical frames but
+// differing container bytes read as unchanged, while different frames stay
+// modified.
+func TestManagerCompareVideoFrames(t *testing.T) {
+	if _, err := exec.LookPath("ffmpeg"); err != nil {
+		t.Skip("ffmpeg not installed")
+	}
+	m := NewManager(t.TempDir())
+	const script = "rec"
+
+	same1 := encodeTestWebM(t, "testsrc", "one")
+	same2 := encodeTestWebM(t, "testsrc", "two") // identical frames, different container bytes
+	if bytes.Equal(same1, same2) {
+		t.Fatal("expected differing container bytes between the two encodes")
+	}
+	diff := encodeTestWebM(t, "testsrc2", "one") // genuinely different frames
+
+	writeArtifact(t, m, script, "cleft", "clip.webm", same1)
+	writeArtifact(t, m, script, "cleft", "other.webm", same1)
+	writeArtifact(t, m, script, "cright", "clip.webm", same2)
+	writeArtifact(t, m, script, "cright", "other.webm", diff)
+
+	left, right := scanPair(t, m, script)
+	byName := map[string]FileDelta{}
+	for _, d := range m.Compare(left, right) {
+		byName[d.Name] = d
+	}
+	if d := byName["clip.webm"]; d.Change != ChangeUnchanged || d.Unverified {
+		t.Errorf("clip.webm: got change=%s unverified=%v, want unchanged/false", d.Change, d.Unverified)
+	}
+	if d := byName["other.webm"]; d.Change != ChangeModified || d.Unverified {
+		t.Errorf("other.webm: got change=%s unverified=%v, want modified/false", d.Change, d.Unverified)
+	}
+}
+
+// TestManagerCompareVideoUnverified checks that when ffmpeg cannot run, a changed
+// .webm keeps its byte-hash "modified" verdict but is flagged Unverified so the UI
+// can caveat it.
+func TestManagerCompareVideoUnverified(t *testing.T) {
+	m := NewManager(t.TempDir())
+	const script = "rec"
+	writeArtifact(t, m, script, "cleft", "clip.webm", []byte("first"))
+	writeArtifact(t, m, script, "cright", "clip.webm", []byte("second"))
+
+	// Empty PATH so exec.LookPath("ffmpeg") fails and the frame check can't run.
+	t.Setenv("PATH", "")
+
+	left, right := scanPair(t, m, script)
+	var d FileDelta
+	for _, got := range m.Compare(left, right) {
+		if got.Name == "clip.webm" {
+			d = got
+		}
+	}
+	if d.Change != ChangeModified || !d.Unverified {
+		t.Errorf("clip.webm: got change=%s unverified=%v, want modified/true", d.Change, d.Unverified)
+	}
+}
+
+// scanPair scans the cleft/cright entry dirs of script into a left/right Meta.
+func scanPair(t *testing.T, m *Manager, script string) (Meta, Meta) {
+	t.Helper()
+	leftFiles, _, err := scanOutputs(m.entryDir(script, "cleft"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rightFiles, _, err := scanOutputs(m.entryDir(script, "cright"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return Meta{Script: script, Key: "cleft", Files: leftFiles}, Meta{Script: script, Key: "cright", Files: rightFiles}
+}
