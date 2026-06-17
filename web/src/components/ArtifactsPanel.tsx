@@ -70,6 +70,9 @@ function makeAuxOpen(pick: (e: React.MouseEvent) => string) {
 const DEFAULT_IMG_MAX_H = 480
 const MIN_IMG_MAX_H = 160
 const MAX_IMG_MAX_H = 1600
+// Pointer travel (px) past which a press-and-move counts as a resize drag rather
+// than a click — so a drag on the A/B image resizes without also flipping sides.
+const DRAG_THRESHOLD = 4
 
 // Shared drag-to-resize for a before/after pair: dragging the grip on EITHER
 // image adjusts a single max-height that's applied to BOTH sides, so they always
@@ -81,16 +84,27 @@ function useImageResize() {
   // the (stable) onResizeStart callback on every resize tick.
   const current = useRef(maxHeight)
   current.current = maxHeight
+  // True once the in-flight press has moved past DRAG_THRESHOLD, i.e. it's a
+  // resize drag and not a click. Read (and cleared) by consumeDrag so a click
+  // handler on the same element can skip its action when a drag just happened.
+  const dragged = useRef(false)
   const onResizeStart = useCallback((e: React.PointerEvent) => {
     if (e.button !== 0) return
     // Suppress the click/drag from selecting text or following the image's <a> link.
     e.preventDefault()
     e.stopPropagation()
+    dragged.current = false
+    const startX = e.clientX
     const startY = e.clientY
     const startH = current.current
     const onMove = (ev: PointerEvent) => {
-      const next = startH + (ev.clientY - startY)
-      setMaxHeight(Math.max(MIN_IMG_MAX_H, Math.min(MAX_IMG_MAX_H, next)))
+      // The grip is a bottom-right (nwse) corner handle, so down-AND-right grows
+      // the image. Sum the horizontal and vertical deltas so a purely horizontal
+      // drag to the right enlarges it just as a downward drag does (and up-left
+      // shrinks it), rather than ignoring sideways movement.
+      const delta = (ev.clientX - startX) + (ev.clientY - startY)
+      if (Math.abs(delta) > DRAG_THRESHOLD) dragged.current = true
+      setMaxHeight(Math.max(MIN_IMG_MAX_H, Math.min(MAX_IMG_MAX_H, startH + delta)))
     }
     const onUp = () => {
       window.removeEventListener('pointermove', onMove)
@@ -99,7 +113,15 @@ function useImageResize() {
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
   }, [])
-  return { maxHeight, onResizeStart }
+  // Whether the gesture that just ended was a drag (resets the flag). A click
+  // handler calls this to decide whether to run — letting a drag-to-resize on a
+  // clickable image avoid also triggering the click (e.g. the A/B flip).
+  const consumeDrag = useCallback(() => {
+    const d = dragged.current
+    dragged.current = false
+    return d
+  }, [])
+  return { maxHeight, onResizeStart, consumeDrag }
 }
 
 // A corner grip (revealed on hover) that the user drags down/up to resize the
@@ -174,7 +196,7 @@ function LayerNode({ url, style }: { url?: string | null; style?: React.CSSPrope
 // the currently-shown image in a new tab.
 function ABSwitch({ left, right }: { left?: string | null; right?: string | null }) {
   const [showAfter, setShowAfter] = useState(true)
-  const { maxHeight, onResizeStart } = useImageResize()
+  const { maxHeight, onResizeStart, consumeDrag } = useImageResize()
   // At least one side is present (ImageDiffView only routes here otherwise); the
   // present image is the invisible sizer that gives the stacked box its size.
   const sizer = (right ?? left) as string
@@ -191,9 +213,12 @@ function ABSwitch({ left, right }: { left?: string | null; right?: string | null
       <div
         // group: reveals the resize grip on hover. select-none: flipping the A/B
         // view is a rapid click target, so without this a quick double-click would
-        // highlight the "No image" placeholder text.
+        // highlight the "No image" placeholder text. A press starts a resize drag
+        // anywhere on the image (onPointerDown); a plain click still flips sides,
+        // but consumeDrag() suppresses that flip when the press turned into a drag.
         className="group relative inline-block cursor-pointer select-none"
-        onClick={() => setShowAfter((s) => !s)}
+        onPointerDown={onResizeStart}
+        onClick={() => { if (!consumeDrag()) setShowAfter((s) => !s) }}
         onAuxClick={makeAuxOpen(() => (showAfter ? right : left) || sizer)}
       >
         <img src={sizer} style={{ visibility: 'hidden', maxHeight: `${maxHeight}px` }} className={`${IMG_CLASS} block`} draggable={false} />
@@ -661,8 +686,11 @@ function FileRow({ file, mode }: { file: ArtifactFile; mode: ImageDiffMode }) {
 function FileGrid({ files, mode }: { files: ArtifactFile[]; mode: ImageDiffMode }) {
   return (
     // pt-3 so the gap above the first file row matches the card body's px-3 left
-    // inset — the top and left spacing around the grid read as equal.
-    <div className="flex flex-wrap gap-3 pt-3">
+    // inset — the top and left spacing around the grid read as equal. items-start
+    // so each card sizes to its own content height instead of stretching to match
+    // a taller neighbour on the same row (flex's default align-items: stretch),
+    // which left a short, small-image card half-empty below its image.
+    <div className="flex flex-wrap items-start gap-3 pt-3">
       {files.map((f) => <FileRow key={f.name} file={f} mode={mode} />)}
     </div>
   )
