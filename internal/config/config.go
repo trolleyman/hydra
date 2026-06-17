@@ -9,6 +9,7 @@ import (
 
 	"braces.dev/errtrace"
 	"github.com/BurntSushi/toml"
+	"github.com/pelletier/go-toml/v2/unstable"
 	"github.com/trolleyman/hydra/internal/sandbox"
 )
 
@@ -707,81 +708,214 @@ func emitArtifactsAuthoritative(out *[]string, arts []ArtifactScript, meta map[s
 	}
 }
 
-// section is a top-level TOML section: an optional header line plus the lines
-// that follow it until the next header, with any comment lines that immediately
-// preceded the header captured as its leading comments.
-type section struct {
-	leading []string // comment/blank lines before the header
-	header  string   // raw "[...]" / "[[...]]" line, "" for the implicit root section
-	body    []string // raw lines after the header (verbatim)
+// existingAnalysis captures everything renderConfig needs to read from a prior
+// config file: the user comments attached to managed tables and keys, and the
+// existing [[artifacts]] blocks with their preserved comments. It is derived
+// from a real TOML parse (go-toml/v2's unstable AST gives accurate byte ranges
+// per expression), so multi-line string and array values can never confuse
+// comment attribution the way a naive line-by-line scan once did.
+type existingAnalysis struct {
+	tableComments  map[string][]string         // normalized table -> leading user comments
+	keyComments    map[string][]string         // "normTable\x00key" -> preceding user comments
+	artifactBlocks [][]string                  // verbatim [[artifacts]] blocks, in source order
+	artifactMeta   map[string]artifactComments // artifact name -> preserved comments
 }
 
-func isTableHeader(trimmed string) bool {
-	return strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") && !strings.Contains(trimmed, "=")
+// tomlItem is one top-level TOML expression (a table header or a key/value),
+// located by the inclusive 0-based line range it occupies in the source.
+type tomlItem struct {
+	kind      unstable.Kind
+	startLine int
+	endLine   int
+	key       string // first key segment, for a KeyValue
+	strVal    string // decoded value, for a string-valued KeyValue (used to read "name")
+	norm      string // normalized table name, for a Table/ArrayTable
 }
 
-func isArrayHeader(header string) bool {
-	return strings.HasPrefix(strings.TrimSpace(header), "[[")
+// lineIndexer returns a function mapping a byte offset to its 0-based line.
+func lineIndexer(data []byte) func(off uint32) int {
+	var newlines []int
+	for i, b := range data {
+		if b == '\n' {
+			newlines = append(newlines, i)
+		}
+	}
+	return func(off uint32) int {
+		o := int(off)
+		lo, hi := 0, len(newlines)
+		for lo < hi {
+			mid := (lo + hi) / 2
+			if newlines[mid] < o {
+				lo = mid + 1
+			} else {
+				hi = mid
+			}
+		}
+		return lo
+	}
 }
 
-// parseSections splits raw config content into ordered top-level sections,
-// preserving every line verbatim. Comment/blank lines preceding a header become
-// that header's leading comments.
-func parseSections(data []byte) []section {
+// parseTOMLItems parses data (already CRLF-normalized) into its ordered
+// top-level expressions, each tagged with the source line range it spans. The
+// unstable parser leaves a table header's Raw range empty, so its line is taken
+// from the first key segment, whose Data references the input bytes for a bare
+// key. A quoted key decodes to an allocated slice that Parser.Range rejects with
+// a panic; the deferred recover turns that (and any other unstable-API surprise)
+// into an error so the caller degrades to a fresh render instead of crashing.
+func parseTOMLItems(data []byte) (items []tomlItem, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			items, err = nil, errtrace.Wrap(fmt.Errorf("parse toml structure: %v", r))
+		}
+	}()
+	offsetLine := lineIndexer(data)
+	var p unstable.Parser
+	p.Reset(data)
+	for p.NextExpression() {
+		e := p.Expression()
+		switch e.Kind {
+		case unstable.Table, unstable.ArrayTable:
+			var parts []string
+			var firstKey []byte // the first segment's bytes, still referencing the input
+			it := e.Key()
+			for it.Next() {
+				if firstKey == nil {
+					firstKey = it.Node().Data
+				}
+				parts = append(parts, string(it.Node().Data))
+			}
+			if len(parts) == 0 {
+				continue
+			}
+			line := offsetLine(p.Range(firstKey).Offset)
+			items = append(items, tomlItem{
+				kind:      e.Kind,
+				startLine: line,
+				endLine:   line,
+				norm:      normalizeTableParts(parts),
+			})
+		case unstable.KeyValue:
+			it := e.Key()
+			if !it.Next() {
+				continue
+			}
+			item := tomlItem{
+				kind:      e.Kind,
+				startLine: offsetLine(e.Raw.Offset),
+				endLine:   offsetLine(e.Raw.Offset + e.Raw.Length),
+				key:       string(it.Node().Data),
+			}
+			if v := e.Value(); v.Kind == unstable.String {
+				item.strVal = string(v.Data)
+			}
+			items = append(items, item)
+		}
+	}
+	if err := p.Error(); err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	return items, nil
+}
+
+// analyzeExisting parses prior config bytes and attributes every user comment to
+// the managed table, key, or [[artifacts]] block it precedes. An empty input (or
+// one that fails to parse) yields an empty analysis, so renderConfig still emits
+// a valid file. keys is the managed-key set used to strip Hydra's own docs.
+func analyzeExisting(data []byte, keys map[string]bool) *existingAnalysis {
+	res := &existingAnalysis{
+		tableComments: map[string][]string{},
+		keyComments:   map[string][]string{},
+		artifactMeta:  map[string]artifactComments{},
+	}
 	if len(data) == 0 {
-		return nil
+		return res
 	}
 	text := strings.ReplaceAll(string(data), "\r\n", "\n")
 	lines := strings.Split(text, "\n")
 	if n := len(lines); n > 0 && lines[n-1] == "" {
 		lines = lines[:n-1] // drop the empty element from a trailing newline
 	}
+	items, err := parseTOMLItems([]byte(text))
+	if err != nil {
+		return res // malformed file: degrade to a fresh render rather than fail the save
+	}
 
-	var sections []section
-	cur := section{}
-	var pending []string // comment/blank lines not yet attached
-	for _, ln := range lines {
-		t := strings.TrimSpace(ln)
-		switch {
-		case isTableHeader(t):
-			sections = append(sections, cur)
-			cur = section{header: ln, leading: trimBlankEdges(pending)}
-			pending = nil
-		case t == "" || strings.HasPrefix(t, "#"):
-			pending = append(pending, ln)
-		default: // a key line: pending comments belong to its section body
-			cur.body = append(cur.body, pending...)
-			pending = nil
-			cur.body = append(cur.body, ln)
+	// gap returns the comment/blank source lines between the previous item's end
+	// and the start of the next item — i.e. the lines preceding that item.
+	gap := func(prevEnd, start int) []string {
+		from := max(prevEnd+1, 0)
+		if from >= start || start > len(lines) {
+			return nil
+		}
+		return lines[from:start]
+	}
+
+	prevEnd := -1
+	curNorm := "" // normalized managed table for the current section (root = "")
+
+	// Accumulators for the [[artifacts]] block currently being read.
+	inArray := false
+	var artLeading, artInterior []string
+	var artName string
+	artHeaderLine, artLastLine := 0, 0
+	flushArtifact := func() {
+		if !inArray {
+			return
+		}
+		block := append([]string{}, userComments(artLeading, keys)...)
+		block = append(block, lines[artHeaderLine:artLastLine+1]...)
+		res.artifactBlocks = append(res.artifactBlocks, block)
+		if artName != "" {
+			res.artifactMeta[artName] = artifactComments{
+				leading:  userComments(artLeading, keys),
+				interior: artInterior,
+			}
+		}
+		inArray, artLeading, artInterior, artName = false, nil, nil, ""
+	}
+
+	for _, it := range items {
+		g := gap(prevEnd, it.startLine)
+		switch it.kind {
+		case unstable.ArrayTable:
+			flushArtifact()
+			inArray = true
+			artLeading = g
+			artHeaderLine, artLastLine = it.startLine, it.endLine
+		case unstable.Table:
+			flushArtifact()
+			curNorm = it.norm
+			if uc := userComments(g, keys); len(uc) > 0 {
+				res.tableComments[curNorm] = append(res.tableComments[curNorm], uc...)
+			}
+		case unstable.KeyValue:
+			if inArray {
+				for _, ln := range g {
+					if strings.HasPrefix(strings.TrimSpace(ln), "#") {
+						artInterior = append(artInterior, ln)
+					}
+				}
+				if it.key == "name" && artName == "" {
+					artName = it.strVal
+				}
+				artLastLine = it.endLine
+			} else if uc := userComments(g, keys); len(uc) > 0 {
+				res.keyComments[curNorm+"\x00"+it.key] = uc
+			}
+		}
+		if it.endLine > prevEnd {
+			prevEnd = it.endLine
 		}
 	}
-	cur.body = append(cur.body, pending...)
-	sections = append(sections, cur)
-	return sections
+	flushArtifact()
+	return res
 }
 
-// trimBlankEdges removes leading and trailing blank lines from a slice.
-func trimBlankEdges(lines []string) []string {
-	start, end := 0, len(lines)
-	for start < end && strings.TrimSpace(lines[start]) == "" {
-		start++
-	}
-	for end > start && strings.TrimSpace(lines[end-1]) == "" {
-		end--
-	}
-	return lines[start:end]
-}
-
-// normalizeManagedTable maps a (legacy or new) table header to its canonical
-// new-layout name: "[defaults]"→"", "[defaults.sandbox]"→"sandbox",
-// "[agents.claude.sandbox]"→"claude.sandbox", "[sandbox]"→"sandbox", etc.
-func normalizeManagedTable(header string) string {
-	t := strings.TrimSpace(header)
-	if t == "" {
-		return ""
-	}
-	name := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(t, "["), "]"))
-	parts := strings.Split(name, ".")
+// normalizeTableParts joins a table header's key segments into the canonical
+// new-layout name, dropping a leading "defaults"/"agents" container: e.g.
+// ["defaults"]→"", ["defaults","sandbox"]→"sandbox", ["agents","claude",
+// "sandbox"]→"claude.sandbox", ["sandbox"]→"sandbox".
+func normalizeTableParts(parts []string) string {
 	if len(parts) > 0 && (parts[0] == "defaults" || parts[0] == "agents") {
 		parts = parts[1:]
 	}
@@ -829,126 +963,17 @@ func userComments(comments []string, keys map[string]bool) []string {
 	return out
 }
 
-// skipValue returns the index of the last line of the value starting at line i,
-// consuming multi-line triple-quoted strings and bracket-balanced arrays so a
-// "key =" or "#" inside a value is not mistaken for structure.
-func skipValue(lines []string, i int) int {
-	ln := lines[i]
-	_, after, ok := strings.Cut(ln, "=")
-	if !ok {
-		return i
-	}
-	val := strings.TrimSpace(after)
-	for _, q := range []string{`"""`, `'''`} {
-		if strings.HasPrefix(val, q) {
-			if strings.Contains(val[len(q):], q) {
-				return i
-			}
-			for j := i + 1; j < len(lines); j++ {
-				if strings.Contains(lines[j], q) {
-					return j
-				}
-			}
-			return len(lines) - 1
-		}
-	}
-	if strings.HasPrefix(val, "[") {
-		depth := strings.Count(val, "[") - strings.Count(val, "]")
-		if depth <= 0 {
-			return i
-		}
-		for j := i + 1; j < len(lines); j++ {
-			depth += strings.Count(lines[j], "[") - strings.Count(lines[j], "]")
-			if depth <= 0 {
-				return j
-			}
-		}
-		return len(lines) - 1
-	}
-	return i
-}
-
-// keyName extracts the key from a "key = value" line, or "" if it is not one.
-func keyName(line string) string {
-	t := strings.TrimSpace(line)
-	eq := strings.Index(t, "=")
-	if eq <= 0 {
-		return ""
-	}
-	return strings.Trim(strings.TrimSpace(t[:eq]), `"'`)
-}
-
-// extractKeyComments maps each key in a section body to the user comments that
-// immediately precede it (Hydra-generated docs/defaults stripped).
-func extractKeyComments(body []string, keys map[string]bool) map[string][]string {
-	res := map[string][]string{}
-	var pend []string
-	for i := 0; i < len(body); i++ {
-		t := strings.TrimSpace(body[i])
-		if t == "" {
-			continue
-		}
-		if strings.HasPrefix(t, "#") {
-			pend = append(pend, body[i])
-			continue
-		}
-		if k := keyName(body[i]); k != "" {
-			if uc := userComments(pend, keys); len(uc) > 0 {
-				res[k] = uc
-			}
-		}
-		pend = nil
-		i = skipValue(body, i)
-	}
-	return res
-}
-
 // renderConfig serializes cfg to the new flattened TOML layout, rendered on top
 // of the existing file content: user comments and unmanaged [[artifacts]] blocks
 // are preserved, managed values reflect cfg, and unset default settings are
 // emitted commented-out with up-to-date documentation.
 func renderConfig(existing []byte, cfg Config) string {
 	keys := managedKeySet()
-	keyComments := map[string][]string{} // "<table>\x00<key>" -> user comments
-	tableComments := map[string][]string{}
-	var artifactBlocks [][]string
-	existingArtifacts := map[string]bool{}
-	artifactMeta := map[string]artifactComments{} // name -> preserved comments
-
-	for _, sec := range parseSections(existing) {
-		if isArrayHeader(sec.header) {
-			block := append([]string{}, userComments(sec.leading, keys)...)
-			block = append(block, sec.header)
-			block = append(block, sec.body...)
-			artifactBlocks = append(artifactBlocks, block)
-			var name string
-			var interior []string
-			for _, bl := range sec.body {
-				if strings.HasPrefix(strings.TrimSpace(bl), "#") {
-					interior = append(interior, bl)
-					continue
-				}
-				if keyName(bl) == "name" {
-					name = artifactValue(bl)
-				}
-			}
-			if name != "" {
-				existingArtifacts[name] = true
-				artifactMeta[name] = artifactComments{
-					leading:  userComments(sec.leading, keys),
-					interior: interior,
-				}
-			}
-			continue
-		}
-		norm := normalizeManagedTable(sec.header)
-		if uc := userComments(sec.leading, keys); len(uc) > 0 {
-			tableComments[norm] = append(tableComments[norm], uc...)
-		}
-		for k, c := range extractKeyComments(sec.body, keys) {
-			keyComments[norm+"\x00"+k] = c
-		}
-	}
+	prior := analyzeExisting(existing, keys)
+	keyComments := prior.keyComments     // "<table>\x00<key>" -> user comments
+	tableComments := prior.tableComments // normalized table -> leading user comments
+	artifactBlocks := prior.artifactBlocks
+	artifactMeta := prior.artifactMeta // name -> preserved comments
 
 	var out []string
 	spec := defaultsSpec()
@@ -1182,13 +1207,4 @@ func appendBlank(out []string) []string {
 		return append(out, "")
 	}
 	return out
-}
-
-// artifactValue extracts the string value from an artifact "name = ..." line.
-func artifactValue(line string) string {
-	_, after, ok := strings.Cut(line, "=")
-	if !ok {
-		return ""
-	}
-	return strings.Trim(strings.TrimSpace(after), `"'`)
 }
