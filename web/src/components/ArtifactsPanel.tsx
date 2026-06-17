@@ -595,8 +595,12 @@ function FileRow({ file, mode }: { file: ArtifactFile; mode: ImageDiffMode }) {
       <div className="flex flex-wrap items-center gap-1.5 mb-2">
         <span className="text-xs font-medium text-gray-700 dark:text-gray-300 truncate">{file.name}</span>
         <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${CHANGE_COLOR[ct] ?? ''}`}>{CHANGE_LABEL[ct] ?? ct}</span>
-        {(file.tags ?? []).map((t) => <TagBadge key={t} tag={t} />)}
       </div>
+      {(file.tags ?? []).length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5 mb-2 max-w-full">
+          {(file.tags ?? []).map((t) => <TagBadge key={t} tag={t} />)}
+        </div>
+      )}
       {isVideoArtifact(file.name) ? (
         <VideoDiffView left={file.left_url} right={file.right_url} mode={mode} />
       ) : (
