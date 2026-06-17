@@ -141,6 +141,12 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
   }, [active])
 
   useEffect(() => {
+    // Tracks whether this effect run is still current. Set in cleanup so async
+    // work started here (e.g. a file upload below) doesn't paint a toast on a
+    // different agent after the user has switched — this pane is reused across
+    // agents, so a late resolve would land on the wrong terminal.
+    let cancelled = false
+
     // If a kill was scheduled, cancel it because we are remounting
     if (killTimeoutRef.current) {
       clearTimeout(killTimeoutRef.current)
@@ -346,11 +352,13 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
         showNotice(`Uploading ${file.name || 'file'}…`, false)
         try {
           const res = await uploadFile(projectId, file)
+          if (cancelled) return
           if (ws.readyState === WebSocket.OPEN) {
             ws.send(new TextEncoder().encode(res.path + ' '))
           }
           showNotice(`Attached ${res.filename}`, true)
         } catch (err) {
+          if (cancelled) return
           showNotice(`Upload failed: ${err instanceof Error ? err.message : 'error'}`, true)
         }
       }
@@ -373,6 +381,7 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
     observer.observe(el)
 
     return () => {
+      cancelled = true
       observer.disconnect()
       if (stabilizeRafRef.current != null) cancelAnimationFrame(stabilizeRafRef.current)
       inputDisposable.dispose()
@@ -381,6 +390,9 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
       term.dispose()
       if (copyTimeoutRef.current) clearTimeout(copyTimeoutRef.current)
       if (noticeTimeoutRef.current) clearTimeout(noticeTimeoutRef.current)
+      // Drop any visible/pending toast so it doesn't linger on the agent we
+      // switch (or reconnect) to — the pane is reused across agents.
+      setNotice(null)
       termRef.current = null
       wsRef.current = null
       fitAddonRef.current = null
