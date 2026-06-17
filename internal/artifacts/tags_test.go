@@ -130,24 +130,32 @@ func TestScanOutputsMalformedSidecar(t *testing.T) {
 	}
 }
 
-// TestCompareTagsPreferHead checks that a file present on both sides takes its
-// tags from the head (right) side, and a removed file falls back to the base.
-func TestCompareTagsPreferHead(t *testing.T) {
+// TestCompareTagsMerge checks that a file's diff tags are the union of both
+// sides: a shared scoped category resolves to the head (right) value, a category
+// present on only one side is kept, free-form tags from either side are unioned,
+// and a one-sided file passes its tags through.
+func TestCompareTagsMerge(t *testing.T) {
 	left := []FileMeta{
-		{Name: "home.png", Hash: "a", Tags: []string{"theme::light"}},
+		// home.png is re-themed and loses a free-form tag the base had; it keeps the
+		// base-only viewport category and the head-only "new" tag.
+		{Name: "home.png", Hash: "a", Tags: []string{"theme::light", "viewport::phone", "wip"}},
 		{Name: "gone.png", Hash: "b", Tags: []string{"theme::light"}},
 	}
 	right := []FileMeta{
-		{Name: "home.png", Hash: "a", Tags: []string{"theme::dark"}},
+		{Name: "home.png", Hash: "a", Tags: []string{"theme::dark", "new"}},
+		{Name: "added.png", Hash: "c", Tags: []string{"theme::dark"}},
 	}
 	tagsByName := map[string][]string{}
 	for _, d := range Compare(left, right) {
 		tagsByName[d.Name] = d.Tags
 	}
-	if got := tagsByName["home.png"]; !reflect.DeepEqual(got, []string{"theme::dark"}) {
-		t.Errorf("home.png tags = %#v, want head side [theme::dark]", got)
+	if got, want := tagsByName["home.png"], []string{"new", "theme::dark", "viewport::phone", "wip"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("home.png tags = %#v, want union with head-scoped winner %#v", got, want)
 	}
 	if got := tagsByName["gone.png"]; !reflect.DeepEqual(got, []string{"theme::light"}) {
 		t.Errorf("gone.png tags = %#v, want base side [theme::light]", got)
+	}
+	if got := tagsByName["added.png"]; !reflect.DeepEqual(got, []string{"theme::dark"}) {
+		t.Errorf("added.png tags = %#v, want head side [theme::dark]", got)
 	}
 }
