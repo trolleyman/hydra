@@ -5,7 +5,7 @@ import { formatError } from '../api/format_error'
 import type { AgentResponse } from '../api'
 import { AgentTerminal } from './AgentTerminal'
 import { DiffViewer } from '../DiffViewer'
-import { formatStartedAgo, agentStatusBadge, agentStatusDetail, archivedEndStateBadge } from './AgentComponents'
+import { formatStartedAgo, agentStatusBadge, archivedEndStateBadge } from './AgentComponents'
 import { LoaderCircle, Merge, Trash2, Tag, RotateCcw, FolderSync, Copy, Check, Pencil, Archive, TerminalSquare } from 'lucide-react'
 import { Tooltip } from './Tooltip'
 
@@ -14,31 +14,13 @@ import { useToastStore } from '../stores/toastStore'
 import { useAgentStore } from '../stores/agentStore'
 
 function PromptBlock({ prompt }: { prompt: string }) {
-  const [expanded, setExpanded] = useState(false)
-  const isLong = prompt.length > 200 || prompt.split('\n').length > 3
-
+  // A plain box that scrolls when the prompt is tall; short prompts show no
+  // scrollbar since the content fits under the max-height.
   return (
     <div className="mb-6 p-4 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
-      <p className="text-xs text-gray-400 dark:text-gray-500 mb-1 uppercase tracking-wide font-medium">Prompt</p>
-      <div className="relative">
-        <div
-          className="overflow-hidden transition-[max-height] duration-300 ease-in-out"
-          style={{ maxHeight: isLong && !expanded ? '4.5rem' : '1000px' }}
-        >
-          <p className="text-sm text-gray-800 dark:text-gray-200 whitespace-pre-wrap">{prompt}</p>
-        </div>
-        {isLong && !expanded && (
-          <div className="absolute bottom-0 left-0 right-0 h-8 bg-gradient-to-t from-gray-50 dark:from-gray-800 to-transparent pointer-events-none" />
-        )}
+      <div className="overflow-y-auto max-h-72">
+        <p className="text-sm text-gray-800 dark:text-gray-200 whitespace-pre-wrap">{prompt}</p>
       </div>
-      {isLong && (
-        <button
-          onClick={() => setExpanded(e => !e)}
-          className="mt-1 text-xs text-blue-500 hover:text-blue-600 dark:text-blue-400 dark:hover:text-blue-300 transition-colors cursor-pointer"
-        >
-          {expanded ? 'Show less' : 'Show more'}
-        </button>
-      )}
     </div>
   )
 }
@@ -523,13 +505,6 @@ export function AgentDetail({
             )}
           </div>
 
-          {/* Live activity / last message */}
-          {agentStatusDetail(agent.agent_status) && (
-            <div className="mt-2 text-xs text-gray-500 dark:text-gray-400 truncate">
-              {agent.agent_status?.status === 'running' ? '⏳ ' : '💬 '}
-              {agentStatusDetail(agent.agent_status)}
-            </div>
-          )}
         </div>
 
         {/* Prompt */}
