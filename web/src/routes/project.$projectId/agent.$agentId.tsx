@@ -1,6 +1,8 @@
 import { useRef, useEffect } from 'react'
 import { createFileRoute, useNavigate, useParams } from '@tanstack/react-router'
+import { LoaderCircle } from 'lucide-react'
 import { useAgentStore } from '../../stores/agentStore'
+import { useProjectStore } from '../../stores/projectStore'
 import { api } from '../../stores/apiClient'
 import { AgentDetail } from '../../components/AgentDetail'
 import { NotFound } from '../../components/NotFound'
@@ -12,7 +14,8 @@ export const Route = createFileRoute('/project/$projectId/agent/$agentId')({
 
 function AgentPage() {
   const { projectId, agentId } = useParams({ from: '/project/$projectId/agent/$agentId' })
-  const { agents, removeAgent, updateAgent, setAgents } = useAgentStore()
+  const { agents, loading, removeAgent, updateAgent, setAgents } = useAgentStore()
+  const projects = useProjectStore((s) => s.projects)
   const navigate = useNavigate()
 
   const isMounted = useRef(true)
@@ -55,6 +58,23 @@ function AgentPage() {
   }
 
   if (!agent) {
+    // The agent store holds a single global list scoped to the *selected*
+    // project, refreshed by a poll in __root.tsx. On a cold load/hard refresh it
+    // starts empty, and on a project switch it briefly still holds the previous
+    // project's agents until the poll re-fetches this one. Only declare the
+    // agent genuinely missing once THIS project's agents have loaded — same gate
+    // as the remembered-agent redirect in __root.tsx — otherwise we'd flash
+    // "Agent Not Found" on every refresh/switch while the fetch is in flight.
+    const project = projects.find((p) => p.id === projectId)
+    const agentsLoaded =
+      project != null && !loading && agents.every((a) => a.project_path === project.path)
+    if (!agentsLoaded) {
+      return (
+        <div className="flex-1 flex items-center justify-center p-6 bg-gray-50 dark:bg-gray-900">
+          <LoaderCircle className="w-6 h-6 text-blue-500 animate-spin" />
+        </div>
+      )
+    }
     return (
       <NotFound
         title="Agent Not Found"
