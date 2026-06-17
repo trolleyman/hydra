@@ -556,7 +556,7 @@ function RootLayout() {
     }
   }, [agents, selectedAgentId, currentProjectId, markRead, pageActive])
 
-  // Reflect unread changes in the browser tab title with a leading blue dot, so
+  // Reflect unread changes in the browser tab title with a trailing blue dot, so
   // a backgrounded tab signals "something's waiting" without the page in focus.
   // We count the live (optimistically-cleared) agents for the current project
   // and trust the backend per-project counts for the others — so the dot tracks
@@ -567,7 +567,7 @@ function RootLayout() {
     .reduce((n, p) => n + (p.unread_count ?? 0), 0)
   const anyUnread = currentProjectUnread + otherProjectsUnread > 0
   useEffect(() => {
-    document.title = anyUnread ? '🔵 Hydra' : 'Hydra'
+    document.title = anyUnread ? 'Hydra 🔵' : 'Hydra'
   }, [anyUnread])
 
   useEffect(() => {
