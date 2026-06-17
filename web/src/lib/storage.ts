@@ -59,8 +59,10 @@ export const artifactPrefsKey = (projectId: string | null, agentId: string, name
 
 // Artifact tag filter, keyed by project + agent (one selection shared across all
 // of an agent's artifact cards — see artifactPrefs.ts loadTagFilter/saveTagFilter).
-// projectId may be null → '_' keeps the key shape stable.
-export const ARTIFACT_TAG_FILTER_PREFIX = 'hydra-artifact-tagfilter-'
+// projectId may be null → '_' keeps the key shape stable. The `-v2-` version: the
+// stored arrays used to list the *selected* (shown) values; they now list the
+// values turned *off* (hidden), so the bump discards the old, now-inverted data.
+export const ARTIFACT_TAG_FILTER_PREFIX = 'hydra-artifact-tagfilter-v2-'
 export const artifactTagFilterKey = (projectId: string | null, agentId: string): string =>
   `${ARTIFACT_TAG_FILTER_PREFIX}${projectId ?? '_'}-${agentId}`
 

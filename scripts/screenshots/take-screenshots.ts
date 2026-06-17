@@ -30,7 +30,7 @@
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import { createServer } from 'node:net'
 import { mkdtempSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { availableParallelism, cpus, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chromium } from 'playwright'
 
@@ -242,10 +242,15 @@ try {
       // rather than the long content (terminal, diff) below it.
       viewportOnly?: boolean
       // Seeds the artifact tag filter (localStorage key built from project+agent)
-      // before the app boots, so the artifacts panel renders with a filter applied
-      // (e.g. theme=light) — documents the header tag filter actively in use plus
-      // the per-file tag badges. Only meaningful on the artifacts (agent-1) page.
-      tagFilter?: { scoped?: Record<string, string>; free?: string[] }
+      // before the app boots, so the artifacts panel renders with a filter applied.
+      // Each array lists a scope's HIDDEN values (e.g. { theme: ['dark'] } drops
+      // the dark shots) — documents the header tag filter actively in use plus the
+      // per-file tag badges. Only meaningful on the artifacts (agent-1) page.
+      tagFilter?: { scoped?: Record<string, string[]>; free?: string[] }
+      // Opens a tag-filter dropdown by its button label (e.g. 'theme'), so the
+      // capture documents the menu itself: the all/clear header and the value
+      // checkboxes (all on by default). Only meaningful on the artifacts page.
+      openFilter?: string
       // Hovers the artifacts panel's info (i) icon so its tooltip opens, after
       // scrolling the "Artifacts" heading to mid-viewport to give the upward-
       // opening tooltip room. Captures the viewport (the tooltip is a fixed
@@ -376,16 +381,28 @@ try {
       // The artifacts tag filter in use. agent-1's "screenshots" set tags each
       // shot by theme + viewport (scoped labels) plus a free-form "new" (see
       // simReadyChangedSet in internal/http/simulation.go), so the header shows
-      // the single-select theme/viewport filters and each file shows tag badges.
-      // We pin theme=light so the capture documents an ACTIVE filter: the
-      // dark-only shots drop out and the header count reads "shown/total changed".
+      // the theme/viewport filters and each file shows tag badges. We hide the
+      // dark theme value so the capture documents an ACTIVE filter: the dark-only
+      // shots drop out and the header count reads "shown/total changed".
       {
         name: 'artifacts-tags',
         path: '/project/sim-project/agent/agent-1',
         scrollTo: 'Changes',
         viewport: { width: 1280, height: 1280 },
         imageDiffMode: 'side-by-side',
-        tagFilter: { scoped: { theme: 'light' } },
+        tagFilter: { scoped: { theme: ['dark'] } },
+      },
+      // The tag-filter dropdown opened, documenting the menu itself: the fixed
+      // "all" (left) / "clear" (right) header, the value checkboxes (all on by
+      // default), and the "shift-click to isolate" hint. Left unfiltered so every
+      // box reads checked. Opens the "theme" filter and captures the viewport.
+      {
+        name: 'artifacts-filter',
+        path: '/project/sim-project/agent/agent-1',
+        scrollTo: 'Changes',
+        viewport: { width: 1280, height: 1280 },
+        imageDiffMode: 'side-by-side',
+        openFilter: 'theme',
       },
       // The artifacts panel's info (i) tooltip, opened — documents what artifacts
       // are, the script contract, the progress marker, and the tags/filter rules
@@ -437,14 +454,18 @@ try {
     // Each (page, theme) capture is fully independent — its own browser context
     // (isolated localStorage/cookies) hitting the shared read-only simulation
     // server — so we run several at once rather than serially. Wall-clock is
-    // dominated by per-shot navigation + networkidle + settle waits, so a small
-    // pool cuts it roughly N-fold. Concurrency is capped (override with
-    // HYDRA_SHOT_CONCURRENCY) to bound peak memory and avoid starving renders of
-    // CPU; the captured pixels are per-context deterministic regardless of how
-    // many run in parallel, so this doesn't affect the diff-hash reproducibility.
+    // dominated by per-shot navigation + networkidle + settle waits, so a larger
+    // pool cuts it roughly N-fold. The default scales with the host's CPU count
+    // (one context per core, clamped) rather than a flat cap, so a beefy machine
+    // gets more parallelism out of the box; override with HYDRA_SHOT_CONCURRENCY.
+    // The clamp still bounds peak memory and avoids starving renders of CPU; the
+    // captured pixels are per-context deterministic regardless of how many run in
+    // parallel, so this doesn't affect the diff-hash reproducibility.
     const tasks = pages.flatMap((pg) => themes.map((theme) => ({ pg, theme })))
     const totalShots = tasks.length
-    const concurrency = Math.max(1, Math.min(Number(process.env.HYDRA_SHOT_CONCURRENCY) || 8, totalShots))
+    const cpuCount = (typeof availableParallelism === 'function' ? availableParallelism() : cpus().length) || 8
+    const defaultConcurrency = Math.min(Math.max(cpuCount, 12), 32)
+    const concurrency = Math.max(1, Math.min(Number(process.env.HYDRA_SHOT_CONCURRENCY) || defaultConcurrency, totalShots))
     let done = 0
     let nextTask = 0
 
@@ -487,7 +508,7 @@ try {
           await ctx.addInitScript((f) => {
             try {
               localStorage.setItem(
-                'hydra-artifact-tagfilter-sim-project-agent-1',
+                'hydra-artifact-tagfilter-v2-sim-project-agent-1',
                 JSON.stringify({ scoped: f.scoped ?? {}, free: f.free ?? [] }),
               )
             } catch {
@@ -671,6 +692,23 @@ try {
           await page
             .locator('xpath=//h3[normalize-space()="Artifacts"]/parent::*//*[name()="svg" and contains(@class,"cursor-help")]')
             .hover()
+          await settle(page)
+        }
+        if (pg.openFilter) {
+          // Open the named tag-filter dropdown so the capture documents the menu.
+          // Its trigger is a button whose lowercase <span> holds the scope label
+          // (the category name, e.g. "theme"). Done after scrollTo so the header —
+          // and the dropdown that opens just below it — sits in the viewport.
+          await page.waitForFunction(
+            (label) => Array.from(document.querySelectorAll('button')).some(
+              (b) => b.querySelector('span.lowercase')?.textContent?.trim() === label),
+            pg.openFilter,
+          )
+          await page.evaluate((label) => {
+            const btn = Array.from(document.querySelectorAll('button')).find(
+              (b) => b.querySelector('span.lowercase')?.textContent?.trim() === label)
+            btn?.click()
+          }, pg.openFilter)
           await settle(page)
         }
         const out = join(OUT, `${pg.name}${suffix}.png`)
