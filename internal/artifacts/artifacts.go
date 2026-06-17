@@ -117,8 +117,13 @@ type Event struct {
 	Progress string
 }
 
-// imageExts maps collectible output extensions to their content types.
-var imageExts = map[string]string{
+// mediaExts maps collectible output extensions to their content types. It covers
+// still images plus animated/video formats: .webp can be an animated image and
+// .webm is video, both rendered by the diff viewer's video modes. Comparison of
+// video falls back to a byte-hash verdict (Compare only pixel-refines formats the
+// Go stdlib can decode), so a non-deterministic encode always reads "modified" —
+// produce lossless WebM (e.g. libvpx-vp9 -lossless 1) for a stable, meaningful diff.
+var mediaExts = map[string]string{
 	".png":  "image/png",
 	".jpg":  "image/jpeg",
 	".jpeg": "image/jpeg",
@@ -128,6 +133,7 @@ var imageExts = map[string]string{
 	".svg":  "image/svg+xml",
 	".bmp":  "image/bmp",
 	".pdf":  "application/pdf",
+	".webm": "video/webm",
 }
 
 // Status is the generation state of a cache entry.
@@ -813,7 +819,7 @@ func (m *Manager) BlobPath(script, key, file string) (path, contentType string, 
 		return "", "", errtrace.Wrap(fmt.Errorf("invalid key"))
 	}
 	ext := strings.ToLower(filepath.Ext(file))
-	ct, ok := imageExts[ext]
+	ct, ok := mediaExts[ext]
 	if !ok {
 		return "", "", errtrace.Wrap(fmt.Errorf("unsupported artifact type %q", ext))
 	}
@@ -1000,8 +1006,8 @@ func scanOutputs(dir string) ([]FileMeta, []string, error) {
 		if d.IsDir() || d.Name() == metaFile {
 			return nil
 		}
-		if _, ok := imageExts[strings.ToLower(filepath.Ext(d.Name()))]; !ok {
-			return nil // skips .meta sidecars too (not an image extension)
+		if _, ok := mediaExts[strings.ToLower(filepath.Ext(d.Name()))]; !ok {
+			return nil // skips .meta sidecars too (not a known media extension)
 		}
 		hash, size, err := hashFile(p)
 		if err != nil {

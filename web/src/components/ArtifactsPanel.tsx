@@ -1,10 +1,15 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { api } from '../stores/apiClient'
 import type { ArtifactSet, ArtifactFile, ArtifactLogLine } from '../api'
-import { LoaderCircle, Image as ImageIcon, ImageOff, ChevronDown, ChevronRight, TriangleAlert, RefreshCw, Maximize2 } from 'lucide-react'
+import { LoaderCircle, Image as ImageIcon, ImageOff, ChevronDown, ChevronRight, TriangleAlert, RefreshCw } from 'lucide-react'
 import { InfoTooltip } from './InfoTooltip'
 import { loadArtifactPrefs, saveArtifactPrefs, loadTagFilter, saveTagFilter, type ArtifactTagFilter } from '../lib/artifactPrefs'
 import { stripAnsi } from '../lib/ansi'
+import {
+  checkerStyle, IMG_CLASS, OVERLAY_CLASS, TAG_CLASS, makeAuxOpen,
+  useMediaResize, ResizeGrip, DIFF_COLOR, DIFF_PIXEL_THRESHOLD,
+} from './artifactDiffShared'
+import { VideoDiffView, isVideoArtifact } from './VideoDiffView'
 
 const CHANGE_LABEL: Record<string, string> = {
   added: 'added',
@@ -20,14 +25,6 @@ const CHANGE_COLOR: Record<string, string> = {
   unchanged: 'text-gray-400 dark:text-gray-500 bg-gray-50 dark:bg-gray-800',
 }
 
-// A subtle checkerboard so transparent screenshots read clearly in both themes.
-const checkerStyle: React.CSSProperties = {
-  backgroundImage:
-    'linear-gradient(45deg, rgba(0,0,0,0.06) 25%, transparent 25%), linear-gradient(-45deg, rgba(0,0,0,0.06) 25%, transparent 25%), linear-gradient(45deg, transparent 75%, rgba(0,0,0,0.06) 75%), linear-gradient(-45deg, transparent 75%, rgba(0,0,0,0.06) 75%)',
-  backgroundSize: '16px 16px',
-  backgroundPosition: '0 0, 0 8px, 8px -8px, -8px 0px',
-}
-
 // The ways to compare a before/after image pair. Persisted in the diff viewer's
 // settings; see DiffViewer's SettingsPopup.
 export type ImageDiffMode = 'side-by-side' | 'ab' | 'slider' | 'onion' | 'difference'
@@ -39,108 +36,6 @@ export const IMAGE_DIFF_MODES: { value: ImageDiffMode; label: string }[] = [
   { value: 'slider', label: 'Before/after slider' },
   { value: 'onion', label: 'Onion skin' },
 ]
-
-const IMG_CLASS = 'max-w-full max-h-[480px] rounded-md border border-gray-200 dark:border-gray-700 object-contain'
-// Shared by the overlay modes: the base image sizes the box, the overlay is
-// stretched to fill that same box so the two align pixel-for-pixel.
-const OVERLAY_CLASS = 'absolute inset-0 w-full h-full object-contain rounded-md border border-gray-200 dark:border-gray-700'
-const TAG_CLASS = 'absolute top-1 z-10 text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-black/55 text-white pointer-events-none'
-
-// Open an image in a new tab. In side-by-side mode the image is a target=_blank
-// link, so left-click already does this; the overlay modes bind left-click/drag
-// to comparison gestures, so they route the new-tab affordance to the middle
-// mouse button (matching a browser's middle-click-to-open-in-new-tab on links).
-function openInNewTab(url: string) {
-  window.open(url, '_blank', 'noopener,noreferrer')
-}
-
-// makeAuxOpen builds an onAuxClick handler that opens `pick()` in a new tab on a
-// middle click. `pick` is a function so the chosen image can depend on state
-// (e.g. which side is currently shown) or the cursor position at click time.
-function makeAuxOpen(pick: (e: React.MouseEvent) => string) {
-  return (e: React.MouseEvent) => {
-    if (e.button !== 1) return
-    e.preventDefault()
-    openInNewTab(pick(e))
-  }
-}
-
-// Default/bounds for the draggable image height (see useImageResize). The base
-// matches IMG_CLASS's max-h-[480px] so a card opens at the same size as before.
-const DEFAULT_IMG_MAX_H = 480
-const MIN_IMG_MAX_H = 160
-const MAX_IMG_MAX_H = 1600
-// Pointer travel (px) past which a press-and-move counts as a resize drag rather
-// than a click — so a drag on the A/B image resizes without also flipping sides.
-const DRAG_THRESHOLD = 4
-
-// Shared drag-to-resize for a before/after pair: dragging the grip on EITHER
-// image adjusts a single max-height that's applied to BOTH sides, so they always
-// grow by the same amount even though only one was dragged. The pointermove
-// listener lives on the window so the drag keeps tracking outside the grip.
-function useImageResize() {
-  const [maxHeight, setMaxHeight] = useState(DEFAULT_IMG_MAX_H)
-  // Hold the latest value so a drag can read its start height without re-creating
-  // the (stable) onResizeStart callback on every resize tick.
-  const current = useRef(maxHeight)
-  current.current = maxHeight
-  // True once the in-flight press has moved past DRAG_THRESHOLD, i.e. it's a
-  // resize drag and not a click. Read (and cleared) by consumeDrag so a click
-  // handler on the same element can skip its action when a drag just happened.
-  const dragged = useRef(false)
-  const onResizeStart = useCallback((e: React.PointerEvent) => {
-    if (e.button !== 0) return
-    // Suppress the click/drag from selecting text or following the image's <a> link.
-    e.preventDefault()
-    e.stopPropagation()
-    dragged.current = false
-    const startX = e.clientX
-    const startY = e.clientY
-    const startH = current.current
-    const onMove = (ev: PointerEvent) => {
-      // The grip is a bottom-right (nwse) corner handle, so down-AND-right grows
-      // the image. Sum the horizontal and vertical deltas so a purely horizontal
-      // drag to the right enlarges it just as a downward drag does (and up-left
-      // shrinks it), rather than ignoring sideways movement.
-      const delta = (ev.clientX - startX) + (ev.clientY - startY)
-      if (Math.abs(delta) > DRAG_THRESHOLD) dragged.current = true
-      setMaxHeight(Math.max(MIN_IMG_MAX_H, Math.min(MAX_IMG_MAX_H, startH + delta)))
-    }
-    const onUp = () => {
-      window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('pointerup', onUp)
-    }
-    window.addEventListener('pointermove', onMove)
-    window.addEventListener('pointerup', onUp)
-  }, [])
-  // Whether the gesture that just ended was a drag (resets the flag). A click
-  // handler calls this to decide whether to run — letting a drag-to-resize on a
-  // clickable image avoid also triggering the click (e.g. the A/B flip).
-  const consumeDrag = useCallback(() => {
-    const d = dragged.current
-    dragged.current = false
-    return d
-  }, [])
-  return { maxHeight, onResizeStart, consumeDrag }
-}
-
-// A corner grip (revealed on hover) that the user drags down/up to resize the
-// image. Sits as a sibling of the <a>, so a normal click on the image still
-// opens it in a new tab; only the grip starts a resize.
-function ResizeGrip({ onPointerDown }: { onPointerDown: (e: React.PointerEvent) => void }) {
-  return (
-    <div
-      onPointerDown={onPointerDown}
-      // Swallow the click so a tap on the grip doesn't reach a parent that treats
-      // a click as a gesture (e.g. the A/B view flips on click of the image box).
-      onClick={(e) => e.stopPropagation()}
-      title="Drag to resize both images"
-      className="absolute bottom-1 right-1 z-10 flex items-center justify-center w-5 h-5 rounded bg-black/45 text-white/90 opacity-0 group-hover:opacity-100 transition-opacity cursor-nwse-resize touch-none select-none"
-    >
-      <Maximize2 className="w-3 h-3" />
-    </div>
-  )
-}
 
 function ImageCell({ url, label, maxHeight, onResizeStart }: { url?: string | null; label: string; maxHeight: number; onResizeStart: (e: React.PointerEvent) => void }) {
   return (
@@ -196,7 +91,7 @@ function LayerNode({ url, style }: { url?: string | null; style?: React.CSSPrope
 // the currently-shown image in a new tab.
 function ABSwitch({ left, right }: { left?: string | null; right?: string | null }) {
   const [showAfter, setShowAfter] = useState(true)
-  const { maxHeight, onResizeStart, consumeDrag } = useImageResize()
+  const { maxHeight, onResizeStart, consumeDrag } = useMediaResize()
   // At least one side is present (ImageDiffView only routes here otherwise); the
   // present image is the invisible sizer that gives the stacked box its size.
   const sizer = (right ?? left) as string
@@ -319,14 +214,6 @@ function OnionCompare({ left, right }: { left?: string | null; right?: string | 
   )
 }
 
-// Bright magenta (#FF00FF) — the colour every changed pixel is painted in the
-// difference view, chosen to stand out against typical UI screenshots.
-const DIFF_COLOR: [number, number, number] = [255, 0, 255]
-// A small per-pixel tolerance (sum of the absolute R/G/B/A channel deltas) below
-// which two pixels count as equal, so JPEG/anti-aliasing speckle doesn't paint a
-// confetti of magenta over otherwise-identical regions. 0 would be exact.
-const DIFF_PIXEL_THRESHOLD = 32
-
 // loadImage resolves to a decoded <img> for a same-origin artifact URL, so the
 // difference view can read its pixels off a canvas without tainting it.
 function loadImage(url: string): Promise<HTMLImageElement> {
@@ -423,7 +310,7 @@ function DiffCanvas({ left, right, maxHeight }: { left: string; right: string; m
 // there is nothing to diff, so the Diff tab just shows the side that's present.
 function DiffCompare({ left, right }: { left?: string | null; right?: string | null }) {
   const [view, setView] = useState<'before' | 'after' | 'diff'>('diff')
-  const { maxHeight, onResizeStart } = useImageResize()
+  const { maxHeight, onResizeStart } = useMediaResize()
   const sizer = (right ?? left) as string
   const btn = (active: boolean) =>
     `text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded cursor-pointer transition-colors ${
@@ -461,7 +348,7 @@ function DiffCompare({ left, right }: { left?: string | null; right?: string | n
 // The default side-by-side pair. Holds one shared resize state so dragging the
 // grip on either image grows both before/after cells by the same amount.
 function SideBySide({ left, right }: { left?: string | null; right?: string | null }) {
-  const { maxHeight, onResizeStart } = useImageResize()
+  const { maxHeight, onResizeStart } = useMediaResize()
   return (
     <div className="flex gap-3">
       <ImageCell url={left} label="Before" maxHeight={maxHeight} onResizeStart={onResizeStart} />
@@ -674,7 +561,11 @@ function FileRow({ file, mode }: { file: ArtifactFile; mode: ImageDiffMode }) {
         <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${CHANGE_COLOR[ct] ?? ''}`}>{CHANGE_LABEL[ct] ?? ct}</span>
         {(file.tags ?? []).map((t) => <TagBadge key={t} tag={t} />)}
       </div>
-      <ImageDiffView left={file.left_url} right={file.right_url} mode={mode} />
+      {isVideoArtifact(file.name) ? (
+        <VideoDiffView left={file.left_url} right={file.right_url} mode={mode} />
+      ) : (
+        <ImageDiffView left={file.left_url} right={file.right_url} mode={mode} />
+      )}
     </div>
   )
 }
