@@ -113,6 +113,14 @@ func (s *SimulationServer) RemoveProject(w http.ResponseWriter, r *http.Request,
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// simAgent1Prompt is the seeded prompt for the live simulated agent (agent-1),
+// shared by ListAgents and GetAgent so the detail page (populated from either)
+// always renders the prompt block.
+const simAgent1Prompt = "Let agents be renamed with a human-friendly title instead of only showing the stable ID.\n\n" +
+	"- Add a mutable `title` field to the agent model and a PATCH endpoint to update it.\n" +
+	"- Render the title in the sidebar and the detail header, with an inline rename (pencil) control; keep the Copy-ID button exposing the underlying id.\n" +
+	"- Fall back to the id when no title is set, and persist the title across daemon restarts."
+
 func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, projectId string) {
 	createdAt1 := simNow().Add(-1 * time.Hour).Unix()
 	createdAt2 := simNow().Add(-2 * time.Hour).Unix()
@@ -132,6 +140,7 @@ func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, pr
 			SessionPid:    1001,
 			SessionStatus: "running",
 			CreatedAt:     &createdAt1,
+			Prompt:        simAgent1Prompt,
 			AgentStatus: &api.AgentStatusInfo{
 				Status:    running,
 				Timestamp: simNow().Format(time.RFC3339),
@@ -244,10 +253,7 @@ func (s *SimulationServer) GetAgent(w http.ResponseWriter, r *http.Request, proj
 			SessionPid:    1001,
 			SessionStatus: "running",
 			CreatedAt:     &createdAt,
-			Prompt: "Let agents be renamed with a human-friendly title instead of only showing the stable ID.\n\n" +
-				"- Add a mutable `title` field to the agent model and a PATCH endpoint to update it.\n" +
-				"- Render the title in the sidebar and the detail header, with an inline rename (pencil) control; keep the Copy-ID button exposing the underlying id.\n" +
-				"- Fall back to the id when no title is set, and persist the title across daemon restarts.",
+			Prompt:        simAgent1Prompt,
 			AgentStatus: &api.AgentStatusInfo{
 				Status:    api.Running,
 				Timestamp: simNow().Format(time.RFC3339),
