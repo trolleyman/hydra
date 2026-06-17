@@ -27,7 +27,7 @@ export const Route = createRootRoute({
 import { useDialogStore } from '../stores/dialogStore'
 import { pruneArtifactPrefs } from '../lib/artifactPrefs'
 import { pruneAgentViewPrefs } from '../lib/agentViewPrefs'
-import { StorageKeys, readLocal, writeLocal, readTrustedProjects, trustProject } from '../lib/storage'
+import { StorageKeys, readLocal, writeLocal, readTrustedProjects, trustProject, archivedCollapsedKey } from '../lib/storage'
 import { loadProjectView, saveProjectView, type ProjectView } from '../lib/projectView'
 
 function formatSpawnedAgo(ms: number): string {
@@ -425,7 +425,28 @@ function RootLayout() {
     return SIDEBAR_DEFAULT
   })
   const sidebarWidthRef = useRef(sidebarWidth)
+  // The Archived section's collapse state is per-project (long archives differ
+  // wildly between projects) and persisted; expanded by default. Re-read it when
+  // the selected project changes; absence of the key means expanded.
   const [archivedCollapsed, setArchivedCollapsed] = useState(false)
+  useEffect(() => {
+    if (!currentProjectId) { setArchivedCollapsed(false); return }
+    setArchivedCollapsed(readLocal(archivedCollapsedKey(currentProjectId)) === '1')
+  }, [currentProjectId])
+
+  // Toggle + persist the per-project collapse state. Collapsing hides the whole
+  // archived list, so if the currently open agent is an archived one it would
+  // disappear from the sidebar while still showing — deselect it back to the
+  // project page so the selection never points at a hidden item.
+  const toggleArchivedCollapsed = useCallback(() => {
+    if (!currentProjectId) return
+    const next = !archivedCollapsed
+    setArchivedCollapsed(next)
+    writeLocal(archivedCollapsedKey(currentProjectId), next ? '1' : null)
+    if (next && selectedAgentId && archived.some((a) => a.id === selectedAgentId)) {
+      navigate({ to: '/project/$projectId', params: { projectId: currentProjectId } })
+    }
+  }, [currentProjectId, archivedCollapsed, selectedAgentId, archived, navigate])
 
   const handleSidebarResizeStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
@@ -989,7 +1010,7 @@ function RootLayout() {
               <>
                 <button
                   type="button"
-                  onClick={() => setArchivedCollapsed((c) => !c)}
+                  onClick={toggleArchivedCollapsed}
                   className="w-full flex items-center gap-1.5 px-1 pt-3 pb-1 mt-1 group"
                 >
                   {archivedCollapsed ? (

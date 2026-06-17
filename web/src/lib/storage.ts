@@ -71,6 +71,13 @@ export const AGENT_VIEW_PREFS_PREFIX = 'hydra-agent-view-'
 export const agentViewPrefsKey = (projectId: string | null, agentId: string): string =>
   `${AGENT_VIEW_PREFS_PREFIX}${projectId ?? '_'}-${agentId}`
 
+// Whether the sidebar's "Archived" section is collapsed, per project. Absent =
+// expanded (the default); '1' = collapsed. Per-project so collapsing one
+// project's long archive doesn't hide another's.
+export const ARCHIVED_COLLAPSED_PREFIX = 'hydra-archived-collapsed-'
+export const archivedCollapsedKey = (projectId: string): string =>
+  `${ARCHIVED_COLLAPSED_PREFIX}${projectId}`
+
 // Unsent spawn-prompt draft, per project and per layout (compact vs full).
 export const promptDraftKey = (projectId: string, compact: boolean): string =>
   `hydra-prompt-draft-${compact ? 'compact' : 'full'}-${projectId}`
