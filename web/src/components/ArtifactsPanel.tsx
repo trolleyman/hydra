@@ -723,8 +723,11 @@ function FileRow({ file, mode }: { file: ArtifactFile; mode: ImageDiffMode }) {
 function FileGrid({ files, mode }: { files: ArtifactFile[]; mode: ImageDiffMode }) {
   return (
     // pt-3 so the gap above the first file row matches the card body's px-3 left
-    // inset — the top and left spacing around the grid read as equal.
-    <div className="flex flex-wrap gap-3 pt-3">
+    // inset — the top and left spacing around the grid read as equal. items-start
+    // so each card sizes to its own content height instead of stretching to match
+    // a taller neighbour on the same row (flex's default align-items: stretch),
+    // which left a short, small-image card half-empty below its image.
+    <div className="flex flex-wrap items-start gap-3 pt-3">
       {files.map((f) => <FileRow key={f.name} file={f} mode={mode} />)}
     </div>
   )
