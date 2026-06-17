@@ -323,16 +323,16 @@ func agentResponse(h heads.Head) api.AgentResponse {
 		endState = &es
 	}
 	return api.AgentResponse{
-		Id:            h.ID,
-		Title:         &title,
-		BranchName:    h.Branch,
-		WorktreePath:  h.Worktree,
-		ProjectPath:   h.ProjectPath,
-		SessionPid:    h.SessionPID,
-		SessionStatus: h.SessionStatus,
-		AgentType:     string(h.AgentType),
-		PrePrompt:     h.PrePrompt,
-		Prompt:        h.Prompt,
+		Id:               h.ID,
+		Title:            &title,
+		BranchName:       h.Branch,
+		WorktreePath:     h.Worktree,
+		ProjectPath:      h.ProjectPath,
+		SessionPid:       h.SessionPID,
+		SessionStatus:    h.SessionStatus,
+		AgentType:        string(h.AgentType),
+		PrePrompt:        h.PrePrompt,
+		Prompt:           h.Prompt,
 		BaseBranch:       h.BaseBranch,
 		Ephemeral:        &h.Ephemeral,
 		CreatedAt:        createdAt,
@@ -1035,6 +1035,51 @@ func (s *Server) KillAgent(ctx context.Context, request api.KillAgentRequestObje
 	}
 
 	return api.KillAgent204Response{}, nil
+}
+
+// PurgeAgent permanently deletes an agent (live or archived): it kills any live
+// session, removes the worktree/branch and on-disk files, deletes the Claude
+// session-history directory, and hard-deletes the DB record. Unlike KillAgent,
+// nothing is retained in the archived-history list. See heads.PurgeHead.
+func (s *Server) PurgeAgent(ctx context.Context, request api.PurgeAgentRequestObject) (api.PurgeAgentResponseObject, error) {
+	projectRoot, err := s.resolveProjectRoot(request.ProjectId)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	log.Printf("api: purge agent request: id=%q, project=%q", request.Id, projectRoot)
+
+	// Resolve a live head first; fall back to the archived record (the common
+	// case — purging from the read-only archived-history view).
+	head, err := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, request.Id)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	if head == nil {
+		head, err = heads.GetArchivedHeadByID(s.DB, request.Id)
+		if err != nil {
+			return nil, errtrace.Wrap(err)
+		}
+	}
+	if head == nil {
+		return api.PurgeAgent404JSONResponse{
+			Code:    404,
+			Error:   api.ErrorResponseErrorNotFound,
+			Details: "agent not found",
+		}, nil
+	}
+
+	if err := heads.PurgeHead(ctx, s.Sessions, s.DB, *head); err != nil {
+		if errors.Is(err, db.ErrOperationInProgress) {
+			return api.PurgeAgent409JSONResponse{
+				Code:    409,
+				Error:   api.ErrorResponseErrorConflict,
+				Details: "operation already in progress",
+			}, nil
+		}
+		return nil, errtrace.Wrap(err)
+	}
+
+	return api.PurgeAgent204Response{}, nil
 }
 
 func (s *Server) GetAgentCommits(ctx context.Context, request api.GetAgentCommitsRequestObject) (api.GetAgentCommitsResponseObject, error) {

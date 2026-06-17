@@ -12,6 +12,7 @@ import (
 	"github.com/trolleyman/hydra/internal/artifacts"
 	"github.com/trolleyman/hydra/internal/daemon"
 	"github.com/trolleyman/hydra/internal/db"
+	"github.com/trolleyman/hydra/internal/git"
 	"github.com/trolleyman/hydra/internal/heads"
 	httppkg "github.com/trolleyman/hydra/internal/http"
 	"github.com/trolleyman/hydra/internal/paths"
@@ -102,6 +103,31 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 	// projects added via the web UI, and their agents' status must stay fresh
 	// too. roots is re-evaluated each cycle so runtime add/remove is picked up.
 	roots := func() []string { return projectRoots(pm) }
+
+	// Correct archived heads that were merged but recorded as "killed" (the
+	// backfill above defaults everything to "killed", and CLI merges historically
+	// archived via the kill path). A merge leaves a "Merge branch 'hydra/<id>'"
+	// commit, so git history recovers the distinction. Per project, best-effort;
+	// fast-forward merges leave no merge commit and so remain "killed".
+	for _, root := range roots() {
+		merged, err := git.MergedHydraBranches(root)
+		if err != nil {
+			log.Printf("warn: detect merged branches in %s: %v", root, err)
+			continue
+		}
+		if len(merged) == 0 {
+			continue
+		}
+		names := make([]string, 0, len(merged))
+		for n := range merged {
+			names = append(names, n)
+		}
+		if n, err := store.SetArchivedEndStateMerged(root, names); err != nil {
+			log.Printf("warn: correct merged end_state in %s: %v", root, err)
+		} else if n > 0 {
+			log.Printf("Corrected %d archived agent(s) to end_state=merged in %s", n, root)
+		}
+	}
 
 	// Resume heads that were running before a restart (best-effort), and clear
 	// out any ephemeral artifact checkouts left behind by a crash mid-generation.

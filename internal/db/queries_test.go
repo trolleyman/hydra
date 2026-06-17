@@ -116,3 +116,100 @@ func TestBackfillArchivedEndState(t *testing.T) {
 		t.Errorf("expected 0 rows on second run, got %d", n2)
 	}
 }
+
+func TestSetArchivedEndStateMerged(t *testing.T) {
+	const root = "/tmp/proj"
+	store := newTestStore(t)
+
+	// A killed head whose branch was actually merged — should be corrected.
+	mustArchive(t, store, &Agent{ID: "was-merged", ProjectPath: root, AgentType: "claude", BranchName: "hydra/was-merged"}, "killed")
+	// A genuinely killed head (branch not in the merged set) — stays "killed".
+	mustArchive(t, store, &Agent{ID: "killed", ProjectPath: root, AgentType: "claude", BranchName: "hydra/killed"}, "killed")
+	// Already "merged" — no-op (not counted).
+	mustArchive(t, store, &Agent{ID: "merged", ProjectPath: root, AgentType: "claude", BranchName: "hydra/merged"}, "merged")
+	// An aborted spawn (empty end_state) whose branch happens to match — must NOT
+	// be pulled into history by the merged correction.
+	mustArchive(t, store, &Agent{ID: "aborted", ProjectPath: root, AgentType: "claude", BranchName: "hydra/aborted"}, "")
+	// A head in a different project with a matching branch — must be untouched.
+	mustArchive(t, store, &Agent{ID: "other", ProjectPath: "/tmp/other", AgentType: "claude", BranchName: "hydra/was-merged"}, "killed")
+
+	mergedBranches := []string{"hydra/was-merged", "hydra/merged", "hydra/aborted"}
+	n, err := store.SetArchivedEndStateMerged(root, mergedBranches)
+	if err != nil {
+		t.Fatalf("set merged: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("expected 1 row corrected, got %d", n)
+	}
+
+	endStates := map[string]string{}
+	for _, a := range mustList(t, store, root) {
+		endStates[a.ID] = a.EndState
+	}
+	if endStates["was-merged"] != "merged" {
+		t.Errorf("was-merged: expected corrected to \"merged\", got %q", endStates["was-merged"])
+	}
+	if endStates["killed"] != "killed" {
+		t.Errorf("killed: expected unchanged \"killed\", got %q", endStates["killed"])
+	}
+	if _, ok := endStates["aborted"]; ok {
+		t.Errorf("aborted spawn (empty end_state) must not be promoted to history")
+	}
+
+	// Other-project row stays "killed".
+	other := mustList(t, store, "/tmp/other")
+	if len(other) != 1 || other[0].EndState != "killed" {
+		t.Errorf("other-project row should be untouched, got %+v", other)
+	}
+
+	// Empty branch list is a no-op.
+	if n0, err := store.SetArchivedEndStateMerged(root, nil); err != nil || n0 != 0 {
+		t.Errorf("empty branch list: expected (0,nil), got (%d,%v)", n0, err)
+	}
+}
+
+func TestHardDeleteAgent(t *testing.T) {
+	const root = "/tmp/proj"
+	store := newTestStore(t)
+
+	mustArchive(t, store, &Agent{ID: "gone", ProjectPath: root, AgentType: "claude", BranchName: "hydra/gone"}, "killed")
+	if len(mustList(t, store, root)) != 1 {
+		t.Fatal("setup: expected 1 archived row")
+	}
+
+	if err := store.HardDeleteAgent("gone"); err != nil {
+		t.Fatalf("hard delete: %v", err)
+	}
+	if got := mustList(t, store, root); len(got) != 0 {
+		t.Errorf("expected row erased from history, got %+v", got)
+	}
+	// Even an Unscoped archived lookup must not find it.
+	if a, err := store.GetArchivedAgent("gone"); err != nil || a != nil {
+		t.Errorf("expected no archived record, got (%+v, %v)", a, err)
+	}
+}
+
+func mustArchive(t *testing.T, store *Store, a *Agent, endState string) {
+	t.Helper()
+	if err := store.UpsertAgent(a); err != nil {
+		t.Fatal(err)
+	}
+	if endState == "" {
+		if err := store.SoftDeleteAgent(a.ID); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	if err := store.ArchiveAgent(a.ID, endState); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func mustList(t *testing.T, store *Store, root string) []Agent {
+	t.Helper()
+	rows, err := store.ListArchivedAgents(root, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return rows
+}

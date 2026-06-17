@@ -203,6 +203,38 @@ func (s *Store) BackfillArchivedEndState() (int64, error) {
 	return result.RowsAffected, errtrace.Wrap(result.Error)
 }
 
+// SetArchivedEndStateMerged corrects archived heads that were actually merged but
+// recorded as "killed". The pre-EndState backfill defaulted every archived head
+// to "killed", and CLI merges historically archived through the kill path, so a
+// merged head can end up mislabelled. git.MergedHydraBranches recovers the truth
+// from merge commits; this flips the matching rows (soft-deleted, non-ephemeral,
+// in the given project, branch in branchNames) to "merged".
+//
+// It only ever UPGRADES a non-empty, non-"merged" end_state — it never downgrades
+// or touches active rows or aborted spawns (empty end_state). That one-way rule
+// keeps fast-forward merges (which git.MergedHydraBranches can't detect, so they
+// stay "killed") from being wrongly flipped back and forth. Returns rows changed.
+func (s *Store) SetArchivedEndStateMerged(projectRoot string, branchNames []string) (int64, error) {
+	if len(branchNames) == 0 {
+		return 0, nil
+	}
+	result := s.db.Unscoped().
+		Model(&Agent{}).
+		Where("project_path = ? AND deleted_at IS NOT NULL AND ephemeral = ?", projectRoot, false).
+		Where("end_state <> ? AND end_state <> ?", "", "merged").
+		Where("branch_name IN ?", branchNames).
+		Update("end_state", "merged")
+	return result.RowsAffected, errtrace.Wrap(result.Error)
+}
+
+// HardDeleteAgent permanently and irreversibly removes an agent row — active or
+// already soft-deleted (archived) — from the database, leaving no trace in the
+// archived-history list. Used only by the "delete for real" purge path; normal
+// kill/merge archival uses ArchiveAgent (a soft delete) instead.
+func (s *Store) HardDeleteAgent(id string) error {
+	return errtrace.Wrap(s.db.Unscoped().Delete(&Agent{}, "id = ?", id).Error)
+}
+
 // TrySetHeadStatus atomically transitions head_status from `from` to `to`.
 // Returns (true, nil) on success, (false, nil) if the row was not in the expected state
 // (i.e. someone else already claimed it), or (false, err) on a real error.

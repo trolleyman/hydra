@@ -155,6 +155,13 @@ func (c *Client) KillAgent(ctx context.Context, id string) error {
 	return errtrace.Wrap(c.do(ctx, http.MethodDelete, "/api/projects/"+c.ProjectID+"/agents/"+id, nil, nil))
 }
 
+// MergeAgent asks the daemon to merge an agent's branch into its base and tear it
+// down, archiving it with end_state "merged". Used by the `hydra merge` CLI so a
+// merge is recorded as a merge (the kill path would mislabel it "killed").
+func (c *Client) MergeAgent(ctx context.Context, id string) error {
+	return errtrace.Wrap(c.do(ctx, http.MethodPost, "/api/projects/"+c.ProjectID+"/agents/"+id+"/merge", nil, nil))
+}
+
 // DialTerminal opens a websocket to the agent's terminal (or its shell tab).
 func (c *Client) DialTerminal(id string, shell bool) (*websocket.Conn, error) {
 	dialer := &websocket.Dialer{

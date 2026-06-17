@@ -82,8 +82,8 @@ func (s *SimulationServer) GetClaudeUsage(w http.ResponseWriter, r *http.Request
 }
 
 func (s *SimulationServer) ListProjects(w http.ResponseWriter, r *http.Request) {
-	simUnread := 1     // matches the one unread agent in ListAgents
-	otherUnread := 3   // updates waiting in a project you're not looking at
+	simUnread := 1   // matches the one unread agent in ListAgents
+	otherUnread := 3 // updates waiting in a project you're not looking at
 	resp := api.ListProjects200JSONResponse{
 		{
 			Id:          "sim-project",
@@ -288,6 +288,10 @@ func (s *SimulationServer) SpawnAgent(w http.ResponseWriter, r *http.Request, pr
 }
 
 func (s *SimulationServer) KillAgent(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *SimulationServer) PurgeAgent(w http.ResponseWriter, r *http.Request, projectId string, id string) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
