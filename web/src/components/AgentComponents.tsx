@@ -140,9 +140,22 @@ export function AgentSidebarItem({
             {agentStatusBadge(agent.agent_status.status).label}
           </span>
         )}
+        {agent.created_at ? (
+          // Non-intrusive relative timestamp (when the agent was created), pushed
+          // to the right edge of the badge row. Hover shows the absolute time.
+          <span
+            className="ml-auto shrink-0 text-[10px] text-gray-300 dark:text-gray-600 tabular-nums"
+            title={`created ${new Date(agent.created_at * 1000).toLocaleString()}`}
+          >
+            {formatStartedAgo(agent.created_at)}
+          </span>
+        ) : null}
       </div>
-      {!archived && agentStatusDetail(agent.agent_status) && (
-        <div className="mt-0.5 ml-4 text-[11px] text-gray-400 dark:text-gray-500 truncate">
+      {!archived && agent.agent_status && (
+        // Reserve a fixed-height line for the live activity / last message so the
+        // row keeps a constant height as the text appears, disappears, or changes
+        // between status transitions — otherwise the whole sidebar jumps around.
+        <div className="mt-0.5 ml-4 min-h-[1rem] text-[11px] text-gray-400 dark:text-gray-500 truncate">
           {agentStatusDetail(agent.agent_status)}
         </div>
       )}

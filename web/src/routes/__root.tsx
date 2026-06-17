@@ -990,14 +990,14 @@ function RootLayout() {
                 <button
                   type="button"
                   onClick={() => setArchivedCollapsed((c) => !c)}
-                  className="w-full flex items-center gap-1.5 px-1 pt-3 pb-1 mt-1 group"
+                  className="w-full flex items-center gap-1.5 px-1 pt-3 pb-1 mt-1 group cursor-pointer rounded-md transition-colors hover:bg-gray-100 dark:hover:bg-gray-700/40"
                 >
                   {archivedCollapsed ? (
-                    <ChevronRight className="w-3 h-3 text-gray-400 dark:text-gray-500 shrink-0" />
+                    <ChevronRight className="w-3 h-3 text-gray-400 dark:text-gray-500 shrink-0 transition-colors group-hover:text-gray-600 dark:group-hover:text-gray-300" />
                   ) : (
-                    <ChevronDown className="w-3 h-3 text-gray-400 dark:text-gray-500 shrink-0" />
+                    <ChevronDown className="w-3 h-3 text-gray-400 dark:text-gray-500 shrink-0 transition-colors group-hover:text-gray-600 dark:group-hover:text-gray-300" />
                   )}
-                  <span className="text-[10px] font-semibold text-gray-400 dark:text-gray-500 tracking-wide">
+                  <span className="text-[10px] font-semibold text-gray-400 dark:text-gray-500 tracking-wide transition-colors group-hover:text-gray-600 dark:group-hover:text-gray-300">
                     Archived
                   </span>
                   <span className="text-[10px] text-gray-300 dark:text-gray-600">{archived.length}</span>
