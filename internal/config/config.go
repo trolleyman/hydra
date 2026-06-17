@@ -921,16 +921,23 @@ func renderConfig(existing []byte, cfg Config) string {
 			block = append(block, sec.header)
 			block = append(block, sec.body...)
 			artifactBlocks = append(artifactBlocks, block)
+			// Walk the block's top-level lines, skipping over multi-line string
+			// values so a "#"-prefixed shell comment or a "name=" assignment INSIDE
+			// the command string is not mistaken for an interior comment or the
+			// artifact's name (which would file these comments under the wrong key
+			// and silently drop them on the next save).
 			var name string
 			var interior []string
-			for _, bl := range sec.body {
+			for i := 0; i < len(sec.body); i++ {
+				bl := sec.body[i]
 				if strings.HasPrefix(strings.TrimSpace(bl), "#") {
 					interior = append(interior, bl)
 					continue
 				}
-				if keyName(bl) == "name" {
+				if name == "" && keyName(bl) == "name" {
 					name = artifactValue(bl)
 				}
+				i = skipValue(sec.body, i)
 			}
 			if name != "" {
 				existingArtifacts[name] = true
