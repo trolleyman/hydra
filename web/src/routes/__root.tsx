@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, useCallback, type WheelEvent } from 'react
 import { api } from '../stores/apiClient'
 import { useProjectStore } from '../stores/projectStore'
 import { useAgentStore, ARCHIVED_PAGE_SIZE } from '../stores/agentStore'
+import { usePageActive } from '../lib/usePageActive'
 import type { ProjectInfo, AgentResponse } from '../api'
 import { ApiError, ErrorResponse } from '../api'
 import { formatError } from '../api/format_error'
@@ -395,6 +396,10 @@ function RootLayout() {
   const routeParams = useParams({ strict: false }) as { projectId?: string; agentId?: string }
   const currentProjectId = routeParams.projectId ?? selectedProjectId
   const selectedAgentId = routeParams.agentId
+  // Whether the user actually has this page in front of them (foreground tab +
+  // focused window). Gates the unread auto-clear so a backgrounded page doesn't
+  // silently dismiss agents the user hasn't actually looked at.
+  const pageActive = usePageActive()
 
   // Navigate to a project's remembered view (agent / repository / bare project).
   // Used by the boot restore and the project-switch dropdown. A remembered agent
@@ -534,18 +539,36 @@ function RootLayout() {
     return () => obs.disconnect()
   }, [archivedHasMore, loadMoreArchived, archived.length])
 
-  // Auto-clear an agent's unread dot when it's the one currently open. Covers
-  // both opening an unread agent (the click) and an already-open agent
-  // transitioning to waiting/finished while you watch it (the next poll marks it
-  // unread, this clears it again). Optimistic locally + a fire-and-forget POST.
+  // Auto-clear an agent's unread dot when it's the one currently open AND the
+  // page is actually in front of the user. Covers both opening an unread agent
+  // (the click) and an already-open agent transitioning to waiting/finished
+  // while you watch it (the next poll marks it unread, this clears it again).
+  // If the page isn't active (backgrounded tab / unfocused window), we leave the
+  // dot lit so the change isn't silently dismissed — `pageActive` is a dep, so
+  // returning to the page re-runs this and clears it then. Optimistic locally +
+  // a fire-and-forget POST.
   useEffect(() => {
-    if (!currentProjectId || !selectedAgentId) return
+    if (!pageActive || !currentProjectId || !selectedAgentId) return
     const sel = agents.find((a) => a.id === selectedAgentId)
     if (sel?.has_unread_changes) {
       markRead(selectedAgentId)
       api.default.markAgentRead(currentProjectId, selectedAgentId).catch(() => {})
     }
-  }, [agents, selectedAgentId, currentProjectId, markRead])
+  }, [agents, selectedAgentId, currentProjectId, markRead, pageActive])
+
+  // Reflect unread changes in the browser tab title with a leading blue dot, so
+  // a backgrounded tab signals "something's waiting" without the page in focus.
+  // We count the live (optimistically-cleared) agents for the current project
+  // and trust the backend per-project counts for the others — so the dot tracks
+  // the same state as the in-app indicators and clears the moment they do.
+  const currentProjectUnread = agents.filter((a) => a.has_unread_changes).length
+  const otherProjectsUnread = projects
+    .filter((p) => p.id !== currentProjectId)
+    .reduce((n, p) => n + (p.unread_count ?? 0), 0)
+  const anyUnread = currentProjectUnread + otherProjectsUnread > 0
+  useEffect(() => {
+    document.title = anyUnread ? '🔵 Hydra' : 'Hydra'
+  }, [anyUnread])
 
   useEffect(() => {
     let cancelled = false
