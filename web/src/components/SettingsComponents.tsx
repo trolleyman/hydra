@@ -353,7 +353,7 @@ export function ArtifactsEditor({
             <li><code className="text-blue-300">HYDRA_ARTIFACT_SOURCE</code> — the checkout directory</li>
             <li><code className="text-blue-300">HYDRA_ARTIFACT_REF</code> — the resolved git ref</li>
           </ul>
-          <p className="mt-1.5">Still images (<code className="text-blue-300">.png .jpg .gif .webp .avif .svg .bmp</code>) and <code className="text-blue-300">.pdf</code> are diffed pixel-by-pixel. Video is supported via <code className="text-blue-300">.webm</code> only, and it must be <strong>lossless</strong> (e.g. <code className="text-blue-300">libvpx-vp9 -lossless 1</code>): video is compared by byte hash, so a lossy encode always reads as changed and produces spurious diffs.</p>
+          <p className="mt-1.5"><code className="text-blue-300">.png .jpg .gif</code> are diffed pixel-by-pixel; other types (<code className="text-blue-300">.webp .avif .svg .bmp .pdf</code> and <code className="text-blue-300">.webm</code> video) are compared by byte hash. Video is supported via <code className="text-blue-300">.webm</code> only and must be <strong>lossless</strong> (e.g. <code className="text-blue-300">libvpx-vp9 -lossless 1</code>), since a non-deterministic encode always reads as changed and produces spurious diffs.</p>
         </InfoTooltip>
       </div>
       <p className="text-xs text-gray-500 dark:text-gray-400 mb-4 ml-10">
