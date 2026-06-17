@@ -63,3 +63,8 @@ mage run
 See `GEMINI.md`/`CLAUDE.md` for more instructions.
 
 See `TODO.md` for limitations and a TODO list.
+
+## Documentation
+
+- [Diff Artifacts](docs/artifacts.md) — render screenshots and videos of a
+  checkout and compare them across a diff (including `.webm` video diffing).

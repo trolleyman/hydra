@@ -638,7 +638,7 @@ func artifactsDocLines() []string {
 		docPrefix + " of a checkout. The diff viewer runs each against both sides of a comparison and",
 		docPrefix + " shows the outputs that differ. Fields:",
 		docPrefix + "   name         unique label, also used as the cache directory (required).",
-		docPrefix + "   command      shell command run via `sh -c` in the checkout directory (required).",
+		docPrefix + "   command      shell command run via `bash -c` in the checkout directory (required).",
 		docPrefix + "   timeout_sec  max seconds the command may run (0 = built-in default).",
 		docPrefix + "   unsafe_host  run on the host with NO sandbox — full access to your machine and",
 		docPrefix + "                credentials; only for audited, self-contained commands (default false).",
