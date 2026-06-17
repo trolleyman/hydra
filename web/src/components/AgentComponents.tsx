@@ -84,6 +84,16 @@ export function agentStatusDetail(status: AgentResponse['agent_status']): string
   return status.last_message ?? ''
 }
 
+// archivedEndStateBadge renders the gray "killed"/"merged" chip for an archived
+// (finished) agent, shown in place of the live status badge.
+export function archivedEndStateBadge(endState: string | null | undefined): { label: string; className: string } {
+  switch (endState) {
+    case 'merged': return { label: 'merged', className: 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400' }
+    case 'killed': return { label: 'killed', className: 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400' }
+    default:       return { label: 'archived', className: 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400' }
+  }
+}
+
 export function AgentSidebarItem({
   agent,
   selected,
@@ -93,6 +103,7 @@ export function AgentSidebarItem({
   selected: boolean
   onClick: () => void
 }) {
+  const archived = agent.archived ?? false
   return (
     <button
       onClick={onClick}
@@ -100,9 +111,9 @@ export function AgentSidebarItem({
         selected
           ? 'bg-blue-50 border border-blue-200 dark:bg-blue-900/30 dark:border-blue-800'
           : 'hover:bg-gray-100 dark:hover:bg-gray-700 border border-transparent'
-      }`}
+      } ${archived && !selected ? 'opacity-60 hover:opacity-100' : ''}`}
     >
-      {agent.has_unread_changes && (
+      {agent.has_unread_changes && !archived && (
         // Unread-changes marker: vertically centered on the right edge. Set when
         // the agent goes running→waiting/finished, cleared when it's opened.
         <span
@@ -110,23 +121,27 @@ export function AgentSidebarItem({
           className="absolute right-3 top-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full bg-sky-400 ring-2 ring-sky-400/25 shrink-0"
         />
       )}
-      <div className={`flex items-center gap-2 min-w-0 ${agent.has_unread_changes ? 'pr-4' : ''}`}>
+      <div className={`flex items-center gap-2 min-w-0 ${agent.has_unread_changes && !archived ? 'pr-4' : ''}`}>
         <span
-          className={`w-2 h-2 rounded-full shrink-0 ${agentDotClass(agent)}`}
+          className={`w-2 h-2 rounded-full shrink-0 ${archived ? 'bg-gray-300 dark:bg-gray-600' : agentDotClass(agent)}`}
         />
-        <span className="font-medium text-sm text-gray-900 dark:text-gray-100 truncate">{agent.title || agent.id}</span>
+        <span className={`font-medium text-sm truncate ${archived ? 'text-gray-500 dark:text-gray-400' : 'text-gray-900 dark:text-gray-100'}`}>{agent.title || agent.id}</span>
       </div>
       <div className="flex items-center gap-1.5 mt-0.5 ml-4">
         <span className={`text-xs ${agentTypeColor(agent.agent_type)}`}>
           {agent.agent_type || 'unknown'}
         </span>
-        {agent.agent_status && (
+        {archived ? (
+          <span className={`text-[10px] px-1 py-0.5 rounded font-medium ${archivedEndStateBadge(agent.end_state).className}`}>
+            {archivedEndStateBadge(agent.end_state).label}
+          </span>
+        ) : agent.agent_status && (
           <span className={`text-[10px] px-1 py-0.5 rounded font-medium ${agentStatusBadge(agent.agent_status.status).className}`}>
             {agentStatusBadge(agent.agent_status.status).label}
           </span>
         )}
       </div>
-      {agentStatusDetail(agent.agent_status) && (
+      {!archived && agentStatusDetail(agent.agent_status) && (
         <div className="mt-0.5 ml-4 text-[11px] text-gray-400 dark:text-gray-500 truncate">
           {agentStatusDetail(agent.agent_status)}
         </div>

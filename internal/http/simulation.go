@@ -174,7 +174,65 @@ func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, pr
 	api.WriteJSON(w, http.StatusOK, resp)
 }
 
+// simArchivedAgents returns the seeded archived (killed/merged) history used by
+// the archived sidebar section + the read-only archived agent page.
+func simArchivedAgents() []api.AgentResponse {
+	archived := true
+	finished := api.Finished
+	stopped := api.Stopped
+	mk := func(id, title, agentType, branch, endState, prompt string, status api.AgentStatus, ageHours time.Duration) api.AgentResponse {
+		createdAt := simNow().Add(-ageHours * time.Hour).Unix()
+		es := endState
+		return api.AgentResponse{
+			Id:            id,
+			Title:         ptr(title),
+			AgentType:     agentType,
+			BaseBranch:    "main",
+			BranchName:    ptr(branch),
+			SessionStatus: "stopped",
+			Prompt:        prompt,
+			CreatedAt:     &createdAt,
+			Archived:      &archived,
+			EndState:      &es,
+			AgentStatus: &api.AgentStatusInfo{
+				Status:    status,
+				Timestamp: simNow().Format(time.RFC3339),
+			},
+		}
+	}
+	return []api.AgentResponse{
+		mk("archived-1", "Add dark-mode toggle to settings", "claude", "hydra/feat-darkmode", "merged", "Add a dark-mode toggle to the settings page, persisted to localStorage and respecting the OS preference by default.", finished, 5),
+		mk("archived-2", "Spike: WebSocket diff refresh", "gemini", "hydra/spike-ws", "killed", "Prototype pushing diff_refresh over the existing terminal WebSocket instead of the 20s poll, and measure the latency win.", stopped, 8),
+		mk("archived-3", "Fix flaky terminal resize test", "claude", "hydra/fix-resize", "merged", "TestTerminalResize fails intermittently in CI. Track down the race and make it deterministic.", finished, 26),
+		mk("archived-4", "Investigate sandbox netns isolation", "claude", "hydra/spike-netns", "killed", "Explore giving each agent its own network namespace with a rootless userspace NAT (pasta/slirp4netns) for per-agent port isolation.", stopped, 30),
+		mk("archived-5", "Render ANSI colour in artifact logs", "copilot", "hydra/feat-ansi", "merged", "Replace stripAnsi in the artifact log panes with a real SGR renderer so build output keeps its colour.", finished, 49),
+	}
+}
+
+func (s *SimulationServer) ListArchivedAgents(w http.ResponseWriter, r *http.Request, projectId string, params api.ListArchivedAgentsParams) {
+	all := simArchivedAgents()
+	offset := 0
+	if params.Offset != nil && *params.Offset > 0 {
+		offset = *params.Offset
+	}
+	if offset > len(all) {
+		offset = len(all)
+	}
+	page := all[offset:]
+	if params.Limit != nil && *params.Limit > 0 && *params.Limit < len(page) {
+		page = page[:*params.Limit]
+	}
+	resp := api.ListArchivedAgents200JSONResponse(page)
+	api.WriteJSON(w, http.StatusOK, resp)
+}
+
 func (s *SimulationServer) GetAgent(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+	for _, a := range simArchivedAgents() {
+		if a.Id == id {
+			api.WriteJSON(w, http.StatusOK, a)
+			return
+		}
+	}
 	if id == "agent-1" {
 		createdAt := simNow().Add(-1 * time.Hour).Unix()
 		api.WriteJSON(w, http.StatusOK, api.AgentResponse{

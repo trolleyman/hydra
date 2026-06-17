@@ -81,9 +81,11 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 		server.SetSandboxError(errtrace.Errorf("%s", reason))
 	}
 
-	if err := store.PruneDeletedAgents(30 * 24 * time.Hour); err != nil {
-		log.Printf("warn: prune deleted agents: %v", err)
-	}
+	// Archived agents (killed/merged heads) are kept indefinitely so they stay
+	// browsable in the history list — we no longer prune soft-deleted rows on
+	// boot. PruneDeletedAgents is retained for a future opt-in retention window
+	// if the table ever grows uncomfortably large.
+	_ = store.PruneDeletedAgents
 
 	// The pollers and boot-time resume cover every registered project, not just
 	// the project the daemon was launched in: a single daemon/DB serves all
@@ -240,7 +242,9 @@ func resumeHeadsOnBoot(reg *session.Registry, store *db.Store, projectRoot strin
 		// left behind (e.g. a crash mid-test) so it doesn't linger.
 		if h.Ephemeral {
 			log.Printf("daemon: cleaning up orphaned ephemeral head %s after restart", h.ID)
-			if err := heads.KillHeadNoLock(context.Background(), reg, store, h); err != nil {
+			// "" end state: ephemeral test heads are not part of the browsable
+			// archived history, so they stay out of the archived list.
+			if err := heads.KillHeadNoLock(context.Background(), reg, store, h, ""); err != nil {
 				log.Printf("warn: cleanup ephemeral head %s: %v", h.ID, err)
 			}
 			continue

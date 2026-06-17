@@ -45,6 +45,11 @@ type Head struct {
 	CreatedAt   int64 // Unix timestamp; 0 if not started
 	// HasUnreadChanges drives the "unread changes" dot in the UI.
 	HasUnreadChanges bool
+	// Archived is true for a finished (killed/merged) head retained in the
+	// history list; such heads have no live session or worktree and are
+	// read-only. EndState records how it ended ("killed" | "merged").
+	Archived bool
+	EndState string
 }
 
 // ListHeads returns all Hydra heads from the DB, cross-referenced with live
@@ -167,6 +172,79 @@ func GetHeadByID(ctx context.Context, reg *session.Registry, store *db.Store, pr
 		}
 	}
 	return nil, nil
+}
+
+// ListArchivedHeads returns a page of archived (killed/merged) heads for the
+// project, newest-archived first. limit <= 0 returns all; offset paginates.
+// Archived heads carry no live session or worktree and are read-only.
+func ListArchivedHeads(store *db.Store, projectRoot string, limit, offset int) ([]Head, error) {
+	rows, err := store.ListArchivedAgents(projectRoot, limit, offset)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	result := make([]Head, 0, len(rows))
+	for i := range rows {
+		result = append(result, archivedHead(&rows[i]))
+	}
+	return result, nil
+}
+
+// GetArchivedHeadByID returns the archived head with the given ID, or nil if no
+// such archived record exists.
+func GetArchivedHeadByID(store *db.Store, id string) (*Head, error) {
+	a, err := store.GetArchivedAgent(id)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	if a == nil {
+		return nil, nil
+	}
+	h := archivedHead(a)
+	return &h, nil
+}
+
+// archivedHead builds a read-only Head from an archived DB record. Its worktree
+// and branch no longer exist on disk, so Worktree is nil; BranchName is kept for
+// display only. The status reflects the last reported activity status (not the
+// transient head_status left over from the kill/merge operation).
+func archivedHead(a *db.Agent) Head {
+	var branch *string
+	if a.BranchName != "" {
+		b := a.BranchName
+		branch = &b
+	}
+	return Head{
+		ID:          a.ID,
+		Title:       a.Title,
+		Branch:      branch,
+		Worktree:    nil,
+		ProjectPath: a.ProjectPath,
+		AgentType:   sandbox.AgentType(a.AgentType),
+		PrePrompt:   a.PrePrompt,
+		Prompt:      a.Prompt,
+		BaseBranch:  a.BaseBranch,
+		Ephemeral:   a.Ephemeral,
+		CreatedAt:   a.CreatedAt.Unix(),
+		AgentStatus: archivedAgentStatus(a),
+		Archived:    true,
+		EndState:    a.EndState,
+	}
+}
+
+// archivedAgentStatus derives the display status for an archived head from its
+// last reported activity status, defaulting to stopped. (It deliberately ignores
+// HeadStatus, which is left as "killing"/"merging" on the soft-deleted row.)
+func archivedAgentStatus(a *db.Agent) *api.AgentStatusInfo {
+	status := api.Stopped
+	if a.AgentStatus != nil && *a.AgentStatus != "" {
+		status = api.AgentStatus(*a.AgentStatus)
+	}
+	ts := a.AgentStatusTime
+	if ts == "" {
+		ts = a.UpdatedAt.Format(time.RFC3339Nano)
+	}
+	event := "archived"
+	return &api.AgentStatusInfo{Status: status, Event: &event, Timestamp: ts}
 }
 
 // SpawnHeadOptions holds parameters for spawning a new agent head.
@@ -632,8 +710,10 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 }
 
 // KillHead removes a Hydra head in safe order: session -> worktree -> branch.
-// When store is non-nil, uses atomic CAS to prevent concurrent kill operations and soft-deletes the record.
-func KillHead(ctx context.Context, reg *session.Registry, store *db.Store, head Head) error {
+// When store is non-nil, uses atomic CAS to prevent concurrent kill operations
+// and archives the record. endState records how it ended ("killed" | "merged",
+// or "" to leave it out of the archived-history list, e.g. ephemeral cleanup).
+func KillHead(ctx context.Context, reg *session.Registry, store *db.Store, head Head, endState string) error {
 	log.Printf("heads: kill requested for agent %s", head.ID)
 	if store != nil {
 		ok, err := store.TrySetHeadStatus(head.ID, "idle", "killing")
@@ -645,11 +725,12 @@ func KillHead(ctx context.Context, reg *session.Registry, store *db.Store, head 
 			return errtrace.Wrap(db.ErrOperationInProgress)
 		}
 	}
-	return errtrace.Wrap(KillHeadNoLock(ctx, reg, store, head))
+	return errtrace.Wrap(KillHeadNoLock(ctx, reg, store, head, endState))
 }
 
-// KillHeadNoLock performs the kill cleanup without acquiring the head_status lock.
-func KillHeadNoLock(ctx context.Context, reg *session.Registry, store *db.Store, head Head) error {
+// KillHeadNoLock performs the kill cleanup without acquiring the head_status
+// lock. On success it archives the record with the given endState (see KillHead).
+func KillHeadNoLock(ctx context.Context, reg *session.Registry, store *db.Store, head Head, endState string) error {
 	var killErr error
 
 	if reg != nil {
@@ -692,8 +773,8 @@ func KillHeadNoLock(ctx context.Context, reg *session.Registry, store *db.Store,
 			errMsg := killErr.Error()
 			_ = store.ClearHeadStatus(head.ID, &errMsg)
 		} else {
-			log.Printf("heads: soft-deleting agent %s from database", head.ID)
-			_ = store.SoftDeleteAgent(head.ID)
+			log.Printf("heads: archiving agent %s (end_state=%q)", head.ID, endState)
+			_ = store.ArchiveAgent(head.ID, endState)
 		}
 	}
 

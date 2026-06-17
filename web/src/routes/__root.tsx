@@ -2,11 +2,11 @@ import { createRootRoute, Link, Outlet, useNavigate, useParams, useLocation } fr
 import { useEffect, useRef, useState, useCallback, type WheelEvent } from 'react'
 import { api } from '../stores/apiClient'
 import { useProjectStore } from '../stores/projectStore'
-import { useAgentStore } from '../stores/agentStore'
+import { useAgentStore, ARCHIVED_PAGE_SIZE } from '../stores/agentStore'
 import type { ProjectInfo, AgentResponse } from '../api'
 import { ApiError, ErrorResponse } from '../api'
 import { formatError } from '../api/format_error'
-import { Sun, Moon, Monitor, ChevronDown, Folder, FolderGit2, FolderOpen, Plus, Settings, Check, X } from 'lucide-react'
+import { Sun, Moon, Monitor, ChevronDown, Folder, FolderGit2, FolderOpen, Plus, Settings, Check, X, LoaderCircle } from 'lucide-react'
 import { folderPickerAvailable, openFolderPicker } from '../api/folderPicker'
 import { AgentSidebarItem } from '../components/AgentComponents'
 import { SpawnForm } from '../components/SpawnForm'
@@ -382,6 +382,13 @@ function RootLayout() {
 
   const { projects, selectedProjectId, setProjects, setSelectedProjectId, setSystemStatus } = useProjectStore()
   const { agents, loading: agentsLoading, setAgents, addAgent, markRead } = useAgentStore()
+  const archived = useAgentStore((s) => s.archived)
+  const archivedLoading = useAgentStore((s) => s.archivedLoading)
+  const archivedHasMore = useAgentStore((s) => s.archivedHasMore)
+  const resetArchived = useAgentStore((s) => s.resetArchived)
+  const setArchivedLoading = useAgentStore((s) => s.setArchivedLoading)
+  const setArchivedFirstPage = useAgentStore((s) => s.setArchivedFirstPage)
+  const appendArchived = useAgentStore((s) => s.appendArchived)
   const dialog = useDialogStore()
   const navigate = useNavigate()
   const location = useLocation()
@@ -483,6 +490,47 @@ function RootLayout() {
   useEffect(() => {
     if (!currentProjectId) setAgents([])
   }, [currentProjectId, setAgents])
+
+  // Archived (killed/merged) history list. Loaded lazily and paginated for
+  // infinite scroll — it is historical, so unlike the live list it is not
+  // polled. Reset + load the first page whenever the selected project changes.
+  const archivedLoadingRef = useRef(false)
+  useEffect(() => {
+    resetArchived()
+    if (!currentProjectId) return
+    let cancelled = false
+    archivedLoadingRef.current = true
+    setArchivedLoading(true)
+    api.default.listArchivedAgents(currentProjectId, ARCHIVED_PAGE_SIZE, 0)
+      .then((page) => { if (!cancelled) setArchivedFirstPage(page) })
+      .catch(() => { if (!cancelled) setArchivedLoading(false) })
+      .finally(() => { archivedLoadingRef.current = false })
+    return () => { cancelled = true }
+  }, [currentProjectId, resetArchived, setArchivedLoading, setArchivedFirstPage])
+
+  const loadMoreArchived = useCallback(() => {
+    if (!currentProjectId || archivedLoadingRef.current) return
+    const { archivedHasMore: hasMore, archived: current } = useAgentStore.getState()
+    if (!hasMore) return
+    archivedLoadingRef.current = true
+    setArchivedLoading(true)
+    api.default.listArchivedAgents(currentProjectId, ARCHIVED_PAGE_SIZE, current.length)
+      .then((page) => appendArchived(page))
+      .catch(() => setArchivedLoading(false))
+      .finally(() => { archivedLoadingRef.current = false })
+  }, [currentProjectId, setArchivedLoading, appendArchived])
+
+  // Trigger the next archived page when the sentinel scrolls into view.
+  const archivedSentinelRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    const el = archivedSentinelRef.current
+    if (!el || !archivedHasMore) return
+    const obs = new IntersectionObserver((entries) => {
+      if (entries.some((e) => e.isIntersecting)) loadMoreArchived()
+    }, { rootMargin: '120px' })
+    obs.observe(el)
+    return () => obs.disconnect()
+  }, [archivedHasMore, loadMoreArchived, archived.length])
 
   // Auto-clear an agent's unread dot when it's the one currently open. Covers
   // both opening an unread agent (the click) and an already-open agent
@@ -892,6 +940,41 @@ function RootLayout() {
                   }}
                 />
               ))
+            )}
+
+            {/* Archived (killed/merged) history — read-only, paginated and loaded
+                lazily as it scrolls into view (infinite scroll). */}
+            {currentProjectId && archived.length > 0 && (
+              <>
+                <div className="flex items-center gap-2 px-1 pt-3 pb-1 mt-1">
+                  <span className="text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide">
+                    Archived
+                  </span>
+                  <span className="text-[10px] text-gray-300 dark:text-gray-600">{archived.length}</span>
+                  <div className="flex-1 h-px bg-gray-100 dark:bg-gray-700" />
+                </div>
+                {archived.map((agent) => (
+                  <AgentSidebarItem
+                    key={agent.id}
+                    agent={agent}
+                    selected={agent.id === selectedAgentId}
+                    onClick={() => {
+                      if (!currentProjectId) return
+                      if (agent.id === selectedAgentId) {
+                        navigate({ to: '/project/$projectId', params: { projectId: currentProjectId } })
+                      } else {
+                        navigate({ to: '/project/$projectId/agent/$agentId', params: { projectId: currentProjectId, agentId: agent.id } })
+                      }
+                    }}
+                  />
+                ))}
+              </>
+            )}
+            {/* Sentinel + spinner for archived infinite scroll. */}
+            {currentProjectId && archivedHasMore && (
+              <div ref={archivedSentinelRef} className="py-3 flex items-center justify-center">
+                {archivedLoading && <LoaderCircle className="w-4 h-4 text-gray-400 animate-spin" />}
+              </div>
             )}
           </div>
 

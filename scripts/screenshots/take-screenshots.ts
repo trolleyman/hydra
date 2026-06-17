@@ -72,6 +72,7 @@ function progress(msg: string) {
 function sectionFor(name: string): string {
   if (name.startsWith('repository')) return 'repository'
   if (name.startsWith('artifact')) return 'artifacts'
+  if (name.startsWith('archived')) return 'archived'
   if (name.startsWith('agent-')) return 'agent'
   if (name.startsWith('spawn')) return 'spawn'
   if (name === 'settings') return 'settings'
@@ -327,6 +328,10 @@ try {
       // icon on the page, so the :has() selector targets it unambiguously.
       { name: 'agent-rename', path: '/project/sim-project/agent/agent-1', viewportOnly: true, click: 'button:has(svg.lucide-pencil)' },
       { name: 'nested-folders', path: '/project/sim-project/agent/agent-3', scrollTo: 'Changes' },
+      // A read-only archived (killed/merged) agent page: no live terminal/diff,
+      // just the prompt and a (not-yet-wired) Resume affordance. The grayed
+      // "Archived" sidebar section itself is already visible in the `home` shot.
+      { name: 'archived-agent', path: '/project/sim-project/agent/archived-1' },
       // agent-1's diff carries simulated "screenshots" artifacts (mixed phone +
       // desktop shapes). Scroll to the "Changes" header — the artifacts panel
       // renders directly below it — and use a taller viewport so the wrapped

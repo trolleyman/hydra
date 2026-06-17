@@ -37,5 +37,13 @@ export type AgentResponse = {
      * True if the agent has changes the user has not yet looked at (set on a running→waiting/finished transition, cleared when the agent is opened).
      */
     has_unread_changes?: boolean;
+    /**
+     * True if the agent is a finished (killed/merged) head retained in the history list. Archived agents are read-only — they have no live session or worktree.
+     */
+    archived?: boolean;
+    /**
+     * How an archived agent ended ("killed" | "merged"); null/absent for active agents.
+     */
+    end_state?: string | null;
 };
 

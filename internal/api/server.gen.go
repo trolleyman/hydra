@@ -147,11 +147,17 @@ type AgentInputRequest struct {
 type AgentResponse struct {
 	AgentStatus *AgentStatusInfo `json:"agent_status,omitempty"`
 	AgentType   string           `json:"agent_type"`
-	BaseBranch  string           `json:"base_branch"`
-	BranchName  *string          `json:"branch_name"`
+
+	// Archived True if the agent is a finished (killed/merged) head retained in the history list. Archived agents are read-only — they have no live session or worktree.
+	Archived   *bool   `json:"archived,omitempty"`
+	BaseBranch string  `json:"base_branch"`
+	BranchName *string `json:"branch_name"`
 
 	// CreatedAt Unix timestamp (seconds) when the session was started; 0 if not started
 	CreatedAt *int64 `json:"created_at,omitempty"`
+
+	// EndState How an archived agent ended ("killed" | "merged"); null/absent for active agents.
+	EndState *string `json:"end_state"`
 
 	// Ephemeral If true, the agent is a throwaway test agent whose worktree and branch are torn down when it stops.
 	Ephemeral *bool `json:"ephemeral,omitempty"`
@@ -661,6 +667,15 @@ type UpdateAgentRequest struct {
 	Title string `json:"title"`
 }
 
+// ListArchivedAgentsParams defines parameters for ListArchivedAgents.
+type ListArchivedAgentsParams struct {
+	// Limit Maximum number of archived agents to return (page size). Omit or <=0 for all.
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Offset Number of archived agents to skip (for pagination).
+	Offset *int `form:"offset,omitempty" json:"offset,omitempty"`
+}
+
 // GetAgentArtifactsParams defines parameters for GetAgentArtifacts.
 type GetAgentArtifactsParams struct {
 	// BaseRef Left (base) commit SHA or ref. Defaults to the agent's base branch.
@@ -786,6 +801,9 @@ type ServerInterface interface {
 	// Spawn a new Hydra agent
 	// (POST /api/projects/{project_id}/agents)
 	SpawnAgent(w http.ResponseWriter, r *http.Request, projectId string)
+	// List archived (killed/merged) Hydra agents, newest first
+	// (GET /api/projects/{project_id}/agents/archived)
+	ListArchivedAgents(w http.ResponseWriter, r *http.Request, projectId string, params ListArchivedAgentsParams)
 	// Kill a Hydra agent by ID
 	// (DELETE /api/projects/{project_id}/agents/{id})
 	KillAgent(w http.ResponseWriter, r *http.Request, projectId string, id string)
@@ -982,6 +1000,50 @@ func (siw *ServerInterfaceWrapper) SpawnAgent(w http.ResponseWriter, r *http.Req
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.SpawnAgent(w, r, projectId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListArchivedAgents operation middleware
+func (siw *ServerInterfaceWrapper) ListArchivedAgents(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListArchivedAgentsParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "limit", r.URL.Query(), &params.Limit)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "offset", r.URL.Query(), &params.Offset)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "offset", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListArchivedAgents(w, r, projectId, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1903,6 +1965,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("DELETE "+options.BaseURL+"/api/projects/{project_id}", wrapper.RemoveProject)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents", wrapper.ListAgents)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents", wrapper.SpawnAgent)
+	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/archived", wrapper.ListArchivedAgents)
 	m.HandleFunc("DELETE "+options.BaseURL+"/api/projects/{project_id}/agents/{id}", wrapper.KillAgent)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/{id}", wrapper.GetAgent)
 	m.HandleFunc("PATCH "+options.BaseURL+"/api/projects/{project_id}/agents/{id}", wrapper.UpdateAgent)
@@ -2150,6 +2213,42 @@ func (response SpawnAgent404JSONResponse) VisitSpawnAgentResponse(w http.Respons
 type SpawnAgent500JSONResponse ErrorResponse
 
 func (response SpawnAgent500JSONResponse) VisitSpawnAgentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ListArchivedAgentsRequestObject struct {
+	ProjectId string `json:"project_id"`
+	Params    ListArchivedAgentsParams
+}
+
+type ListArchivedAgentsResponseObject interface {
+	VisitListArchivedAgentsResponse(w http.ResponseWriter) error
+}
+
+type ListArchivedAgents200JSONResponse []AgentResponse
+
+func (response ListArchivedAgents200JSONResponse) VisitListArchivedAgentsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ListArchivedAgents404JSONResponse ErrorResponse
+
+func (response ListArchivedAgents404JSONResponse) VisitListArchivedAgentsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ListArchivedAgents500JSONResponse ErrorResponse
+
+func (response ListArchivedAgents500JSONResponse) VisitListArchivedAgentsResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(500)
 
@@ -2947,6 +3046,9 @@ type StrictServerInterface interface {
 	// Spawn a new Hydra agent
 	// (POST /api/projects/{project_id}/agents)
 	SpawnAgent(ctx context.Context, request SpawnAgentRequestObject) (SpawnAgentResponseObject, error)
+	// List archived (killed/merged) Hydra agents, newest first
+	// (GET /api/projects/{project_id}/agents/archived)
+	ListArchivedAgents(ctx context.Context, request ListArchivedAgentsRequestObject) (ListArchivedAgentsResponseObject, error)
 	// Kill a Hydra agent by ID
 	// (DELETE /api/projects/{project_id}/agents/{id})
 	KillAgent(ctx context.Context, request KillAgentRequestObject) (KillAgentResponseObject, error)
@@ -3222,6 +3324,33 @@ func (sh *strictHandler) SpawnAgent(w http.ResponseWriter, r *http.Request, proj
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(SpawnAgentResponseObject); ok {
 		if err := validResponse.VisitSpawnAgentResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListArchivedAgents operation middleware
+func (sh *strictHandler) ListArchivedAgents(w http.ResponseWriter, r *http.Request, projectId string, params ListArchivedAgentsParams) {
+	var request ListArchivedAgentsRequestObject
+
+	request.ProjectId = projectId
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListArchivedAgents(ctx, request.(ListArchivedAgentsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListArchivedAgents")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListArchivedAgentsResponseObject); ok {
+		if err := validResponse.VisitListArchivedAgentsResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

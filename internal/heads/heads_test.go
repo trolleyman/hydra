@@ -39,7 +39,7 @@ func TestKillHeadNoLock_RemovesLogs(t *testing.T) {
 	}
 
 	// Call KillHeadNoLock with nil cli and store
-	err := KillHeadNoLock(context.Background(), nil, nil, head)
+	err := KillHeadNoLock(context.Background(), nil, nil, head, "killed")
 	if err != nil {
 		t.Fatalf("KillHeadNoLock failed: %v", err)
 	}

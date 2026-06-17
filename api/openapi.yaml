@@ -282,6 +282,52 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /api/projects/{project_id}/agents/archived:
+    get:
+      summary: List archived (killed/merged) Hydra agents, newest first
+      description: Returns a page of finished agents retained for the browsable history list. Supports limit/offset for infinite scroll.
+      operationId: listArchivedAgents
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            type: string
+          description: Project ID to scope the archived agent list
+        - in: query
+          name: limit
+          required: false
+          schema:
+            type: integer
+          description: Maximum number of archived agents to return (page size). Omit or <=0 for all.
+        - in: query
+          name: offset
+          required: false
+          schema:
+            type: integer
+          description: Number of archived agents to skip (for pagination).
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AgentResponse'
+        '404':
+          description: Project Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /api/projects/{project_id}/agents/{id}/restart:
     post:
       summary: Restart a Hydra agent (kill and respawn with the same prompt)
@@ -1260,6 +1306,13 @@ components:
         has_unread_changes:
           type: boolean
           description: True if the agent has changes the user has not yet looked at (set on a running→waiting/finished transition, cleared when the agent is opened).
+        archived:
+          type: boolean
+          description: True if the agent is a finished (killed/merged) head retained in the history list. Archived agents are read-only — they have no live session or worktree.
+        end_state:
+          type: string
+          nullable: true
+          description: How an archived agent ended ("killed" | "merged"); null/absent for active agents.
 
     CommitInfo:
       type: object
