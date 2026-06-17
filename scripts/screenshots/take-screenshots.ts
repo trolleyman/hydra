@@ -328,11 +328,9 @@ try {
       // icon on the page, so the :has() selector targets it unambiguously.
       { name: 'agent-rename', path: '/project/sim-project/agent/agent-1', viewportOnly: true, click: 'button:has(svg.lucide-pencil)' },
       { name: 'nested-folders', path: '/project/sim-project/agent/agent-3', scrollTo: 'Changes' },
-      // The browsable history of finished agents: the sidebar shows live agents
-      // followed by a grayed "Archived" section (killed/merged), loaded lazily.
-      { name: 'archived-agents', path: '/project/sim-project/' },
-      // A read-only archived agent page: no live terminal/diff, just the prompt
-      // and a (not-yet-wired) Resume affordance.
+      // A read-only archived (killed/merged) agent page: no live terminal/diff,
+      // just the prompt and a (not-yet-wired) Resume affordance. The grayed
+      // "Archived" sidebar section itself is already visible in the `home` shot.
       { name: 'archived-agent', path: '/project/sim-project/agent/archived-1' },
       // agent-1's diff carries simulated "screenshots" artifacts (mixed phone +
       // desktop shapes). Scroll to the "Changes" header — the artifacts panel
