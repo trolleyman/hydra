@@ -6,7 +6,7 @@ import { useAgentStore, ARCHIVED_PAGE_SIZE } from '../stores/agentStore'
 import type { ProjectInfo, AgentResponse } from '../api'
 import { ApiError, ErrorResponse } from '../api'
 import { formatError } from '../api/format_error'
-import { Sun, Moon, Monitor, ChevronDown, Folder, FolderGit2, FolderOpen, Plus, Settings, Check, X, LoaderCircle } from 'lucide-react'
+import { Sun, Moon, Monitor, ChevronDown, ChevronRight, Folder, FolderGit2, FolderOpen, Plus, Settings, Check, X, LoaderCircle } from 'lucide-react'
 import { folderPickerAvailable, openFolderPicker } from '../api/folderPicker'
 import { AgentSidebarItem } from '../components/AgentComponents'
 import { SpawnForm } from '../components/SpawnForm'
@@ -420,6 +420,7 @@ function RootLayout() {
     return SIDEBAR_DEFAULT
   })
   const sidebarWidthRef = useRef(sidebarWidth)
+  const [archivedCollapsed, setArchivedCollapsed] = useState(false)
 
   const handleSidebarResizeStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
@@ -883,15 +884,31 @@ function RootLayout() {
           {/* Repository view — sits between the spawn box and the agents list */}
           <div className="px-2 pt-2 pb-1 border-b border-gray-100 dark:border-gray-700">
             {currentProjectId ? (
-              <Link
-                to="/project/$projectId/repository"
-                params={{ projectId: currentProjectId }}
-                className="flex items-center gap-2 px-2.5 py-2 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-                activeProps={{ className: 'flex items-center gap-2 px-2.5 py-2 rounded-lg text-sm font-medium bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300' }}
-              >
-                <FolderGit2 className="w-4 h-4 shrink-0" />
-                Repository
-              </Link>
+              (() => {
+                const repositoryActive = /\/repository(\/|$)/.test(location.pathname)
+                return (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (repositoryActive) {
+                        // Toggle off: clicking the active Repository button returns
+                        // to the project home screen, mirroring agent deselection.
+                        navigate({ to: '/project/$projectId', params: { projectId: currentProjectId } })
+                      } else {
+                        navigate({ to: '/project/$projectId/repository', params: { projectId: currentProjectId } })
+                      }
+                    }}
+                    className={
+                      repositoryActive
+                        ? 'w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-sm font-medium bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
+                        : 'w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors'
+                    }
+                  >
+                    <FolderGit2 className="w-4 h-4 shrink-0" />
+                    Repository
+                  </button>
+                )
+              })()
             ) : (
               <span className="flex items-center gap-2 px-2.5 py-2 rounded-lg text-sm font-medium text-gray-400 dark:text-gray-600 cursor-not-allowed">
                 <FolderGit2 className="w-4 h-4 shrink-0" />
@@ -901,7 +918,7 @@ function RootLayout() {
           </div>
 
           <div className="px-3 py-3 border-b border-gray-100 dark:border-gray-700">
-            <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">
+            <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 tracking-wide">
               Agents
             </span>
             <span className="ml-2 text-xs text-gray-400 dark:text-gray-500">({filteredAgents.length})</span>
@@ -936,32 +953,42 @@ function RootLayout() {
                 lazily as it scrolls into view (infinite scroll). */}
             {currentProjectId && archived.length > 0 && (
               <>
-                <div className="flex items-center gap-2 px-1 pt-3 pb-1 mt-1">
-                  <span className="text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide">
+                <button
+                  type="button"
+                  onClick={() => setArchivedCollapsed((c) => !c)}
+                  className="w-full flex items-center gap-1.5 px-1 pt-3 pb-1 mt-1 group"
+                >
+                  {archivedCollapsed ? (
+                    <ChevronRight className="w-3 h-3 text-gray-400 dark:text-gray-500 shrink-0" />
+                  ) : (
+                    <ChevronDown className="w-3 h-3 text-gray-400 dark:text-gray-500 shrink-0" />
+                  )}
+                  <span className="text-[10px] font-semibold text-gray-400 dark:text-gray-500 tracking-wide">
                     Archived
                   </span>
                   <span className="text-[10px] text-gray-300 dark:text-gray-600">{archived.length}</span>
                   <div className="flex-1 h-px bg-gray-100 dark:bg-gray-700" />
-                </div>
-                {archived.map((agent) => (
-                  <AgentSidebarItem
-                    key={agent.id}
-                    agent={agent}
-                    selected={agent.id === selectedAgentId}
-                    onClick={() => {
-                      if (!currentProjectId) return
-                      if (agent.id === selectedAgentId) {
-                        navigate({ to: '/project/$projectId', params: { projectId: currentProjectId } })
-                      } else {
-                        navigate({ to: '/project/$projectId/agent/$agentId', params: { projectId: currentProjectId, agentId: agent.id } })
-                      }
-                    }}
-                  />
-                ))}
+                </button>
+                {!archivedCollapsed &&
+                  archived.map((agent) => (
+                    <AgentSidebarItem
+                      key={agent.id}
+                      agent={agent}
+                      selected={agent.id === selectedAgentId}
+                      onClick={() => {
+                        if (!currentProjectId) return
+                        if (agent.id === selectedAgentId) {
+                          navigate({ to: '/project/$projectId', params: { projectId: currentProjectId } })
+                        } else {
+                          navigate({ to: '/project/$projectId/agent/$agentId', params: { projectId: currentProjectId, agentId: agent.id } })
+                        }
+                      }}
+                    />
+                  ))}
               </>
             )}
             {/* Sentinel + spinner for archived infinite scroll. */}
-            {currentProjectId && archivedHasMore && (
+            {currentProjectId && !archivedCollapsed && archivedHasMore && (
               <div ref={archivedSentinelRef} className="py-3 flex items-center justify-center">
                 {archivedLoading && <LoaderCircle className="w-4 h-4 text-gray-400 animate-spin" />}
               </div>

@@ -1282,7 +1282,7 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
           or not tags are present — the filter loading in must not jump the layout. */}
       <div className="flex flex-wrap items-center gap-2 mb-2 min-h-[1.625rem]">
         <ImageIcon className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400" />
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Artifacts</h3>
+        <h3 className="text-xs font-semibold tracking-wide text-gray-500 dark:text-gray-400">Artifacts</h3>
         {generatingCount > 0 && (
           <span className="flex items-center gap-1.5 text-[11px] font-normal text-gray-400 dark:text-gray-500">
             <LoaderCircle className="w-3 h-3 animate-spin" />
