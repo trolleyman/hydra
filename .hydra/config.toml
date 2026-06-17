@@ -56,8 +56,11 @@ writable_paths = ["~/.cache/go-build", "~/.go/pkg", "~/.bun/install/cache", "~/.
 # PNGs so visual changes show up side-by-side in the diff viewer. The script
 # builds the checkout's frontend, boots `hydra server --simulation` and
 # screenshots several pages (home, the repository browser, agent diff views).
-# Building Go + the frontend is slow, so allow a generous timeout (results are
-# cached per resolved ref).
+# It also records the repository view's loading spinner to a lossless,
+# byte-deterministic .webm (project-local ffmpeg-static, libvpx-vp9 -lossless 1
+# in bitexact mode) so the video diff viewer is exercised too — see the [[artifacts]]
+# docs above on why video must be lossless. Building Go + the frontend is slow, so
+# allow a generous timeout (results are cached per resolved ref).
 name = "screenshots"
 command = "cd scripts/screenshots && bun install && bun take-screenshots.ts"
 timeout_sec = 900

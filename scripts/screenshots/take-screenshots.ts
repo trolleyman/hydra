@@ -33,6 +33,7 @@ import { mkdtempSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chromium } from 'playwright'
+import ffmpegStatic from 'ffmpeg-static'
 
 // A fixed instant the browser clock is pinned to for every capture, so any
 // duration the UI derives from "now" — an agent's "spawned X ago", the artifacts
@@ -251,6 +252,14 @@ try {
       // opening tooltip room. Captures the viewport (the tooltip is a fixed
       // portal). Only meaningful on the artifacts (agent-1) page.
       artifactInfo?: boolean
+      // Expands the "screenshots" card, seeks its loader-animation.webm pair to
+      // the given time (paused), and pins that row to the top — so the capture
+      // shows the video diff viewer (VideoDiffView) directly rather than buried
+      // in a collapsed "N changed" card. Captures the viewport. The seek lands a
+      // mid-clip frame so the before/after progress bars differ; the page's
+      // play() no-op keeps the pair paused so the frame is byte-stable. Only
+      // meaningful on the artifacts (agent-1) page, paired with imageDiffMode.
+      videoDiff?: { seek: number }
     }[] = [
       { name: 'home', path: '/' },
       // The unread-changes indicator: the agent sidebar shows an amber dot on the
@@ -423,6 +432,29 @@ try {
         viewport: { width: 1280, height: 1280 },
         imageDiffMode: 'side-by-side',
         expandArtifact: 'components',
+      },
+      // The video diff viewer (VideoDiffView) shown directly: agent-1's
+      // "screenshots" set carries a .webm artifact (loader-animation.webm) the
+      // panel routes to the video viewer instead of the image one. It otherwise
+      // only renders inside the collapsed screenshots card, so these two shots
+      // expand it and pin the .webm row to the top. The before/after pair is
+      // seeked to a mid-clip frame (paused) so the progress bars differ. Two
+      // shots document the two most distinct video modes:
+      //   side-by-side — the Before / After clips next to each other + transport
+      //   difference   — the per-frame pixel diff (changed pixels painted magenta)
+      {
+        name: 'artifact-video',
+        path: '/project/sim-project/agent/agent-1',
+        viewport: { width: 1280, height: 1000 },
+        imageDiffMode: 'side-by-side',
+        videoDiff: { seek: 1.2 },
+      },
+      {
+        name: 'artifact-video-diff',
+        path: '/project/sim-project/agent/agent-1',
+        viewport: { width: 1280, height: 1000 },
+        imageDiffMode: 'difference',
+        videoDiff: { seek: 1.2 },
       },
     ]
     // Capture every page in both themes. Dark mode has its own colours (e.g.
@@ -646,6 +678,57 @@ try {
           }, pg.expandArtifact)
           await settle(page)
         }
+        if (pg.videoDiff) {
+          // Expand the "screenshots" card so its .webm row mounts, seek the
+          // before/after pair to the requested frame, then pin the row to the top.
+          await page.waitForFunction(() =>
+            Array.from(document.querySelectorAll('button')).some((b) => b.textContent?.includes('screenshots')),
+          )
+          await page.evaluate(() => {
+            const btn = Array.from(document.querySelectorAll('button')).find((b) => b.textContent?.includes('screenshots'))
+            btn?.click()
+          })
+          // The video viewer mounts <video> elements once the card expands. Wait
+          // for them to be attached, not visible: the difference mode keeps its
+          // videos hidden (only the diff canvas shows), so a visibility wait would
+          // time out there.
+          await page.waitForSelector('video', { state: 'attached' })
+          await settle(page)
+          // Seek every video to the shared time and wait for the frame to land.
+          // play() is a no-op (init script), so the pair stays paused on the
+          // seeked frame, which is identical across renders (byte-stable). The
+          // fallback timeout must exceed 4000ms — the init script collapses
+          // shorter timers to 0, which would resolve before the seek completes.
+          await page.evaluate(async (t) => {
+            const vids = Array.from(document.querySelectorAll('video'))
+            await Promise.all(vids.map((v) => new Promise<void>((res) => {
+              v.pause()
+              if (Math.abs(v.currentTime - t) < 0.001) return res()
+              const done = () => { v.removeEventListener('seeked', done); res() }
+              v.addEventListener('seeked', done)
+              try { v.currentTime = t } catch { res() }
+              setTimeout(res, 5000)
+            })))
+          }, pg.videoDiff.seek)
+          // Pin the .webm file row to the top of the scroll container (same
+          // sticky-aware offset technique as scrollTo/expandArtifact).
+          await page.evaluate(() => {
+            const span = Array.from(document.querySelectorAll('span')).find((s) => s.textContent?.trim() === 'loader-animation.webm')
+            const row = span?.closest('div.rounded-lg') as HTMLElement | null | undefined
+            const cont = row?.closest('.overflow-auto') as HTMLElement | null | undefined
+            if (row && cont) {
+              const offset = row.getBoundingClientRect().top - cont.getBoundingClientRect().top + cont.scrollTop
+              cont.scrollTop = offset - 96
+            }
+          })
+          // The difference mode redraws its pixel-diff canvas on a throttled rAF
+          // loop; give it real time (playwright timers, not the page's frozen
+          // setTimeout) to draw the seeked frame at least once. Once drawn the
+          // pixels are identical every iteration (the pair is paused), so the
+          // shot stays byte-stable.
+          await page.waitForTimeout(400)
+          await settle(page)
+        }
         if (pg.artifactInfo) {
           // Place the "Artifacts" heading at mid-viewport so the tooltip — which
           // opens upward from the (i) icon into a fixed portal — has room above it,
@@ -677,7 +760,7 @@ try {
         // Scrolled pages, the lightbox (a fixed, viewport-filling overlay),
         // header-focused shots and the hovered info tooltip (a fixed portal)
         // capture the viewport; others capture the full page.
-        await page.screenshot({ path: out, fullPage: !pg.scrollTo && !pg.attachImages && !pg.viewportOnly && !pg.artifactInfo })
+        await page.screenshot({ path: out, fullPage: !pg.scrollTo && !pg.attachImages && !pg.viewportOnly && !pg.artifactInfo && !pg.videoDiff })
         // Emit the tag sidecar (<file>.png.meta, {"tags":[...]}) that the diff
         // viewer reads (internal/artifacts readTagsSidecar). theme + viewport +
         // section are scoped "category::value" labels — the viewer keeps one
@@ -707,6 +790,84 @@ try {
     }
     progress(`capturing ${totalShots} screenshots (${concurrency} at a time)`)
     await Promise.all(Array.from({ length: concurrency }, () => worker()))
+
+    // Record a real animated UI element to a lossless .webm so the screenshots
+    // artifact also exercises the video diff viewer (web/src/components/
+    // VideoDiffView.tsx) — the moving-picture twin of the PNG shots. We capture
+    // the repository view's loading spinner (a LoaderCircle with Tailwind
+    // animate-spin) over one full rotation.
+    //
+    // The diff viewer compares video by byte hash (it can't decode pixels
+    // server-side), so the .webm MUST be byte-reproducible or every comparison
+    // would read "modified". Two sources of nondeterminism are removed:
+    //   * The spin is a CSS animation, so we DON'T let it free-run on the wall
+    //     clock. Pausing it via the Web Animations API doesn't stick (a style
+    //     recalc resets the CSS animation-play-state back to running), so instead
+    //     we kill all CSS animation and drive the rotation ourselves with an
+    //     explicit inline transform per frame — animate-spin IS a rotate, so this
+    //     reproduces the exact frames the animation would show, but deterministically.
+    //   * ffmpeg's libvpx-vp9 -lossless encode is deterministic for identical
+    //     input frames, but the WebM muxer stamps a wall-clock date + version
+    //     strings by default; -flags/-fflags +bitexact drop those. yuv444p keeps
+    //     full chroma (no subsampling), so the encode is genuinely lossless.
+    // (Verified: two full runs produce byte-identical .webm output.)
+    const SPIN_FRAMES = 12 // one rotation at 12fps → a 1s clip
+    const ffmpegBin = ffmpegStatic as unknown as string
+    const recordSpinner = async (theme: (typeof themes)[number]) => {
+      const ctx = await browser.newContext({ viewport: { width: 900, height: 600 }, deviceScaleFactor: 1, colorScheme: theme })
+      await ctx.clock.setFixedTime(SIM_NOW)
+      await ctx.addInitScript((mode) => { try { localStorage.setItem('hydra-theme-mode', mode) } catch { /* ignore */ } }, theme)
+      await ctx.addInitScript(() => { try { window.localStorage.setItem('hydra-trusted-projects', '["sim-project"]') } catch { /* ignore */ } })
+      const page = await ctx.newPage()
+      try {
+        // Hold the file-contents request so the repository view stays in its
+        // loading state (centered spinner) — same trick as the repository-loading
+        // shot. NOTE: no animation-killing stylesheet here; we need the spin.
+        await page.route('**/repository/file*', () => { /* hold open */ })
+        await page.goto(base + '/project/sim-project/repository', { waitUntil: 'domcontentloaded' })
+        const spinner = page.locator('svg.lucide-loader-circle.h-5')
+        await spinner.waitFor()
+        await page.evaluate(async () => { if (document.fonts && document.fonts.ready) await document.fonts.ready })
+        // Kill every CSS animation/transition so nothing rotates on the wall
+        // clock; we set the spinner's rotation explicitly per frame below.
+        await page.addStyleTag({ content: '*,*::before,*::after{animation:none!important;transition:none!important}' })
+        // Square clip centered on the spinner: the spinner on the loading pane's
+        // background. The box is deterministic (fixed layout), so the clip is too.
+        const box = await spinner.boundingBox()
+        if (!box) throw new Error('loading spinner has no bounding box')
+        const side = 120
+        const clip = {
+          x: Math.round(box.x + box.width / 2 - side / 2),
+          y: Math.round(box.y + box.height / 2 - side / 2),
+          width: side,
+          height: side,
+        }
+        const tmp = mkdtempSync(join(tmpdir(), 'hydra-spin-'))
+        for (let i = 0; i < SPIN_FRAMES; i++) {
+          const deg = (i / SPIN_FRAMES) * 360
+          await spinner.evaluate((el, d) => { (el as SVGElement).style.transform = `rotate(${d}deg)` }, deg)
+          // Commit the transform before the shot (two rAFs, like settle()).
+          await page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))))
+          await page.screenshot({ path: join(tmp, `f${String(i).padStart(3, '0')}.png`), clip })
+        }
+        const out = join(OUT, `loading-spinner-${theme}.webm`)
+        const r = spawnSync(ffmpegBin, [
+          '-y', '-nostdin', '-loglevel', 'error',
+          '-framerate', '12', '-i', join(tmp, 'f%03d.png'),
+          '-c:v', 'libvpx-vp9', '-lossless', '1', '-pix_fmt', 'yuv444p',
+          '-g', '12', '-threads', '1', '-an',
+          '-flags', '+bitexact', '-fflags', '+bitexact',
+          out,
+        ], { encoding: 'utf8' })
+        if (r.status !== 0) throw new Error(`ffmpeg failed (${r.status}): ${r.stderr}`)
+        writeFileSync(`${out}.meta`, JSON.stringify({ tags: [`theme::${theme}`, 'viewport::desktop', 'section::repository'] }))
+        console.log(`wrote ${out}`)
+      } finally {
+        await ctx.close()
+      }
+    }
+    progress('recording spinner video')
+    for (const theme of themes) await recordSpinner(theme)
   } finally {
     await browser.close()
   }
