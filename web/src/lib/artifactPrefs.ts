@@ -62,11 +62,13 @@ export function saveArtifactPrefs(
   writeLocal(artifactPrefsKey(projectId, agentId, name), JSON.stringify(value))
 }
 
-// The artifact tag filter, shared across an agent's cards. `scoped` maps a label
-// category (e.g. "theme") to the selected values (e.g. ["dark", "light"]) — a
-// file matches the category if it carries any one of them; an absent or empty
-// list means "all". `free` is the set of selected free-form tags. An empty
-// filter (no scoped values, no free tags) means "show everything".
+// The artifact tag filter, shared across an agent's cards. Every value is shown
+// (every checkbox on) by default; the filter records only what the user has
+// turned OFF. `scoped` maps a label category (e.g. "theme") to its hidden values
+// (e.g. ["dark"]) — a file is dropped if its value for that category is among
+// them; an absent or empty list means "nothing hidden" (show all). `free` is the
+// set of hidden free-form tags. An empty filter (no scoped values, no free tags)
+// means "show everything".
 export type ArtifactTagFilter = {
   scoped: Record<string, string[]>
   free: string[]

@@ -29,9 +29,38 @@ function PromptBlock({ prompt }: { prompt: string }) {
 // retained in the history. There is no live session, so there is no terminal
 // (just a grayed placeholder) and no diff/kill/merge/restart actions. The
 // "Resume" affordance is shown but not yet wired — see PLAN #49.
-function ArchivedAgentDetail({ agent }: { agent: AgentResponse }) {
+function ArchivedAgentDetail({ agent, projectId, onPurged }: { agent: AgentResponse; projectId: string | null; onPurged: (id: string) => void }) {
   const [copied, setCopied] = useState(false)
+  const [purging, setPurging] = useState(false)
   const endBadge = archivedEndStateBadge(agent.end_state)
+
+  function handlePurge() {
+    useDialogStore.getState().show({
+      title: 'Delete agent permanently',
+      message:
+        `Permanently delete "${agent.title || agent.id}"? This erases its record from the ` +
+        `history list and deletes its Claude session history. This cannot be undone.`,
+      type: 'warning',
+      showCancel: true,
+      onConfirm: async () => {
+        setPurging(true)
+        try {
+          await api.default.purgeAgent(projectId ?? '', agent.id)
+          // Drop it from the history list and navigate off the now-dead URL.
+          useAgentStore.getState().removeArchived(agent.id)
+          onPurged(agent.id)
+        } catch (e) {
+          useDialogStore.getState().show({
+            title: 'Delete Failed',
+            message: formatError(e),
+            type: 'error',
+          })
+        } finally {
+          setPurging(false)
+        }
+      },
+    })
+  }
   const agentTypeClass =
     agent.agent_type === 'claude'
       ? 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300'
@@ -104,15 +133,27 @@ function ArchivedAgentDetail({ agent }: { agent: AgentResponse }) {
             This agent was {endBadge.label}. Its session, worktree and branch were removed,
             so there is no live terminal or diff to show.
           </div>
-          <Tooltip content="Resuming archived agents isn't available yet (see PLAN #49)">
-            <button
-              disabled
-              className="mt-1 inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md border border-gray-300 text-gray-400 dark:border-gray-600 dark:text-gray-500 cursor-not-allowed"
-            >
-              <RotateCcw className="w-3.5 h-3.5" />
-              Resume agent
-            </button>
-          </Tooltip>
+          <div className="mt-1 flex items-center gap-2">
+            <Tooltip content="Resuming archived agents isn't available yet (see PLAN #49)">
+              <button
+                disabled
+                className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md border border-gray-300 text-gray-400 dark:border-gray-600 dark:text-gray-500 cursor-not-allowed"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                Resume agent
+              </button>
+            </Tooltip>
+            <Tooltip content="Permanently delete this agent and its Claude session history">
+              <button
+                onClick={handlePurge}
+                disabled={purging}
+                className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md border border-red-300 text-red-600 hover:bg-red-50 dark:border-red-900/60 dark:text-red-400 dark:hover:bg-red-900/20 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {purging ? <LoaderCircle className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                Delete permanently
+              </button>
+            </Tooltip>
+          </div>
         </div>
       </div>
     </div>
@@ -372,7 +413,7 @@ export function AgentDetail({
   // terminal/diff. Placed after all hooks above so hook order stays stable when
   // the same mounted component switches between a live and an archived agent.
   if (agent.archived) {
-    return <ArchivedAgentDetail agent={agent} />
+    return <ArchivedAgentDetail agent={agent} projectId={projectId} onPurged={onKilled} />
   }
 
   return (

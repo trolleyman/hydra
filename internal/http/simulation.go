@@ -82,8 +82,8 @@ func (s *SimulationServer) GetClaudeUsage(w http.ResponseWriter, r *http.Request
 }
 
 func (s *SimulationServer) ListProjects(w http.ResponseWriter, r *http.Request) {
-	simUnread := 1     // matches the one unread agent in ListAgents
-	otherUnread := 3   // updates waiting in a project you're not looking at
+	simUnread := 1   // matches the one unread agent in ListAgents
+	otherUnread := 3 // updates waiting in a project you're not looking at
 	resp := api.ListProjects200JSONResponse{
 		{
 			Id:          "sim-project",
@@ -288,6 +288,10 @@ func (s *SimulationServer) SpawnAgent(w http.ResponseWriter, r *http.Request, pr
 }
 
 func (s *SimulationServer) KillAgent(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *SimulationServer) PurgeAgent(w http.ResponseWriter, r *http.Request, projectId string, id string) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -1359,16 +1363,18 @@ func (s *SimulationServer) HandleTerminalWS(w http.ResponseWriter, r *http.Reque
 	conn := &safeConn{Conn: rawConn}
 	defer conn.Close()
 
-	// 1. Simulate sandbox startup
+	// 1. Simulate sandbox startup. Emit the whole boot transcript in one burst
+	// rather than pacing it with sleeps: the screenshot generator captures this
+	// terminal, and a wall-clock-paced stream means a capture catches a
+	// nondeterministic number of "Step N/3" lines depending on how long its
+	// navigate+settle happened to take — which shows up as a spurious diff
+	// between the before/after renders. Writing every line up front makes the
+	// captured terminal a fixed, complete transcript.
 	sendStatusUpdate(conn, "building")
 	_ = conn.WriteMessage(websocket.BinaryMessage, []byte("\x1b[32m[Simulation] Starting agent "+agentID+"...\x1b[0m\r\n"))
-	time.Sleep(1 * time.Second)
 	_ = conn.WriteMessage(websocket.BinaryMessage, []byte("Step 1/3: Creating git worktree...\r\n"))
-	time.Sleep(1 * time.Second)
 	_ = conn.WriteMessage(websocket.BinaryMessage, []byte("Step 2/3: Preparing sandbox...\r\n"))
-	time.Sleep(1 * time.Second)
 	_ = conn.WriteMessage(websocket.BinaryMessage, []byte("Step 3/3: Launching agent session...\r\n"))
-	time.Sleep(500 * time.Millisecond)
 	_ = conn.WriteMessage(websocket.BinaryMessage, []byte("\x1b[32mSimulated agent ready.\x1b[0m\r\n\r\n"))
 
 	// 2. Transition to Running

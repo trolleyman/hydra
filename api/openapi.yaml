@@ -1061,6 +1061,50 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /api/projects/{project_id}/agents/{id}/purge:
+    delete:
+      summary: Permanently delete an agent (kill it and erase every record, including its Claude session history)
+      description: >-
+        Irreversibly removes the agent: stops any live session, removes its
+        worktree/branch and on-disk status files, deletes its Claude
+        session-history directory, and hard-deletes the database record so it no
+        longer appears even in the archived-history list. Works on both live and
+        archived agents.
+      operationId: purgeAgent
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            type: string
+          description: Project ID
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: No Content (Agent permanently deleted)
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Conflict (operation already in progress)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
 components:
   schemas:
     ErrorResponse:

@@ -376,9 +376,9 @@ function ImageDiffView({ left, right, mode }: { left?: string | null; right?: st
 // A file's tags come from a sibling JSON sidecar (<file>.meta) the artifact
 // script writes; the backend normalizes them (see internal/artifacts). A
 // "category::value" tag is a GitLab-style scoped label — at most one value per
-// category on a given file — which the filter renders as a segmented control
-// where any number of values can be toggled on (matching any of them); a plain
-// tag (no "::") is free-form, rendered as a toggle chip.
+// category on a given file. Every value's checkbox is ON by default (show all);
+// the filter records only what the user turns OFF, hiding files that carry a
+// hidden value. A plain tag (no "::") is free-form and works the same way.
 
 // parseScopedTag splits "category::value" into its parts, or returns null for a
 // free-form tag. Mirrors the backend's split (first "::", non-empty halves).
@@ -441,31 +441,34 @@ function collectTags(sets: ArtifactSet[]): CollectedTags {
   }
 }
 
-// filterIsActive reports whether the filter would hide anything (any scoped
-// category with a selected value, or any free tag selected).
+// filterIsActive reports whether the filter would hide anything — i.e. any
+// scoped category or the free-form group has at least one value turned off.
 function filterIsActive(filter: ArtifactTagFilter): boolean {
-  return Object.values(filter.scoped).some((vals) => vals.length > 0) || filter.free.length > 0
+  return Object.values(filter.scoped).some((off) => off.length > 0) || filter.free.length > 0
 }
 
-// fileMatchesFilter reports whether a file passes the active filter: for every
-// scoped category with selections it must carry at least one of the selected
-// values (an OR within a category; files lacking that category are excluded),
-// and it must include every selected free tag (an AND across categories/tags).
+// fileMatchesFilter reports whether a file passes the filter. Each array lists
+// the values turned OFF. For a scoped category, the file is dropped if its value
+// for that category is hidden — files lacking the category carry none of the
+// hidden values, so they're unaffected. For free-form tags, the file is dropped
+// only if every free tag it carries is hidden (a file tagged both an on and an
+// off tag stays; an untagged file is never dropped on this axis).
 function fileMatchesFilter(file: ArtifactFile, filter: ArtifactTagFilter): boolean {
   const tags = file.tags ?? []
-  for (const [cat, vals] of Object.entries(filter.scoped)) {
-    if (vals.length === 0) continue
+  for (const [cat, off] of Object.entries(filter.scoped)) {
+    if (off.length === 0) continue
     // The built-in "type" scope matches the file's intrinsic media type, not a
-    // tag it carries; every other scope OR-matches the file's `category::value`
-    // tags (a file lacking that category is excluded).
+    // tag it carries; like every other scope, the file is dropped when its
+    // value for that category is turned off.
     if (cat === TYPE_CATEGORY) {
-      if (!vals.includes(fileMediaType(file))) return false
-    } else if (!vals.some((v) => tags.includes(`${cat}::${v}`))) {
+      if (off.includes(fileMediaType(file))) return false
+    } else if (off.some((v) => tags.includes(`${cat}::${v}`))) {
       return false
     }
   }
-  for (const t of filter.free) {
-    if (!tags.includes(t)) return false
+  if (filter.free.length > 0) {
+    const freeTags = tags.filter((t) => !parseScopedTag(t))
+    if (freeTags.length > 0 && freeTags.every((t) => filter.free.includes(t))) return false
   }
   return true
 }
@@ -487,26 +490,29 @@ function TagBadge({ tag }: { tag: string }) {
 
 // TagScopeFilter renders one filter button for a single tag scope, so each
 // scope gets its own trigger on the Artifacts header instead of one combined
-// menu. A scoped category (kind 'scoped') uses the category name as its label
-// and lists its values: an "all" reset row (filled when nothing's chosen) plus
-// a checkbox per value, OR-matched so a file passes if it carries any checked
-// value. The free-form group (kind 'free') is labelled "tags" and AND-matches
-// its checked tags. The count badge and active (blue) styling mirror the rest
-// of the bar; selection is shared across every card via the parent's filter
-// state, and an empty selection on a scope means "don't constrain on it".
+// menu. The button's label is the category name (or "tags" for the free-form
+// group); the dropdown lists a checkbox per value, every one ON by default. The
+// `off` prop is the set of values the user has turned off (a file is hidden if
+// it carries one). A fixed header row carries "all" (top-left, re-check
+// everything) and "clear" (top-right, uncheck everything) so the menu's height
+// never changes as you select. Shift-clicking a value isolates it (clears the
+// others). The count badge shows how many values are hidden; selection is shared
+// across every card via the parent's filter state.
 function TagScopeFilter({
-  kind,
   label,
   values,
-  selected,
+  off,
   onToggle,
+  onIsolate,
+  onAll,
   onClear,
 }: {
-  kind: 'scoped' | 'free'
   label: string
   values: string[]
-  selected: string[]
+  off: string[]
   onToggle: (val: string) => void
+  onIsolate: (val: string) => void
+  onAll: () => void
   onClear: () => void
 }) {
   const [open, setOpen] = useState(false)
@@ -522,7 +528,11 @@ function TagScopeFilter({
     return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey) }
   }, [open])
 
-  const activeCount = selected.length
+  // Count only currently-offered values that are off (stale entries for values
+  // no longer present don't count), so "all on" / the badge stay accurate.
+  const hiddenCount = values.filter((v) => off.includes(v)).length
+  const allOn = hiddenCount === 0
+  const allOff = hiddenCount === values.length && values.length > 0
   const rowClass = 'flex items-center gap-2 px-3 py-1.5 text-xs cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors'
 
   return (
@@ -530,44 +540,48 @@ function TagScopeFilter({
       <button
         onClick={() => setOpen((o) => !o)}
         className={`flex items-center gap-1.5 h-7 px-2.5 rounded-md border text-[11px] font-medium transition-colors cursor-pointer ${
-          open || activeCount > 0
+          open || hiddenCount > 0
             ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800'
             : 'bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
         }`}
       >
         <span className="lowercase">{label}</span>
-        {activeCount > 0 && (
-          <span className="inline-flex items-center justify-center min-w-[1rem] h-4 px-1 rounded-full bg-blue-500 text-white text-[10px] font-semibold leading-none">{activeCount}</span>
+        {hiddenCount > 0 && (
+          <span className="inline-flex items-center justify-center min-w-[1rem] h-4 px-1 rounded-full bg-blue-500 text-white text-[10px] font-semibold leading-none">{hiddenCount}</span>
         )}
         <ChevronDown className={`w-3 h-3 transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
 
       {open && (
         <div className="absolute right-0 top-full mt-1.5 w-56 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl z-50 overflow-hidden text-left">
-          {activeCount > 0 && (
-            <div className="flex items-center px-3 py-1.5 border-b border-gray-100 dark:border-gray-700/60 text-[11px]">
-              <button onClick={onClear} className="ml-auto text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 cursor-pointer">clear</button>
-            </div>
-          )}
+          {/* Fixed header: "all" left, "clear" right. Always present (regardless
+              of selection) so toggling values never grows/shrinks the menu. */}
+          <div className="flex items-center justify-between px-3 py-1.5 border-b border-gray-100 dark:border-gray-700/60 text-[11px] font-medium">
+            <button
+              onClick={onAll}
+              className={`cursor-pointer ${allOn ? 'text-blue-600 dark:text-blue-300' : 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300'}`}
+            >all</button>
+            <button
+              onClick={onClear}
+              className={`cursor-pointer ${allOff ? 'text-blue-600 dark:text-blue-300' : 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300'}`}
+            >clear</button>
+          </div>
           <div className="max-h-72 overflow-auto py-1">
-            {/* "all" reset row — selected (filled) when nothing in this scoped
-                category is chosen, i.e. the category is unconstrained. Free-form
-                tags AND-match individually, so there's no "all" for them. */}
-            {kind === 'scoped' && (
-              <button onClick={onClear} className={`w-full ${rowClass}`}>
-                <span className={`flex items-center justify-center w-3.5 h-3.5 rounded-full border shrink-0 ${activeCount === 0 ? 'border-blue-500 bg-blue-500' : 'border-gray-300 dark:border-gray-600'}`}>
-                  {activeCount === 0 && <span className="w-1.5 h-1.5 rounded-full bg-white" />}
-                </span>
-                <span className={activeCount === 0 ? 'text-gray-700 dark:text-gray-200' : 'text-gray-500 dark:text-gray-400'}>all</span>
-              </button>
-            )}
             {values.map((v) => (
-              <label key={v} className={rowClass}>
-                <input type="checkbox" checked={selected.includes(v)} onChange={() => onToggle(v)} className="w-3.5 h-3.5 accent-blue-500 cursor-pointer shrink-0" />
+              // Drive selection from onClick (not the input's onChange) so we can
+              // read shiftKey: shift-click isolates this value, a plain click
+              // toggles it. preventDefault stops the label's own checkbox toggle.
+              <label
+                key={v}
+                className={rowClass}
+                onClick={(e) => { e.preventDefault(); if (e.shiftKey) onIsolate(v); else onToggle(v) }}
+              >
+                <input type="checkbox" readOnly checked={!off.includes(v)} className="w-3.5 h-3.5 accent-blue-500 cursor-pointer shrink-0" />
                 <span className="text-gray-700 dark:text-gray-300 truncate">{v}</span>
               </label>
             ))}
           </div>
+          <div className="px-3 py-1 border-t border-gray-100 dark:border-gray-700/60 text-[10px] text-gray-400 dark:text-gray-500">shift-click to isolate</div>
         </div>
       )}
     </div>
@@ -1210,7 +1224,8 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
     return [...types].sort()
   }, [sets])
   const showTypeFilter = fileTypes.length > 1
-  const typeSelected = tagFilter.scoped[TYPE_CATEGORY] ?? []
+  // Values turned off (hidden), mirroring the user scopes' inverted model.
+  const typeOff = tagFilter.scoped[TYPE_CATEGORY] ?? []
 
   if (error) {
     return (
@@ -1248,7 +1263,7 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
           <p>Configure them in <code className="text-blue-300">.hydra/config.toml</code> with <code className="text-blue-300">[[artifacts]]</code> blocks (<code className="text-blue-300">name</code>, <code className="text-blue-300">command</code>, optional <code className="text-blue-300">timeout_sec</code>) — for example a script that builds the app and screenshots a page, so visual UI changes show up here in the diff viewer.</p>
           <p>A script with no visual changes — or one still generating — collapses to a single header row; click it to expand. The two sides (base and head) build in parallel, so the expanded card shows their <strong>build logs side by side</strong> (Before / After, stderr in red); once finished, reopen them any time with <strong>Show build log</strong>. The refresh button (top-right of each card) re-runs a script — handy to retry a failure or re-render even when nothing visibly changed.</p>
           <p>The header shows each side's latest <code className="text-blue-300">stdout</code> line as live progress. To surface a cleaner message, print a line prefixed with <code className="text-blue-300">::hydra:progress::</code> (e.g. <code className="text-blue-300">echo "::hydra:progress:: capturing home 3/24"</code>) — Hydra strips the prefix, shows the rest as the progress line, and from then on ignores ordinary <code className="text-blue-300">stdout</code> for the header, so a noisy build can't hijack it. The full output still lands in the build log.</p>
-          <p><strong>Tags &amp; filter.</strong> Alongside an image <code className="text-blue-300">home.png</code> the script can write a JSON sidecar <code className="text-blue-300">home.png.meta</code> like <code className="text-blue-300">{'{'}"tags": ["theme::dark", "viewport::phone"]{'}'}</code>. Tags show as labels on each file and as a filter on this bar. A <code className="text-blue-300">category::value</code> tag is a <em>scoped</em> label — only one value per category is kept on a file (the last wins), and the filter lets you toggle any number of a category's values (a file matches if it has any of them); plain tags are free-form toggles. Handy when a script emits many shots (light/dark, phone/desktop) and you want to see just one slice. A built-in <strong>type</strong> filter (image / video, from each file's extension) appears after your tags whenever a set mixes both.</p>
+          <p><strong>Tags &amp; filter.</strong> Alongside an image <code className="text-blue-300">home.png</code> the script can write a JSON sidecar <code className="text-blue-300">home.png.meta</code> like <code className="text-blue-300">{'{'}"tags": ["theme::dark", "viewport::phone"]{'}'}</code>. Tags show as labels on each file and as a filter on this bar. A <code className="text-blue-300">category::value</code> tag is a <em>scoped</em> label — only one value per category is kept on a file (the last wins), and each category gets a filter button listing its values. Every value starts <em>on</em>; uncheck one to hide the files carrying it, or use <strong>all</strong> / <strong>clear</strong> (top of the menu) to toggle them in bulk. Shift-click a value to isolate it (hide everything else). Plain tags work the same way under a "tags" button. Handy when a script emits many shots (light/dark, phone/desktop) and you want to see just one slice. A built-in <strong>type</strong> filter (image / video, from each file's extension) appears after your tags whenever a set mixes both.</p>
         </InfoTooltip>
         {/* One compact filter button per tag scope on the header bar — a button
             for each scoped category (theme / viewport / …) and one "tags" button
@@ -1260,43 +1275,46 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
             {collectedTags.scoped.map(({ cat, values }) => (
               <TagScopeFilter
                 key={cat}
-                kind="scoped"
                 label={cat}
                 values={values}
-                selected={tagFilter.scoped[cat] ?? []}
+                off={tagFilter.scoped[cat] ?? []}
                 onToggle={(val) => {
                   const cur = tagFilter.scoped[cat] ?? []
                   const next = cur.includes(val) ? cur.filter((x) => x !== val) : [...cur, val]
                   updateTagFilter({ ...tagFilter, scoped: { ...tagFilter.scoped, [cat]: next } })
                 }}
-                onClear={() => updateTagFilter({ ...tagFilter, scoped: { ...tagFilter.scoped, [cat]: [] } })}
+                onIsolate={(val) => updateTagFilter({ ...tagFilter, scoped: { ...tagFilter.scoped, [cat]: values.filter((x) => x !== val) } })}
+                onAll={() => updateTagFilter({ ...tagFilter, scoped: { ...tagFilter.scoped, [cat]: [] } })}
+                onClear={() => updateTagFilter({ ...tagFilter, scoped: { ...tagFilter.scoped, [cat]: [...values] } })}
               />
             ))}
             {collectedTags.free.length > 0 && (
               <TagScopeFilter
-                kind="free"
                 label="tags"
                 values={collectedTags.free}
-                selected={tagFilter.free}
+                off={tagFilter.free}
                 onToggle={(t) =>
                   updateTagFilter({ ...tagFilter, free: tagFilter.free.includes(t) ? tagFilter.free.filter((x) => x !== t) : [...tagFilter.free, t] })
                 }
-                onClear={() => updateTagFilter({ ...tagFilter, free: [] })}
+                onIsolate={(t) => updateTagFilter({ ...tagFilter, free: collectedTags.free.filter((x) => x !== t) })}
+                onAll={() => updateTagFilter({ ...tagFilter, free: [] })}
+                onClear={() => updateTagFilter({ ...tagFilter, free: [...collectedTags.free] })}
               />
             )}
             {/* Built-in type scope, last — image vs video, derived from the file
                 extensions rather than a tag. */}
             {showTypeFilter && (
               <TagScopeFilter
-                kind="scoped"
                 label={TYPE_CATEGORY}
                 values={fileTypes}
-                selected={typeSelected}
+                off={typeOff}
                 onToggle={(val) => {
-                  const next = typeSelected.includes(val) ? typeSelected.filter((x) => x !== val) : [...typeSelected, val]
+                  const next = typeOff.includes(val) ? typeOff.filter((x) => x !== val) : [...typeOff, val]
                   updateTagFilter({ ...tagFilter, scoped: { ...tagFilter.scoped, [TYPE_CATEGORY]: next } })
                 }}
-                onClear={() => updateTagFilter({ ...tagFilter, scoped: { ...tagFilter.scoped, [TYPE_CATEGORY]: [] } })}
+                onIsolate={(val) => updateTagFilter({ ...tagFilter, scoped: { ...tagFilter.scoped, [TYPE_CATEGORY]: fileTypes.filter((x) => x !== val) } })}
+                onAll={() => updateTagFilter({ ...tagFilter, scoped: { ...tagFilter.scoped, [TYPE_CATEGORY]: [] } })}
+                onClear={() => updateTagFilter({ ...tagFilter, scoped: { ...tagFilter.scoped, [TYPE_CATEGORY]: [...fileTypes] } })}
               />
             )}
           </div>

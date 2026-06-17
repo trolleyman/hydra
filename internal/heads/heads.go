@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"os/user"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -89,20 +90,20 @@ func ListHeads(ctx context.Context, reg *session.Registry, store *db.Store, proj
 		}
 
 		h := Head{
-			ID:            a.ID,
-			Title:         a.Title,
-			Branch:        branch,
-			Worktree:      worktree,
-			ProjectPath:   a.ProjectPath,
-			SessionPID:    sessionPID,
-			SessionStatus: sessionStatus,
-			AgentType:     sandbox.AgentType(a.AgentType),
-			PrePrompt:     a.PrePrompt,
-			Prompt:        a.Prompt,
-			BaseBranch:    a.BaseBranch,
-			Ephemeral:     a.Ephemeral,
-			CreatedAt:     a.CreatedAt.Unix(),
-			AgentStatus:   computeAgentStatus(&a),
+			ID:               a.ID,
+			Title:            a.Title,
+			Branch:           branch,
+			Worktree:         worktree,
+			ProjectPath:      a.ProjectPath,
+			SessionPID:       sessionPID,
+			SessionStatus:    sessionStatus,
+			AgentType:        sandbox.AgentType(a.AgentType),
+			PrePrompt:        a.PrePrompt,
+			Prompt:           a.Prompt,
+			BaseBranch:       a.BaseBranch,
+			Ephemeral:        a.Ephemeral,
+			CreatedAt:        a.CreatedAt.Unix(),
+			AgentStatus:      computeAgentStatus(&a),
 			HasUnreadChanges: a.HasUnreadChanges,
 		}
 		enrichAgentStatus(a.ProjectPath, a.ID, h.AgentStatus)
@@ -780,4 +781,103 @@ func KillHeadNoLock(ctx context.Context, reg *session.Registry, store *db.Store,
 
 	log.Printf("heads: kill complete for agent %s", head.ID)
 	return errtrace.Wrap(killErr)
+}
+
+// PurgeHead permanently and irreversibly deletes a head, leaving no trace. Unlike
+// KillHead (which soft-deletes the record into the browsable archived-history
+// list), PurgeHead: stops any live session, removes the worktree/branch and the
+// on-disk status/cow files, deletes the agent's Claude session-history directory
+// under ~/.claude/projects, and HARD-deletes the database row.
+//
+// It works on both live and already-archived heads (an archived head's session,
+// worktree and branch are already gone, so those steps are no-ops). Per-step
+// cleanup failures are logged but do not abort the purge — the aim is to remove
+// as much as possible — except a failure to hard-delete the DB row, which is
+// returned so the caller knows the record still exists.
+func PurgeHead(ctx context.Context, reg *session.Registry, store *db.Store, head Head) error {
+	log.Printf("heads: permanent delete requested for agent %s", head.ID)
+
+	if reg != nil {
+		if err := reg.Kill(head.ID); err != nil {
+			log.Printf("warn: heads: purge kill session failed for %s: %v", head.ID, err)
+		}
+		reg.Remove(head.ID)
+		reg.KillMatching(head.ID + "-shell")
+	}
+
+	if head.Worktree != nil && head.ProjectPath != "" {
+		if err := git.RemoveWorktree(head.ProjectPath, *head.Worktree); err != nil {
+			log.Printf("warn: heads: purge remove worktree %s failed for %s: %v", *head.Worktree, head.ID, err)
+		}
+	}
+
+	if head.Branch != nil && head.ProjectPath != "" && strings.HasPrefix(*head.Branch, "hydra/") {
+		if err := git.DeleteBranch(head.ProjectPath, *head.Branch); err != nil {
+			// Expected to fail for archived heads (branch already deleted on kill).
+			log.Printf("heads: purge delete branch %s for %s: %v", *head.Branch, head.ID, err)
+		}
+	}
+
+	if head.ProjectPath != "" {
+		RemoveAgentStatusFiles(head.ProjectPath, head.ID)
+		removeCowDir(head.ProjectPath, head.ID)
+		removeClaudeSessionDir(head)
+	}
+
+	if store == nil {
+		return nil
+	}
+	if err := store.HardDeleteAgent(head.ID); err != nil {
+		return errtrace.Wrap(err)
+	}
+	log.Printf("heads: permanent delete complete for agent %s", head.ID)
+	return nil
+}
+
+// removeClaudeSessionDir deletes the agent's Claude Code session-history
+// directory. Claude derives it from the working directory (the head's worktree)
+// by replacing every non-alphanumeric character with '-', stored under
+// ~/.claude/projects/<slug>. Only Claude agents have one; other agent types are a
+// no-op (see the "delete for real" feature note). Best-effort — a missing dir or
+// any error is logged and ignored.
+func removeClaudeSessionDir(head Head) {
+	if head.AgentType != sandbox.AgentTypeClaude {
+		return
+	}
+	u, err := user.Current()
+	if err != nil || u.HomeDir == "" {
+		log.Printf("warn: heads: purge cannot resolve home for %s: %v", head.ID, err)
+		return
+	}
+	// Archived heads carry no live Worktree, so recompute the deterministic path
+	// Claude saw as its cwd: <project>/.hydra/worktrees/<id>.
+	worktree := paths.GetWorktreeDirFromProjectRoot(head.ProjectPath, head.ID)
+	slug := claudeProjectsSlug(worktree)
+	if slug == "" {
+		return
+	}
+	dir := filepath.Join(u.HomeDir, ".claude", "projects", slug)
+	if err := os.RemoveAll(dir); err != nil {
+		log.Printf("warn: heads: purge remove claude session dir %s for %s: %v", dir, head.ID, err)
+	} else {
+		log.Printf("heads: purge removed claude session dir %s for agent %s", dir, head.ID)
+	}
+}
+
+// claudeProjectsSlug mirrors how Claude Code encodes a working directory into its
+// ~/.claude/projects/<slug> folder name: every character that is not an ASCII
+// letter or digit becomes '-' (no collapsing of runs), so e.g.
+// /home/u/code/hydra/.hydra/worktrees/x -> -home-u-code-hydra--hydra-worktrees-x.
+func claudeProjectsSlug(p string) string {
+	b := make([]byte, len(p))
+	for i := 0; i < len(p); i++ {
+		c := p[i]
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9':
+			b[i] = c
+		default:
+			b[i] = '-'
+		}
+	}
+	return string(b)
 }

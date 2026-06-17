@@ -737,4 +737,30 @@ export class DefaultService {
             },
         });
     }
+    /**
+     * Permanently delete an agent (kill it and erase every record, including its Claude session history)
+     * Irreversibly removes the agent: stops any live session, removes its worktree/branch and on-disk status files, deletes its Claude session-history directory, and hard-deletes the database record so it no longer appears even in the archived-history list. Works on both live and archived agents.
+     * @param projectId Project ID
+     * @param id
+     * @returns void
+     * @throws ApiError
+     */
+    public purgeAgent(
+        projectId: string,
+        id: string,
+    ): CancelablePromise<void> {
+        return this.httpRequest.request({
+            method: 'DELETE',
+            url: '/api/projects/{project_id}/agents/{id}/purge',
+            path: {
+                'project_id': projectId,
+                'id': id,
+            },
+            errors: {
+                404: `Not Found`,
+                409: `Conflict (operation already in progress)`,
+                500: `Internal Server Error`,
+            },
+        });
+    }
 }
