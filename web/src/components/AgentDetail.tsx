@@ -5,7 +5,7 @@ import { formatError } from '../api/format_error'
 import type { AgentResponse } from '../api'
 import { AgentTerminal } from './AgentTerminal'
 import { DiffViewer } from '../DiffViewer'
-import { formatStartedAgo, agentStatusDetail, archivedEndStateBadge } from './AgentComponents'
+import { formatStartedAgo, agentStatusBadge, archivedEndStateBadge } from './AgentComponents'
 import { LoaderCircle, Merge, Trash2, Tag, RotateCcw, FolderSync, Copy, Check, Pencil, Archive, TerminalSquare } from 'lucide-react'
 import { Tooltip } from './Tooltip'
 
@@ -482,6 +482,14 @@ export function AgentDetail({
             <span className={`text-xs px-2.5 py-0.5 rounded-full font-medium ${agentTypeClass}`}>
               {agent.agent_type}
             </span>
+            {agent.agent_status && (
+              <>
+                <span className="text-gray-300 dark:text-gray-600">|</span>
+                <span className={`text-xs px-2 py-0.5 rounded font-medium ${agentStatusBadge(agent.agent_status.status).className}`}>
+                  {agentStatusBadge(agent.agent_status.status).label}
+                </span>
+              </>
+            )}
             <span className="text-gray-300 dark:text-gray-600">|</span>
             {agent.branch_name && (
               <span className="text-xs font-mono text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
@@ -497,13 +505,6 @@ export function AgentDetail({
             )}
           </div>
 
-          {/* Live activity / last message */}
-          {agentStatusDetail(agent.agent_status) && (
-            <div className="mt-2 text-xs text-gray-500 dark:text-gray-400 truncate">
-              {agent.agent_status?.status === 'running' ? '⏳ ' : '💬 '}
-              {agentStatusDetail(agent.agent_status)}
-            </div>
-          )}
         </div>
 
         {/* Prompt */}

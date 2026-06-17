@@ -244,6 +244,10 @@ func (s *SimulationServer) GetAgent(w http.ResponseWriter, r *http.Request, proj
 			SessionPid:    1001,
 			SessionStatus: "running",
 			CreatedAt:     &createdAt,
+			Prompt: "Let agents be renamed with a human-friendly title instead of only showing the stable ID.\n\n" +
+				"- Add a mutable `title` field to the agent model and a PATCH endpoint to update it.\n" +
+				"- Render the title in the sidebar and the detail header, with an inline rename (pencil) control; keep the Copy-ID button exposing the underlying id.\n" +
+				"- Fall back to the id when no title is set, and persist the title across daemon restarts.",
 			AgentStatus: &api.AgentStatusInfo{
 				Status:    api.Running,
 				Timestamp: simNow().Format(time.RFC3339),
