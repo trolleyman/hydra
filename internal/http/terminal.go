@@ -221,7 +221,18 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	att, err := s.Sessions.Attach(sessionID, 24, 80)
+	// Attach without imposing a size (0,0). The session already has a width —
+	// either from its initial start or from the last client that sized it — and a
+	// detached agent keeps producing output at that width. Passing a concrete size
+	// here would resize the live PTY on every reconnect, and since the browser
+	// opens this socket on a fresh mount (e.g. navigating back to an agent) before
+	// its flex layout has settled, that size is frequently wrong — it would reflow
+	// the agent narrow, baking narrow-wrapped lines into the scrollback ring that
+	// then look broken when the user scrolls up. Instead we leave the PTY at its
+	// current width and let the client send a single resize once its layout is
+	// stable (see fitAndSend in AgentTerminal.tsx), which is a no-op when the width
+	// is unchanged. This keeps detached agents and their history at a stable width.
+	att, err := s.Sessions.Attach(sessionID, 0, 0)
 	if err != nil {
 		log.Printf("terminal ws: attach session %q: %v", sessionID, err)
 		_ = conn.WriteMessage(websocket.BinaryMessage, []byte("\r\n\x1b[31mAgent is not running.\x1b[0m\r\n"))

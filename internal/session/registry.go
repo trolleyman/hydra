@@ -136,7 +136,10 @@ func (r *Registry) IsLive(id string) bool {
 }
 
 // Attach returns a consumer handle that replays scrollback then streams live
-// output. Returns ErrNotFound if the session is unknown.
+// output. Returns ErrNotFound if the session is unknown. Pass rows/cols of 0 to
+// attach without resizing the PTY — the session keeps its current width, so an
+// observer (or a client that hasn't measured its layout yet) never reflows the
+// agent's output for everyone else.
 func (r *Registry) Attach(id string, rows, cols uint16) (*Attachment, error) {
 	s, ok := r.Get(id)
 	if !ok {
