@@ -86,10 +86,15 @@ function useImageResize() {
     // Suppress the click/drag from selecting text or following the image's <a> link.
     e.preventDefault()
     e.stopPropagation()
+    const startX = e.clientX
     const startY = e.clientY
     const startH = current.current
     const onMove = (ev: PointerEvent) => {
-      const next = startH + (ev.clientY - startY)
+      // The grip is a bottom-right (nwse) corner handle, so down-AND-right grows
+      // the image. Sum the horizontal and vertical deltas so a purely horizontal
+      // drag to the right enlarges it just as a downward drag does (and up-left
+      // shrinks it), rather than ignoring sideways movement.
+      const next = startH + (ev.clientX - startX) + (ev.clientY - startY)
       setMaxHeight(Math.max(MIN_IMG_MAX_H, Math.min(MAX_IMG_MAX_H, next)))
     }
     const onUp = () => {
