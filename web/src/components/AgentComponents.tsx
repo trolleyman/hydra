@@ -75,13 +75,42 @@ export function agentStatusBadge(status: string | undefined): { label: string; c
   }
 }
 
-// agentStatusDetail returns the richer progress line to show under an agent:
-// its live activity while running, otherwise its most recent message (e.g. the
-// question it's waiting on, or its closing summary).
-export function agentStatusDetail(status: AgentResponse['agent_status']): string {
+// Playful placeholders shown while an agent is running but hasn't reported a
+// concrete activity yet (e.g. just after starting, or between tool calls). One
+// is picked per agent and stays stable so it doesn't flicker between renders.
+const RUNNING_PLACEHOLDERS = [
+  'Cogitating', 'Thinking', 'Cooking', 'Tinkering', 'Noodling',
+  'Pondering', 'Conjuring', 'Brewing', 'Scheming', 'Percolating',
+]
+
+// stableIndex hashes a string to a stable index in [0, n), so a given agent
+// keeps the same placeholder instead of changing on every poll/render.
+function stableIndex(s: string, n: number): number {
+  let h = 0
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0
+  return Math.abs(h) % n
+}
+
+// agentStatusDetail returns the richer progress line to show under an active
+// agent: its live activity while running, otherwise its most recent message
+// (e.g. the question it's waiting on, or its closing summary). When neither is
+// reported it falls back to a short status-based placeholder so the line is
+// never blank while the agent is doing something. Not used for archived agents.
+export function agentStatusDetail(agent: AgentResponse): string {
+  const status = agent.agent_status
   if (!status) return ''
-  if (status.status === 'running' && status.activity) return status.activity
-  return status.last_message ?? ''
+  if (status.status === 'running') {
+    return status.activity || `${RUNNING_PLACEHOLDERS[stableIndex(agent.id, RUNNING_PLACEHOLDERS.length)]}…`
+  }
+  if (status.last_message) return status.last_message
+  // No message yet — keep the line meaningful for the active states.
+  switch (status.status) {
+    case 'starting': return 'Starting up…'
+    case 'building': return 'Building…'
+    case 'waiting':  return 'Waiting…'
+    case 'merging':  return 'Merging…'
+    default:         return ''
+  }
 }
 
 // archivedEndStateBadge renders the gray "killed"/"merged" chip for an archived
@@ -157,7 +186,7 @@ export function AgentSidebarItem({
         // row keeps a constant height as the text appears, disappears, or changes
         // between status transitions — otherwise the whole sidebar jumps around.
         <div className="mt-0.5 ml-4 min-h-[1rem] text-[11px] text-gray-400 dark:text-gray-500 truncate">
-          {agentStatusDetail(agent.agent_status)}
+          {agentStatusDetail(agent)}
         </div>
       )}
     </button>
