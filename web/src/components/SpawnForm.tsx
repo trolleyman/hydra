@@ -6,21 +6,10 @@ import { uploadFile, extractFiles, isImageFile } from '../api/uploads'
 import { Zap, LoaderCircle, Paperclip, X, FileText } from 'lucide-react'
 import { Tooltip } from './Tooltip'
 import { ImageLightbox } from './ImageLightbox'
-import { StorageKeys, promptDraftKey, readLocal, writeLocal } from '../lib/storage'
+import { StorageKeys, promptDraftKey, imageCounterKey, readLocal, writeLocal } from '../lib/storage'
+import { type Attachment, spawnDraftKey, loadAttachments, saveAttachments, nextAttachmentId } from '../lib/spawnDrafts'
 
 type AgentTypeOption = 'claude' | 'gemini' | 'copilot'
-
-// A pasted/attached file in the spawn form. Its absolute `path` (set once the
-// upload resolves) is appended to the prompt on submit so the agent can read it.
-interface Attachment {
-  id: number
-  filename: string
-  path: string | null
-  previewUrl?: string
-  size: number
-  uploading: boolean
-  error?: string
-}
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/i.test(navigator.platform)
 
@@ -137,23 +126,21 @@ export function SpawnForm({
   // Index into the image-only attachment list while the lightbox is open; null
   // when closed.
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
-  const attachIdRef = useRef(0)
   // Numbers generically-named pasted images (image.png, image.png, …) as
   // image1.png, image2.png, … so each can be referred to distinctly in the
-  // prompt. Reset after a successful spawn.
+  // prompt. Per project + layout (persisted via imageCounterKey) so the count
+  // doesn't bleed across projects, and reset after a successful spawn.
   const imageCounterRef = useRef(0)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  // Tracks every image preview object URL we create, so they can all be revoked
-  // on unmount without relying on the (stale) attachments closure.
-  const objectUrlsRef = useRef<Set<string>>(new Set())
+  // Mirrors `attachments` into a ref so the project-switch effect can stash the
+  // outgoing project's attachments without depending on (and re-running for)
+  // every attachment change.
+  const attachmentsRef = useRef<Attachment[]>([])
   const animatedPlaceholder = useTypewriter(PLACEHOLDERS)
 
   useEffect(() => {
-    const urls = objectUrlsRef.current
-    return () => {
-      urls.forEach((u) => URL.revokeObjectURL(u))
-    }
-  }, [])
+    attachmentsRef.current = attachments
+  }, [attachments])
 
   useEffect(() => {
     writeLocal(StorageKeys.defaultAgentType, agentType)
@@ -260,6 +247,38 @@ export function SpawnForm({
     writeLocal(draftKey, value || null)
   }
 
+  // Per-project attachments + image counter, swapped in/out as the project (or
+  // layout) changes so each box keeps its own — just like the text draft. The
+  // attachments live in an in-session module cache (their thumbnails are object
+  // URLs that can't be persisted); the counter is mirrored to localStorage.
+  const storeKey = projectId ? spawnDraftKey(projectId, compact) : null
+  const counterKey = projectId ? imageCounterKey(projectId, compact) : null
+  const prevStoreKeyRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    const prev = prevStoreKeyRef.current
+    if (prev === storeKey) return
+    // Stash the outgoing project's attachments before loading the new one's.
+    if (prev) saveAttachments(prev, attachmentsRef.current)
+    if (storeKey) {
+      setAttachments(loadAttachments(storeKey))
+      imageCounterRef.current = Number(readLocal(counterKey!)) || 0
+    } else {
+      setAttachments([])
+      imageCounterRef.current = 0
+    }
+    prevStoreKeyRef.current = storeKey
+  }, [storeKey, counterKey])
+
+  // Persist the current box's attachments to the cache on unmount (the
+  // full-page form remounts when navigating between projects).
+  useEffect(() => {
+    return () => {
+      const key = prevStoreKeyRef.current
+      if (key) saveAttachments(key, attachmentsRef.current)
+    }
+  }, [])
+
   function handleIdChange(value: string) {
     setAgentId(slugify(value, 40, true))
     setIdManuallyEdited(true)
@@ -276,6 +295,7 @@ export function SpawnForm({
     if (stem !== '' && stem.toLowerCase() !== 'image') return file
     const ext = (file.name.match(/\.([^.]+)$/)?.[1] || file.type.split('/')[1] || 'png').toLowerCase()
     const n = ++imageCounterRef.current
+    if (counterKey) writeLocal(counterKey, String(imageCounterRef.current))
     return new File([file], `image${n}.${ext}`, { type: file.type, lastModified: file.lastModified })
   }
 
@@ -284,9 +304,8 @@ export function SpawnForm({
   function addFiles(rawFiles: File[]) {
     const files = rawFiles.map(numberGenericImage)
     for (const file of files) {
-      const id = attachIdRef.current++
+      const id = nextAttachmentId()
       const previewUrl = isImageFile(file) ? URL.createObjectURL(file) : undefined
-      if (previewUrl) objectUrlsRef.current.add(previewUrl)
       setAttachments((prev) => [...prev, { id, filename: file.name || 'pasted-image', path: null, previewUrl, size: file.size, uploading: true }])
       uploadFile(projectId, file)
         .then((res) => {
@@ -301,10 +320,7 @@ export function SpawnForm({
   function removeAttachment(id: number) {
     setAttachments((prev) => {
       const found = prev.find((a) => a.id === id)
-      if (found?.previewUrl) {
-        URL.revokeObjectURL(found.previewUrl)
-        objectUrlsRef.current.delete(found.previewUrl)
-      }
+      if (found?.previewUrl) URL.revokeObjectURL(found.previewUrl)
       return prev.filter((a) => a.id !== id)
     })
   }
@@ -360,10 +376,11 @@ export function SpawnForm({
       setAgentId('')
       setIdManuallyEdited(false)
       attachments.forEach((a) => a.previewUrl && URL.revokeObjectURL(a.previewUrl))
-      objectUrlsRef.current.clear()
       setAttachments([])
+      if (storeKey) saveAttachments(storeKey, [])
       setLightboxIndex(null)
       imageCounterRef.current = 0
+      if (counterKey) writeLocal(counterKey, null)
       onSpawned?.(agent)
     } catch (err) {
       setError(formatError(err))

@@ -75,6 +75,13 @@ export const agentViewPrefsKey = (projectId: string | null, agentId: string): st
 export const promptDraftKey = (projectId: string, compact: boolean): string =>
   `hydra-prompt-draft-${compact ? 'compact' : 'full'}-${projectId}`
 
+// Running count of generically-named pasted images (image1.png, image2.png, …)
+// for the spawn form, per project and per layout — mirrors promptDraftKey so the
+// numbering stays separate across projects and survives a reload (the
+// attachments themselves are in-session only; see lib/spawnDrafts.ts).
+export const imageCounterKey = (projectId: string, compact: boolean): string =>
+  `hydra-image-counter-${compact ? 'compact' : 'full'}-${projectId}`
+
 // ── Shared safe accessors ────────────────────────────────────────────────────
 // localStorage can throw (privacy mode, quota, disabled storage); these swallow
 // it so callers never need their own try/catch.
