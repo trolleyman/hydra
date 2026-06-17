@@ -190,9 +190,11 @@ type FileDelta struct {
 	Change  ChangeType
 	InLeft  bool
 	InRight bool
-	// Tags are the file's labels, taken from the head (right) side when the file
-	// is present there, else the base (left) side — the head is the current
-	// source of truth for what a file is tagged as.
+	// Tags are the file's labels, the union of the base (left) and head (right)
+	// sides: a free-form tag from either side is kept, and a scoped
+	// "category::value" label shared by both is resolved in the head's favor (so
+	// a re-tagged category shows its current value while one present on only one
+	// side survives). See mergeTags.
 	Tags []string
 }
 
@@ -221,13 +223,10 @@ func Compare(left, right []FileMeta) []FileDelta {
 		lf, inLeft := leftByName[name]
 		rf, inRight := rightByName[name]
 		d := FileDelta{Name: name, InLeft: inLeft, InRight: inRight}
-		// Surface the head side's tags when the file exists there; otherwise the
-		// base side's (a removed file only exists on the left).
-		if inRight {
-			d.Tags = rf.Tags
-		} else {
-			d.Tags = lf.Tags
-		}
+		// Union the two sides' tags, with the head winning a shared scoped
+		// category. A file on only one side passes that side's tags through
+		// (the other is empty).
+		d.Tags = mergeTags(lf.Tags, rf.Tags)
 		switch {
 		case inLeft && !inRight:
 			d.Change = ChangeRemoved
@@ -1081,6 +1080,42 @@ func normalizeTags(raw []string) (tags, warnings []string) {
 	sort.Strings(tags)
 	sort.Strings(warnings)
 	return tags, warnings
+}
+
+// mergeTags combines a file's before (left) and after (right) tag sets into the
+// labels shown for the diff. Free-form tags are unioned. A scoped
+// "category::value" label is merged per category with the after side winning, so
+// a file that re-tags a category shows the new value while a category present on
+// only one side is preserved. Both inputs are already normalized (≤1 value per
+// category, deduped); the result is sorted, and empty merges return nil so a
+// tagless file stays tagless.
+func mergeTags(left, right []string) []string {
+	free := map[string]struct{}{}
+	scoped := map[string]string{} // category -> "category::value"
+	add := func(tags []string) {
+		for _, t := range tags {
+			cat, val, isScoped := strings.Cut(t, "::")
+			if !isScoped || cat == "" || val == "" {
+				free[t] = struct{}{} // free-form or malformed scoped tag
+				continue
+			}
+			scoped[cat] = t
+		}
+	}
+	add(left)
+	add(right) // after overrides before for a shared scoped category
+	if len(free) == 0 && len(scoped) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(free)+len(scoped))
+	for t := range free {
+		out = append(out, t)
+	}
+	for _, t := range scoped {
+		out = append(out, t)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func hashFile(path string) (string, int64, error) {
