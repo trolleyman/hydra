@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { api } from '../stores/apiClient'
 import type { ArtifactSet, ArtifactFile, ArtifactLogLine } from '../api'
-import { LoaderCircle, Image as ImageIcon, ImageOff, ChevronDown, ChevronRight, TriangleAlert, RefreshCw, Maximize2, Filter, Search, X } from 'lucide-react'
+import { LoaderCircle, Image as ImageIcon, ImageOff, ChevronDown, ChevronRight, TriangleAlert, RefreshCw, Maximize2 } from 'lucide-react'
 import { InfoTooltip } from './InfoTooltip'
 import { loadArtifactPrefs, saveArtifactPrefs, loadTagFilter, saveTagFilter, type ArtifactTagFilter } from '../lib/artifactPrefs'
 import { stripAnsi } from '../lib/ansi'
@@ -551,17 +551,31 @@ function TagBadge({ tag }: { tag: string }) {
   return <span className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-300">{tag}</span>
 }
 
-// TagFilterDropdown is the Material-style filter menu on the Artifacts header. A
-// single trigger button (with a count badge) opens an elevated, searchable menu
-// of every tag as checkboxes: one section per scoped category — a lowercase "all"
-// reset row plus a checkbox per value (OR-matched within the category, so files
-// carrying any checked value pass) — and a "tags" section of free-form tags
-// (AND-matched). The search box narrows the list, and "select all" / "none"
-// bulk-toggle whatever is currently shown (so they honor the search). The
-// selection is shared across every card; an empty selection means "show all".
-function TagFilterDropdown({ tags, filter, onChange }: { tags: CollectedTags; filter: ArtifactTagFilter; onChange: (f: ArtifactTagFilter) => void }) {
+// TagScopeFilter renders one filter button for a single tag scope, so each
+// scope gets its own trigger on the Artifacts header instead of one combined
+// menu. A scoped category (kind 'scoped') uses the category name as its label
+// and lists its values: an "all" reset row (filled when nothing's chosen) plus
+// a checkbox per value, OR-matched so a file passes if it carries any checked
+// value. The free-form group (kind 'free') is labelled "tags" and AND-matches
+// its checked tags. The count badge and active (blue) styling mirror the rest
+// of the bar; selection is shared across every card via the parent's filter
+// state, and an empty selection on a scope means "don't constrain on it".
+function TagScopeFilter({
+  kind,
+  label,
+  values,
+  selected,
+  onToggle,
+  onClear,
+}: {
+  kind: 'scoped' | 'free'
+  label: string
+  values: string[]
+  selected: string[]
+  onToggle: (val: string) => void
+  onClear: () => void
+}) {
   const [open, setOpen] = useState(false)
-  const [query, setQuery] = useState('')
   const ref = useRef<HTMLDivElement>(null)
 
   // Close on an outside click or Escape, like the diff viewer's settings popup.
@@ -574,41 +588,7 @@ function TagFilterDropdown({ tags, filter, onChange }: { tags: CollectedTags; fi
     return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey) }
   }, [open])
 
-  const activeCount = Object.values(filter.scoped).reduce((n, v) => n + v.length, 0) + filter.free.length
-
-  // Apply the search box: keep only the values/tags matching the (case-insensitive)
-  // query. A scoped value matches on "category value" so typing either narrows it.
-  const q = query.trim().toLowerCase()
-  const matches = (hay: string) => !q || hay.toLowerCase().includes(q)
-  const visScoped = tags.scoped
-    .map(({ cat, values }) => ({ cat, values: values.filter((v) => matches(`${cat} ${v}`)) }))
-    .filter((c) => c.values.length > 0)
-  const visFree = tags.free.filter((t) => matches(t))
-  const nothingVisible = visScoped.length === 0 && visFree.length === 0
-
-  const toggleScoped = (cat: string, val: string) => {
-    const cur = filter.scoped[cat] ?? []
-    const next = cur.includes(val) ? cur.filter((x) => x !== val) : [...cur, val]
-    onChange({ ...filter, scoped: { ...filter.scoped, [cat]: next } })
-  }
-  const clearScoped = (cat: string) => onChange({ ...filter, scoped: { ...filter.scoped, [cat]: [] } })
-  const toggleFree = (t: string) =>
-    onChange({ ...filter, free: filter.free.includes(t) ? filter.free.filter((x) => x !== t) : [...filter.free, t] })
-
-  // Bulk actions act on the currently-visible (searched) options, so "select all"
-  // after typing selects just the matches and "none" clears just them.
-  const selectAllVisible = () => {
-    const scoped = { ...filter.scoped }
-    for (const { cat, values } of visScoped) scoped[cat] = [...new Set([...(scoped[cat] ?? []), ...values])]
-    onChange({ scoped, free: [...new Set([...filter.free, ...visFree])] })
-  }
-  const selectNoneVisible = () => {
-    const scoped = { ...filter.scoped }
-    for (const { cat, values } of visScoped) scoped[cat] = (scoped[cat] ?? []).filter((v) => !values.includes(v))
-    const drop = new Set(visFree)
-    onChange({ scoped, free: filter.free.filter((t) => !drop.has(t)) })
-  }
-
+  const activeCount = selected.length
   const rowClass = 'flex items-center gap-2 px-3 py-1.5 text-xs cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors'
 
   return (
@@ -621,8 +601,7 @@ function TagFilterDropdown({ tags, filter, onChange }: { tags: CollectedTags; fi
             : 'bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
         }`}
       >
-        <Filter className="w-3.5 h-3.5" />
-        <span>Filter</span>
+        <span className="lowercase">{label}</span>
         {activeCount > 0 && (
           <span className="inline-flex items-center justify-center min-w-[1rem] h-4 px-1 rounded-full bg-blue-500 text-white text-[10px] font-semibold leading-none">{activeCount}</span>
         )}
@@ -630,71 +609,30 @@ function TagFilterDropdown({ tags, filter, onChange }: { tags: CollectedTags; fi
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full mt-1.5 w-64 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl z-50 overflow-hidden text-left">
-          <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-100 dark:border-gray-700/60">
-            <Search className="w-3.5 h-3.5 text-gray-400 shrink-0" />
-            <input
-              autoFocus
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search tags…"
-              className="w-full bg-transparent text-xs text-gray-700 dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none"
-            />
-            {query && (
-              <button onClick={() => setQuery('')} aria-label="Clear search" className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 cursor-pointer shrink-0">
-                <X className="w-3.5 h-3.5" />
+        <div className="absolute right-0 top-full mt-1.5 w-56 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl z-50 overflow-hidden text-left">
+          {activeCount > 0 && (
+            <div className="flex items-center px-3 py-1.5 border-b border-gray-100 dark:border-gray-700/60 text-[11px]">
+              <button onClick={onClear} className="ml-auto text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 cursor-pointer">clear</button>
+            </div>
+          )}
+          <div className="max-h-72 overflow-auto py-1">
+            {/* "all" reset row — selected (filled) when nothing in this scoped
+                category is chosen, i.e. the category is unconstrained. Free-form
+                tags AND-match individually, so there's no "all" for them. */}
+            {kind === 'scoped' && (
+              <button onClick={onClear} className={`w-full ${rowClass}`}>
+                <span className={`flex items-center justify-center w-3.5 h-3.5 rounded-full border shrink-0 ${activeCount === 0 ? 'border-blue-500 bg-blue-500' : 'border-gray-300 dark:border-gray-600'}`}>
+                  {activeCount === 0 && <span className="w-1.5 h-1.5 rounded-full bg-white" />}
+                </span>
+                <span className={activeCount === 0 ? 'text-gray-700 dark:text-gray-200' : 'text-gray-500 dark:text-gray-400'}>all</span>
               </button>
             )}
-          </div>
-          <div className="flex items-center gap-3 px-3 py-1.5 border-b border-gray-100 dark:border-gray-700/60 text-[11px]">
-            <button onClick={selectAllVisible} className="text-blue-600 dark:text-blue-400 hover:underline cursor-pointer">select all</button>
-            <button onClick={selectNoneVisible} className="text-blue-600 dark:text-blue-400 hover:underline cursor-pointer">none</button>
-            {activeCount > 0 && (
-              <button onClick={() => onChange({ scoped: {}, free: [] })} className="ml-auto text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 cursor-pointer">clear</button>
-            )}
-          </div>
-          <div className="max-h-72 overflow-auto py-1">
-            {nothingVisible ? (
-              <div className="px-3 py-2 text-xs text-gray-400 dark:text-gray-500">No matching tags</div>
-            ) : (
-              <>
-                {visScoped.map(({ cat, values }) => {
-                  const sel = filter.scoped[cat] ?? []
-                  return (
-                    <div key={cat} className="py-0.5">
-                      <div className="px-3 pt-1 pb-0.5 text-[10px] font-medium tracking-wide text-gray-400 dark:text-gray-500 lowercase">{cat}</div>
-                      {/* "all" reset row — selected (filled) when nothing in this
-                          category is chosen, i.e. the category is unconstrained. */}
-                      {!q && (
-                        <button onClick={() => clearScoped(cat)} className={`w-full ${rowClass}`}>
-                          <span className={`flex items-center justify-center w-3.5 h-3.5 rounded-full border shrink-0 ${sel.length === 0 ? 'border-blue-500 bg-blue-500' : 'border-gray-300 dark:border-gray-600'}`}>
-                            {sel.length === 0 && <span className="w-1.5 h-1.5 rounded-full bg-white" />}
-                          </span>
-                          <span className={sel.length === 0 ? 'text-gray-700 dark:text-gray-200' : 'text-gray-500 dark:text-gray-400'}>all</span>
-                        </button>
-                      )}
-                      {values.map((v) => (
-                        <label key={v} className={rowClass}>
-                          <input type="checkbox" checked={sel.includes(v)} onChange={() => toggleScoped(cat, v)} className="w-3.5 h-3.5 accent-blue-500 cursor-pointer shrink-0" />
-                          <span className="text-gray-700 dark:text-gray-300 truncate">{v}</span>
-                        </label>
-                      ))}
-                    </div>
-                  )
-                })}
-                {visFree.length > 0 && (
-                  <div className="py-0.5">
-                    <div className="px-3 pt-1 pb-0.5 text-[10px] font-medium tracking-wide text-gray-400 dark:text-gray-500 lowercase">tags</div>
-                    {visFree.map((t) => (
-                      <label key={t} className={rowClass}>
-                        <input type="checkbox" checked={filter.free.includes(t)} onChange={() => toggleFree(t)} className="w-3.5 h-3.5 accent-blue-500 cursor-pointer shrink-0" />
-                        <span className="text-gray-700 dark:text-gray-300 truncate">{t}</span>
-                      </label>
-                    ))}
-                  </div>
-                )}
-              </>
-            )}
+            {values.map((v) => (
+              <label key={v} className={rowClass}>
+                <input type="checkbox" checked={selected.includes(v)} onChange={() => onToggle(v)} className="w-3.5 h-3.5 accent-blue-500 cursor-pointer shrink-0" />
+                <span className="text-gray-700 dark:text-gray-300 truncate">{v}</span>
+              </label>
+            ))}
           </div>
         </div>
       )}
@@ -1359,13 +1297,40 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
           <p>The header shows each side's latest <code className="text-blue-300">stdout</code> line as live progress. To surface a cleaner message, print a line prefixed with <code className="text-blue-300">::hydra:progress::</code> (e.g. <code className="text-blue-300">echo "::hydra:progress:: capturing home 3/24"</code>) — Hydra strips the prefix, shows the rest as the progress line, and from then on ignores ordinary <code className="text-blue-300">stdout</code> for the header, so a noisy build can't hijack it. The full output still lands in the build log.</p>
           <p><strong>Tags &amp; filter.</strong> Alongside an image <code className="text-blue-300">home.png</code> the script can write a JSON sidecar <code className="text-blue-300">home.png.meta</code> like <code className="text-blue-300">{'{'}"tags": ["theme::dark", "viewport::phone"]{'}'}</code>. Tags show as labels on each file and as a filter on this bar. A <code className="text-blue-300">category::value</code> tag is a <em>scoped</em> label — only one value per category is kept on a file (the last wins), and the filter lets you toggle any number of a category's values (a file matches if it has any of them); plain tags are free-form toggles. Handy when a script emits many shots (light/dark, phone/desktop) and you want to see just one slice.</p>
         </InfoTooltip>
-        {/* A compact filter button on the header bar opens a searchable dropdown
-            of every theme / viewport / tag. Shown only once some file (or a
-            settled side, via pending_tags) carries tags; ml-auto floats it to
-            the right of the bar. */}
+        {/* One compact filter button per tag scope on the header bar — a button
+            for each scoped category (theme / viewport / …) and one "tags" button
+            for free-form tags — so each opens just its own slice instead of one
+            combined menu. Shown only once some file (or a settled side, via
+            pending_tags) carries tags; ml-auto floats them to the right. */}
         {hasTags && (
-          <div className="ml-auto">
-            <TagFilterDropdown tags={collectedTags} filter={tagFilter} onChange={updateTagFilter} />
+          <div className="ml-auto flex flex-wrap items-center gap-1.5">
+            {collectedTags.scoped.map(({ cat, values }) => (
+              <TagScopeFilter
+                key={cat}
+                kind="scoped"
+                label={cat}
+                values={values}
+                selected={tagFilter.scoped[cat] ?? []}
+                onToggle={(val) => {
+                  const cur = tagFilter.scoped[cat] ?? []
+                  const next = cur.includes(val) ? cur.filter((x) => x !== val) : [...cur, val]
+                  updateTagFilter({ ...tagFilter, scoped: { ...tagFilter.scoped, [cat]: next } })
+                }}
+                onClear={() => updateTagFilter({ ...tagFilter, scoped: { ...tagFilter.scoped, [cat]: [] } })}
+              />
+            ))}
+            {collectedTags.free.length > 0 && (
+              <TagScopeFilter
+                kind="free"
+                label="tags"
+                values={collectedTags.free}
+                selected={tagFilter.free}
+                onToggle={(t) =>
+                  updateTagFilter({ ...tagFilter, free: tagFilter.free.includes(t) ? tagFilter.free.filter((x) => x !== t) : [...tagFilter.free, t] })
+                }
+                onClear={() => updateTagFilter({ ...tagFilter, free: [] })}
+              />
+            )}
           </div>
         )}
       </div>
