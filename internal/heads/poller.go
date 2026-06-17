@@ -65,6 +65,17 @@ func ReconcileLivenessOnce(reg *session.Registry, store *db.Store, projectRoot s
 	}
 }
 
+// graceUnread is how long a running→finished (or idle running→waiting)
+// transition must persist before the poller raises the unread-changes flag.
+// It exists because a head that ends its turn to await a *background subagent*
+// briefly writes "finished" to the shared per-head status.json (its Stop hook),
+// and the subagent — which runs in the same sandbox and writes the same file —
+// resets it to "running" again within ~1s via its own tool hooks. Without this
+// grace the 1s poller would latch a spurious unread dot on that blip even though
+// the head is still working and resumes on its own. A genuine finish (nothing
+// resetting it) outlasts the window and still raises the flag.
+const graceUnread = 5 * time.Second
+
 // RunJSONStatusPoller runs a polling loop that syncs JSON status files into the
 // DB every 1 second. roots returns the set of project roots to poll on each
 // tick; it is re-evaluated every cycle so projects added/removed at runtime are
@@ -72,52 +83,151 @@ func ReconcileLivenessOnce(reg *session.Registry, store *db.Store, projectRoot s
 func RunJSONStatusPoller(ctx context.Context, store *db.Store, roots func() []string) {
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
+	// One debouncer for the lifetime of the loop: its pending-unread state must
+	// survive across ticks for the grace window to mean anything.
+	deb := newUnreadDebouncer()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
 			for _, root := range roots() {
-				RunJSONStatusPollerOnce(store, root)
+				pollJSONStatusOnce(store, root, deb)
 			}
 		}
 	}
 }
 
-// RunJSONStatusPollerOnce performs a single JSON status polling cycle.
+// RunJSONStatusPollerOnce performs a single JSON status polling cycle. It uses a
+// throwaway debouncer, so deferred unread flags never mature within one call —
+// it is only the boot warmup; the long-lived RunJSONStatusPoller loop owns the
+// persistent debouncer that actually resolves them.
 func RunJSONStatusPollerOnce(store *db.Store, projectRoot string) {
-	pollJSONStatusOnce(store, projectRoot)
+	pollJSONStatusOnce(store, projectRoot, newUnreadDebouncer())
 }
 
-func pollJSONStatusOnce(store *db.Store, projectRoot string) {
+// pendingUnread records a running→finished/waiting transition whose unread flag
+// is being deferred, along with the status it is waiting to confirm.
+type pendingUnread struct {
+	status string
+	since  time.Time
+}
+
+// unreadDebouncer defers the unread-changes flag for transitions that can be a
+// transient delegation blip (see graceUnread). It is keyed by agent id and
+// owned by the single poller goroutine, so it needs no locking.
+type unreadDebouncer struct {
+	pending map[string]pendingUnread
+}
+
+func newUnreadDebouncer() *unreadDebouncer {
+	return &unreadDebouncer{pending: make(map[string]pendingUnread)}
+}
+
+// arm starts (or keeps) deferring the unread flag for id in the given status.
+// Re-arming the same status preserves the original timestamp so the grace
+// window keeps counting rather than restarting each poll.
+func (d *unreadDebouncer) arm(id, status string, now time.Time) {
+	if cur, ok := d.pending[id]; ok && cur.status == status {
+		return
+	}
+	d.pending[id] = pendingUnread{status: status, since: now}
+}
+
+func (d *unreadDebouncer) forget(id string) {
+	delete(d.pending, id)
+}
+
+// ready reports whether id's deferred flag has matured: the agent is still in
+// the status it was armed for and graceUnread has elapsed. The entry is cleared
+// when it fires, or when the status no longer matches (the transition was a
+// blip that has since changed).
+func (d *unreadDebouncer) ready(id, status string, now time.Time) bool {
+	p, ok := d.pending[id]
+	if !ok {
+		return false
+	}
+	if p.status != status {
+		delete(d.pending, id)
+		return false
+	}
+	if now.Sub(p.since) >= graceUnread {
+		delete(d.pending, id)
+		return true
+	}
+	return false
+}
+
+// isUserInputEvent reports whether the hook event that produced a waiting status
+// was a user-input tool call (AskUserQuestion / ExitPlanMode), which trigger_hook
+// surfaces via PreToolUse. Such a wait is an unambiguous "needs you" and is
+// flagged immediately, unlike an idle Notification wait which is deferred.
+func isUserInputEvent(event *string) bool {
+	if event == nil {
+		return false
+	}
+	switch *event {
+	case "PreToolUse", "preToolUse", "BeforeTool":
+		return true
+	default:
+		return false
+	}
+}
+
+func pollJSONStatusOnce(store *db.Store, projectRoot string, deb *unreadDebouncer) {
 	agents, err := store.ListAgents(projectRoot)
 	if err != nil {
 		log.Printf("warn: json status poller: list agents: %v", err)
 		return
 	}
 
+	now := time.Now()
 	for _, a := range agents {
 		if a.SessionStatus != "running" {
+			deb.forget(a.ID)
 			continue
 		}
 		info := readStatusJSON(projectRoot, a.ID)
 		if info == nil || info.Timestamp == "" {
 			continue
 		}
-		if !statusTimeAfter(info.Timestamp, a.AgentStatusTime) {
-			continue
-		}
 		agentStatus := mapAgentStatus(info.Status)
 		if agentStatus == "" {
 			continue
 		}
-		// Raise the unread-changes flag on a running→waiting/finished transition
-		// (the moments the user wants to be drawn back to). Only that specific
-		// transition counts, so e.g. a starting→waiting flicker doesn't mark it.
-		markUnread := a.AgentStatus != nil && *a.AgentStatus == "running" &&
-			(agentStatus == "waiting" || agentStatus == "finished")
-		if err := store.UpdateAgentStatus(a.ID, agentStatus, info.Timestamp, markUnread); err != nil {
-			log.Printf("warn: json status poller: update agent status for %s: %v", a.ID, err)
+
+		if statusTimeAfter(info.Timestamp, a.AgentStatusTime) {
+			// The unread-changes flag is for the moments the user wants to be
+			// drawn back to: a running→waiting/finished transition (and only
+			// that — a starting→waiting flicker, say, doesn't count). A
+			// running→waiting from a user-input tool is an unambiguous request
+			// for the user and is flagged at once; running→finished and idle
+			// running→waiting are deferred (graceUnread) because they also fire
+			// when a head pauses to await a background subagent that resumes on
+			// its own.
+			prevRunning := a.AgentStatus != nil && *a.AgentStatus == "running"
+			immediate := prevRunning && agentStatus == "waiting" && isUserInputEvent(info.Event)
+			if err := store.UpdateAgentStatus(a.ID, agentStatus, info.Timestamp, immediate); err != nil {
+				log.Printf("warn: json status poller: update agent status for %s: %v", a.ID, err)
+			}
+			switch {
+			case immediate:
+				deb.forget(a.ID)
+			case prevRunning && (agentStatus == "finished" || agentStatus == "waiting"):
+				deb.arm(a.ID, agentStatus, now)
+			case agentStatus == "running" || agentStatus == "starting":
+				// Activity resumed (e.g. the subagent's next tool hook) — cancel
+				// any pending flag before it can mature.
+				deb.forget(a.ID)
+			}
+		}
+
+		// Confirm a deferred flag once the agent has held the state past the
+		// grace window without resuming activity.
+		if deb.ready(a.ID, agentStatus, now) {
+			if err := store.RaiseUnread(a.ID); err != nil {
+				log.Printf("warn: json status poller: raise unread for %s: %v", a.ID, err)
+			}
 		}
 	}
 }

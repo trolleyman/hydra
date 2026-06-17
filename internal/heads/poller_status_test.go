@@ -1,6 +1,9 @@
 package heads
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestStatusTimeAfter(t *testing.T) {
 	cases := []struct {
@@ -23,5 +26,91 @@ func TestStatusTimeAfter(t *testing.T) {
 		if got := statusTimeAfter(c.a, c.b); got != c.want {
 			t.Errorf("%s: statusTimeAfter(%q,%q) = %v, want %v", c.name, c.a, c.b, got, c.want)
 		}
+	}
+}
+
+func TestUnreadDebouncerMaturesAfterGrace(t *testing.T) {
+	d := newUnreadDebouncer()
+	t0 := time.Unix(1000, 0)
+	d.arm("a", "finished", t0)
+
+	if d.ready("a", "finished", t0) {
+		t.Fatal("fired immediately on arm; should wait for the grace window")
+	}
+	if d.ready("a", "finished", t0.Add(graceUnread-time.Millisecond)) {
+		t.Fatal("fired just before the grace window elapsed")
+	}
+	if !d.ready("a", "finished", t0.Add(graceUnread)) {
+		t.Fatal("did not fire once the grace window elapsed")
+	}
+	// ready clears the entry after firing, so it does not fire again.
+	if d.ready("a", "finished", t0.Add(2*graceUnread)) {
+		t.Fatal("fired twice for one transition")
+	}
+}
+
+func TestUnreadDebouncerCancelledByResumedActivity(t *testing.T) {
+	// The delegation-blip case: a head writes "finished" when its turn ends to
+	// await a background subagent, then the subagent's next tool hook resets the
+	// status to running before the grace window elapses. The pending flag must be
+	// cancelled so no spurious unread dot latches.
+	d := newUnreadDebouncer()
+	t0 := time.Unix(2000, 0)
+	d.arm("a", "finished", t0)
+
+	// Activity resumed within the window — the poller forgets it.
+	d.forget("a")
+
+	if d.ready("a", "finished", t0.Add(2*graceUnread)) {
+		t.Fatal("matured after activity resumed; the blip should have been cancelled")
+	}
+}
+
+func TestUnreadDebouncerStatusChangeClearsPending(t *testing.T) {
+	// If the status drifts to a different deferred state, the original pending
+	// entry must not fire for the new status.
+	d := newUnreadDebouncer()
+	t0 := time.Unix(3000, 0)
+	d.arm("a", "finished", t0)
+
+	if d.ready("a", "waiting", t0.Add(graceUnread)) {
+		t.Fatal("fired for a status it was not armed for")
+	}
+	// And the stale entry was cleared.
+	if d.ready("a", "finished", t0.Add(2*graceUnread)) {
+		t.Fatal("stale entry survived a status mismatch")
+	}
+}
+
+func TestUnreadDebouncerArmPreservesOriginalSince(t *testing.T) {
+	// Re-arming the same status across polls must keep counting from the first
+	// observation, not restart the window each tick.
+	d := newUnreadDebouncer()
+	t0 := time.Unix(4000, 0)
+	d.arm("a", "finished", t0)
+	d.arm("a", "finished", t0.Add(graceUnread-time.Second)) // a later poll, same status
+
+	if !d.ready("a", "finished", t0.Add(graceUnread)) {
+		t.Fatal("re-arming restarted the grace window instead of preserving it")
+	}
+}
+
+func TestIsUserInputEvent(t *testing.T) {
+	yes := []string{"PreToolUse", "preToolUse", "BeforeTool"}
+	for _, e := range yes {
+		e := e
+		if !isUserInputEvent(&e) {
+			t.Errorf("isUserInputEvent(%q) = false, want true", e)
+		}
+	}
+	no := []string{"Notification", "Stop", "SessionStart", ""}
+	for _, e := range no {
+		e := e
+		if isUserInputEvent(&e) {
+			t.Errorf("isUserInputEvent(%q) = true, want false", e)
+		}
+	}
+	if isUserInputEvent(nil) {
+		t.Error("isUserInputEvent(nil) = true, want false")
 	}
 }
