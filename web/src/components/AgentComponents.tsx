@@ -113,19 +113,20 @@ export function AgentSidebarItem({
           : 'hover:bg-gray-100 dark:hover:bg-gray-700 border border-transparent'
       } ${archived && !selected ? 'opacity-60 hover:opacity-100' : ''}`}
     >
-      {agent.has_unread_changes && !archived && (
-        // Unread-changes marker: vertically centered on the right edge. Set when
-        // the agent goes running→waiting/finished, cleared when it's opened.
-        <span
-          aria-label="unread changes"
-          className="absolute right-3 top-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full bg-sky-400 ring-2 ring-sky-400/25 shrink-0"
-        />
-      )}
-      <div className={`flex items-center gap-2 min-w-0 ${agent.has_unread_changes && !archived ? 'pr-4' : ''}`}>
+      <div className="flex items-center gap-2 min-w-0">
         <span
           className={`w-2 h-2 rounded-full shrink-0 ${archived ? 'bg-gray-300 dark:bg-gray-600' : agentDotClass(agent)}`}
         />
         <span className={`font-medium text-sm truncate ${archived ? 'text-gray-500 dark:text-gray-400' : 'text-gray-900 dark:text-gray-100'}`}>{agent.title || agent.id}</span>
+        {agent.has_unread_changes && !archived && (
+          // Unread-changes marker, pinned to the right of the title line so it
+          // never overlaps the type/status/created-time row below. Set when the
+          // agent goes running→waiting/finished, cleared when it's opened.
+          <span
+            aria-label="unread changes"
+            className="ml-auto shrink-0 w-2.5 h-2.5 rounded-full bg-sky-400 ring-2 ring-sky-400/25"
+          />
+        )}
       </div>
       <div className="flex items-center gap-1.5 mt-0.5 ml-4">
         <span className={`text-xs ${agentTypeColor(agent.agent_type)}`}>
