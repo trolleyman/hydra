@@ -951,11 +951,12 @@ function RootLayout() {
             )}
           </div>
 
-          <div className="px-3 py-3 border-b border-gray-100 dark:border-gray-700">
+          <div className="px-3 py-3 border-b border-gray-100 dark:border-gray-700 flex items-center gap-1.5">
             <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 tracking-wide">
               Agents
             </span>
-            <span className="ml-2 text-xs text-gray-400 dark:text-gray-500">({filteredAgents.length})</span>
+            <span className="text-xs text-gray-300 dark:text-gray-600">·</span>
+            <span className="text-xs text-gray-400 dark:text-gray-500">{filteredAgents.length}</span>
           </div>
 
           <div className="flex-1 overflow-y-auto p-2 space-y-0.5" onWheel={forwardSidebarWheelToMain}>
@@ -1000,6 +1001,7 @@ function RootLayout() {
                   <span className="text-[10px] font-semibold text-gray-400 dark:text-gray-500 tracking-wide transition-colors group-hover:text-gray-600 dark:group-hover:text-gray-300">
                     Archived
                   </span>
+                  <span className="text-[10px] text-gray-300 dark:text-gray-600">·</span>
                   <span className="text-[10px] text-gray-300 dark:text-gray-600">{archived.length}</span>
                   <div className="flex-1 h-px bg-gray-100 dark:bg-gray-700" />
                 </button>

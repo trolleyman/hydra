@@ -62,3 +62,37 @@ func Merge(projectRoot, srcRef string, authorName, authorEmail string) error {
 	}
 	return nil
 }
+
+// MergedHydraBranches returns the set of hydra/* branch names that appear in a
+// merge-commit subject ("Merge branch 'hydra/<id>'") anywhere in the repo's
+// reachable history. It is used to retroactively tell merged heads apart from
+// killed ones: both have their branch deleted, but only a merge leaves a merge
+// commit behind. Matches the message format produced by Merge above (and the
+// git default), tolerating a trailing "into <branch>".
+//
+// Fast-forward merges leave no merge commit, so they are NOT detected — callers
+// must treat a branch's absence as "not known to be merged", never as proof it
+// was killed.
+func MergedHydraBranches(projectRoot string) (map[string]struct{}, error) {
+	out, err := gitOutput(projectRoot, "log", "--all", "--merges", "--format=%s")
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	const prefix = "Merge branch '"
+	merged := map[string]struct{}{}
+	for _, line := range strings.Split(out, "\n") {
+		i := strings.Index(line, prefix)
+		if i < 0 {
+			continue
+		}
+		rest := line[i+len(prefix):]
+		j := strings.IndexByte(rest, '\'')
+		if j < 0 {
+			continue
+		}
+		if name := rest[:j]; strings.HasPrefix(name, "hydra/") {
+			merged[name] = struct{}{}
+		}
+	}
+	return merged, nil
+}

@@ -57,6 +57,9 @@ interface AgentState {
   // optimistically when a live agent is just killed/merged). New entries go to
   // the front, matching the list's newest-first ordering.
   upsertArchived: (agent: AgentResponse) => void
+  // Remove an archived agent from the history list (e.g. after it is permanently
+  // deleted / purged).
+  removeArchived: (id: string) => void
   // Optimistically pin an agent's status for a short window. ttlMs defaults to
   // OPTIMISTIC_TTL_MS.
   setOptimisticStatus: (id: string, status: AgentStatus, ttlMs?: number) => void
@@ -155,6 +158,9 @@ export const useAgentStore = create<AgentState>((set) => ({
       ? { archived: state.archived.map((a) => (a.id === agent.id ? agent : a)) }
       : { archived: [agent, ...state.archived] }
   )),
+  removeArchived: (id) => set((state) => ({
+    archived: state.archived.filter((a) => a.id !== id),
+  })),
   setOptimisticStatus: (id: string, status: AgentStatus, ttlMs = OPTIMISTIC_TTL_MS) => set((state) => {
     const override: OptimisticOverride = { status, until: Date.now() + ttlMs }
     return {

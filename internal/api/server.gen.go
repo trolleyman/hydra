@@ -831,6 +831,9 @@ type ServerInterface interface {
 	// Merge a Hydra agent's branch into its base branch and kill it
 	// (POST /api/projects/{project_id}/agents/{id}/merge)
 	MergeAgent(w http.ResponseWriter, r *http.Request, projectId string, id string)
+	// Permanently delete an agent (kill it and erase every record, including its Claude session history)
+	// (DELETE /api/projects/{project_id}/agents/{id}/purge)
+	PurgeAgent(w http.ResponseWriter, r *http.Request, projectId string, id string)
 	// Mark an agent as read, clearing its unread-changes flag
 	// (POST /api/projects/{project_id}/agents/{id}/read)
 	MarkAgentRead(w http.ResponseWriter, r *http.Request, projectId string, id string)
@@ -1472,6 +1475,40 @@ func (siw *ServerInterfaceWrapper) MergeAgent(w http.ResponseWriter, r *http.Req
 	handler.ServeHTTP(w, r)
 }
 
+// PurgeAgent operation middleware
+func (siw *ServerInterfaceWrapper) PurgeAgent(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PurgeAgent(w, r, projectId, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // MarkAgentRead operation middleware
 func (siw *ServerInterfaceWrapper) MarkAgentRead(w http.ResponseWriter, r *http.Request) {
 
@@ -1975,6 +2012,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/diff-files", wrapper.GetAgentDiffFiles)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/input", wrapper.SendAgentInput)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/merge", wrapper.MergeAgent)
+	m.HandleFunc("DELETE "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/purge", wrapper.PurgeAgent)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/read", wrapper.MarkAgentRead)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/restart", wrapper.RestartAgent)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/update-from-base", wrapper.UpdateAgentFromBase)
@@ -2617,6 +2655,50 @@ func (response MergeAgent500JSONResponse) VisitMergeAgentResponse(w http.Respons
 	return json.NewEncoder(w).Encode(response)
 }
 
+type PurgeAgentRequestObject struct {
+	ProjectId string `json:"project_id"`
+	Id        string `json:"id"`
+}
+
+type PurgeAgentResponseObject interface {
+	VisitPurgeAgentResponse(w http.ResponseWriter) error
+}
+
+type PurgeAgent204Response struct {
+}
+
+func (response PurgeAgent204Response) VisitPurgeAgentResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type PurgeAgent404JSONResponse ErrorResponse
+
+func (response PurgeAgent404JSONResponse) VisitPurgeAgentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type PurgeAgent409JSONResponse ErrorResponse
+
+func (response PurgeAgent409JSONResponse) VisitPurgeAgentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type PurgeAgent500JSONResponse ErrorResponse
+
+func (response PurgeAgent500JSONResponse) VisitPurgeAgentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 type MarkAgentReadRequestObject struct {
 	ProjectId string `json:"project_id"`
 	Id        string `json:"id"`
@@ -3076,6 +3158,9 @@ type StrictServerInterface interface {
 	// Merge a Hydra agent's branch into its base branch and kill it
 	// (POST /api/projects/{project_id}/agents/{id}/merge)
 	MergeAgent(ctx context.Context, request MergeAgentRequestObject) (MergeAgentResponseObject, error)
+	// Permanently delete an agent (kill it and erase every record, including its Claude session history)
+	// (DELETE /api/projects/{project_id}/agents/{id}/purge)
+	PurgeAgent(ctx context.Context, request PurgeAgentRequestObject) (PurgeAgentResponseObject, error)
 	// Mark an agent as read, clearing its unread-changes flag
 	// (POST /api/projects/{project_id}/agents/{id}/read)
 	MarkAgentRead(ctx context.Context, request MarkAgentReadRequestObject) (MarkAgentReadResponseObject, error)
@@ -3611,6 +3696,33 @@ func (sh *strictHandler) MergeAgent(w http.ResponseWriter, r *http.Request, proj
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(MergeAgentResponseObject); ok {
 		if err := validResponse.VisitMergeAgentResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// PurgeAgent operation middleware
+func (sh *strictHandler) PurgeAgent(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+	var request PurgeAgentRequestObject
+
+	request.ProjectId = projectId
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.PurgeAgent(ctx, request.(PurgeAgentRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "PurgeAgent")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(PurgeAgentResponseObject); ok {
+		if err := validResponse.VisitPurgeAgentResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
