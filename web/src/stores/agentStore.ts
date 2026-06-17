@@ -54,8 +54,9 @@ interface AgentState {
   // Append a fetched page of archived agents, de-duplicating by id.
   appendArchived: (page: AgentResponse[]) => void
   // Insert/replace a single archived agent (e.g. fetched on a cold page load, or
-  // optimistically when a live agent is just killed/merged). New entries go to
-  // the front, matching the list's newest-first ordering.
+  // optimistically when a live agent is just killed/merged). New entries are
+  // placed in created-at order (newest first), matching the list's ordering — a
+  // just-killed *old* agent therefore slots in by its creation date, not the top.
   upsertArchived: (agent: AgentResponse) => void
   // Remove an archived agent from the history list (e.g. after it is permanently
   // deleted / purged).
@@ -153,11 +154,23 @@ export const useAgentStore = create<AgentState>((set) => ({
       archivedLoading: false,
     }
   }),
-  upsertArchived: (agent) => set((state) => (
-    state.archived.some((a) => a.id === agent.id)
-      ? { archived: state.archived.map((a) => (a.id === agent.id ? agent : a)) }
-      : { archived: [agent, ...state.archived] }
-  )),
+  upsertArchived: (agent) => set((state) => {
+    if (state.archived.some((a) => a.id === agent.id)) {
+      return { archived: state.archived.map((a) => (a.id === agent.id ? agent : a)) }
+    }
+    // Insert in created-at order (newest first), tie-breaking by id to match the
+    // backend's stable ordering, so an optimistically-archived agent lands in the
+    // same slot the server would place it on the next fetch.
+    const next = [...state.archived]
+    const at = agent.created_at ?? 0
+    let i = next.findIndex((a) => {
+      const t = a.created_at ?? 0
+      return t < at || (t === at && a.id > agent.id)
+    })
+    if (i < 0) i = next.length
+    next.splice(i, 0, agent)
+    return { archived: next }
+  }),
   removeArchived: (id) => set((state) => ({
     archived: state.archived.filter((a) => a.id !== id),
   })),

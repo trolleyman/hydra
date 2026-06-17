@@ -151,14 +151,15 @@ func (s *Store) ArchiveAgent(id, endState string) error {
 }
 
 // ListArchivedAgents returns a page of archived (soft-deleted, non-ephemeral,
-// with a recorded EndState) agents for the project, newest-archived first. A
-// limit <= 0 returns all; offset paginates. Aborted spawns (soft-deleted but
-// EndState "") are excluded.
+// with a recorded EndState) agents for the project, newest-created first — i.e.
+// ordered by the same creation timestamp the UI shows for each agent, matching
+// the active list's ordering. A limit <= 0 returns all; offset paginates.
+// Aborted spawns (soft-deleted but EndState "") are excluded.
 func (s *Store) ListArchivedAgents(projectRoot string, limit, offset int) ([]Agent, error) {
 	var agents []Agent
 	q := s.db.Unscoped().
 		Where("project_path = ? AND deleted_at IS NOT NULL AND end_state <> ? AND ephemeral = ?", projectRoot, "", false).
-		Order("deleted_at DESC")
+		Order("created_at DESC")
 	if limit > 0 {
 		q = q.Limit(limit)
 	}
