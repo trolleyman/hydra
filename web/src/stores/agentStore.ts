@@ -53,7 +53,9 @@ interface AgentState {
   setArchivedFirstPage: (page: AgentResponse[]) => void
   // Append a fetched page of archived agents, de-duplicating by id.
   appendArchived: (page: AgentResponse[]) => void
-  // Insert/replace a single archived agent (e.g. fetched on a cold page load).
+  // Insert/replace a single archived agent (e.g. fetched on a cold page load, or
+  // optimistically when a live agent is just killed/merged). New entries go to
+  // the front, matching the list's newest-first ordering.
   upsertArchived: (agent: AgentResponse) => void
   // Optimistically pin an agent's status for a short window. ttlMs defaults to
   // OPTIMISTIC_TTL_MS.
@@ -151,7 +153,7 @@ export const useAgentStore = create<AgentState>((set) => ({
   upsertArchived: (agent) => set((state) => (
     state.archived.some((a) => a.id === agent.id)
       ? { archived: state.archived.map((a) => (a.id === agent.id ? agent : a)) }
-      : { archived: [...state.archived, agent] }
+      : { archived: [agent, ...state.archived] }
   )),
   setOptimisticStatus: (id: string, status: AgentStatus, ttlMs = OPTIMISTIC_TTL_MS) => set((state) => {
     const override: OptimisticOverride = { status, until: Date.now() + ttlMs }
