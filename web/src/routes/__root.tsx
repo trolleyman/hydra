@@ -577,8 +577,11 @@ function RootLayout() {
     }
   }, [agents, selectedAgentId, currentProjectId, markRead, pageActive])
 
-  // Reflect unread changes in the browser tab title with a trailing blue dot, so
-  // a backgrounded tab signals "something's waiting" without the page in focus.
+  // Reflect unread changes in the browser tab title with a leading dot, so a
+  // backgrounded tab signals "something's waiting" without the page in focus.
+  // We use a plain U+25CF glyph (not a color emoji like 🔵) so it renders as a
+  // small, consistent dot across platforms — Linux/Chrome draws emoji via Noto
+  // Color Emoji as an oversized glossy ball that looks out of place in a tab.
   // We count the live (optimistically-cleared) agents for the current project
   // and trust the backend per-project counts for the others — so the dot tracks
   // the same state as the in-app indicators and clears the moment they do.
@@ -595,7 +598,7 @@ function RootLayout() {
   const titleAgentName = titleAgent ? titleAgent.title || titleAgent.id : undefined
   const onRepository = /\/repository(\/|$)/.test(location.pathname)
   useEffect(() => {
-    const parts = [anyUnread ? 'Hydra 🔵' : 'Hydra']
+    const parts = [anyUnread ? '● Hydra' : 'Hydra']
     if (titleProjectName) parts.push(titleProjectName)
     if (titleAgentName) parts.push(titleAgentName)
     else if (onRepository) parts.push('Repository')
