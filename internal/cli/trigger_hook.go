@@ -200,7 +200,18 @@ func runTriggerHook(agentType string, eventOverride string, logFile *os.File) er
 	var status api.AgentStatus
 	switch event {
 	case "SessionStart", "sessionStart":
-		status = api.Running
+		// A resume (claude --continue / --resume, source="resume") restores a
+		// prior conversation and then sits idle waiting for the user — it is not
+		// actively working — so report it as waiting. A fresh startup
+		// (source="startup", "clear", "compact") proceeds to work on the submitted
+		// prompt (a UserPromptSubmit follows), so it stays running. Without a
+		// resume signal we can't tell a restored session from a working one apart,
+		// which is why a resumed agent otherwise lingered as "running".
+		if stringField(input, "source") == "resume" {
+			status = api.Waiting
+		} else {
+			status = api.Running
+		}
 	case "UserPromptSubmit", "userPromptSubmit", "BeforeAgent", "beforeAgent":
 		// The user just submitted a prompt (Claude's UserPromptSubmit) or the
 		// agent's turn is beginning (Gemini's BeforeAgent). Either way the agent

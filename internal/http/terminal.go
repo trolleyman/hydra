@@ -205,7 +205,10 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		sessionID = shellID
-	} else if !s.Sessions.IsLive(head.ID) && head.Worktree != nil {
+	}
+
+	resumed := false
+	if !useShell && !s.Sessions.IsLive(head.ID) && head.Worktree != nil {
 		// The agent's session isn't running (e.g. the daemon was restarted).
 		// Resume it on demand so opening the page brings the agent back via its
 		// own --resume, instead of showing "Agent is not running".
@@ -213,6 +216,8 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 		sendStatusUpdate(conn, "starting")
 		if err := heads.ResumeHead(s.Sessions, s.DB, projectRoot, *head, 24, 80); err != nil {
 			log.Printf("terminal ws: resume agent %q failed: %v", head.ID, err)
+		} else {
+			resumed = true
 		}
 	}
 
@@ -225,8 +230,14 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 	}
 	defer att.Close()
 
-	// Initial status again just in case it changed between checks
-	sendStatusUpdate(conn, "running")
+	// Initial status again just in case it changed between checks. A just-resumed
+	// agent is idle waiting for the user (it restored its conversation but isn't
+	// working), so report waiting rather than a misleading "running".
+	if resumed {
+		sendStatusUpdate(conn, "waiting")
+	} else {
+		sendStatusUpdate(conn, "running")
+	}
 
 	done := make(chan struct{})
 
