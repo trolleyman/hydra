@@ -24,6 +24,32 @@ interface PaneProps {
   onMetrics?: (m: { cols: number; rows: number; cellHeight: number }) => void
 }
 
+// The terminal panel's layout is the same across agents/windows, so the last
+// geometry we successfully sent is a good seed for the next connection. The
+// backend uses it as the *initial* PTY size when it has to start or resume a
+// session, so a fresh/resumed agent renders at the right width immediately
+// instead of flashing the 80x24 default and reflowing. It never resizes an
+// already-live PTY (that still waits for the client's settled measurement).
+const LAST_GEOM_KEY = 'hydra:lastTerminalGeometry'
+
+function loadLastGeometry(): { cols: number; rows: number } | null {
+  try {
+    const raw = localStorage.getItem(LAST_GEOM_KEY)
+    if (!raw) return null
+    const g = JSON.parse(raw) as { cols?: unknown; rows?: unknown }
+    if (typeof g.cols === 'number' && typeof g.rows === 'number' && g.cols > 0 && g.rows > 0) {
+      return { cols: g.cols, rows: g.rows }
+    }
+  } catch { /* ignore malformed/unavailable storage */ }
+  return null
+}
+
+function saveLastGeometry(cols: number, rows: number) {
+  try {
+    localStorage.setItem(LAST_GEOM_KEY, JSON.stringify({ cols, rows }))
+  } catch { /* ignore unavailable storage */ }
+}
+
 function getWsUrl(agentId: string, projectId: string | null, shell?: boolean, sandboxed?: boolean, shellId?: string): string {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
   const host = window.location.host
@@ -34,6 +60,12 @@ function getWsUrl(agentId: string, projectId: string | null, shell?: boolean, sa
     if (sandboxed === false) params.set('sandboxed', 'false')
     // Per-tab id: each shell tab is its own process; a refresh reuses the same id.
     if (shellId) params.set('shell_id', shellId)
+  }
+  // Seed the initial PTY size from the last known geometry (see above).
+  const geom = loadLastGeometry()
+  if (geom) {
+    params.set('cols', String(geom.cols))
+    params.set('rows', String(geom.rows))
   }
   const qs = params.toString() ? `?${params.toString()}` : ''
   const pid = projectId ? encodeURIComponent(projectId) : '_'
@@ -88,6 +120,10 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
       if (cellHeight > 0) onMetrics({ cols, rows, cellHeight })
     }
     if (ws?.readyState !== WebSocket.OPEN || cols <= 0 || rows <= 0) return
+    // Remember the latest real geometry to seed the next connection's initial
+    // PTY size (see loadLastGeometry). Only the active pane reaches here with a
+    // valid measurement, so this never records a hidden pane's stale 0-size.
+    if (active) saveLastGeometry(cols, rows)
     if (!force && cols === lastSentSize.current.cols && rows === lastSentSize.current.rows) return
     ws.send(JSON.stringify({ type: 'resize', cols, rows }))
     lastSentSize.current = { cols, rows }

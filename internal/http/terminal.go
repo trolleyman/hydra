@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -112,6 +113,25 @@ func (s *Server) HandleShellClose(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// parseTermSize reads the client-seeded cols/rows query params, returning the
+// 80x24 default for any value that's missing, unparseable, or out of a sane
+// range (rows/cols are uint16, and an absurd size would only hurt). Order is
+// (rows, cols) to match the rest of the session API.
+func parseTermSize(r *http.Request) (uint16, uint16) {
+	parse := func(key string, def uint16) uint16 {
+		v := r.URL.Query().Get(key)
+		if v == "" {
+			return def
+		}
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 || n > 2000 {
+			return def
+		}
+		return uint16(n)
+	}
+	return parse("rows", 24), parse("cols", 80)
+}
+
 // HandleTerminalWS handles WebSocket connections for agent terminal access.
 // URL pattern: /ws/projects/{project_id}/agents/{id}/terminal
 func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
@@ -130,6 +150,12 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	useShell := r.URL.Query().Get("shell") == "true"
+	// Client-seeded initial PTY size. Used only when we have to start or resume a
+	// session here, so a fresh/resumed agent renders at the right width straight
+	// away instead of flashing the 80x24 default and reflowing. Falls back to the
+	// 80x24 default when absent or out of range. This never resizes an already-live
+	// PTY — that path attaches with 0,0 and waits for the client's settled resize.
+	initRows, initCols := parseTermSize(r)
 	projectRoot, err := s.resolveProjectRoot(projectID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusNotFound)
@@ -198,7 +224,7 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 		// shell_id identifies the terminal tab so each gets its own shell process
 		// and a refresh reattaches to the same one.
 		shellToken := r.URL.Query().Get("shell_id")
-		shellID, err := heads.StartShellSession(s.Sessions, projectRoot, *head, 24, 80, sandboxed, shellToken)
+		shellID, err := heads.StartShellSession(s.Sessions, projectRoot, *head, initRows, initCols, sandboxed, shellToken)
 		if err != nil {
 			log.Printf("terminal ws: start shell session for %q: %v", agentID, err)
 			_ = conn.WriteMessage(websocket.TextMessage, []byte("error: "+err.Error()))
@@ -214,7 +240,7 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 		// own --resume, instead of showing "Agent is not running".
 		log.Printf("terminal ws: resuming agent %q (no live session)", head.ID)
 		sendStatusUpdate(conn, "starting")
-		if err := heads.ResumeHead(s.Sessions, s.DB, projectRoot, *head, 24, 80); err != nil {
+		if err := heads.ResumeHead(s.Sessions, s.DB, projectRoot, *head, initRows, initCols); err != nil {
 			log.Printf("terminal ws: resume agent %q failed: %v", head.ID, err)
 		} else {
 			resumed = true
