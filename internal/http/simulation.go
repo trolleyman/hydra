@@ -1095,6 +1095,16 @@ func simReadyChangedSet() api.ArtifactSet {
 				Tags:       artTags("theme::dark", "viewport::phone", "new"),
 				RightUrl:   ptr(simSVG("Settings (new)", "#15803d", 240, 480)),
 			},
+			// A .webm artifact: the frontend routes it to the video diff viewer
+			// (synchronized before/after playback + per-frame difference) rather
+			// than the image one. Same before/after model as the images above.
+			{
+				Name:       "loader-animation.webm",
+				ChangeType: api.ArtifactFileChangeTypeModified,
+				Tags:       artTags("theme::dark", "viewport::desktop"),
+				LeftUrl:    ptr(simWebM(simVideoBefore)),
+				RightUrl:   ptr(simWebM(simVideoAfter)),
+			},
 			{
 				Name:       "about.png",
 				ChangeType: api.ArtifactFileChangeTypeUnchanged,

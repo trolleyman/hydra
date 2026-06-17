@@ -512,6 +512,12 @@ try {
             ms?: number,
             ...rest: unknown[]
           ) => (ms && ms < 4000 ? 0 : orig(fn, ms, ...rest))) as typeof setTimeout
+          // Freeze video artifacts (the .webm diff viewer auto-plays its before/
+          // after pair): no-op play() so they sit paused on their first frame. The
+          // artifact diff is byte-hash based, so a timing-dependent frame would make
+          // any shot containing the video row flap between "modified"/"unchanged".
+          // Frame 0 is identical across renders, keeping those captures stable.
+          ;(HTMLMediaElement.prototype as unknown as { play: () => Promise<void> }).play = () => Promise.resolve()
         })
         const page = await ctx.newPage()
         if (pg.holdRequest) {
