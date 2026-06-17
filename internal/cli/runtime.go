@@ -87,6 +87,16 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 	// if the table ever grows uncomfortably large.
 	_ = store.PruneDeletedAgents
 
+	// One-time backfill: heads killed/merged before the EndState column existed
+	// were soft-deleted with an empty EndState, so they don't appear in the
+	// archived-history list. Upgrade the ones that actually ran to "killed" so
+	// they become browsable; aborted spawns (never ran) stay excluded. Idempotent.
+	if n, err := store.BackfillArchivedEndState(); err != nil {
+		log.Printf("warn: backfill archived end_state: %v", err)
+	} else if n > 0 {
+		log.Printf("Backfilled %d pre-existing soft-deleted agent(s) into the archived history", n)
+	}
+
 	// The pollers and boot-time resume cover every registered project, not just
 	// the project the daemon was launched in: a single daemon/DB serves all
 	// projects added via the web UI, and their agents' status must stay fresh

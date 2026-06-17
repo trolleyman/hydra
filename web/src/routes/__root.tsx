@@ -381,7 +381,7 @@ function RootLayout() {
   const [trustedProjectIds, setTrustedProjectIds] = useState<Set<string>>(() => readTrustedProjects())
 
   const { projects, selectedProjectId, setProjects, setSelectedProjectId, setSystemStatus } = useProjectStore()
-  const { agents, loading: agentsLoading, setAgents, addAgent, markRead } = useAgentStore()
+  const { agents, setAgents, addAgent, markRead } = useAgentStore()
   const archived = useAgentStore((s) => s.archived)
   const archivedLoading = useAgentStore((s) => s.archivedLoading)
   const archivedHasMore = useAgentStore((s) => s.archivedHasMore)
@@ -398,9 +398,10 @@ function RootLayout() {
 
   // Navigate to a project's remembered view (agent / repository / bare project).
   // Used by the boot restore and the project-switch dropdown. A remembered agent
-  // that no longer exists is corrected to the project page once that project's
-  // agents load (see the persist effect below), so it's safe to route to it
-  // optimistically here without first waiting for the agent list.
+  // that no longer exists is corrected to the project page by the agent page
+  // itself (which redirects + resets the memory once a getAgent lookup confirms
+  // it's truly gone), so it's safe to route to it optimistically here without
+  // first waiting for the agent list.
   const navigateToProjectView = useCallback((projectId: string, view: ProjectView) => {
     if (view.kind === 'agent') {
       navigate({ to: '/project/$projectId/agent/$agentId', params: { projectId, agentId: view.agentId } })
@@ -627,10 +628,13 @@ function RootLayout() {
   // memory before the boot restore above runs). Single writer for the three view
   // kinds: agent, repository (path included), and the bare project page.
   //
-  // A remembered agent that's been killed/merged (possibly in another session)
-  // is detected here once the project's agents have loaded: we drop the memory
-  // to the project page AND redirect off the dead agent so you never get stuck
-  // on "Agent Not Found".
+  // Correcting a remembered-but-dead agent is deliberately NOT done here. A
+  // killed/merged head is now a valid read-only *archived* page, so it must not
+  // be bounced; and the only place that can distinguish a genuinely-gone agent
+  // from an archived one whose record simply hasn't loaded into the sidebar list
+  // yet (deep in the paginated history, or on a cold load) is the agent page
+  // itself — it does a one-shot getAgent and, only if truly missing, redirects
+  // off the dead agent and resets this memory to the project page.
   useEffect(() => {
     const projectId = routeParams.projectId
     if (!projectId) return // not on a project route ("/", "/settings") — leave storage alone
@@ -640,22 +644,8 @@ function RootLayout() {
       saveProjectView(projectId, currentViewFromRoute(projectId, undefined, location.pathname))
       return
     }
-    // `agents` is loaded for this project once the fetch has settled (loading
-    // false) and every entry's project_path matches it; until then (e.g. mid
-    // project-switch, while the stale list still holds the previous project's
-    // agents) keep the optimistic value. We key off `loading` rather than a
-    // non-empty list so a project with ZERO agents still counts as loaded —
-    // otherwise a remembered-but-dead agent in an empty project would never be
-    // detected and you'd stay stuck on "Agent Not Found".
-    const proj = projects.find((p) => p.id === projectId)
-    const agentsLoaded = proj != null && !agentsLoading && agents.every((a) => a.project_path === proj.path)
-    if (agentsLoaded && !agents.some((a) => a.id === agentId)) {
-      saveProjectView(projectId, { kind: 'project' })
-      navigate({ to: '/project/$projectId', params: { projectId } })
-    } else {
-      saveProjectView(projectId, { kind: 'agent', agentId })
-    }
-  }, [routeParams.projectId, routeParams.agentId, location.pathname, agents, agentsLoading, projects, navigate])
+    saveProjectView(projectId, { kind: 'agent', agentId })
+  }, [routeParams.projectId, routeParams.agentId, location.pathname])
 
   // Drop expired per-artifact and per-agent-view UI prefs once on boot.
   useEffect(() => { pruneArtifactPrefs(); pruneAgentViewPrefs() }, [])

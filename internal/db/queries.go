@@ -177,6 +177,32 @@ func (s *Store) GetArchivedAgent(id string) (*Agent, error) {
 	return &a, nil
 }
 
+// BackfillArchivedEndState retroactively marks pre-existing soft-deleted agents
+// as archived ("killed") so they surface in the browsable archived-history list.
+//
+// Before the EndState column existed, killing/merging a head simply soft-deleted
+// it with an empty EndState — in storage indistinguishable from an aborted spawn
+// (which is also soft-deleted with EndState ""). We upgrade only rows that show
+// evidence of having actually run: a session that reached a non-"pending" status
+// (UpdateSessionInfo flips it to "running" only after the sandbox session
+// starts), or a reported agent status. Genuinely aborted spawns fail before the
+// session starts — they stay session_status "pending" with a nil agent_status —
+// so they remain excluded.
+//
+// endState is always "killed": the original kill/merge distinction was never
+// recorded, so it can't be reconstructed; "killed" is the safe, common default.
+// Idempotent — it only touches non-ephemeral soft-deleted rows whose EndState is
+// still empty, so it's a no-op on every boot after the first. Returns the number
+// of rows upgraded.
+func (s *Store) BackfillArchivedEndState() (int64, error) {
+	result := s.db.Unscoped().
+		Model(&Agent{}).
+		Where("deleted_at IS NOT NULL AND ephemeral = ? AND (end_state IS NULL OR end_state = ?)", false, "").
+		Where("(session_status IS NOT NULL AND session_status <> '' AND session_status <> ?) OR (agent_status IS NOT NULL AND agent_status <> ?)", "pending", "").
+		Update("end_state", "killed")
+	return result.RowsAffected, errtrace.Wrap(result.Error)
+}
+
 // TrySetHeadStatus atomically transitions head_status from `from` to `to`.
 // Returns (true, nil) on success, (false, nil) if the row was not in the expected state
 // (i.e. someone else already claimed it), or (false, err) on a real error.

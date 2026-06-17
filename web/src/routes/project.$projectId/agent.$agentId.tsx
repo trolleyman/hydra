@@ -5,7 +5,7 @@ import { useAgentStore } from '../../stores/agentStore'
 import { useProjectStore } from '../../stores/projectStore'
 import { api } from '../../stores/apiClient'
 import { AgentDetail } from '../../components/AgentDetail'
-import { NotFound } from '../../components/NotFound'
+import { saveProjectView } from '../../lib/projectView'
 import type { AgentResponse } from '../../api'
 
 export const Route = createFileRoute('/project/$projectId/agent/$agentId')({
@@ -60,6 +60,18 @@ function AgentPage() {
     return () => { cancelled = true }
   }, [agent, agentsLoaded, archivedFetch, projectId, agentId, upsertArchived])
 
+  // Once a live + archived + one-shot getAgent lookup have all settled and the
+  // agent is genuinely gone (hard-deleted / aborted spawn / pruned — a
+  // killed/merged head would resolve as archived), redirect off the dead URL and
+  // reset the project's remembered view so a reload / project-switch doesn't land
+  // back on it. This is the sole owner of dead-agent correction (see __root).
+  useEffect(() => {
+    if (agent || !agentsLoaded || archivedFetch !== 'missing') return
+    if (!isMounted.current || agentId !== agentIdRef.current) return
+    saveProjectView(projectId, { kind: 'project' })
+    navigate({ to: '/project/$projectId', params: { projectId } })
+  }, [agent, agentsLoaded, archivedFetch, projectId, agentId, navigate])
+
   function handleKilled(id: string) {
     removeAgent(id)
     if (isMounted.current && id === agentIdRef.current) {
@@ -87,24 +99,16 @@ function AgentPage() {
     // The agent store holds a single global list scoped to the *selected*
     // project, refreshed by a poll in __root.tsx. On a cold load/hard refresh it
     // starts empty, and on a project switch it briefly still holds the previous
-    // project's agents until the poll re-fetches this one. Only declare the
-    // agent genuinely missing once THIS project's agents have loaded — same gate
-    // as the remembered-agent redirect in __root.tsx — otherwise we'd flash
-    // "Agent Not Found" on every refresh/switch while the fetch is in flight.
-    // Also keep showing the spinner while the archived fallback fetch is running.
-    if (!agentsLoaded || archivedFetch === 'idle' || archivedFetch === 'loading') {
-      return (
-        <div className="flex-1 flex items-center justify-center p-6 bg-gray-50 dark:bg-gray-900">
-          <LoaderCircle className="w-6 h-6 text-blue-500 animate-spin" />
-        </div>
-      )
-    }
+    // project's agents until the poll re-fetches this one. Keep showing the
+    // spinner until THIS project's agents have loaded and the archived fallback
+    // fetch has settled — otherwise we'd flash a redirect on every refresh/switch
+    // while the fetch is in flight. Once it settles as 'missing' the redirect
+    // effect above fires; we keep the spinner up for the brief moment until it
+    // takes effect rather than flashing an "Agent Not Found" page.
     return (
-      <NotFound
-        title="Agent Not Found"
-        message={`We couldn't find an agent with ID "${agentId}". It may have been killed or expired.`}
-        errorCode="AGENT_404"
-      />
+      <div className="flex-1 flex items-center justify-center p-6 bg-gray-50 dark:bg-gray-900">
+        <LoaderCircle className="w-6 h-6 text-blue-500 animate-spin" />
+      </div>
     )
   }
 
