@@ -16,6 +16,7 @@ package usage
 
 import (
 	"context"
+	"log"
 	"regexp"
 	"strconv"
 	"strings"
@@ -69,19 +70,33 @@ func NewCache(ttl time.Duration, probe func(context.Context) (Snapshot, error)) 
 }
 
 // Get returns the cached snapshot if fresh (and !force), otherwise re-probes.
+// Probing is serialized on c.mu: concurrent callers (multiple browser tabs
+// polling, or someone hammering the raw endpoint) coalesce onto a single probe
+// rather than each spawning their own `claude /usage` process. The trade-off is
+// that a caller arriving mid-probe blocks until it finishes (up to probeMax);
+// the lock-wait is logged so this is visible if it ever stalls.
 func (c *Cache) Get(ctx context.Context, force bool) (Snapshot, error) {
+	waitStart := time.Now()
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if waited := time.Since(waitStart); waited > 100*time.Millisecond {
+		log.Printf("usage: waited %s for in-flight probe (coalesced)", waited.Round(time.Millisecond))
+	}
 
 	if !force && c.has && time.Since(c.at) < c.ttl {
 		return c.snap, nil
 	}
 
+	start := time.Now()
 	snap, err := c.probe(ctx)
+	dur := time.Since(start).Round(time.Millisecond)
 	if err != nil {
 		if c.has {
+			log.Printf("usage: probe failed after %s (%v); serving stale snapshot from %s ago",
+				dur, err, time.Since(c.at).Round(time.Second))
 			return c.snap, nil // serve stale on transient failure
 		}
+		log.Printf("usage: probe failed after %s (%v); no cached snapshot to serve", dur, err)
 		return Snapshot{}, err
 	}
 	c.snap, c.at, c.has = snap, time.Now(), true
