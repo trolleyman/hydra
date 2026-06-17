@@ -562,6 +562,18 @@ try {
         }
         // Let async data + layout settle before capturing (fonts + frames, no sleep).
         await settle(page)
+        // The simulated agent terminal streams a fixed boot transcript over its
+        // WebSocket (SimulationServer.HandleTerminalWS), ending in a shell prompt.
+        // The WS isn't tracked by networkidle, and xterm renders on its own frame,
+        // so wait until that final prompt has painted — otherwise a capture could
+        // race the stream and show a partially-rendered terminal (a spurious diff).
+        // Guarded on the terminal's presence so pages without one just skip it.
+        if (await page.locator('.xterm-rows').count()) {
+          await page.waitForFunction(() =>
+            (document.querySelector('.xterm-rows')?.textContent ?? '').includes('agent@hydra-sim:~$'),
+          )
+          await settle(page)
+        }
         if (pg.attachImages) {
           // Stub the upload endpoint so it resolves instantly and deterministically
           // (no disk writes, no timing jitter) — the chips then leave their
