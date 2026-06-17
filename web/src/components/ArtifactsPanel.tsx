@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { api } from '../stores/apiClient'
 import type { ArtifactSet, ArtifactFile, ArtifactLogLine } from '../api'
-import { LoaderCircle, Image as ImageIcon, ImageOff, ChevronDown, ChevronRight, TriangleAlert, RefreshCw, Maximize2 } from 'lucide-react'
+import { LoaderCircle, Image as ImageIcon, ImageOff, ChevronDown, ChevronRight, TriangleAlert, RefreshCw, Maximize2, Filter, Search, X } from 'lucide-react'
 import { InfoTooltip } from './InfoTooltip'
 import { loadArtifactPrefs, saveArtifactPrefs, loadTagFilter, saveTagFilter, type ArtifactTagFilter } from '../lib/artifactPrefs'
 import { stripAnsi } from '../lib/ansi'
@@ -28,13 +28,14 @@ const checkerStyle: React.CSSProperties = {
   backgroundPosition: '0 0, 0 8px, 8px -8px, -8px 0px',
 }
 
-// The four ways to compare a before/after image pair. Persisted in the diff
-// viewer's settings; see DiffViewer's SettingsPopup.
-export type ImageDiffMode = 'side-by-side' | 'ab' | 'slider' | 'onion'
+// The ways to compare a before/after image pair. Persisted in the diff viewer's
+// settings; see DiffViewer's SettingsPopup.
+export type ImageDiffMode = 'side-by-side' | 'ab' | 'slider' | 'onion' | 'difference'
 
 export const IMAGE_DIFF_MODES: { value: ImageDiffMode; label: string }[] = [
   { value: 'side-by-side', label: 'Side by side' },
   { value: 'ab', label: 'Before/After' },
+  { value: 'difference', label: 'Difference (magenta)' },
   { value: 'slider', label: 'Before/after slider' },
   { value: 'onion', label: 'Onion skin' },
 ]
@@ -287,6 +288,145 @@ function OnionCompare({ left, right }: { left?: string | null; right?: string | 
   )
 }
 
+// Bright magenta (#FF00FF) — the colour every changed pixel is painted in the
+// difference view, chosen to stand out against typical UI screenshots.
+const DIFF_COLOR: [number, number, number] = [255, 0, 255]
+// A small per-pixel tolerance (sum of the absolute R/G/B/A channel deltas) below
+// which two pixels count as equal, so JPEG/anti-aliasing speckle doesn't paint a
+// confetti of magenta over otherwise-identical regions. 0 would be exact.
+const DIFF_PIXEL_THRESHOLD = 32
+
+// loadImage resolves to a decoded <img> for a same-origin artifact URL, so the
+// difference view can read its pixels off a canvas without tainting it.
+function loadImage(url: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    img.onload = () => resolve(img)
+    img.onerror = () => reject(new Error(`failed to load ${url}`))
+    img.src = url
+  })
+}
+
+// DiffCanvas renders the "after" image with every pixel that differs from the
+// "before" image painted bright magenta. The two are aligned at the top-left and
+// compared over the union of their bounds, so a size change (or pixels present on
+// only one side) reads as a difference too. It only runs with both sides present;
+// the caller handles the single-side case. Same-origin artifact URLs keep the
+// canvas untainted so getImageData works.
+function DiffCanvas({ left, right, maxHeight }: { left: string; right: string; maxHeight: number }) {
+  const ref = useRef<HTMLCanvasElement>(null)
+  const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading')
+
+  useEffect(() => {
+    let cancelled = false
+    setState('loading')
+    Promise.all([loadImage(left), loadImage(right)])
+      .then(([la, ra]) => {
+        if (cancelled) return
+        const canvas = ref.current
+        if (!canvas) return
+        const w = Math.max(la.naturalWidth, ra.naturalWidth)
+        const h = Math.max(la.naturalHeight, ra.naturalHeight)
+        if (w === 0 || h === 0) { setState('error'); return }
+        canvas.width = w
+        canvas.height = h
+        const ctx = canvas.getContext('2d', { willReadFrequently: true })
+        if (!ctx) { setState('error'); return }
+
+        // The visible canvas starts as the "after" image (the base); a scratch
+        // canvas holds "before" so we can read both pixel buffers and overwrite
+        // only the differing pixels with magenta.
+        ctx.clearRect(0, 0, w, h)
+        ctx.drawImage(ra, 0, 0)
+        const after = ctx.getImageData(0, 0, w, h)
+
+        const scratch = document.createElement('canvas')
+        scratch.width = w
+        scratch.height = h
+        const sctx = scratch.getContext('2d', { willReadFrequently: true })
+        if (!sctx) { setState('error'); return }
+        sctx.drawImage(la, 0, 0)
+        const before = sctx.getImageData(0, 0, w, h).data
+
+        const out = after.data
+        for (let i = 0; i < out.length; i += 4) {
+          const d =
+            Math.abs(out[i] - before[i]) +
+            Math.abs(out[i + 1] - before[i + 1]) +
+            Math.abs(out[i + 2] - before[i + 2]) +
+            Math.abs(out[i + 3] - before[i + 3])
+          if (d > DIFF_PIXEL_THRESHOLD) {
+            out[i] = DIFF_COLOR[0]
+            out[i + 1] = DIFF_COLOR[1]
+            out[i + 2] = DIFF_COLOR[2]
+            out[i + 3] = 255
+          }
+        }
+        ctx.putImageData(after, 0, 0)
+        setState('ready')
+      })
+      .catch(() => { if (!cancelled) setState('error') })
+    return () => { cancelled = true }
+  }, [left, right])
+
+  return (
+    <div className="relative inline-block" onAuxClick={makeAuxOpen(() => right)}>
+      <span className={`${TAG_CLASS} left-1`}>Diff</span>
+      <canvas
+        ref={ref}
+        style={{ ...checkerStyle, maxHeight: `${maxHeight}px` }}
+        className={`${IMG_CLASS} block ${state === 'ready' ? '' : 'opacity-0'}`}
+      />
+      {state !== 'ready' && (
+        <div className="absolute inset-0 flex items-center justify-center text-[11px] text-gray-400 dark:text-gray-500">
+          {state === 'error' ? 'Could not compute diff' : 'Computing diff…'}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// DiffCompare is the "difference" mode: a Before / After / Diff switch like the
+// A/B view, where the Diff tab shows the after image with every changed pixel in
+// bright magenta (see DiffCanvas). When only one side exists (added/removed file)
+// there is nothing to diff, so the Diff tab just shows the side that's present.
+function DiffCompare({ left, right }: { left?: string | null; right?: string | null }) {
+  const [view, setView] = useState<'before' | 'after' | 'diff'>('diff')
+  const { maxHeight, onResizeStart } = useImageResize()
+  const sizer = (right ?? left) as string
+  const btn = (active: boolean) =>
+    `text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded cursor-pointer transition-colors ${
+      active ? 'bg-blue-500 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600'
+    }`
+  const canDiff = !!left && !!right
+  return (
+    <div className="min-w-0">
+      <div className="flex items-center gap-1 mb-1">
+        <button onClick={() => setView('before')} className={btn(view === 'before')}>Before</button>
+        <button onClick={() => setView('after')} className={btn(view === 'after')}>After</button>
+        <button onClick={() => setView('diff')} className={btn(view === 'diff')}>Diff</button>
+      </div>
+      {view === 'diff' && canDiff ? (
+        <div className="group relative inline-block">
+          <DiffCanvas left={left} right={right} maxHeight={maxHeight} />
+          <ResizeGrip onPointerDown={onResizeStart} />
+        </div>
+      ) : (
+        // Before/After (or the Diff tab with only one side present): show the
+        // chosen image, stacked over a hidden sizer so the box keeps its size.
+        <div
+          className="relative inline-block select-none"
+          onAuxClick={makeAuxOpen(() => (view === 'before' ? left : right) || sizer)}
+        >
+          <img src={sizer} style={{ visibility: 'hidden', maxHeight: `${maxHeight}px` }} className={`${IMG_CLASS} block`} draggable={false} />
+          <LayerNode url={view === 'before' ? left : (right ?? left)} style={{ maxHeight: `${maxHeight}px` }} />
+          <ResizeGrip onPointerDown={onResizeStart} />
+        </div>
+      )}
+    </div>
+  )
+}
+
 // The default side-by-side pair. Holds one shared resize state so dragging the
 // grip on either image grows both before/after cells by the same amount.
 function SideBySide({ left, right }: { left?: string | null; right?: string | null }) {
@@ -308,6 +448,7 @@ function ImageDiffView({ left, right, mode }: { left?: string | null; right?: st
     return <SideBySide left={left} right={right} />
   }
   if (mode === 'ab') return <ABSwitch left={left} right={right} />
+  if (mode === 'difference') return <DiffCompare left={left} right={right} />
   if (mode === 'slider') return <SliderCompare left={left} right={right} />
   return <OnionCompare left={left} right={right} />
 }
@@ -338,21 +479,26 @@ type CollectedTags = {
 }
 
 // collectTags gathers every tag across all files into the scoped categories (with
-// their distinct values) and free-form tags that the filter bar offers.
+// their distinct values) and free-form tags that the filter bar offers. It also
+// folds in each set's `pending_tags` — the tags a side that settled early exposes
+// while the other side is still generating — so the filter appears as soon as we
+// know what tags there are likely to be, not only once the whole set is ready.
 function collectTags(sets: ArtifactSet[]): CollectedTags {
   const scoped = new Map<string, Set<string>>()
   const free = new Set<string>()
+  const add = (t: string) => {
+    const p = parseScopedTag(t)
+    if (p) {
+      if (!scoped.has(p.cat)) scoped.set(p.cat, new Set())
+      scoped.get(p.cat)!.add(p.val)
+    } else {
+      free.add(t)
+    }
+  }
   for (const s of sets) {
+    for (const t of s.pending_tags ?? []) add(t)
     for (const f of s.files) {
-      for (const t of f.tags ?? []) {
-        const p = parseScopedTag(t)
-        if (p) {
-          if (!scoped.has(p.cat)) scoped.set(p.cat, new Set())
-          scoped.get(p.cat)!.add(p.val)
-        } else {
-          free.add(t)
-        }
-      }
+      for (const t of f.tags ?? []) add(t)
     }
   }
   return {
@@ -399,18 +545,41 @@ function TagBadge({ tag }: { tag: string }) {
   return <span className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-300">{tag}</span>
 }
 
-// TagFilterBar is the inline filter shown on the Artifacts header: one
-// multi-select segmented control per scoped category (All + each value, where
-// any number of values can be toggled on) and a toggle chip per free-form tag.
-// The selection is shared across every card. A "Clear" button on the left resets
-// the whole filter.
-function TagFilterBar({ tags, filter, onChange }: { tags: CollectedTags; filter: ArtifactTagFilter; onChange: (f: ArtifactTagFilter) => void }) {
-  const seg = (active: boolean) =>
-    `px-1.5 py-0.5 text-[11px] cursor-pointer transition-colors ${
-      active ? 'bg-blue-500 text-white' : 'bg-gray-100 dark:bg-gray-700/60 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600'
-    }`
-  // Toggle a value within its category (OR across the values), or clear the whole
-  // category back to "All".
+// TagFilterDropdown is the Material-style filter menu on the Artifacts header. A
+// single trigger button (with a count badge) opens an elevated, searchable menu
+// of every tag as checkboxes: one section per scoped category — a lowercase "all"
+// reset row plus a checkbox per value (OR-matched within the category, so files
+// carrying any checked value pass) — and a "tags" section of free-form tags
+// (AND-matched). The search box narrows the list, and "select all" / "none"
+// bulk-toggle whatever is currently shown (so they honor the search). The
+// selection is shared across every card; an empty selection means "show all".
+function TagFilterDropdown({ tags, filter, onChange }: { tags: CollectedTags; filter: ArtifactTagFilter; onChange: (f: ArtifactTagFilter) => void }) {
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
+  const ref = useRef<HTMLDivElement>(null)
+
+  // Close on an outside click or Escape, like the diff viewer's settings popup.
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false) }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey) }
+  }, [open])
+
+  const activeCount = Object.values(filter.scoped).reduce((n, v) => n + v.length, 0) + filter.free.length
+
+  // Apply the search box: keep only the values/tags matching the (case-insensitive)
+  // query. A scoped value matches on "category value" so typing either narrows it.
+  const q = query.trim().toLowerCase()
+  const matches = (hay: string) => !q || hay.toLowerCase().includes(q)
+  const visScoped = tags.scoped
+    .map(({ cat, values }) => ({ cat, values: values.filter((v) => matches(`${cat} ${v}`)) }))
+    .filter((c) => c.values.length > 0)
+  const visFree = tags.free.filter((t) => matches(t))
+  const nothingVisible = visScoped.length === 0 && visFree.length === 0
+
   const toggleScoped = (cat: string, val: string) => {
     const cur = filter.scoped[cat] ?? []
     const next = cur.includes(val) ? cur.filter((x) => x !== val) : [...cur, val]
@@ -420,43 +589,109 @@ function TagFilterBar({ tags, filter, onChange }: { tags: CollectedTags; filter:
   const toggleFree = (t: string) =>
     onChange({ ...filter, free: filter.free.includes(t) ? filter.free.filter((x) => x !== t) : [...filter.free, t] })
 
+  // Bulk actions act on the currently-visible (searched) options, so "select all"
+  // after typing selects just the matches and "none" clears just them.
+  const selectAllVisible = () => {
+    const scoped = { ...filter.scoped }
+    for (const { cat, values } of visScoped) scoped[cat] = [...new Set([...(scoped[cat] ?? []), ...values])]
+    onChange({ scoped, free: [...new Set([...filter.free, ...visFree])] })
+  }
+  const selectNoneVisible = () => {
+    const scoped = { ...filter.scoped }
+    for (const { cat, values } of visScoped) scoped[cat] = (scoped[cat] ?? []).filter((v) => !values.includes(v))
+    const drop = new Set(visFree)
+    onChange({ scoped, free: filter.free.filter((t) => !drop.has(t)) })
+  }
+
+  const rowClass = 'flex items-center gap-2 px-3 py-1.5 text-xs cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors'
+
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-      {filterIsActive(filter) && (
-        <button
-          onClick={() => onChange({ scoped: {}, free: [] })}
-          className="text-[11px] text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 cursor-pointer underline"
-        >
-          Clear
-        </button>
-      )}
-      {tags.scoped.map(({ cat, values }) => {
-        const sel = filter.scoped[cat] ?? []
-        return (
-          <div key={cat} className="flex items-center gap-1">
-            <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">{cat}</span>
-            <div className="flex rounded border border-gray-200 dark:border-gray-700 overflow-hidden divide-x divide-gray-200 dark:divide-gray-700">
-              <button className={seg(sel.length === 0)} onClick={() => clearScoped(cat)}>All</button>
-              {values.map((v) => (
-                <button key={v} className={seg(sel.includes(v))} onClick={() => toggleScoped(cat, v)}>{v}</button>
-              ))}
-            </div>
+    <div ref={ref} className="relative">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className={`flex items-center gap-1.5 h-7 px-2.5 rounded-md border text-[11px] font-medium transition-colors cursor-pointer ${
+          open || activeCount > 0
+            ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800'
+            : 'bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
+        }`}
+      >
+        <Filter className="w-3.5 h-3.5" />
+        <span>Filter</span>
+        {activeCount > 0 && (
+          <span className="inline-flex items-center justify-center min-w-[1rem] h-4 px-1 rounded-full bg-blue-500 text-white text-[10px] font-semibold leading-none">{activeCount}</span>
+        )}
+        <ChevronDown className={`w-3 h-3 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+
+      {open && (
+        <div className="absolute right-0 top-full mt-1.5 w-64 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl z-50 overflow-hidden text-left">
+          <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-100 dark:border-gray-700/60">
+            <Search className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+            <input
+              autoFocus
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search tags…"
+              className="w-full bg-transparent text-xs text-gray-700 dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none"
+            />
+            {query && (
+              <button onClick={() => setQuery('')} aria-label="Clear search" className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 cursor-pointer shrink-0">
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
           </div>
-        )
-      })}
-      {tags.free.map((t) => (
-        <button
-          key={t}
-          onClick={() => toggleFree(t)}
-          className={`text-[11px] px-1.5 py-0.5 rounded border cursor-pointer transition-colors ${
-            filter.free.includes(t)
-              ? 'bg-blue-500 border-blue-500 text-white'
-              : 'border-gray-200 dark:border-gray-700 bg-gray-100 dark:bg-gray-700/60 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600'
-          }`}
-        >
-          {t}
-        </button>
-      ))}
+          <div className="flex items-center gap-3 px-3 py-1.5 border-b border-gray-100 dark:border-gray-700/60 text-[11px]">
+            <button onClick={selectAllVisible} className="text-blue-600 dark:text-blue-400 hover:underline cursor-pointer">select all</button>
+            <button onClick={selectNoneVisible} className="text-blue-600 dark:text-blue-400 hover:underline cursor-pointer">none</button>
+            {activeCount > 0 && (
+              <button onClick={() => onChange({ scoped: {}, free: [] })} className="ml-auto text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 cursor-pointer">clear</button>
+            )}
+          </div>
+          <div className="max-h-72 overflow-auto py-1">
+            {nothingVisible ? (
+              <div className="px-3 py-2 text-xs text-gray-400 dark:text-gray-500">No matching tags</div>
+            ) : (
+              <>
+                {visScoped.map(({ cat, values }) => {
+                  const sel = filter.scoped[cat] ?? []
+                  return (
+                    <div key={cat} className="py-0.5">
+                      <div className="px-3 pt-1 pb-0.5 text-[10px] font-medium tracking-wide text-gray-400 dark:text-gray-500 lowercase">{cat}</div>
+                      {/* "all" reset row — selected (filled) when nothing in this
+                          category is chosen, i.e. the category is unconstrained. */}
+                      {!q && (
+                        <button onClick={() => clearScoped(cat)} className={`w-full ${rowClass}`}>
+                          <span className={`flex items-center justify-center w-3.5 h-3.5 rounded-full border shrink-0 ${sel.length === 0 ? 'border-blue-500 bg-blue-500' : 'border-gray-300 dark:border-gray-600'}`}>
+                            {sel.length === 0 && <span className="w-1.5 h-1.5 rounded-full bg-white" />}
+                          </span>
+                          <span className={sel.length === 0 ? 'text-gray-700 dark:text-gray-200' : 'text-gray-500 dark:text-gray-400'}>all</span>
+                        </button>
+                      )}
+                      {values.map((v) => (
+                        <label key={v} className={rowClass}>
+                          <input type="checkbox" checked={sel.includes(v)} onChange={() => toggleScoped(cat, v)} className="w-3.5 h-3.5 accent-blue-500 cursor-pointer shrink-0" />
+                          <span className="text-gray-700 dark:text-gray-300 truncate">{v}</span>
+                        </label>
+                      ))}
+                    </div>
+                  )
+                })}
+                {visFree.length > 0 && (
+                  <div className="py-0.5">
+                    <div className="px-3 pt-1 pb-0.5 text-[10px] font-medium tracking-wide text-gray-400 dark:text-gray-500 lowercase">tags</div>
+                    {visFree.map((t) => (
+                      <label key={t} className={rowClass}>
+                        <input type="checkbox" checked={filter.free.includes(t)} onChange={() => toggleFree(t)} className="w-3.5 h-3.5 accent-blue-500 cursor-pointer shrink-0" />
+                        <span className="text-gray-700 dark:text-gray-300 truncate">{t}</span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -1118,12 +1353,13 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
           <p>The header shows each side's latest <code className="text-blue-300">stdout</code> line as live progress. To surface a cleaner message, print a line prefixed with <code className="text-blue-300">::hydra:progress::</code> (e.g. <code className="text-blue-300">echo "::hydra:progress:: capturing home 3/24"</code>) — Hydra strips the prefix, shows the rest as the progress line, and from then on ignores ordinary <code className="text-blue-300">stdout</code> for the header, so a noisy build can't hijack it. The full output still lands in the build log.</p>
           <p><strong>Tags &amp; filter.</strong> Alongside an image <code className="text-blue-300">home.png</code> the script can write a JSON sidecar <code className="text-blue-300">home.png.meta</code> like <code className="text-blue-300">{'{'}"tags": ["theme::dark", "viewport::phone"]{'}'}</code>. Tags show as labels on each file and as a filter on this bar. A <code className="text-blue-300">category::value</code> tag is a <em>scoped</em> label — only one value per category is kept on a file (the last wins), and the filter lets you toggle any number of a category's values (a file matches if it has any of them); plain tags are free-form toggles. Handy when a script emits many shots (light/dark, phone/desktop) and you want to see just one slice.</p>
         </InfoTooltip>
-        {/* Filter lives right on the header bar (not behind a popover) so picking a
-            theme / viewport / tag is a single click. Shown only once some file
-            carries tags; ml-auto floats it to the right of the bar. */}
+        {/* A compact filter button on the header bar opens a searchable dropdown
+            of every theme / viewport / tag. Shown only once some file (or a
+            settled side, via pending_tags) carries tags; ml-auto floats it to
+            the right of the bar. */}
         {hasTags && (
           <div className="ml-auto">
-            <TagFilterBar tags={collectedTags} filter={tagFilter} onChange={updateTagFilter} />
+            <TagFilterDropdown tags={collectedTags} filter={tagFilter} onChange={updateTagFilter} />
           </div>
         )}
       </div>

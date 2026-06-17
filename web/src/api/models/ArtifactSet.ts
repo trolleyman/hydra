@@ -54,6 +54,10 @@ export type ArtifactSet = {
      * As left_log_url, for the RIGHT (after) side.
      */
     right_log_url?: string | null;
+    /**
+     * Tags already known from a side that has settled while the other side is still generating, so the diff viewer's tag filter can appear before the whole set is ready (the "before" side often finishes first thanks to caching). Deduped and sorted, drawn from whichever side(s) have produced files so far. Only set while status is "generating"; once ready, tags are carried per file in files[].tags.
+     */
+    pending_tags?: Array<string> | null;
     files: Array<ArtifactFile>;
 };
 export namespace ArtifactSet {
