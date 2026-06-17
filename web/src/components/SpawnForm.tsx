@@ -382,7 +382,7 @@ export function SpawnForm({
         {attachments.map((a) => {
           // Clicking anywhere on an image chip (the thumbnail or its filename)
           // opens the lightbox — only the X stays separate. Non-image files
-          // aren't clickable. The cursor-zoom-in / role=button makes the chip's
+          // aren't clickable. The cursor-pointer / role=button makes the chip's
           // clickability obvious.
           const isImage = !!a.previewUrl
           const openLightbox = isImage
@@ -395,7 +395,7 @@ export function SpawnForm({
               onKeyDown={openLightbox ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openLightbox() } } : undefined}
               role={isImage ? 'button' : undefined}
               tabIndex={isImage ? 0 : undefined}
-              className={`group relative flex items-center gap-1.5 rounded-md border px-1.5 py-1 ${text} ${isImage ? 'cursor-zoom-in' : ''} ${a.error ? 'border-red-300 bg-red-50 dark:border-red-800 dark:bg-red-900/20' : 'border-gray-200 bg-gray-50 dark:border-gray-600 dark:bg-gray-700/60'}`}
+              className={`group relative flex items-center gap-1.5 rounded-md border px-1.5 py-1 ${text} ${isImage ? 'cursor-pointer' : ''} ${a.error ? 'border-red-300 bg-red-50 dark:border-red-800 dark:bg-red-900/20' : 'border-gray-200 bg-gray-50 dark:border-gray-600 dark:bg-gray-700/60'}`}
               title={a.error ? a.error : isImage ? `View ${a.filename}` : a.filename}
               aria-label={isImage ? `View ${a.filename}` : undefined}
             >
