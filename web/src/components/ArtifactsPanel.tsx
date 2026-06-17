@@ -391,6 +391,19 @@ function parseScopedTag(tag: string): { cat: string; val: string } | null {
   return { cat, val }
 }
 
+// The built-in "type" filter scope. Unlike the user-defined tag scopes (which
+// come from each file's .meta sidecar), this one is intrinsic — derived from the
+// file's extension — so it's offered whenever a set spans more than one type
+// (e.g. PNG screenshots alongside a .webm). The name is reserved: a user
+// `type::…` tag is ignored so it can't collide with the built-in.
+const TYPE_CATEGORY = 'type'
+
+// fileMediaType classifies a file as 'video' or 'image' for the built-in type
+// filter, matching how FileRow routes it (isVideoArtifact → the video viewer).
+function fileMediaType(file: ArtifactFile): string {
+  return isVideoArtifact(file.name) ? 'video' : 'image'
+}
+
 type CollectedTags = {
   scoped: { cat: string; values: string[] }[]
   free: string[]
@@ -407,6 +420,7 @@ function collectTags(sets: ArtifactSet[]): CollectedTags {
   const add = (t: string) => {
     const p = parseScopedTag(t)
     if (p) {
+      if (p.cat === TYPE_CATEGORY) return // reserved for the built-in type filter
       if (!scoped.has(p.cat)) scoped.set(p.cat, new Set())
       scoped.get(p.cat)!.add(p.val)
     } else {
@@ -440,7 +454,15 @@ function filterIsActive(filter: ArtifactTagFilter): boolean {
 function fileMatchesFilter(file: ArtifactFile, filter: ArtifactTagFilter): boolean {
   const tags = file.tags ?? []
   for (const [cat, vals] of Object.entries(filter.scoped)) {
-    if (vals.length > 0 && !vals.some((v) => tags.includes(`${cat}::${v}`))) return false
+    if (vals.length === 0) continue
+    // The built-in "type" scope matches the file's intrinsic media type, not a
+    // tag it carries; every other scope OR-matches the file's `category::value`
+    // tags (a file lacking that category is excluded).
+    if (cat === TYPE_CATEGORY) {
+      if (!vals.includes(fileMediaType(file))) return false
+    } else if (!vals.some((v) => tags.includes(`${cat}::${v}`))) {
+      return false
+    }
   }
   for (const t of filter.free) {
     if (!tags.includes(t)) return false
@@ -1178,6 +1200,18 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
   const collectedTags = useMemo(() => collectTags(sets ?? []), [sets])
   const hasTags = collectedTags.scoped.length > 0 || collectedTags.free.length > 0
 
+  // The built-in "type" filter (image / video), derived from the files' own
+  // extensions rather than their tags. Offered whenever a set spans more than one
+  // type, so a reviewer can isolate the videos (or the stills); shown after the
+  // user-defined tag scopes.
+  const fileTypes = useMemo(() => {
+    const types = new Set<string>()
+    for (const s of sets ?? []) for (const f of s.files) types.add(fileMediaType(f))
+    return [...types].sort()
+  }, [sets])
+  const showTypeFilter = fileTypes.length > 1
+  const typeSelected = tagFilter.scoped[TYPE_CATEGORY] ?? []
+
   if (error) {
     return (
       <div className="mb-4 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-xs text-red-600 dark:text-red-400">
@@ -1214,14 +1248,14 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
           <p>Configure them in <code className="text-blue-300">.hydra/config.toml</code> with <code className="text-blue-300">[[artifacts]]</code> blocks (<code className="text-blue-300">name</code>, <code className="text-blue-300">command</code>, optional <code className="text-blue-300">timeout_sec</code>) — for example a script that builds the app and screenshots a page, so visual UI changes show up here in the diff viewer.</p>
           <p>A script with no visual changes — or one still generating — collapses to a single header row; click it to expand. The two sides (base and head) build in parallel, so the expanded card shows their <strong>build logs side by side</strong> (Before / After, stderr in red); once finished, reopen them any time with <strong>Show build log</strong>. The refresh button (top-right of each card) re-runs a script — handy to retry a failure or re-render even when nothing visibly changed.</p>
           <p>The header shows each side's latest <code className="text-blue-300">stdout</code> line as live progress. To surface a cleaner message, print a line prefixed with <code className="text-blue-300">::hydra:progress::</code> (e.g. <code className="text-blue-300">echo "::hydra:progress:: capturing home 3/24"</code>) — Hydra strips the prefix, shows the rest as the progress line, and from then on ignores ordinary <code className="text-blue-300">stdout</code> for the header, so a noisy build can't hijack it. The full output still lands in the build log.</p>
-          <p><strong>Tags &amp; filter.</strong> Alongside an image <code className="text-blue-300">home.png</code> the script can write a JSON sidecar <code className="text-blue-300">home.png.meta</code> like <code className="text-blue-300">{'{'}"tags": ["theme::dark", "viewport::phone"]{'}'}</code>. Tags show as labels on each file and as a filter on this bar. A <code className="text-blue-300">category::value</code> tag is a <em>scoped</em> label — only one value per category is kept on a file (the last wins), and the filter lets you toggle any number of a category's values (a file matches if it has any of them); plain tags are free-form toggles. Handy when a script emits many shots (light/dark, phone/desktop) and you want to see just one slice.</p>
+          <p><strong>Tags &amp; filter.</strong> Alongside an image <code className="text-blue-300">home.png</code> the script can write a JSON sidecar <code className="text-blue-300">home.png.meta</code> like <code className="text-blue-300">{'{'}"tags": ["theme::dark", "viewport::phone"]{'}'}</code>. Tags show as labels on each file and as a filter on this bar. A <code className="text-blue-300">category::value</code> tag is a <em>scoped</em> label — only one value per category is kept on a file (the last wins), and the filter lets you toggle any number of a category's values (a file matches if it has any of them); plain tags are free-form toggles. Handy when a script emits many shots (light/dark, phone/desktop) and you want to see just one slice. A built-in <strong>type</strong> filter (image / video, from each file's extension) appears after your tags whenever a set mixes both.</p>
         </InfoTooltip>
         {/* One compact filter button per tag scope on the header bar — a button
             for each scoped category (theme / viewport / …) and one "tags" button
             for free-form tags — so each opens just its own slice instead of one
             combined menu. Shown only once some file (or a settled side, via
             pending_tags) carries tags; ml-auto floats them to the right. */}
-        {hasTags && (
+        {(hasTags || showTypeFilter) && (
           <div className="ml-auto flex flex-wrap items-center gap-1.5">
             {collectedTags.scoped.map(({ cat, values }) => (
               <TagScopeFilter
@@ -1248,6 +1282,21 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
                   updateTagFilter({ ...tagFilter, free: tagFilter.free.includes(t) ? tagFilter.free.filter((x) => x !== t) : [...tagFilter.free, t] })
                 }
                 onClear={() => updateTagFilter({ ...tagFilter, free: [] })}
+              />
+            )}
+            {/* Built-in type scope, last — image vs video, derived from the file
+                extensions rather than a tag. */}
+            {showTypeFilter && (
+              <TagScopeFilter
+                kind="scoped"
+                label={TYPE_CATEGORY}
+                values={fileTypes}
+                selected={typeSelected}
+                onToggle={(val) => {
+                  const next = typeSelected.includes(val) ? typeSelected.filter((x) => x !== val) : [...typeSelected, val]
+                  updateTagFilter({ ...tagFilter, scoped: { ...tagFilter.scoped, [TYPE_CATEGORY]: next } })
+                }}
+                onClear={() => updateTagFilter({ ...tagFilter, scoped: { ...tagFilter.scoped, [TYPE_CATEGORY]: [] } })}
               />
             )}
           </div>

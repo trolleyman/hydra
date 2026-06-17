@@ -860,7 +860,9 @@ try {
           out,
         ], { encoding: 'utf8' })
         if (r.status !== 0) throw new Error(`ffmpeg failed (${r.status}): ${r.stderr}`)
-        writeFileSync(`${out}.meta`, JSON.stringify({ tags: [`theme::${theme}`, 'viewport::desktop', 'section::repository'] }))
+        // No viewport:: tag — a small spinner clip has no meaningful viewport, and
+        // the built-in image/video type filter already distinguishes the .webm.
+        writeFileSync(`${out}.meta`, JSON.stringify({ tags: [`theme::${theme}`, 'section::repository'] }))
         console.log(`wrote ${out}`)
       } finally {
         await ctx.close()
