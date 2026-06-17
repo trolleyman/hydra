@@ -44,6 +44,12 @@ type Agent struct {
 	HeadStatus string  `gorm:"default:idle"` // idle|killing|merging
 	LastError  *string // error message from failed operation
 
+	// EndState records how an archived (soft-deleted) agent ended: "killed" |
+	// "merged", or "" for an active agent or an aborted spawn. The archived-history
+	// list shows only soft-deleted rows with a non-empty EndState, so aborted
+	// spawns (also soft-deleted, but EndState "") never surface there.
+	EndState string
+
 	CreatedAt time.Time `gorm:"autoCreateTime:false"` // set explicitly
 	UpdatedAt time.Time
 	DeletedAt gorm.DeletedAt `gorm:"index"`

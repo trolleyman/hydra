@@ -129,6 +129,54 @@ func (s *Store) SoftDeleteAgent(id string) error {
 	return errtrace.Wrap(result.Error)
 }
 
+// ArchiveAgent records how an agent ended (endState: "killed" | "merged") and
+// then soft-deletes it, so it leaves the active list but is retained for the
+// browsable archived-history list. The end_state write must precede the
+// soft-delete (it targets the still-active row).
+func (s *Store) ArchiveAgent(id, endState string) error {
+	if err := s.db.Model(&Agent{}).Where("id = ?", id).Update("end_state", endState).Error; err != nil {
+		return errtrace.Wrap(err)
+	}
+	return errtrace.Wrap(s.db.Delete(&Agent{}, "id = ?", id).Error)
+}
+
+// ListArchivedAgents returns a page of archived (soft-deleted, non-ephemeral,
+// with a recorded EndState) agents for the project, newest-archived first. A
+// limit <= 0 returns all; offset paginates. Aborted spawns (soft-deleted but
+// EndState "") are excluded.
+func (s *Store) ListArchivedAgents(projectRoot string, limit, offset int) ([]Agent, error) {
+	var agents []Agent
+	q := s.db.Unscoped().
+		Where("project_path = ? AND deleted_at IS NOT NULL AND end_state <> ? AND ephemeral = ?", projectRoot, "", false).
+		Order("deleted_at DESC")
+	if limit > 0 {
+		q = q.Limit(limit)
+	}
+	if offset > 0 {
+		q = q.Offset(offset)
+	}
+	if err := q.Find(&agents).Error; err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	return agents, nil
+}
+
+// GetArchivedAgent returns the archived agent with the given ID, or nil if no
+// such archived record exists (active agents are not returned here).
+func (s *Store) GetArchivedAgent(id string) (*Agent, error) {
+	var a Agent
+	err := s.db.Unscoped().
+		Where("id = ? AND deleted_at IS NOT NULL AND end_state <> ?", id, "").
+		First(&a).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	return &a, nil
+}
+
 // TrySetHeadStatus atomically transitions head_status from `from` to `to`.
 // Returns (true, nil) on success, (false, nil) if the row was not in the expected state
 // (i.e. someone else already claimed it), or (false, err) on a real error.

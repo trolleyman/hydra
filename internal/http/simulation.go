@@ -174,7 +174,65 @@ func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, pr
 	api.WriteJSON(w, http.StatusOK, resp)
 }
 
+// simArchivedAgents returns the seeded archived (killed/merged) history used by
+// the archived sidebar section + the read-only archived agent page.
+func simArchivedAgents() []api.AgentResponse {
+	archived := true
+	finished := api.Finished
+	stopped := api.Stopped
+	mk := func(id, title, agentType, branch, endState string, status api.AgentStatus, ageHours time.Duration) api.AgentResponse {
+		createdAt := simNow().Add(-ageHours * time.Hour).Unix()
+		es := endState
+		return api.AgentResponse{
+			Id:            id,
+			Title:         ptr(title),
+			AgentType:     agentType,
+			BaseBranch:    "main",
+			BranchName:    ptr(branch),
+			SessionStatus: "stopped",
+			CreatedAt:     &createdAt,
+			Archived:      &archived,
+			EndState:      &es,
+			AgentStatus: &api.AgentStatusInfo{
+				Status:    status,
+				Timestamp: simNow().Format(time.RFC3339),
+			},
+		}
+	}
+	return []api.AgentResponse{
+		mk("archived-1", "Add dark-mode toggle to settings", "claude", "hydra/feat-darkmode", "merged", finished, 5),
+		mk("archived-2", "Spike: WebSocket diff refresh", "gemini", "hydra/spike-ws", "killed", stopped, 8),
+		mk("archived-3", "Fix flaky terminal resize test", "claude", "hydra/fix-resize", "merged", finished, 26),
+		mk("archived-4", "Investigate sandbox netns isolation", "claude", "hydra/spike-netns", "killed", stopped, 30),
+		mk("archived-5", "Render ANSI colour in artifact logs", "copilot", "hydra/feat-ansi", "merged", finished, 49),
+	}
+}
+
+func (s *SimulationServer) ListArchivedAgents(w http.ResponseWriter, r *http.Request, projectId string, params api.ListArchivedAgentsParams) {
+	all := simArchivedAgents()
+	offset := 0
+	if params.Offset != nil && *params.Offset > 0 {
+		offset = *params.Offset
+	}
+	if offset > len(all) {
+		offset = len(all)
+	}
+	page := all[offset:]
+	if params.Limit != nil && *params.Limit > 0 && *params.Limit < len(page) {
+		page = page[:*params.Limit]
+	}
+	resp := api.ListArchivedAgents200JSONResponse(page)
+	api.WriteJSON(w, http.StatusOK, resp)
+}
+
 func (s *SimulationServer) GetAgent(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+	for _, a := range simArchivedAgents() {
+		if a.Id == id {
+			a.Prompt = "Add a dark-mode toggle to the settings page, persisted to localStorage and respecting the OS preference by default."
+			api.WriteJSON(w, http.StatusOK, a)
+			return
+		}
+	}
 	if id == "agent-1" {
 		createdAt := simNow().Add(-1 * time.Hour).Unix()
 		api.WriteJSON(w, http.StatusOK, api.AgentResponse{

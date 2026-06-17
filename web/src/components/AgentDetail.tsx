@@ -5,8 +5,8 @@ import { formatError } from '../api/format_error'
 import type { AgentResponse } from '../api'
 import { AgentTerminal } from './AgentTerminal'
 import { DiffViewer } from '../DiffViewer'
-import { formatStartedAgo, agentStatusBadge, agentStatusDetail } from './AgentComponents'
-import { LoaderCircle, Merge, Trash2, Tag, RotateCcw, FolderSync, Copy, Check, Pencil } from 'lucide-react'
+import { formatStartedAgo, agentStatusBadge, agentStatusDetail, archivedEndStateBadge } from './AgentComponents'
+import { LoaderCircle, Merge, Trash2, Tag, RotateCcw, FolderSync, Copy, Check, Pencil, Archive, TerminalSquare } from 'lucide-react'
 import { Tooltip } from './Tooltip'
 
 import { useDialogStore } from '../stores/dialogStore'
@@ -39,6 +39,100 @@ function PromptBlock({ prompt }: { prompt: string }) {
           {expanded ? 'Show less' : 'Show more'}
         </button>
       )}
+    </div>
+  )
+}
+
+// ArchivedAgentDetail is the read-only view for a finished (killed/merged) agent
+// retained in the history. There is no live session, so there is no terminal
+// (just a grayed placeholder) and no diff/kill/merge/restart actions. The
+// "Resume" affordance is shown but not yet wired — see PLAN #49.
+function ArchivedAgentDetail({ agent }: { agent: AgentResponse }) {
+  const [copied, setCopied] = useState(false)
+  const endBadge = archivedEndStateBadge(agent.end_state)
+  const agentTypeClass =
+    agent.agent_type === 'claude'
+      ? 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300'
+      : agent.agent_type === 'gemini'
+        ? 'bg-teal-100 text-teal-800 dark:bg-teal-900/40 dark:text-teal-300'
+        : agent.agent_type === 'copilot'
+          ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300'
+          : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'
+
+  return (
+    <div className="flex-1 flex flex-col overflow-auto p-6 min-w-0 min-h-0" data-main-scroll>
+      <div className="w-full">
+        {/* Header */}
+        <div className="mb-6">
+          <div className="flex items-center gap-2 mb-2">
+            <Archive className="w-5 h-5 text-gray-400 dark:text-gray-500 shrink-0" />
+            <h1 className="text-2xl font-bold text-gray-600 dark:text-gray-300 truncate" title={agent.id}>
+              {agent.title || agent.id}
+            </h1>
+            <Tooltip content="Copy ID">
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(agent.id)
+                  setCopied(true)
+                  setTimeout(() => setCopied(false), 2000)
+                }}
+                className="w-6 h-6 flex items-center justify-center rounded-md border border-gray-200 text-gray-400 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-500 dark:hover:bg-gray-700 transition-colors cursor-pointer shrink-0"
+              >
+                {copied ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3 h-3" />}
+              </button>
+            </Tooltip>
+          </div>
+
+          {/* Metadata row */}
+          <div className="flex items-center gap-3 flex-wrap">
+            <span className={`text-xs px-2.5 py-0.5 rounded-full font-medium ${agentTypeClass}`}>
+              {agent.agent_type}
+            </span>
+            <span className="text-gray-300 dark:text-gray-600">|</span>
+            <span className={`text-xs px-2 py-0.5 rounded font-medium ${endBadge.className}`}>
+              {endBadge.label}
+            </span>
+            {agent.branch_name && (
+              <>
+                <span className="text-gray-300 dark:text-gray-600">|</span>
+                <span className="text-xs font-mono text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
+                  <Tag className="w-3.5 h-3.5" />
+                  {agent.branch_name}
+                </span>
+              </>
+            )}
+            {agent.created_at !== 0 && agent.created_at !== undefined && (
+              <>
+                <span className="text-gray-300 dark:text-gray-600">|</span>
+                <span className="text-xs text-gray-500 dark:text-gray-400">
+                  created {formatStartedAgo(agent.created_at)}
+                </span>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* Prompt */}
+        {agent.prompt && <PromptBlock key={agent.id} prompt={agent.prompt} />}
+
+        {/* Grayed-out terminal placeholder with a (not-yet-wired) Resume button. */}
+        <div className="rounded-lg border border-dashed border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 p-8 flex flex-col items-center justify-center text-center gap-3">
+          <TerminalSquare className="w-8 h-8 text-gray-300 dark:text-gray-600" />
+          <div className="text-sm text-gray-500 dark:text-gray-400">
+            This agent was {endBadge.label}. Its session, worktree and branch were removed,
+            so there is no live terminal or diff to show.
+          </div>
+          <Tooltip content="Resuming archived agents isn't available yet (see PLAN #49)">
+            <button
+              disabled
+              className="mt-1 inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md border border-gray-300 text-gray-400 dark:border-gray-600 dark:text-gray-500 cursor-not-allowed"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              Resume agent
+            </button>
+          </Tooltip>
+        </div>
+      </div>
     </div>
   )
 }
@@ -282,6 +376,13 @@ export function AgentDetail({
     } finally {
       setSavingTitle(false)
     }
+  }
+
+  // Archived agents are read-only: render the history view instead of the live
+  // terminal/diff. Placed after all hooks above so hook order stays stable when
+  // the same mounted component switches between a live and an archived agent.
+  if (agent.archived) {
+    return <ArchivedAgentDetail agent={agent} />
   }
 
   return (

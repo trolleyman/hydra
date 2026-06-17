@@ -292,7 +292,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if head := m.selectedHead(); head != nil {
 			h := *head
 			return m, func() tea.Msg {
-				if err := heads.KillHead(context.Background(), m.reg, m.store, h); err != nil {
+				if err := heads.KillHead(context.Background(), m.reg, m.store, h, "killed"); err != nil {
 					return errMsg{err}
 				}
 				return killDoneMsg(h.ID)

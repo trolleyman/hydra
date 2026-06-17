@@ -19,10 +19,19 @@ interface OptimisticOverride {
   until: number
 }
 
+// Page size for the archived-history infinite-scroll list.
+export const ARCHIVED_PAGE_SIZE = 20
+
 interface AgentState {
   agents: AgentResponse[]
   loading: boolean
   error: string | null
+  // Archived (killed/merged) history, loaded lazily in pages as the user scrolls
+  // the sidebar. Distinct from `agents`, which is the live (polled) list.
+  archived: AgentResponse[]
+  archivedLoading: boolean
+  // True while there may be more archived pages to fetch (last page was full).
+  archivedHasMore: boolean
   // Per-agent optimistic status overrides keyed by agent id, each with a wall-
   // clock expiry. Applied on top of polled data in setAgents so a locally-known
   // status change (e.g. a just-submitted prompt) shows instantly.
@@ -37,6 +46,15 @@ interface AgentState {
   addAgent: (agent: AgentResponse) => void
   removeAgent: (id: string) => void
   updateAgent: (agent: AgentResponse) => void
+  // Reset the archived list (e.g. on project switch).
+  resetArchived: () => void
+  setArchivedLoading: (loading: boolean) => void
+  // Replace the archived list with the first page.
+  setArchivedFirstPage: (page: AgentResponse[]) => void
+  // Append a fetched page of archived agents, de-duplicating by id.
+  appendArchived: (page: AgentResponse[]) => void
+  // Insert/replace a single archived agent (e.g. fetched on a cold page load).
+  upsertArchived: (agent: AgentResponse) => void
   // Optimistically pin an agent's status for a short window. ttlMs defaults to
   // OPTIMISTIC_TTL_MS.
   setOptimisticStatus: (id: string, status: AgentStatus, ttlMs?: number) => void
@@ -91,6 +109,9 @@ export const useAgentStore = create<AgentState>((set) => ({
   agents: [],
   loading: true,
   error: null,
+  archived: [],
+  archivedLoading: false,
+  archivedHasMore: true,
   optimistic: {},
   readUntil: {},
   setAgents: (agents) => set((state) => {
@@ -111,6 +132,27 @@ export const useAgentStore = create<AgentState>((set) => ({
   updateAgent: (agent) => set((state) => ({
     agents: state.agents.map((a) => a.id === agent.id ? agent : a)
   })),
+  resetArchived: () => set({ archived: [], archivedHasMore: true, archivedLoading: false }),
+  setArchivedLoading: (loading) => set({ archivedLoading: loading }),
+  setArchivedFirstPage: (page) => set({
+    archived: page,
+    archivedHasMore: page.length >= ARCHIVED_PAGE_SIZE,
+    archivedLoading: false,
+  }),
+  appendArchived: (page) => set((state) => {
+    const seen = new Set(state.archived.map((a) => a.id))
+    const fresh = page.filter((a) => !seen.has(a.id))
+    return {
+      archived: [...state.archived, ...fresh],
+      archivedHasMore: page.length >= ARCHIVED_PAGE_SIZE,
+      archivedLoading: false,
+    }
+  }),
+  upsertArchived: (agent) => set((state) => (
+    state.archived.some((a) => a.id === agent.id)
+      ? { archived: state.archived.map((a) => (a.id === agent.id ? agent : a)) }
+      : { archived: [...state.archived, agent] }
+  )),
   setOptimisticStatus: (id: string, status: AgentStatus, ttlMs = OPTIMISTIC_TTL_MS) => set((state) => {
     const override: OptimisticOverride = { status, until: Date.now() + ttlMs }
     return {

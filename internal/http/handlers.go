@@ -316,6 +316,12 @@ func agentResponse(h heads.Head) api.AgentResponse {
 		createdAt = &h.CreatedAt
 	}
 	title := h.Title
+	archived := h.Archived
+	var endState *string
+	if h.EndState != "" {
+		es := h.EndState
+		endState = &es
+	}
 	return api.AgentResponse{
 		Id:            h.ID,
 		Title:         &title,
@@ -332,6 +338,8 @@ func agentResponse(h heads.Head) api.AgentResponse {
 		CreatedAt:        createdAt,
 		AgentStatus:      h.AgentStatus,
 		HasUnreadChanges: &h.HasUnreadChanges,
+		Archived:         &archived,
+		EndState:         endState,
 	}
 }
 
@@ -349,6 +357,33 @@ func (s *Server) ListAgents(ctx context.Context, request api.ListAgentsRequestOb
 		}
 	}
 	resp := make(api.ListAgents200JSONResponse, len(headList))
+	for i, h := range headList {
+		resp[i] = agentResponse(h)
+	}
+	return resp, nil
+}
+
+func (s *Server) ListArchivedAgents(_ context.Context, request api.ListArchivedAgentsRequestObject) (api.ListArchivedAgentsResponseObject, error) {
+	projectRoot, err := s.resolveProjectRoot(request.ProjectId)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	limit, offset := 0, 0
+	if request.Params.Limit != nil {
+		limit = *request.Params.Limit
+	}
+	if request.Params.Offset != nil && *request.Params.Offset > 0 {
+		offset = *request.Params.Offset
+	}
+	headList, err := heads.ListArchivedHeads(s.DB, projectRoot, limit, offset)
+	if err != nil {
+		return nil, &apiError{ //errtrace:skip
+			Code: 500,
+			Type: api.ErrorResponseErrorInternalError,
+			Err:  err,
+		}
+	}
+	resp := make(api.ListArchivedAgents200JSONResponse, len(headList))
 	for i, h := range headList {
 		resp[i] = agentResponse(h)
 	}
@@ -708,6 +743,14 @@ func (s *Server) GetAgent(ctx context.Context, request api.GetAgentRequestObject
 		return nil, errtrace.Wrap(err)
 	}
 	if head == nil {
+		// Fall back to the archived (killed/merged) record, so an archived
+		// agent's read-only page still loads on a cold open / hard refresh.
+		head, err = heads.GetArchivedHeadByID(s.DB, request.Id)
+		if err != nil {
+			return nil, errtrace.Wrap(err)
+		}
+	}
+	if head == nil {
 		return api.GetAgent404JSONResponse{
 			Code:    404,
 			Error:   api.ErrorResponseErrorNotFound,
@@ -843,7 +886,7 @@ func (s *Server) MergeAgent(ctx context.Context, request api.MergeAgentRequestOb
 	}
 
 	// Kill cleanup without re-doing the CAS (already in "merging" state).
-	if err := heads.KillHeadNoLock(ctx, s.Sessions, s.DB, *head); err != nil {
+	if err := heads.KillHeadNoLock(ctx, s.Sessions, s.DB, *head, "merged"); err != nil {
 		return nil, errtrace.Wrap(err)
 	}
 
@@ -923,8 +966,10 @@ func (s *Server) RestartAgent(ctx context.Context, request api.RestartAgentReque
 	agentType := head.AgentType
 	baseBranch := head.BaseBranch
 
-	// Kill the existing head (container, worktree, branch).
-	if err := heads.KillHead(ctx, s.Sessions, s.DB, *head); err != nil {
+	// Kill the existing head (container, worktree, branch). The respawn below
+	// reuses the same ID and un-archives the record, so the end state here is
+	// transient; record "killed" anyway in case the respawn fails.
+	if err := heads.KillHead(ctx, s.Sessions, s.DB, *head, "killed"); err != nil {
 		if errors.Is(err, db.ErrOperationInProgress) {
 			return api.RestartAgent409JSONResponse{
 				Code:    409,
@@ -978,7 +1023,7 @@ func (s *Server) KillAgent(ctx context.Context, request api.KillAgentRequestObje
 		}, nil
 	}
 
-	if err := heads.KillHead(ctx, s.Sessions, s.DB, *head); err != nil {
+	if err := heads.KillHead(ctx, s.Sessions, s.DB, *head, "killed"); err != nil {
 		if errors.Is(err, db.ErrOperationInProgress) {
 			return api.KillAgent409JSONResponse{
 				Code:    409,

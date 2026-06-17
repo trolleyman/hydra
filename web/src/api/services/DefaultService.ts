@@ -226,6 +226,36 @@ export class DefaultService {
         });
     }
     /**
+     * List archived (killed/merged) Hydra agents, newest first
+     * Returns a page of finished agents retained for the browsable history list. Supports limit/offset for infinite scroll.
+     * @param projectId Project ID to scope the archived agent list
+     * @param limit Maximum number of archived agents to return (page size). Omit or <=0 for all.
+     * @param offset Number of archived agents to skip (for pagination).
+     * @returns AgentResponse OK
+     * @throws ApiError
+     */
+    public listArchivedAgents(
+        projectId: string,
+        limit?: number,
+        offset?: number,
+    ): CancelablePromise<Array<AgentResponse>> {
+        return this.httpRequest.request({
+            method: 'GET',
+            url: '/api/projects/{project_id}/agents/archived',
+            path: {
+                'project_id': projectId,
+            },
+            query: {
+                'limit': limit,
+                'offset': offset,
+            },
+            errors: {
+                404: `Project Not Found`,
+                500: `Internal Server Error`,
+            },
+        });
+    }
+    /**
      * Restart a Hydra agent (kill and respawn with the same prompt)
      * @param projectId Project ID
      * @param id
