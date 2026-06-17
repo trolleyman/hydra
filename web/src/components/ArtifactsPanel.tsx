@@ -109,6 +109,9 @@ function ResizeGrip({ onPointerDown }: { onPointerDown: (e: React.PointerEvent) 
   return (
     <div
       onPointerDown={onPointerDown}
+      // Swallow the click so a tap on the grip doesn't reach a parent that treats
+      // a click as a gesture (e.g. the A/B view flips on click of the image box).
+      onClick={(e) => e.stopPropagation()}
       title="Drag to resize both images"
       className="absolute bottom-1 right-1 z-10 flex items-center justify-center w-5 h-5 rounded bg-black/45 text-white/90 opacity-0 group-hover:opacity-100 transition-opacity cursor-nwse-resize touch-none select-none"
     >
@@ -171,6 +174,7 @@ function LayerNode({ url, style }: { url?: string | null; style?: React.CSSPrope
 // the currently-shown image in a new tab.
 function ABSwitch({ left, right }: { left?: string | null; right?: string | null }) {
   const [showAfter, setShowAfter] = useState(true)
+  const { maxHeight, onResizeStart } = useImageResize()
   // At least one side is present (ImageDiffView only routes here otherwise); the
   // present image is the invisible sizer that gives the stacked box its size.
   const sizer = (right ?? left) as string
@@ -185,15 +189,17 @@ function ABSwitch({ left, right }: { left?: string | null; right?: string | null
         <button onClick={() => setShowAfter(true)} className={btn(showAfter)}>After</button>
       </div>
       <div
-        // select-none: flipping the A/B view is a rapid click target, so without
-        // this a quick double-click would highlight the "No image" placeholder text.
-        className="relative inline-block cursor-pointer select-none"
+        // group: reveals the resize grip on hover. select-none: flipping the A/B
+        // view is a rapid click target, so without this a quick double-click would
+        // highlight the "No image" placeholder text.
+        className="group relative inline-block cursor-pointer select-none"
         onClick={() => setShowAfter((s) => !s)}
         onAuxClick={makeAuxOpen(() => (showAfter ? right : left) || sizer)}
       >
-        <img src={sizer} style={{ visibility: 'hidden' }} className={`${IMG_CLASS} block`} draggable={false} />
-        <LayerNode url={right} style={{ visibility: showAfter ? 'visible' : 'hidden' }} />
-        <LayerNode url={left} style={{ visibility: showAfter ? 'hidden' : 'visible' }} />
+        <img src={sizer} style={{ visibility: 'hidden', maxHeight: `${maxHeight}px` }} className={`${IMG_CLASS} block`} draggable={false} />
+        <LayerNode url={right} style={{ maxHeight: `${maxHeight}px`, visibility: showAfter ? 'visible' : 'hidden' }} />
+        <LayerNode url={left} style={{ maxHeight: `${maxHeight}px`, visibility: showAfter ? 'hidden' : 'visible' }} />
+        <ResizeGrip onPointerDown={onResizeStart} />
       </div>
     </div>
   )
