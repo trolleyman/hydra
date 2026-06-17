@@ -22,6 +22,11 @@ export const StorageKeys = {
   diffSidebarWidth: 'hydra-diff-sidebar-width',
   diffImageMode: 'hydra-diff-image-mode',
 
+  // Last terminal geometry the client successfully sent (JSON {cols, rows}). Seeds
+  // the initial PTY size on the next connection so a fresh/resumed agent renders
+  // at the right width instead of flashing the 80x24 default (see AgentTerminal).
+  terminalGeometry: 'hydra-terminal-geometry',
+
   repoWrap: 'hydra-repo-wrap',
   repoIcons: 'hydra-repo-icons',
   repoSidebarWidth: 'hydra-repo-sidebar-width',

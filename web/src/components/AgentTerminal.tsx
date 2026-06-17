@@ -8,6 +8,7 @@ import { Tooltip } from './Tooltip'
 import { uploadFile, extractFiles } from '../api/uploads'
 import { useAgentStore } from '../stores/agentStore'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from '../lib/agentViewPrefs'
+import { StorageKeys, readLocal, writeLocal } from '../lib/storage'
 
 const DEFAULT_TERMINAL_HEIGHT = 450
 
@@ -30,24 +31,20 @@ interface PaneProps {
 // session, so a fresh/resumed agent renders at the right width immediately
 // instead of flashing the 80x24 default and reflowing. It never resizes an
 // already-live PTY (that still waits for the client's settled measurement).
-const LAST_GEOM_KEY = 'hydra:lastTerminalGeometry'
-
 function loadLastGeometry(): { cols: number; rows: number } | null {
+  const raw = readLocal(StorageKeys.terminalGeometry)
+  if (!raw) return null
   try {
-    const raw = localStorage.getItem(LAST_GEOM_KEY)
-    if (!raw) return null
     const g = JSON.parse(raw) as { cols?: unknown; rows?: unknown }
     if (typeof g.cols === 'number' && typeof g.rows === 'number' && g.cols > 0 && g.rows > 0) {
       return { cols: g.cols, rows: g.rows }
     }
-  } catch { /* ignore malformed/unavailable storage */ }
+  } catch { /* ignore malformed value */ }
   return null
 }
 
 function saveLastGeometry(cols: number, rows: number) {
-  try {
-    localStorage.setItem(LAST_GEOM_KEY, JSON.stringify({ cols, rows }))
-  } catch { /* ignore unavailable storage */ }
+  writeLocal(StorageKeys.terminalGeometry, JSON.stringify({ cols, rows }))
 }
 
 function getWsUrl(agentId: string, projectId: string | null, shell?: boolean, sandboxed?: boolean, shellId?: string): string {
