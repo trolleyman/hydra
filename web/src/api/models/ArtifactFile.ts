@@ -20,6 +20,10 @@ export type ArtifactFile = {
      * Labels for this file, read from a sibling JSON sidecar (<file>.meta, {"tags": [...]}). A "category::value" tag is a scoped label — only one value per category survives. Drives the artifacts panel's tag badges and filter. Null/absent when the file has no tags.
      */
     tags?: Array<string> | null;
+    /**
+     * True only for a video file reported as "modified" whose verdict is a raw byte-hash comparison because ffmpeg was unavailable to verify it frame-by-frame — so the change may be spurious (e.g. only container metadata differs). Absent/false for images and for frame-verified video. The UI shows a caveat badge when set.
+     */
+    unverified?: boolean | null;
 };
 export namespace ArtifactFile {
     export enum change_type {

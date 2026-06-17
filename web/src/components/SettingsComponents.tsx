@@ -353,7 +353,7 @@ export function ArtifactsEditor({
             <li><code className="text-blue-300">HYDRA_ARTIFACT_SOURCE</code> — the checkout directory</li>
             <li><code className="text-blue-300">HYDRA_ARTIFACT_REF</code> — the resolved git ref</li>
           </ul>
-          <p className="mt-1.5"><code className="text-blue-300">.png .jpg .gif</code> are diffed pixel-by-pixel; other types (<code className="text-blue-300">.webp .avif .svg .bmp .pdf</code> and <code className="text-blue-300">.webm</code> video) are compared by byte hash. Video is supported via <code className="text-blue-300">.webm</code> only and must be <strong>lossless</strong> (e.g. <code className="text-blue-300">libvpx-vp9 -lossless 1</code>), since a non-deterministic encode always reads as changed and produces spurious diffs.</p>
+          <p className="mt-1.5"><code className="text-blue-300">.png .jpg .gif</code> are diffed pixel-by-pixel; <code className="text-blue-300">.webm</code> video is diffed frame-by-frame when <strong>ffmpeg</strong> is installed (else by byte hash); other types (<code className="text-blue-300">.webp .avif .svg .bmp .pdf</code>) are compared by byte hash. Encode video as <strong>lossless</strong> <code className="text-blue-300">.webm</code> (e.g. <code className="text-blue-300">libvpx-vp9 -lossless 1</code>) so identical frames stay identical — a lossy encode changes pixels and reads as changed.</p>
         </InfoTooltip>
       </div>
       <p className="text-xs text-gray-500 dark:text-gray-400 mb-4 ml-10">

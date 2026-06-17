@@ -202,6 +202,11 @@ type FileDelta struct {
 	// a re-tagged category shows its current value while one present on only one
 	// side survives). See mergeTags.
 	Tags []string
+	// Unverified is set only on a video file left as ChangeModified because the
+	// per-frame check could not run (ffmpeg missing or errored), so the verdict
+	// is the raw byte-hash one and may be spurious — see Manager.Compare. The UI
+	// caveats it with a badge. Always false for images and frame-verified video.
+	Unverified bool
 }
 
 // Compare matches files by name across two versions' file lists and classifies
@@ -267,8 +272,15 @@ func AnyChanged(deltas []FileDelta) bool {
 // difference.
 //
 // Only formats the standard library can decode (PNG, JPEG, GIF) get the pixel
-// check; other types — and any file that fails to decode — keep the byte-hash
-// verdict.
+// check; other still types — and any file that fails to decode — keep the
+// byte-hash verdict.
+//
+// Video (.webm) cannot be decoded by the stdlib, so it is refined out-of-process
+// via ffmpeg (videoFramesEqual): identical frames downgrade ChangeModified to
+// ChangeUnchanged, which strips spurious diffs from non-deterministic container
+// metadata. When ffmpeg is unavailable or errors the byte-hash verdict stands,
+// but the delta is marked Unverified so the UI can caveat a possibly-spurious
+// "modified".
 func (m *Manager) Compare(left, right Meta) []FileDelta {
 	deltas := Compare(left.Files, right.Files)
 	for i := range deltas {
@@ -278,11 +290,86 @@ func (m *Manager) Compare(left, right Meta) []FileDelta {
 		}
 		lp := filepath.Join(m.entryDir(left.Script, left.Key), filepath.FromSlash(d.Name))
 		rp := filepath.Join(m.entryDir(right.Script, right.Key), filepath.FromSlash(d.Name))
+		if isVideoFile(d.Name) {
+			equal, err := videoFramesEqual(lp, rp)
+			switch {
+			case err != nil:
+				d.Unverified = true
+			case equal:
+				d.Change = ChangeUnchanged
+			}
+			continue
+		}
 		if equal, err := imagesPixelEqual(lp, rp); err == nil && equal {
 			d.Change = ChangeUnchanged
 		}
 	}
 	return deltas
+}
+
+// isVideoFile reports whether name's extension is one of the video media types
+// (currently only .webm) — the formats that go through the ffmpeg frame check
+// rather than the stdlib pixel decoder.
+func isVideoFile(name string) bool {
+	return strings.HasPrefix(mediaExts[strings.ToLower(filepath.Ext(name))], "video/")
+}
+
+// videoFramesEqual reports whether two video files decode to the same sequence
+// of frames, by comparing per-frame content hashes from ffmpeg. It returns an
+// error (so the caller falls back to the byte-hash verdict) when ffmpeg is not
+// installed or fails to decode either side.
+func videoFramesEqual(leftPath, rightPath string) (bool, error) {
+	l, err := videoFrameHashes(leftPath)
+	if err != nil {
+		return false, errtrace.Wrap(err)
+	}
+	r, err := videoFrameHashes(rightPath)
+	if err != nil {
+		return false, errtrace.Wrap(err)
+	}
+	return l == r, nil
+}
+
+// videoFrameHashes returns a newline-joined list of per-frame content hashes for
+// the first video stream of path, using `ffmpeg -f framemd5`. Each row's hash is
+// the md5 of that frame's decoded (rawvideo) pixels, so it depends only on the
+// visual content — container muxing, timestamps and writing-app metadata do not
+// affect it. Only the hash column is kept, so differing presentation timestamps
+// on otherwise-identical frames don't register as a change.
+func videoFrameHashes(path string) (string, error) {
+	bin, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		return "", errtrace.Wrap(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	// -map 0:v:0 picks the first video stream; -an drops audio; framemd5 to
+	// stdout emits one hash row per decoded frame.
+	cmd := exec.CommandContext(ctx, bin, "-nostdin", "-loglevel", "error", "-i", path, "-map", "0:v:0", "-an", "-f", "framemd5", "-")
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	if err := cmd.Run(); err != nil {
+		return "", errtrace.Wrap(err)
+	}
+	var b strings.Builder
+	sc := bufio.NewScanner(&out)
+	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		// Skip the comment header (#software, #stream metadata, …) and blanks;
+		// keep only the trailing hash field of each frame row.
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if i := strings.LastIndex(line, ","); i >= 0 {
+			b.WriteString(strings.TrimSpace(line[i+1:]))
+			b.WriteByte('\n')
+		}
+	}
+	if err := sc.Err(); err != nil {
+		return "", errtrace.Wrap(err)
+	}
+	return b.String(), nil
 }
 
 // imagesPixelEqual reports whether two image files decode to the same dimensions

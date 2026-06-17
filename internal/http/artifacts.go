@@ -350,6 +350,9 @@ func (s *Server) buildArtifactSet(projectID, name string, leftSpec, rightSpec *c
 		if d.InRight {
 			f.RightUrl = ptr(blobURL(projectID, name, rightMeta.Key, d.Name))
 		}
+		if d.Unverified {
+			f.Unverified = ptr(true)
+		}
 		set.Files = append(set.Files, f)
 	}
 	return set
