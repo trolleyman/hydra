@@ -219,6 +219,10 @@ export function AgentDetail({
         try {
           await api.default.killAgent(projectId ?? '', agent.id)
           useToastStore.getState().show({ message: `Agent "${agent.id}" killed`, type: 'info' })
+          // Optimistically move the agent into the archived history so it appears
+          // in the sidebar immediately, rather than vanishing until the next
+          // archived-list refetch (which only happens on a project switch).
+          useAgentStore.getState().upsertArchived({ ...agent, archived: true, end_state: 'killed', session_status: 'stopped', session_pid: 0 })
           onKilled(agent.id)
         } catch (err) {
           useDialogStore.getState().show({
@@ -258,6 +262,10 @@ export function AgentDetail({
             message: `Agent "${agent.id}" merged into ${agent.base_branch}`,
             type: 'success',
           })
+          // Optimistically move the agent into the archived history so it appears
+          // in the sidebar immediately, rather than vanishing until the next
+          // archived-list refetch (which only happens on a project switch).
+          useAgentStore.getState().upsertArchived({ ...agent, archived: true, end_state: 'merged', session_status: 'stopped', session_pid: 0 })
           onKilled(agent.id)
         } catch (err: any) {
           const errorData = (err.body && typeof err.body === 'object') ? err.body : err
