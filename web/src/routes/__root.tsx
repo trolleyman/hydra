@@ -566,9 +566,20 @@ function RootLayout() {
     .filter((p) => p.id !== currentProjectId)
     .reduce((n, p) => n + (p.unread_count ?? 0), 0)
   const anyUnread = currentProjectUnread + otherProjectsUnread > 0
+  // Build the rest of the title from the current view: project, then the open
+  // agent (its title, falling back to id) or the repository browser. Computed as
+  // primitive strings so the effect only fires when the displayed text changes.
+  const titleProjectName = projects.find((p) => p.id === currentProjectId)?.name
+  const titleAgent = selectedAgentId ? agents.find((a) => a.id === selectedAgentId) : undefined
+  const titleAgentName = titleAgent ? titleAgent.title || titleAgent.id : undefined
+  const onRepository = /\/repository(\/|$)/.test(location.pathname)
   useEffect(() => {
-    document.title = anyUnread ? 'Hydra 🔵' : 'Hydra'
-  }, [anyUnread])
+    const parts = [anyUnread ? 'Hydra 🔵' : 'Hydra']
+    if (titleProjectName) parts.push(titleProjectName)
+    if (titleAgentName) parts.push(titleAgentName)
+    else if (onRepository) parts.push('Repository')
+    document.title = parts.join(' · ')
+  }, [anyUnread, titleProjectName, titleAgentName, onRepository])
 
   useEffect(() => {
     let cancelled = false
