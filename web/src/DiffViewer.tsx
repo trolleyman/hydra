@@ -1371,7 +1371,7 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger }: { agent
   })
   const [imageDiffMode, setImageDiffMode] = useState<ImageDiffMode>(() => {
     const stored = readLocal(StorageKeys.diffImageMode)
-    if (stored === 'side-by-side' || stored === 'ab' || stored === 'slider' || stored === 'onion') return stored
+    if (stored === 'side-by-side' || stored === 'ab' || stored === 'difference' || stored === 'slider' || stored === 'onion') return stored
     return 'side-by-side'
   })
 

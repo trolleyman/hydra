@@ -269,6 +269,9 @@ type ArtifactSet struct {
 	// Name The configured artifact script name
 	Name string `json:"name"`
 
+	// PendingTags Tags already known from a side that has settled while the other side is still generating, so the diff viewer's tag filter can appear before the whole set is ready (the "before" side often finishes first thanks to caching). Deduped and sorted, drawn from whichever side(s) have produced files so far. Only set while status is "generating"; once ready, tags are carried per file in files[].tags.
+	PendingTags *[]string `json:"pending_tags"`
+
 	// RightError As left_error, for the RIGHT (after) side.
 	RightError *string `json:"right_error"`
 

@@ -310,6 +310,12 @@ func (s *Server) buildArtifactSet(projectID, name string, leftSpec, rightSpec *c
 	switch {
 	case leftMeta.Status == artifacts.StatusGenerating || rightMeta.Status == artifacts.StatusGenerating:
 		set.Status = api.Generating
+		// Surface the tags known so far from any side that has already settled (a
+		// settled side carries its files; a still-generating one has none), so the
+		// tag filter can appear while the other side is still building.
+		if tags := pendingTags(leftMeta, rightMeta); len(tags) > 0 {
+			set.PendingTags = &tags
+		}
 		return set
 	case leftErrored && rightErrored:
 		set.Status = api.Error
@@ -347,6 +353,30 @@ func (s *Server) buildArtifactSet(projectID, name string, leftSpec, rightSpec *c
 		set.Files = append(set.Files, f)
 	}
 	return set
+}
+
+// pendingTags gathers the deduped, sorted union of every tag carried by the
+// files of the given metas. While a set generates, a settled side has files (so
+// contributes its tags) and a still-generating side has none, so this exposes
+// the tags learned so far — letting the filter bar show before both sides settle.
+func pendingTags(metas ...artifacts.Meta) []string {
+	seen := map[string]struct{}{}
+	for _, m := range metas {
+		for _, f := range m.Files {
+			for _, t := range f.Tags {
+				seen[t] = struct{}{}
+			}
+		}
+	}
+	if len(seen) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(seen))
+	for t := range seen {
+		out = append(out, t)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // toAPILog converts the manager's captured log lines into the API shape. It
