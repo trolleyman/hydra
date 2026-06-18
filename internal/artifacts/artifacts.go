@@ -949,6 +949,70 @@ func (m *Manager) CleanCheckouts() {
 	_ = os.RemoveAll(m.checkoutsDir())
 }
 
+// legacyKeyRe matches a cache-entry dir in the old flat layout, where the kind
+// was a single-letter prefix on the id: "c<sha>" for a commit, "w<hash>" for a
+// working-tree snapshot. Captures the prefix and the id.
+var legacyKeyRe = regexp.MustCompile(`^([cw])([0-9a-f]+)$`)
+
+// MigrateLegacyLayout moves any cache entries still in the old flat
+// "c<sha>"/"w<hash>" layout into the current out/<script>/<kind>/<id> layout,
+// rewriting each meta.json's key field to match its new path (the field is
+// returned verbatim and feeds the blob URLs, so a stale key would 404).
+// Migrating — rather than discarding — keeps already-generated screenshots valid
+// across the upgrade. Best-effort and idempotent: safe to run on every boot, and
+// it skips an entry whose new-format dir already exists (a fresh regen wins).
+// Returns the number of entries moved.
+func (m *Manager) MigrateLegacyLayout() int {
+	scriptDirs, err := os.ReadDir(m.outDir())
+	if err != nil {
+		return 0
+	}
+	moved := 0
+	for _, sd := range scriptDirs {
+		if !sd.IsDir() {
+			continue
+		}
+		scriptPath := filepath.Join(m.outDir(), sd.Name())
+		children, err := os.ReadDir(scriptPath)
+		if err != nil {
+			continue
+		}
+		for _, c := range children {
+			match := legacyKeyRe.FindStringSubmatch(c.Name())
+			if !c.IsDir() || match == nil {
+				continue // already-migrated commit/ & worktree/ dirs, or stray files
+			}
+			kind := keyKindCommit
+			if match[1] == "w" {
+				kind = keyKindWorktree
+			}
+			newKey := kind + "/" + match[2]
+			oldDir := filepath.Join(scriptPath, c.Name())
+			newDir := filepath.Join(scriptPath, kind, match[2])
+			// A new-format entry already exists (regenerated since the upgrade):
+			// keep the fresh one and drop the stale legacy copy.
+			if _, err := os.Stat(newDir); err == nil {
+				_ = os.RemoveAll(oldDir)
+				continue
+			}
+			if err := os.MkdirAll(filepath.Dir(newDir), 0o755); err != nil {
+				continue
+			}
+			if err := os.Rename(oldDir, newDir); err != nil {
+				continue
+			}
+			// Point the persisted meta at its new path. If meta is unreadable the
+			// entry is effectively dead anyway; the next Get regenerates it.
+			if meta, ok := readMeta(newDir); ok && meta.Key != newKey {
+				meta.Key = newKey
+				_ = writeMeta(newDir, meta)
+			}
+			moved++
+		}
+	}
+	return moved
+}
+
 // PruneStale removes cache entries older than maxAge, then removes the oldest
 // remaining entries until the total cache size is under maxBytes. Entries with
 // an in-flight generation are never touched.
@@ -983,18 +1047,18 @@ func (m *Manager) PruneStale(maxAge time.Duration, maxBytes int64) error {
 		scriptPath := filepath.Join(m.outDir(), sd.Name())
 		// Entries nest two levels below the script dir: <kind>/<id> (see
 		// versionKey). Anything else directly under the script dir is a leftover
-		// from the old flat "c<sha>"/"w<hash>" layout — drop it on sight so the
-		// rename doesn't strand orphaned caches that the loops below never reach.
+		// from the old flat "c<sha>"/"w<hash>" layout — skip it (don't delete), so
+		// a not-yet-migrated cache survives until MigrateLegacyLayout (run on boot)
+		// moves it over.
 		kindDirs, err := os.ReadDir(scriptPath)
 		if err != nil {
 			continue
 		}
 		for _, kindDir := range kindDirs {
-			kindPath := filepath.Join(scriptPath, kindDir.Name())
 			if !kindDir.IsDir() || (kindDir.Name() != keyKindCommit && kindDir.Name() != keyKindWorktree) {
-				_ = os.RemoveAll(kindPath)
 				continue
 			}
+			kindPath := filepath.Join(scriptPath, kindDir.Name())
 			idDirs, err := os.ReadDir(kindPath)
 			if err != nil {
 				continue

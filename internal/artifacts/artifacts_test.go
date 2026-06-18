@@ -311,6 +311,68 @@ func hasDotDotPrefix(rel string) bool {
 	return rel == ".." || (len(rel) >= 3 && rel[:3] == ".."+string(filepath.Separator))
 }
 
+func TestMigrateLegacyLayout(t *testing.T) {
+	m := NewManager(t.TempDir())
+	const sha = "a6a44867d80c2401f8a3648cd06c5c7c005db467"
+	const wHash = "deadbeef"
+
+	// Seed two entries in the old flat layout (c<sha> commit, w<hash> worktree),
+	// each with a meta.json carrying the old key and a blob file alongside.
+	seedLegacy := func(script, name, key string) {
+		dir := filepath.Join(m.outDir(), script, name)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := writeMeta(dir, Meta{Script: script, Key: key, Status: StatusReady, Files: []FileMeta{{Name: "home.png"}}}); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "home.png"), []byte("PNG"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	seedLegacy("shots", "c"+sha, "c"+sha)
+	seedLegacy("shots", "w"+wHash, "w"+wHash)
+
+	if n := m.MigrateLegacyLayout(); n != 2 {
+		t.Fatalf("migrated = %d, want 2", n)
+	}
+
+	// Old dirs gone; new <kind>/<id> dirs present with the blob moved and the
+	// persisted key rewritten to match the new path.
+	check := func(oldName, newKey string) {
+		if _, err := os.Stat(filepath.Join(m.outDir(), "shots", oldName)); !os.IsNotExist(err) {
+			t.Errorf("legacy dir %q still present", oldName)
+		}
+		newDir := m.entryDir("shots", newKey)
+		if _, err := os.Stat(filepath.Join(newDir, "home.png")); err != nil {
+			t.Errorf("blob not moved for %q: %v", newKey, err)
+		}
+		meta, ok := readMeta(newDir)
+		if !ok {
+			t.Fatalf("meta missing for %q", newKey)
+		}
+		if meta.Key != newKey {
+			t.Errorf("meta.Key = %q, want %q", meta.Key, newKey)
+		}
+	}
+	check("c"+sha, "commit/"+sha)
+	check("w"+wHash, "worktree/"+wHash)
+
+	// Idempotent: a second run finds nothing to move.
+	if n := m.MigrateLegacyLayout(); n != 0 {
+		t.Errorf("second run migrated = %d, want 0", n)
+	}
+
+	// A legacy entry whose new-format dir already exists is dropped, not moved.
+	seedLegacy("shots", "c"+sha, "c"+sha)
+	if n := m.MigrateLegacyLayout(); n != 0 {
+		t.Errorf("migrated over existing = %d, want 0", n)
+	}
+	if _, err := os.Stat(filepath.Join(m.outDir(), "shots", "c"+sha)); !os.IsNotExist(err) {
+		t.Error("stale legacy dir not removed when new-format entry exists")
+	}
+}
+
 func TestCompare(t *testing.T) {
 	left := []FileMeta{
 		{Name: "a.png", Hash: "1"},
