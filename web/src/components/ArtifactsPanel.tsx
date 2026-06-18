@@ -37,16 +37,27 @@ export const IMAGE_DIFF_MODES: { value: ImageDiffMode; label: string }[] = [
   { value: 'onion', label: 'Onion skin' },
 ]
 
-function ImageCell({ url, label, maxHeight, onResizeStart }: { url?: string | null; label: string; maxHeight: number; onResizeStart: (e: React.PointerEvent) => void }) {
+function ImageCell({ url, label, maxHeight, onResizeStart, consumeDrag }: { url?: string | null; label: string; maxHeight: number; onResizeStart: (e: React.PointerEvent) => void; consumeDrag: () => boolean }) {
   return (
     <div className="min-w-0">
       <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-1">{label}</div>
       {url ? (
-        <div className="group relative inline-block">
-          <a href={url} target="_blank" rel="noreferrer" className="block">
+        // A press-and-drag anywhere on the image resizes it (onPointerDown); a plain
+        // click still opens it in a new tab via the <a>, but consumeDrag() cancels
+        // that navigation when the press turned into a drag. select-none so a drag
+        // doesn't marquee-select. draggable={false} so the image isn't ghost-dragged.
+        <div className="group relative inline-block select-none" onPointerDown={onResizeStart}>
+          <a
+            href={url}
+            target="_blank"
+            rel="noreferrer"
+            className="block"
+            onClick={(e) => { if (consumeDrag()) e.preventDefault() }}
+          >
             <img
               src={url}
               loading="lazy"
+              draggable={false}
               style={{ ...checkerStyle, maxHeight: `${maxHeight}px` }}
               className={IMG_CLASS}
             />
@@ -190,16 +201,22 @@ function SliderCompare({ left, right }: { left?: string | null; right?: string |
 // the side currently weighted by the blend.
 function OnionCompare({ left, right }: { left?: string | null; right?: string | null }) {
   const [opacity, setOpacity] = useState(50)
+  const { maxHeight, onResizeStart } = useMediaResize()
   const sizer = (right ?? left) as string
   return (
     <div className="min-w-0">
       <div
-        className="relative inline-block"
+        // A press-and-drag anywhere on the blended image resizes it; the opacity
+        // slider below is a separate row, so the box owns no left-click gesture and
+        // onResizeStart needs no consumeDrag guard. group reveals the grip on hover.
+        className="group relative inline-block select-none"
+        onPointerDown={onResizeStart}
         onAuxClick={makeAuxOpen(() => (opacity >= 50 ? right : left) || sizer)}
       >
-        <img src={sizer} style={{ visibility: 'hidden' }} className={`${IMG_CLASS} block`} draggable={false} />
+        <img src={sizer} style={{ visibility: 'hidden', maxHeight: `${maxHeight}px` }} className={`${IMG_CLASS} block`} draggable={false} />
         <LayerNode url={left} />
         <LayerNode url={right} style={{ opacity: opacity / 100 }} />
+        <ResizeGrip onPointerDown={onResizeStart} />
       </div>
       <div className="flex items-center gap-2 mt-1">
         <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">Before</span>
@@ -325,15 +342,19 @@ function DiffCompare({ left, right }: { left?: string | null; right?: string | n
         <button onClick={() => setView('diff')} className={btn(view === 'diff')}>Diff</button>
       </div>
       {view === 'diff' && canDiff ? (
-        <div className="group relative inline-block">
+        // A press-and-drag anywhere on the diff canvas resizes it; there's no
+        // left-click gesture here, so onResizeStart needs no consumeDrag guard.
+        <div className="group relative inline-block" onPointerDown={onResizeStart}>
           <DiffCanvas left={left} right={right} maxHeight={maxHeight} />
           <ResizeGrip onPointerDown={onResizeStart} />
         </div>
       ) : (
         // Before/After (or the Diff tab with only one side present): show the
-        // chosen image, stacked over a hidden sizer so the box keeps its size.
+        // chosen image, stacked over a hidden sizer so the box keeps its size. A
+        // press-and-drag anywhere resizes (group reveals the grip on hover too).
         <div
-          className="relative inline-block select-none"
+          className="group relative inline-block select-none"
+          onPointerDown={onResizeStart}
           onAuxClick={makeAuxOpen(() => (view === 'before' ? left : right) || sizer)}
         >
           <img src={sizer} style={{ visibility: 'hidden', maxHeight: `${maxHeight}px` }} className={`${IMG_CLASS} block`} draggable={false} />
@@ -348,11 +369,11 @@ function DiffCompare({ left, right }: { left?: string | null; right?: string | n
 // The default side-by-side pair. Holds one shared resize state so dragging the
 // grip on either image grows both before/after cells by the same amount.
 function SideBySide({ left, right }: { left?: string | null; right?: string | null }) {
-  const { maxHeight, onResizeStart } = useMediaResize()
+  const { maxHeight, onResizeStart, consumeDrag } = useMediaResize()
   return (
     <div className="flex gap-3">
-      <ImageCell url={left} label="Before" maxHeight={maxHeight} onResizeStart={onResizeStart} />
-      <ImageCell url={right} label="After" maxHeight={maxHeight} onResizeStart={onResizeStart} />
+      <ImageCell url={left} label="Before" maxHeight={maxHeight} onResizeStart={onResizeStart} consumeDrag={consumeDrag} />
+      <ImageCell url={right} label="After" maxHeight={maxHeight} onResizeStart={onResizeStart} consumeDrag={consumeDrag} />
     </div>
   )
 }
