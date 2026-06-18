@@ -806,7 +806,12 @@ function RootLayout() {
 
   function handleSpawned(agent: AgentResponse) {
     addAgent(agent)
-    if (currentProjectId) {
+    // Spawn in the background: only jump to the new agent if the user isn't
+    // already focused on one. When an agent is open, leave it in front so a
+    // spawn from the sidebar doesn't yank them away from their current work —
+    // the new agent just appears in the list. If nothing is selected (e.g. the
+    // project home / repository view), select it so the spawn isn't a no-op.
+    if (currentProjectId && !selectedAgentId) {
       navigate({ to: '/project/$projectId/agent/$agentId', params: { projectId: currentProjectId, agentId: agent.id } })
     }
   }
