@@ -5,9 +5,10 @@
 // of a diff (a commit ref, or the head's uncommitted working tree) the manager
 // checks out the relevant source, runs the script against it, and collects the
 // image files it writes. Results are cached on disk under
-// .hydra/artifacts/out/<script>/<version-key> (gitignored, never committed) and
-// keyed by an immutable version identifier (the resolved commit SHA, or a hash
-// of the working-tree state), so repeat views are free.
+// .hydra/artifacts/out/<script>/<kind>/<id> (gitignored, never committed),
+// keyed by an immutable version identifier: commit/<sha> for a resolved commit,
+// or worktree/<hash> for a snapshot of the working-tree state. Repeat views of
+// the same version are free.
 //
 // Generation runs in the background: Get returns immediately with a
 // "generating" status while a goroutine does the (potentially slow) work, a
@@ -563,24 +564,38 @@ func (m *Manager) root() string         { return paths.GetArtifactsDirFromProjec
 func (m *Manager) outDir() string       { return filepath.Join(m.root(), "out") }
 func (m *Manager) checkoutsDir() string { return filepath.Join(m.root(), "checkouts") }
 
+// entryDir is the on-disk cache dir for a (script, key) pair. key is a
+// "<kind>/<id>" path (see versionKey), so the entry nests as
+// out/<script>/<kind>/<id>/; filepath.Join treats the slash as a separator.
 func (m *Manager) entryDir(script, key string) string {
-	return filepath.Join(m.outDir(), sanitizeName(script), key)
+	return filepath.Join(m.outDir(), sanitizeName(script), filepath.FromSlash(key))
 }
 
+// Cache-key kinds. A key is "<kind>/<id>": a commit is keyed by its resolved
+// SHA, the working tree by a content fingerprint. The kind is the first path
+// segment, so on disk an entry lives at out/<script>/<kind>/<id>/ — commits and
+// working-tree snapshots sit in separate, self-describing subtrees.
+const (
+	keyKindCommit   = "commit"
+	keyKindWorktree = "worktree"
+)
+
 // versionKey resolves a Version to a stable cache key and a human-readable ref.
+// The key doubles as the entry's path under the script dir (see entryDir), so it
+// is always "<kind>/<id>" with an id that is safe as a single path segment.
 func (m *Manager) versionKey(v Version) (key, ref string, err error) {
 	if v.WorktreeDir != "" {
 		h, err := git.WorktreeStateHash(v.WorktreeDir)
 		if err != nil {
 			return "", "", errtrace.Wrap(err)
 		}
-		return "w" + h, "working tree", nil
+		return keyKindWorktree + "/" + h, "working tree", nil
 	}
 	sha, err := git.ResolveRef(m.projectRoot, v.Ref)
 	if err != nil {
 		return "", "", errtrace.Wrap(err)
 	}
-	return "c" + sha, sha, nil
+	return keyKindCommit + "/" + sha, sha, nil
 }
 
 // Get returns the cache entry for (spec, v), starting a background generation
@@ -723,7 +738,12 @@ func (m *Manager) generate(spec config.ArtifactScript, v Version, key, ref strin
 	// Resolve the directory the script runs in.
 	runDir := v.WorktreeDir
 	if runDir == "" {
-		co := filepath.Join(m.checkoutsDir(), key)
+		// The checkout is an ephemeral, internal worktree, so keep it as a single
+		// flat dir rather than mirroring the cache key's "<kind>/<id>" nesting:
+		// AddDetachedWorktree gitignores the checkout's *parent*, and a nested
+		// parent would both leave an empty <kind> dir behind on cleanup and race a
+		// sibling checkout (base + head generate concurrently) sharing that parent.
+		co := filepath.Join(m.checkoutsDir(), strings.ReplaceAll(key, "/", "-"))
 		_ = git.RemoveWorktree(m.projectRoot, co) // clear any stale checkout
 		_ = os.RemoveAll(co)
 		if err := git.AddDetachedWorktree(m.projectRoot, co, ref); err != nil {
@@ -895,8 +915,11 @@ func (m *Manager) buildCommandSpec(spec config.ArtifactScript, runDir, outputDir
 	return errtrace.Wrap2(sandbox.BuildSpec(opts))
 }
 
-// keyRe matches valid cache keys produced by versionKey.
-var keyRe = regexp.MustCompile(`^[cw][0-9a-f]+$`)
+// keyRe matches valid cache keys produced by versionKey ("commit/<sha>" or
+// "worktree/<hash>"). Anchored with a single fixed kind segment and a hex id, so
+// a key can never contain ".." or extra path segments — BlobPath relies on this
+// to keep the resolved blob path inside the entry dir.
+var keyRe = regexp.MustCompile(`^(commit|worktree)/[0-9a-f]+$`)
 
 // BlobPath validates a (script, key, file) triple and returns the absolute
 // on-disk path of the artifact file plus its content type. It guards against
@@ -958,24 +981,39 @@ func (m *Manager) PruneStale(maxAge time.Duration, maxBytes int64) error {
 			continue
 		}
 		scriptPath := filepath.Join(m.outDir(), sd.Name())
-		keyDirs, err := os.ReadDir(scriptPath)
+		// Entries nest two levels below the script dir: <kind>/<id> (see
+		// versionKey). Anything else directly under the script dir is a leftover
+		// from the old flat "c<sha>"/"w<hash>" layout — drop it on sight so the
+		// rename doesn't strand orphaned caches that the loops below never reach.
+		kindDirs, err := os.ReadDir(scriptPath)
 		if err != nil {
 			continue
 		}
-		for _, kd := range keyDirs {
-			if !kd.IsDir() {
+		for _, kindDir := range kindDirs {
+			kindPath := filepath.Join(scriptPath, kindDir.Name())
+			if !kindDir.IsDir() || (kindDir.Name() != keyKindCommit && kindDir.Name() != keyKindWorktree) {
+				_ = os.RemoveAll(kindPath)
 				continue
 			}
-			dir := filepath.Join(scriptPath, kd.Name())
-			if _, busy := inFlight[dir]; busy {
+			idDirs, err := os.ReadDir(kindPath)
+			if err != nil {
 				continue
 			}
-			size, modTime := dirStats(dir)
-			if maxAge > 0 && modTime.Before(cutoff) {
-				_ = os.RemoveAll(dir)
-				continue
+			for _, id := range idDirs {
+				if !id.IsDir() {
+					continue
+				}
+				dir := filepath.Join(kindPath, id.Name())
+				if _, busy := inFlight[dir]; busy {
+					continue
+				}
+				size, modTime := dirStats(dir)
+				if maxAge > 0 && modTime.Before(cutoff) {
+					_ = os.RemoveAll(dir)
+					continue
+				}
+				entries = append(entries, entry{dir: dir, modTime: modTime, size: size})
 			}
-			entries = append(entries, entry{dir: dir, modTime: modTime, size: size})
 		}
 	}
 
