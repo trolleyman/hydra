@@ -601,8 +601,8 @@ type SandboxConfig struct {
 	MaskedPaths *[]string      `json:"masked_paths"`
 	Network     *NetworkConfig `json:"network,omitempty"`
 
-	// PostExitScript Bash script run on the HOST (unsandboxed) when a head ends (kill/merge/restart). Gets HYDRA_* head context + HYDRA_END_STATE. For host-side teardown the sandbox can't do, e.g. releasing a per-head emulator slot.
-	PostExitScript *string `json:"post_exit_script"`
+	// PreExitScript Bash script run in a sandbox when a head ends, after the agent's session is killed but before its worktree is removed. Runs with the head's sandbox policy, cwd = worktree, with HYDRA_* head context + HYDRA_END_STATE. For per-head teardown such as releasing a claimed resource.
+	PreExitScript *string `json:"pre_exit_script"`
 
 	// PreSpawnScript Bash script run inside the sandbox once, when the agent is first spawned — not on resume or for bash shells (e.g. `mise trust`)
 	PreSpawnScript *string   `json:"pre_spawn_script"`

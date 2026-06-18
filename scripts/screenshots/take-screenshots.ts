@@ -76,7 +76,7 @@ function sectionFor(name: string): string {
   if (name.startsWith('archived')) return 'archived'
   if (name.startsWith('agent-')) return 'agent'
   if (name.startsWith('spawn')) return 'spawn'
-  if (name === 'settings') return 'settings'
+  if (name === 'settings' || name === 'services-warning') return 'settings'
   if (name === 'nested-folders') return 'diff'
   return 'overview'
 }
@@ -325,11 +325,19 @@ try {
       // policy editor with the ShellEditor's bash highlighting + line-number
       // gutter, the typed text and the highlight layer aligned. The form lives
       // in a viewport-height scroll container, so use a tall viewport to fit the
-      // whole page: the pre-spawn editor sits near the bottom and the "Diff
-      // Artifacts" editor (the [[artifacts]] scripts, rendered below the tab on
-      // every tab) sits below that, so the viewport must be tall enough to reach
-      // it (simulation seeds one screenshots script there).
-      { name: 'settings', path: '/project/sim-project/settings', viewport: { width: 1280, height: 1900 } },
+      // whole page: the pre-spawn + pre-exit editors sit near the bottom, the
+      // "Diff Artifacts" editor (the [[artifacts]] scripts) below that, and the
+      // "Services" editor (the [[services]], with a live "Running" status badge)
+      // below that — so the viewport must be tall enough to reach the very bottom
+      // (simulation seeds one of each there).
+      { name: 'settings', path: '/project/sim-project/settings', viewport: { width: 1280, height: 2900 } },
+      // The same settings page for a project whose emulator-pool service has
+      // failed (simulation marks mobile-app's emu-pool failed): the "Services"
+      // editor shows a red "Failed" badge + the exit reason, and the project
+      // selector in the top bar carries the amber service-failure warning icon
+      // next to the project name. Full-page + tall viewport so both the top-bar
+      // warning and the failed service card at the bottom are in one shot.
+      { name: 'services-warning', path: '/project/mobile-app/settings', viewport: { width: 1280, height: 2900 } },
       // The agent detail header showing the new user-facing title: the sidebar
       // and header render the mutable title (e.g. "Add renameable agent titles")
       // in place of the stable ID, with a rename (pencil) button beside it and
@@ -554,7 +562,7 @@ try {
           // pops up — it's a fixed inset-0 overlay that otherwise intercepts
           // every click/scroll the capture flow performs. Trust is client-side
           // localStorage keyed by project id (lib/storage StorageKeys.trustedProjects).
-          try { window.localStorage.setItem('hydra-trusted-projects', '["sim-project"]') } catch { /* ignore */ }
+          try { window.localStorage.setItem('hydra-trusted-projects', '["sim-project","mobile-app"]') } catch { /* ignore */ }
           // Deterministic shuffle (spawn-form placeholder order).
           ;(Math as unknown as { random: () => number }).random = () => 0.5
           // Freeze short-lived timers (the typewriter placeholder animation runs

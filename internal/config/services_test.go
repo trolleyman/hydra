@@ -7,41 +7,41 @@ import (
 
 func intPtr(i int) *int { return &i }
 
-// TestPostExitScriptRoundTrip checks that a post_exit_script survives a
+// TestPreExitScriptRoundTrip checks that a pre_exit_script survives a
 // render -> parse round-trip and resolves for an agent.
-func TestPostExitScriptRoundTrip(t *testing.T) {
+func TestPreExitScriptRoundTrip(t *testing.T) {
 	cfg := Config{
 		Defaults: AgentConfig{
-			Sandbox: &SandboxConfig{PostExitScript: strPtr("emu-release.sh\necho done")},
+			Sandbox: &SandboxConfig{PreExitScript: strPtr("emu-release.sh\necho done")},
 		},
 	}
 
 	tomlStr := renderConfig(nil, cfg)
-	if !strings.Contains(tomlStr, "post_exit_script = ") {
-		t.Fatalf("rendered config missing post_exit_script:\n%s", tomlStr)
+	if !strings.Contains(tomlStr, "pre_exit_script = ") {
+		t.Fatalf("rendered config missing pre_exit_script:\n%s", tomlStr)
 	}
 
 	parsed, err := decodeConfig([]byte(tomlStr))
 	if err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if got := parsed.ResolvePostExitScript("claude"); got != "emu-release.sh\necho done" {
-		t.Fatalf("resolved postExit mismatch: %q", got)
+	if got := parsed.ResolvePreExitScript("claude"); got != "emu-release.sh\necho done" {
+		t.Fatalf("resolved preExit mismatch: %q", got)
 	}
 }
 
-// TestPostExitScriptAgentOverride checks the per-agent override wins.
-func TestPostExitScriptAgentOverride(t *testing.T) {
+// TestPreExitScriptAgentOverride checks the per-agent override wins.
+func TestPreExitScriptAgentOverride(t *testing.T) {
 	cfg := Config{
-		Defaults: AgentConfig{Sandbox: &SandboxConfig{PostExitScript: strPtr("default")}},
+		Defaults: AgentConfig{Sandbox: &SandboxConfig{PreExitScript: strPtr("default")}},
 		Agents: map[string]AgentConfig{
-			"claude": {Sandbox: &SandboxConfig{PostExitScript: strPtr("claude-only")}},
+			"claude": {Sandbox: &SandboxConfig{PreExitScript: strPtr("claude-only")}},
 		},
 	}
-	if got := cfg.ResolvePostExitScript("claude"); got != "claude-only" {
+	if got := cfg.ResolvePreExitScript("claude"); got != "claude-only" {
 		t.Fatalf("claude override: got %q", got)
 	}
-	if got := cfg.ResolvePostExitScript("gemini"); got != "default" {
+	if got := cfg.ResolvePreExitScript("gemini"); got != "default" {
 		t.Fatalf("gemini inherits default: got %q", got)
 	}
 }

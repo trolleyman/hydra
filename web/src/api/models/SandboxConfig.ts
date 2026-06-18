@@ -19,9 +19,9 @@ export type SandboxConfig = {
      */
     pre_spawn_script?: string | null;
     /**
-     * Bash script run on the HOST (unsandboxed) when a head ends (kill/merge/restart). Gets HYDRA_* head context + HYDRA_END_STATE. For host-side teardown the sandbox can't do, e.g. releasing a per-head emulator slot.
+     * Bash script run in a sandbox when a head ends, after the agent's session is killed but before its worktree is removed. Runs with the head's sandbox policy, cwd = worktree, with HYDRA_* head context + HYDRA_END_STATE. For per-head teardown such as releasing a claimed resource.
      */
-    post_exit_script?: string | null;
+    pre_exit_script?: string | null;
     network?: NetworkConfig | null;
 };
 

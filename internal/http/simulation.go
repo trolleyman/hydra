@@ -1310,7 +1310,7 @@ func (s *SimulationServer) GetConfig(w http.ResponseWriter, r *http.Request, pro
 	if params.Scope == nil || *params.Scope != api.GetConfigParamsScopeUser {
 		resp.Defaults.Sandbox = &api.SandboxConfig{
 			PreSpawnScript: ptr("#!/bin/bash\nset -euo pipefail\ncp -r \"$HYDRA_PROJECT_ROOT/pipeline/out\" \"$HYDRA_WORKTREE/pipeline/out\"\n"),
-			PostExitScript: ptr("source \"$HYDRA_WORKTREE/.hydra/emu.env\" 2>/dev/null && scripts/emu-pool.sh reap\n"),
+			PreExitScript:  ptr("source \"$HYDRA_WORKTREE/.hydra/emu.env\" 2>/dev/null && scripts/emu-claim-slot.sh release\n"),
 		}
 		resp.Artifacts = &[]api.ArtifactScript{
 			{Name: "screenshots", Command: "bun run screenshots.ts", TimeoutSec: ptr(900)},
@@ -1327,6 +1327,18 @@ func (s *SimulationServer) SaveConfig(w http.ResponseWriter, r *http.Request, pr
 }
 
 func (s *SimulationServer) GetServices(w http.ResponseWriter, r *http.Request, projectId string) {
+	// mobile-app's emulator pool has crashed out (exhausted restarts) — drives the
+	// failed-service badge and the top-bar warning indicator in the screenshots.
+	// Every other project's pool is healthy.
+	if projectId == "mobile-app" {
+		api.WriteJSON(w, http.StatusOK, api.ServiceStatusResponse{
+			Services: []api.ServiceStatus{
+				{Name: "emu-pool", Command: "scripts/emu-pool.sh up 3 --foreground", Host: true, State: api.Failed, Restarts: 3, MaxRestarts: 3, Pid: ptr(0),
+					Message: ptr("exit status 1 (last output: emulator: ERROR: x86_64 emulation requires hardware acceleration — /dev/kvm not found)")},
+			},
+		})
+		return
+	}
 	api.WriteJSON(w, http.StatusOK, api.ServiceStatusResponse{
 		Services: []api.ServiceStatus{
 			{Name: "emu-pool", Command: "scripts/emu-pool.sh up 3 --foreground", Host: true, State: api.Up, Restarts: 0, MaxRestarts: 3, Pid: ptr(40123)},

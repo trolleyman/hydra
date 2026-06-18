@@ -40,7 +40,7 @@ const DefaultPrePrompt = "You are a head (AI agent) of Hydra, an AI orchestratio
 	"- `cow_paths` — worktree-relative paths mounted copy-on-write from the project root (you can read and overwrite them; writes stay in your worktree and never touch the real files).\n" +
 	"- `network.enabled` / `network.allowed_hosts` — outbound network access and its host allow-list.\n" +
 	"- `pre_spawn_script` — a bash script run inside the sandbox once, when the agent is first spawned (e.g. `mise trust`).\n" +
-	"- `post_exit_script` — a bash script run on the host (unsandboxed) when a head ends, for host-side teardown the sandbox can't do.\n" +
+	"- `pre_exit_script` — a bash script run inside a sandbox when a head ends (before its worktree is removed), for per-head teardown such as releasing a claimed resource.\n" +
 	"- `pre_prompt` — the standing instructions you are reading now.\n" +
 	"\n" +
 	"## Workflow\n" +
@@ -80,15 +80,17 @@ type SandboxConfig struct {
 	// arbitrary setup). It runs via /bin/sh in the agent's worktree with the
 	// same environment and confinement as the agent. nil/empty = no script.
 	PreSpawnScript *string `toml:"pre_spawn_script"`
-	// PostExitScript is an optional shell script run on the HOST (unsandboxed)
-	// when a head ends — i.e. on kill/merge/restart/ephemeral-cleanup, after the
-	// session, worktree and branch are torn down. It is best-effort and bounded
-	// by a timeout. The same HYDRA_* head-context variables as the agent are
-	// exported, plus HYDRA_END_STATE ("killed"|"merged"|""). Use it for host-side
-	// teardown the sandbox can't do — e.g. releasing a per-head emulator slot.
-	// nil/empty = no script. Unlike PreSpawnScript it runs unconfined, so it has
-	// full access to the host: only set it to commands you trust.
-	PostExitScript *string `toml:"post_exit_script"`
+	// PreExitScript is an optional shell script run inside a sandbox when a head
+	// ends — after the agent's session is killed but BEFORE the worktree/branch
+	// are torn down (kill/merge/restart/ephemeral-cleanup). It runs in a fresh
+	// sandbox with this agent's policy, in the worktree (which still exists), with
+	// the same HYDRA_* head-context variables plus HYDRA_END_STATE
+	// ("killed"|"merged"|""). Use it for per-head teardown the agent didn't do
+	// itself — e.g. releasing a claimed emulator slot from the worktree's
+	// .hydra/emu.env. It is best-effort and bounded by a timeout. Being sandboxed,
+	// it cannot reach host-only resources (the host adb server, /dev/kvm); those
+	// belong to a host-side [[services]] pool. nil/empty = no script.
+	PreExitScript *string `toml:"pre_exit_script"`
 }
 
 // ServiceScript describes a per-project long-running command Hydra supervises
@@ -407,8 +409,8 @@ func (s *SandboxConfig) Merge(other SandboxConfig) {
 	if other.PreSpawnScript != nil {
 		s.PreSpawnScript = other.PreSpawnScript
 	}
-	if other.PostExitScript != nil {
-		s.PostExitScript = other.PostExitScript
+	if other.PreExitScript != nil {
+		s.PreExitScript = other.PreExitScript
 	}
 }
 
@@ -506,12 +508,12 @@ func (c Config) ResolveSandboxOptions(agentType string) (writable, masked, resto
 	return writable, masked, restore, cow, net, preSpawn
 }
 
-// ResolvePostExitScript returns the host-side post-exit script for an agent type
-// (the per-agent override, else the defaults), or "" when none is configured.
-func (c Config) ResolvePostExitScript(agentType string) string {
+// ResolvePreExitScript returns the sandboxed pre-exit teardown script for an
+// agent type (the per-agent override, else the defaults), or "" when unset.
+func (c Config) ResolvePreExitScript(agentType string) string {
 	resolved := c.GetResolvedConfig(agentType)
-	if sb := resolved.Sandbox; sb != nil && sb.PostExitScript != nil {
-		return *sb.PostExitScript
+	if sb := resolved.Sandbox; sb != nil && sb.PreExitScript != nil {
+		return *sb.PreExitScript
 	}
 	return ""
 }
@@ -652,12 +654,12 @@ func defaultsSpec() []specEntry {
 			},
 		},
 		{
-			table: "sandbox", key: "post_exit_script",
-			doc: "shell script run on the HOST (unsandboxed) when a head ends — gets HYDRA_* + HYDRA_END_STATE; e.g. release a per-head resource.",
+			table: "sandbox", key: "pre_exit_script",
+			doc: "shell script run in a sandbox when a head ends, before its worktree is removed — gets HYDRA_* + HYDRA_END_STATE; e.g. release a claimed resource.",
 			def: func() string { return `""` },
 			get: func(a AgentConfig) (string, bool) {
-				if a.Sandbox != nil && a.Sandbox.PostExitScript != nil && *a.Sandbox.PostExitScript != "" {
-					return tomlStringValue(*a.Sandbox.PostExitScript), true
+				if a.Sandbox != nil && a.Sandbox.PreExitScript != nil && *a.Sandbox.PreExitScript != "" {
+					return tomlStringValue(*a.Sandbox.PreExitScript), true
 				}
 				return "", false
 			},
@@ -1337,8 +1339,8 @@ func emitAgent(out *[]string, name string, a AgentConfig, keyComments, tableComm
 	if sb.PreSpawnScript != nil && *sb.PreSpawnScript != "" {
 		emitSetField(out, name+".sandbox", "pre_spawn_script", tomlStringValue(*sb.PreSpawnScript), true, keyComments)
 	}
-	if sb.PostExitScript != nil && *sb.PostExitScript != "" {
-		emitSetField(out, name+".sandbox", "post_exit_script", tomlStringValue(*sb.PostExitScript), true, keyComments)
+	if sb.PreExitScript != nil && *sb.PreExitScript != "" {
+		emitSetField(out, name+".sandbox", "pre_exit_script", tomlStringValue(*sb.PreExitScript), true, keyComments)
 	}
 	if nw := sb.Network; nw != nil && (nw.Enabled != nil || len(nw.AllowedHosts) > 0) {
 		*out = appendBlank(*out)
@@ -1378,7 +1380,7 @@ func sandboxHasContent(sb *SandboxConfig) bool {
 	if sb.PreSpawnScript != nil && *sb.PreSpawnScript != "" {
 		return true
 	}
-	if sb.PostExitScript != nil && *sb.PostExitScript != "" {
+	if sb.PreExitScript != nil && *sb.PreExitScript != "" {
 		return true
 	}
 	return sb.Network != nil && (sb.Network.Enabled != nil || len(sb.Network.AllowedHosts) > 0)

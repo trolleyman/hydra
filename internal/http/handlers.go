@@ -612,7 +612,7 @@ func toAPIAgentConfig(c config.AgentConfig) api.AgentConfig {
 			RestoreRo:      &c.Sandbox.RestoreRO,
 			CowPaths:       &c.Sandbox.CowPaths,
 			PreSpawnScript: c.Sandbox.PreSpawnScript,
-			PostExitScript: c.Sandbox.PostExitScript,
+			PreExitScript:  c.Sandbox.PreExitScript,
 		}
 		if c.Sandbox.Network != nil {
 			out.Sandbox.Network = &api.NetworkConfig{
@@ -644,8 +644,8 @@ func fromAPIAgentConfig(a api.AgentConfig) config.AgentConfig {
 		if a.Sandbox.PreSpawnScript != nil && *a.Sandbox.PreSpawnScript != "" {
 			sb.PreSpawnScript = a.Sandbox.PreSpawnScript
 		}
-		if a.Sandbox.PostExitScript != nil && *a.Sandbox.PostExitScript != "" {
-			sb.PostExitScript = a.Sandbox.PostExitScript
+		if a.Sandbox.PreExitScript != nil && *a.Sandbox.PreExitScript != "" {
+			sb.PreExitScript = a.Sandbox.PreExitScript
 		}
 		if a.Sandbox.Network != nil {
 			sb.Network = &config.NetworkConfig{Enabled: a.Sandbox.Network.Enabled}

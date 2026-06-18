@@ -315,31 +315,31 @@ export function ConfigForm({
           />
         </div>
 
-        {/* Post-exit script */}
+        {/* Pre-exit script */}
         <div className="space-y-1.5">
           <div className="flex items-center gap-1.5">
             <Terminal className="w-3.5 h-3.5 text-amber-500 dark:text-amber-400" />
             <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">
-              Post-Exit Script
+              Pre-Exit Script
             </label>
-            <InfoTooltip title="Post-Exit Script">
-              <p>A shell script run <strong>on the host</strong> with <strong>no sandbox</strong> when a head <strong>ends</strong> (kill, merge, or restart) — after its session, worktree and branch are torn down.</p>
-              <p className="mt-1.5">Use it for host-side teardown the sandbox can't do — e.g. releasing a per-head emulator slot. It is best-effort (failures are logged, never block the kill) and bounded by a 30s timeout. Runs via <code className="text-blue-300">bash -c</code> from the project root.</p>
-              <p className="mt-1.5 text-amber-300"><strong>Unsandboxed:</strong> it has full access to your machine and credentials. Only set commands you trust.</p>
+            <InfoTooltip title="Pre-Exit Script">
+              <p>A shell script run <strong>inside a sandbox</strong> when a head <strong>ends</strong> (kill, merge, or restart) — after its agent session is killed but <strong>before</strong> the worktree is removed.</p>
+              <p className="mt-1.5">It runs in a fresh sandbox with this agent's policy, with the <strong>worktree as the working directory</strong> (still present), so it can read e.g. <code className="text-blue-300">.hydra/emu.env</code>. Use it for per-head teardown the agent didn't do itself — e.g. releasing a claimed emulator slot. Best-effort (failures are logged, never block the kill) and bounded by a 30s timeout.</p>
+              <p className="mt-1.5">Being sandboxed it <strong>cannot</strong> reach host-only resources (the host adb server, <code className="text-blue-300">/dev/kvm</code>); those belong to a host-side service pool.</p>
               <p className="mt-1.5">It receives the same <code className="text-blue-300">HYDRA_*</code> head-context variables as the agent, plus:</p>
               <ul className="mt-1 space-y-0.5 list-none">
                 <li><code className="text-blue-300">HYDRA_END_STATE</code> — <code className="text-blue-300">killed</code>, <code className="text-blue-300">merged</code>, or empty</li>
               </ul>
             </InfoTooltip>
           </div>
-          {inheritedSandbox?.post_exit_script && (
+          {inheritedSandbox?.pre_exit_script && (
             <p className="text-[11px] text-gray-400 dark:text-gray-500 italic ml-0.5">
-              Inherited: <span className="font-mono">{inheritedSandbox.post_exit_script}</span>
+              Inherited: <span className="font-mono">{inheritedSandbox.pre_exit_script}</span>
             </p>
           )}
           <ShellEditor
-            value={sandbox.post_exit_script ?? ''}
-            onChange={(val) => updateSandbox({ post_exit_script: val || null })}
+            value={sandbox.pre_exit_script ?? ''}
+            onChange={(val) => updateSandbox({ pre_exit_script: val || null })}
             placeholder={'# e.g. source "$HYDRA_WORKTREE/.hydra/emu.env" && release-slot'}
             rows={6}
           />
