@@ -11,9 +11,9 @@ import (
 )
 
 // cowBaseDir is where a head's copy-on-write upper/work layers live: under the
-// project's .hydra (outside the worktree, so they never show up in git status)
-// and keyed by head ID so writes persist across resumes and are cleaned up with
-// the head.
+// project's .hydra and keyed by head ID so writes persist across resumes and are
+// cleaned up with the head. The .hydra/cow dir self-ignores via a "*" .gitignore
+// (see buildCowMounts) so these layers never surface in the project's git status.
 func cowBaseDir(projectRoot, id string) string {
 	return filepath.Join(paths.GetHydraDirFromProjectRoot(projectRoot), "cow", id)
 }
@@ -40,6 +40,14 @@ func cowDirName(rel string) string {
 func buildCowMounts(projectRoot, worktreePath, id string, cowPaths []string, writable bool) []sandbox.CowMount {
 	var mounts []sandbox.CowMount
 	base := cowBaseDir(projectRoot, id)
+	// Drop a "*" .gitignore in .hydra/cow so the per-head upper/work layers (which
+	// live inside the project root) never show up in the project's git status.
+	// Best-effort; matches how worktrees/artifacts/uploads self-ignore.
+	if len(cowPaths) > 0 {
+		if err := paths.CreateGitignoreAllInDir(filepath.Dir(base)); err != nil {
+			log.Printf("warn: cow_paths: create .gitignore in %s: %v", filepath.Dir(base), err)
+		}
+	}
 	for _, p := range cowPaths {
 		rel := filepath.Clean(strings.TrimSpace(p))
 		if rel == "" || rel == "." {
