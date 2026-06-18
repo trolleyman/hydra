@@ -1,12 +1,14 @@
 package heads
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"os/user"
 	"path/filepath"
 	"sort"
@@ -747,6 +749,12 @@ func KillHeadNoLock(ctx context.Context, reg *session.Registry, store *db.Store,
 	}
 
 	if killErr == nil {
+		// Sandboxed teardown hook: the agent's session is dead but the worktree is
+		// still present, so run the configured pre_exit_script (best-effort, in a
+		// fresh sandbox with the head's policy, cwd=worktree) BEFORE the worktree is
+		// removed — e.g. to release a claimed emulator slot from .hydra/emu.env.
+		runPreExitScript(ctx, head, endState)
+
 		if head.Worktree != nil && head.ProjectPath != "" {
 			log.Printf("heads: removing worktree %s for agent %s", *head.Worktree, head.ID)
 			if err := git.RemoveWorktree(head.ProjectPath, *head.Worktree); err != nil {
@@ -781,6 +789,86 @@ func KillHeadNoLock(ctx context.Context, reg *session.Registry, store *db.Store,
 
 	log.Printf("heads: kill complete for agent %s", head.ID)
 	return errtrace.Wrap(killErr)
+}
+
+// preExitTimeout bounds how long a pre_exit_script may run before it is killed,
+// so a hung teardown hook can't wedge a kill/merge request.
+const preExitTimeout = 30 * time.Second
+
+// runPreExitScript runs the project's configured pre_exit_script for a head that
+// is ending, in a fresh SANDBOX with the head's sandbox policy, with the worktree
+// as the working directory — called after the agent's session is killed but
+// before the worktree is removed. It is best-effort: any failure is logged, never
+// returned. The script receives the same HYDRA_* head-context variables as the
+// agent, plus HYDRA_END_STATE ("killed"|"merged"|""). endState mirrors
+// KillHeadNoLock's argument. Being sandboxed, it can touch the worktree (e.g.
+// .hydra/emu.env) but not host-only resources.
+func runPreExitScript(ctx context.Context, head Head, endState string) {
+	if head.ProjectPath == "" || head.Worktree == nil {
+		return
+	}
+	worktree := *head.Worktree
+	cfg, err := config.Load(head.ProjectPath)
+	if err != nil {
+		log.Printf("warn: pre_exit_script: load config for %s: %v", head.ID, err)
+		return
+	}
+	script := cfg.ResolvePreExitScript(string(head.AgentType))
+	if strings.TrimSpace(script) == "" {
+		return
+	}
+
+	currentUser, err := user.Current()
+	if err != nil {
+		log.Printf("warn: pre_exit_script for %s: current user: %v", head.ID, err)
+		return
+	}
+	home := currentUser.HomeDir
+
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	runCtx, cancel := context.WithTimeout(ctx, preExitTimeout)
+	defer cancel()
+
+	writable, masked, restore, _, net, _ := cfg.ResolveSandboxOptions(string(head.AgentType))
+	env := append(agentEnv(home, currentUser.Username, readGitConfigVal(head.ProjectPath, "user.name"), readGitConfigVal(head.ProjectPath, "user.email")), sandbox.MiseTrustEnv(head.ProjectPath, worktree)...)
+	env = append(env, headContextEnv(head.ID, head.AgentType, head.ProjectPath, worktree, derefStr(head.Branch), head.BaseBranch)...)
+	env = append(env, "HYDRA_END_STATE="+endState)
+
+	spec, err := sandbox.BuildSpec(sandbox.Options{
+		AgentType:     sandbox.AgentTypeBash,
+		WorktreePath:  worktree,
+		GitCommonDir:  gitCommonDir(head.ProjectPath),
+		Home:          home,
+		WritablePaths: writable,
+		MaskedPaths:   masked,
+		RestoreRO:     restore,
+		Network:       net,
+		Env:           env,
+		Argv:          []string{"bash", "-c", script},
+		HardenGUI:     true,
+		Seccomp:       true,
+	})
+	if err != nil {
+		log.Printf("warn: pre_exit_script for %s: build sandbox: %v", head.ID, err)
+		return
+	}
+	defer spec.Cleanup()
+
+	log.Printf("heads: running pre_exit_script for agent %s (end_state=%q)", head.ID, endState)
+	cmd := exec.CommandContext(runCtx, spec.Path, spec.Args[1:]...) //errtrace:skip
+	cmd.Dir = spec.Dir
+	cmd.Env = spec.Env
+	cmd.ExtraFiles = spec.ExtraFiles
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		log.Printf("warn: pre_exit_script for %s failed: %v; output:\n%s", head.ID, err, bytes.TrimSpace(out))
+		return
+	}
+	if trimmed := bytes.TrimSpace(out); len(trimmed) > 0 {
+		log.Printf("heads: pre_exit_script for %s output:\n%s", head.ID, trimmed)
+	}
 }
 
 // PurgeHead permanently and irreversibly deletes a head, leaving no trace. Unlike

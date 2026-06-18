@@ -15,6 +15,7 @@ import type { ProjectInfo } from '../models/ProjectInfo';
 import type { RepositoryBranchesResponse } from '../models/RepositoryBranchesResponse';
 import type { RepositoryFileResponse } from '../models/RepositoryFileResponse';
 import type { RepositoryTreeResponse } from '../models/RepositoryTreeResponse';
+import type { ServiceStatusResponse } from '../models/ServiceStatusResponse';
 import type { SpawnAgentRequest } from '../models/SpawnAgentRequest';
 import type { StatusResponse } from '../models/StatusResponse';
 import type { UpdateAgentRequest } from '../models/UpdateAgentRequest';
@@ -580,6 +581,46 @@ export class DefaultService {
             errors: {
                 404: `Project Not Found`,
                 500: `Internal Server Error`,
+            },
+        });
+    }
+    /**
+     * Get the live status of the project's supervised services
+     * @param projectId Project ID
+     * @returns ServiceStatusResponse OK
+     * @throws ApiError
+     */
+    public getServices(
+        projectId: string,
+    ): CancelablePromise<ServiceStatusResponse> {
+        return this.httpRequest.request({
+            method: 'GET',
+            url: '/api/projects/{project_id}/services',
+            path: {
+                'project_id': projectId,
+            },
+            errors: {
+                404: `Project Not Found`,
+            },
+        });
+    }
+    /**
+     * Restart the project's supervised services (picks up config changes)
+     * @param projectId Project ID
+     * @returns ServiceStatusResponse OK
+     * @throws ApiError
+     */
+    public restartServices(
+        projectId: string,
+    ): CancelablePromise<ServiceStatusResponse> {
+        return this.httpRequest.request({
+            method: 'POST',
+            url: '/api/projects/{project_id}/services/restart',
+            path: {
+                'project_id': projectId,
+            },
+            errors: {
+                404: `Project Not Found`,
             },
         });
     }

@@ -7,7 +7,7 @@ import { usePageActive } from '../lib/usePageActive'
 import type { ProjectInfo, AgentResponse } from '../api'
 import { ApiError, ErrorResponse } from '../api'
 import { formatError } from '../api/format_error'
-import { Sun, Moon, Monitor, ChevronDown, ChevronRight, Folder, FolderGit2, FolderOpen, Plus, Settings, Check, X, LoaderCircle } from 'lucide-react'
+import { Sun, Moon, Monitor, ChevronDown, ChevronRight, Folder, FolderGit2, FolderOpen, Plus, Settings, Check, X, LoaderCircle, AlertTriangle } from 'lucide-react'
 import { folderPickerAvailable, openFolderPicker } from '../api/folderPicker'
 import { AgentSidebarItem } from '../components/AgentComponents'
 import { SpawnForm } from '../components/SpawnForm'
@@ -63,6 +63,45 @@ function forwardSidebarWheelToMain(e: WheelEvent<HTMLDivElement>) {
   if (main && main.scrollHeight > main.clientHeight) {
     main.scrollTop += e.deltaY
   }
+}
+
+// ── Service Health Warning ─────────────────────────────────────────────────────
+// Polls the selected project's service status and shows a warning icon (next to
+// the project name) when any supervised service has failed. Tooltip lists them.
+
+function ServiceHealthWarning({ projectId }: { projectId: string | null }) {
+  const [failed, setFailed] = useState<string[]>([])
+
+  useEffect(() => {
+    setFailed([])
+    if (!projectId) return
+    let active = true
+    const tick = async () => {
+      try {
+        const resp = await api.default.getServices(projectId)
+        if (active) setFailed(resp.services.filter((s) => s.state === 'failed').map((s) => s.name))
+      } catch {
+        // best-effort
+      }
+    }
+    void tick()
+    const id = setInterval(tick, 5000)
+    return () => {
+      active = false
+      clearInterval(id)
+    }
+  }, [projectId])
+
+  if (failed.length === 0) return null
+  return (
+    <span
+      className="shrink-0 inline-flex"
+      aria-label="service failure"
+      title={`Service${failed.length > 1 ? 's' : ''} failed: ${failed.join(', ')}. Open Settings to restart.`}
+    >
+      <AlertTriangle className="w-3.5 h-3.5 text-amber-500" />
+    </span>
+  )
 }
 
 // ── Project Dropdown ───────────────────────────────────────────────────────────
@@ -206,6 +245,7 @@ function ProjectDropdown({
           )}
         </span>
         <span className="truncate max-w-[160px]">{selected?.name ?? 'Select project'}</span>
+        <ServiceHealthWarning projectId={selectedId} />
         <ChevronDown className="w-3 h-3" />
       </button>
 

@@ -832,6 +832,56 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /api/projects/{project_id}/services:
+    get:
+      summary: Get the live status of the project's supervised services
+      operationId: getServices
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            type: string
+          description: Project ID
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceStatusResponse'
+        '404':
+          description: Project Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/projects/{project_id}/services/restart:
+    post:
+      summary: Restart the project's supervised services (picks up config changes)
+      operationId: restartServices
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            type: string
+          description: Project ID
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceStatusResponse'
+        '404':
+          description: Project Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /api/projects/{project_id}/repository/tree:
     get:
       summary: List the files tracked in the project's repository
@@ -1631,6 +1681,10 @@ components:
           type: string
           nullable: true
           description: Bash script run inside the sandbox once, when the agent is first spawned — not on resume or for bash shells (e.g. `mise trust`)
+        pre_exit_script:
+          type: string
+          nullable: true
+          description: Bash script run in a sandbox when a head ends, after the agent's session is killed but before its worktree is removed. Runs with the head's sandbox policy, cwd = worktree, with HYDRA_* head context + HYDRA_END_STATE. For per-head teardown such as releasing a claimed resource.
         network:
           $ref: '#/components/schemas/NetworkConfig'
           nullable: true
@@ -1663,6 +1717,25 @@ components:
           type: boolean
           description: Run on the host with NO sandbox — full access to the machine and credentials (default false)
 
+    ServiceScript:
+      type: object
+      required: [name, command]
+      description: A per-project long-running command the daemon supervises while the project is registered ([[services]] in config.toml)
+      properties:
+        name:
+          type: string
+          description: Unique label, shown in the UI and logs
+        command:
+          type: string
+          description: Shell command run via `bash -c` from the project root
+        host:
+          type: boolean
+          description: Run on the host with NO sandbox — needed for host devices the sandbox hides, e.g. /dev/kvm (default false)
+        max_restarts:
+          type: integer
+          nullable: true
+          description: Relaunch cap after an unexpected exit (null = default 3; 0 = never restart)
+
     ConfigResponse:
       type: object
       required: [defaults, agents]
@@ -1679,9 +1752,51 @@ components:
             $ref: '#/components/schemas/ArtifactScript'
           nullable: true
           description: Per-project visual-artifact generation scripts ([[artifacts]] in config.toml)
+        services:
+          type: array
+          items:
+            $ref: '#/components/schemas/ServiceScript'
+          nullable: true
+          description: Per-project long-running supervised commands ([[services]] in config.toml)
         default_pre_prompt:
           type: string
           description: Built-in default pre-prompt always prepended to agent prompts (read-only)
+
+    ServiceStatus:
+      type: object
+      required: [name, command, host, state, restarts, max_restarts]
+      description: Live status of one supervised service
+      properties:
+        name:
+          type: string
+        command:
+          type: string
+        host:
+          type: boolean
+        state:
+          type: string
+          enum: [up, restarting, failed, down]
+          description: up = running; restarting = backing off after an unexpected exit; failed = gave up after exhausting restarts; down = intentionally stopped
+        restarts:
+          type: integer
+          description: Restarts performed so far
+        max_restarts:
+          type: integer
+        pid:
+          type: integer
+          description: Process id while running, else 0
+        message:
+          type: string
+          description: Human-readable detail for non-running states (exit reason / last output)
+
+    ServiceStatusResponse:
+      type: object
+      required: [services]
+      properties:
+        services:
+          type: array
+          items:
+            $ref: '#/components/schemas/ServiceStatus'
 
     ArtifactFile:
       type: object

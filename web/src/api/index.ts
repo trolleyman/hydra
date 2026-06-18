@@ -38,6 +38,9 @@ export type { RepositoryBranchesResponse } from './models/RepositoryBranchesResp
 export type { RepositoryFileResponse } from './models/RepositoryFileResponse';
 export type { RepositoryTreeResponse } from './models/RepositoryTreeResponse';
 export type { SandboxConfig } from './models/SandboxConfig';
+export type { ServiceScript } from './models/ServiceScript';
+export { ServiceStatus } from './models/ServiceStatus';
+export type { ServiceStatusResponse } from './models/ServiceStatusResponse';
 export type { SpawnAgentRequest } from './models/SpawnAgentRequest';
 export type { StatusResponse } from './models/StatusResponse';
 export type { TerminalDataEvent } from './models/TerminalDataEvent';
