@@ -15,7 +15,7 @@
 // WebP animations aren't handled here — the browser plays them in an <img> with no
 // seek/sync API, so they can't be frame-aligned; only .webm gets the video viewer.
 import { useEffect, useRef, useState, useCallback } from 'react'
-import { Play, Pause, Repeat, VideoOff } from 'lucide-react'
+import { Play, Pause, Repeat, VideoOff, StepBack, StepForward } from 'lucide-react'
 import {
   checkerStyle, IMG_CLASS, OVERLAY_CLASS, TAG_CLASS, makeAuxOpen,
   useMediaResize, ResizeGrip, DIFF_COLOR, DIFF_PIXEL_THRESHOLD,
@@ -31,6 +31,10 @@ export function isVideoArtifact(name: string): boolean {
 // follower onto the master's clock. ~1.5 frames at 60fps — tight enough that the
 // pair reads as one animation, loose enough not to thrash on normal jitter.
 const SYNC_TOL = 0.08
+// HTML5 video exposes no frame rate, so a single-frame step has to assume one.
+// 30fps is the common case for screen recordings/animation artifacts; at worst the
+// step is a touch coarse/fine, which is fine for eyeballing a frame-by-frame diff.
+const FRAME_DUR = 1 / 30
 // The difference view recomputes a full-frame pixel diff on a timer rather than
 // every animation frame; getImageData over a large frame is costly, so ~20fps
 // keeps it responsive without pinning a core.
@@ -60,6 +64,8 @@ function useVideoSync() {
   const rateRef = useRef(rate); rateRef.current = rate
   const loopRef = useRef(loop); loopRef.current = loop
   const currentTimeRef = useRef(0)
+  // Mirrors `duration` for the frame-step callback, which clamps to the timeline.
+  const durationRef = useRef(0)
   // True while the user drags the scrubber: the sync loop must not fight the drag
   // by writing currentTime back from a video that's mid-seek.
   const scrubbingRef = useRef(false)
@@ -68,6 +74,7 @@ function useVideoSync() {
     const els = [leftEl.current, rightEl.current]
     let max = 0
     for (const el of els) if (el && Number.isFinite(el.duration)) max = Math.max(max, el.duration)
+    durationRef.current = max
     setDuration(max)
   }, [])
 
@@ -168,13 +175,21 @@ function useVideoSync() {
       for (const el of [leftEl.current, rightEl.current]) if (el) void el.play().catch(() => {})
     }
   }, [])
+  // Nudge the pair one frame forward (+1) or back (-1). Stepping is a paused,
+  // examine-this-frame gesture, so it stops playback first, then seeks; the loop
+  // keeps the follower aligned to the new clock as usual.
+  const frameStep = useCallback((dir: 1 | -1) => {
+    setPlaying(false)
+    const max = durationRef.current || Infinity
+    seek(Math.max(0, Math.min(currentTimeRef.current + dir * FRAME_DUR, max)))
+  }, [seek])
   const getLeft = useCallback(() => leftEl.current, [])
   const getRight = useCallback(() => rightEl.current, [])
 
   return {
     attachLeft, attachRight, getLeft, getRight,
     playing, currentTime, duration, rate, loop,
-    togglePlay, seek, setRate, setLoop, beginScrub, endScrub,
+    togglePlay, seek, setRate, setLoop, beginScrub, endScrub, frameStep,
   }
 }
 
@@ -468,12 +483,18 @@ const RATES = [0.25, 0.5, 1, 1.5, 2]
 // The shared transport bar under every video comparison: play/pause, a scrubber
 // over the (longer) timeline, current/total time, a loop toggle and a speed select.
 function VideoTransport({ controller }: { controller: Controller }) {
-  const { playing, currentTime, duration, rate, loop, togglePlay, seek, setRate, setLoop, beginScrub, endScrub } = controller
+  const { playing, currentTime, duration, rate, loop, togglePlay, seek, setRate, setLoop, beginScrub, endScrub, frameStep } = controller
   const iconBtn = 'flex items-center justify-center w-7 h-7 rounded-md border border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer transition-colors'
   return (
     <div className="flex items-center gap-2 mt-1.5 max-w-full">
+      <button onClick={() => frameStep(-1)} className={iconBtn} title="Previous frame">
+        <StepBack className="w-3.5 h-3.5" />
+      </button>
       <button onClick={togglePlay} className={iconBtn} title={playing ? 'Pause' : 'Play'}>
         {playing ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
+      </button>
+      <button onClick={() => frameStep(1)} className={iconBtn} title="Next frame">
+        <StepForward className="w-3.5 h-3.5" />
       </button>
       <span className="text-[10px] tabular-nums text-gray-500 dark:text-gray-400 w-9 text-right">{formatTime(currentTime)}</span>
       <input
