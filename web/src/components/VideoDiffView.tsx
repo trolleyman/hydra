@@ -152,8 +152,22 @@ function useVideoSync() {
       try { el.currentTime = Number.isFinite(el.duration) ? Math.min(t, el.duration) : t } catch { /* ignore */ }
     }
   }, [])
-  const beginScrub = useCallback(() => { scrubbingRef.current = true }, [])
-  const endScrub = useCallback(() => { scrubbingRef.current = false }, [])
+  // Pause playback for the duration of a drag and resume afterwards if it was
+  // playing, so the picture holds still under the scrubber instead of running on.
+  // We touch the elements directly rather than `playing` so the play/pause button
+  // doesn't flicker mid-drag.
+  const wasPlayingRef = useRef(false)
+  const beginScrub = useCallback(() => {
+    scrubbingRef.current = true
+    wasPlayingRef.current = playingRef.current
+    for (const el of [leftEl.current, rightEl.current]) if (el) el.pause()
+  }, [])
+  const endScrub = useCallback(() => {
+    scrubbingRef.current = false
+    if (wasPlayingRef.current) {
+      for (const el of [leftEl.current, rightEl.current]) if (el) void el.play().catch(() => {})
+    }
+  }, [])
   const getLeft = useCallback(() => leftEl.current, [])
   const getRight = useCallback(() => rightEl.current, [])
 
