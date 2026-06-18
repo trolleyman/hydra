@@ -373,6 +373,12 @@ function RootLayout() {
   // Guards the one-time redirect from the bare root path to the selected
   // project (see effect below).
   const didAutoNavigate = useRef(false)
+  // When restoring a project view lands on the bare project page *because* the
+  // remembered agent had unread changes (see restoreProjectView), this holds
+  // that project id for one persist cycle so the deflection doesn't overwrite
+  // the remembered agent with `{ kind: 'project' }`. The memory is kept so a
+  // later switch back restores the agent once it's been read.
+  const deflectedUnreadProject = useRef<string | null>(null)
   const [, setTick] = useState(0)
   const [development, setDevelopment] = useState(false)
   const [restarting, setRestarting] = useState(false)
@@ -418,6 +424,30 @@ function RootLayout() {
       navigate({ to: '/project/$projectId', params: { projectId } })
     }
   }, [navigate])
+
+  // Restore a project's remembered view when switching into it — but never
+  // auto-open a remembered agent that currently has unread changes. Opening an
+  // agent clears its unread dot (the auto-clear effect below), so silently
+  // restoring an unread agent on a project switch would "read" a notification
+  // the user never looked at. In that case land on the bare project page
+  // instead; the agent stays in the sidebar (dot lit) for the user to open
+  // deliberately, and its remembered view is preserved (deflectedUnreadProject)
+  // so a later switch back restores it once read. A remembered agent that's
+  // already read — or whose lookup fails (gone / offline) — is opened as before;
+  // the agent page self-corrects a truly-dead one.
+  const restoreProjectView = useCallback(async (projectId: string, view: ProjectView) => {
+    if (view.kind === 'agent') {
+      try {
+        const agent = await api.default.getAgent(projectId, view.agentId)
+        if (agent.has_unread_changes) {
+          deflectedUnreadProject.current = projectId
+          navigate({ to: '/project/$projectId', params: { projectId } })
+          return
+        }
+      } catch { /* lookup failed — fall through and open optimistically */ }
+    }
+    navigateToProjectView(projectId, view)
+  }, [navigate, navigateToProjectView])
 
   const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
     const saved = readLocal(StorageKeys.sidebarWidth)
@@ -677,9 +707,9 @@ function RootLayout() {
       // Restore the view (agent / repository / project) last open in this
       // project. Read up front so the persist effect below — which momentarily
       // sees the bare project route — can't overwrite it before we navigate.
-      navigateToProjectView(selectedProjectId, loadProjectView(selectedProjectId))
+      restoreProjectView(selectedProjectId, loadProjectView(selectedProjectId))
     }
-  }, [selectedProjectId, projects, navigateToProjectView])
+  }, [selectedProjectId, projects, restoreProjectView])
 
   // Persist the current view per project so switching back (or reloading)
   // restores it. Keyed off the actual route params (not currentProjectId, which
@@ -698,6 +728,15 @@ function RootLayout() {
     const projectId = routeParams.projectId
     if (!projectId) return // not on a project route ("/", "/settings") — leave storage alone
     const agentId = routeParams.agentId
+    // The deflection from restoreProjectView lands on the bare project page,
+    // but that isn't a deliberate navigation — skip it so the remembered agent
+    // survives (one cycle only, then resume normal persistence). If the user
+    // has already moved on to an agent, just drop the stale marker and persist
+    // as usual.
+    if (deflectedUnreadProject.current === projectId) {
+      deflectedUnreadProject.current = null
+      if (agentId == null) return
+    }
     if (agentId == null) {
       // Repository browser or bare project page — persisted verbatim.
       saveProjectView(projectId, currentViewFromRoute(projectId, undefined, location.pathname))
@@ -867,8 +906,9 @@ function RootLayout() {
             }
             // Restore the view (agent / repository / project) last open in the
             // project we're switching to, so it comes back rather than the bare
-            // project page.
-            navigateToProjectView(id, loadProjectView(id))
+            // project page — but don't auto-open a remembered agent that has
+            // unread changes (see restoreProjectView).
+            restoreProjectView(id, loadProjectView(id))
           }}
           onDeselect={() => {
             setSelectedProjectId(null)
