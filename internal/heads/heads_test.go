@@ -90,20 +90,3 @@ func TestDerefStr(t *testing.T) {
 		t.Errorf("derefStr(&\"x\") = %q, want \"x\"", got)
 	}
 }
-
-func TestClaudeProjectsSlug(t *testing.T) {
-	// Mirrors Claude Code's ~/.claude/projects/<slug> encoding: every
-	// non-alphanumeric character becomes '-', with no collapsing of runs (so the
-	// '/.' before a dotdir yields '--'). Verified against a real projects dir.
-	cases := map[string]string{
-		"/home/callum/code/hydra/.hydra/worktrees/add-a-hand-pointer": "-home-callum-code-hydra--hydra-worktrees-add-a-hand-pointer",
-		"/home/u/code/hydra": "-home-u-code-hydra",
-		"abc123":             "abc123",
-		"":                   "",
-	}
-	for in, want := range cases {
-		if got := claudeProjectsSlug(in); got != want {
-			t.Errorf("claudeProjectsSlug(%q) = %q, want %q", in, got, want)
-		}
-	}
-}

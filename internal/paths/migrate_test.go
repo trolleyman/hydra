@@ -135,3 +135,76 @@ func TestMigrateHydraLayout_RepairsWorktrees(t *testing.T) {
 		t.Fatalf("git status in migrated worktree failed (links not repaired): %v: %s", err, out)
 	}
 }
+
+func TestClaudeProjectsSlug(t *testing.T) {
+	// Mirrors Claude Code's ~/.claude/projects/<slug> encoding: every
+	// non-alphanumeric character becomes '-', with no collapsing of runs (so the
+	// '/.' before a dotdir yields '--'). Verified against a real projects dir.
+	cases := map[string]string{
+		"/home/callum/code/hydra/.hydra/local/worktrees/x": "-home-callum-code-hydra--hydra-local-worktrees-x",
+		"/home/u/code/hydra": "-home-u-code-hydra",
+		"abc123":             "abc123",
+		"":                   "",
+	}
+	for in, want := range cases {
+		if got := ClaudeProjectsSlug(in); got != want {
+			t.Errorf("ClaudeProjectsSlug(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestMigrateClaudeSessionDirsIn(t *testing.T) {
+	root := t.TempDir()
+	projectsDir := filepath.Join(root, "projects")
+	oldWorktreesDir := filepath.Join(GetHydraDirFromProjectRoot(root), "worktrees")
+	newWorktreesDir := filepath.Join(GetHydraLocalDirFromProjectRoot(root), "worktrees")
+
+	// h1: has Claude history at the old slug — must move to the new slug.
+	// h2: present worktree but no Claude history — must be skipped, no error.
+	writeFile(t, filepath.Join(newWorktreesDir, "h1", ".keep"), "")
+	writeFile(t, filepath.Join(newWorktreesDir, "h2", ".keep"), "")
+	oldSlug := ClaudeProjectsSlug(filepath.Join(oldWorktreesDir, "h1"))
+	newSlug := ClaudeProjectsSlug(filepath.Join(newWorktreesDir, "h1"))
+	writeFile(t, filepath.Join(projectsDir, oldSlug, "session.jsonl"), "CONVO")
+
+	if err := migrateClaudeSessionDirsIn(projectsDir, oldWorktreesDir, newWorktreesDir); err != nil {
+		t.Fatalf("migrate session dirs: %v", err)
+	}
+
+	if got, err := os.ReadFile(filepath.Join(projectsDir, newSlug, "session.jsonl")); err != nil || string(got) != "CONVO" {
+		t.Fatalf("session not migrated to new slug: %q err=%v", got, err)
+	}
+	if _, err := os.Stat(filepath.Join(projectsDir, oldSlug)); !os.IsNotExist(err) {
+		t.Fatalf("old slug dir should be gone: %v", err)
+	}
+
+	// Idempotent: a second run finds nothing at the old slug and is a no-op.
+	if err := migrateClaudeSessionDirsIn(projectsDir, oldWorktreesDir, newWorktreesDir); err != nil {
+		t.Fatalf("second migrate: %v", err)
+	}
+}
+
+func TestMigrateClaudeSessionDirsIn_ConflictLeavesOldInPlace(t *testing.T) {
+	root := t.TempDir()
+	projectsDir := filepath.Join(root, "projects")
+	oldWorktreesDir := filepath.Join(GetHydraDirFromProjectRoot(root), "worktrees")
+	newWorktreesDir := filepath.Join(GetHydraLocalDirFromProjectRoot(root), "worktrees")
+
+	writeFile(t, filepath.Join(newWorktreesDir, "h1", ".keep"), "")
+	oldSlug := ClaudeProjectsSlug(filepath.Join(oldWorktreesDir, "h1"))
+	newSlug := ClaudeProjectsSlug(filepath.Join(newWorktreesDir, "h1"))
+	// History already exists at the new slug (e.g. a post-move session). The old
+	// one must be left untouched rather than clobbered.
+	writeFile(t, filepath.Join(projectsDir, oldSlug, "s.jsonl"), "OLD")
+	writeFile(t, filepath.Join(projectsDir, newSlug, "s.jsonl"), "NEW")
+
+	if err := migrateClaudeSessionDirsIn(projectsDir, oldWorktreesDir, newWorktreesDir); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	if got, _ := os.ReadFile(filepath.Join(projectsDir, newSlug, "s.jsonl")); string(got) != "NEW" {
+		t.Fatalf("new session should be preserved, got %q", got)
+	}
+	if got, _ := os.ReadFile(filepath.Join(projectsDir, oldSlug, "s.jsonl")); string(got) != "OLD" {
+		t.Fatalf("old session should be left in place, got %q", got)
+	}
+}

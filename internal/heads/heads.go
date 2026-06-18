@@ -938,9 +938,9 @@ func removeClaudeSessionDir(head Head) {
 		return
 	}
 	// Archived heads carry no live Worktree, so recompute the deterministic path
-	// Claude saw as its cwd: <project>/.hydra/worktrees/<id>.
+	// Claude saw as its cwd: <project>/.hydra/local/worktrees/<id>.
 	worktree := paths.GetWorktreeDirFromProjectRoot(head.ProjectPath, head.ID)
-	slug := claudeProjectsSlug(worktree)
+	slug := paths.ClaudeProjectsSlug(worktree)
 	if slug == "" {
 		return
 	}
@@ -950,22 +950,4 @@ func removeClaudeSessionDir(head Head) {
 	} else {
 		log.Printf("heads: purge removed claude session dir %s for agent %s", dir, head.ID)
 	}
-}
-
-// claudeProjectsSlug mirrors how Claude Code encodes a working directory into its
-// ~/.claude/projects/<slug> folder name: every character that is not an ASCII
-// letter or digit becomes '-' (no collapsing of runs), so e.g.
-// /home/u/code/hydra/.hydra/worktrees/x -> -home-u-code-hydra--hydra-worktrees-x.
-func claudeProjectsSlug(p string) string {
-	b := make([]byte, len(p))
-	for i := 0; i < len(p); i++ {
-		c := p[i]
-		switch {
-		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9':
-			b[i] = c
-		default:
-			b[i] = '-'
-		}
-	}
-	return string(b)
 }

@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -212,6 +213,20 @@ func MigrateHydraLayout(projectRoot string) error {
 		}
 	}
 
+	// Migrate Claude session-history dirs to follow the worktree move. This runs on
+	// every call (not gated on movedWorktrees) and independently of it: projects
+	// migrated by an earlier build moved their worktrees but left these dirs at the
+	// old slug, so resume was broken with no remaining trigger. It's idempotent and
+	// a cheap no-op once every head's history sits at the new slug.
+	worktreesDir := filepath.Join(local, "worktrees")
+	if info, err := os.Stat(worktreesDir); err == nil && info.IsDir() {
+		if err := migrateClaudeSessionDirs(projectRoot, worktreesDir); err != nil {
+			// Non-fatal: only Claude's conversation-resume (--continue) for moved
+			// heads is affected until their session dirs follow the worktree move.
+			log.Printf("warn: hydra layout: migrate claude session dirs in %s: %v", projectRoot, err)
+		}
+	}
+
 	// Belt-and-suspenders: ensure .hydra/local itself self-ignores once it exists,
 	// so the parent never surfaces even if a future subdir forgets its .gitignore.
 	if _, err := os.Stat(local); err == nil {
@@ -243,4 +258,87 @@ func repairMovedWorktrees(projectRoot, worktreesDir string) error {
 		return errtrace.Wrap(fmt.Errorf("git worktree repair: %w: %s", err, strings.TrimSpace(string(out))))
 	}
 	return nil
+}
+
+// migrateClaudeSessionDirs renames each head's Claude Code session-history
+// directory to follow its worktree's move under .hydra/local. Claude derives the
+// dir name from the worktree's absolute path (its cwd) via ClaudeProjectsSlug and
+// stores it at ~/.claude/projects/<slug>; once the worktree moves from
+// .hydra/worktrees/<id> to .hydra/local/worktrees/<id> the old slug no longer
+// matches, so `claude --continue` reports "No conversation found to continue".
+// Renaming the dir to the new slug restores resume for pre-move heads.
+//
+// Best-effort: per-head failures are logged and skipped. Other agent types key
+// their history differently (or not by cwd), so only Claude's dir is migrated —
+// mirroring removeClaudeSessionDir, which is likewise Claude-only.
+func migrateClaudeSessionDirs(projectRoot, newWorktreesDir string) error {
+	u, err := user.Current()
+	if err != nil || u.HomeDir == "" {
+		return errtrace.Wrap(fmt.Errorf("resolve home: %w", err))
+	}
+	// Compute slugs from the symlink-resolved project root so they match the cwd
+	// Claude actually recorded; the slug is purely textual, so a now-missing old
+	// worktree path still encodes correctly.
+	root, nerr := NormalizePath(projectRoot)
+	if nerr != nil {
+		root = projectRoot
+	}
+	oldWorktreesDir := filepath.Join(GetHydraDirFromProjectRoot(root), "worktrees")
+	projectsDir := filepath.Join(u.HomeDir, ".claude", "projects")
+	return errtrace.Wrap(migrateClaudeSessionDirsIn(projectsDir, oldWorktreesDir, newWorktreesDir))
+}
+
+// migrateClaudeSessionDirsIn is the testable core of migrateClaudeSessionDirs: it
+// renames ~/.claude/projects/<oldSlug> to <newSlug> for every head directory found
+// under newWorktreesDir, given an explicit projects dir.
+func migrateClaudeSessionDirsIn(projectsDir, oldWorktreesDir, newWorktreesDir string) error {
+	entries, err := os.ReadDir(newWorktreesDir)
+	if err != nil {
+		return errtrace.Wrap(err)
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		id := e.Name()
+		oldSlug := ClaudeProjectsSlug(filepath.Join(oldWorktreesDir, id))
+		newSlug := ClaudeProjectsSlug(filepath.Join(newWorktreesDir, id))
+		if oldSlug == newSlug {
+			continue
+		}
+		oldDir := filepath.Join(projectsDir, oldSlug)
+		newDir := filepath.Join(projectsDir, newSlug)
+		if info, serr := os.Stat(oldDir); serr != nil || !info.IsDir() {
+			continue // this head has no Claude history at the old location
+		}
+		if _, serr := os.Stat(newDir); serr == nil {
+			log.Printf("warn: hydra layout: both %s and %s exist; leaving claude session dir in place", oldDir, newDir)
+			continue
+		}
+		if err := os.Rename(oldDir, newDir); err != nil {
+			log.Printf("warn: hydra layout: move claude session dir %s -> %s: %v", oldDir, newDir, err)
+			continue
+		}
+		log.Printf("hydra layout: migrated claude session dir for head %s", id)
+	}
+	return nil
+}
+
+// ClaudeProjectsSlug mirrors how Claude Code encodes a working directory into its
+// ~/.claude/projects/<slug> folder name: every character that is not an ASCII
+// letter or digit becomes '-' (no collapsing of runs), so e.g.
+// /home/u/code/hydra/.hydra/local/worktrees/x ->
+// -home-u-code-hydra--hydra-local-worktrees-x.
+func ClaudeProjectsSlug(p string) string {
+	b := make([]byte, len(p))
+	for i := 0; i < len(p); i++ {
+		c := p[i]
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9':
+			b[i] = c
+		default:
+			b[i] = '-'
+		}
+	}
+	return string(b)
 }
