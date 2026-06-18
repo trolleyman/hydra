@@ -257,6 +257,14 @@ try {
       // document the live inline-markdown highlighting (and its line-wrapping)
       // in the textarea overlay without driving keystrokes.
       seedPrompt?: string
+      // Screenshot-only: enlarge BOTH spawn boxes (the compact sidebar box and
+      // the full-page main box) so a seeded markdown draft reads in full rather
+      // than scrolled, and widen the sidebar so the compact box has room. Purely
+      // a capture-time override: box heights are set via injected JS after the
+      // page settles, and the sidebar width is seeded into localStorage before
+      // boot. The app's real default box/sidebar sizes are unchanged. Pairs with
+      // seedPrompt.
+      tallSpawn?: boolean
       // Seeds the artifact tag filter (localStorage key built from project+agent)
       // before the app boots, so the artifacts panel renders with a filter applied.
       // Each array lists a scope's HIDDEN values (e.g. { theme: ['dark'] } drops
@@ -301,7 +309,9 @@ try {
       // live-activity lines: agent-md's markdown activity and agent-3's
       // "$ …"-command activity (rendered wholly as code, overriding markdown).
       // Full-page so both the box and the sidebar activity land in one shot.
-      { name: 'spawn-markdown', path: '/project/sim-project/', seedPrompt: MARKDOWN_DEMO_PROMPT },
+      // tallSpawn enlarges both spawn boxes (capture-only) so the whole seeded
+      // draft, fenced code block included, is visible without scrolling.
+      { name: 'spawn-markdown', path: '/project/sim-project/', seedPrompt: MARKDOWN_DEMO_PROMPT, tallSpawn: true },
       // The agent-detail prompt block rendering the same markdown: code/bold/
       // italic, an inline-code span that wraps, the tightened gap under the
       // metadata row, and the soft bottom fade as the tall prompt scrolls out of
@@ -598,6 +608,17 @@ try {
             }
           }, pg.seedPrompt)
         }
+        // Capture-only: widen the sidebar so the compact spawn box has more
+        // horizontal room and its seeded markdown wraps less / reads better.
+        // The width is React state seeded from this localStorage key (see
+        // web/src/lib/storage.ts StorageKeys.sidebarWidth; __root.tsx clamps it
+        // to <=600 and defaults to 264), so seeding it before boot is stable
+        // across re-renders. The app's default width is unchanged outside this shot.
+        if (pg.tallSpawn) {
+          await ctx.addInitScript(() => {
+            try { localStorage.setItem('hydra-sidebar-width', '380') } catch { /* ignore */ }
+          })
+        }
         await ctx.addInitScript(() => {
           // Pre-trust the simulated project so the first-open "Trust this
           // project?" modal (web/src/components/TrustProjectModal.tsx) never
@@ -654,6 +675,26 @@ try {
           await page.waitForFunction(() =>
             (document.querySelector('.xterm-rows')?.textContent ?? '').includes('agent@hydra-sim:~$'),
           )
+          await settle(page)
+        }
+        if (pg.tallSpawn) {
+          // Capture-only height override: enlarge both spawn boxes so the seeded
+          // markdown draft (multi-paragraph + a fenced code block) shows in full
+          // instead of scrolling within the default-sized box. The resize grip
+          // carries title="Drag to resize" and is a direct child of each spawn
+          // card (cardRef), so its parent IS the card; the compact sidebar box is
+          // told apart by its rounded-[10px] shell (the full box is rounded-[14px]).
+          // We set height directly — the textarea wrapper is flex-1 min-h-0, so it
+          // fills the taller card. This never touches the app's real default sizes.
+          await page.evaluate(({ compactH, fullH }) => {
+            document.querySelectorAll('[title="Drag to resize"]').forEach((handle) => {
+              const card = (handle as HTMLElement).parentElement
+              if (!card) return
+              const h = card.className.includes('rounded-[10px]') ? compactH : fullH
+              card.style.height = `${h}px`
+              card.style.minHeight = `${h}px`
+            })
+          }, { compactH: 500, fullH: 500 })
           await settle(page)
         }
         if (pg.attachImages) {

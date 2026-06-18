@@ -39,8 +39,8 @@ const FRAME_DUR = 1 / 30
 // every animation frame; getImageData over a large frame is costly, so ~20fps
 // keeps it responsive without pinning a core.
 const DIFF_MIN_INTERVAL = 50
-// The slider/onion modes don't expose a resize grip (like their image twins), so
-// their sizer uses the default max height.
+// The slider mode doesn't expose a resize grip (like its image twin — a drag there
+// moves the wipe handle), so its sizer uses the default max height.
 const MAX_SLIDER_H = 480
 
 // useVideoSync is the shared brain for a before/after video pair: it owns the two
@@ -237,19 +237,23 @@ function VideoSizer({ url, maxHeight }: { url: string; maxHeight: number }) {
 }
 
 // Side-by-side cell, the video twin of ImageCell.
-function VideoCell({ url, attach, label, maxHeight, onResizeStart }: {
+function VideoCell({ url, attach, label, maxHeight, onResizeStart, consumeDrag }: {
   url?: string | null
   attach: (el: HTMLVideoElement | null) => void
   label: string
   maxHeight: number
   onResizeStart: (e: React.PointerEvent) => void
+  consumeDrag: () => boolean
 }) {
   return (
     <div className="min-w-0">
       <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-1">{label}</div>
       {url ? (
-        <div className="group relative inline-block">
-          <a href={url} target="_blank" rel="noreferrer" className="block">
+        // A press-and-drag anywhere on the frame resizes it; a plain click still
+        // opens the .webm in a new tab via the <a>, but consumeDrag() cancels that
+        // navigation when the press turned into a drag (twin of ImageCell).
+        <div className="group relative inline-block select-none" onPointerDown={onResizeStart}>
+          <a href={url} target="_blank" rel="noreferrer" className="block" onClick={(e) => { if (consumeDrag()) e.preventDefault() }}>
             <VideoNode url={url} attach={attach} className={IMG_CLASS} style={{ ...checkerStyle, maxHeight: `${maxHeight}px` }} />
           </a>
           <ResizeGrip onPointerDown={onResizeStart} />
@@ -262,11 +266,11 @@ function VideoCell({ url, attach, label, maxHeight, onResizeStart }: {
 }
 
 function VideoSideBySide({ controller, left, right }: { controller: Controller; left?: string | null; right?: string | null }) {
-  const { maxHeight, onResizeStart } = useMediaResize()
+  const { maxHeight, onResizeStart, consumeDrag } = useMediaResize()
   return (
     <div className="flex gap-3">
-      <VideoCell url={left} attach={controller.attachLeft} label="Before" maxHeight={maxHeight} onResizeStart={onResizeStart} />
-      <VideoCell url={right} attach={controller.attachRight} label="After" maxHeight={maxHeight} onResizeStart={onResizeStart} />
+      <VideoCell url={left} attach={controller.attachLeft} label="Before" maxHeight={maxHeight} onResizeStart={onResizeStart} consumeDrag={consumeDrag} />
+      <VideoCell url={right} attach={controller.attachRight} label="After" maxHeight={maxHeight} onResizeStart={onResizeStart} consumeDrag={consumeDrag} />
     </div>
   )
 }
@@ -364,13 +368,22 @@ function VideoSlider({ controller, left, right }: { controller: Controller; left
 // a slider-controlled opacity.
 function VideoOnion({ controller, left, right }: { controller: Controller; left?: string | null; right?: string | null }) {
   const [opacity, setOpacity] = useState(50)
+  const { maxHeight, onResizeStart } = useMediaResize()
   const sizer = (right ?? left) as string
   return (
     <div className="min-w-0">
-      <div className="relative inline-block" onAuxClick={makeAuxOpen(() => (opacity >= 50 ? right : left) || sizer)}>
-        <VideoSizer url={sizer} maxHeight={MAX_SLIDER_H} />
+      <div
+        // A press-and-drag anywhere on the blended frame resizes it (twin of the
+        // image OnionCompare); the opacity slider below is a separate row, so the
+        // box owns no left-click gesture. group reveals the grip on hover.
+        className="group relative inline-block select-none"
+        onPointerDown={onResizeStart}
+        onAuxClick={makeAuxOpen(() => (opacity >= 50 ? right : left) || sizer)}
+      >
+        <VideoSizer url={sizer} maxHeight={maxHeight} />
         <VideoLayer url={left} attach={controller.attachLeft} />
         <VideoLayer url={right} attach={controller.attachRight} style={{ opacity: opacity / 100 }} />
+        <ResizeGrip onPointerDown={onResizeStart} />
       </div>
       <div className="flex items-center gap-2 mt-1">
         <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">Before</span>
@@ -454,7 +467,7 @@ function VideoDifference({ controller, left, right }: { controller: Controller; 
         <button onClick={() => setView('after')} className={tabBtn(view === 'after')}>After</button>
         <button onClick={() => setView('diff')} className={tabBtn(view === 'diff')}>Diff</button>
       </div>
-      <div className="group relative inline-block">
+      <div className="group relative inline-block select-none" onPointerDown={onResizeStart}>
         {diffActive && <span className={`${TAG_CLASS} left-1`}>Diff</span>}
         <VideoSizer url={sizer} maxHeight={maxHeight} />
         <VideoLayer url={left} attach={controller.attachLeft} style={{ maxHeight: `${maxHeight}px`, visibility: shown === 'left' ? 'visible' : 'hidden' }} />
