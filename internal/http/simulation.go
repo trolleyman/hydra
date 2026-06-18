@@ -136,6 +136,8 @@ const simAgentMdPrompt = "Add **simple inline-markdown** rendering so prompts an
 	"- A long command in backticks like `go test ./internal/heads/... -run TestResumeLazy -count=1 -race -v` should wrap mid-span, with each line fragment keeping its own rounded code background.\n" +
 	"- Proof the override is activity-only: this literal `$ run-this-command --now` sitting inside the prompt should stay ordinary code, not a highlighted command line.\n" +
 	"- Tighten the gap between the metadata above and this box, and add a soft bottom fade so a tall prompt doesn't cut off hard as it scrolls out of view.\n" +
+	"- A fenced block must render as its own code chip in both the spawn box and this detail view, e.g.\n" +
+	"```ts\nconst seg = parseInline(text)\nrenderMarkdown(seg) // code/bold/italic\n```\n" +
 	"- Keep it dependency-free: a tiny hand-rolled tokenizer beats pulling in a whole markdown library just for `code`, *italic* and **bold**.\n" +
 	"- Finally, share one renderer across the spawn box, the agent-detail prompt and the sidebar activity line so the three never drift apart."
 

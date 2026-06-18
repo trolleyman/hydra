@@ -52,7 +52,8 @@ const SIM_NOW = new Date('2025-01-01T12:00:00Z')
 const MARKDOWN_DEMO_PROMPT =
   "Add **simple inline-markdown** rendering so prompts and the live-activity line aren't flat text.\n\n" +
   'Highlight `inline code`, *italic* and **bold** as you type. A long command in backticks like `go test ./internal/heads/... -run TestResumeLazy -count=1 -race -v` wraps across lines, each fragment keeping its own rounded background, and a line that contains `code` stays exactly as tall as a plain one.\n\n' +
-  'Note: a literal `$ run-this-command --now` in the prompt is just code, not a command — that override is activity-only.'
+  'Note: a literal `$ run-this-command --now` in the prompt is just code, not a command — that override is activity-only.\n\n' +
+  'A fenced block renders as its own code chip:\n```ts\nconst seg = parseInline(text)\nrenderMarkdown(seg) // code/bold/italic\n```'
 
 const OUT = required('HYDRA_ARTIFACT_OUTPUT')
 // HYDRA_ARTIFACT_SOURCE is the checkout root. Fall back to the repo root two
