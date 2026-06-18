@@ -632,7 +632,7 @@ function FileRow({ file, mode }: { file: ArtifactFile; mode: ImageDiffMode }) {
         </div>
       )}
       {isVideoArtifact(file.name) ? (
-        <VideoDiffView left={file.left_url} right={file.right_url} mode={mode} />
+        <VideoDiffView left={file.left_url} right={file.right_url} mode={mode} fps={file.fps} />
       ) : (
         <ImageDiffView left={file.left_url} right={file.right_url} mode={mode} />
       )}

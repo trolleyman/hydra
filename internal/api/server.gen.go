@@ -223,6 +223,9 @@ type AgentStatusInfo struct {
 type ArtifactFile struct {
 	ChangeType ArtifactFileChangeType `json:"change_type"`
 
+	// Fps Frame rate of a video file, read from its sibling JSON sidecar (<file>.meta, {"fps": 60}). HTML5 video exposes no frame rate, so the viewer's frame-step buttons use it to size a single-frame step. Null/absent when the sidecar omits it, in which case the viewer assumes a sensible default. Only meaningful for video files.
+	Fps *float64 `json:"fps"`
+
 	// LeftUrl URL of the file for the left version (null if absent on the left)
 	LeftUrl *string `json:"left_url"`
 

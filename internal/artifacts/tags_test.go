@@ -159,3 +159,76 @@ func TestCompareTagsMerge(t *testing.T) {
 		t.Errorf("added.png tags = %#v, want head side [theme::dark]", got)
 	}
 }
+
+// TestScanOutputsReadsFps checks that scanOutputs picks up an fps from the sidecar,
+// leaves it zero when absent, and warns on (and ignores) a non-positive value.
+func TestScanOutputsReadsFps(t *testing.T) {
+	m := NewManager(t.TempDir())
+	const script, key = "shot", "commit/fps"
+	dir := m.entryDir(script, key)
+
+	writeArtifact(t, m, script, key, "anim.webm", []byte("WEBM"))
+	writeArtifact(t, m, script, key, "still.webm", []byte("WEBM"))
+	writeArtifact(t, m, script, key, "bad.webm", []byte("WEBM"))
+	if err := os.WriteFile(filepath.Join(dir, "anim.webm.meta"), []byte(`{"fps": 60}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// still.webm has a sidecar with no fps → fps stays zero (unset).
+	if err := os.WriteFile(filepath.Join(dir, "still.webm.meta"), []byte(`{"tags": ["wip"]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "bad.webm.meta"), []byte(`{"fps": -5}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	files, warnings, err := scanOutputs(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fpsByName := map[string]float64{}
+	for _, f := range files {
+		fpsByName[f.Name] = f.Fps
+	}
+	if fpsByName["anim.webm"] != 60 {
+		t.Errorf("anim.webm fps = %v, want 60", fpsByName["anim.webm"])
+	}
+	if fpsByName["still.webm"] != 0 {
+		t.Errorf("still.webm fps = %v, want 0 (unset)", fpsByName["still.webm"])
+	}
+	if fpsByName["bad.webm"] != 0 {
+		t.Errorf("bad.webm fps = %v, want 0 (non-positive ignored)", fpsByName["bad.webm"])
+	}
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "bad.webm") || !strings.Contains(warnings[0], "fps") {
+		t.Errorf("want one warning mentioning bad.webm + fps, got %v", warnings)
+	}
+}
+
+// TestCompareFps checks the diff fps prefers the head side, falls back to the
+// base, and passes a one-sided file's value through.
+func TestCompareFps(t *testing.T) {
+	left := []FileMeta{
+		{Name: "both.webm", Hash: "a", Fps: 30},
+		{Name: "base-only.webm", Hash: "b", Fps: 24},
+		{Name: "base-has-fps.webm", Hash: "x", Fps: 25},
+	}
+	right := []FileMeta{
+		{Name: "both.webm", Hash: "a", Fps: 60},
+		{Name: "head-only.webm", Hash: "c", Fps: 50},
+		// head re-encode dropped the sidecar fps → falls back to the base's.
+		{Name: "base-has-fps.webm", Hash: "y"},
+	}
+	fpsByName := map[string]float64{}
+	for _, d := range Compare(left, right) {
+		fpsByName[d.Name] = d.Fps
+	}
+	for name, want := range map[string]float64{
+		"both.webm":         60, // head wins
+		"base-only.webm":    24, // base passes through
+		"head-only.webm":    50, // head passes through
+		"base-has-fps.webm": 25, // head unset → base fallback
+	} {
+		if fpsByName[name] != want {
+			t.Errorf("%s fps = %v, want %v", name, fpsByName[name], want)
+		}
+	}
+}

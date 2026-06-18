@@ -31,10 +31,12 @@ export function isVideoArtifact(name: string): boolean {
 // follower onto the master's clock. ~1.5 frames at 60fps — tight enough that the
 // pair reads as one animation, loose enough not to thrash on normal jitter.
 const SYNC_TOL = 0.08
-// HTML5 video exposes no frame rate, so a single-frame step has to assume one.
-// 30fps is the common case for screen recordings/animation artifacts; at worst the
-// step is a touch coarse/fine, which is fine for eyeballing a frame-by-frame diff.
-const FRAME_DUR = 1 / 30
+// HTML5 video exposes no frame rate, so a single-frame step needs one supplied. A
+// command can declare it in the artifact's <file>.meta sidecar ({"fps": 60}); this
+// is the fallback when the sidecar omits it. 30fps is the common case for screen
+// recordings/animation artifacts — at worst a missing-sidecar step is a touch
+// coarse/fine, which is fine for eyeballing a frame-by-frame diff.
+const DEFAULT_FPS = 30
 // The difference view recomputes a full-frame pixel diff on a timer rather than
 // every animation frame; getImageData over a large frame is costly, so ~20fps
 // keeps it responsive without pinning a core.
@@ -48,9 +50,14 @@ const MAX_SLIDER_H = 480
 // common clock, and exposes the transport state/controls the UI binds to. The
 // element with the longer duration is the master clock; the other is corrected to
 // follow it, so the timeline always spans the full animation.
-function useVideoSync() {
+function useVideoSync(fps?: number | null) {
   const leftEl = useRef<HTMLVideoElement | null>(null)
   const rightEl = useRef<HTMLVideoElement | null>(null)
+
+  // Frame duration for the step buttons: from the sidecar fps when present and
+  // sane, else the default. Held in a ref so frameStep stays a stable callback.
+  const frameDurRef = useRef(1 / DEFAULT_FPS)
+  frameDurRef.current = 1 / (fps && fps > 0 ? fps : DEFAULT_FPS)
 
   const [playing, setPlaying] = useState(true)
   const [currentTime, setCurrentTime] = useState(0)
@@ -181,7 +188,7 @@ function useVideoSync() {
   const frameStep = useCallback((dir: 1 | -1) => {
     setPlaying(false)
     const max = durationRef.current || Infinity
-    seek(Math.max(0, Math.min(currentTimeRef.current + dir * FRAME_DUR, max)))
+    seek(Math.max(0, Math.min(currentTimeRef.current + dir * frameDurRef.current, max)))
   }, [seek])
   const getLeft = useCallback(() => leftEl.current, [])
   const getRight = useCallback(() => rightEl.current, [])
@@ -541,8 +548,8 @@ function VideoTransport({ controller }: { controller: Controller }) {
 // shared transport. The mode set mirrors the image viewer so a .webm artifact honours
 // the same diff-viewer setting; the controller (one per file row) keeps the pair in
 // lockstep across whichever mode is showing.
-export function VideoDiffView({ left, right, mode }: { left?: string | null; right?: string | null; mode: ImageDiffMode }) {
-  const controller = useVideoSync()
+export function VideoDiffView({ left, right, mode, fps }: { left?: string | null; right?: string | null; mode: ImageDiffMode; fps?: number | null }) {
+  const controller = useVideoSync(fps)
   let body: React.ReactNode
   if (mode === 'side-by-side' || (!left && !right)) body = <VideoSideBySide controller={controller} left={left} right={right} />
   else if (mode === 'ab') body = <VideoAB controller={controller} left={left} right={right} />

@@ -80,16 +80,31 @@ otherwise show up as a spurious "modified".
   identical frames still reads as "modified". Lossless keeps identical frames
   identical — and also makes the byte-hash fallback meaningful.
 
+The video viewer has a shared transport — play/pause, a scrubber, a loop toggle,
+a speed select, and **frame-step buttons** either side of play/pause to advance
+one frame at a time. HTML5 video exposes no frame rate, so by default a step
+assumes 30fps. Declare the real rate in the `.meta` sidecar (see below) to make
+stepping frame-accurate:
+
+```json
+{ "fps": 60 }
+```
+
 ## Tags & filtering
 
 Alongside an output file `home.png` (or `home.webm`) the command may write a JSON
-sidecar `home.png.meta` like:
+sidecar `home.png.meta`. It is a single, extensible home for per-file metadata:
 
 ```json
-{ "tags": ["theme::dark", "viewport::phone"] }
+{ "tags": ["theme::dark", "viewport::phone"], "fps": 60 }
 ```
 
-The diff viewer shows these as labels and offers a filter. A `category::value`
+The diff viewer shows the tags as labels and offers a filter. A `category::value`
 tag is a scoped label — only one value per category is kept (the last wins);
 plain tags are free-form. When a set mixes images and video, a built-in
 **type** filter (image / video) appears too.
+
+`fps` applies to video only and sizes the viewer's frame-step buttons (see
+above); a non-positive value is ignored with a warning. Both keys are optional —
+omit either, or skip the sidecar entirely. A malformed sidecar is reported as a
+build warning and otherwise ignored.

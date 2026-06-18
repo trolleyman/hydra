@@ -152,10 +152,14 @@ type FileMeta struct {
 	Size int64  `json:"size"`
 	Hash string `json:"hash"` // sha256 hex of the file contents
 	// Tags are labels read from the file's sibling JSON sidecar (<file>.meta,
-	// {"tags": [...]}) — see readTagsSidecar/normalizeTags. They drive the diff
+	// {"tags": [...]}) — see readSidecar/normalizeTags. They drive the diff
 	// viewer's tag badges and filter. Already normalized: deduped, sorted, and
 	// with GitLab-style scoped labels collapsed to one value per category.
 	Tags []string `json:"tags,omitempty"`
+	// Fps is the video frame rate from the same sidecar ({"fps": 60}). HTML5
+	// video exposes no frame rate, so the viewer's frame-step buttons use this to
+	// size a single-frame step. Zero when the sidecar omits it (or for images).
+	Fps float64 `json:"fps,omitempty"`
 }
 
 // Meta is the persisted (and returned) description of one cache entry.
@@ -208,6 +212,10 @@ type FileDelta struct {
 	// is the raw byte-hash one and may be spurious — see Manager.Compare. The UI
 	// caveats it with a badge. Always false for images and frame-verified video.
 	Unverified bool
+	// Fps is the video frame rate from the file's sidecar, with the head (right)
+	// side preferred over the base when both declare one. Zero when neither side
+	// declares it (or for images). The viewer uses it to size a frame step.
+	Fps float64
 }
 
 // Compare matches files by name across two versions' file lists and classifies
@@ -239,6 +247,13 @@ func Compare(left, right []FileMeta) []FileDelta {
 		// category. A file on only one side passes that side's tags through
 		// (the other is empty).
 		d.Tags = mergeTags(lf.Tags, rf.Tags)
+		// Frame rate: prefer the head's, fall back to the base's. A file present
+		// on only one side carries that side's value (the other is zero).
+		if rf.Fps > 0 {
+			d.Fps = rf.Fps
+		} else {
+			d.Fps = lf.Fps
+		}
 		switch {
 		case inLeft && !inRight:
 			d.Change = ChangeRemoved
@@ -1182,9 +1197,9 @@ func writeMeta(dir string, meta Meta) error {
 }
 
 // scanOutputs collects the image files a generation wrote, reading each file's
-// optional <file>.meta tag sidecar. It also returns human-readable warnings
-// (malformed sidecar JSON, a scoped-label category set more than once) for the
-// caller to fold into the build log so the script author sees them.
+// optional <file>.meta sidecar (tags + video fps). It also returns human-readable
+// warnings (malformed sidecar JSON, a scoped-label category set more than once)
+// for the caller to fold into the build log so the script author sees them.
 func scanOutputs(dir string) ([]FileMeta, []string, error) {
 	var out []FileMeta
 	var warnings []string
@@ -1204,11 +1219,11 @@ func scanOutputs(dir string) ([]FileMeta, []string, error) {
 		}
 		rel, _ := filepath.Rel(dir, p)
 		name := filepath.ToSlash(rel)
-		tags, warns := readTagsSidecar(p)
+		tags, fps, warns := readSidecar(p)
 		for _, w := range warns {
 			warnings = append(warnings, name+": "+w)
 		}
-		out = append(out, FileMeta{Name: name, Size: size, Hash: hash, Tags: tags})
+		out = append(out, FileMeta{Name: name, Size: size, Hash: hash, Tags: tags, Fps: fps})
 		return nil
 	})
 	if err != nil {
@@ -1218,23 +1233,32 @@ func scanOutputs(dir string) ([]FileMeta, []string, error) {
 	return out, warnings, nil
 }
 
-// readTagsSidecar reads the optional tag sidecar for an image file: a sibling
-// JSON file named "<image>.meta" of the form {"tags": ["a", "theme::dark"]}.
-// A missing/unreadable sidecar yields no tags and no warnings; malformed JSON
-// yields a warning (and no tags). The "meta" extension keeps a single, extensible
-// home for any future per-file metadata beyond tags.
-func readTagsSidecar(imagePath string) (tags, warnings []string) {
-	data, err := os.ReadFile(imagePath + ".meta")
+// readSidecar reads the optional metadata sidecar for an output file: a sibling
+// JSON file named "<file>.meta" of the form
+// {"tags": ["a", "theme::dark"], "fps": 60}. The "meta" extension is a single,
+// extensible home for per-file metadata. A missing/unreadable sidecar yields
+// nothing and no warnings (the common case); malformed JSON yields a warning (and
+// no metadata). fps is reported only when present and positive — a non-positive
+// value is ignored (zero, the caller's "unset", with a warning).
+func readSidecar(filePath string) (tags []string, fps float64, warnings []string) {
+	data, err := os.ReadFile(filePath + ".meta")
 	if err != nil {
-		return nil, nil // no sidecar → no tags (the common case)
+		return nil, 0, nil // no sidecar → no metadata (the common case)
 	}
 	var sc struct {
 		Tags []string `json:"tags"`
+		Fps  float64  `json:"fps"`
 	}
 	if err := json.Unmarshal(data, &sc); err != nil {
-		return nil, []string{fmt.Sprintf("tags: ignoring malformed sidecar %s.meta: %v", filepath.Base(imagePath), err)}
+		return nil, 0, []string{fmt.Sprintf("ignoring malformed sidecar %s.meta: %v", filepath.Base(filePath), err)}
 	}
-	return normalizeTags(sc.Tags)
+	tags, warnings = normalizeTags(sc.Tags)
+	if sc.Fps < 0 {
+		warnings = append(warnings, fmt.Sprintf("fps: ignoring non-positive value %g in sidecar %s.meta", sc.Fps, filepath.Base(filePath)))
+	} else {
+		fps = sc.Fps
+	}
+	return tags, fps, warnings
 }
 
 // normalizeTags cleans a raw tag list and enforces GitLab-style scoped labels.
