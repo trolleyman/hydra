@@ -107,13 +107,23 @@ as pid-1. The hydra binary is already bound into every sandbox at
 - `StartShellSession` — with the flag on and a namespace host present, spawns
   sandboxed bash as a **sibling child** of the supervisor, so it shares the writable
   overlay. Without the flag (or host), the existing read-only-COW path is unchanged.
+- `runPreExitInNamespace(...)` — with the flag on and a host present, the
+  `pre_exit_script` runs as a child of the **still-live supervisor** (the same bwrap
+  as the agent, sharing its writable COW overlay so it sees the agent's writes). It
+  runs **before** `removeNamespaceHost`, so the kill order is: kill agent session →
+  kill bash shells → pre-exit hook → tear down supervisor → remove worktree/branch.
+  Without a host it falls back to a fresh standalone sandbox (the prior behaviour).
+  A hung hook is bounded by `preExitTimeout` and killed via the supervisor (the
+  passed-in master fd is blocking, so the child is signalled, not just disconnected).
 - `removeNamespaceHost(id)` — tears down the supervisor + socket dir; called from
-  `KillHeadNoLock` and the spawn-cleanup path.
+  `KillHeadNoLock` (after the pre-exit hook) and the spawn-cleanup path.
 
 ### `internal/sandbox`
 
-- `WrapPreSpawn(script, argv)` exposes the existing pre-spawn wrapper so the agent
-  child's argv can carry the pre-spawn script when spawned outside `BuildSpec`.
+- `WrapPreSpawn(script, argv)` exposes the existing pre-spawn wrapper. In
+  shared-namespace mode the agent child's argv is wrapped with it, so the
+  `pre_spawn_script` runs **inside the supervisor's bwrap** — the same one the agent
+  and bash terminals share — and its writes land in the shared COW overlay.
 
 ## How to try it
 
@@ -137,10 +147,22 @@ unsandboxed by design), so only **sandboxed** terminals share the overlay.
 - ⚠️ The overlay sharing itself needs an overlay-capable bwrap (can't run nested in
   the dev sandbox), so it is validated on a real host via the steps above.
 
+## Hooks in shared-namespace mode
+
+Both lifecycle hooks run **in the head's one shared bwrap** when the flag is on, so
+each sees (and writes to) the same COW overlay as the agent:
+
+- `pre_spawn_script` — wrapped around the agent child's argv (runs, then `exec`s the
+  agent), exactly as `withPreSpawn` does for the standalone path.
+- `pre_exit_script` — spawned as a child of the still-live supervisor during kill,
+  before the supervisor is torn down.
+
+For sandboxed **bash terminals**, `pre_spawn_script` is still intentionally skipped
+(it is a once-per-head agent hook; interactive shells open repeatedly), unchanged
+from today's behaviour.
+
 ## Known limitations (spike — follow-ups)
 
-- **Pre-spawn for shells:** the agent child gets the pre-spawn script wrapped around
-  it, but bash terminals skip it (unchanged from today's behaviour).
 - **Reaping:** the supervisor is pid-1 and reaps its direct children, but orphaned
   grandchildren that reparent to it could linger as zombies. A dedicated reaper was
   intentionally omitted to avoid racing Go's `os/exec` child reaping.

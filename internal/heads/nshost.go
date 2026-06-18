@@ -1,12 +1,15 @@
 package heads
 
 import (
+	"context"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sync"
+	"syscall"
 	"time"
 
 	"braces.dev/errtrace"
@@ -130,7 +133,7 @@ func removeNamespaceHost(id string) {
 // startAgentSession starts the agent either in its own sandbox (default) or, when
 // the shared-namespace flag is on, as a child of the head's supervisor so it
 // shares the writable COW overlay with bash terminals. sb carries the agent's
-// argv, env and (for the namespace path) the pre-spawn script to wrap around it.
+// argv, env and the pre-spawn script.
 func startAgentSession(reg *session.Registry, projectRoot, id string, agentType sandbox.AgentType, worktree string, rows, cols uint16, sb sandbox.Options) (*session.Session, error) {
 	if !sharedNSEnabled() {
 		return reg.Start(session.StartOptions{ID: id, Rows: rows, Cols: cols, Sandbox: sb})
@@ -140,10 +143,51 @@ func startAgentSession(reg *session.Registry, projectRoot, id string, agentType 
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
+	// Wrap the pre-spawn script around the agent's argv so it runs inside the
+	// supervisor's bwrap (the same one the agent and bash terminals share), exactly
+	// as withPreSpawn does for the standalone path — its writes land in the shared
+	// COW overlay and are visible to every sibling terminal.
 	argv := sandbox.WrapPreSpawn(sb.PreSpawnScript, sb.Argv)
 	sp, err := host.client.Spawn(nshost.SpawnRequest{Argv: argv, Env: sb.Env, Cwd: worktree, Rows: rows, Cols: cols})
 	if err != nil {
 		return nil, errtrace.Wrap(fmt.Errorf("spawn agent in namespace host: %w", err))
 	}
 	return reg.StartWithProc(id, agentType, worktree, rows, cols, false, sp)
+}
+
+// runPreExitInNamespace runs a pre_exit_script as a child of the head's live
+// supervisor, so it executes in the same bwrap (and writable COW overlay) as the
+// agent did. It returns the hook's combined PTY output. The child is PTY-attached
+// like every namespace-host process; output is read until the child exits (EOF on
+// the master) or ctx fires, whichever comes first.
+func runPreExitInNamespace(ctx context.Context, host *nsHost, worktree string, env []string, script string) ([]byte, error) {
+	sp, err := host.client.Spawn(nshost.SpawnRequest{
+		Argv: []string{"/bin/bash", "-c", script},
+		Env:  env,
+		Cwd:  worktree,
+		Rows: 24, Cols: 80,
+	})
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+
+	resCh := make(chan []byte, 1)
+	go func() {
+		data, _ := io.ReadAll(sp)
+		resCh <- data
+	}()
+
+	select {
+	case out := <-resCh:
+		_ = sp.Close()
+		return out, nil
+	case <-ctx.Done():
+		// The master fd (received over the socket) is blocking, so closing it does
+		// not interrupt a blocked read; actively kill the child via the supervisor
+		// so it exits, the master EOFs, and the reader returns.
+		_ = sp.Signal(syscall.SIGKILL)
+		out := <-resCh
+		_ = sp.Close()
+		return out, errtrace.Wrap(fmt.Errorf("pre_exit_script timed out after %s", preExitTimeout))
+	}
 }

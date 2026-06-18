@@ -762,17 +762,23 @@ func KillHeadNoLock(ctx context.Context, reg *session.Registry, store *db.Store,
 		// which is about to be removed, so they must not outlive it.
 		reg.KillMatching(head.ID + "-shell")
 	}
-	// Stop the shared-namespace supervisor (if any) — once the agent and shells
-	// are gone, the single bwrap owning their writable COW overlay can go too.
+	if killErr == nil {
+		// Sandboxed teardown hook: the agent's session is dead but the worktree is
+		// still present, so run the configured pre_exit_script (best-effort,
+		// cwd=worktree) BEFORE the worktree is removed — e.g. to release a claimed
+		// emulator slot from .hydra/emu.env. In shared-namespace mode this runs
+		// inside the head's still-live supervisor (the same bwrap as the agent), so
+		// it sees the agent's COW writes — which is why it must precede the
+		// removeNamespaceHost teardown below.
+		runPreExitScript(ctx, head, endState)
+	}
+
+	// Stop the shared-namespace supervisor (if any) — after the pre-exit hook, the
+	// single bwrap owning the writable COW overlay is no longer needed. Unconditional
+	// so a failed kill still reclaims it.
 	removeNamespaceHost(head.ID)
 
 	if killErr == nil {
-		// Sandboxed teardown hook: the agent's session is dead but the worktree is
-		// still present, so run the configured pre_exit_script (best-effort, in a
-		// fresh sandbox with the head's policy, cwd=worktree) BEFORE the worktree is
-		// removed — e.g. to release a claimed emulator slot from .hydra/emu.env.
-		runPreExitScript(ctx, head, endState)
-
 		if head.Worktree != nil && head.ProjectPath != "" {
 			log.Printf("heads: removing worktree %s for agent %s", *head.Worktree, head.ID)
 			if err := git.RemoveWorktree(head.ProjectPath, *head.Worktree); err != nil {
@@ -853,6 +859,23 @@ func runPreExitScript(ctx context.Context, head Head, endState string) {
 	env := append(agentEnv(home, currentUser.Username, readGitConfigVal(head.ProjectPath, "user.name"), readGitConfigVal(head.ProjectPath, "user.email")), sandbox.MiseTrustEnv(head.ProjectPath, worktree)...)
 	env = append(env, headContextEnv(head.ID, head.AgentType, head.ProjectPath, worktree, derefStr(head.Branch), head.BaseBranch)...)
 	env = append(env, "HYDRA_END_STATE="+endState)
+
+	// Shared-namespace mode: run the hook inside the head's live supervisor so it
+	// executes in the SAME bwrap as the agent — sharing the writable COW overlay and
+	// seeing the agent's writes — rather than in a fresh sandbox. Falls through to
+	// the standalone sandbox below when there is no namespace host for this head.
+	if sharedNSEnabled() {
+		if host, ok := namespaceHostFor(head.ID); ok {
+			log.Printf("heads: running pre_exit_script for agent %s in namespace host (end_state=%q)", head.ID, endState)
+			out, err := runPreExitInNamespace(runCtx, host, worktree, env, script)
+			if err != nil {
+				log.Printf("warn: pre_exit_script for %s failed: %v; output:\n%s", head.ID, err, bytes.TrimSpace(out))
+			} else if trimmed := bytes.TrimSpace(out); len(trimmed) > 0 {
+				log.Printf("heads: pre_exit_script for %s output:\n%s", head.ID, trimmed)
+			}
+			return
+		}
+	}
 
 	spec, err := sandbox.BuildSpec(sandbox.Options{
 		AgentType:     sandbox.AgentTypeBash,
