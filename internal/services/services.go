@@ -27,16 +27,19 @@ import (
 // State is the lifecycle state of a supervised service, surfaced to the UI.
 type State string
 
+// Note: the string values are deliberately distinct from AgentStatus's values
+// ("running"/"stopped") so the two status enums don't collide in the generated
+// API client (a value collision makes oapi-codegen prefix every enum constant).
 const (
 	// StateRunning means the process is currently up.
-	StateRunning State = "running"
+	StateRunning State = "up"
 	// StateRestarting means the process exited and is backing off before relaunch.
 	StateRestarting State = "restarting"
 	// StateFailed means the process exhausted its restart budget (or failed to
 	// even start) and the supervisor gave up.
 	StateFailed State = "failed"
 	// StateStopped means the service was intentionally stopped (shutdown / removal).
-	StateStopped State = "stopped"
+	StateStopped State = "down"
 )
 
 // Status is a snapshot of one supervised service for the API/UI.

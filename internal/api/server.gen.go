@@ -84,6 +84,14 @@ const (
 	MergeConflictErrorErrorMergeConflict MergeConflictErrorError = "merge_conflict"
 )
 
+// Defines values for ServiceStatusState.
+const (
+	Down       ServiceStatusState = "down"
+	Failed     ServiceStatusState = "failed"
+	Restarting ServiceStatusState = "restarting"
+	Up         ServiceStatusState = "up"
+)
+
 // Defines values for TerminalDataEventType.
 const (
 	TerminalDataEventTypeData        TerminalDataEventType = "data"
@@ -374,6 +382,9 @@ type ConfigResponse struct {
 	// DefaultPrePrompt Built-in default pre-prompt always prepended to agent prompts (read-only)
 	DefaultPrePrompt *string     `json:"default_pre_prompt,omitempty"`
 	Defaults         AgentConfig `json:"defaults"`
+
+	// Services Per-project long-running supervised commands ([[services]] in config.toml)
+	Services *[]ServiceScript `json:"services"`
 }
 
 // ConfigTomlResponse defines model for ConfigTomlResponse.
@@ -590,10 +601,56 @@ type SandboxConfig struct {
 	MaskedPaths *[]string      `json:"masked_paths"`
 	Network     *NetworkConfig `json:"network,omitempty"`
 
+	// PostExitScript Bash script run on the HOST (unsandboxed) when a head ends (kill/merge/restart). Gets HYDRA_* head context + HYDRA_END_STATE. For host-side teardown the sandbox can't do, e.g. releasing a per-head emulator slot.
+	PostExitScript *string `json:"post_exit_script"`
+
 	// PreSpawnScript Bash script run inside the sandbox once, when the agent is first spawned — not on resume or for bash shells (e.g. `mise trust`)
 	PreSpawnScript *string   `json:"pre_spawn_script"`
 	RestoreRo      *[]string `json:"restore_ro"`
 	WritablePaths  *[]string `json:"writable_paths"`
+}
+
+// ServiceScript A per-project long-running command the daemon supervises while the project is registered ([[services]] in config.toml)
+type ServiceScript struct {
+	// Command Shell command run via `bash -c` from the project root
+	Command string `json:"command"`
+
+	// Host Run on the host with NO sandbox — needed for host devices the sandbox hides, e.g. /dev/kvm (default false)
+	Host *bool `json:"host,omitempty"`
+
+	// MaxRestarts Relaunch cap after an unexpected exit (null = default 3; 0 = never restart)
+	MaxRestarts *int `json:"max_restarts"`
+
+	// Name Unique label, shown in the UI and logs
+	Name string `json:"name"`
+}
+
+// ServiceStatus Live status of one supervised service
+type ServiceStatus struct {
+	Command     string `json:"command"`
+	Host        bool   `json:"host"`
+	MaxRestarts int    `json:"max_restarts"`
+
+	// Message Human-readable detail for non-running states (exit reason / last output)
+	Message *string `json:"message,omitempty"`
+	Name    string  `json:"name"`
+
+	// Pid Process id while running, else 0
+	Pid *int `json:"pid,omitempty"`
+
+	// Restarts Restarts performed so far
+	Restarts int `json:"restarts"`
+
+	// State up = running; restarting = backing off after an unexpected exit; failed = gave up after exhausting restarts; down = intentionally stopped
+	State ServiceStatusState `json:"state"`
+}
+
+// ServiceStatusState up = running; restarting = backing off after an unexpected exit; failed = gave up after exhausting restarts; down = intentionally stopped
+type ServiceStatusState string
+
+// ServiceStatusResponse defines model for ServiceStatusResponse.
+type ServiceStatusResponse struct {
+	Services []ServiceStatus `json:"services"`
 }
 
 // SpawnAgentRequest defines model for SpawnAgentRequest.
@@ -881,6 +938,12 @@ type ServerInterface interface {
 	// List the files tracked in the project's repository
 	// (GET /api/projects/{project_id}/repository/tree)
 	GetRepositoryTree(w http.ResponseWriter, r *http.Request, projectId string, params GetRepositoryTreeParams)
+	// Get the live status of the project's supervised services
+	// (GET /api/projects/{project_id}/services)
+	GetServices(w http.ResponseWriter, r *http.Request, projectId string)
+	// Restart the project's supervised services (picks up config changes)
+	// (POST /api/projects/{project_id}/services/restart)
+	RestartServices(w http.ResponseWriter, r *http.Request, projectId string)
 	// Get system status
 	// (GET /api/status)
 	GetStatus(w http.ResponseWriter, r *http.Request)
@@ -1840,6 +1903,56 @@ func (siw *ServerInterfaceWrapper) GetRepositoryTree(w http.ResponseWriter, r *h
 	handler.ServeHTTP(w, r)
 }
 
+// GetServices operation middleware
+func (siw *ServerInterfaceWrapper) GetServices(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetServices(w, r, projectId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RestartServices operation middleware
+func (siw *ServerInterfaceWrapper) RestartServices(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RestartServices(w, r, projectId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetStatus operation middleware
 func (siw *ServerInterfaceWrapper) GetStatus(w http.ResponseWriter, r *http.Request) {
 
@@ -2042,6 +2155,8 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/repository/branches", wrapper.GetRepositoryBranches)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/repository/file", wrapper.GetRepositoryFile)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/repository/tree", wrapper.GetRepositoryTree)
+	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/services", wrapper.GetServices)
+	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/services/restart", wrapper.RestartServices)
 	m.HandleFunc("GET "+options.BaseURL+"/api/status", wrapper.GetStatus)
 	m.HandleFunc("GET "+options.BaseURL+"/api/usage/claude", wrapper.GetClaudeUsage)
 	m.HandleFunc("GET "+options.BaseURL+"/health", wrapper.CheckHealth)
@@ -3057,6 +3172,58 @@ func (response GetRepositoryTree500JSONResponse) VisitGetRepositoryTreeResponse(
 	return json.NewEncoder(w).Encode(response)
 }
 
+type GetServicesRequestObject struct {
+	ProjectId string `json:"project_id"`
+}
+
+type GetServicesResponseObject interface {
+	VisitGetServicesResponse(w http.ResponseWriter) error
+}
+
+type GetServices200JSONResponse ServiceStatusResponse
+
+func (response GetServices200JSONResponse) VisitGetServicesResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetServices404JSONResponse ErrorResponse
+
+func (response GetServices404JSONResponse) VisitGetServicesResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type RestartServicesRequestObject struct {
+	ProjectId string `json:"project_id"`
+}
+
+type RestartServicesResponseObject interface {
+	VisitRestartServicesResponse(w http.ResponseWriter) error
+}
+
+type RestartServices200JSONResponse ServiceStatusResponse
+
+func (response RestartServices200JSONResponse) VisitRestartServicesResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type RestartServices404JSONResponse ErrorResponse
+
+func (response RestartServices404JSONResponse) VisitRestartServicesResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 type GetStatusRequestObject struct {
 }
 
@@ -3208,6 +3375,12 @@ type StrictServerInterface interface {
 	// List the files tracked in the project's repository
 	// (GET /api/projects/{project_id}/repository/tree)
 	GetRepositoryTree(ctx context.Context, request GetRepositoryTreeRequestObject) (GetRepositoryTreeResponseObject, error)
+	// Get the live status of the project's supervised services
+	// (GET /api/projects/{project_id}/services)
+	GetServices(ctx context.Context, request GetServicesRequestObject) (GetServicesResponseObject, error)
+	// Restart the project's supervised services (picks up config changes)
+	// (POST /api/projects/{project_id}/services/restart)
+	RestartServices(ctx context.Context, request RestartServicesRequestObject) (RestartServicesResponseObject, error)
 	// Get system status
 	// (GET /api/status)
 	GetStatus(ctx context.Context, request GetStatusRequestObject) (GetStatusResponseObject, error)
@@ -3991,6 +4164,58 @@ func (sh *strictHandler) GetRepositoryTree(w http.ResponseWriter, r *http.Reques
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetRepositoryTreeResponseObject); ok {
 		if err := validResponse.VisitGetRepositoryTreeResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetServices operation middleware
+func (sh *strictHandler) GetServices(w http.ResponseWriter, r *http.Request, projectId string) {
+	var request GetServicesRequestObject
+
+	request.ProjectId = projectId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetServices(ctx, request.(GetServicesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetServices")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetServicesResponseObject); ok {
+		if err := validResponse.VisitGetServicesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RestartServices operation middleware
+func (sh *strictHandler) RestartServices(w http.ResponseWriter, r *http.Request, projectId string) {
+	var request RestartServicesRequestObject
+
+	request.ProjectId = projectId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RestartServices(ctx, request.(RestartServicesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RestartServices")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RestartServicesResponseObject); ok {
+		if err := validResponse.VisitRestartServicesResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

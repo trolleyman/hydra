@@ -18,6 +18,7 @@ import (
 	"github.com/trolleyman/hydra/internal/paths"
 	"github.com/trolleyman/hydra/internal/projects"
 	"github.com/trolleyman/hydra/internal/sandbox"
+	"github.com/trolleyman/hydra/internal/services"
 	"github.com/trolleyman/hydra/internal/session"
 )
 
@@ -29,6 +30,7 @@ type daemonRuntime struct {
 	handler     http.Handler
 	store       *db.Store
 	reg         *session.Registry
+	services    *services.Manager
 	projectRoot string
 }
 
@@ -64,6 +66,9 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 	// One artifacts Manager per registered project, created lazily on first use.
 	artifactReg := artifacts.NewRegistry()
 
+	// Supervises each project's [[services]] (e.g. a host-side emulator pool).
+	svcMgr := services.NewManager()
+
 	server := &httppkg.Server{
 		WorktreesDir:    worktreesDir,
 		ProjectRoot:     projectRoot,
@@ -74,6 +79,7 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 		StartTime:       time.Now(),
 		Development:     os.Getenv("HYDRA_DEV_RESTART") == "1",
 		Artifacts:       artifactReg,
+		Services:        svcMgr,
 		BackgroundCtx:   ctx,
 	}
 
@@ -166,12 +172,19 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 	go heads.RunJSONStatusPoller(ctx, store, roots)
 	go runStoragePruner(ctx, artifactReg, roots)
 
+	// Start each registered project's [[services]]. Done after the pollers so a
+	// slow service launch never delays request serving; StopAll on shutdown.
+	for _, root := range roots() {
+		svcMgr.StartProject(root)
+	}
+
 	mux := buildMux(server)
 	return &daemonRuntime{
 		server:      server,
 		handler:     httppkg.LoggingMiddleware(mux),
 		store:       store,
 		reg:         reg,
+		services:    svcMgr,
 		projectRoot: projectRoot,
 	}, nil
 }

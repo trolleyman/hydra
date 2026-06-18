@@ -18,6 +18,10 @@ export type SandboxConfig = {
      * Bash script run inside the sandbox once, when the agent is first spawned — not on resume or for bash shells (e.g. `mise trust`)
      */
     pre_spawn_script?: string | null;
+    /**
+     * Bash script run on the HOST (unsandboxed) when a head ends (kill/merge/restart). Gets HYDRA_* head context + HYDRA_END_STATE. For host-side teardown the sandbox can't do, e.g. releasing a per-head emulator slot.
+     */
+    post_exit_script?: string | null;
     network?: NetworkConfig | null;
 };
 

@@ -1,12 +1,14 @@
 package heads
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"os/user"
 	"path/filepath"
 	"sort"
@@ -767,6 +769,12 @@ func KillHeadNoLock(ctx context.Context, reg *session.Registry, store *db.Store,
 
 		RemoveAgentStatusFiles(head.ProjectPath, head.ID)
 		removeCowDir(head.ProjectPath, head.ID)
+
+		// Host-side teardown hook: now that the session/worktree/branch are gone,
+		// run the configured post_exit_script on the host (best-effort) so it can
+		// release resources the sandbox couldn't reach (e.g. a per-head emulator
+		// slot). Skipped when the kill failed (the head didn't actually end).
+		runPostExitScript(ctx, head, endState)
 	}
 
 	if store != nil {
@@ -781,6 +789,65 @@ func KillHeadNoLock(ctx context.Context, reg *session.Registry, store *db.Store,
 
 	log.Printf("heads: kill complete for agent %s", head.ID)
 	return errtrace.Wrap(killErr)
+}
+
+// postExitTimeout bounds how long a post_exit_script may run before it is
+// killed, so a hung teardown hook can't wedge a kill/merge request.
+const postExitTimeout = 30 * time.Second
+
+// runPostExitScript runs the project's configured host-side post_exit_script for
+// a head that has just ended, on the HOST with NO sandbox. It is best-effort:
+// any failure is logged, never returned. The script's working directory is the
+// project root (the worktree is already gone) and it receives the same HYDRA_*
+// head-context variables as the agent, plus HYDRA_END_STATE ("killed"|"merged"|
+// ""). endState mirrors KillHeadNoLock's argument.
+func runPostExitScript(ctx context.Context, head Head, endState string) {
+	if head.ProjectPath == "" {
+		return
+	}
+	cfg, err := config.Load(head.ProjectPath)
+	if err != nil {
+		log.Printf("warn: post_exit_script: load config for %s: %v", head.ID, err)
+		return
+	}
+	script := cfg.ResolvePostExitScript(string(head.AgentType))
+	if strings.TrimSpace(script) == "" {
+		return
+	}
+
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	runCtx, cancel := context.WithTimeout(ctx, postExitTimeout)
+	defer cancel()
+
+	worktree := ""
+	if head.Worktree != nil {
+		worktree = *head.Worktree
+	}
+	env := append([]string{}, os.Environ()...)
+	env = append(env,
+		"HYDRA_HEAD_ID="+head.ID,
+		"HYDRA_AGENT_TYPE="+string(head.AgentType),
+		"HYDRA_PROJECT_ROOT="+head.ProjectPath,
+		"HYDRA_WORKTREE="+worktree,
+		"HYDRA_BRANCH="+derefStr(head.Branch),
+		"HYDRA_BASE_BRANCH="+head.BaseBranch,
+		"HYDRA_END_STATE="+endState,
+	)
+
+	log.Printf("heads: running post_exit_script for agent %s (end_state=%q)", head.ID, endState)
+	cmd := exec.CommandContext(runCtx, "bash", "-c", script) //errtrace:skip
+	cmd.Dir = head.ProjectPath
+	cmd.Env = env
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		log.Printf("warn: post_exit_script for %s failed: %v; output:\n%s", head.ID, err, bytes.TrimSpace(out))
+		return
+	}
+	if trimmed := bytes.TrimSpace(out); len(trimmed) > 0 {
+		log.Printf("heads: post_exit_script for %s output:\n%s", head.ID, trimmed)
+	}
 }
 
 // PurgeHead permanently and irreversibly deletes a head, leaving no trace. Unlike

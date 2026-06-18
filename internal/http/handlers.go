@@ -23,6 +23,7 @@ import (
 	"github.com/trolleyman/hydra/internal/paths"
 	"github.com/trolleyman/hydra/internal/projects"
 	"github.com/trolleyman/hydra/internal/sandbox"
+	"github.com/trolleyman/hydra/internal/services"
 	"github.com/trolleyman/hydra/internal/session"
 	"github.com/trolleyman/hydra/internal/usage"
 )
@@ -58,6 +59,10 @@ type Server struct {
 	// Artifacts generates/caches diff artifacts (screenshots etc.), one Manager
 	// per registered project (resolved per request). nil disables the feature.
 	Artifacts *artifacts.Registry
+
+	// Services supervises each project's [[services]] (long-running host/sandbox
+	// commands, e.g. an emulator pool). nil disables the feature (e.g. in tests).
+	Services *services.Manager
 
 	lastSandboxError atomic.Value // holds string
 
@@ -259,6 +264,10 @@ func (s *Server) AddProject(_ context.Context, request api.AddProjectRequestObje
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
+	// Start the newly-added project's [[services]] (no-op if it declares none).
+	if s.Services != nil {
+		s.Services.StartProject(p.Path)
+	}
 	return api.AddProject201JSONResponse(api.ProjectInfo{
 		Id:   p.ID,
 		Path: p.Path,
@@ -290,6 +299,11 @@ func (s *Server) GetProjectConfigToml(_ context.Context, request api.GetProjectC
 }
 
 func (s *Server) RemoveProject(_ context.Context, request api.RemoveProjectRequestObject) (api.RemoveProjectResponseObject, error) {
+	// Resolve the path before removal so we can stop its services afterwards.
+	var removedPath string
+	if p := s.ProjectsManager.GetByID(request.ProjectId); p != nil {
+		removedPath = p.Path
+	}
 	found, err := s.ProjectsManager.RemoveProject(request.ProjectId)
 	if err != nil {
 		return api.RemoveProject500JSONResponse{
@@ -304,6 +318,10 @@ func (s *Server) RemoveProject(_ context.Context, request api.RemoveProjectReque
 			Error:   api.ErrorResponseErrorNotFound,
 			Details: "project not found",
 		}, nil
+	}
+	// Tear down the removed project's [[services]].
+	if s.Services != nil && removedPath != "" {
+		s.Services.StopProject(removedPath)
 	}
 	return api.RemoveProject204Response{}, nil
 }
@@ -527,6 +545,14 @@ func (s *Server) GetConfig(_ context.Context, request api.GetConfigRequestObject
 		resp.Artifacts = &arts
 	}
 
+	if len(cfg.Services) > 0 {
+		svcs := make([]api.ServiceScript, len(cfg.Services))
+		for i, svc := range cfg.Services {
+			svcs[i] = toAPIServiceScript(svc)
+		}
+		resp.Services = &svcs
+	}
+
 	return api.GetConfig200JSONResponse(resp), nil
 }
 
@@ -554,6 +580,26 @@ func fromAPIArtifactScript(a api.ArtifactScript) config.ArtifactScript {
 	return out
 }
 
+// toAPIServiceScript converts an internal ServiceScript to the API representation.
+func toAPIServiceScript(svc config.ServiceScript) api.ServiceScript {
+	out := api.ServiceScript{Name: svc.Name, Command: svc.Command}
+	if svc.Host {
+		out.Host = &svc.Host
+	}
+	out.MaxRestarts = svc.MaxRestarts
+	return out
+}
+
+// fromAPIServiceScript converts an API ServiceScript to the internal representation.
+func fromAPIServiceScript(svc api.ServiceScript) config.ServiceScript {
+	out := config.ServiceScript{Name: svc.Name, Command: svc.Command}
+	if svc.Host != nil {
+		out.Host = *svc.Host
+	}
+	out.MaxRestarts = svc.MaxRestarts
+	return out
+}
+
 // toAPIAgentConfig converts an internal AgentConfig to the API representation.
 func toAPIAgentConfig(c config.AgentConfig) api.AgentConfig {
 	out := api.AgentConfig{
@@ -566,6 +612,7 @@ func toAPIAgentConfig(c config.AgentConfig) api.AgentConfig {
 			RestoreRo:      &c.Sandbox.RestoreRO,
 			CowPaths:       &c.Sandbox.CowPaths,
 			PreSpawnScript: c.Sandbox.PreSpawnScript,
+			PostExitScript: c.Sandbox.PostExitScript,
 		}
 		if c.Sandbox.Network != nil {
 			out.Sandbox.Network = &api.NetworkConfig{
@@ -596,6 +643,9 @@ func fromAPIAgentConfig(a api.AgentConfig) config.AgentConfig {
 		}
 		if a.Sandbox.PreSpawnScript != nil && *a.Sandbox.PreSpawnScript != "" {
 			sb.PreSpawnScript = a.Sandbox.PreSpawnScript
+		}
+		if a.Sandbox.PostExitScript != nil && *a.Sandbox.PostExitScript != "" {
+			sb.PostExitScript = a.Sandbox.PostExitScript
 		}
 		if a.Sandbox.Network != nil {
 			sb.Network = &config.NetworkConfig{Enabled: a.Sandbox.Network.Enabled}
@@ -630,6 +680,14 @@ func (s *Server) SaveConfig(_ context.Context, request api.SaveConfigRequestObje
 			newCfg.Artifacts = append(newCfg.Artifacts, fromAPIArtifactScript(a))
 		}
 	}
+	// A non-nil services list (even empty) is authoritative; a nil list (older
+	// clients / defaults-only saves) leaves the existing [[services]] untouched.
+	if request.Body.Services != nil {
+		newCfg.Services = make([]config.ServiceScript, 0, len(*request.Body.Services))
+		for _, svc := range *request.Body.Services {
+			newCfg.Services = append(newCfg.Services, fromAPIServiceScript(svc))
+		}
+	}
 
 	scope := api.SaveConfigParamsScopeProject
 	if request.Params.Scope != nil {
@@ -649,6 +707,14 @@ func (s *Server) SaveConfig(_ context.Context, request api.SaveConfigRequestObje
 
 	if err := config.SaveToFile(savePath, newCfg); err != nil {
 		return nil, errtrace.Wrap(err)
+	}
+
+	// Restart the project's services so config changes (added/removed/edited
+	// [[services]]) take effect immediately. Only for project-scope saves: a
+	// user-scope save would have to restart every registered project, and the
+	// merged result is reloaded from disk by RestartProject anyway.
+	if s.Services != nil && scope == api.SaveConfigParamsScopeProject {
+		s.Services.RestartProject(projectRoot)
 	}
 
 	return api.SaveConfig200Response{}, nil
