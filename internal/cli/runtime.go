@@ -129,14 +129,20 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 		}
 	}
 
-	// Resume heads that were running before a restart (best-effort), and clear
-	// out any ephemeral artifact checkouts left behind by a crash mid-generation.
-	// Only touch projects that already have an artifacts dir, so we don't create
-	// empty ones in projects that never generated artifacts.
+	// Resume heads that were running before a restart (best-effort), clear out
+	// any ephemeral artifact checkouts left behind by a crash mid-generation, and
+	// migrate any cache still in the old flat key layout to the current
+	// commit/<sha> & worktree/<hash> layout. Only touch projects that already have
+	// an artifacts dir, so we don't create empty ones in projects that never
+	// generated artifacts.
 	for _, root := range roots() {
 		resumeHeadsOnBoot(reg, store, root)
 		if _, err := os.Stat(paths.GetArtifactsDirFromProjectRoot(root)); err == nil {
-			artifactReg.Manager(root).CleanCheckouts()
+			mgr := artifactReg.Manager(root)
+			if n := mgr.MigrateLegacyLayout(); n > 0 {
+				log.Printf("Migrated %d artifact cache entr(y/ies) to the new layout in %s", n, root)
+			}
+			mgr.CleanCheckouts()
 		}
 	}
 
