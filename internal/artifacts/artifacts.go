@@ -5,7 +5,7 @@
 // of a diff (a commit ref, or the head's uncommitted working tree) the manager
 // checks out the relevant source, runs the script against it, and collects the
 // image files it writes. Results are cached on disk under
-// .hydra/artifacts/out/<script>/<kind>/<id> (gitignored, never committed),
+// .hydra/local/artifacts/out/<script>/<kind>/<id> (gitignored, never committed),
 // keyed by an immutable version identifier: commit/<sha> for a resolved commit,
 // or worktree/<hash> for a snapshot of the working-tree state. Repeat views of
 // the same version are free.
@@ -525,7 +525,7 @@ func (m *Manager) EntryDir(script string, v Version) (string, error) {
 // Registry lazily creates and caches one Manager per project root. A single
 // daemon serves every registered project, but each project needs its own
 // Manager: managers are stateful (in-flight generation tracking, the cache
-// lives under that project's .hydra/artifacts) so they must be reused across
+// lives under that project's .hydra/local/artifacts) so they must be reused across
 // requests for the same project rather than recreated.
 type Registry struct {
 	mu   sync.Mutex

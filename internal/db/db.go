@@ -15,9 +15,15 @@ type Store struct {
 	db *gorm.DB
 }
 
-// Open opens (or creates) the SQLite database at <projectRoot>/.hydra/state/db.sqlite3,
+// Open opens (or creates) the SQLite database at <projectRoot>/.hydra/local/state/db.sqlite3,
 // enables WAL mode, and runs AutoMigrate to ensure the schema is current.
 func Open(projectRoot string) (*Store, error) {
+	// Move a pre-existing flat .hydra/<dir> layout under .hydra/local first, so the
+	// DB (and worktrees etc.) are found at their new home rather than recreated empty.
+	if err := paths.MigrateHydraLayout(projectRoot); err != nil {
+		return nil, errtrace.Wrap(fmt.Errorf("migrate .hydra layout: %w", err))
+	}
+
 	stateDir := paths.GetStateDirFromProjectRoot(projectRoot)
 	if err := paths.CreateGitignoreAllInDir(stateDir); err != nil {
 		return nil, errtrace.Wrap(fmt.Errorf("create state dir: %w", err))

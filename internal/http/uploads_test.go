@@ -80,8 +80,8 @@ func TestHandleUpload(t *testing.T) {
 		t.Fatalf("decode: %v", err)
 	}
 
-	// Stored under <root>/.hydra/uploads and readable with the original content.
-	wantDir := filepath.Join(paths.GetHydraDirFromProjectRoot(root), "uploads")
+	// Stored under <root>/.hydra/local/uploads and readable with the original content.
+	wantDir := paths.GetUploadsDirFromProjectRoot(root)
 	if filepath.Dir(resp.Path) != wantDir {
 		t.Errorf("path %q not under %q", resp.Path, wantDir)
 	}

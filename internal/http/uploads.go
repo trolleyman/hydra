@@ -38,7 +38,7 @@ type uploadResponse struct {
 }
 
 // HandleUpload accepts a multipart file upload (a pasted image, or any attached
-// file) and stores it under <projectRoot>/.hydra/uploads. It is registered
+// file) and stores it under <projectRoot>/.hydra/local/uploads. It is registered
 // outside the OpenAPI mux because it consumes multipart/form-data rather than
 // JSON, mirroring HandleArtifactBlob which serves raw bytes.
 func (s *Server) HandleUpload(w http.ResponseWriter, r *http.Request) {

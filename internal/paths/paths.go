@@ -2,6 +2,7 @@ package paths
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -74,8 +75,18 @@ func GetHydraDirFromProjectRoot(projectRoot string) string {
 	return filepath.Join(projectRoot, ".hydra")
 }
 
+// GetHydraLocalDirFromProjectRoot returns .hydra/local, the single parent holding
+// every generated, never-committed thing (worktrees, the SQLite DB, caches, COW
+// layers, ...). Only .hydra/config.toml lives at the .hydra top level. Each
+// subdirectory self-ignores via a "*" .gitignore, so the whole tree stays out of
+// the project's git status. See MigrateHydraLayout for the one-time move of
+// projects created under the old flat layout.
+func GetHydraLocalDirFromProjectRoot(projectRoot string) string {
+	return filepath.Join(GetHydraDirFromProjectRoot(projectRoot), "local")
+}
+
 func GetWorktreesDirFromProjectRoot(projectRoot string) string {
-	return filepath.Join(GetHydraDirFromProjectRoot(projectRoot), "worktrees")
+	return filepath.Join(GetHydraLocalDirFromProjectRoot(projectRoot), "worktrees")
 }
 
 func GetWorktreeDirFromProjectRoot(projectRoot, id string) string {
@@ -83,36 +94,46 @@ func GetWorktreeDirFromProjectRoot(projectRoot, id string) string {
 }
 
 func GetStateDirFromProjectRoot(projectRoot string) string {
-	return filepath.Join(GetHydraDirFromProjectRoot(projectRoot), "state")
+	return filepath.Join(GetHydraLocalDirFromProjectRoot(projectRoot), "state")
 }
 
 // GetArtifactsDirFromProjectRoot returns the (gitignored) directory holding
 // generated diff artifacts (screenshots etc.) and their ephemeral checkouts.
 func GetArtifactsDirFromProjectRoot(projectRoot string) string {
-	return filepath.Join(GetHydraDirFromProjectRoot(projectRoot), "artifacts")
+	return filepath.Join(GetHydraLocalDirFromProjectRoot(projectRoot), "artifacts")
 }
 
 // GetUploadsDirFromProjectRoot returns the (gitignored) directory holding files
-// pasted/attached to prompts. It sits under .hydra so it's readable read-only
-// inside agent sandboxes at the same absolute path.
+// pasted/attached to prompts. It sits under .hydra/local so it's readable
+// read-only inside agent sandboxes at the same absolute path.
 func GetUploadsDirFromProjectRoot(projectRoot string) string {
-	return filepath.Join(GetHydraDirFromProjectRoot(projectRoot), "uploads")
+	return filepath.Join(GetHydraLocalDirFromProjectRoot(projectRoot), "uploads")
+}
+
+// GetCacheDirFromProjectRoot returns the (gitignored) directory holding generated
+// caches (e.g. the captured Gemini default system prompt, keyed by CLI version).
+func GetCacheDirFromProjectRoot(projectRoot string) string {
+	return filepath.Join(GetHydraLocalDirFromProjectRoot(projectRoot), "cache")
 }
 
 func GetDBPathFromProjectRoot(projectRoot string) string {
 	return filepath.Join(GetStateDirFromProjectRoot(projectRoot), "db.sqlite3")
 }
 
+func GetStatusDirFromProjectRoot(projectRoot string) string {
+	return filepath.Join(GetHydraLocalDirFromProjectRoot(projectRoot), "status")
+}
+
 func GetStatusJsonFromProjectRoot(projectRoot, id string) string {
-	return filepath.Join(GetHydraDirFromProjectRoot(projectRoot), "status", id+".json")
+	return filepath.Join(GetStatusDirFromProjectRoot(projectRoot), id+".json")
 }
 
 func GetStatusLogFromProjectRoot(projectRoot, id string) string {
-	return filepath.Join(GetHydraDirFromProjectRoot(projectRoot), "status", id+"_log.jsonl")
+	return filepath.Join(GetStatusDirFromProjectRoot(projectRoot), id+"_log.jsonl")
 }
 
 func GetBuildLogFromProjectRoot(projectRoot, id string) string {
-	return filepath.Join(GetHydraDirFromProjectRoot(projectRoot), "status", id+"_build.log")
+	return filepath.Join(GetStatusDirFromProjectRoot(projectRoot), id+"_build.log")
 }
 
 // WriteFileIfChanged writes content to path only when it differs from the existing file.
@@ -136,6 +157,90 @@ func CreateGitignoreAllInDir(dir string) error {
 		if err := os.WriteFile(gitignorePath, []byte("*\n"), 0644); err != nil {
 			return errtrace.Wrap(fmt.Errorf("create .gitignore: %w: %s", err, gitignorePath))
 		}
+	}
+	return nil
+}
+
+// hydraLocalSubdirs are the generated .hydra subdirectories that used to sit at
+// the .hydra top level and now live under .hydra/local. MigrateHydraLayout moves
+// any it finds at the old location.
+var hydraLocalSubdirs = []string{"worktrees", "state", "artifacts", "uploads", "status", "cache", "cow"}
+
+// MigrateHydraLayout moves a project created under the old flat layout
+// (.hydra/<dir>) into the consolidated one (.hydra/local/<dir>). It is idempotent
+// and best-effort per directory: a directory already present at the new location
+// is left untouched. Worktrees record absolute git metadata links, so after
+// moving them we run `git worktree repair` to re-point the registrations.
+//
+// Called from db.Open (covers the boot project + CLI commands) and per-project at
+// daemon boot / on AddProject, so every project is migrated before its worktrees
+// or DB are used.
+func MigrateHydraLayout(projectRoot string) error {
+	hydra := GetHydraDirFromProjectRoot(projectRoot)
+	local := GetHydraLocalDirFromProjectRoot(projectRoot)
+
+	movedWorktrees := false
+	for _, name := range hydraLocalSubdirs {
+		oldPath := filepath.Join(hydra, name)
+		newPath := filepath.Join(local, name)
+		info, err := os.Stat(oldPath)
+		if err != nil || !info.IsDir() {
+			continue // nothing at the old location
+		}
+		if _, err := os.Stat(newPath); err == nil {
+			// Already migrated (or a partial state) — don't clobber the new copy.
+			log.Printf("warn: hydra layout: both %s and %s exist; leaving the old one in place", oldPath, newPath)
+			continue
+		}
+		if err := os.MkdirAll(local, 0o755); err != nil {
+			return errtrace.Wrap(fmt.Errorf("create %s: %w", local, err))
+		}
+		if err := os.Rename(oldPath, newPath); err != nil {
+			return errtrace.Wrap(fmt.Errorf("move %s -> %s: %w", oldPath, newPath, err))
+		}
+		log.Printf("hydra layout: migrated .hydra/%s -> .hydra/local/%s in %s", name, name, projectRoot)
+		if name == "worktrees" {
+			movedWorktrees = true
+		}
+	}
+
+	if movedWorktrees {
+		if err := repairMovedWorktrees(projectRoot, filepath.Join(local, "worktrees")); err != nil {
+			// Non-fatal: the worktrees still work; only their git metadata links are
+			// stale until repaired. Surface it so it can be fixed manually if needed.
+			log.Printf("warn: hydra layout: git worktree repair in %s: %v", projectRoot, err)
+		}
+	}
+
+	// Belt-and-suspenders: ensure .hydra/local itself self-ignores once it exists,
+	// so the parent never surfaces even if a future subdir forgets its .gitignore.
+	if _, err := os.Stat(local); err == nil {
+		if err := CreateGitignoreAllInDir(local); err != nil {
+			return errtrace.Wrap(err)
+		}
+	}
+	return nil
+}
+
+// repairMovedWorktrees re-points the git worktree registrations after their
+// directories were moved under .hydra/local. `git worktree repair <path>...`,
+// run from the main worktree, rewrites the stale absolute gitdir links.
+func repairMovedWorktrees(projectRoot, worktreesDir string) error {
+	entries, err := os.ReadDir(worktreesDir)
+	if err != nil {
+		return errtrace.Wrap(err)
+	}
+	args := []string{"-C", projectRoot, "worktree", "repair"}
+	for _, e := range entries {
+		if e.IsDir() {
+			args = append(args, filepath.Join(worktreesDir, e.Name()))
+		}
+	}
+	if len(args) == 4 { // no worktree dirs to repair
+		return nil
+	}
+	if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
+		return errtrace.Wrap(fmt.Errorf("git worktree repair: %w: %s", err, strings.TrimSpace(string(out))))
 	}
 	return nil
 }

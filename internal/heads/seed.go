@@ -45,8 +45,7 @@ type seedResult struct {
 // here as context files (~/.gemini/GEMINI.md, ~/.copilot/copilot-instructions.md),
 // merged on top of any the host user already has.
 func seedHead(projectRoot, id string, agentType sandbox.AgentType, worktreePath, home, prePrompt string) (*seedResult, error) {
-	hydraDir := paths.GetHydraDirFromProjectRoot(projectRoot)
-	cacheDir := filepath.Join(hydraDir, "cache")
+	cacheDir := paths.GetCacheDirFromProjectRoot(projectRoot)
 	if err := paths.CreateGitignoreAllInDir(cacheDir); err != nil {
 		return nil, errtrace.Wrap(err)
 	}
@@ -167,7 +166,7 @@ func seedHead(projectRoot, id string, agentType sandbox.AgentType, worktreePath,
 // context file, which is loaded as instructional context instead.
 func seedGeminiPrePrompt(res *seedResult, cacheDir, home, prePrompt string) error {
 	// Never let Gemini write its default system prompt into the read-only
-	// `.hydra/cache` inside the sandbox (EROFS crash). We capture the default
+	// `.hydra/local/cache` inside the sandbox (EROFS crash). We capture the default
 	// ourselves on the host below; the agent only ever reads via GEMINI_SYSTEM_MD.
 	res.Env = append(res.Env, "GEMINI_WRITE_SYSTEM_MD=")
 
@@ -264,7 +263,7 @@ func readHostFile(p string) []byte {
 // not inherit from the daemon's own environment, or they leak into every agent.
 // In particular GEMINI_SYSTEM_MD / GEMINI_WRITE_SYSTEM_MD drive where the Gemini
 // CLI reads/writes its system prompt: an inherited GEMINI_WRITE_SYSTEM_MD makes
-// Gemini try to write into the read-only `.hydra/cache` inside the sandbox and
+// Gemini try to write into the read-only `.hydra/local/cache` inside the sandbox and
 // crash with EROFS. seedGeminiPrePrompt sets the ones it wants explicitly.
 var envKeysHydraOwns = map[string]bool{
 	"GEMINI_SYSTEM_MD":       true,

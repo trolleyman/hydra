@@ -3,7 +3,7 @@
 // The generated OpenAPI client only handles JSON bodies, so uploads use a raw
 // multipart request against the same-origin /uploads endpoint (proxied to the
 // backend in dev — see vite.config.ts). The backend stores the file under the
-// project's .hydra/uploads dir and returns its absolute path, which is valid
+// project's .hydra/local/uploads dir and returns its absolute path, which is valid
 // both on the host and inside the agent sandbox. Inserting that path into the
 // prompt/terminal lets the agent read the file directly.
 
