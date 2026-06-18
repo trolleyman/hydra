@@ -8,19 +8,23 @@ import { DiffViewer } from '../DiffViewer'
 import { formatStartedAgo, agentStatusBadge, archivedEndStateBadge } from './AgentComponents'
 import { LoaderCircle, Merge, Trash2, Tag, RotateCcw, FolderSync, Copy, Check, Pencil, Archive, TerminalSquare } from 'lucide-react'
 import { Tooltip } from './Tooltip'
+import { renderMarkdown } from '../lib/markdown'
 
 import { useDialogStore } from '../stores/dialogStore'
 import { useToastStore } from '../stores/toastStore'
 import { useAgentStore } from '../stores/agentStore'
 
 function PromptBlock({ prompt }: { prompt: string }) {
-  // A plain box that scrolls when the prompt is tall; short prompts show no
-  // scrollbar since the content fits under the max-height.
+  // A box that scrolls when the prompt is tall; short prompts show no scrollbar
+  // since the content fits under the max-height. The negative top margin tucks
+  // it a little closer to the metadata above, and the bottom gradient softens
+  // the cutoff as a long prompt scrolls out of view.
   return (
-    <div className="mb-6 p-4 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+    <div className="relative -mt-2 mb-6 p-4 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
       <div className="overflow-y-auto max-h-72">
-        <p className="text-sm text-gray-800 dark:text-gray-200 whitespace-pre-wrap">{prompt}</p>
+        <p className="text-sm text-gray-800 dark:text-gray-200 whitespace-pre-wrap">{renderMarkdown(prompt)}</p>
       </div>
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-8 rounded-b-lg bg-gradient-to-t from-gray-50 dark:from-gray-800 to-transparent" />
     </div>
   )
 }

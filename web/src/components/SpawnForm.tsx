@@ -7,6 +7,7 @@ import { Zap, LoaderCircle, Paperclip, X, FileText } from 'lucide-react'
 import { Tooltip } from './Tooltip'
 import { ImageLightbox } from './ImageLightbox'
 import { StorageKeys, promptDraftKey, imageCounterKey, readLocal, writeLocal } from '../lib/storage'
+import { HighlightedTextarea } from '../lib/markdown'
 import { type Attachment, spawnDraftKey, loadAttachments, saveAttachments, nextAttachmentId } from '../lib/spawnDrafts'
 
 type AgentTypeOption = 'claude' | 'gemini' | 'copilot'
@@ -468,7 +469,7 @@ export function SpawnForm({
         <input ref={fileInputRef} type="file" multiple className="hidden" onChange={handleFileInput} />
         <div className={`relative rounded-xl p-[1.5px] transition-colors duration-200 ${disabled ? 'bg-gray-100 dark:bg-gray-700' : 'bg-gray-200 dark:bg-gray-600 focus-within:bg-gradient-to-br focus-within:from-blue-500 focus-within:via-indigo-500 focus-within:to-purple-600 focus-within:shadow-md focus-within:shadow-blue-500/20'}`}>
           <div ref={cardRef} className="rounded-[10px] bg-white dark:bg-gray-800 overflow-hidden flex flex-col min-h-[128px]">
-            <textarea
+            <HighlightedTextarea
               ref={textareaRef}
               value={prompt}
               onChange={(e) => handlePromptChange(e.target.value)}
@@ -480,7 +481,8 @@ export function SpawnForm({
               placeholder={disabled ? 'Select a project first…' : (prompt ? 'Describe a task…' : animatedPlaceholder)}
               rows={3}
               disabled={loading || disabled}
-              className={`w-full flex-1 px-3 pt-2.5 pb-1 text-xs text-gray-800 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 bg-transparent resize-none focus:outline-none leading-relaxed disabled:opacity-50 min-h-[72px] ${dragOver ? 'ring-2 ring-blue-400 rounded' : ''}`}
+              wrapperClassName={`w-full flex-1 min-h-[72px] ${dragOver ? 'ring-2 ring-blue-400 rounded' : ''}`}
+              textClassName="px-3 pt-2.5 pb-1 text-xs leading-relaxed placeholder-gray-400 dark:placeholder-gray-500 disabled:opacity-50"
             />
             {renderAttachments('sm')}
             <div className="flex items-center justify-between px-2 pb-2 gap-2 shrink-0">
@@ -552,7 +554,7 @@ export function SpawnForm({
           <div className="relative rounded-2xl p-[1.5px] bg-gradient-to-br from-blue-500 via-indigo-500 to-purple-600 animate-gradient shadow-2xl shadow-blue-500/20">
             <div ref={cardRef} className="rounded-[14px] bg-white dark:bg-gray-800 overflow-hidden flex flex-col min-h-[180px]">
               {/* Prompt textarea */}
-              <textarea
+              <HighlightedTextarea
                 ref={textareaRef}
                 value={prompt}
                 onChange={(e) => handlePromptChange(e.target.value)}
@@ -564,7 +566,8 @@ export function SpawnForm({
                 placeholder={prompt ? 'Describe what you need…' : animatedPlaceholder}
                 rows={6}
                 disabled={loading}
-                className={`w-full flex-1 px-4 pt-4 pb-2 text-sm text-gray-800 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 bg-transparent resize-none focus:outline-none leading-relaxed disabled:opacity-50 min-h-[120px] ${dragOver ? 'ring-2 ring-blue-400 rounded' : ''}`}
+                wrapperClassName={`w-full flex-1 min-h-[120px] ${dragOver ? 'ring-2 ring-blue-400 rounded' : ''}`}
+                textClassName="px-4 pt-4 pb-2 text-sm leading-relaxed placeholder-gray-400 dark:placeholder-gray-500 disabled:opacity-50"
               />
 
               {renderAttachments('md')}

@@ -1,4 +1,5 @@
 import type { AgentResponse } from '../api'
+import { renderMarkdown } from '../lib/markdown'
 
 export function normalizeContainerState(status: string): string {
   const s = status.toLowerCase()
@@ -189,7 +190,7 @@ export function AgentSidebarItem({
         // row keeps a constant height as the text appears, disappears, or changes
         // between status transitions — otherwise the whole sidebar jumps around.
         <div className="mt-0.5 ml-4 min-h-[1rem] text-[11px] text-gray-400 dark:text-gray-500 truncate">
-          {agentStatusDetail(agent)}
+          {renderMarkdown(agentStatusDetail(agent), { dollarCommand: true })}
         </div>
       )}
     </button>
