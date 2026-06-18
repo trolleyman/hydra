@@ -1347,7 +1347,7 @@ function SettingsPopup({ fileView, onFileViewChange, sideBySide, onSideBySideCha
 
 // ── Main DiffViewer component ─────────────────────────────────────────────────
 
-export function DiffViewer({ agent, projectId, externalRefreshTrigger }: { agent: AgentResponse; projectId: string | null; externalRefreshTrigger?: number }) {
+export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalArtifactRefresh }: { agent: AgentResponse; projectId: string | null; externalRefreshTrigger?: number; externalArtifactRefresh?: number }) {
   const [commits, setCommits] = useState<CommitInfo[]>([])
   const [leftSel, setLeftSel] = useState<LeftSel>({ type: 'base' })
   const [rightSel, setRightSel] = useState<RightSel>({ type: 'latest' })
@@ -1910,7 +1910,15 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger }: { agent
           baseRef={artifactParams.baseRef}
           headRef={artifactParams.headRef}
           includeUncommitted={artifactParams.includeUncommitted}
-          refreshKey={refreshKey}
+          // Re-snapshot artifacts on the manual refresh button (refreshKey) AND
+          // when a commit is auto-detected (externalArtifactRefresh). Both only
+          // ever increment, so their sum strictly increases on either trigger,
+          // re-running ArtifactsPanel's effect to re-request — a cache hit when
+          // the resolved commit SHA is unchanged, a regen when it moved. The
+          // diff text itself updates silently via externalRefreshTrigger, so we
+          // deliberately keep this out of the diff-loading effects (which would
+          // flash a loading spinner and reset the user's selection).
+          refreshKey={refreshKey + (externalArtifactRefresh ?? 0)}
           imageDiffMode={imageDiffMode}
         />
       )}

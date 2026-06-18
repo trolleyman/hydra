@@ -91,6 +91,13 @@ const (
 	TerminalDataEventTypeStatus      TerminalDataEventType = "status"
 )
 
+// Defines values for TerminalDiffRefreshEventType.
+const (
+	TerminalDiffRefreshEventTypeData        TerminalDiffRefreshEventType = "data"
+	TerminalDiffRefreshEventTypeDiffRefresh TerminalDiffRefreshEventType = "diff_refresh"
+	TerminalDiffRefreshEventTypeStatus      TerminalDiffRefreshEventType = "status"
+)
+
 // Defines values for TerminalEventType.
 const (
 	TerminalEventTypeData        TerminalEventType = "data"
@@ -100,9 +107,9 @@ const (
 
 // Defines values for TerminalStatusEventType.
 const (
-	Data        TerminalStatusEventType = "data"
-	DiffRefresh TerminalStatusEventType = "diff_refresh"
-	Status      TerminalStatusEventType = "status"
+	TerminalStatusEventTypeData        TerminalStatusEventType = "data"
+	TerminalStatusEventTypeDiffRefresh TerminalStatusEventType = "diff_refresh"
+	TerminalStatusEventTypeStatus      TerminalStatusEventType = "status"
 )
 
 // Defines values for GetConfigParamsScope.
@@ -636,6 +643,16 @@ type TerminalDataEvent struct {
 
 // TerminalDataEventType defines model for TerminalDataEvent.Type.
 type TerminalDataEventType string
+
+// TerminalDiffRefreshEvent defines model for TerminalDiffRefreshEvent.
+type TerminalDiffRefreshEvent struct {
+	// HeadMoved True when this refresh was triggered by a new commit (HEAD moved), as opposed to an uncommitted working-tree change. The diff viewer uses it to also re-snapshot per-commit artifacts (screenshots), which are memoized by commit SHA, while a plain working-tree change only re-fetches the diff text.
+	HeadMoved *bool                        `json:"head_moved,omitempty"`
+	Type      TerminalDiffRefreshEventType `json:"type"`
+}
+
+// TerminalDiffRefreshEventType defines model for TerminalDiffRefreshEvent.Type.
+type TerminalDiffRefreshEventType string
 
 // TerminalEvent defines model for TerminalEvent.
 type TerminalEvent struct {
