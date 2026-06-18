@@ -99,13 +99,16 @@ function stableIndex(s: string, n: number): number {
 export function agentStatusDetail(agent: AgentResponse): string {
   const status = agent.agent_status
   if (!status) return ''
-  if (status.status === 'running') {
+  // Show the live activity placeholder immediately while the agent is spinning
+  // up (pending/starting) as well as once it's running — so the line is
+  // populated the moment the agent is created rather than blank until it
+  // reports its first action.
+  if (status.status === 'running' || status.status === 'starting' || status.status === 'pending') {
     return status.activity || `${RUNNING_PLACEHOLDERS[stableIndex(agent.id, RUNNING_PLACEHOLDERS.length)]}…`
   }
   if (status.last_message) return status.last_message
   // No message yet — keep the line meaningful for the active states.
   switch (status.status) {
-    case 'starting': return 'Starting up…'
     case 'building': return 'Building…'
     case 'waiting':  return 'Waiting…'
     case 'merging':  return 'Merging…'
