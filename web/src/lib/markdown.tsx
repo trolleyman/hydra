@@ -229,14 +229,14 @@ function renderMarkdownSource(text: string): ReactNode {
   return segs.map((s, i) => {
     if (s.kind === 'text') return <span key={i}>{s.value}</span>
     if (s.kind === 'code') {
-      // Tint + a (zero-layout-impact) clone-decorated background only. We must
-      // NOT switch to a monospace font here: the textarea underneath uses the
-      // inherited (proportional) font, so a font-mono run in the backdrop would
-      // be a different width and the visible caret would drift from the typed
-      // text — worse with every code span on the line. `box-decoration-clone`
-      // keeps the background tidy when a code span wraps.
+      // Background chip only, NOT tinted — same as the read-only inline style, so
+      // it reads as the surrounding text wrapped in a chip. We must NOT switch to
+      // a monospace font here: the textarea underneath uses the inherited
+      // (proportional) font, so a font-mono run in the backdrop would be a
+      // different width and the visible caret would drift from the typed text.
+      // `box-decoration-clone` keeps the background tidy when a code span wraps.
       return (
-        <span key={i} className="rounded box-decoration-clone bg-gray-200/70 dark:bg-gray-700/60 text-pink-600 dark:text-pink-300">
+        <span key={i} className="rounded box-decoration-clone bg-gray-200/70 dark:bg-gray-700/60">
           {s.marker}
           {s.value}
           {s.marker}
@@ -245,17 +245,31 @@ function renderMarkdownSource(text: string): ReactNode {
     }
     if (s.kind === 'codeblock') {
       // Rendered as ONE full-width block so the whole code block sits inside a
-      // single rounded background, not a separate chip per wrapped line. It can't
-      // be tinted or syntax-highlighted (a monospace/coloured run would change
-      // glyph widths and drift the caret), and it must carry NO padding/margin
-      // (which would shift glyphs and break alignment) — just a background. With
-      // the hugging newline trimmed above, the block's own line breaks reproduce
-      // the textarea's lines exactly. Fence lines are dimmed like emphasis markers.
+      // single rounded background, not a separate chip per wrapped line. It must
+      // carry NO padding/margin (which would shift glyphs and break alignment)
+      // and stays in the inherited proportional font (a font swap would change
+      // glyph widths and drift the caret). Syntax COLOURS come from the same
+      // highlight.js path as the read-only block — colour alone doesn't affect
+      // layout, and `.md-src-code` strips the theme's bold/italic, which WOULD
+      // change glyph advances. The highlighted HTML's text is exactly the inner
+      // code, so we re-add the two fence newlines around it to stay char-for-char
+      // with the source (`open` + "\n" + value + "\n" + `close` === raw). With the
+      // hugging newline trimmed above, the block's line breaks reproduce the
+      // textarea's lines exactly. Fence lines are dimmed like emphasis markers.
       const { open, body, close } = splitFence(s.raw)
+      const html = highlightCode(s.value, s.lang)
       return (
-        <span key={i} className="block rounded bg-gray-200/80 dark:bg-gray-700/70 break-words">
+        <span key={i} className="md-src-code block rounded bg-gray-200/80 dark:bg-gray-700/70 break-words">
           <span className="opacity-50">{open}</span>
-          {body}
+          {html != null ? (
+            <>
+              {'\n'}
+              <span dangerouslySetInnerHTML={{ __html: html }} />
+              {'\n'}
+            </>
+          ) : (
+            body
+          )}
           <span className="opacity-50">{close}</span>
         </span>
       )
