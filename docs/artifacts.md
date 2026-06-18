@@ -38,7 +38,7 @@ The command is given:
 | `HYDRA_ARTIFACT_SOURCE` | The checkout directory. |
 | `HYDRA_ARTIFACT_REF`    | The resolved git ref. |
 
-Results are cached per commit under `.hydra/artifacts/out/<name>/<version-key>`
+Results are cached per commit under `.hydra/local/artifacts/out/<name>/<version-key>`
 (gitignored, never committed), so re-viewing a diff is free.
 
 ## How files are compared

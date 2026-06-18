@@ -104,6 +104,16 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 	// too. roots is re-evaluated each cycle so runtime add/remove is picked up.
 	roots := func() []string { return projectRoots(pm) }
 
+	// Migrate every registered project from the old flat .hydra/<dir> layout to
+	// .hydra/local/<dir> before anything touches their worktrees or caches. The
+	// boot project was already migrated by db.Open above; this covers projects
+	// loaded from disk that share this daemon. Idempotent and best-effort.
+	for _, root := range roots() {
+		if err := paths.MigrateHydraLayout(root); err != nil {
+			log.Printf("warn: migrate .hydra layout in %s: %v", root, err)
+		}
+	}
+
 	// Correct archived heads that were merged but recorded as "killed" (the
 	// backfill above defaults everything to "killed", and CLI merges historically
 	// archived via the kill path). A merge leaves a "Merge branch 'hydra/<id>'"

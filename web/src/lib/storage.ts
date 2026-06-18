@@ -84,6 +84,12 @@ export const archivedCollapsedKey = (projectId: string): string =>
 export const promptDraftKey = (projectId: string, compact: boolean): string =>
   `hydra-prompt-draft-${compact ? 'compact' : 'full'}-${projectId}`
 
+// Scroll offset (textarea scrollTop) of the spawn-prompt box, per project and
+// per layout — mirrors promptDraftKey so a long draft restores to the same
+// scroll position when switching back to its project.
+export const promptScrollKey = (projectId: string, compact: boolean): string =>
+  `hydra-prompt-scroll-${compact ? 'compact' : 'full'}-${projectId}`
+
 // Running count of generically-named pasted images (image1.png, image2.png, …)
 // for the spawn form, per project and per layout — mirrors promptDraftKey so the
 // numbering stays separate across projects and survives a reload (the

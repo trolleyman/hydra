@@ -1,5 +1,6 @@
 import {
   forwardRef,
+  useEffect,
   useImperativeHandle,
   useRef,
   type ReactNode,
@@ -68,8 +69,14 @@ function parseInline(text: string): Seg[] {
   return segs
 }
 
+// Inline-code styling for read-only renders. Deliberately uses only HORIZONTAL
+// padding and a slightly smaller (never larger) em size: vertical padding or a
+// bigger font would change the line height, and we want a line with a code span
+// to stay exactly as tall as a plain one. `box-decoration-clone` makes the
+// rounded chip + background repeat cleanly on each fragment when a long code
+// span wraps across lines rather than leaving a broken/clipped box.
 const CODE_CLASS =
-  'rounded bg-gray-200/70 dark:bg-gray-700/60 px-1 py-px font-mono text-[0.9em] text-pink-600 dark:text-pink-300'
+  'rounded box-decoration-clone bg-gray-200/70 dark:bg-gray-700/60 px-1 font-mono text-[0.9em] text-pink-600 dark:text-pink-300'
 
 export interface RenderMarkdownOptions {
   // When true, text that begins with a `$` is rendered entirely as a code span
@@ -120,8 +127,13 @@ function renderMarkdownSource(text: string): ReactNode {
   return segs.map((s, i) => {
     if (s.kind === 'text') return <span key={i}>{s.value}</span>
     if (s.kind === 'code') {
+      // No padding and no size change here: the backdrop must stay glyph-aligned
+      // with the textarea, so we only tint + add a (zero-layout-impact) clone-
+      // decorated background. The monospace font does widen the run, but the
+      // line height is untouched. `box-decoration-clone` keeps the background
+      // tidy when a code span wraps.
       return (
-        <span key={i} className="rounded bg-gray-200/70 dark:bg-gray-700/60 font-mono text-pink-600 dark:text-pink-300">
+        <span key={i} className="rounded box-decoration-clone bg-gray-200/70 dark:bg-gray-700/60 font-mono text-pink-600 dark:text-pink-300">
           {s.marker}
           {s.value}
           {s.marker}
@@ -167,6 +179,15 @@ export const HighlightedTextarea = forwardRef<HTMLTextAreaElement, HighlightedTe
       bd.scrollTop = ta.scrollTop
       bd.scrollLeft = ta.scrollLeft
     }
+
+    // Re-sync after every render, on the next frame: the textarea's scroll
+    // offset can be set imperatively (e.g. SpawnForm restoring a per-project
+    // saved offset after the draft loads) without firing onScroll, so this
+    // catches those and keeps the highlight backdrop aligned.
+    useEffect(() => {
+      const id = requestAnimationFrame(syncScroll)
+      return () => cancelAnimationFrame(id)
+    })
 
     return (
       <div className={`relative ${wrapperClassName}`}>

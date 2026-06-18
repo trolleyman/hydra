@@ -3,6 +3,7 @@ package projects
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -171,6 +172,13 @@ func (m *Manager) AddProject(path string) (ProjectInfo, error) {
 		if paths.ComparePaths(p.Path, path) {
 			return p, nil
 		}
+	}
+
+	// Migrate a project added at runtime (e.g. via the web UI) from the old flat
+	// .hydra/<dir> layout to .hydra/local/<dir> before its worktrees/DB are used.
+	// Best-effort: a failure here shouldn't block registering the project.
+	if err := paths.MigrateHydraLayout(path); err != nil {
+		log.Printf("warn: migrate .hydra layout in %s: %v", path, err)
 	}
 
 	id := m.generateID(path)

@@ -6,7 +6,7 @@ import { uploadFile, extractFiles, isImageFile } from '../api/uploads'
 import { Zap, LoaderCircle, Paperclip, X, FileText } from 'lucide-react'
 import { Tooltip } from './Tooltip'
 import { ImageLightbox } from './ImageLightbox'
-import { StorageKeys, promptDraftKey, imageCounterKey, readLocal, writeLocal } from '../lib/storage'
+import { StorageKeys, promptDraftKey, promptScrollKey, imageCounterKey, readLocal, writeLocal } from '../lib/storage'
 import { HighlightedTextarea } from '../lib/markdown'
 import { type Attachment, spawnDraftKey, loadAttachments, saveAttachments, nextAttachmentId } from '../lib/spawnDrafts'
 
@@ -231,21 +231,36 @@ export function SpawnForm({
   // reloads and project switches. The compact (sidebar) and full-page boxes use
   // distinct keys so their drafts never bleed into one another.
   const draftKey = projectId ? promptDraftKey(projectId, compact) : null
+  const scrollKey = projectId ? promptScrollKey(projectId, compact) : null
 
   // Load the saved draft on mount and whenever the project changes, clearing the
-  // box when the new project has no draft.
+  // box when the new project has no draft, then restore that project's saved
+  // scroll position. The scroll offset is restored in a rAF because the
+  // textarea's scrollable range only exists after the setPrompt above commits
+  // the new text to the DOM.
   useEffect(() => {
     if (!draftKey) {
       setPrompt('')
       return
     }
     setPrompt(readLocal(draftKey) ?? '')
-  }, [draftKey])
+    const saved = scrollKey ? Number(readLocal(scrollKey)) || 0 : 0
+    const raf = requestAnimationFrame(() => {
+      if (textareaRef.current) textareaRef.current.scrollTop = saved
+    })
+    return () => cancelAnimationFrame(raf)
+  }, [draftKey, scrollKey])
 
   function handlePromptChange(value: string) {
     setPrompt(value)
     if (!draftKey) return
     writeLocal(draftKey, value || null)
+  }
+
+  // Persist the textarea's scroll offset so it travels with the draft when
+  // switching projects (saved live on scroll; restored by the load effect above).
+  function handlePromptScroll(e: React.UIEvent<HTMLTextAreaElement>) {
+    if (scrollKey) writeLocal(scrollKey, String(e.currentTarget.scrollTop))
   }
 
   // Per-project attachments + image counter, swapped in/out as the project (or
@@ -374,6 +389,7 @@ export function SpawnForm({
       const agent = await api.default.spawnAgent(projectId ?? '', req)
       setPrompt('')
       if (draftKey) writeLocal(draftKey, null)
+      if (scrollKey) writeLocal(scrollKey, null)
       setAgentId('')
       setIdManuallyEdited(false)
       attachments.forEach((a) => a.previewUrl && URL.revokeObjectURL(a.previewUrl))
@@ -474,6 +490,7 @@ export function SpawnForm({
               value={prompt}
               onChange={(e) => handlePromptChange(e.target.value)}
               onKeyDown={handleKeyDown}
+              onScroll={handlePromptScroll}
               onPaste={handlePaste}
               onDrop={handleDrop}
               onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
@@ -559,6 +576,7 @@ export function SpawnForm({
                 value={prompt}
                 onChange={(e) => handlePromptChange(e.target.value)}
                 onKeyDown={handleKeyDown}
+                onScroll={handlePromptScroll}
                 onPaste={handlePaste}
                 onDrop={handleDrop}
                 onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
