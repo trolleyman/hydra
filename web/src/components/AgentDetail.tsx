@@ -21,10 +21,13 @@ function PromptBlock({ prompt }: { prompt: string }) {
   // the cutoff as a long prompt scrolls out of view.
   return (
     <div className="relative -mt-2 mb-6 p-4 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
-      <div className="overflow-y-auto max-h-72">
+      {/* pb-4 lets the last block (often a code block) scroll up clear of the
+          bottom fade instead of staying tucked under it; a taller max-height
+          also means most prompts don't need to scroll at all. */}
+      <div className="overflow-y-auto max-h-96 pb-4">
         <p className="text-sm text-gray-800 dark:text-gray-200 whitespace-pre-wrap">{renderMarkdown(prompt)}</p>
       </div>
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-8 rounded-b-lg bg-gradient-to-t from-gray-50 dark:from-gray-800 to-transparent" />
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-6 rounded-b-lg bg-gradient-to-t from-gray-50 dark:from-gray-800 to-transparent" />
     </div>
   )
 }
