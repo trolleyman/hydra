@@ -2,12 +2,13 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
-import { TerminalEvent, type TerminalStatusEvent, type TerminalDataEvent, AgentStatus } from '../api'
+import { TerminalEvent, type TerminalStatusEvent, type TerminalDataEvent, type TerminalDiffRefreshEvent, AgentStatus } from '../api'
 import { RefreshCw, Plus, X, ChevronDown, Shield, ShieldOff } from 'lucide-react'
 import { Tooltip } from './Tooltip'
 import { uploadFile, extractFiles } from '../api/uploads'
 import { useAgentStore } from '../stores/agentStore'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from '../lib/agentViewPrefs'
+import { StorageKeys, readLocal, writeLocal } from '../lib/storage'
 
 const DEFAULT_TERMINAL_HEIGHT = 450
 
@@ -20,8 +21,30 @@ interface PaneProps {
   active: boolean
   reconnectAttempt: number
   onStatusUpdate?: (status: string) => void
-  onDiffRefresh?: () => void
+  onDiffRefresh?: (headMoved: boolean) => void
   onMetrics?: (m: { cols: number; rows: number; cellHeight: number }) => void
+}
+
+// The terminal panel's layout is the same across agents/windows, so the last
+// geometry we successfully sent is a good seed for the next connection. The
+// backend uses it as the *initial* PTY size when it has to start or resume a
+// session, so a fresh/resumed agent renders at the right width immediately
+// instead of flashing the 80x24 default and reflowing. It never resizes an
+// already-live PTY (that still waits for the client's settled measurement).
+function loadLastGeometry(): { cols: number; rows: number } | null {
+  const raw = readLocal(StorageKeys.terminalGeometry)
+  if (!raw) return null
+  try {
+    const g = JSON.parse(raw) as { cols?: unknown; rows?: unknown }
+    if (typeof g.cols === 'number' && typeof g.rows === 'number' && g.cols > 0 && g.rows > 0) {
+      return { cols: g.cols, rows: g.rows }
+    }
+  } catch { /* ignore malformed value */ }
+  return null
+}
+
+function saveLastGeometry(cols: number, rows: number) {
+  writeLocal(StorageKeys.terminalGeometry, JSON.stringify({ cols, rows }))
 }
 
 function getWsUrl(agentId: string, projectId: string | null, shell?: boolean, sandboxed?: boolean, shellId?: string): string {
@@ -34,6 +57,12 @@ function getWsUrl(agentId: string, projectId: string | null, shell?: boolean, sa
     if (sandboxed === false) params.set('sandboxed', 'false')
     // Per-tab id: each shell tab is its own process; a refresh reuses the same id.
     if (shellId) params.set('shell_id', shellId)
+  }
+  // Seed the initial PTY size from the last known geometry (see above).
+  const geom = loadLastGeometry()
+  if (geom) {
+    params.set('cols', String(geom.cols))
+    params.set('rows', String(geom.rows))
   }
   const qs = params.toString() ? `?${params.toString()}` : ''
   const pid = projectId ? encodeURIComponent(projectId) : '_'
@@ -88,6 +117,10 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
       if (cellHeight > 0) onMetrics({ cols, rows, cellHeight })
     }
     if (ws?.readyState !== WebSocket.OPEN || cols <= 0 || rows <= 0) return
+    // Remember the latest real geometry to seed the next connection's initial
+    // PTY size (see loadLastGeometry). Only the active pane reaches here with a
+    // valid measurement, so this never records a hidden pane's stale 0-size.
+    if (active) saveLastGeometry(cols, rows)
     if (!force && cols === lastSentSize.current.cols && rows === lastSentSize.current.rows) return
     ws.send(JSON.stringify({ type: 'resize', cols, rows }))
     lastSentSize.current = { cols, rows }
@@ -108,6 +141,12 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
   }, [active])
 
   useEffect(() => {
+    // Tracks whether this effect run is still current. Set in cleanup so async
+    // work started here (e.g. a file upload below) doesn't paint a toast on a
+    // different agent after the user has switched — this pane is reused across
+    // agents, so a late resolve would land on the wrong terminal.
+    let cancelled = false
+
     // If a kill was scheduled, cancel it because we are remounting
     if (killTimeoutRef.current) {
       clearTimeout(killTimeoutRef.current)
@@ -204,7 +243,8 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
               return
             }
             case TerminalEvent.type.DIFF_REFRESH: {
-              onDiffRefresh?.()
+              const refreshEvent = msg as TerminalDiffRefreshEvent
+              onDiffRefresh?.(refreshEvent.head_moved ?? false)
               return
             }
             case TerminalEvent.type.DATA: {
@@ -313,11 +353,13 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
         showNotice(`Uploading ${file.name || 'file'}…`, false)
         try {
           const res = await uploadFile(projectId, file)
+          if (cancelled) return
           if (ws.readyState === WebSocket.OPEN) {
             ws.send(new TextEncoder().encode(res.path + ' '))
           }
           showNotice(`Attached ${res.filename}`, true)
         } catch (err) {
+          if (cancelled) return
           showNotice(`Upload failed: ${err instanceof Error ? err.message : 'error'}`, true)
         }
       }
@@ -340,6 +382,7 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
     observer.observe(el)
 
     return () => {
+      cancelled = true
       observer.disconnect()
       if (stabilizeRafRef.current != null) cancelAnimationFrame(stabilizeRafRef.current)
       inputDisposable.dispose()
@@ -348,6 +391,9 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
       term.dispose()
       if (copyTimeoutRef.current) clearTimeout(copyTimeoutRef.current)
       if (noticeTimeoutRef.current) clearTimeout(noticeTimeoutRef.current)
+      // Drop any visible/pending toast so it doesn't linger on the agent we
+      // switch (or reconnect) to — the pane is reused across agents.
+      setNotice(null)
       termRef.current = null
       wsRef.current = null
       fitAddonRef.current = null
@@ -381,18 +427,35 @@ interface TabConfig {
   sandboxed: boolean
 }
 
+// The always-present agent tab. Bash tabs are appended after it.
+const TERMINAL_TAB: TabConfig = { id: 'terminal', label: 'Terminal', shell: false, sandboxed: true }
+
+// Rebuild the tab list for an agent from its persisted bash tabs, always keeping
+// the fixed agent terminal first.
+function tabsFromPrefs(projectId: string | null, agentId: string): TabConfig[] {
+  const saved = loadAgentViewPrefs(projectId, agentId).bashTabs ?? []
+  return [TERMINAL_TAB, ...saved.map((t) => ({ id: t.id, label: t.label, shell: true, sandboxed: t.sandboxed }))]
+}
+
 interface Props {
   agentId: string
   projectId: string | null
   isEphemeral?: boolean
   onRefresh?: () => void
   onStatusUpdate?: (status: string) => void
-  onDiffRefresh?: () => void
+  onDiffRefresh?: (headMoved: boolean) => void
 }
 
 export function AgentTerminal({ agentId, projectId, onRefresh, onStatusUpdate, onDiffRefresh }: Props) {
-  const [tabs, setTabs] = useState<TabConfig[]>([{ id: 'terminal', label: 'Terminal', shell: false, sandboxed: true }])
-  const [activeTabId, setActiveTabId] = useState('terminal')
+  // Restore this agent's bash tabs (and which was active) from localStorage, so
+  // switching away and back brings the same shells with you rather than dropping
+  // them or leaking another agent's tabs in.
+  const [tabs, setTabs] = useState<TabConfig[]>(() => tabsFromPrefs(projectId, agentId))
+  const [activeTabId, setActiveTabId] = useState(() => {
+    const restored = tabsFromPrefs(projectId, agentId)
+    const saved = loadAgentViewPrefs(projectId, agentId).activeTabId
+    return saved && restored.some((t) => t.id === saved) ? saved : 'terminal'
+  })
   const [reconnectKeys, setReconnectKeys] = useState<Record<string, number>>({})
   const [status, setStatus] = useState<string>('pending')
   const [shellMenuOpen, setShellMenuOpen] = useState(false)
@@ -429,46 +492,79 @@ export function AgentTerminal({ agentId, projectId, onRefresh, onStatusUpdate, o
     setHeight(h)
   }
 
-  // The CSS `resize-y` handle writes directly to the element's inline height, so
-  // we observe size changes, mirror them into state (otherwise a later re-render
-  // would revert the drag) and save them for this agent. We snap the height so
-  // the terminal viewport is a whole number of rows: the pane fills everything
-  // below the title bar, so `overhead` (title bar + borders) is held constant and
-  // only the viewport portion is rounded to the nearest cell. Setting height to a
-  // value that re-snaps to itself produces no further change, so this can't loop.
+  // Likewise reload the per-agent bash tabs during render when the agent changes,
+  // so we never carry the previous agent's shells over (or persist them onto the
+  // new agent). Keep the active tab if it still exists, else fall back to the
+  // agent terminal.
+  const tabsAgentRef = useRef(agentId)
+  if (tabsAgentRef.current !== agentId) {
+    tabsAgentRef.current = agentId
+    const restored = tabsFromPrefs(projectId, agentId)
+    const savedActive = loadAgentViewPrefs(projectId, agentId).activeTabId
+    setTabs(restored)
+    setActiveTabId(savedActive && restored.some((t) => t.id === savedActive) ? savedActive : 'terminal')
+  }
+
+  // Persist the bash tabs (and active tab) for this agent whenever they change.
+  // Runs after the agent-switch reset above commits, so it always writes the
+  // current agent's tabs to that agent's key.
   useEffect(() => {
+    patchAgentViewPrefs(projectId, agentId, {
+      bashTabs: tabs.filter((t) => t.shell).map((t) => ({ id: t.id, label: t.label, sandboxed: t.sandboxed })),
+      activeTabId,
+    })
+  }, [tabs, activeTabId, projectId, agentId])
+
+  // Custom drag handle for vertical resize. We deliberately avoid CSS `resize-y`,
+  // which changes the height pixel-by-pixel; instead we snap to whole rows on
+  // every pointer move so the terminal grows/shrinks one character cell at a time,
+  // like GNOME Terminal. `overhead` (title bar + borders) is captured once at drag
+  // start and held constant; only the viewport portion is rounded to the nearest
+  // cell. Pointer capture routes moves to the handle even when the cursor leaves
+  // it, and is released automatically if the component unmounts mid-drag.
+  const dragRef = useRef<{ startY: number; startHeight: number; overhead: number; cellHeight: number } | null>(null)
+
+  function onResizeStart(e: React.PointerEvent<HTMLDivElement>) {
+    e.preventDefault()
     const el = rootRef.current
     if (!el) return
-    let first = true
-    const observer = new ResizeObserver(() => {
-      const raw = Math.round(el.offsetHeight)
-      if (raw <= 0) return
-      let target = raw
-      const { cellHeight } = metricsRef.current
-      const pane = paneWrapRef.current
-      if (cellHeight > 0 && pane) {
-        const overhead = raw - pane.offsetHeight
-        const rows = Math.max(1, Math.round(pane.offsetHeight / cellHeight))
-        target = Math.max(150, Math.round(overhead + rows * cellHeight))
-      }
-      if (target !== lastHeightRef.current) {
-        lastHeightRef.current = target
-        setHeight(target)
-        patchAgentViewPrefs(projectId, agentId, { terminalHeight: target })
-      }
-      // The first observation is the initial mount/layout, not a user drag, so
-      // don't flash the size indicator for it.
-      if (first) { first = false; return }
-      setIsResizing(true)
-      if (resizeTimeoutRef.current) clearTimeout(resizeTimeoutRef.current)
-      resizeTimeoutRef.current = setTimeout(() => setIsResizing(false), 600)
-    })
-    observer.observe(el)
-    return () => {
-      observer.disconnect()
-      if (resizeTimeoutRef.current) clearTimeout(resizeTimeoutRef.current)
+    const pane = paneWrapRef.current
+    const overhead = pane ? el.offsetHeight - pane.offsetHeight : 0
+    dragRef.current = { startY: e.clientY, startHeight: el.offsetHeight, overhead, cellHeight: metricsRef.current.cellHeight }
+    e.currentTarget.setPointerCapture(e.pointerId)
+    if (resizeTimeoutRef.current) clearTimeout(resizeTimeoutRef.current)
+    setIsResizing(true)
+  }
+
+  function onResizeMove(e: React.PointerEvent<HTMLDivElement>) {
+    const d = dragRef.current
+    if (!d) return
+    const raw = d.startHeight + (e.clientY - d.startY)
+    let target = Math.max(150, Math.round(raw))
+    if (d.cellHeight > 0) {
+      const rows = Math.max(1, Math.round((raw - d.overhead) / d.cellHeight))
+      target = Math.max(150, Math.round(d.overhead + rows * d.cellHeight))
     }
-  }, [agentId, projectId])
+    if (target !== lastHeightRef.current) {
+      lastHeightRef.current = target
+      setHeight(target)
+    }
+  }
+
+  function onResizeEnd(e: React.PointerEvent<HTMLDivElement>) {
+    if (!dragRef.current) return
+    dragRef.current = null
+    e.currentTarget.releasePointerCapture(e.pointerId)
+    // Let the indicator linger briefly after the drag, then fade out.
+    if (resizeTimeoutRef.current) clearTimeout(resizeTimeoutRef.current)
+    resizeTimeoutRef.current = setTimeout(() => setIsResizing(false), 600)
+    patchAgentViewPrefs(projectId, agentId, { terminalHeight: lastHeightRef.current })
+  }
+
+  // Clear the indicator fade timer on unmount.
+  useEffect(() => () => {
+    if (resizeTimeoutRef.current) clearTimeout(resizeTimeoutRef.current)
+  }, [])
 
   function handleStatusUpdate(newStatus: string) {
     setStatus(newStatus)
@@ -526,11 +622,12 @@ export function AgentTerminal({ agentId, projectId, onRefresh, onStatusUpdate, o
   const isLoading = status === AgentStatus.PENDING || status === AgentStatus.BUILDING
 
   return (
-    <div ref={rootRef} className="relative rounded-lg overflow-hidden border border-gray-700 dark:border-gray-600 flex flex-col resize-y" style={{ background: '#111827', height: `${height}px`, minHeight: '150px' }}>
+    <div ref={rootRef} className="relative rounded-lg overflow-hidden border border-gray-700 dark:border-gray-600 flex flex-col" style={{ background: '#111827', height: `${height}px`, minHeight: '150px' }}>
       {/* Size indicator shown while dragging the resize handle; fades out when
-          the drag stops. Snapping keeps rows whole, so this reads cleanly. */}
+          the drag stops. Snapping keeps rows whole, so this reads cleanly. Inset
+          a bit from the top-right corner so it sits clearly inside the terminal. */}
       <div
-        className={`absolute top-10 right-2 px-2 py-1 bg-gray-900/90 text-gray-200 text-[11px] font-mono rounded border border-gray-600 shadow-lg pointer-events-none z-20 transition-opacity duration-500 ${isResizing ? 'opacity-100' : 'opacity-0'}`}
+        className={`absolute top-14 right-4 px-2 py-1 bg-gray-900/90 text-gray-200 text-[11px] font-mono rounded border border-gray-600 shadow-lg pointer-events-none z-20 transition-opacity duration-500 ${isResizing ? 'opacity-100' : 'opacity-0'}`}
       >
         {dims.cols}×{dims.rows}
       </div>
@@ -655,6 +752,18 @@ export function AgentTerminal({ agentId, projectId, onRefresh, onStatusUpdate, o
           />
         </div>
       ))}
+
+      {/* Custom resize handle: a thin strip along the bottom edge. Dragging it
+          snaps the height to whole rows (see onResizeMove), so the terminal
+          steps one character cell at a time rather than resizing smoothly. */}
+      <div
+        onPointerDown={onResizeStart}
+        onPointerMove={onResizeMove}
+        onPointerUp={onResizeEnd}
+        className="group absolute bottom-0 left-0 right-0 h-2 cursor-ns-resize z-20 touch-none"
+      >
+        <div className="mx-auto mt-1 h-0.5 w-10 rounded-full bg-gray-600/0 group-hover:bg-gray-500 transition-colors" />
+      </div>
     </div>
   )
 }

@@ -6,7 +6,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"braces.dev/errtrace"
@@ -55,18 +54,6 @@ func questionText(input map[string]interface{}) string {
 		return s
 	}
 	return ""
-}
-
-// stopStatus decides whether a finished turn means the agent is waiting on the
-// user or has genuinely finished. Heuristic: a trailing '?' in the agent's last
-// message signals it ended by asking a question, so it's waiting for an answer;
-// otherwise it completed its work. (Best-effort — agents don't expose an
-// explicit "I need input" signal on turn end.)
-func stopStatus(lastMessage string) api.AgentStatus {
-	if strings.HasSuffix(strings.TrimRight(lastMessage, " \t\r\n"), "?") {
-		return api.Waiting
-	}
-	return api.Finished
 }
 
 func init() {
@@ -213,7 +200,18 @@ func runTriggerHook(agentType string, eventOverride string, logFile *os.File) er
 	var status api.AgentStatus
 	switch event {
 	case "SessionStart", "sessionStart":
-		status = api.Running
+		// A resume (claude --continue / --resume, source="resume") restores a
+		// prior conversation and then sits idle waiting for the user — it is not
+		// actively working — so report it as waiting. A fresh startup
+		// (source="startup", "clear", "compact") proceeds to work on the submitted
+		// prompt (a UserPromptSubmit follows), so it stays running. Without a
+		// resume signal we can't tell a restored session from a working one apart,
+		// which is why a resumed agent otherwise lingered as "running".
+		if stringField(input, "source") == "resume" {
+			status = api.Waiting
+		} else {
+			status = api.Running
+		}
 	case "UserPromptSubmit", "userPromptSubmit", "BeforeAgent", "beforeAgent":
 		// The user just submitted a prompt (Claude's UserPromptSubmit) or the
 		// agent's turn is beginning (Gemini's BeforeAgent). Either way the agent
@@ -223,9 +221,14 @@ func runTriggerHook(agentType string, eventOverride string, logFile *os.File) er
 		// waiting/finished until the agent happened to run a tool.
 		status = api.Running
 	case "Stop", "AfterAgent":
-		// The turn finished. Distinguish "waiting on the user" (the agent ended
-		// by asking a question) from "finished" (it completed its work).
-		status = stopStatus(lastMessage)
+		// The turn ended, so the agent has finished its work. The "waiting on
+		// the user" case isn't inferred here: agents don't expose an explicit
+		// "I need input" signal on turn end, and guessing from the message text
+		// (e.g. a trailing '?') misfires too often — plenty of finished turns
+		// end on a question. Genuine waits surface through other hooks instead:
+		// the AskUserQuestion/ExitPlanMode tool calls (PreToolUse) and the
+		// Notification event.
+		status = api.Finished
 	case "SessionEnd", "sessionEnd":
 		status = api.Stopped
 	case "PreToolUse", "preToolUse", "BeforeTool":

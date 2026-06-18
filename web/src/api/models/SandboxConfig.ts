@@ -18,6 +18,10 @@ export type SandboxConfig = {
      * Bash script run inside the sandbox once, when the agent is first spawned — not on resume or for bash shells (e.g. `mise trust`)
      */
     pre_spawn_script?: string | null;
+    /**
+     * Bash script run in a sandbox when a head ends, after the agent's session is killed but before its worktree is removed. Runs with the head's sandbox policy, cwd = worktree, with HYDRA_* head context + HYDRA_END_STATE. For per-head teardown such as releasing a claimed resource.
+     */
+    pre_exit_script?: string | null;
     network?: NetworkConfig | null;
 };
 

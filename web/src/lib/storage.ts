@@ -22,6 +22,11 @@ export const StorageKeys = {
   diffSidebarWidth: 'hydra-diff-sidebar-width',
   diffImageMode: 'hydra-diff-image-mode',
 
+  // Last terminal geometry the client successfully sent (JSON {cols, rows}). Seeds
+  // the initial PTY size on the next connection so a fresh/resumed agent renders
+  // at the right width instead of flashing the 80x24 default (see AgentTerminal).
+  terminalGeometry: 'hydra-terminal-geometry',
+
   repoWrap: 'hydra-repo-wrap',
   repoIcons: 'hydra-repo-icons',
   repoSidebarWidth: 'hydra-repo-sidebar-width',
@@ -34,7 +39,14 @@ export const StorageKeys = {
 
 // ── Dynamic keys (prefix + builder pair) ─────────────────────────────────────
 
-// Which agent is selected within a project. One entry per project.
+// Which view is last open within a project — an agent, the repository browser,
+// or the bare project page. One entry per project. See lib/projectView.ts.
+export const PROJECT_VIEW_PREFIX = 'hydra-project-view-'
+export const projectViewKey = (projectId: string): string =>
+  `${PROJECT_VIEW_PREFIX}${projectId}`
+
+// Legacy: which agent was selected within a project. Superseded by the richer
+// project-view key above; still read once so an existing selection migrates.
 export const SELECTED_AGENT_PREFIX = 'hydra-selected-agent-'
 export const selectedAgentKey = (projectId: string): string =>
   `${SELECTED_AGENT_PREFIX}${projectId}`
@@ -45,6 +57,15 @@ export const ARTIFACT_PREFS_PREFIX = 'hydra-artifact-'
 export const artifactPrefsKey = (projectId: string | null, agentId: string, name: string): string =>
   `${ARTIFACT_PREFS_PREFIX}${projectId ?? '_'}-${agentId}-${name}`
 
+// Artifact tag filter, keyed by project + agent (one selection shared across all
+// of an agent's artifact cards — see artifactPrefs.ts loadTagFilter/saveTagFilter).
+// projectId may be null → '_' keeps the key shape stable. The `-v2-` version: the
+// stored arrays used to list the *selected* (shown) values; they now list the
+// values turned *off* (hidden), so the bump discards the old, now-inverted data.
+export const ARTIFACT_TAG_FILTER_PREFIX = 'hydra-artifact-tagfilter-v2-'
+export const artifactTagFilterKey = (projectId: string | null, agentId: string): string =>
+  `${ARTIFACT_TAG_FILTER_PREFIX}${projectId ?? '_'}-${agentId}`
+
 // Per-agent view prefs (terminal height, page scroll, collapsed diff files) so
 // each agent's detail page restores its own layout (see agentViewPrefs.ts).
 // projectId may be null → '_' keeps the key shape stable.
@@ -52,9 +73,29 @@ export const AGENT_VIEW_PREFS_PREFIX = 'hydra-agent-view-'
 export const agentViewPrefsKey = (projectId: string | null, agentId: string): string =>
   `${AGENT_VIEW_PREFS_PREFIX}${projectId ?? '_'}-${agentId}`
 
+// Whether the sidebar's "Archived" section is collapsed, per project. Absent =
+// expanded (the default); '1' = collapsed. Per-project so collapsing one
+// project's long archive doesn't hide another's.
+export const ARCHIVED_COLLAPSED_PREFIX = 'hydra-archived-collapsed-'
+export const archivedCollapsedKey = (projectId: string): string =>
+  `${ARCHIVED_COLLAPSED_PREFIX}${projectId}`
+
 // Unsent spawn-prompt draft, per project and per layout (compact vs full).
 export const promptDraftKey = (projectId: string, compact: boolean): string =>
   `hydra-prompt-draft-${compact ? 'compact' : 'full'}-${projectId}`
+
+// Scroll offset (textarea scrollTop) of the spawn-prompt box, per project and
+// per layout — mirrors promptDraftKey so a long draft restores to the same
+// scroll position when switching back to its project.
+export const promptScrollKey = (projectId: string, compact: boolean): string =>
+  `hydra-prompt-scroll-${compact ? 'compact' : 'full'}-${projectId}`
+
+// Running count of generically-named pasted images (image1.png, image2.png, …)
+// for the spawn form, per project and per layout — mirrors promptDraftKey so the
+// numbering stays separate across projects and survives a reload (the
+// attachments themselves are in-session only; see lib/spawnDrafts.ts).
+export const imageCounterKey = (projectId: string, compact: boolean): string =>
+  `hydra-image-counter-${compact ? 'compact' : 'full'}-${projectId}`
 
 // ── Shared safe accessors ────────────────────────────────────────────────────
 // localStorage can throw (privacy mode, quota, disabled storage); these swallow

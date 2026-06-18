@@ -6,6 +6,7 @@ import type { AddProjectRequest } from '../models/AddProjectRequest';
 import type { AgentInputRequest } from '../models/AgentInputRequest';
 import type { AgentResponse } from '../models/AgentResponse';
 import type { ArtifactsResponse } from '../models/ArtifactsResponse';
+import type { ClaudeUsageResponse } from '../models/ClaudeUsageResponse';
 import type { CommitInfo } from '../models/CommitInfo';
 import type { ConfigResponse } from '../models/ConfigResponse';
 import type { ConfigTomlResponse } from '../models/ConfigTomlResponse';
@@ -14,8 +15,10 @@ import type { ProjectInfo } from '../models/ProjectInfo';
 import type { RepositoryBranchesResponse } from '../models/RepositoryBranchesResponse';
 import type { RepositoryFileResponse } from '../models/RepositoryFileResponse';
 import type { RepositoryTreeResponse } from '../models/RepositoryTreeResponse';
+import type { ServiceStatusResponse } from '../models/ServiceStatusResponse';
 import type { SpawnAgentRequest } from '../models/SpawnAgentRequest';
 import type { StatusResponse } from '../models/StatusResponse';
+import type { UpdateAgentRequest } from '../models/UpdateAgentRequest';
 import type { CancelablePromise } from '../core/CancelablePromise';
 import type { BaseHttpRequest } from '../core/BaseHttpRequest';
 export class DefaultService {
@@ -59,6 +62,28 @@ export class DefaultService {
         return this.httpRequest.request({
             method: 'GET',
             url: '/api/status',
+            errors: {
+                500: `Internal Server Error`,
+            },
+        });
+    }
+    /**
+     * Get cached Claude Code subscription usage
+     * Probes the locally-installed Claude CLI (`claude /usage`) for the account's subscription quota and returns a cached snapshot. The result is cached briefly (~30s); pass refresh=true to force a fresh probe.
+     *
+     * @param refresh Bypass the cache and re-probe the CLI.
+     * @returns ClaudeUsageResponse OK
+     * @throws ApiError
+     */
+    public getClaudeUsage(
+        refresh?: boolean,
+    ): CancelablePromise<ClaudeUsageResponse> {
+        return this.httpRequest.request({
+            method: 'GET',
+            url: '/api/usage/claude',
+            query: {
+                'refresh': refresh,
+            },
             errors: {
                 500: `Internal Server Error`,
             },
@@ -196,6 +221,36 @@ export class DefaultService {
             mediaType: 'application/json',
             errors: {
                 400: `Bad Request`,
+                404: `Project Not Found`,
+                500: `Internal Server Error`,
+            },
+        });
+    }
+    /**
+     * List archived (killed/merged) Hydra agents, newest first
+     * Returns a page of finished agents retained for the browsable history list. Supports limit/offset for infinite scroll.
+     * @param projectId Project ID to scope the archived agent list
+     * @param limit Maximum number of archived agents to return (page size). Omit or <=0 for all.
+     * @param offset Number of archived agents to skip (for pagination).
+     * @returns AgentResponse OK
+     * @throws ApiError
+     */
+    public listArchivedAgents(
+        projectId: string,
+        limit?: number,
+        offset?: number,
+    ): CancelablePromise<Array<AgentResponse>> {
+        return this.httpRequest.request({
+            method: 'GET',
+            url: '/api/projects/{project_id}/agents/archived',
+            path: {
+                'project_id': projectId,
+            },
+            query: {
+                'limit': limit,
+                'offset': offset,
+            },
+            errors: {
                 404: `Project Not Found`,
                 500: `Internal Server Error`,
             },
@@ -450,6 +505,30 @@ export class DefaultService {
         });
     }
     /**
+     * Mark an agent as read, clearing its unread-changes flag
+     * @param projectId Project ID
+     * @param id
+     * @returns void
+     * @throws ApiError
+     */
+    public markAgentRead(
+        projectId: string,
+        id: string,
+    ): CancelablePromise<void> {
+        return this.httpRequest.request({
+            method: 'POST',
+            url: '/api/projects/{project_id}/agents/{id}/read',
+            path: {
+                'project_id': projectId,
+                'id': id,
+            },
+            errors: {
+                404: `Not Found`,
+                500: `Internal Server Error`,
+            },
+        });
+    }
+    /**
      * Get the merged configuration
      * @param projectId Project ID
      * @param scope Load only a specific scope's raw config instead of the merged config
@@ -502,6 +581,46 @@ export class DefaultService {
             errors: {
                 404: `Project Not Found`,
                 500: `Internal Server Error`,
+            },
+        });
+    }
+    /**
+     * Get the live status of the project's supervised services
+     * @param projectId Project ID
+     * @returns ServiceStatusResponse OK
+     * @throws ApiError
+     */
+    public getServices(
+        projectId: string,
+    ): CancelablePromise<ServiceStatusResponse> {
+        return this.httpRequest.request({
+            method: 'GET',
+            url: '/api/projects/{project_id}/services',
+            path: {
+                'project_id': projectId,
+            },
+            errors: {
+                404: `Project Not Found`,
+            },
+        });
+    }
+    /**
+     * Restart the project's supervised services (picks up config changes)
+     * @param projectId Project ID
+     * @returns ServiceStatusResponse OK
+     * @throws ApiError
+     */
+    public restartServices(
+        projectId: string,
+    ): CancelablePromise<ServiceStatusResponse> {
+        return this.httpRequest.request({
+            method: 'POST',
+            url: '/api/projects/{project_id}/services/restart',
+            path: {
+                'project_id': projectId,
+            },
+            errors: {
+                404: `Project Not Found`,
             },
         });
     }
@@ -606,6 +725,35 @@ export class DefaultService {
         });
     }
     /**
+     * Update a Hydra agent's mutable fields (currently its title)
+     * @param projectId Project ID
+     * @param id
+     * @param requestBody
+     * @returns AgentResponse OK
+     * @throws ApiError
+     */
+    public updateAgent(
+        projectId: string,
+        id: string,
+        requestBody: UpdateAgentRequest,
+    ): CancelablePromise<AgentResponse> {
+        return this.httpRequest.request({
+            method: 'PATCH',
+            url: '/api/projects/{project_id}/agents/{id}',
+            path: {
+                'project_id': projectId,
+                'id': id,
+            },
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                400: `Bad Request`,
+                404: `Not Found`,
+                500: `Internal Server Error`,
+            },
+        });
+    }
+    /**
      * Kill a Hydra agent by ID
      * @param projectId Project ID
      * @param id
@@ -619,6 +767,32 @@ export class DefaultService {
         return this.httpRequest.request({
             method: 'DELETE',
             url: '/api/projects/{project_id}/agents/{id}',
+            path: {
+                'project_id': projectId,
+                'id': id,
+            },
+            errors: {
+                404: `Not Found`,
+                409: `Conflict (operation already in progress)`,
+                500: `Internal Server Error`,
+            },
+        });
+    }
+    /**
+     * Permanently delete an agent (kill it and erase every record, including its Claude session history)
+     * Irreversibly removes the agent: stops any live session, removes its worktree/branch and on-disk status files, deletes its Claude session-history directory, and hard-deletes the database record so it no longer appears even in the archived-history list. Works on both live and archived agents.
+     * @param projectId Project ID
+     * @param id
+     * @returns void
+     * @throws ApiError
+     */
+    public purgeAgent(
+        projectId: string,
+        id: string,
+    ): CancelablePromise<void> {
+        return this.httpRequest.request({
+            method: 'DELETE',
+            url: '/api/projects/{project_id}/agents/{id}/purge',
             path: {
                 'project_id': projectId,
                 'id': id,

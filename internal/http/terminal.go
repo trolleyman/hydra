@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -63,6 +64,17 @@ type terminalStatusEvent struct {
 	Status string `json:"status"`
 }
 
+// terminalDiffRefreshEvent tells the diff viewer to re-fetch. HeadMoved
+// distinguishes a new commit (HEAD moved) from a plain uncommitted edit: the
+// client re-fetches the diff text on either, but only re-snapshots the
+// per-commit artifacts (screenshots) when the commit actually changed, since
+// those are memoized by commit SHA and regenerating them on every edit would
+// be wasted work.
+type terminalDiffRefreshEvent struct {
+	terminalEvent
+	HeadMoved bool `json:"head_moved"`
+}
+
 type safeConn struct {
 	*websocket.Conn
 	mu sync.Mutex
@@ -95,6 +107,15 @@ func sendTerminalEvent(conn *safeConn, eventType string) {
 	_ = conn.WriteMessage(websocket.TextMessage, data)
 }
 
+// sendDiffRefresh emits a diff_refresh event, flagging whether the worktree
+// change was a new commit (headMoved) so the client knows to also regenerate
+// the per-commit artifacts.
+func sendDiffRefresh(conn *safeConn, headMoved bool) {
+	msg := terminalDiffRefreshEvent{terminalEvent: terminalEvent{Type: "diff_refresh"}, HeadMoved: headMoved}
+	data, _ := json.Marshal(msg)
+	_ = conn.WriteMessage(websocket.TextMessage, data)
+}
+
 // HandleShellClose terminates a single web bash shell immediately, so closing a
 // terminal tab kills its process now instead of waiting out the idle grace
 // period (which only covers reloads / transient disconnects).
@@ -110,6 +131,25 @@ func (s *Server) HandleShellClose(w http.ResponseWriter, r *http.Request) {
 	log.Printf("shell close: agent=%q shell_id=%q sandboxed=%v", agentID, token, sandboxed)
 	heads.KillShellSession(s.Sessions, agentID, sandboxed, token)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// parseTermSize reads the client-seeded cols/rows query params, returning the
+// 80x24 default for any value that's missing, unparseable, or out of a sane
+// range (rows/cols are uint16, and an absurd size would only hurt). Order is
+// (rows, cols) to match the rest of the session API.
+func parseTermSize(r *http.Request) (uint16, uint16) {
+	parse := func(key string, def uint16) uint16 {
+		v := r.URL.Query().Get(key)
+		if v == "" {
+			return def
+		}
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 || n > 2000 {
+			return def
+		}
+		return uint16(n)
+	}
+	return parse("rows", 24), parse("cols", 80)
 }
 
 // HandleTerminalWS handles WebSocket connections for agent terminal access.
@@ -130,6 +170,12 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	useShell := r.URL.Query().Get("shell") == "true"
+	// Client-seeded initial PTY size. Used only when we have to start or resume a
+	// session here, so a fresh/resumed agent renders at the right width straight
+	// away instead of flashing the 80x24 default and reflowing. Falls back to the
+	// 80x24 default when absent or out of range. This never resizes an already-live
+	// PTY — that path attaches with 0,0 and waits for the client's settled resize.
+	initRows, initCols := parseTermSize(r)
 	projectRoot, err := s.resolveProjectRoot(projectID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusNotFound)
@@ -198,25 +244,41 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 		// shell_id identifies the terminal tab so each gets its own shell process
 		// and a refresh reattaches to the same one.
 		shellToken := r.URL.Query().Get("shell_id")
-		shellID, err := heads.StartShellSession(s.Sessions, projectRoot, *head, 24, 80, sandboxed, shellToken)
+		shellID, err := heads.StartShellSession(s.Sessions, projectRoot, *head, initRows, initCols, sandboxed, shellToken)
 		if err != nil {
 			log.Printf("terminal ws: start shell session for %q: %v", agentID, err)
 			_ = conn.WriteMessage(websocket.TextMessage, []byte("error: "+err.Error()))
 			return
 		}
 		sessionID = shellID
-	} else if !s.Sessions.IsLive(head.ID) && head.Worktree != nil {
+	}
+
+	resumed := false
+	if !useShell && !s.Sessions.IsLive(head.ID) && head.Worktree != nil {
 		// The agent's session isn't running (e.g. the daemon was restarted).
 		// Resume it on demand so opening the page brings the agent back via its
 		// own --resume, instead of showing "Agent is not running".
 		log.Printf("terminal ws: resuming agent %q (no live session)", head.ID)
 		sendStatusUpdate(conn, "starting")
-		if err := heads.ResumeHead(s.Sessions, s.DB, projectRoot, *head, 24, 80); err != nil {
+		if err := heads.ResumeHead(s.Sessions, s.DB, projectRoot, *head, initRows, initCols); err != nil {
 			log.Printf("terminal ws: resume agent %q failed: %v", head.ID, err)
+		} else {
+			resumed = true
 		}
 	}
 
-	att, err := s.Sessions.Attach(sessionID, 24, 80)
+	// Attach without imposing a size (0,0). The session already has a width —
+	// either from its initial start or from the last client that sized it — and a
+	// detached agent keeps producing output at that width. Passing a concrete size
+	// here would resize the live PTY on every reconnect, and since the browser
+	// opens this socket on a fresh mount (e.g. navigating back to an agent) before
+	// its flex layout has settled, that size is frequently wrong — it would reflow
+	// the agent narrow, baking narrow-wrapped lines into the scrollback ring that
+	// then look broken when the user scrolls up. Instead we leave the PTY at its
+	// current width and let the client send a single resize once its layout is
+	// stable (see fitAndSend in AgentTerminal.tsx), which is a no-op when the width
+	// is unchanged. This keeps detached agents and their history at a stable width.
+	att, err := s.Sessions.Attach(sessionID, 0, 0)
 	if err != nil {
 		log.Printf("terminal ws: attach session %q: %v", sessionID, err)
 		_ = conn.WriteMessage(websocket.BinaryMessage, []byte("\r\n\x1b[31mAgent is not running.\x1b[0m\r\n"))
@@ -225,8 +287,14 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 	}
 	defer att.Close()
 
-	// Initial status again just in case it changed between checks
-	sendStatusUpdate(conn, "running")
+	// Initial status again just in case it changed between checks. A just-resumed
+	// agent is idle waiting for the user (it restored its conversation but isn't
+	// working), so report waiting rather than a misleading "running".
+	if resumed {
+		sendStatusUpdate(conn, "waiting")
+	} else {
+		sendStatusUpdate(conn, "running")
+	}
 
 	done := make(chan struct{})
 
@@ -328,7 +396,9 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 
 		// checkAndEmit recomputes the worktree fingerprint and emits diff_refresh only
 		// when it has changed since the last emit. Read-only git commands (status, log,
-		// diff) and idle ticks therefore never trigger a client re-fetch.
+		// diff) and idle ticks therefore never trigger a client re-fetch. It also
+		// reports, via the event's head_moved flag, whether HEAD advanced (a commit) so
+		// the client re-snapshots the per-commit artifacts only then, not on every edit.
 		checkAndEmit := func() {
 			if worktree == "" {
 				return
@@ -338,10 +408,12 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			lastHash = h
-			if c, err := git.ResolveRef(worktree, "HEAD"); err == nil {
+			headMoved := false
+			if c, err := git.ResolveRef(worktree, "HEAD"); err == nil && c != lastHead {
 				lastHead = c
+				headMoved = true
 			}
-			sendTerminalEvent(conn, "diff_refresh")
+			sendDiffRefresh(conn, headMoved)
 		}
 
 		// checkHeadAndEmit is a cheap HEAD-only check (a single git rev-parse, no

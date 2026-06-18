@@ -85,3 +85,10 @@ code.hljs.hljs-line { padding: 0 0 0 0.75rem; }
 .dark .hljs-emphasis { color: inherit; font-style: italic; }
 .dark .hljs-strong { color: inherit; font-weight: bold; }
 .dark .hljs-link { text-decoration: underline; }
+
+/* The prompt editor's highlight backdrop syntax-colours code blocks too, but it
+   uses the proportional UI font and must stay glyph-aligned with the (invisible)
+   textarea caret underneath. Token COLOUR is free — it doesn't affect layout —
+   but the theme's bold/italic would change glyph advances in a proportional font
+   and drift the caret, so force weight/style off for these tokens only. */
+.md-src-code, .md-src-code * { font-weight: 400 !important; font-style: normal !important; }

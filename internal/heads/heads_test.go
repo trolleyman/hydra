@@ -3,7 +3,6 @@ package heads
 import (
 	"context"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -15,8 +14,8 @@ func TestKillHeadNoLock_RemovesLogs(t *testing.T) {
 	projectRoot := tmpDir
 	agentID := "test-agent"
 
-	// Create .hydra/status directory
-	statusDir := filepath.Join(projectRoot, ".hydra", "status")
+	// Create the status directory
+	statusDir := paths.GetStatusDirFromProjectRoot(projectRoot)
 	if err := os.MkdirAll(statusDir, 0755); err != nil {
 		t.Fatalf("failed to create status dir: %v", err)
 	}
@@ -39,7 +38,7 @@ func TestKillHeadNoLock_RemovesLogs(t *testing.T) {
 	}
 
 	// Call KillHeadNoLock with nil cli and store
-	err := KillHeadNoLock(context.Background(), nil, nil, head)
+	err := KillHeadNoLock(context.Background(), nil, nil, head, "killed")
 	if err != nil {
 		t.Fatalf("KillHeadNoLock failed: %v", err)
 	}

@@ -21,6 +21,7 @@ export { ArtifactLogLine } from './models/ArtifactLogLine';
 export type { ArtifactScript } from './models/ArtifactScript';
 export { ArtifactSet } from './models/ArtifactSet';
 export type { ArtifactsResponse } from './models/ArtifactsResponse';
+export type { ClaudeUsageResponse } from './models/ClaudeUsageResponse';
 export type { CommitInfo } from './models/CommitInfo';
 export type { ConfigResponse } from './models/ConfigResponse';
 export type { ConfigTomlResponse } from './models/ConfigTomlResponse';
@@ -37,11 +38,16 @@ export type { RepositoryBranchesResponse } from './models/RepositoryBranchesResp
 export type { RepositoryFileResponse } from './models/RepositoryFileResponse';
 export type { RepositoryTreeResponse } from './models/RepositoryTreeResponse';
 export type { SandboxConfig } from './models/SandboxConfig';
+export type { ServiceScript } from './models/ServiceScript';
+export { ServiceStatus } from './models/ServiceStatus';
+export type { ServiceStatusResponse } from './models/ServiceStatusResponse';
 export type { SpawnAgentRequest } from './models/SpawnAgentRequest';
 export type { StatusResponse } from './models/StatusResponse';
 export type { TerminalDataEvent } from './models/TerminalDataEvent';
+export type { TerminalDiffRefreshEvent } from './models/TerminalDiffRefreshEvent';
 export { TerminalEvent } from './models/TerminalEvent';
 export type { TerminalStatusEvent } from './models/TerminalStatusEvent';
 export type { UncommittedSummary } from './models/UncommittedSummary';
+export type { UpdateAgentRequest } from './models/UpdateAgentRequest';
 
 export { DefaultService } from './services/DefaultService';

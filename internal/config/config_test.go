@@ -127,6 +127,79 @@ func TestArtifactsRoundTrip(t *testing.T) {
 	}
 }
 
+// TestArtifactCommentSurvivesMultilineCommand guards a save round-trip where an
+// artifact's command is a multi-line string that itself contains shell "#"
+// comments and a "name=" assignment. Those must not be mistaken for the block's
+// interior comments or its name, which previously filed the user's real comment
+// under the wrong key and dropped it on save.
+func TestArtifactCommentSurvivesMultilineCommand(t *testing.T) {
+	command := `out_dir="x"
+# a shell comment inside the command
+name=$(basename "$f")
+echo hi
+`
+	existing := "[[artifacts]]\n" +
+		"# Render the screenshot tests and collect the PNGs.\n" +
+		"# Second line of the user comment.\n" +
+		`name = "screenshots"` + "\n" +
+		"command = \"\"\"\n" + command + "\"\"\"\n" +
+		"timeout_sec = 900\n"
+
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(path, []byte(existing), 0o644); err != nil {
+		t.Fatalf("write existing: %v", err)
+	}
+
+	cfg := Config{Artifacts: []ArtifactScript{
+		{Name: "screenshots", Command: command, TimeoutSec: 900},
+	}}
+	if err := SaveToFile(path, cfg); err != nil {
+		t.Fatalf("SaveToFile: %v", err)
+	}
+
+	saved, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read saved: %v", err)
+	}
+	for _, want := range []string{
+		"# Render the screenshot tests and collect the PNGs.",
+		"# Second line of the user comment.",
+		`name = "screenshots"`,
+	} {
+		if !strings.Contains(string(saved), want) {
+			t.Errorf("saved config missing %q:\n%s", want, saved)
+		}
+	}
+}
+
+// TestKeyCommentSurvivesMultilineArray guards that a user comment above a
+// managed key whose value spans multiple lines (a formatted array) is attributed
+// to that key and re-emitted, rather than being swallowed by the array body.
+func TestKeyCommentSurvivesMultilineArray(t *testing.T) {
+	existing := "[sandbox]\n" +
+		"# keep this note above writable_paths\n" +
+		"writable_paths = [\n  \"~/.cache\",\n  \"~/.npm\",\n]\n"
+
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(path, []byte(existing), 0o644); err != nil {
+		t.Fatalf("write existing: %v", err)
+	}
+
+	cfg := Config{Defaults: AgentConfig{
+		Sandbox: &SandboxConfig{WritablePaths: []string{"~/.cache", "~/.npm"}},
+	}}
+	if err := SaveToFile(path, cfg); err != nil {
+		t.Fatalf("SaveToFile: %v", err)
+	}
+	saved, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read saved: %v", err)
+	}
+	if !strings.Contains(string(saved), "# keep this note above writable_paths") {
+		t.Errorf("saved config dropped the key comment:\n%s", saved)
+	}
+}
+
 func TestArtifactsMergeReplaces(t *testing.T) {
 	base := Config{Artifacts: []ArtifactScript{{Name: "a", Command: "x"}}}
 	base.Merge(Config{Artifacts: []ArtifactScript{{Name: "b", Command: "y"}}})

@@ -61,6 +61,35 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /api/usage/claude:
+    get:
+      summary: Get cached Claude Code subscription usage
+      description: >
+        Probes the locally-installed Claude CLI (`claude /usage`) for the
+        account's subscription quota and returns a cached snapshot. The result
+        is cached briefly (~30s); pass refresh=true to force a fresh probe.
+      operationId: getClaudeUsage
+      parameters:
+        - name: refresh
+          in: query
+          required: false
+          description: Bypass the cache and re-probe the CLI.
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClaudeUsageResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /api/dev/restart:
     post:
       summary: Trigger a server rebuild and restart (dev mode only)
@@ -240,6 +269,52 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Project Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/projects/{project_id}/agents/archived:
+    get:
+      summary: List archived (killed/merged) Hydra agents, newest first
+      description: Returns a page of finished agents retained for the browsable history list. Supports limit/offset for infinite scroll.
+      operationId: listArchivedAgents
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            type: string
+          description: Project ID to scope the archived agent list
+        - in: query
+          name: limit
+          required: false
+          schema:
+            type: integer
+          description: Maximum number of archived agents to return (page size). Omit or <=0 for all.
+        - in: query
+          name: offset
+          required: false
+          schema:
+            type: integer
+          description: Number of archived agents to skip (for pagination).
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AgentResponse'
         '404':
           description: Project Not Found
           content:
@@ -649,6 +724,38 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /api/projects/{project_id}/agents/{id}/read:
+    post:
+      summary: Mark an agent as read, clearing its unread-changes flag
+      operationId: markAgentRead
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            type: string
+          description: Project ID
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: No Content
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /api/projects/{project_id}/config:
     get:
       summary: Get the merged configuration
@@ -720,6 +827,56 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         '500':
           description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/projects/{project_id}/services:
+    get:
+      summary: Get the live status of the project's supervised services
+      operationId: getServices
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            type: string
+          description: Project ID
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceStatusResponse'
+        '404':
+          description: Project Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/projects/{project_id}/services/restart:
+    post:
+      summary: Restart the project's supervised services (picks up config changes)
+      operationId: restartServices
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            type: string
+          description: Project ID
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceStatusResponse'
+        '404':
+          description: Project Not Found
           content:
             application/json:
               schema:
@@ -871,6 +1028,52 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+    patch:
+      summary: Update a Hydra agent's mutable fields (currently its title)
+      operationId: updateAgent
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            type: string
+          description: Project ID
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateAgentRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentResponse'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
     delete:
       summary: Kill a Hydra agent by ID
       operationId: killAgent
@@ -889,6 +1092,50 @@ paths:
       responses:
         '204':
           description: No Content (Agent killed)
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Conflict (operation already in progress)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/projects/{project_id}/agents/{id}/purge:
+    delete:
+      summary: Permanently delete an agent (kill it and erase every record, including its Claude session history)
+      description: >-
+        Irreversibly removes the agent: stops any live session, removes its
+        worktree/branch and on-disk status files, deletes its Claude
+        session-history directory, and hard-deletes the database record so it no
+        longer appears even in the archived-history list. Works on both live and
+        archived agents.
+      operationId: purgeAgent
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            type: string
+          description: Project ID
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: No Content (Agent permanently deleted)
         '404':
           description: Not Found
           content:
@@ -961,6 +1208,49 @@ components:
           type: boolean
           description: Whether the server is running in development mode
 
+    ClaudeUsageResponse:
+      type: object
+      required: [available]
+      properties:
+        available:
+          type: boolean
+          description: True when a usable usage snapshot was obtained.
+        error:
+          type: string
+          nullable: true
+          description: Why usage is unavailable (CLI missing, not a subscription account, parse failure, …).
+        captured_at:
+          type: string
+          format: date-time
+          description: When the snapshot was probed.
+        account_tier:
+          type: string
+          nullable: true
+          description: Detected plan, e.g. "Claude Max" or "Claude Pro".
+        session_percent_used:
+          type: number
+          format: float
+          nullable: true
+          description: Percent of the current session ("4 hour") limit used (0-100).
+        session_resets_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the current session limit resets (derived from the relative "Resets in …" text).
+        session_reset_text:
+          type: string
+          nullable: true
+          description: Raw session reset text, e.g. "Resets in 2h 15m".
+        weekly_percent_used:
+          type: number
+          format: float
+          nullable: true
+          description: Percent of the weekly (all-models) limit used (0-100).
+        weekly_reset_text:
+          type: string
+          nullable: true
+          description: Raw weekly reset text, e.g. "Resets Jan 15, 3:30pm".
+
     ProjectInfo:
       type: object
       required: [id, path, name]
@@ -974,6 +1264,9 @@ components:
         name:
           type: string
           description: Human-readable project name (last path component)
+        unread_count:
+          type: integer
+          description: Number of this project's agents with unread changes. Drives the cross-project "updates waiting" indicator.
 
     ConfigTomlResponse:
       type: object
@@ -1020,6 +1313,14 @@ components:
           type: boolean
           description: If true, the agent is a throwaway test agent whose worktree and branch are torn down when it stops.
 
+    UpdateAgentRequest:
+      type: object
+      required: [title]
+      properties:
+        title:
+          type: string
+          description: New user-facing display name for the agent. Trimmed; must be non-empty.
+
     AgentStatus:
       type: string
       enum:
@@ -1062,6 +1363,9 @@ components:
       properties:
         id:
           type: string
+        title:
+          type: string
+          description: Mutable, user-facing display name. May be empty before it is seeded; clients should fall back to id.
         branch_name:
           type: string
           nullable: true
@@ -1093,6 +1397,16 @@ components:
           description: Unix timestamp (seconds) when the session was started; 0 if not started
         agent_status:
           $ref: '#/components/schemas/AgentStatusInfo'
+        has_unread_changes:
+          type: boolean
+          description: True if the agent has changes the user has not yet looked at (set on a running→waiting/finished transition, cleared when the agent is opened).
+        archived:
+          type: boolean
+          description: True if the agent is a finished (killed/merged) head retained in the history list. Archived agents are read-only — they have no live session or worktree.
+        end_state:
+          type: string
+          nullable: true
+          description: How an archived agent ended ("killed" | "merged"); null/absent for active agents.
 
     CommitInfo:
       type: object
@@ -1367,6 +1681,10 @@ components:
           type: string
           nullable: true
           description: Bash script run inside the sandbox once, when the agent is first spawned — not on resume or for bash shells (e.g. `mise trust`)
+        pre_exit_script:
+          type: string
+          nullable: true
+          description: Bash script run in a sandbox when a head ends, after the agent's session is killed but before its worktree is removed. Runs with the head's sandbox policy, cwd = worktree, with HYDRA_* head context + HYDRA_END_STATE. For per-head teardown such as releasing a claimed resource.
         network:
           $ref: '#/components/schemas/NetworkConfig'
           nullable: true
@@ -1399,6 +1717,25 @@ components:
           type: boolean
           description: Run on the host with NO sandbox — full access to the machine and credentials (default false)
 
+    ServiceScript:
+      type: object
+      required: [name, command]
+      description: A per-project long-running command the daemon supervises while the project is registered ([[services]] in config.toml)
+      properties:
+        name:
+          type: string
+          description: Unique label, shown in the UI and logs
+        command:
+          type: string
+          description: Shell command run via `bash -c` from the project root
+        host:
+          type: boolean
+          description: Run on the host with NO sandbox — needed for host devices the sandbox hides, e.g. /dev/kvm (default false)
+        max_restarts:
+          type: integer
+          nullable: true
+          description: Relaunch cap after an unexpected exit (null = default 3; 0 = never restart)
+
     ConfigResponse:
       type: object
       required: [defaults, agents]
@@ -1415,9 +1752,51 @@ components:
             $ref: '#/components/schemas/ArtifactScript'
           nullable: true
           description: Per-project visual-artifact generation scripts ([[artifacts]] in config.toml)
+        services:
+          type: array
+          items:
+            $ref: '#/components/schemas/ServiceScript'
+          nullable: true
+          description: Per-project long-running supervised commands ([[services]] in config.toml)
         default_pre_prompt:
           type: string
           description: Built-in default pre-prompt always prepended to agent prompts (read-only)
+
+    ServiceStatus:
+      type: object
+      required: [name, command, host, state, restarts, max_restarts]
+      description: Live status of one supervised service
+      properties:
+        name:
+          type: string
+        command:
+          type: string
+        host:
+          type: boolean
+        state:
+          type: string
+          enum: [up, restarting, failed, down]
+          description: up = running; restarting = backing off after an unexpected exit; failed = gave up after exhausting restarts; down = intentionally stopped
+        restarts:
+          type: integer
+          description: Restarts performed so far
+        max_restarts:
+          type: integer
+        pid:
+          type: integer
+          description: Process id while running, else 0
+        message:
+          type: string
+          description: Human-readable detail for non-running states (exit reason / last output)
+
+    ServiceStatusResponse:
+      type: object
+      required: [services]
+      properties:
+        services:
+          type: array
+          items:
+            $ref: '#/components/schemas/ServiceStatus'
 
     ArtifactFile:
       type: object
@@ -1437,6 +1816,36 @@ components:
           type: string
           nullable: true
           description: URL of the file for the right version (null if absent on the right)
+        tags:
+          type: array
+          nullable: true
+          items:
+            type: string
+          description: >-
+            Labels for this file, read from a sibling JSON sidecar
+            (<file>.meta, {"tags": [...]}). A "category::value" tag is a
+            scoped label — only one value per category survives. Drives the
+            artifacts panel's tag badges and filter. Null/absent when the file
+            has no tags.
+        unverified:
+          type: boolean
+          nullable: true
+          description: >-
+            True only for a video file reported as "modified" whose verdict is a
+            raw byte-hash comparison because ffmpeg was unavailable to verify it
+            frame-by-frame — so the change may be spurious (e.g. only container
+            metadata differs). Absent/false for images and for frame-verified
+            video. The UI shows a caveat badge when set.
+        fps:
+          type: number
+          format: double
+          nullable: true
+          description: >-
+            Frame rate of a video file, read from its sibling JSON sidecar
+            (<file>.meta, {"fps": 60}). HTML5 video exposes no frame rate, so the
+            viewer's frame-step buttons use it to size a single-frame step.
+            Null/absent when the sidecar omits it, in which case the viewer
+            assumes a sensible default. Only meaningful for video files.
 
     ArtifactSet:
       type: object
@@ -1517,6 +1926,18 @@ components:
           type: string
           nullable: true
           description: As left_log_url, for the RIGHT (after) side.
+        pending_tags:
+          type: array
+          nullable: true
+          description: >-
+            Tags already known from a side that has settled while the other side
+            is still generating, so the diff viewer's tag filter can appear
+            before the whole set is ready (the "before" side often finishes
+            first thanks to caching). Deduped and sorted, drawn from whichever
+            side(s) have produced files so far. Only set while status is
+            "generating"; once ready, tags are carried per file in files[].tags.
+          items:
+            type: string
         files:
           type: array
           items:
@@ -1551,11 +1972,25 @@ components:
         mapping:
           status: '#/components/schemas/TerminalStatusEvent'
           data: '#/components/schemas/TerminalDataEvent'
-          diff_refresh: '#/components/schemas/TerminalEvent'
+          diff_refresh: '#/components/schemas/TerminalDiffRefreshEvent'
       properties:
         type:
           type: string
           enum: [status, data, diff_refresh]
+
+    TerminalDiffRefreshEvent:
+      allOf:
+        - $ref: '#/components/schemas/TerminalEvent'
+        - type: object
+          properties:
+            head_moved:
+              type: boolean
+              description: >-
+                True when this refresh was triggered by a new commit (HEAD
+                moved), as opposed to an uncommitted working-tree change. The
+                diff viewer uses it to also re-snapshot per-commit artifacts
+                (screenshots), which are memoized by commit SHA, while a plain
+                working-tree change only re-fetches the diff text.
 
     TerminalStatusEvent:
       allOf:

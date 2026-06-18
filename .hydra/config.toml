@@ -1,7 +1,8 @@
 ## extra instructions appended to every agent's system prompt.
 pre_prompt = """
 - Use bun instead of npm, and bun x instead of npx
-- Check using mage build before committing"""
+- Check using mage build before committing
+"""
 
 [sandbox]
 ## extra paths made writable in the sandbox (added to the built-in defaults).
@@ -10,6 +11,8 @@ writable_paths = ["~/.cache/go-build", "~/.go/pkg", "~/.bun/install/cache", "~/.
 # masked_paths = ["~/.ssh", "~/.aws", "~/.azure", "~/.gnupg", "~/.docker", "~/.kube", "~/.password-store", "~/.config", "~/.netrc", "~/.git-credentials", "~/.npmrc", "~/.pypirc", "~/.zsh_history", "~/.bash_history", "~/.sh_history", "~/.config/mise/config.local.toml", "~/.dotfiles/mise/config.local.toml"]
 ## paths re-exposed read-only after a masked parent (added to the built-in defaults).
 # restore_ro = ["~/.config/git", "~/.config/gh", "~/.config/mise/config.toml"]
+## worktree-relative paths mounted copy-on-write from the project root (read source, writes kept per-head; e.g. large gitignored build dirs).
+# cow_paths = []
 ## shell script run in the sandbox once before each agent launches (e.g. mise trust).
 # pre_spawn_script = ""
 
@@ -38,13 +41,26 @@ writable_paths = ["~/.cache/go-build", "~/.go/pkg", "~/.bun/install/cache", "~/.
 ##                credentials; only for audited, self-contained commands (default false).
 ## The command is given: HYDRA_ARTIFACT_OUTPUT (directory to write images into),
 ## HYDRA_ARTIFACT_SOURCE (the checkout dir), HYDRA_ARTIFACT_REF (the resolved ref).
+## Outputs may be still images (.png/.jpg/.gif/.webp/.avif/.svg/.bmp/.pdf) or video
+## (.webm) — useful for comparing an animation before/after. The viewer plays a
+## before/after .webm pair in lockstep (synchronized scrub) and offers a per-frame
+## difference view. Because video is compared by byte hash (its pixels can't be
+## decoded server-side), encode LOSSLESS and deterministically or every run reads as
+## "modified": e.g. `ffmpeg -i in.mp4 -c:v libvpx-vp9 -lossless 1 -an out.webm`.
+## Tags: alongside an image foo.png the command may write a JSON sidecar foo.png.meta
+## like {"tags": ["theme::dark", "viewport::phone"]}. The diff viewer shows these as
+## labels and offers a filter. A "category::value" tag is a scoped label: only one
+## value per category is kept (the last one wins); plain tags are free-form.
 [[artifacts]]
 # Diff-viewer artifact generator (PLAN.md #17): renders Hydra's own web UI to
 # PNGs so visual changes show up side-by-side in the diff viewer. The script
 # builds the checkout's frontend, boots `hydra server --simulation` and
 # screenshots several pages (home, the repository browser, agent diff views).
-# Building Go + the frontend is slow, so allow a generous timeout (results are
-# cached per resolved ref).
+# It also records the repository view's loading spinner to a lossless,
+# byte-deterministic .webm (project-local ffmpeg-static, libvpx-vp9 -lossless 1
+# in bitexact mode) so the video diff viewer is exercised too — see the [[artifacts]]
+# docs above on why video must be lossless. Building Go + the frontend is slow, so
+# allow a generous timeout (results are cached per resolved ref).
 name = "screenshots"
 command = "cd scripts/screenshots && bun install && bun take-screenshots.ts"
 timeout_sec = 900

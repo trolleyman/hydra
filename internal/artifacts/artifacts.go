@@ -5,9 +5,10 @@
 // of a diff (a commit ref, or the head's uncommitted working tree) the manager
 // checks out the relevant source, runs the script against it, and collects the
 // image files it writes. Results are cached on disk under
-// .hydra/artifacts/out/<script>/<version-key> (gitignored, never committed) and
-// keyed by an immutable version identifier (the resolved commit SHA, or a hash
-// of the working-tree state), so repeat views are free.
+// .hydra/local/artifacts/out/<script>/<kind>/<id> (gitignored, never committed),
+// keyed by an immutable version identifier: commit/<sha> for a resolved commit,
+// or worktree/<hash> for a snapshot of the working-tree state. Repeat views of
+// the same version are free.
 //
 // Generation runs in the background: Get returns immediately with a
 // "generating" status while a goroutine does the (potentially slow) work, a
@@ -117,8 +118,13 @@ type Event struct {
 	Progress string
 }
 
-// imageExts maps collectible output extensions to their content types.
-var imageExts = map[string]string{
+// mediaExts maps collectible output extensions to their content types. It covers
+// still images plus animated/video formats: .webp can be an animated image and
+// .webm is video, both rendered by the diff viewer's video modes. Comparison of
+// video falls back to a byte-hash verdict (Compare only pixel-refines formats the
+// Go stdlib can decode), so a non-deterministic encode always reads "modified" —
+// produce lossless WebM (e.g. libvpx-vp9 -lossless 1) for a stable, meaningful diff.
+var mediaExts = map[string]string{
 	".png":  "image/png",
 	".jpg":  "image/jpeg",
 	".jpeg": "image/jpeg",
@@ -128,6 +134,7 @@ var imageExts = map[string]string{
 	".svg":  "image/svg+xml",
 	".bmp":  "image/bmp",
 	".pdf":  "application/pdf",
+	".webm": "video/webm",
 }
 
 // Status is the generation state of a cache entry.
@@ -144,6 +151,15 @@ type FileMeta struct {
 	Name string `json:"name"` // path relative to the entry dir, forward-slashed
 	Size int64  `json:"size"`
 	Hash string `json:"hash"` // sha256 hex of the file contents
+	// Tags are labels read from the file's sibling JSON sidecar (<file>.meta,
+	// {"tags": [...]}) — see readSidecar/normalizeTags. They drive the diff
+	// viewer's tag badges and filter. Already normalized: deduped, sorted, and
+	// with GitLab-style scoped labels collapsed to one value per category.
+	Tags []string `json:"tags,omitempty"`
+	// Fps is the video frame rate from the same sidecar ({"fps": 60}). HTML5
+	// video exposes no frame rate, so the viewer's frame-step buttons use this to
+	// size a single-frame step. Zero when the sidecar omits it (or for images).
+	Fps float64 `json:"fps,omitempty"`
 }
 
 // Meta is the persisted (and returned) description of one cache entry.
@@ -185,20 +201,35 @@ type FileDelta struct {
 	Change  ChangeType
 	InLeft  bool
 	InRight bool
+	// Tags are the file's labels, the union of the base (left) and head (right)
+	// sides: a free-form tag from either side is kept, and a scoped
+	// "category::value" label shared by both is resolved in the head's favor (so
+	// a re-tagged category shows its current value while one present on only one
+	// side survives). See mergeTags.
+	Tags []string
+	// Unverified is set only on a video file left as ChangeModified because the
+	// per-frame check could not run (ffmpeg missing or errored), so the verdict
+	// is the raw byte-hash one and may be spurious — see Manager.Compare. The UI
+	// caveats it with a badge. Always false for images and frame-verified video.
+	Unverified bool
+	// Fps is the video frame rate from the file's sidecar, with the head (right)
+	// side preferred over the base when both declare one. Zero when neither side
+	// declares it (or for images). The viewer uses it to size a frame step.
+	Fps float64
 }
 
 // Compare matches files by name across two versions' file lists and classifies
 // each as added/removed/modified/unchanged. The result is sorted by name.
 func Compare(left, right []FileMeta) []FileDelta {
-	leftHash := make(map[string]string, len(left))
-	rightHash := make(map[string]string, len(right))
+	leftByName := make(map[string]FileMeta, len(left))
+	rightByName := make(map[string]FileMeta, len(right))
 	names := map[string]struct{}{}
 	for _, f := range left {
-		leftHash[f.Name] = f.Hash
+		leftByName[f.Name] = f
 		names[f.Name] = struct{}{}
 	}
 	for _, f := range right {
-		rightHash[f.Name] = f.Hash
+		rightByName[f.Name] = f
 		names[f.Name] = struct{}{}
 	}
 	ordered := make([]string, 0, len(names))
@@ -209,15 +240,26 @@ func Compare(left, right []FileMeta) []FileDelta {
 
 	out := make([]FileDelta, 0, len(ordered))
 	for _, name := range ordered {
-		lh, inLeft := leftHash[name]
-		rh, inRight := rightHash[name]
+		lf, inLeft := leftByName[name]
+		rf, inRight := rightByName[name]
 		d := FileDelta{Name: name, InLeft: inLeft, InRight: inRight}
+		// Union the two sides' tags, with the head winning a shared scoped
+		// category. A file on only one side passes that side's tags through
+		// (the other is empty).
+		d.Tags = mergeTags(lf.Tags, rf.Tags)
+		// Frame rate: prefer the head's, fall back to the base's. A file present
+		// on only one side carries that side's value (the other is zero).
+		if rf.Fps > 0 {
+			d.Fps = rf.Fps
+		} else {
+			d.Fps = lf.Fps
+		}
 		switch {
 		case inLeft && !inRight:
 			d.Change = ChangeRemoved
 		case !inLeft && inRight:
 			d.Change = ChangeAdded
-		case lh != rh:
+		case lf.Hash != rf.Hash:
 			d.Change = ChangeModified
 		default:
 			d.Change = ChangeUnchanged
@@ -246,8 +288,15 @@ func AnyChanged(deltas []FileDelta) bool {
 // difference.
 //
 // Only formats the standard library can decode (PNG, JPEG, GIF) get the pixel
-// check; other types — and any file that fails to decode — keep the byte-hash
-// verdict.
+// check; other still types — and any file that fails to decode — keep the
+// byte-hash verdict.
+//
+// Video (.webm) cannot be decoded by the stdlib, so it is refined out-of-process
+// via ffmpeg (videoFramesEqual): identical frames downgrade ChangeModified to
+// ChangeUnchanged, which strips spurious diffs from non-deterministic container
+// metadata. When ffmpeg is unavailable or errors the byte-hash verdict stands,
+// but the delta is marked Unverified so the UI can caveat a possibly-spurious
+// "modified".
 func (m *Manager) Compare(left, right Meta) []FileDelta {
 	deltas := Compare(left.Files, right.Files)
 	for i := range deltas {
@@ -257,11 +306,86 @@ func (m *Manager) Compare(left, right Meta) []FileDelta {
 		}
 		lp := filepath.Join(m.entryDir(left.Script, left.Key), filepath.FromSlash(d.Name))
 		rp := filepath.Join(m.entryDir(right.Script, right.Key), filepath.FromSlash(d.Name))
+		if isVideoFile(d.Name) {
+			equal, err := videoFramesEqual(lp, rp)
+			switch {
+			case err != nil:
+				d.Unverified = true
+			case equal:
+				d.Change = ChangeUnchanged
+			}
+			continue
+		}
 		if equal, err := imagesPixelEqual(lp, rp); err == nil && equal {
 			d.Change = ChangeUnchanged
 		}
 	}
 	return deltas
+}
+
+// isVideoFile reports whether name's extension is one of the video media types
+// (currently only .webm) — the formats that go through the ffmpeg frame check
+// rather than the stdlib pixel decoder.
+func isVideoFile(name string) bool {
+	return strings.HasPrefix(mediaExts[strings.ToLower(filepath.Ext(name))], "video/")
+}
+
+// videoFramesEqual reports whether two video files decode to the same sequence
+// of frames, by comparing per-frame content hashes from ffmpeg. It returns an
+// error (so the caller falls back to the byte-hash verdict) when ffmpeg is not
+// installed or fails to decode either side.
+func videoFramesEqual(leftPath, rightPath string) (bool, error) {
+	l, err := videoFrameHashes(leftPath)
+	if err != nil {
+		return false, errtrace.Wrap(err)
+	}
+	r, err := videoFrameHashes(rightPath)
+	if err != nil {
+		return false, errtrace.Wrap(err)
+	}
+	return l == r, nil
+}
+
+// videoFrameHashes returns a newline-joined list of per-frame content hashes for
+// the first video stream of path, using `ffmpeg -f framemd5`. Each row's hash is
+// the md5 of that frame's decoded (rawvideo) pixels, so it depends only on the
+// visual content — container muxing, timestamps and writing-app metadata do not
+// affect it. Only the hash column is kept, so differing presentation timestamps
+// on otherwise-identical frames don't register as a change.
+func videoFrameHashes(path string) (string, error) {
+	bin, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		return "", errtrace.Wrap(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	// -map 0:v:0 picks the first video stream; -an drops audio; framemd5 to
+	// stdout emits one hash row per decoded frame.
+	cmd := exec.CommandContext(ctx, bin, "-nostdin", "-loglevel", "error", "-i", path, "-map", "0:v:0", "-an", "-f", "framemd5", "-")
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	if err := cmd.Run(); err != nil {
+		return "", errtrace.Wrap(err)
+	}
+	var b strings.Builder
+	sc := bufio.NewScanner(&out)
+	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		// Skip the comment header (#software, #stream metadata, …) and blanks;
+		// keep only the trailing hash field of each frame row.
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if i := strings.LastIndex(line, ","); i >= 0 {
+			b.WriteString(strings.TrimSpace(line[i+1:]))
+			b.WriteByte('\n')
+		}
+	}
+	if err := sc.Err(); err != nil {
+		return "", errtrace.Wrap(err)
+	}
+	return b.String(), nil
 }
 
 // imagesPixelEqual reports whether two image files decode to the same dimensions
@@ -416,7 +540,7 @@ func (m *Manager) EntryDir(script string, v Version) (string, error) {
 // Registry lazily creates and caches one Manager per project root. A single
 // daemon serves every registered project, but each project needs its own
 // Manager: managers are stateful (in-flight generation tracking, the cache
-// lives under that project's .hydra/artifacts) so they must be reused across
+// lives under that project's .hydra/local/artifacts) so they must be reused across
 // requests for the same project rather than recreated.
 type Registry struct {
 	mu   sync.Mutex
@@ -455,24 +579,38 @@ func (m *Manager) root() string         { return paths.GetArtifactsDirFromProjec
 func (m *Manager) outDir() string       { return filepath.Join(m.root(), "out") }
 func (m *Manager) checkoutsDir() string { return filepath.Join(m.root(), "checkouts") }
 
+// entryDir is the on-disk cache dir for a (script, key) pair. key is a
+// "<kind>/<id>" path (see versionKey), so the entry nests as
+// out/<script>/<kind>/<id>/; filepath.Join treats the slash as a separator.
 func (m *Manager) entryDir(script, key string) string {
-	return filepath.Join(m.outDir(), sanitizeName(script), key)
+	return filepath.Join(m.outDir(), sanitizeName(script), filepath.FromSlash(key))
 }
 
+// Cache-key kinds. A key is "<kind>/<id>": a commit is keyed by its resolved
+// SHA, the working tree by a content fingerprint. The kind is the first path
+// segment, so on disk an entry lives at out/<script>/<kind>/<id>/ — commits and
+// working-tree snapshots sit in separate, self-describing subtrees.
+const (
+	keyKindCommit   = "commit"
+	keyKindWorktree = "worktree"
+)
+
 // versionKey resolves a Version to a stable cache key and a human-readable ref.
+// The key doubles as the entry's path under the script dir (see entryDir), so it
+// is always "<kind>/<id>" with an id that is safe as a single path segment.
 func (m *Manager) versionKey(v Version) (key, ref string, err error) {
 	if v.WorktreeDir != "" {
 		h, err := git.WorktreeStateHash(v.WorktreeDir)
 		if err != nil {
 			return "", "", errtrace.Wrap(err)
 		}
-		return "w" + h, "working tree", nil
+		return keyKindWorktree + "/" + h, "working tree", nil
 	}
 	sha, err := git.ResolveRef(m.projectRoot, v.Ref)
 	if err != nil {
 		return "", "", errtrace.Wrap(err)
 	}
-	return "c" + sha, sha, nil
+	return keyKindCommit + "/" + sha, sha, nil
 }
 
 // Get returns the cache entry for (spec, v), starting a background generation
@@ -615,7 +753,12 @@ func (m *Manager) generate(spec config.ArtifactScript, v Version, key, ref strin
 	// Resolve the directory the script runs in.
 	runDir := v.WorktreeDir
 	if runDir == "" {
-		co := filepath.Join(m.checkoutsDir(), key)
+		// The checkout is an ephemeral, internal worktree, so keep it as a single
+		// flat dir rather than mirroring the cache key's "<kind>/<id>" nesting:
+		// AddDetachedWorktree gitignores the checkout's *parent*, and a nested
+		// parent would both leave an empty <kind> dir behind on cleanup and race a
+		// sibling checkout (base + head generate concurrently) sharing that parent.
+		co := filepath.Join(m.checkoutsDir(), strings.ReplaceAll(key, "/", "-"))
 		_ = git.RemoveWorktree(m.projectRoot, co) // clear any stale checkout
 		_ = os.RemoveAll(co)
 		if err := git.AddDetachedWorktree(m.projectRoot, co, ref); err != nil {
@@ -715,10 +858,15 @@ func (m *Manager) generate(spec config.ArtifactScript, v Version, key, ref strin
 		return meta
 	}
 
-	files, err := scanOutputs(dir)
+	files, tagWarnings, err := scanOutputs(dir)
 	if err != nil {
 		meta.Status, meta.Error = StatusError, err.Error()
 		return meta
+	}
+	// Surface tag-sidecar problems in the build log (entry is still in-flight here,
+	// so appendLog records and persists them) without failing the generation.
+	for _, w := range tagWarnings {
+		m.appendLog(dir, w, StreamStderr, false)
 	}
 	meta.Files = files
 	meta.Status = StatusReady
@@ -782,8 +930,11 @@ func (m *Manager) buildCommandSpec(spec config.ArtifactScript, runDir, outputDir
 	return errtrace.Wrap2(sandbox.BuildSpec(opts))
 }
 
-// keyRe matches valid cache keys produced by versionKey.
-var keyRe = regexp.MustCompile(`^[cw][0-9a-f]+$`)
+// keyRe matches valid cache keys produced by versionKey ("commit/<sha>" or
+// "worktree/<hash>"). Anchored with a single fixed kind segment and a hex id, so
+// a key can never contain ".." or extra path segments — BlobPath relies on this
+// to keep the resolved blob path inside the entry dir.
+var keyRe = regexp.MustCompile(`^(commit|worktree)/[0-9a-f]+$`)
 
 // BlobPath validates a (script, key, file) triple and returns the absolute
 // on-disk path of the artifact file plus its content type. It guards against
@@ -793,7 +944,7 @@ func (m *Manager) BlobPath(script, key, file string) (path, contentType string, 
 		return "", "", errtrace.Wrap(fmt.Errorf("invalid key"))
 	}
 	ext := strings.ToLower(filepath.Ext(file))
-	ct, ok := imageExts[ext]
+	ct, ok := mediaExts[ext]
 	if !ok {
 		return "", "", errtrace.Wrap(fmt.Errorf("unsupported artifact type %q", ext))
 	}
@@ -811,6 +962,70 @@ func (m *Manager) BlobPath(script, key, file string) (path, contentType string, 
 func (m *Manager) CleanCheckouts() {
 	_, _ = exec.Command("git", "-C", m.projectRoot, "worktree", "prune").Output()
 	_ = os.RemoveAll(m.checkoutsDir())
+}
+
+// legacyKeyRe matches a cache-entry dir in the old flat layout, where the kind
+// was a single-letter prefix on the id: "c<sha>" for a commit, "w<hash>" for a
+// working-tree snapshot. Captures the prefix and the id.
+var legacyKeyRe = regexp.MustCompile(`^([cw])([0-9a-f]+)$`)
+
+// MigrateLegacyLayout moves any cache entries still in the old flat
+// "c<sha>"/"w<hash>" layout into the current out/<script>/<kind>/<id> layout,
+// rewriting each meta.json's key field to match its new path (the field is
+// returned verbatim and feeds the blob URLs, so a stale key would 404).
+// Migrating — rather than discarding — keeps already-generated screenshots valid
+// across the upgrade. Best-effort and idempotent: safe to run on every boot, and
+// it skips an entry whose new-format dir already exists (a fresh regen wins).
+// Returns the number of entries moved.
+func (m *Manager) MigrateLegacyLayout() int {
+	scriptDirs, err := os.ReadDir(m.outDir())
+	if err != nil {
+		return 0
+	}
+	moved := 0
+	for _, sd := range scriptDirs {
+		if !sd.IsDir() {
+			continue
+		}
+		scriptPath := filepath.Join(m.outDir(), sd.Name())
+		children, err := os.ReadDir(scriptPath)
+		if err != nil {
+			continue
+		}
+		for _, c := range children {
+			match := legacyKeyRe.FindStringSubmatch(c.Name())
+			if !c.IsDir() || match == nil {
+				continue // already-migrated commit/ & worktree/ dirs, or stray files
+			}
+			kind := keyKindCommit
+			if match[1] == "w" {
+				kind = keyKindWorktree
+			}
+			newKey := kind + "/" + match[2]
+			oldDir := filepath.Join(scriptPath, c.Name())
+			newDir := filepath.Join(scriptPath, kind, match[2])
+			// A new-format entry already exists (regenerated since the upgrade):
+			// keep the fresh one and drop the stale legacy copy.
+			if _, err := os.Stat(newDir); err == nil {
+				_ = os.RemoveAll(oldDir)
+				continue
+			}
+			if err := os.MkdirAll(filepath.Dir(newDir), 0o755); err != nil {
+				continue
+			}
+			if err := os.Rename(oldDir, newDir); err != nil {
+				continue
+			}
+			// Point the persisted meta at its new path. If meta is unreadable the
+			// entry is effectively dead anyway; the next Get regenerates it.
+			if meta, ok := readMeta(newDir); ok && meta.Key != newKey {
+				meta.Key = newKey
+				_ = writeMeta(newDir, meta)
+			}
+			moved++
+		}
+	}
+	return moved
 }
 
 // PruneStale removes cache entries older than maxAge, then removes the oldest
@@ -845,24 +1060,39 @@ func (m *Manager) PruneStale(maxAge time.Duration, maxBytes int64) error {
 			continue
 		}
 		scriptPath := filepath.Join(m.outDir(), sd.Name())
-		keyDirs, err := os.ReadDir(scriptPath)
+		// Entries nest two levels below the script dir: <kind>/<id> (see
+		// versionKey). Anything else directly under the script dir is a leftover
+		// from the old flat "c<sha>"/"w<hash>" layout — skip it (don't delete), so
+		// a not-yet-migrated cache survives until MigrateLegacyLayout (run on boot)
+		// moves it over.
+		kindDirs, err := os.ReadDir(scriptPath)
 		if err != nil {
 			continue
 		}
-		for _, kd := range keyDirs {
-			if !kd.IsDir() {
+		for _, kindDir := range kindDirs {
+			if !kindDir.IsDir() || (kindDir.Name() != keyKindCommit && kindDir.Name() != keyKindWorktree) {
 				continue
 			}
-			dir := filepath.Join(scriptPath, kd.Name())
-			if _, busy := inFlight[dir]; busy {
+			kindPath := filepath.Join(scriptPath, kindDir.Name())
+			idDirs, err := os.ReadDir(kindPath)
+			if err != nil {
 				continue
 			}
-			size, modTime := dirStats(dir)
-			if maxAge > 0 && modTime.Before(cutoff) {
-				_ = os.RemoveAll(dir)
-				continue
+			for _, id := range idDirs {
+				if !id.IsDir() {
+					continue
+				}
+				dir := filepath.Join(kindPath, id.Name())
+				if _, busy := inFlight[dir]; busy {
+					continue
+				}
+				size, modTime := dirStats(dir)
+				if maxAge > 0 && modTime.Before(cutoff) {
+					_ = os.RemoveAll(dir)
+					continue
+				}
+				entries = append(entries, entry{dir: dir, modTime: modTime, size: size})
 			}
-			entries = append(entries, entry{dir: dir, modTime: modTime, size: size})
 		}
 	}
 
@@ -966,8 +1196,13 @@ func writeMeta(dir string, meta Meta) error {
 	return errtrace.Wrap(os.WriteFile(filepath.Join(dir, metaFile), data, 0o644))
 }
 
-func scanOutputs(dir string) ([]FileMeta, error) {
+// scanOutputs collects the image files a generation wrote, reading each file's
+// optional <file>.meta sidecar (tags + video fps). It also returns human-readable
+// warnings (malformed sidecar JSON, a scoped-label category set more than once)
+// for the caller to fold into the build log so the script author sees them.
+func scanOutputs(dir string) ([]FileMeta, []string, error) {
 	var out []FileMeta
+	var warnings []string
 	err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return errtrace.Wrap(err)
@@ -975,22 +1210,131 @@ func scanOutputs(dir string) ([]FileMeta, error) {
 		if d.IsDir() || d.Name() == metaFile {
 			return nil
 		}
-		if _, ok := imageExts[strings.ToLower(filepath.Ext(d.Name()))]; !ok {
-			return nil
+		if _, ok := mediaExts[strings.ToLower(filepath.Ext(d.Name()))]; !ok {
+			return nil // skips .meta sidecars too (not a known media extension)
 		}
 		hash, size, err := hashFile(p)
 		if err != nil {
 			return errtrace.Wrap(err)
 		}
 		rel, _ := filepath.Rel(dir, p)
-		out = append(out, FileMeta{Name: filepath.ToSlash(rel), Size: size, Hash: hash})
+		name := filepath.ToSlash(rel)
+		tags, fps, warns := readSidecar(p)
+		for _, w := range warns {
+			warnings = append(warnings, name+": "+w)
+		}
+		out = append(out, FileMeta{Name: name, Size: size, Hash: hash, Tags: tags, Fps: fps})
 		return nil
 	})
 	if err != nil {
-		return nil, errtrace.Wrap(err)
+		return nil, nil, errtrace.Wrap(err)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
-	return out, nil
+	return out, warnings, nil
+}
+
+// readSidecar reads the optional metadata sidecar for an output file: a sibling
+// JSON file named "<file>.meta" of the form
+// {"tags": ["a", "theme::dark"], "fps": 60}. The "meta" extension is a single,
+// extensible home for per-file metadata. A missing/unreadable sidecar yields
+// nothing and no warnings (the common case); malformed JSON yields a warning (and
+// no metadata). fps is reported only when present and positive — a non-positive
+// value is ignored (zero, the caller's "unset", with a warning).
+func readSidecar(filePath string) (tags []string, fps float64, warnings []string) {
+	data, err := os.ReadFile(filePath + ".meta")
+	if err != nil {
+		return nil, 0, nil // no sidecar → no metadata (the common case)
+	}
+	var sc struct {
+		Tags []string `json:"tags"`
+		Fps  float64  `json:"fps"`
+	}
+	if err := json.Unmarshal(data, &sc); err != nil {
+		return nil, 0, []string{fmt.Sprintf("ignoring malformed sidecar %s.meta: %v", filepath.Base(filePath), err)}
+	}
+	tags, warnings = normalizeTags(sc.Tags)
+	if sc.Fps < 0 {
+		warnings = append(warnings, fmt.Sprintf("fps: ignoring non-positive value %g in sidecar %s.meta", sc.Fps, filepath.Base(filePath)))
+	} else {
+		fps = sc.Fps
+	}
+	return tags, fps, warnings
+}
+
+// normalizeTags cleans a raw tag list and enforces GitLab-style scoped labels.
+// A tag of the form "category::value" is scoped: at most one value per category
+// survives, and the LAST one declared wins (with a warning naming the discarded
+// ones). Free-form tags (no "::") are kept as a deduped set. The result is sorted
+// for stable output. A scoped tag with an empty category or value is malformed
+// and kept verbatim as a free tag.
+func normalizeTags(raw []string) (tags, warnings []string) {
+	free := map[string]struct{}{}
+	scopedVal := map[string]string{}   // category -> chosen (last) "category::value"
+	scopedAll := map[string][]string{} // category -> every "category::value" seen, for the warning
+	for _, t := range raw {
+		t = strings.TrimSpace(t)
+		if t == "" {
+			continue
+		}
+		cat, val, isScoped := strings.Cut(t, "::")
+		cat, val = strings.TrimSpace(cat), strings.TrimSpace(val)
+		if !isScoped || cat == "" || val == "" {
+			free[t] = struct{}{} // free-form or malformed scoped tag
+			continue
+		}
+		full := cat + "::" + val
+		scopedAll[cat] = append(scopedAll[cat], full)
+		scopedVal[cat] = full // last declared wins
+	}
+	for t := range free {
+		tags = append(tags, t)
+	}
+	for cat, all := range scopedAll {
+		tags = append(tags, scopedVal[cat])
+		if len(all) > 1 {
+			warnings = append(warnings, fmt.Sprintf("tags: category %q set %d times (%s); keeping last (%s)",
+				cat, len(all), strings.Join(all, ", "), scopedVal[cat]))
+		}
+	}
+	sort.Strings(tags)
+	sort.Strings(warnings)
+	return tags, warnings
+}
+
+// mergeTags combines a file's before (left) and after (right) tag sets into the
+// labels shown for the diff. Free-form tags are unioned. A scoped
+// "category::value" label is merged per category with the after side winning, so
+// a file that re-tags a category shows the new value while a category present on
+// only one side is preserved. Both inputs are already normalized (≤1 value per
+// category, deduped); the result is sorted, and empty merges return nil so a
+// tagless file stays tagless.
+func mergeTags(left, right []string) []string {
+	free := map[string]struct{}{}
+	scoped := map[string]string{} // category -> "category::value"
+	add := func(tags []string) {
+		for _, t := range tags {
+			cat, val, isScoped := strings.Cut(t, "::")
+			if !isScoped || cat == "" || val == "" {
+				free[t] = struct{}{} // free-form or malformed scoped tag
+				continue
+			}
+			scoped[cat] = t
+		}
+	}
+	add(left)
+	add(right) // after overrides before for a shared scoped category
+	if len(free) == 0 && len(scoped) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(free)+len(scoped))
+	for t := range free {
+		out = append(out, t)
+	}
+	for _, t := range scoped {
+		out = append(out, t)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func hashFile(path string) (string, int64, error) {

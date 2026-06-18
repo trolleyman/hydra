@@ -1347,7 +1347,7 @@ function SettingsPopup({ fileView, onFileViewChange, sideBySide, onSideBySideCha
 
 // ── Main DiffViewer component ─────────────────────────────────────────────────
 
-export function DiffViewer({ agent, projectId, externalRefreshTrigger }: { agent: AgentResponse; projectId: string | null; externalRefreshTrigger?: number }) {
+export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalArtifactRefresh }: { agent: AgentResponse; projectId: string | null; externalRefreshTrigger?: number; externalArtifactRefresh?: number }) {
   const [commits, setCommits] = useState<CommitInfo[]>([])
   const [leftSel, setLeftSel] = useState<LeftSel>({ type: 'base' })
   const [rightSel, setRightSel] = useState<RightSel>({ type: 'latest' })
@@ -1371,7 +1371,7 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger }: { agent
   })
   const [imageDiffMode, setImageDiffMode] = useState<ImageDiffMode>(() => {
     const stored = readLocal(StorageKeys.diffImageMode)
-    if (stored === 'side-by-side' || stored === 'ab' || stored === 'slider' || stored === 'onion') return stored
+    if (stored === 'side-by-side' || stored === 'ab' || stored === 'difference' || stored === 'slider' || stored === 'onion') return stored
     return 'side-by-side'
   })
 
@@ -1592,50 +1592,73 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger }: { agent
   }, [hasActiveSelection, applySilentDiff])
 
   // Background (silent) refresh when triggered externally (e.g. git command detected via WS).
-  const silentRefreshRef = useRef(false)
+  //
+  // Triggers must COALESCE, not drop. A diff_refresh that lands while a previous
+  // silent fetch is still in flight has to be serviced once that fetch finishes —
+  // otherwise a commit made moments after an edit is lost: the edit's fetch reads
+  // the pre-commit state, the commit's trigger is dropped because a fetch was in
+  // flight, and since externalRefreshTrigger never changes again nothing re-fetches,
+  // so the diff stays stale. We record the latest trigger and re-run when a newer
+  // one arrived during the fetch.
+  const silentRefreshRunningRef = useRef(false)
+  const latestTriggerRef = useRef(0)
   useEffect(() => {
     if (!externalRefreshTrigger || !agent.branch_name) return
-    if (silentRefreshRef.current) return
-    silentRefreshRef.current = true
+    // Always remember the most recent trigger so an in-flight fetch picks it up.
+    latestTriggerRef.current = externalRefreshTrigger
+    if (silentRefreshRunningRef.current) return
 
-    const params: { baseRef?: string; headRef?: string; ignoreWhitespace?: boolean; includeUncommitted?: boolean } = {}
-    if (ignoreWhitespace) params.ignoreWhitespace = true
-    if (leftSel.type === 'commit') params.baseRef = leftSel.sha
-    else if (leftSel.type === 'latest' && commitsRef.current.length > 0) params.baseRef = commitsRef.current[0].sha
-    if (rightSel.type === 'uncommitted') params.includeUncommitted = true
-    else if (rightSel.type === 'commit') params.headRef = rightSel.sha
+    const run = () => {
+      silentRefreshRunningRef.current = true
+      // The trigger value this pass is servicing; if it advances before we finish,
+      // a newer refresh landed mid-fetch and we run again.
+      const servicing = latestTriggerRef.current
 
-    // Snapshot current per-file contexts before async work
-    const contextsSnap = new Map(fileContextsRef.current)
+      const params: { baseRef?: string; headRef?: string; ignoreWhitespace?: boolean; includeUncommitted?: boolean } = {}
+      if (ignoreWhitespace) params.ignoreWhitespace = true
+      if (leftSel.type === 'commit') params.baseRef = leftSel.sha
+      else if (leftSel.type === 'latest' && commitsRef.current.length > 0) params.baseRef = commitsRef.current[0].sha
+      if (rightSel.type === 'uncommitted') params.includeUncommitted = true
+      else if (rightSel.type === 'commit') params.headRef = rightSel.sha
 
-    // Refresh commits list silently — but only push it into state when it actually
-    // changed, so an idle/no-op refresh never re-renders (and never disturbs a
-    // text selection the user has in the diff).
-    api.default.getAgentCommits(projectId ?? '', agent.id)
-      .then((c) => {
-        commitsRef.current = c
-        const sig = JSON.stringify(c.map((x) => x.sha))
-        if (sig !== lastCommitsSigRef.current) {
-          lastCommitsSigRef.current = sig
-          setCommits(c)
-        }
-      }).catch(() => { })
+      // Snapshot current per-file contexts before async work
+      const contextsSnap = new Map(fileContextsRef.current)
 
-    // Fetch full diff silently — preserves open comments since we diff against previous state.
-    api.default.getAgentDiff(projectId ?? '', agent.id,
-      params.baseRef, params.headRef, params.ignoreWhitespace, params.includeUncommitted, undefined, 3)
-      .then((d) => {
-        // Defer applying while the user is selecting text — otherwise the re-render
-        // wipes their selection. The selectionchange listener flushes it later.
-        if (hasActiveSelection()) {
-          pendingSilentRef.current = { d, contexts: contextsSnap }
-        } else {
-          pendingSilentRef.current = null
-          applySilentDiff(d, contextsSnap)
-        }
+      // Refresh commits list silently — but only push it into state when it actually
+      // changed, so an idle/no-op refresh never re-renders (and never disturbs a
+      // text selection the user has in the diff).
+      const commitsP = api.default.getAgentCommits(projectId ?? '', agent.id)
+        .then((c) => {
+          commitsRef.current = c
+          const sig = JSON.stringify(c.map((x) => x.sha))
+          if (sig !== lastCommitsSigRef.current) {
+            lastCommitsSigRef.current = sig
+            setCommits(c)
+          }
+        }).catch(() => { })
+
+      // Fetch full diff silently — preserves open comments since we diff against previous state.
+      const diffP = api.default.getAgentDiff(projectId ?? '', agent.id,
+        params.baseRef, params.headRef, params.ignoreWhitespace, params.includeUncommitted, undefined, 3)
+        .then((d) => {
+          // Defer applying while the user is selecting text — otherwise the re-render
+          // wipes their selection. The selectionchange listener flushes it later.
+          if (hasActiveSelection()) {
+            pendingSilentRef.current = { d, contexts: contextsSnap }
+          } else {
+            pendingSilentRef.current = null
+            applySilentDiff(d, contextsSnap)
+          }
+        })
+        .catch(() => { })
+
+      Promise.allSettled([commitsP, diffP]).then(() => {
+        silentRefreshRunningRef.current = false
+        // A newer trigger arrived while we were fetching — service it now.
+        if (latestTriggerRef.current !== servicing) run()
       })
-      .catch(() => { })
-      .finally(() => { silentRefreshRef.current = false })
+    }
+    run()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [externalRefreshTrigger])
 
@@ -1887,7 +1910,15 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger }: { agent
           baseRef={artifactParams.baseRef}
           headRef={artifactParams.headRef}
           includeUncommitted={artifactParams.includeUncommitted}
-          refreshKey={refreshKey}
+          // Re-snapshot artifacts on the manual refresh button (refreshKey) AND
+          // when a commit is auto-detected (externalArtifactRefresh). Both only
+          // ever increment, so their sum strictly increases on either trigger,
+          // re-running ArtifactsPanel's effect to re-request — a cache hit when
+          // the resolved commit SHA is unchanged, a regen when it moved. The
+          // diff text itself updates silently via externalRefreshTrigger, so we
+          // deliberately keep this out of the diff-loading effects (which would
+          // flash a loading spinner and reset the user's selection).
+          refreshKey={refreshKey + (externalArtifactRefresh ?? 0)}
           imageDiffMode={imageDiffMode}
         />
       )}

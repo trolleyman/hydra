@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 
 	"braces.dev/errtrace"
@@ -95,27 +94,15 @@ var mergeCmd = &cobra.Command{
 			}
 		}
 
-		// Get author info from git config
-		authorName, authorEmail := "", ""
-		if out, err := exec.Command("git", "-C", projectRoot, "config", "--get", "user.name").Output(); err == nil {
-			authorName = strings.TrimRight(string(out), "\n")
-		}
-		if out, err := exec.Command("git", "-C", projectRoot, "config", "--get", "user.email").Output(); err == nil {
-			authorEmail = strings.TrimRight(string(out), "\n")
-		}
-
-		if err := git.Merge(projectRoot, branchName, authorName, authorEmail); err != nil {
-			return errtrace.Wrap(fmt.Errorf("merge failed (resolve conflicts then run 'hydra kill %s'): %w", id, err))
-		}
-
-		// Tear down the head (session + worktree + branch) through the daemon so
-		// the live session is stopped too.
+		// Perform the merge and tear-down through the daemon, which owns the live
+		// session and archives the head with end_state "merged" (doing the merge
+		// here and then calling KillAgent would mislabel it "killed").
 		client, err := daemon.Connect(ctx, projectRoot)
 		if err != nil {
 			return errtrace.Wrap(err)
 		}
-		if err := client.KillAgent(ctx, id); err != nil {
-			return errtrace.Wrap(err)
+		if err := client.MergeAgent(ctx, id); err != nil {
+			return errtrace.Wrap(fmt.Errorf("merge failed (resolve conflicts then run 'hydra kill %s'): %w", id, err))
 		}
 
 		return nil

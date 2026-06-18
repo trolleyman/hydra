@@ -292,7 +292,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if head := m.selectedHead(); head != nil {
 			h := *head
 			return m, func() tea.Msg {
-				if err := heads.KillHead(context.Background(), m.reg, m.store, h); err != nil {
+				if err := heads.KillHead(context.Background(), m.reg, m.store, h, "killed"); err != nil {
 					return errMsg{err}
 				}
 				return killDoneMsg(h.ID)
@@ -739,7 +739,10 @@ func streamSessionOutput(ctx context.Context, reg *session.Registry, id string) 
 		if reg == nil {
 			return
 		}
-		att, err := reg.Attach(id, 24, 80)
+		// Read-only log stream: attach without a size (0,0) so we never resize the
+		// live PTY. Imposing 80 cols here would reflow the agent narrow for every
+		// other viewer (e.g. the web terminal), corrupting its scrollback.
+		att, err := reg.Attach(id, 0, 0)
 		if err != nil {
 			return
 		}

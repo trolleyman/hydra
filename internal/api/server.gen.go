@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/oapi-codegen/runtime"
 	strictnethttp "github.com/oapi-codegen/runtime/strictmiddleware/nethttp"
@@ -83,11 +84,26 @@ const (
 	MergeConflictErrorErrorMergeConflict MergeConflictErrorError = "merge_conflict"
 )
 
+// Defines values for ServiceStatusState.
+const (
+	Down       ServiceStatusState = "down"
+	Failed     ServiceStatusState = "failed"
+	Restarting ServiceStatusState = "restarting"
+	Up         ServiceStatusState = "up"
+)
+
 // Defines values for TerminalDataEventType.
 const (
 	TerminalDataEventTypeData        TerminalDataEventType = "data"
 	TerminalDataEventTypeDiffRefresh TerminalDataEventType = "diff_refresh"
 	TerminalDataEventTypeStatus      TerminalDataEventType = "status"
+)
+
+// Defines values for TerminalDiffRefreshEventType.
+const (
+	TerminalDiffRefreshEventTypeData        TerminalDiffRefreshEventType = "data"
+	TerminalDiffRefreshEventTypeDiffRefresh TerminalDiffRefreshEventType = "diff_refresh"
+	TerminalDiffRefreshEventTypeStatus      TerminalDiffRefreshEventType = "status"
 )
 
 // Defines values for TerminalEventType.
@@ -99,9 +115,9 @@ const (
 
 // Defines values for TerminalStatusEventType.
 const (
-	Data        TerminalStatusEventType = "data"
-	DiffRefresh TerminalStatusEventType = "diff_refresh"
-	Status      TerminalStatusEventType = "status"
+	TerminalStatusEventTypeData        TerminalStatusEventType = "data"
+	TerminalStatusEventTypeDiffRefresh TerminalStatusEventType = "diff_refresh"
+	TerminalStatusEventTypeStatus      TerminalStatusEventType = "status"
 )
 
 // Defines values for GetConfigParamsScope.
@@ -146,25 +162,37 @@ type AgentInputRequest struct {
 type AgentResponse struct {
 	AgentStatus *AgentStatusInfo `json:"agent_status,omitempty"`
 	AgentType   string           `json:"agent_type"`
-	BaseBranch  string           `json:"base_branch"`
-	BranchName  *string          `json:"branch_name"`
+
+	// Archived True if the agent is a finished (killed/merged) head retained in the history list. Archived agents are read-only — they have no live session or worktree.
+	Archived   *bool   `json:"archived,omitempty"`
+	BaseBranch string  `json:"base_branch"`
+	BranchName *string `json:"branch_name"`
 
 	// CreatedAt Unix timestamp (seconds) when the session was started; 0 if not started
 	CreatedAt *int64 `json:"created_at,omitempty"`
 
+	// EndState How an archived agent ended ("killed" | "merged"); null/absent for active agents.
+	EndState *string `json:"end_state"`
+
 	// Ephemeral If true, the agent is a throwaway test agent whose worktree and branch are torn down when it stops.
-	Ephemeral   *bool  `json:"ephemeral,omitempty"`
-	Id          string `json:"id"`
-	PrePrompt   string `json:"pre_prompt"`
-	ProjectPath string `json:"project_path"`
-	Prompt      string `json:"prompt"`
+	Ephemeral *bool `json:"ephemeral,omitempty"`
+
+	// HasUnreadChanges True if the agent has changes the user has not yet looked at (set on a running→waiting/finished transition, cleared when the agent is opened).
+	HasUnreadChanges *bool  `json:"has_unread_changes,omitempty"`
+	Id               string `json:"id"`
+	PrePrompt        string `json:"pre_prompt"`
+	ProjectPath      string `json:"project_path"`
+	Prompt           string `json:"prompt"`
 
 	// SessionPid PID of the running sandbox session, or 0 if not running
 	SessionPid int `json:"session_pid"`
 
 	// SessionStatus Sandbox session status (pending|starting|running|stopped)
-	SessionStatus string  `json:"session_status"`
-	WorktreePath  *string `json:"worktree_path"`
+	SessionStatus string `json:"session_status"`
+
+	// Title Mutable, user-facing display name. May be empty before it is seeded; clients should fall back to id.
+	Title        *string `json:"title,omitempty"`
+	WorktreePath *string `json:"worktree_path"`
 }
 
 // AgentStatus The computed status of the agent (derived from container, agent, and head status)
@@ -195,6 +223,9 @@ type AgentStatusInfo struct {
 type ArtifactFile struct {
 	ChangeType ArtifactFileChangeType `json:"change_type"`
 
+	// Fps Frame rate of a video file, read from its sibling JSON sidecar (<file>.meta, {"fps": 60}). HTML5 video exposes no frame rate, so the viewer's frame-step buttons use it to size a single-frame step. Null/absent when the sidecar omits it, in which case the viewer assumes a sensible default. Only meaningful for video files.
+	Fps *float64 `json:"fps"`
+
 	// LeftUrl URL of the file for the left version (null if absent on the left)
 	LeftUrl *string `json:"left_url"`
 
@@ -203,6 +234,12 @@ type ArtifactFile struct {
 
 	// RightUrl URL of the file for the right version (null if absent on the right)
 	RightUrl *string `json:"right_url"`
+
+	// Tags Labels for this file, read from a sibling JSON sidecar (<file>.meta, {"tags": [...]}). A "category::value" tag is a scoped label — only one value per category survives. Drives the artifacts panel's tag badges and filter. Null/absent when the file has no tags.
+	Tags *[]string `json:"tags"`
+
+	// Unverified True only for a video file reported as "modified" whose verdict is a raw byte-hash comparison because ffmpeg was unavailable to verify it frame-by-frame — so the change may be spurious (e.g. only container metadata differs). Absent/false for images and for frame-verified video. The UI shows a caveat badge when set.
+	Unverified *bool `json:"unverified"`
 }
 
 // ArtifactFileChangeType defines model for ArtifactFile.ChangeType.
@@ -259,6 +296,9 @@ type ArtifactSet struct {
 	// Name The configured artifact script name
 	Name string `json:"name"`
 
+	// PendingTags Tags already known from a side that has settled while the other side is still generating, so the diff viewer's tag filter can appear before the whole set is ready (the "before" side often finishes first thanks to caching). Deduped and sorted, drawn from whichever side(s) have produced files so far. Only set while status is "generating"; once ready, tags are carried per file in files[].tags.
+	PendingTags *[]string `json:"pending_tags"`
+
 	// RightError As left_error, for the RIGHT (after) side.
 	RightError *string `json:"right_error"`
 
@@ -282,6 +322,36 @@ type ArtifactSetStatus string
 // ArtifactsResponse defines model for ArtifactsResponse.
 type ArtifactsResponse struct {
 	Scripts []ArtifactSet `json:"scripts"`
+}
+
+// ClaudeUsageResponse defines model for ClaudeUsageResponse.
+type ClaudeUsageResponse struct {
+	// AccountTier Detected plan, e.g. "Claude Max" or "Claude Pro".
+	AccountTier *string `json:"account_tier"`
+
+	// Available True when a usable usage snapshot was obtained.
+	Available bool `json:"available"`
+
+	// CapturedAt When the snapshot was probed.
+	CapturedAt *time.Time `json:"captured_at,omitempty"`
+
+	// Error Why usage is unavailable (CLI missing, not a subscription account, parse failure, …).
+	Error *string `json:"error"`
+
+	// SessionPercentUsed Percent of the current session ("4 hour") limit used (0-100).
+	SessionPercentUsed *float32 `json:"session_percent_used"`
+
+	// SessionResetText Raw session reset text, e.g. "Resets in 2h 15m".
+	SessionResetText *string `json:"session_reset_text"`
+
+	// SessionResetsAt When the current session limit resets (derived from the relative "Resets in …" text).
+	SessionResetsAt *time.Time `json:"session_resets_at"`
+
+	// WeeklyPercentUsed Percent of the weekly (all-models) limit used (0-100).
+	WeeklyPercentUsed *float32 `json:"weekly_percent_used"`
+
+	// WeeklyResetText Raw weekly reset text, e.g. "Resets Jan 15, 3:30pm".
+	WeeklyResetText *string `json:"weekly_reset_text"`
 }
 
 // CommitInfo defines model for CommitInfo.
@@ -315,6 +385,9 @@ type ConfigResponse struct {
 	// DefaultPrePrompt Built-in default pre-prompt always prepended to agent prompts (read-only)
 	DefaultPrePrompt *string     `json:"default_pre_prompt,omitempty"`
 	Defaults         AgentConfig `json:"defaults"`
+
+	// Services Per-project long-running supervised commands ([[services]] in config.toml)
+	Services *[]ServiceScript `json:"services"`
 }
 
 // ConfigTomlResponse defines model for ConfigTomlResponse.
@@ -456,6 +529,9 @@ type ProjectInfo struct {
 
 	// Path Absolute filesystem path to the project root
 	Path string `json:"path"`
+
+	// UnreadCount Number of this project's agents with unread changes. Drives the cross-project "updates waiting" indicator.
+	UnreadCount *int `json:"unread_count,omitempty"`
 }
 
 // RepositoryBranch defines model for RepositoryBranch.
@@ -528,10 +604,56 @@ type SandboxConfig struct {
 	MaskedPaths *[]string      `json:"masked_paths"`
 	Network     *NetworkConfig `json:"network,omitempty"`
 
+	// PreExitScript Bash script run in a sandbox when a head ends, after the agent's session is killed but before its worktree is removed. Runs with the head's sandbox policy, cwd = worktree, with HYDRA_* head context + HYDRA_END_STATE. For per-head teardown such as releasing a claimed resource.
+	PreExitScript *string `json:"pre_exit_script"`
+
 	// PreSpawnScript Bash script run inside the sandbox once, when the agent is first spawned — not on resume or for bash shells (e.g. `mise trust`)
 	PreSpawnScript *string   `json:"pre_spawn_script"`
 	RestoreRo      *[]string `json:"restore_ro"`
 	WritablePaths  *[]string `json:"writable_paths"`
+}
+
+// ServiceScript A per-project long-running command the daemon supervises while the project is registered ([[services]] in config.toml)
+type ServiceScript struct {
+	// Command Shell command run via `bash -c` from the project root
+	Command string `json:"command"`
+
+	// Host Run on the host with NO sandbox — needed for host devices the sandbox hides, e.g. /dev/kvm (default false)
+	Host *bool `json:"host,omitempty"`
+
+	// MaxRestarts Relaunch cap after an unexpected exit (null = default 3; 0 = never restart)
+	MaxRestarts *int `json:"max_restarts"`
+
+	// Name Unique label, shown in the UI and logs
+	Name string `json:"name"`
+}
+
+// ServiceStatus Live status of one supervised service
+type ServiceStatus struct {
+	Command     string `json:"command"`
+	Host        bool   `json:"host"`
+	MaxRestarts int    `json:"max_restarts"`
+
+	// Message Human-readable detail for non-running states (exit reason / last output)
+	Message *string `json:"message,omitempty"`
+	Name    string  `json:"name"`
+
+	// Pid Process id while running, else 0
+	Pid *int `json:"pid,omitempty"`
+
+	// Restarts Restarts performed so far
+	Restarts int `json:"restarts"`
+
+	// State up = running; restarting = backing off after an unexpected exit; failed = gave up after exhausting restarts; down = intentionally stopped
+	State ServiceStatusState `json:"state"`
+}
+
+// ServiceStatusState up = running; restarting = backing off after an unexpected exit; failed = gave up after exhausting restarts; down = intentionally stopped
+type ServiceStatusState string
+
+// ServiceStatusResponse defines model for ServiceStatusResponse.
+type ServiceStatusResponse struct {
+	Services []ServiceStatus `json:"services"`
 }
 
 // SpawnAgentRequest defines model for SpawnAgentRequest.
@@ -582,6 +704,16 @@ type TerminalDataEvent struct {
 // TerminalDataEventType defines model for TerminalDataEvent.Type.
 type TerminalDataEventType string
 
+// TerminalDiffRefreshEvent defines model for TerminalDiffRefreshEvent.
+type TerminalDiffRefreshEvent struct {
+	// HeadMoved True when this refresh was triggered by a new commit (HEAD moved), as opposed to an uncommitted working-tree change. The diff viewer uses it to also re-snapshot per-commit artifacts (screenshots), which are memoized by commit SHA, while a plain working-tree change only re-fetches the diff text.
+	HeadMoved *bool                        `json:"head_moved,omitempty"`
+	Type      TerminalDiffRefreshEventType `json:"type"`
+}
+
+// TerminalDiffRefreshEventType defines model for TerminalDiffRefreshEvent.Type.
+type TerminalDiffRefreshEventType string
+
 // TerminalEvent defines model for TerminalEvent.
 type TerminalEvent struct {
 	Type TerminalEventType `json:"type"`
@@ -607,6 +739,21 @@ type UncommittedSummary struct {
 
 	// UntrackedCount Number of untracked (new, never-added) files
 	UntrackedCount int `json:"untracked_count"`
+}
+
+// UpdateAgentRequest defines model for UpdateAgentRequest.
+type UpdateAgentRequest struct {
+	// Title New user-facing display name for the agent. Trimmed; must be non-empty.
+	Title string `json:"title"`
+}
+
+// ListArchivedAgentsParams defines parameters for ListArchivedAgents.
+type ListArchivedAgentsParams struct {
+	// Limit Maximum number of archived agents to return (page size). Omit or <=0 for all.
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Offset Number of archived agents to skip (for pagination).
+	Offset *int `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
 // GetAgentArtifactsParams defines parameters for GetAgentArtifacts.
@@ -690,11 +837,20 @@ type GetRepositoryTreeParams struct {
 	Ref *string `form:"ref,omitempty" json:"ref,omitempty"`
 }
 
+// GetClaudeUsageParams defines parameters for GetClaudeUsage.
+type GetClaudeUsageParams struct {
+	// Refresh Bypass the cache and re-probe the CLI.
+	Refresh *bool `form:"refresh,omitempty" json:"refresh,omitempty"`
+}
+
 // AddProjectJSONRequestBody defines body for AddProject for application/json ContentType.
 type AddProjectJSONRequestBody = AddProjectRequest
 
 // SpawnAgentJSONRequestBody defines body for SpawnAgent for application/json ContentType.
 type SpawnAgentJSONRequestBody = SpawnAgentRequest
+
+// UpdateAgentJSONRequestBody defines body for UpdateAgent for application/json ContentType.
+type UpdateAgentJSONRequestBody = UpdateAgentRequest
 
 // SendAgentInputJSONRequestBody defines body for SendAgentInput for application/json ContentType.
 type SendAgentInputJSONRequestBody = AgentInputRequest
@@ -725,12 +881,18 @@ type ServerInterface interface {
 	// Spawn a new Hydra agent
 	// (POST /api/projects/{project_id}/agents)
 	SpawnAgent(w http.ResponseWriter, r *http.Request, projectId string)
+	// List archived (killed/merged) Hydra agents, newest first
+	// (GET /api/projects/{project_id}/agents/archived)
+	ListArchivedAgents(w http.ResponseWriter, r *http.Request, projectId string, params ListArchivedAgentsParams)
 	// Kill a Hydra agent by ID
 	// (DELETE /api/projects/{project_id}/agents/{id})
 	KillAgent(w http.ResponseWriter, r *http.Request, projectId string, id string)
 	// Get a specific Hydra agent by ID
 	// (GET /api/projects/{project_id}/agents/{id})
 	GetAgent(w http.ResponseWriter, r *http.Request, projectId string, id string)
+	// Update a Hydra agent's mutable fields (currently its title)
+	// (PATCH /api/projects/{project_id}/agents/{id})
+	UpdateAgent(w http.ResponseWriter, r *http.Request, projectId string, id string)
 	// Get generated visual artifacts (e.g. screenshots) for both sides of a diff
 	// (GET /api/projects/{project_id}/agents/{id}/artifacts)
 	GetAgentArtifacts(w http.ResponseWriter, r *http.Request, projectId string, id string, params GetAgentArtifactsParams)
@@ -749,6 +911,12 @@ type ServerInterface interface {
 	// Merge a Hydra agent's branch into its base branch and kill it
 	// (POST /api/projects/{project_id}/agents/{id}/merge)
 	MergeAgent(w http.ResponseWriter, r *http.Request, projectId string, id string)
+	// Permanently delete an agent (kill it and erase every record, including its Claude session history)
+	// (DELETE /api/projects/{project_id}/agents/{id}/purge)
+	PurgeAgent(w http.ResponseWriter, r *http.Request, projectId string, id string)
+	// Mark an agent as read, clearing its unread-changes flag
+	// (POST /api/projects/{project_id}/agents/{id}/read)
+	MarkAgentRead(w http.ResponseWriter, r *http.Request, projectId string, id string)
 	// Restart a Hydra agent (kill and respawn with the same prompt)
 	// (POST /api/projects/{project_id}/agents/{id}/restart)
 	RestartAgent(w http.ResponseWriter, r *http.Request, projectId string, id string)
@@ -773,9 +941,18 @@ type ServerInterface interface {
 	// List the files tracked in the project's repository
 	// (GET /api/projects/{project_id}/repository/tree)
 	GetRepositoryTree(w http.ResponseWriter, r *http.Request, projectId string, params GetRepositoryTreeParams)
+	// Get the live status of the project's supervised services
+	// (GET /api/projects/{project_id}/services)
+	GetServices(w http.ResponseWriter, r *http.Request, projectId string)
+	// Restart the project's supervised services (picks up config changes)
+	// (POST /api/projects/{project_id}/services/restart)
+	RestartServices(w http.ResponseWriter, r *http.Request, projectId string)
 	// Get system status
 	// (GET /api/status)
 	GetStatus(w http.ResponseWriter, r *http.Request)
+	// Get cached Claude Code subscription usage
+	// (GET /api/usage/claude)
+	GetClaudeUsage(w http.ResponseWriter, r *http.Request, params GetClaudeUsageParams)
 	// Health check
 	// (GET /health)
 	CheckHealth(w http.ResponseWriter, r *http.Request)
@@ -921,6 +1098,50 @@ func (siw *ServerInterfaceWrapper) SpawnAgent(w http.ResponseWriter, r *http.Req
 	handler.ServeHTTP(w, r)
 }
 
+// ListArchivedAgents operation middleware
+func (siw *ServerInterfaceWrapper) ListArchivedAgents(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListArchivedAgentsParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "limit", r.URL.Query(), &params.Limit)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "offset", r.URL.Query(), &params.Offset)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "offset", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListArchivedAgents(w, r, projectId, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // KillAgent operation middleware
 func (siw *ServerInterfaceWrapper) KillAgent(w http.ResponseWriter, r *http.Request) {
 
@@ -980,6 +1201,40 @@ func (siw *ServerInterfaceWrapper) GetAgent(w http.ResponseWriter, r *http.Reque
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetAgent(w, r, projectId, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateAgent operation middleware
+func (siw *ServerInterfaceWrapper) UpdateAgent(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateAgent(w, r, projectId, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1306,6 +1561,74 @@ func (siw *ServerInterfaceWrapper) MergeAgent(w http.ResponseWriter, r *http.Req
 	handler.ServeHTTP(w, r)
 }
 
+// PurgeAgent operation middleware
+func (siw *ServerInterfaceWrapper) PurgeAgent(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PurgeAgent(w, r, projectId, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// MarkAgentRead operation middleware
+func (siw *ServerInterfaceWrapper) MarkAgentRead(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.MarkAgentRead(w, r, projectId, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // RestartAgent operation middleware
 func (siw *ServerInterfaceWrapper) RestartAgent(w http.ResponseWriter, r *http.Request) {
 
@@ -1583,11 +1906,88 @@ func (siw *ServerInterfaceWrapper) GetRepositoryTree(w http.ResponseWriter, r *h
 	handler.ServeHTTP(w, r)
 }
 
+// GetServices operation middleware
+func (siw *ServerInterfaceWrapper) GetServices(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetServices(w, r, projectId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RestartServices operation middleware
+func (siw *ServerInterfaceWrapper) RestartServices(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RestartServices(w, r, projectId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetStatus operation middleware
 func (siw *ServerInterfaceWrapper) GetStatus(w http.ResponseWriter, r *http.Request) {
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetStatus(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetClaudeUsage operation middleware
+func (siw *ServerInterfaceWrapper) GetClaudeUsage(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetClaudeUsageParams
+
+	// ------------- Optional query parameter "refresh" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "refresh", r.URL.Query(), &params.Refresh)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "refresh", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetClaudeUsage(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1738,14 +2138,18 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("DELETE "+options.BaseURL+"/api/projects/{project_id}", wrapper.RemoveProject)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents", wrapper.ListAgents)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents", wrapper.SpawnAgent)
+	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/archived", wrapper.ListArchivedAgents)
 	m.HandleFunc("DELETE "+options.BaseURL+"/api/projects/{project_id}/agents/{id}", wrapper.KillAgent)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/{id}", wrapper.GetAgent)
+	m.HandleFunc("PATCH "+options.BaseURL+"/api/projects/{project_id}/agents/{id}", wrapper.UpdateAgent)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/artifacts", wrapper.GetAgentArtifacts)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/commits", wrapper.GetAgentCommits)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/diff", wrapper.GetAgentDiff)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/diff-files", wrapper.GetAgentDiffFiles)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/input", wrapper.SendAgentInput)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/merge", wrapper.MergeAgent)
+	m.HandleFunc("DELETE "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/purge", wrapper.PurgeAgent)
+	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/read", wrapper.MarkAgentRead)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/restart", wrapper.RestartAgent)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/update-from-base", wrapper.UpdateAgentFromBase)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/config", wrapper.GetConfig)
@@ -1754,7 +2158,10 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/repository/branches", wrapper.GetRepositoryBranches)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/repository/file", wrapper.GetRepositoryFile)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/repository/tree", wrapper.GetRepositoryTree)
+	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/services", wrapper.GetServices)
+	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/services/restart", wrapper.RestartServices)
 	m.HandleFunc("GET "+options.BaseURL+"/api/status", wrapper.GetStatus)
+	m.HandleFunc("GET "+options.BaseURL+"/api/usage/claude", wrapper.GetClaudeUsage)
 	m.HandleFunc("GET "+options.BaseURL+"/health", wrapper.CheckHealth)
 
 	return m
@@ -1988,6 +2395,42 @@ func (response SpawnAgent500JSONResponse) VisitSpawnAgentResponse(w http.Respons
 	return json.NewEncoder(w).Encode(response)
 }
 
+type ListArchivedAgentsRequestObject struct {
+	ProjectId string `json:"project_id"`
+	Params    ListArchivedAgentsParams
+}
+
+type ListArchivedAgentsResponseObject interface {
+	VisitListArchivedAgentsResponse(w http.ResponseWriter) error
+}
+
+type ListArchivedAgents200JSONResponse []AgentResponse
+
+func (response ListArchivedAgents200JSONResponse) VisitListArchivedAgentsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ListArchivedAgents404JSONResponse ErrorResponse
+
+func (response ListArchivedAgents404JSONResponse) VisitListArchivedAgentsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ListArchivedAgents500JSONResponse ErrorResponse
+
+func (response ListArchivedAgents500JSONResponse) VisitListArchivedAgentsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 type KillAgentRequestObject struct {
 	ProjectId string `json:"project_id"`
 	Id        string `json:"id"`
@@ -2062,6 +2505,52 @@ func (response GetAgent404JSONResponse) VisitGetAgentResponse(w http.ResponseWri
 type GetAgent500JSONResponse ErrorResponse
 
 func (response GetAgent500JSONResponse) VisitGetAgentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type UpdateAgentRequestObject struct {
+	ProjectId string `json:"project_id"`
+	Id        string `json:"id"`
+	Body      *UpdateAgentJSONRequestBody
+}
+
+type UpdateAgentResponseObject interface {
+	VisitUpdateAgentResponse(w http.ResponseWriter) error
+}
+
+type UpdateAgent200JSONResponse AgentResponse
+
+func (response UpdateAgent200JSONResponse) VisitUpdateAgentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type UpdateAgent400JSONResponse ErrorResponse
+
+func (response UpdateAgent400JSONResponse) VisitUpdateAgentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type UpdateAgent404JSONResponse ErrorResponse
+
+func (response UpdateAgent404JSONResponse) VisitUpdateAgentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type UpdateAgent500JSONResponse ErrorResponse
+
+func (response UpdateAgent500JSONResponse) VisitUpdateAgentResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(500)
 
@@ -2298,6 +2787,85 @@ func (response MergeAgent409JSONResponse) VisitMergeAgentResponse(w http.Respons
 type MergeAgent500JSONResponse ErrorResponse
 
 func (response MergeAgent500JSONResponse) VisitMergeAgentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type PurgeAgentRequestObject struct {
+	ProjectId string `json:"project_id"`
+	Id        string `json:"id"`
+}
+
+type PurgeAgentResponseObject interface {
+	VisitPurgeAgentResponse(w http.ResponseWriter) error
+}
+
+type PurgeAgent204Response struct {
+}
+
+func (response PurgeAgent204Response) VisitPurgeAgentResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type PurgeAgent404JSONResponse ErrorResponse
+
+func (response PurgeAgent404JSONResponse) VisitPurgeAgentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type PurgeAgent409JSONResponse ErrorResponse
+
+func (response PurgeAgent409JSONResponse) VisitPurgeAgentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type PurgeAgent500JSONResponse ErrorResponse
+
+func (response PurgeAgent500JSONResponse) VisitPurgeAgentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type MarkAgentReadRequestObject struct {
+	ProjectId string `json:"project_id"`
+	Id        string `json:"id"`
+}
+
+type MarkAgentReadResponseObject interface {
+	VisitMarkAgentReadResponse(w http.ResponseWriter) error
+}
+
+type MarkAgentRead204Response struct {
+}
+
+func (response MarkAgentRead204Response) VisitMarkAgentReadResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type MarkAgentRead404JSONResponse ErrorResponse
+
+func (response MarkAgentRead404JSONResponse) VisitMarkAgentReadResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type MarkAgentRead500JSONResponse ErrorResponse
+
+func (response MarkAgentRead500JSONResponse) VisitMarkAgentReadResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(500)
 
@@ -2607,6 +3175,58 @@ func (response GetRepositoryTree500JSONResponse) VisitGetRepositoryTreeResponse(
 	return json.NewEncoder(w).Encode(response)
 }
 
+type GetServicesRequestObject struct {
+	ProjectId string `json:"project_id"`
+}
+
+type GetServicesResponseObject interface {
+	VisitGetServicesResponse(w http.ResponseWriter) error
+}
+
+type GetServices200JSONResponse ServiceStatusResponse
+
+func (response GetServices200JSONResponse) VisitGetServicesResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetServices404JSONResponse ErrorResponse
+
+func (response GetServices404JSONResponse) VisitGetServicesResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type RestartServicesRequestObject struct {
+	ProjectId string `json:"project_id"`
+}
+
+type RestartServicesResponseObject interface {
+	VisitRestartServicesResponse(w http.ResponseWriter) error
+}
+
+type RestartServices200JSONResponse ServiceStatusResponse
+
+func (response RestartServices200JSONResponse) VisitRestartServicesResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type RestartServices404JSONResponse ErrorResponse
+
+func (response RestartServices404JSONResponse) VisitRestartServicesResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 type GetStatusRequestObject struct {
 }
 
@@ -2626,6 +3246,32 @@ func (response GetStatus200JSONResponse) VisitGetStatusResponse(w http.ResponseW
 type GetStatus500JSONResponse ErrorResponse
 
 func (response GetStatus500JSONResponse) VisitGetStatusResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetClaudeUsageRequestObject struct {
+	Params GetClaudeUsageParams
+}
+
+type GetClaudeUsageResponseObject interface {
+	VisitGetClaudeUsageResponse(w http.ResponseWriter) error
+}
+
+type GetClaudeUsage200JSONResponse ClaudeUsageResponse
+
+func (response GetClaudeUsage200JSONResponse) VisitGetClaudeUsageResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetClaudeUsage500JSONResponse ErrorResponse
+
+func (response GetClaudeUsage500JSONResponse) VisitGetClaudeUsageResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(500)
 
@@ -2672,12 +3318,18 @@ type StrictServerInterface interface {
 	// Spawn a new Hydra agent
 	// (POST /api/projects/{project_id}/agents)
 	SpawnAgent(ctx context.Context, request SpawnAgentRequestObject) (SpawnAgentResponseObject, error)
+	// List archived (killed/merged) Hydra agents, newest first
+	// (GET /api/projects/{project_id}/agents/archived)
+	ListArchivedAgents(ctx context.Context, request ListArchivedAgentsRequestObject) (ListArchivedAgentsResponseObject, error)
 	// Kill a Hydra agent by ID
 	// (DELETE /api/projects/{project_id}/agents/{id})
 	KillAgent(ctx context.Context, request KillAgentRequestObject) (KillAgentResponseObject, error)
 	// Get a specific Hydra agent by ID
 	// (GET /api/projects/{project_id}/agents/{id})
 	GetAgent(ctx context.Context, request GetAgentRequestObject) (GetAgentResponseObject, error)
+	// Update a Hydra agent's mutable fields (currently its title)
+	// (PATCH /api/projects/{project_id}/agents/{id})
+	UpdateAgent(ctx context.Context, request UpdateAgentRequestObject) (UpdateAgentResponseObject, error)
 	// Get generated visual artifacts (e.g. screenshots) for both sides of a diff
 	// (GET /api/projects/{project_id}/agents/{id}/artifacts)
 	GetAgentArtifacts(ctx context.Context, request GetAgentArtifactsRequestObject) (GetAgentArtifactsResponseObject, error)
@@ -2696,6 +3348,12 @@ type StrictServerInterface interface {
 	// Merge a Hydra agent's branch into its base branch and kill it
 	// (POST /api/projects/{project_id}/agents/{id}/merge)
 	MergeAgent(ctx context.Context, request MergeAgentRequestObject) (MergeAgentResponseObject, error)
+	// Permanently delete an agent (kill it and erase every record, including its Claude session history)
+	// (DELETE /api/projects/{project_id}/agents/{id}/purge)
+	PurgeAgent(ctx context.Context, request PurgeAgentRequestObject) (PurgeAgentResponseObject, error)
+	// Mark an agent as read, clearing its unread-changes flag
+	// (POST /api/projects/{project_id}/agents/{id}/read)
+	MarkAgentRead(ctx context.Context, request MarkAgentReadRequestObject) (MarkAgentReadResponseObject, error)
 	// Restart a Hydra agent (kill and respawn with the same prompt)
 	// (POST /api/projects/{project_id}/agents/{id}/restart)
 	RestartAgent(ctx context.Context, request RestartAgentRequestObject) (RestartAgentResponseObject, error)
@@ -2720,9 +3378,18 @@ type StrictServerInterface interface {
 	// List the files tracked in the project's repository
 	// (GET /api/projects/{project_id}/repository/tree)
 	GetRepositoryTree(ctx context.Context, request GetRepositoryTreeRequestObject) (GetRepositoryTreeResponseObject, error)
+	// Get the live status of the project's supervised services
+	// (GET /api/projects/{project_id}/services)
+	GetServices(ctx context.Context, request GetServicesRequestObject) (GetServicesResponseObject, error)
+	// Restart the project's supervised services (picks up config changes)
+	// (POST /api/projects/{project_id}/services/restart)
+	RestartServices(ctx context.Context, request RestartServicesRequestObject) (RestartServicesResponseObject, error)
 	// Get system status
 	// (GET /api/status)
 	GetStatus(ctx context.Context, request GetStatusRequestObject) (GetStatusResponseObject, error)
+	// Get cached Claude Code subscription usage
+	// (GET /api/usage/claude)
+	GetClaudeUsage(ctx context.Context, request GetClaudeUsageRequestObject) (GetClaudeUsageResponseObject, error)
 	// Health check
 	// (GET /health)
 	CheckHealth(ctx context.Context, request CheckHealthRequestObject) (CheckHealthResponseObject, error)
@@ -2945,6 +3612,33 @@ func (sh *strictHandler) SpawnAgent(w http.ResponseWriter, r *http.Request, proj
 	}
 }
 
+// ListArchivedAgents operation middleware
+func (sh *strictHandler) ListArchivedAgents(w http.ResponseWriter, r *http.Request, projectId string, params ListArchivedAgentsParams) {
+	var request ListArchivedAgentsRequestObject
+
+	request.ProjectId = projectId
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListArchivedAgents(ctx, request.(ListArchivedAgentsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListArchivedAgents")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListArchivedAgentsResponseObject); ok {
+		if err := validResponse.VisitListArchivedAgentsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // KillAgent operation middleware
 func (sh *strictHandler) KillAgent(w http.ResponseWriter, r *http.Request, projectId string, id string) {
 	var request KillAgentRequestObject
@@ -2992,6 +3686,40 @@ func (sh *strictHandler) GetAgent(w http.ResponseWriter, r *http.Request, projec
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetAgentResponseObject); ok {
 		if err := validResponse.VisitGetAgentResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdateAgent operation middleware
+func (sh *strictHandler) UpdateAgent(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+	var request UpdateAgentRequestObject
+
+	request.ProjectId = projectId
+	request.Id = id
+
+	var body UpdateAgentJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateAgent(ctx, request.(UpdateAgentRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateAgent")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdateAgentResponseObject); ok {
+		if err := validResponse.VisitUpdateAgentResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -3164,6 +3892,60 @@ func (sh *strictHandler) MergeAgent(w http.ResponseWriter, r *http.Request, proj
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(MergeAgentResponseObject); ok {
 		if err := validResponse.VisitMergeAgentResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// PurgeAgent operation middleware
+func (sh *strictHandler) PurgeAgent(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+	var request PurgeAgentRequestObject
+
+	request.ProjectId = projectId
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.PurgeAgent(ctx, request.(PurgeAgentRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "PurgeAgent")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(PurgeAgentResponseObject); ok {
+		if err := validResponse.VisitPurgeAgentResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// MarkAgentRead operation middleware
+func (sh *strictHandler) MarkAgentRead(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+	var request MarkAgentReadRequestObject
+
+	request.ProjectId = projectId
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.MarkAgentRead(ctx, request.(MarkAgentReadRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "MarkAgentRead")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(MarkAgentReadResponseObject); ok {
+		if err := validResponse.VisitMarkAgentReadResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -3392,6 +4174,58 @@ func (sh *strictHandler) GetRepositoryTree(w http.ResponseWriter, r *http.Reques
 	}
 }
 
+// GetServices operation middleware
+func (sh *strictHandler) GetServices(w http.ResponseWriter, r *http.Request, projectId string) {
+	var request GetServicesRequestObject
+
+	request.ProjectId = projectId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetServices(ctx, request.(GetServicesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetServices")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetServicesResponseObject); ok {
+		if err := validResponse.VisitGetServicesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RestartServices operation middleware
+func (sh *strictHandler) RestartServices(w http.ResponseWriter, r *http.Request, projectId string) {
+	var request RestartServicesRequestObject
+
+	request.ProjectId = projectId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RestartServices(ctx, request.(RestartServicesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RestartServices")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RestartServicesResponseObject); ok {
+		if err := validResponse.VisitRestartServicesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // GetStatus operation middleware
 func (sh *strictHandler) GetStatus(w http.ResponseWriter, r *http.Request) {
 	var request GetStatusRequestObject
@@ -3409,6 +4243,32 @@ func (sh *strictHandler) GetStatus(w http.ResponseWriter, r *http.Request) {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetStatusResponseObject); ok {
 		if err := validResponse.VisitGetStatusResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetClaudeUsage operation middleware
+func (sh *strictHandler) GetClaudeUsage(w http.ResponseWriter, r *http.Request, params GetClaudeUsageParams) {
+	var request GetClaudeUsageRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetClaudeUsage(ctx, request.(GetClaudeUsageRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetClaudeUsage")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetClaudeUsageResponseObject); ok {
+		if err := validResponse.VisitGetClaudeUsageResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

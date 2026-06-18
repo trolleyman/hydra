@@ -5,39 +5,163 @@ import { formatError } from '../api/format_error'
 import type { AgentResponse } from '../api'
 import { AgentTerminal } from './AgentTerminal'
 import { DiffViewer } from '../DiffViewer'
-import { formatStartedAgo, agentStatusBadge, agentStatusDetail } from './AgentComponents'
-import { LoaderCircle, Merge, Trash2, Tag, RotateCcw, FolderSync, Copy, Check } from 'lucide-react'
+import { formatStartedAgo, agentStatusBadge, archivedEndStateBadge } from './AgentComponents'
+import { LoaderCircle, Merge, Trash2, Tag, RotateCcw, FolderSync, Copy, Check, Pencil, Archive, TerminalSquare } from 'lucide-react'
 import { Tooltip } from './Tooltip'
+import { renderMarkdown } from '../lib/markdown'
 
 import { useDialogStore } from '../stores/dialogStore'
 import { useToastStore } from '../stores/toastStore'
+import { useAgentStore } from '../stores/agentStore'
 
 function PromptBlock({ prompt }: { prompt: string }) {
-  const [expanded, setExpanded] = useState(false)
-  const isLong = prompt.length > 200 || prompt.split('\n').length > 3
+  // A box that scrolls when the prompt is tall; short prompts show no scrollbar
+  // since the content fits under the max-height. The negative top margin tucks
+  // it a little closer to the metadata above, and the bottom gradient softens
+  // the cutoff as a long prompt scrolls out of view.
+  return (
+    <div className="relative -mt-2 mb-6 p-4 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+      {/* A taller max-height means most prompts (incl. a code block or two)
+          don't need to scroll at all. */}
+      <div className="overflow-y-auto max-h-96">
+        <p className="text-sm text-gray-800 dark:text-gray-200 whitespace-pre-wrap">{renderMarkdown(prompt)}</p>
+      </div>
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-6 rounded-b-lg bg-gradient-to-t from-gray-50 dark:from-gray-800 to-transparent" />
+    </div>
+  )
+}
+
+// ArchivedAgentDetail is the read-only view for a finished (killed/merged) agent
+// retained in the history. There is no live session, so there is no terminal
+// (just a grayed placeholder) and no diff/kill/merge/restart actions. The
+// "Resume" affordance is shown but not yet wired — see PLAN #49.
+function ArchivedAgentDetail({ agent, projectId, onPurged }: { agent: AgentResponse; projectId: string | null; onPurged: (id: string) => void }) {
+  const [copied, setCopied] = useState(false)
+  const [purging, setPurging] = useState(false)
+  const endBadge = archivedEndStateBadge(agent.end_state)
+
+  function handlePurge() {
+    useDialogStore.getState().show({
+      title: 'Delete agent permanently',
+      message:
+        `Permanently delete "${agent.title || agent.id}"? This erases its record from the ` +
+        `history list and deletes its Claude session history. This cannot be undone.`,
+      type: 'warning',
+      showCancel: true,
+      onConfirm: async () => {
+        setPurging(true)
+        try {
+          await api.default.purgeAgent(projectId ?? '', agent.id)
+          // Drop it from the history list and navigate off the now-dead URL.
+          useAgentStore.getState().removeArchived(agent.id)
+          onPurged(agent.id)
+        } catch (e) {
+          useDialogStore.getState().show({
+            title: 'Delete Failed',
+            message: formatError(e),
+            type: 'error',
+          })
+        } finally {
+          setPurging(false)
+        }
+      },
+    })
+  }
+  const agentTypeClass =
+    agent.agent_type === 'claude'
+      ? 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300'
+      : agent.agent_type === 'gemini'
+        ? 'bg-teal-100 text-teal-800 dark:bg-teal-900/40 dark:text-teal-300'
+        : agent.agent_type === 'copilot'
+          ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300'
+          : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'
 
   return (
-    <div className="mb-6 p-4 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
-      <p className="text-xs text-gray-400 dark:text-gray-500 mb-1 uppercase tracking-wide font-medium">Prompt</p>
-      <div className="relative">
-        <div
-          className="overflow-hidden transition-[max-height] duration-300 ease-in-out"
-          style={{ maxHeight: isLong && !expanded ? '4.5rem' : '1000px' }}
-        >
-          <p className="text-sm text-gray-800 dark:text-gray-200 whitespace-pre-wrap">{prompt}</p>
+    <div className="flex-1 flex flex-col overflow-auto p-6 min-w-0 min-h-0" data-main-scroll>
+      <div className="w-full">
+        {/* Header */}
+        <div className="mb-6">
+          <div className="flex items-center gap-2 mb-2">
+            <Archive className="w-5 h-5 text-gray-400 dark:text-gray-500 shrink-0" />
+            <h1 className="text-2xl font-bold text-gray-600 dark:text-gray-300 truncate" title={agent.id}>
+              {agent.title || agent.id}
+            </h1>
+            <Tooltip content="Copy ID">
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(agent.id)
+                  setCopied(true)
+                  setTimeout(() => setCopied(false), 2000)
+                }}
+                className="w-6 h-6 flex items-center justify-center rounded-md border border-gray-200 text-gray-400 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-500 dark:hover:bg-gray-700 transition-colors cursor-pointer shrink-0"
+              >
+                {copied ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3 h-3" />}
+              </button>
+            </Tooltip>
+          </div>
+
+          {/* Metadata row */}
+          <div className="flex items-center gap-3 flex-wrap">
+            <span className={`text-xs px-2.5 py-0.5 rounded-full font-medium ${agentTypeClass}`}>
+              {agent.agent_type}
+            </span>
+            <span className="text-gray-300 dark:text-gray-600">|</span>
+            <span className={`text-xs px-2 py-0.5 rounded font-medium ${endBadge.className}`}>
+              {endBadge.label}
+            </span>
+            {agent.branch_name && (
+              <>
+                <span className="text-gray-300 dark:text-gray-600">|</span>
+                <span className="text-xs font-mono text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
+                  <Tag className="w-3.5 h-3.5" />
+                  {agent.branch_name}
+                </span>
+              </>
+            )}
+            {agent.created_at !== 0 && agent.created_at !== undefined && (
+              <>
+                <span className="text-gray-300 dark:text-gray-600">|</span>
+                <span className="text-xs text-gray-500 dark:text-gray-400">
+                  created {formatStartedAgo(agent.created_at)}
+                </span>
+              </>
+            )}
+          </div>
         </div>
-        {isLong && !expanded && (
-          <div className="absolute bottom-0 left-0 right-0 h-8 bg-gradient-to-t from-gray-50 dark:from-gray-800 to-transparent pointer-events-none" />
-        )}
+
+        {/* Prompt */}
+        {agent.prompt && <PromptBlock key={agent.id} prompt={agent.prompt} />}
+
+        {/* Grayed-out terminal placeholder with a (not-yet-wired) Resume button. */}
+        <div className="rounded-lg border border-dashed border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 p-8 flex flex-col items-center justify-center text-center gap-3">
+          <TerminalSquare className="w-8 h-8 text-gray-300 dark:text-gray-600" />
+          <div className="text-sm text-gray-500 dark:text-gray-400">
+            This agent was {endBadge.label}. Its session, worktree and branch were removed,
+            so there is no live terminal or diff to show.
+          </div>
+          <div className="mt-1 flex items-center gap-2">
+            <Tooltip content="Resuming archived agents isn't available yet (see PLAN #49)">
+              <button
+                disabled
+                className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md border border-gray-300 text-gray-400 dark:border-gray-600 dark:text-gray-500 cursor-not-allowed"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                Resume agent
+              </button>
+            </Tooltip>
+            <Tooltip content="Permanently delete this agent and its Claude session history">
+              <button
+                onClick={handlePurge}
+                disabled={purging}
+                className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md border border-red-300 text-red-600 hover:bg-red-50 dark:border-red-900/60 dark:text-red-400 dark:hover:bg-red-900/20 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {purging ? <LoaderCircle className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                Delete permanently
+              </button>
+            </Tooltip>
+          </div>
+        </div>
       </div>
-      {isLong && (
-        <button
-          onClick={() => setExpanded(e => !e)}
-          className="mt-1 text-xs text-blue-500 hover:text-blue-600 dark:text-blue-400 dark:hover:text-blue-300 transition-colors cursor-pointer"
-        >
-          {expanded ? 'Show less' : 'Show more'}
-        </button>
-      )}
     </div>
   )
 }
@@ -60,8 +184,16 @@ export function AgentDetail({
   const [updating, setUpdating] = useState(false)
   const [restarting, setRestarting] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [editingTitle, setEditingTitle] = useState(false)
+  const [titleDraft, setTitleDraft] = useState('')
+  const [savingTitle, setSavingTitle] = useState(false)
+  const updateAgentInStore = useAgentStore((s) => s.updateAgent)
   const [, setTick] = useState(0)
   const [diffRefreshTrigger, setDiffRefreshTrigger] = useState(0)
+  // Bumped only when the refresh was a new commit (HEAD moved), so the diff
+  // viewer re-snapshots the per-commit artifacts (screenshots) on commit — not
+  // on every uncommitted working-tree edit, which would rebuild them needlessly.
+  const [artifactRefreshTrigger, setArtifactRefreshTrigger] = useState(0)
   const scrollRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -138,6 +270,10 @@ export function AgentDetail({
         try {
           await api.default.killAgent(projectId ?? '', agent.id)
           useToastStore.getState().show({ message: `Agent "${agent.id}" killed`, type: 'info' })
+          // Optimistically move the agent into the archived history so it appears
+          // in the sidebar immediately, rather than vanishing until the next
+          // archived-list refetch (which only happens on a project switch).
+          useAgentStore.getState().upsertArchived({ ...agent, archived: true, end_state: 'killed', session_status: 'stopped', session_pid: 0 })
           onKilled(agent.id)
         } catch (err) {
           useDialogStore.getState().show({
@@ -177,6 +313,10 @@ export function AgentDetail({
             message: `Agent "${agent.id}" merged into ${agent.base_branch}`,
             type: 'success',
           })
+          // Optimistically move the agent into the archived history so it appears
+          // in the sidebar immediately, rather than vanishing until the next
+          // archived-list refetch (which only happens on a project switch).
+          useAgentStore.getState().upsertArchived({ ...agent, archived: true, end_state: 'merged', session_status: 'stopped', session_pid: 0 })
           onKilled(agent.id)
         } catch (err: any) {
           const errorData = (err.body && typeof err.body === 'object') ? err.body : err
@@ -255,6 +395,37 @@ export function AgentDetail({
     })
   }
 
+  function startEditingTitle() {
+    setTitleDraft(agent.title || agent.id)
+    setEditingTitle(true)
+  }
+
+  async function saveTitle() {
+    const next = titleDraft.trim()
+    // No-op edits (empty, or unchanged) just close the editor without a request.
+    if (!next || next === (agent.title || '')) {
+      setEditingTitle(false)
+      return
+    }
+    setSavingTitle(true)
+    try {
+      const updated = await api.default.updateAgent(projectId ?? '', agent.id, { title: next })
+      updateAgentInStore(updated)
+      setEditingTitle(false)
+    } catch (err) {
+      useToastStore.getState().show({ message: `Failed to rename agent: ${formatError(err)}`, type: 'error' })
+    } finally {
+      setSavingTitle(false)
+    }
+  }
+
+  // Archived agents are read-only: render the history view instead of the live
+  // terminal/diff. Placed after all hooks above so hook order stays stable when
+  // the same mounted component switches between a live and an archived agent.
+  if (agent.archived) {
+    return <ArchivedAgentDetail agent={agent} projectId={projectId} onPurged={onKilled} />
+  }
+
   return (
     <div ref={scrollRef} className="flex-1 flex flex-col overflow-auto p-6 min-w-0 min-h-0" data-main-scroll>
       <div className="w-full">
@@ -262,7 +433,43 @@ export function AgentDetail({
         <div className="mb-6">
           {/* Title row */}
           <div className="flex items-center gap-2 mb-2">
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">{agent.id}</h1>
+            {editingTitle ? (
+              <input
+                autoFocus
+                value={titleDraft}
+                disabled={savingTitle}
+                onChange={(e) => setTitleDraft(e.target.value)}
+                onBlur={saveTitle}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    void saveTitle()
+                  } else if (e.key === 'Escape') {
+                    e.preventDefault()
+                    setEditingTitle(false)
+                  }
+                }}
+                className="text-2xl font-bold text-gray-900 dark:text-gray-100 bg-transparent border-b border-blue-400 focus:outline-none min-w-0 flex-1 disabled:opacity-50"
+              />
+            ) : (
+              <h1
+                onDoubleClick={startEditingTitle}
+                className="text-2xl font-bold text-gray-900 dark:text-gray-100 truncate"
+                title={agent.id}
+              >
+                {agent.title || agent.id}
+              </h1>
+            )}
+            {!editingTitle && (
+              <Tooltip content="Rename agent">
+                <button
+                  onClick={startEditingTitle}
+                  className="w-6 h-6 flex items-center justify-center rounded-md border border-gray-200 text-gray-400 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-500 dark:hover:bg-gray-700 transition-colors cursor-pointer shrink-0"
+                >
+                  <Pencil className="w-3 h-3" />
+                </button>
+              </Tooltip>
+            )}
             <Tooltip content="Copy ID">
               <button
                 onClick={() => {
@@ -357,13 +564,6 @@ export function AgentDetail({
             )}
           </div>
 
-          {/* Live activity / last message */}
-          {agentStatusDetail(agent.agent_status) && (
-            <div className="mt-2 text-xs text-gray-500 dark:text-gray-400 truncate">
-              {agent.agent_status?.status === 'running' ? '⏳ ' : '💬 '}
-              {agentStatusDetail(agent.agent_status)}
-            </div>
-          )}
         </div>
 
         {/* Prompt */}
@@ -375,11 +575,14 @@ export function AgentDetail({
           projectId={projectId}
           isEphemeral={agent.ephemeral}
           onRefresh={onRefresh}
-          onDiffRefresh={() => setDiffRefreshTrigger((t) => t + 1)}
+          onDiffRefresh={(headMoved) => {
+            setDiffRefreshTrigger((t) => t + 1)
+            if (headMoved) setArtifactRefreshTrigger((t) => t + 1)
+          }}
         />
 
         {/* Diff viewer */}
-        <DiffViewer agent={agent} projectId={projectId} externalRefreshTrigger={diffRefreshTrigger} />
+        <DiffViewer agent={agent} projectId={projectId} externalRefreshTrigger={diffRefreshTrigger} externalArtifactRefresh={artifactRefreshTrigger} />
       </div>
     </div>
   )

@@ -9,7 +9,7 @@
 //      regenerated) the stale entry is ignored, so the card falls back to its
 //      status-derived defaults instead of restoring a now-irrelevant toggle.
 
-import { ARTIFACT_PREFS_PREFIX, artifactPrefsKey, readLocal, writeLocal } from './storage'
+import { ARTIFACT_PREFS_PREFIX, ARTIFACT_TAG_FILTER_PREFIX, artifactPrefsKey, artifactTagFilterKey, readLocal, writeLocal } from './storage'
 
 export type ArtifactPrefs = {
   collapsed?: boolean
@@ -62,6 +62,45 @@ export function saveArtifactPrefs(
   writeLocal(artifactPrefsKey(projectId, agentId, name), JSON.stringify(value))
 }
 
+// The artifact tag filter, shared across an agent's cards. Every value is shown
+// (every checkbox on) by default; the filter records only what the user has
+// turned OFF. `scoped` maps a label category (e.g. "theme") to its hidden values
+// (e.g. ["dark"]) — a file is dropped if its value for that category is among
+// them; an absent or empty list means "nothing hidden" (show all). `free` is the
+// set of hidden free-form tags. An empty filter (no scoped values, no free tags)
+// means "show everything".
+export type ArtifactTagFilter = {
+  scoped: Record<string, string[]>
+  free: string[]
+}
+
+export function loadTagFilter(projectId: string | null, agentId: string): ArtifactTagFilter {
+  const raw = readLocal(artifactTagFilterKey(projectId, agentId))
+  if (!raw) return { scoped: {}, free: [] }
+  try {
+    const parsed = JSON.parse(raw) as { scoped?: unknown; free?: unknown }
+    const scoped: Record<string, string[]> = {}
+    if (parsed.scoped && typeof parsed.scoped === 'object') {
+      // Normalize each category to a string[]. Tolerate the legacy single-value
+      // shape (Record<string, string>) by wrapping a non-empty string in a list.
+      for (const [cat, v] of Object.entries(parsed.scoped as Record<string, unknown>)) {
+        if (Array.isArray(v)) scoped[cat] = v.filter((x): x is string => typeof x === 'string')
+        else if (typeof v === 'string' && v) scoped[cat] = [v]
+      }
+    }
+    return {
+      scoped,
+      free: Array.isArray(parsed.free) ? parsed.free.filter((t): t is string => typeof t === 'string') : [],
+    }
+  } catch {
+    return { scoped: {}, free: [] }
+  }
+}
+
+export function saveTagFilter(projectId: string | null, agentId: string, filter: ArtifactTagFilter): void {
+  writeLocal(artifactTagFilterKey(projectId, agentId), JSON.stringify(filter))
+}
+
 // Drop expired artifact-pref entries. Cheap to call once on app boot; iterating
 // localStorage is fine given the small number of keys Hydra writes.
 export function pruneArtifactPrefs(): void {
@@ -71,6 +110,9 @@ export function pruneArtifactPrefs(): void {
     for (let i = 0; i < localStorage.length; i++) {
       const k = localStorage.key(i)
       if (!k || !k.startsWith(ARTIFACT_PREFS_PREFIX)) continue
+      // The tag-filter key shares the artifact prefix but is a different shape
+      // (no status/timestamp), so don't treat it as a stale/corrupt prefs entry.
+      if (k.startsWith(ARTIFACT_TAG_FILTER_PREFIX)) continue
       const stored = readStored(k)
       if (!stored || now - stored.t > ARTIFACT_TTL_MS) stale.push(k)
     }

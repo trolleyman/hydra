@@ -1,12 +1,14 @@
-import { createRootRoute, Link, Outlet, useNavigate, useParams } from '@tanstack/react-router'
+import { createRootRoute, Link, Outlet, useNavigate, useParams, useLocation } from '@tanstack/react-router'
 import { useEffect, useRef, useState, useCallback, type WheelEvent } from 'react'
 import { api } from '../stores/apiClient'
 import { useProjectStore } from '../stores/projectStore'
-import { useAgentStore } from '../stores/agentStore'
+import { useAgentStore, ARCHIVED_PAGE_SIZE } from '../stores/agentStore'
+import { usePageActive } from '../lib/usePageActive'
 import type { ProjectInfo, AgentResponse } from '../api'
 import { ApiError, ErrorResponse } from '../api'
 import { formatError } from '../api/format_error'
-import { Sun, Moon, Monitor, ChevronDown, Folder, FolderGit2, Plus, Settings, Check, X } from 'lucide-react'
+import { Sun, Moon, Monitor, ChevronDown, ChevronRight, Folder, FolderGit2, FolderOpen, Plus, Settings, Check, X, LoaderCircle, AlertTriangle } from 'lucide-react'
+import { folderPickerAvailable, openFolderPicker } from '../api/folderPicker'
 import { AgentSidebarItem } from '../components/AgentComponents'
 import { SpawnForm } from '../components/SpawnForm'
 
@@ -14,6 +16,7 @@ import { Dialog } from '../components/Dialog'
 import { Toaster } from '../components/Toaster'
 import { NotFound } from '../components/NotFound'
 import { Tooltip } from '../components/Tooltip'
+import { ClaudeUsageIndicator } from '../components/ClaudeUsageIndicator'
 import { TrustProjectModal } from '../components/TrustProjectModal'
 
 export const Route = createRootRoute({
@@ -24,7 +27,8 @@ export const Route = createRootRoute({
 import { useDialogStore } from '../stores/dialogStore'
 import { pruneArtifactPrefs } from '../lib/artifactPrefs'
 import { pruneAgentViewPrefs } from '../lib/agentViewPrefs'
-import { StorageKeys, selectedAgentKey, readLocal, writeLocal, readTrustedProjects, trustProject } from '../lib/storage'
+import { StorageKeys, readLocal, writeLocal, readTrustedProjects, trustProject, archivedCollapsedKey } from '../lib/storage'
+import { loadProjectView, saveProjectView, type ProjectView } from '../lib/projectView'
 
 function formatSpawnedAgo(ms: number): string {
   const seconds = Math.floor(ms / 1000)
@@ -41,7 +45,7 @@ function formatSpawnedAgo(ms: number): string {
 
 const SIDEBAR_MIN = 160
 const SIDEBAR_MAX = 600
-const SIDEBAR_DEFAULT = 224
+const SIDEBAR_DEFAULT = 264
 
 // When the agents sidebar can't consume a wheel event (no scrollbar, or already
 // at the top/bottom edge), forward the scroll to the main content area (e.g. the
@@ -59,6 +63,45 @@ function forwardSidebarWheelToMain(e: WheelEvent<HTMLDivElement>) {
   if (main && main.scrollHeight > main.clientHeight) {
     main.scrollTop += e.deltaY
   }
+}
+
+// ── Service Health Warning ─────────────────────────────────────────────────────
+// Polls the selected project's service status and shows a warning icon (next to
+// the project name) when any supervised service has failed. Tooltip lists them.
+
+function ServiceHealthWarning({ projectId }: { projectId: string | null }) {
+  const [failed, setFailed] = useState<string[]>([])
+
+  useEffect(() => {
+    setFailed([])
+    if (!projectId) return
+    let active = true
+    const tick = async () => {
+      try {
+        const resp = await api.default.getServices(projectId)
+        if (active) setFailed(resp.services.filter((s) => s.state === 'failed').map((s) => s.name))
+      } catch {
+        // best-effort
+      }
+    }
+    void tick()
+    const id = setInterval(tick, 5000)
+    return () => {
+      active = false
+      clearInterval(id)
+    }
+  }, [projectId])
+
+  if (failed.length === 0) return null
+  return (
+    <span
+      className="shrink-0 inline-flex"
+      aria-label="service failure"
+      title={`Service${failed.length > 1 ? 's' : ''} failed: ${failed.join(', ')}. Open Settings to restart.`}
+    >
+      <AlertTriangle className="w-3.5 h-3.5 text-amber-500" />
+    </span>
+  )
 }
 
 // ── Project Dropdown ───────────────────────────────────────────────────────────
@@ -83,11 +126,21 @@ function ProjectDropdown({
   const [newPath, setNewPath] = useState('')
   const [adding, setAdding] = useState(false)
   const [addError, setAddError] = useState<string | null>(null)
+  // Native folder picker: only offered to local clients on a system with a
+  // dialog tool (the daemon checks both). `browsing` is true while the OS
+  // dialog is open and we're awaiting the user's pick.
+  const [pickerAvailable, setPickerAvailable] = useState(false)
+  const [browsing, setBrowsing] = useState(false)
   const [hoveredId, setHoveredId] = useState<string | null>(null)
   const dropdownRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
   const selected = projects.find((p) => p.id === selectedId)
+  // Unread agents sitting in projects other than the one you're looking at —
+  // drives the dot on the folder button ("updates waiting elsewhere").
+  const otherProjectsUnread = projects
+    .filter((p) => p.id !== selectedId)
+    .reduce((n, p) => n + (p.unread_count ?? 0), 0)
 
   useEffect(() => {
     if (!open) return
@@ -107,6 +160,34 @@ function ProjectDropdown({
       inputRef.current?.focus()
     }
   }, [showAddInput])
+
+  useEffect(() => {
+    let cancelled = false
+    void folderPickerAvailable().then((a) => {
+      if (!cancelled) setPickerAvailable(a)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  // Open the native OS folder dialog, then add the picked project immediately.
+  async function handleBrowse() {
+    if (browsing) return
+    setBrowsing(true)
+    setAddError(null)
+    try {
+      const res = await openFolderPicker()
+      if (res.cancelled || !res.path) return
+      await onAddProject(res.path)
+      setShowAddInput(false)
+      setOpen(false)
+    } catch (err) {
+      setAddError(formatError(err))
+    } finally {
+      setBrowsing(false)
+    }
+  }
 
   async function handleAdd(e: React.FormEvent) {
     e.preventDefault()
@@ -150,11 +231,21 @@ function ProjectDropdown({
   return (
     <div ref={dropdownRef} className="relative shrink-0">
       <button
+        aria-label="Select project"
         onClick={() => { setOpen((o) => !o); setShowAddInput(false); setAddError(null) }}
         className="flex items-center gap-1.5 h-8 px-2.5 rounded-md text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors max-w-xs cursor-pointer"
       >
-        <Folder className="w-3.5 h-3.5" />
+        <span className="relative shrink-0">
+          <Folder className="w-3.5 h-3.5" />
+          {otherProjectsUnread > 0 && (
+            <span
+              aria-label="updates waiting in other projects"
+              className="absolute -top-1 -right-1 w-1.5 h-1.5 rounded-full bg-sky-400 ring-2 ring-white dark:ring-gray-900"
+            />
+          )}
+        </span>
         <span className="truncate max-w-[160px]">{selected?.name ?? 'Select project'}</span>
+        <ServiceHealthWarning projectId={selectedId} />
         <ChevronDown className="w-3 h-3" />
       </button>
 
@@ -184,6 +275,12 @@ function ProjectDropdown({
                     <div className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{p.name}</div>
                     <div className="text-xs font-mono text-gray-400 dark:text-gray-500 truncate">{p.path}</div>
                   </div>
+                  {(p.unread_count ?? 0) > 0 && (
+                    <span
+                      aria-label={`${p.unread_count} agents with unread changes`}
+                      className="shrink-0 mt-1.5 w-2 h-2 rounded-full bg-sky-500"
+                    />
+                  )}
                   {p.id === selectedId && hoveredId !== p.id && (
                     <Check className="w-3.5 h-3.5 text-blue-500 shrink-0 mt-0.5" />
                   )}
@@ -201,13 +298,28 @@ function ProjectDropdown({
           )}
 
           <div className="py-1">
+            {pickerAvailable && !showAddInput && (
+              <>
+                <button
+                  onClick={handleBrowse}
+                  disabled={browsing}
+                  className="w-full flex items-center gap-2 px-3 py-2 cursor-pointer text-left text-sm text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors disabled:opacity-50 disabled:cursor-default"
+                >
+                  <FolderOpen className="w-3 h-3" />
+                  {browsing ? 'Waiting for folder…' : 'Browse…'}
+                </button>
+                {addError && (
+                  <p className="text-[10px] text-red-500 px-3 pb-1 leading-snug">{addError}</p>
+                )}
+              </>
+            )}
             {!showAddInput ? (
               <button
-                onClick={() => setShowAddInput(true)}
+                onClick={() => { setShowAddInput(true); setAddError(null) }}
                 className="w-full flex items-center gap-2 px-3 py-2 cursor-pointer text-left text-sm text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
               >
                 <Plus className="w-3 h-3" />
-                Open folder…
+                {pickerAvailable ? 'Enter path manually…' : 'Open folder…'}
               </button>
             ) : (
               <form onSubmit={handleAdd} className="px-3 py-2">
@@ -280,14 +392,20 @@ function loadThemeMode(): ThemeMode {
   return 'system'
 }
 
-// Per-project memory of the last-selected agent, so switching back to a project
-// restores its agent view rather than dropping you on the bare project page.
-function loadSelectedAgentId(projectId: string): string | null {
-  return readLocal(selectedAgentKey(projectId))
-}
-
-function saveSelectedAgentId(projectId: string, agentId: string | null) {
-  writeLocal(selectedAgentKey(projectId), agentId)
+// Derive the current view from the active route so it can be persisted as the
+// project's last-open view. Agent routes set agentId; the repository browser is
+// recognised by its path (and its splat preserved so a deep file path restores);
+// anything else is the bare project page.
+function currentViewFromRoute(projectId: string, agentId: string | undefined, pathname: string): ProjectView {
+  if (agentId != null) return { kind: 'agent', agentId }
+  const repoBase = `/project/${projectId}/repository`
+  if (pathname === repoBase || pathname.startsWith(`${repoBase}/`)) {
+    const path = pathname.startsWith(`${repoBase}/`)
+      ? decodeURIComponent(pathname.slice(repoBase.length + 1))
+      : ''
+    return { kind: 'repository', path }
+  }
+  return { kind: 'project' }
 }
 
 function RootLayout() {
@@ -295,6 +413,12 @@ function RootLayout() {
   // Guards the one-time redirect from the bare root path to the selected
   // project (see effect below).
   const didAutoNavigate = useRef(false)
+  // When restoring a project view lands on the bare project page *because* the
+  // remembered agent had unread changes (see restoreProjectView), this holds
+  // that project id for one persist cycle so the deflection doesn't overwrite
+  // the remembered agent with `{ kind: 'project' }`. The memory is kept so a
+  // later switch back restores the agent once it's been read.
+  const deflectedUnreadProject = useRef<string | null>(null)
   const [, setTick] = useState(0)
   const [development, setDevelopment] = useState(false)
   const [restarting, setRestarting] = useState(false)
@@ -304,12 +428,66 @@ function RootLayout() {
   const [trustedProjectIds, setTrustedProjectIds] = useState<Set<string>>(() => readTrustedProjects())
 
   const { projects, selectedProjectId, setProjects, setSelectedProjectId, setSystemStatus } = useProjectStore()
-  const { agents, setAgents, addAgent } = useAgentStore()
+  const { agents, setAgents, addAgent, markRead } = useAgentStore()
+  const archived = useAgentStore((s) => s.archived)
+  const archivedLoading = useAgentStore((s) => s.archivedLoading)
+  const archivedHasMore = useAgentStore((s) => s.archivedHasMore)
+  const resetArchived = useAgentStore((s) => s.resetArchived)
+  const setArchivedLoading = useAgentStore((s) => s.setArchivedLoading)
+  const setArchivedFirstPage = useAgentStore((s) => s.setArchivedFirstPage)
+  const appendArchived = useAgentStore((s) => s.appendArchived)
   const dialog = useDialogStore()
   const navigate = useNavigate()
+  const location = useLocation()
   const routeParams = useParams({ strict: false }) as { projectId?: string; agentId?: string }
   const currentProjectId = routeParams.projectId ?? selectedProjectId
   const selectedAgentId = routeParams.agentId
+  // Whether the user actually has this page in front of them (foreground tab +
+  // focused window). Gates the unread auto-clear so a backgrounded page doesn't
+  // silently dismiss agents the user hasn't actually looked at.
+  const pageActive = usePageActive()
+
+  // Navigate to a project's remembered view (agent / repository / bare project).
+  // Used by the boot restore and the project-switch dropdown. A remembered agent
+  // that no longer exists is corrected to the project page by the agent page
+  // itself (which redirects + resets the memory once a getAgent lookup confirms
+  // it's truly gone), so it's safe to route to it optimistically here without
+  // first waiting for the agent list.
+  const navigateToProjectView = useCallback((projectId: string, view: ProjectView) => {
+    if (view.kind === 'agent') {
+      navigate({ to: '/project/$projectId/agent/$agentId', params: { projectId, agentId: view.agentId } })
+    } else if (view.kind === 'repository' && view.path) {
+      navigate({ to: '/project/$projectId/repository/$', params: { projectId, _splat: view.path } })
+    } else if (view.kind === 'repository') {
+      navigate({ to: '/project/$projectId/repository', params: { projectId } })
+    } else {
+      navigate({ to: '/project/$projectId', params: { projectId } })
+    }
+  }, [navigate])
+
+  // Restore a project's remembered view when switching into it — but never
+  // auto-open a remembered agent that currently has unread changes. Opening an
+  // agent clears its unread dot (the auto-clear effect below), so silently
+  // restoring an unread agent on a project switch would "read" a notification
+  // the user never looked at. In that case land on the bare project page
+  // instead; the agent stays in the sidebar (dot lit) for the user to open
+  // deliberately, and its remembered view is preserved (deflectedUnreadProject)
+  // so a later switch back restores it once read. A remembered agent that's
+  // already read — or whose lookup fails (gone / offline) — is opened as before;
+  // the agent page self-corrects a truly-dead one.
+  const restoreProjectView = useCallback(async (projectId: string, view: ProjectView) => {
+    if (view.kind === 'agent') {
+      try {
+        const agent = await api.default.getAgent(projectId, view.agentId)
+        if (agent.has_unread_changes) {
+          deflectedUnreadProject.current = projectId
+          navigate({ to: '/project/$projectId', params: { projectId } })
+          return
+        }
+      } catch { /* lookup failed — fall through and open optimistically */ }
+    }
+    navigateToProjectView(projectId, view)
+  }, [navigate, navigateToProjectView])
 
   const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
     const saved = readLocal(StorageKeys.sidebarWidth)
@@ -317,6 +495,28 @@ function RootLayout() {
     return SIDEBAR_DEFAULT
   })
   const sidebarWidthRef = useRef(sidebarWidth)
+  // The Archived section's collapse state is per-project (long archives differ
+  // wildly between projects) and persisted; expanded by default. Re-read it when
+  // the selected project changes; absence of the key means expanded.
+  const [archivedCollapsed, setArchivedCollapsed] = useState(false)
+  useEffect(() => {
+    if (!currentProjectId) { setArchivedCollapsed(false); return }
+    setArchivedCollapsed(readLocal(archivedCollapsedKey(currentProjectId)) === '1')
+  }, [currentProjectId])
+
+  // Toggle + persist the per-project collapse state. Collapsing hides the whole
+  // archived list, so if the currently open agent is an archived one it would
+  // disappear from the sidebar while still showing — deselect it back to the
+  // project page so the selection never points at a hidden item.
+  const toggleArchivedCollapsed = useCallback(() => {
+    if (!currentProjectId) return
+    const next = !archivedCollapsed
+    setArchivedCollapsed(next)
+    writeLocal(archivedCollapsedKey(currentProjectId), next ? '1' : null)
+    if (next && selectedAgentId && archived.some((a) => a.id === selectedAgentId)) {
+      navigate({ to: '/project/$projectId', params: { projectId: currentProjectId } })
+    }
+  }, [currentProjectId, archivedCollapsed, selectedAgentId, archived, navigate])
 
   const handleSidebarResizeStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
@@ -389,6 +589,92 @@ function RootLayout() {
     if (!currentProjectId) setAgents([])
   }, [currentProjectId, setAgents])
 
+  // Archived (killed/merged) history list. Loaded lazily and paginated for
+  // infinite scroll — it is historical, so unlike the live list it is not
+  // polled. Reset + load the first page whenever the selected project changes.
+  const archivedLoadingRef = useRef(false)
+  useEffect(() => {
+    resetArchived()
+    if (!currentProjectId) return
+    let cancelled = false
+    archivedLoadingRef.current = true
+    setArchivedLoading(true)
+    api.default.listArchivedAgents(currentProjectId, ARCHIVED_PAGE_SIZE, 0)
+      .then((page) => { if (!cancelled) setArchivedFirstPage(page) })
+      .catch(() => { if (!cancelled) setArchivedLoading(false) })
+      .finally(() => { archivedLoadingRef.current = false })
+    return () => { cancelled = true }
+  }, [currentProjectId, resetArchived, setArchivedLoading, setArchivedFirstPage])
+
+  const loadMoreArchived = useCallback(() => {
+    if (!currentProjectId || archivedLoadingRef.current) return
+    const { archivedHasMore: hasMore, archived: current } = useAgentStore.getState()
+    if (!hasMore) return
+    archivedLoadingRef.current = true
+    setArchivedLoading(true)
+    api.default.listArchivedAgents(currentProjectId, ARCHIVED_PAGE_SIZE, current.length)
+      .then((page) => appendArchived(page))
+      .catch(() => setArchivedLoading(false))
+      .finally(() => { archivedLoadingRef.current = false })
+  }, [currentProjectId, setArchivedLoading, appendArchived])
+
+  // Trigger the next archived page when the sentinel scrolls into view.
+  const archivedSentinelRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    const el = archivedSentinelRef.current
+    if (!el || !archivedHasMore) return
+    const obs = new IntersectionObserver((entries) => {
+      if (entries.some((e) => e.isIntersecting)) loadMoreArchived()
+    }, { rootMargin: '120px' })
+    obs.observe(el)
+    return () => obs.disconnect()
+  }, [archivedHasMore, loadMoreArchived, archived.length])
+
+  // Auto-clear an agent's unread dot when it's the one currently open AND the
+  // page is actually in front of the user. Covers both opening an unread agent
+  // (the click) and an already-open agent transitioning to waiting/finished
+  // while you watch it (the next poll marks it unread, this clears it again).
+  // If the page isn't active (backgrounded tab / unfocused window), we leave the
+  // dot lit so the change isn't silently dismissed — `pageActive` is a dep, so
+  // returning to the page re-runs this and clears it then. Optimistic locally +
+  // a fire-and-forget POST.
+  useEffect(() => {
+    if (!pageActive || !currentProjectId || !selectedAgentId) return
+    const sel = agents.find((a) => a.id === selectedAgentId)
+    if (sel?.has_unread_changes) {
+      markRead(selectedAgentId)
+      api.default.markAgentRead(currentProjectId, selectedAgentId).catch(() => {})
+    }
+  }, [agents, selectedAgentId, currentProjectId, markRead, pageActive])
+
+  // Reflect unread changes in the browser tab title with a leading dot, so a
+  // backgrounded tab signals "something's waiting" without the page in focus.
+  // We use a plain U+25CF glyph (not a color emoji like 🔵) so it renders as a
+  // small, consistent dot across platforms — Linux/Chrome draws emoji via Noto
+  // Color Emoji as an oversized glossy ball that looks out of place in a tab.
+  // We count the live (optimistically-cleared) agents for the current project
+  // and trust the backend per-project counts for the others — so the dot tracks
+  // the same state as the in-app indicators and clears the moment they do.
+  const currentProjectUnread = agents.filter((a) => a.has_unread_changes).length
+  const otherProjectsUnread = projects
+    .filter((p) => p.id !== currentProjectId)
+    .reduce((n, p) => n + (p.unread_count ?? 0), 0)
+  const anyUnread = currentProjectUnread + otherProjectsUnread > 0
+  // Build the rest of the title from the current view: project, then the open
+  // agent (its title, falling back to id) or the repository browser. Computed as
+  // primitive strings so the effect only fires when the displayed text changes.
+  const titleProjectName = projects.find((p) => p.id === currentProjectId)?.name
+  const titleAgent = selectedAgentId ? agents.find((a) => a.id === selectedAgentId) : undefined
+  const titleAgentName = titleAgent ? titleAgent.title || titleAgent.id : undefined
+  const onRepository = /\/repository(\/|$)/.test(location.pathname)
+  useEffect(() => {
+    const parts = [anyUnread ? '● Hydra' : 'Hydra']
+    if (titleProjectName) parts.push(titleProjectName)
+    if (titleAgentName) parts.push(titleAgentName)
+    else if (onRepository) parts.push('Repository')
+    document.title = parts.join(' · ')
+  }, [anyUnread, titleProjectName, titleAgentName, onRepository])
+
   useEffect(() => {
     let cancelled = false
     let ticker: ReturnType<typeof setInterval> | null = null
@@ -458,42 +744,46 @@ function RootLayout() {
     }
     if (selectedProjectId != null && projects.some((p) => p.id === selectedProjectId)) {
       didAutoNavigate.current = true
-      // Restore the agent that was last open in this project, if any (read the
-      // saved id up front so the save effect below — which momentarily sees the
-      // bare project route — can't wipe it before we navigate).
-      const savedAgentId = loadSelectedAgentId(selectedProjectId)
-      if (savedAgentId) {
-        navigate({ to: '/project/$projectId/agent/$agentId', params: { projectId: selectedProjectId, agentId: savedAgentId } })
-      } else {
-        navigate({ to: '/project/$projectId', params: { projectId: selectedProjectId } })
-      }
+      // Restore the view (agent / repository / project) last open in this
+      // project. Read up front so the persist effect below — which momentarily
+      // sees the bare project route — can't overwrite it before we navigate.
+      restoreProjectView(selectedProjectId, loadProjectView(selectedProjectId))
     }
-  }, [selectedProjectId, projects, navigate])
+  }, [selectedProjectId, projects, restoreProjectView])
 
-  // Persist which agent is selected per project so switching back restores it.
-  // Keyed off the actual route params (not currentProjectId, which falls back to
-  // the stored project on "/" and would let this wipe the memory before the boot
-  // restore below runs). Single writer: clear on the bare project page, and avoid
-  // persisting an id that isn't in the project's loaded agent list — so a
-  // killed/expired agent doesn't keep routing you to "not found".
+  // Persist the current view per project so switching back (or reloading)
+  // restores it. Keyed off the actual route params (not currentProjectId, which
+  // falls back to the stored project on "/" and would let this overwrite the
+  // memory before the boot restore above runs). Single writer for the three view
+  // kinds: agent, repository (path included), and the bare project page.
+  //
+  // Correcting a remembered-but-dead agent is deliberately NOT done here. A
+  // killed/merged head is now a valid read-only *archived* page, so it must not
+  // be bounced; and the only place that can distinguish a genuinely-gone agent
+  // from an archived one whose record simply hasn't loaded into the sidebar list
+  // yet (deep in the paginated history, or on a cold load) is the agent page
+  // itself — it does a one-shot getAgent and, only if truly missing, redirects
+  // off the dead agent and resets this memory to the project page.
   useEffect(() => {
     const projectId = routeParams.projectId
     if (!projectId) return // not on a project route ("/", "/settings") — leave storage alone
     const agentId = routeParams.agentId
+    // The deflection from restoreProjectView lands on the bare project page,
+    // but that isn't a deliberate navigation — skip it so the remembered agent
+    // survives (one cycle only, then resume normal persistence). If the user
+    // has already moved on to an agent, just drop the stale marker and persist
+    // as usual.
+    if (deflectedUnreadProject.current === projectId) {
+      deflectedUnreadProject.current = null
+      if (agentId == null) return
+    }
     if (agentId == null) {
-      saveSelectedAgentId(projectId, null)
+      // Repository browser or bare project page — persisted verbatim.
+      saveProjectView(projectId, currentViewFromRoute(projectId, undefined, location.pathname))
       return
     }
-    // `agents` is loaded for this project once every entry's project_path matches
-    // it; until then (e.g. mid project-switch) keep the optimistic value.
-    const proj = projects.find((p) => p.id === projectId)
-    const agentsLoaded = proj != null && agents.length > 0 && agents.every((a) => a.project_path === proj.path)
-    if (agentsLoaded && !agents.some((a) => a.id === agentId)) {
-      saveSelectedAgentId(projectId, null)
-    } else {
-      saveSelectedAgentId(projectId, agentId)
-    }
-  }, [routeParams.projectId, routeParams.agentId, agents, projects])
+    saveProjectView(projectId, { kind: 'agent', agentId })
+  }, [routeParams.projectId, routeParams.agentId, location.pathname])
 
   // Drop expired per-artifact and per-agent-view UI prefs once on boot.
   useEffect(() => { pruneArtifactPrefs(); pruneAgentViewPrefs() }, [])
@@ -595,7 +885,12 @@ function RootLayout() {
 
   function handleSpawned(agent: AgentResponse) {
     addAgent(agent)
-    if (currentProjectId) {
+    // Spawn in the background: only jump to the new agent if the user isn't
+    // already focused on one. When an agent is open, leave it in front so a
+    // spawn from the sidebar doesn't yank them away from their current work —
+    // the new agent just appears in the list. If nothing is selected (e.g. the
+    // project home / repository view), select it so the spawn isn't a no-op.
+    if (currentProjectId && !selectedAgentId) {
       navigate({ to: '/project/$projectId/agent/$agentId', params: { projectId: currentProjectId, agentId: agent.id } })
     }
   }
@@ -649,15 +944,11 @@ function RootLayout() {
               navigate({ to: '/project/$projectId/settings', params: { projectId: id } })
               return
             }
-            // Restore the agent last open in the project we're switching to;
-            // navigate straight to it so the agent view comes back, not the bare
-            // project page. Falls back to the project page when none is remembered.
-            const savedAgentId = loadSelectedAgentId(id)
-            if (savedAgentId) {
-              navigate({ to: '/project/$projectId/agent/$agentId', params: { projectId: id, agentId: savedAgentId } })
-            } else {
-              navigate({ to: '/project/$projectId', params: { projectId: id } })
-            }
+            // Restore the view (agent / repository / project) last open in the
+            // project we're switching to, so it comes back rather than the bare
+            // project page — but don't auto-open a remembered agent that has
+            // unread changes (see restoreProjectView).
+            restoreProjectView(id, loadProjectView(id))
           }}
           onDeselect={() => {
             setSelectedProjectId(null)
@@ -674,6 +965,7 @@ function RootLayout() {
         )}
 
         <div className="ml-auto flex items-center gap-3 shrink-0 self-center">
+          <ClaudeUsageIndicator />
           {spawnedAt.current !== null && (
             <Tooltip content={`Spawned at ${new Date(spawnedAt.current).toUTCString()}`}>
               <span className="text-xs text-gray-400 dark:text-gray-500 cursor-default hidden md:block">
@@ -735,15 +1027,31 @@ function RootLayout() {
           {/* Repository view — sits between the spawn box and the agents list */}
           <div className="px-2 pt-2 pb-1 border-b border-gray-100 dark:border-gray-700">
             {currentProjectId ? (
-              <Link
-                to="/project/$projectId/repository"
-                params={{ projectId: currentProjectId }}
-                className="flex items-center gap-2 px-2.5 py-2 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-                activeProps={{ className: 'flex items-center gap-2 px-2.5 py-2 rounded-lg text-sm font-medium bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300' }}
-              >
-                <FolderGit2 className="w-4 h-4 shrink-0" />
-                Repository
-              </Link>
+              (() => {
+                const repositoryActive = /\/repository(\/|$)/.test(location.pathname)
+                return (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (repositoryActive) {
+                        // Toggle off: clicking the active Repository button returns
+                        // to the project home screen, mirroring agent deselection.
+                        navigate({ to: '/project/$projectId', params: { projectId: currentProjectId } })
+                      } else {
+                        navigate({ to: '/project/$projectId/repository', params: { projectId: currentProjectId } })
+                      }
+                    }}
+                    className={
+                      repositoryActive
+                        ? 'w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-sm font-medium bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
+                        : 'w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors'
+                    }
+                  >
+                    <FolderGit2 className="w-4 h-4 shrink-0" />
+                    Repository
+                  </button>
+                )
+              })()
             ) : (
               <span className="flex items-center gap-2 px-2.5 py-2 rounded-lg text-sm font-medium text-gray-400 dark:text-gray-600 cursor-not-allowed">
                 <FolderGit2 className="w-4 h-4 shrink-0" />
@@ -752,11 +1060,12 @@ function RootLayout() {
             )}
           </div>
 
-          <div className="px-3 py-3 border-b border-gray-100 dark:border-gray-700">
-            <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">
+          <div className="px-3 py-3 border-b border-gray-100 dark:border-gray-700 flex items-center gap-1.5">
+            <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 tracking-wide">
               Agents
             </span>
-            <span className="ml-2 text-xs text-gray-400 dark:text-gray-500">({filteredAgents.length})</span>
+            <span className="text-xs text-gray-300 dark:text-gray-600">·</span>
+            <span className="text-xs text-gray-400 dark:text-gray-500">{filteredAgents.length}</span>
           </div>
 
           <div className="flex-1 overflow-y-auto p-2 space-y-0.5" onWheel={forwardSidebarWheelToMain}>
@@ -782,6 +1091,52 @@ function RootLayout() {
                   }}
                 />
               ))
+            )}
+
+            {/* Archived (killed/merged) history — read-only, paginated and loaded
+                lazily as it scrolls into view (infinite scroll). */}
+            {currentProjectId && archived.length > 0 && (
+              <>
+                <button
+                  type="button"
+                  onClick={toggleArchivedCollapsed}
+                  className="w-full flex items-center gap-1.5 px-1 pt-3 pb-1 mt-1 group cursor-pointer rounded-md transition-colors hover:bg-gray-100 dark:hover:bg-gray-700/40"
+                >
+                  {archivedCollapsed ? (
+                    <ChevronRight className="w-3 h-3 text-gray-400 dark:text-gray-500 shrink-0 transition-colors group-hover:text-gray-600 dark:group-hover:text-gray-300" />
+                  ) : (
+                    <ChevronDown className="w-3 h-3 text-gray-400 dark:text-gray-500 shrink-0 transition-colors group-hover:text-gray-600 dark:group-hover:text-gray-300" />
+                  )}
+                  <span className="text-[10px] font-semibold text-gray-400 dark:text-gray-500 tracking-wide transition-colors group-hover:text-gray-600 dark:group-hover:text-gray-300">
+                    Archived
+                  </span>
+                  <span className="text-[10px] text-gray-300 dark:text-gray-600">·</span>
+                  <span className="text-[10px] text-gray-300 dark:text-gray-600">{archived.length}</span>
+                  <div className="flex-1 h-px bg-gray-100 dark:bg-gray-700" />
+                </button>
+                {!archivedCollapsed &&
+                  archived.map((agent) => (
+                    <AgentSidebarItem
+                      key={agent.id}
+                      agent={agent}
+                      selected={agent.id === selectedAgentId}
+                      onClick={() => {
+                        if (!currentProjectId) return
+                        if (agent.id === selectedAgentId) {
+                          navigate({ to: '/project/$projectId', params: { projectId: currentProjectId } })
+                        } else {
+                          navigate({ to: '/project/$projectId/agent/$agentId', params: { projectId: currentProjectId, agentId: agent.id } })
+                        }
+                      }}
+                    />
+                  ))}
+              </>
+            )}
+            {/* Sentinel + spinner for archived infinite scroll. */}
+            {currentProjectId && !archivedCollapsed && archivedHasMore && (
+              <div ref={archivedSentinelRef} className="py-3 flex items-center justify-center">
+                {archivedLoading && <LoaderCircle className="w-4 h-4 text-gray-400 animate-spin" />}
+              </div>
             )}
           </div>
 

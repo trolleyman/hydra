@@ -18,6 +18,19 @@ type SimulationServer struct {
 	Development bool
 }
 
+// simNow is the fixed wall-clock instant ALL time-derived simulation values are
+// computed from, instead of time.Now(). The diff viewer renders the two sides of
+// a comparison in separate server boots and hashes the resulting screenshots, so
+// any value that moves with the real clock (an agent's "spawned X ago", the
+// artifacts panel's elapsed timer) would make otherwise-identical renders differ
+// and show up as a spurious visual change. Pinning the server's clock — together
+// with the screenshot script pinning the browser's clock to the SAME instant
+// (scripts/screenshots/take-screenshots.ts, page.clock) — makes every duration
+// label deterministic, down to the second. Keep the two instants in sync.
+func simNow() time.Time {
+	return time.Date(2025, 1, 1, 12, 0, 0, 0, time.UTC)
+}
+
 func (s *SimulationServer) CheckHealth(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("OK"))
@@ -48,12 +61,41 @@ func (s *SimulationServer) GetStatus(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *SimulationServer) GetClaudeUsage(w http.ResponseWriter, r *http.Request, params api.GetClaudeUsageParams) {
+	// Fixed snapshot so the diff viewer's two server boots render identically.
+	// session_resets_at is intentionally omitted: a live countdown would differ
+	// between otherwise-identical renders (see GetStatus's uptime note).
+	available := true
+	tier := "Claude Max"
+	session := float32(38)
+	weekly := float32(65)
+	sessionText := "Resets in 2h 15m"
+	weeklyText := "Resets Jan 15, 3:30pm"
+	api.WriteJSON(w, http.StatusOK, api.ClaudeUsageResponse{
+		Available:          available,
+		AccountTier:        &tier,
+		SessionPercentUsed: &session,
+		SessionResetText:   &sessionText,
+		WeeklyPercentUsed:  &weekly,
+		WeeklyResetText:    &weeklyText,
+	})
+}
+
 func (s *SimulationServer) ListProjects(w http.ResponseWriter, r *http.Request) {
+	simUnread := 1   // matches the one unread agent in ListAgents
+	otherUnread := 3 // updates waiting in a project you're not looking at
 	resp := api.ListProjects200JSONResponse{
 		{
-			Id:   "sim-project",
-			Path: "/simulated/project",
-			Name: "simulated-project",
+			Id:          "sim-project",
+			Path:        "/simulated/project",
+			Name:        "simulated-project",
+			UnreadCount: &simUnread,
+		},
+		{
+			Id:          "mobile-app",
+			Path:        "/simulated/mobile-app",
+			Name:        "mobile-app",
+			UnreadCount: &otherUnread,
 		},
 	}
 	api.WriteJSON(w, http.StatusOK, resp)
@@ -71,45 +113,101 @@ func (s *SimulationServer) RemoveProject(w http.ResponseWriter, r *http.Request,
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// simAgent1Prompt is the seeded prompt for the live simulated agent (agent-1),
+// shared by ListAgents and GetAgent so the detail page (populated from either)
+// always renders the prompt block.
+const simAgent1Prompt = "Let agents be renamed with a human-friendly title instead of only showing the stable ID.\n\n" +
+	"- Add a mutable `title` field to the agent model and a PATCH endpoint to update it.\n" +
+	"- Render the title in the sidebar and the detail header, with an inline rename (pencil) control; keep the Copy-ID button exposing the underlying id.\n" +
+	"- Fall back to the id when no title is set, and persist the title across daemon restarts."
+
+// simAgentMdPrompt is the seeded prompt for the markdown-demo agent (agent-md),
+// shared by ListAgents and GetAgent. It is written to exercise the inline-
+// markdown renderer thoroughly: `code`, *italic* and **bold** runs, a long
+// inline-code reference that wraps across lines, a line that mixes code with
+// prose (to prove a code span doesn't change the line height), and a literal
+// "$ …" run that must stay ordinary code in a prompt (the $-command override is
+// activity-only). It is also long enough to overflow the detail PromptBlock's
+// max height so the bottom-fade-on-scroll is visible.
+const simAgentMdPrompt = "Add **simple inline-markdown** rendering so prompts and the live-activity line aren't flat text.\n\n" +
+	"- In the spawn box and this detail view, highlight `inline code`, *italic* and **bold** runs — but leave #headings alone.\n" +
+	"- Reuse the same pass for the live-activity line; when an activity begins with a `$`, render the whole line as a command (e.g. a build or test invocation), overriding markdown — but do that *only* for activity, never for a prompt.\n" +
+	"- A long inline-code reference such as `web/src/components/AgentComponents.tsx` must wrap across lines cleanly, and a line that contains `code` must stay exactly as tall as a `plain` one.\n" +
+	"- A long command in backticks like `go test ./internal/heads/... -run TestResumeLazy -count=1 -race -v` should wrap mid-span, with each line fragment keeping its own rounded code background.\n" +
+	"- Proof the override is activity-only: this literal `$ run-this-command --now` sitting inside the prompt should stay ordinary code, not a highlighted command line.\n" +
+	"- Tighten the gap between the metadata above and this box, and add a soft bottom fade so a tall prompt doesn't cut off hard as it scrolls out of view.\n" +
+	"- A fenced block must render as its own code chip in both the spawn box and this detail view, e.g.\n" +
+	"```ts\nconst seg = parseInline(text)\nrenderMarkdown(seg) // code/bold/italic\n```\n" +
+	"- Keep it dependency-free: a tiny hand-rolled tokenizer beats pulling in a whole markdown library just for `code`, *italic* and **bold**.\n" +
+	"- Finally, share one renderer across the spawn box, the agent-detail prompt and the sidebar activity line so the three never drift apart."
+
 func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, projectId string) {
-	createdAt1 := time.Now().Add(-1 * time.Hour).Unix()
-	createdAt2 := time.Now().Add(-2 * time.Hour).Unix()
-	createdAt3 := time.Now().Add(-3 * time.Hour).Unix()
+	createdAt0 := simNow().Add(-30 * time.Minute).Unix()
+	createdAt1 := simNow().Add(-1 * time.Hour).Unix()
+	createdAt2 := simNow().Add(-2 * time.Hour).Unix()
+	createdAt3 := simNow().Add(-3 * time.Hour).Unix()
 
 	running := api.Running
 	waiting := api.Waiting
+	unread := true
 
 	resp := api.ListAgents200JSONResponse{
 		{
+			// Markdown-rendering demo agent. Its live-activity line carries inline
+			// markdown (code + bold + italic) so the sidebar shows the rendered
+			// activity; see agent-3 for the $-command override.
+			Id:            "agent-md",
+			Title:         ptr("Add inline markdown rendering"),
+			AgentType:     "claude",
+			BaseBranch:    "main",
+			BranchName:    ptr("hydra/feat-markdown"),
+			SessionPid:    1004,
+			SessionStatus: "running",
+			CreatedAt:     &createdAt0,
+			Prompt:        simAgentMdPrompt,
+			AgentStatus: &api.AgentStatusInfo{
+				Status:    running,
+				Timestamp: simNow().Format(time.RFC3339),
+				Activity:  ptr("Wrapping `renderMarkdown()` over the **prompt** & *activity*"),
+			},
+		},
+		{
 			Id:            "agent-1",
+			Title:         ptr("Add renameable agent titles"),
 			AgentType:     "claude",
 			BaseBranch:    "main",
 			BranchName:    ptr("hydra/feat-1"),
 			SessionPid:    1001,
 			SessionStatus: "running",
 			CreatedAt:     &createdAt1,
+			Prompt:        simAgent1Prompt,
 			AgentStatus: &api.AgentStatusInfo{
 				Status:    running,
-				Timestamp: time.Now().Format(time.RFC3339),
+				Timestamp: simNow().Format(time.RFC3339),
 			},
 		},
 		{
-			Id:            "agent-2",
-			AgentType:     "gemini",
-			BaseBranch:    "main",
-			BranchName:    ptr("hydra/feat-2"),
-			SessionPid:    1002,
-			SessionStatus: "running",
-			CreatedAt:     &createdAt2,
+			// Finished while you were away → unread-changes dot lit.
+			Id:               "agent-2",
+			Title:            ptr("Migrate auth providers to OAuth"),
+			AgentType:        "gemini",
+			BaseBranch:       "main",
+			BranchName:       ptr("hydra/feat-2"),
+			SessionPid:       1002,
+			SessionStatus:    "running",
+			CreatedAt:        &createdAt2,
+			HasUnreadChanges: &unread,
 			AgentStatus: &api.AgentStatusInfo{
-				Status:    waiting,
-				Timestamp: time.Now().Format(time.RFC3339),
+				Status:      waiting,
+				Timestamp:   simNow().Format(time.RFC3339),
+				LastMessage: ptr("The spike is built, tested, and committed. Here's what landed…"),
 			},
 		},
 		{
 			// Deeply-nested refactor — exercises the diff tree's VS Code-style
 			// "compact folders" rendering (see GetAgentDiff for agent-3).
 			Id:            "agent-3",
+			Title:         ptr("Refactor auth into nested packages"),
 			AgentType:     "claude",
 			BaseBranch:    "main",
 			BranchName:    ptr("hydra/feat-3"),
@@ -118,35 +216,119 @@ func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, pr
 			CreatedAt:     &createdAt3,
 			AgentStatus: &api.AgentStatusInfo{
 				Status:    running,
-				Timestamp: time.Now().Format(time.RFC3339),
+				Timestamp: simNow().Format(time.RFC3339),
+				// A "$"-prefixed activity renders as a command (whole line styled
+				// as code), overriding markdown — demos the activity-only override.
+				Activity: ptr("$ go test ./internal/heads/ -run TestResumeLazy"),
 			},
 		},
 	}
 	api.WriteJSON(w, http.StatusOK, resp)
 }
 
+// simArchivedAgents returns the seeded archived (killed/merged) history used by
+// the archived sidebar section + the read-only archived agent page.
+func simArchivedAgents() []api.AgentResponse {
+	archived := true
+	finished := api.Finished
+	stopped := api.Stopped
+	mk := func(id, title, agentType, branch, endState, prompt string, status api.AgentStatus, ageHours time.Duration) api.AgentResponse {
+		createdAt := simNow().Add(-ageHours * time.Hour).Unix()
+		es := endState
+		return api.AgentResponse{
+			Id:            id,
+			Title:         ptr(title),
+			AgentType:     agentType,
+			BaseBranch:    "main",
+			BranchName:    ptr(branch),
+			SessionStatus: "stopped",
+			Prompt:        prompt,
+			CreatedAt:     &createdAt,
+			Archived:      &archived,
+			EndState:      &es,
+			AgentStatus: &api.AgentStatusInfo{
+				Status:    status,
+				Timestamp: simNow().Format(time.RFC3339),
+			},
+		}
+	}
+	return []api.AgentResponse{
+		mk("archived-1", "Add dark-mode toggle to settings", "claude", "hydra/feat-darkmode", "merged", "Add a dark-mode toggle to the settings page, persisted to localStorage and respecting the OS preference by default.", finished, 5),
+		mk("archived-2", "Spike: WebSocket diff refresh", "gemini", "hydra/spike-ws", "killed", "Prototype pushing diff_refresh over the existing terminal WebSocket instead of the 20s poll, and measure the latency win.", stopped, 8),
+		mk("archived-3", "Fix flaky terminal resize test", "claude", "hydra/fix-resize", "merged", "TestTerminalResize fails intermittently in CI. Track down the race and make it deterministic.", finished, 26),
+		mk("archived-4", "Investigate sandbox netns isolation", "claude", "hydra/spike-netns", "killed", "Explore giving each agent its own network namespace with a rootless userspace NAT (pasta/slirp4netns) for per-agent port isolation.", stopped, 30),
+		mk("archived-5", "Render ANSI colour in artifact logs", "copilot", "hydra/feat-ansi", "merged", "Replace stripAnsi in the artifact log panes with a real SGR renderer so build output keeps its colour.", finished, 49),
+	}
+}
+
+func (s *SimulationServer) ListArchivedAgents(w http.ResponseWriter, r *http.Request, projectId string, params api.ListArchivedAgentsParams) {
+	all := simArchivedAgents()
+	offset := 0
+	if params.Offset != nil && *params.Offset > 0 {
+		offset = *params.Offset
+	}
+	if offset > len(all) {
+		offset = len(all)
+	}
+	page := all[offset:]
+	if params.Limit != nil && *params.Limit > 0 && *params.Limit < len(page) {
+		page = page[:*params.Limit]
+	}
+	resp := api.ListArchivedAgents200JSONResponse(page)
+	api.WriteJSON(w, http.StatusOK, resp)
+}
+
 func (s *SimulationServer) GetAgent(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+	for _, a := range simArchivedAgents() {
+		if a.Id == id {
+			api.WriteJSON(w, http.StatusOK, a)
+			return
+		}
+	}
 	if id == "agent-1" {
-		createdAt := time.Now().Add(-1 * time.Hour).Unix()
+		createdAt := simNow().Add(-1 * time.Hour).Unix()
 		api.WriteJSON(w, http.StatusOK, api.AgentResponse{
 			Id:            "agent-1",
+			Title:         ptr("Add renameable agent titles"),
 			AgentType:     "claude",
 			BaseBranch:    "main",
 			BranchName:    ptr("hydra/feat-1"),
 			SessionPid:    1001,
 			SessionStatus: "running",
 			CreatedAt:     &createdAt,
+			Prompt:        simAgent1Prompt,
 			AgentStatus: &api.AgentStatusInfo{
 				Status:    api.Running,
-				Timestamp: time.Now().Format(time.RFC3339),
+				Timestamp: simNow().Format(time.RFC3339),
+			},
+		})
+		return
+	}
+	if id == "agent-md" {
+		createdAt := simNow().Add(-30 * time.Minute).Unix()
+		api.WriteJSON(w, http.StatusOK, api.AgentResponse{
+			Id:            "agent-md",
+			Title:         ptr("Add inline markdown rendering"),
+			AgentType:     "claude",
+			BaseBranch:    "main",
+			BranchName:    ptr("hydra/feat-markdown"),
+			SessionPid:    1004,
+			SessionStatus: "running",
+			CreatedAt:     &createdAt,
+			Prompt:        simAgentMdPrompt,
+			AgentStatus: &api.AgentStatusInfo{
+				Status:    api.Running,
+				Timestamp: simNow().Format(time.RFC3339),
+				Activity:  ptr("Wrapping `renderMarkdown()` over the **prompt** & *activity*"),
 			},
 		})
 		return
 	}
 	if id == "agent-3" {
-		createdAt := time.Now().Add(-3 * time.Hour).Unix()
+		createdAt := simNow().Add(-3 * time.Hour).Unix()
 		api.WriteJSON(w, http.StatusOK, api.AgentResponse{
 			Id:            "agent-3",
+			Title:         ptr("Refactor auth into nested packages"),
 			AgentType:     "claude",
 			BaseBranch:    "main",
 			BranchName:    ptr("hydra/feat-3"),
@@ -156,7 +338,7 @@ func (s *SimulationServer) GetAgent(w http.ResponseWriter, r *http.Request, proj
 			Prompt:        "Refactor the auth providers into a deeply nested package layout so the diff tree shows VS Code-style compacted folders.",
 			AgentStatus: &api.AgentStatusInfo{
 				Status:    api.Running,
-				Timestamp: time.Now().Format(time.RFC3339),
+				Timestamp: simNow().Format(time.RFC3339),
 			},
 		})
 		return
@@ -172,11 +354,23 @@ func (s *SimulationServer) KillAgent(w http.ResponseWriter, r *http.Request, pro
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (s *SimulationServer) PurgeAgent(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *SimulationServer) UpdateAgent(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+	api.WriteError(w, http.StatusNotImplemented, "Not implemented in simulation mode")
+}
+
 func (s *SimulationServer) RestartAgent(w http.ResponseWriter, r *http.Request, projectId string, id string) {
 	api.WriteError(w, http.StatusNotImplemented, "Not implemented in simulation mode")
 }
 
 func (s *SimulationServer) MergeAgent(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *SimulationServer) MarkAgentRead(w http.ResponseWriter, r *http.Request, projectId string, id string) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -194,7 +388,7 @@ func (s *SimulationServer) GetAgentCommits(w http.ResponseWriter, r *http.Reques
 				Message:     "Add feature X\n\nMore details about feature X",
 				AuthorName:  "Agent Claude",
 				AuthorEmail: "claude@hydra.ai",
-				Timestamp:   time.Now().Add(-10 * time.Minute).Format(time.RFC3339),
+				Timestamp:   simNow().Add(-10 * time.Minute).Format(time.RFC3339),
 			},
 			{
 				Sha:         "bcde1234efgh5678ijkl9012mnop3456qrst7890",
@@ -203,7 +397,7 @@ func (s *SimulationServer) GetAgentCommits(w http.ResponseWriter, r *http.Reques
 				Message:     "Fix bug Y",
 				AuthorName:  "Agent Claude",
 				AuthorEmail: "claude@hydra.ai",
-				Timestamp:   time.Now().Add(-20 * time.Minute).Format(time.RFC3339),
+				Timestamp:   simNow().Add(-20 * time.Minute).Format(time.RFC3339),
 			},
 			{
 				Sha:         "cdef1234efgh5678ijkl9012mnop3456qrst7890",
@@ -212,7 +406,7 @@ func (s *SimulationServer) GetAgentCommits(w http.ResponseWriter, r *http.Reques
 				Message:     "Refactor Z",
 				AuthorName:  "Agent Claude",
 				AuthorEmail: "claude@hydra.ai",
-				Timestamp:   time.Now().Add(-30 * time.Minute).Format(time.RFC3339),
+				Timestamp:   simNow().Add(-30 * time.Minute).Format(time.RFC3339),
 			},
 			{
 				Sha:         "defg1234efgh5678ijkl9012mnop3456qrst7890",
@@ -221,7 +415,7 @@ func (s *SimulationServer) GetAgentCommits(w http.ResponseWriter, r *http.Reques
 				Message:     "Initial work for feature X",
 				AuthorName:  "Agent Claude",
 				AuthorEmail: "claude@hydra.ai",
-				Timestamp:   time.Now().Add(-40 * time.Minute).Format(time.RFC3339),
+				Timestamp:   simNow().Add(-40 * time.Minute).Format(time.RFC3339),
 			},
 		}
 		api.WriteJSON(w, http.StatusOK, resp)
@@ -850,7 +1044,7 @@ func simArtifactSets(id string) []api.ArtifactSet {
 	}
 	leftProgress := "building frontend"
 	rightProgress := "artifacts-ab-dark.png 7/12"
-	startedAt := time.Now().Add(-8 * time.Second).Unix()
+	startedAt := simNow().Add(-8 * time.Second).Unix()
 	leftLog := simArtifactLog()
 	rightLog := simArtifactLog()
 	return []api.ArtifactSet{
@@ -915,8 +1109,19 @@ func simArtifactSets(id string) []api.ArtifactSet {
 	}
 }
 
+// artTags returns a pointer to a tag slice for a simulated artifact file. The
+// "theme::*" / "viewport::*" tags are scoped labels (one value per category),
+// so the diff viewer renders them as single-select dropdowns; "new" is a plain
+// free-form tag, rendered as a toggle chip.
+func artTags(tags ...string) *[]string {
+	s := append([]string{}, tags...)
+	return &s
+}
+
 // simReadyChangedSet is the finished comparison with visual changes (including an
-// added file with no "before", to document the missing-image placeholder).
+// added file with no "before", to document the missing-image placeholder). Its
+// files carry scoped (theme/viewport) and free-form tags so the panel documents
+// its tag badges and the tag filter.
 func simReadyChangedSet() api.ArtifactSet {
 	return api.ArtifactSet{
 		Name:    "screenshots",
@@ -926,29 +1131,51 @@ func simReadyChangedSet() api.ArtifactSet {
 			{
 				Name:       "home.png",
 				ChangeType: api.ArtifactFileChangeTypeModified,
+				Tags:       artTags("theme::light", "viewport::desktop"),
 				LeftUrl:    ptr(simSVG("Home (before)", "#b91c1c", 360, 220)),
 				RightUrl:   ptr(simSVG("Home (after)", "#15803d", 360, 220)),
 			},
 			{
+				Name:       "home-dark.png",
+				ChangeType: api.ArtifactFileChangeTypeModified,
+				Tags:       artTags("theme::dark", "viewport::desktop"),
+				LeftUrl:    ptr(simSVG("Home dark (before)", "#7f1d1d", 360, 220)),
+				RightUrl:   ptr(simSVG("Home dark (after)", "#166534", 360, 220)),
+			},
+			{
 				Name:       "login-phone.png",
 				ChangeType: api.ArtifactFileChangeTypeModified,
+				Tags:       artTags("theme::light", "viewport::phone"),
 				LeftUrl:    ptr(simSVG("Login (before)", "#b91c1c", 240, 480)),
 				RightUrl:   ptr(simSVG("Login (after)", "#15803d", 240, 480)),
 			},
 			{
-				Name:       "profile-phone.png",
+				Name:       "profile-phone-dark.png",
 				ChangeType: api.ArtifactFileChangeTypeModified,
-				LeftUrl:    ptr(simSVG("Profile (before)", "#b91c1c", 240, 480)),
-				RightUrl:   ptr(simSVG("Profile (after)", "#15803d", 240, 480)),
+				Tags:       artTags("theme::dark", "viewport::phone"),
+				LeftUrl:    ptr(simSVG("Profile (before)", "#7f1d1d", 240, 480)),
+				RightUrl:   ptr(simSVG("Profile (after)", "#166534", 240, 480)),
 			},
 			{
 				Name:       "settings-phone.png",
 				ChangeType: api.ArtifactFileChangeTypeAdded,
+				Tags:       artTags("theme::dark", "viewport::phone", "new"),
 				RightUrl:   ptr(simSVG("Settings (new)", "#15803d", 240, 480)),
+			},
+			// A .webm artifact: the frontend routes it to the video diff viewer
+			// (synchronized before/after playback + per-frame difference) rather
+			// than the image one. Same before/after model as the images above.
+			{
+				Name:       "loader-animation.webm",
+				ChangeType: api.ArtifactFileChangeTypeModified,
+				Tags:       artTags("theme::dark", "viewport::desktop"),
+				LeftUrl:    ptr(simWebM(simVideoBefore)),
+				RightUrl:   ptr(simWebM(simVideoAfter)),
 			},
 			{
 				Name:       "about.png",
 				ChangeType: api.ArtifactFileChangeTypeUnchanged,
+				Tags:       artTags("theme::light", "viewport::desktop"),
 				LeftUrl:    ptr(simSVG("About", "#334155", 360, 220)),
 				RightUrl:   ptr(simSVG("About", "#334155", 360, 220)),
 			},
@@ -1146,9 +1373,13 @@ func (s *SimulationServer) GetConfig(w http.ResponseWriter, r *http.Request, pro
 	if params.Scope == nil || *params.Scope != api.GetConfigParamsScopeUser {
 		resp.Defaults.Sandbox = &api.SandboxConfig{
 			PreSpawnScript: ptr("#!/bin/bash\nset -euo pipefail\ncp -r \"$HYDRA_PROJECT_ROOT/pipeline/out\" \"$HYDRA_WORKTREE/pipeline/out\"\n"),
+			PreExitScript:  ptr("source \"$HYDRA_WORKTREE/.hydra/emu.env\" 2>/dev/null && scripts/emu-claim-slot.sh release\n"),
 		}
 		resp.Artifacts = &[]api.ArtifactScript{
 			{Name: "screenshots", Command: "bun run screenshots.ts", TimeoutSec: ptr(900)},
+		}
+		resp.Services = &[]api.ServiceScript{
+			{Name: "emu-pool", Command: "scripts/emu-pool.sh up 3 --foreground", Host: ptr(true), MaxRestarts: ptr(3)},
 		}
 	}
 	api.WriteJSON(w, http.StatusOK, resp)
@@ -1156,6 +1387,30 @@ func (s *SimulationServer) GetConfig(w http.ResponseWriter, r *http.Request, pro
 
 func (s *SimulationServer) SaveConfig(w http.ResponseWriter, r *http.Request, projectId string, params api.SaveConfigParams) {
 	w.WriteHeader(http.StatusOK)
+}
+
+func (s *SimulationServer) GetServices(w http.ResponseWriter, r *http.Request, projectId string) {
+	// mobile-app's emulator pool has crashed out (exhausted restarts) — drives the
+	// failed-service badge and the top-bar warning indicator in the screenshots.
+	// Every other project's pool is healthy.
+	if projectId == "mobile-app" {
+		api.WriteJSON(w, http.StatusOK, api.ServiceStatusResponse{
+			Services: []api.ServiceStatus{
+				{Name: "emu-pool", Command: "scripts/emu-pool.sh up 3 --foreground", Host: true, State: api.Failed, Restarts: 3, MaxRestarts: 3, Pid: ptr(0),
+					Message: ptr("exit status 1 (last output: emulator: ERROR: x86_64 emulation requires hardware acceleration — /dev/kvm not found)")},
+			},
+		})
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, api.ServiceStatusResponse{
+		Services: []api.ServiceStatus{
+			{Name: "emu-pool", Command: "scripts/emu-pool.sh up 3 --foreground", Host: true, State: api.Up, Restarts: 0, MaxRestarts: 3, Pid: ptr(40123)},
+		},
+	})
+}
+
+func (s *SimulationServer) RestartServices(w http.ResponseWriter, r *http.Request, projectId string) {
+	s.GetServices(w, r, projectId)
 }
 
 func (s *SimulationServer) DevRestart(w http.ResponseWriter, r *http.Request) {
@@ -1199,16 +1454,18 @@ func (s *SimulationServer) HandleTerminalWS(w http.ResponseWriter, r *http.Reque
 	conn := &safeConn{Conn: rawConn}
 	defer conn.Close()
 
-	// 1. Simulate sandbox startup
+	// 1. Simulate sandbox startup. Emit the whole boot transcript in one burst
+	// rather than pacing it with sleeps: the screenshot generator captures this
+	// terminal, and a wall-clock-paced stream means a capture catches a
+	// nondeterministic number of "Step N/3" lines depending on how long its
+	// navigate+settle happened to take — which shows up as a spurious diff
+	// between the before/after renders. Writing every line up front makes the
+	// captured terminal a fixed, complete transcript.
 	sendStatusUpdate(conn, "building")
 	_ = conn.WriteMessage(websocket.BinaryMessage, []byte("\x1b[32m[Simulation] Starting agent "+agentID+"...\x1b[0m\r\n"))
-	time.Sleep(1 * time.Second)
 	_ = conn.WriteMessage(websocket.BinaryMessage, []byte("Step 1/3: Creating git worktree...\r\n"))
-	time.Sleep(1 * time.Second)
 	_ = conn.WriteMessage(websocket.BinaryMessage, []byte("Step 2/3: Preparing sandbox...\r\n"))
-	time.Sleep(1 * time.Second)
 	_ = conn.WriteMessage(websocket.BinaryMessage, []byte("Step 3/3: Launching agent session...\r\n"))
-	time.Sleep(500 * time.Millisecond)
 	_ = conn.WriteMessage(websocket.BinaryMessage, []byte("\x1b[32mSimulated agent ready.\x1b[0m\r\n\r\n"))
 
 	// 2. Transition to Running

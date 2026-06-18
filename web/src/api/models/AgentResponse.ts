@@ -5,6 +5,10 @@
 import type { AgentStatusInfo } from './AgentStatusInfo';
 export type AgentResponse = {
     id: string;
+    /**
+     * Mutable, user-facing display name. May be empty before it is seeded; clients should fall back to id.
+     */
+    title?: string;
     branch_name?: string | null;
     worktree_path?: string | null;
     project_path: string;
@@ -29,5 +33,17 @@ export type AgentResponse = {
      */
     created_at?: number;
     agent_status?: AgentStatusInfo;
+    /**
+     * True if the agent has changes the user has not yet looked at (set on a running→waiting/finished transition, cleared when the agent is opened).
+     */
+    has_unread_changes?: boolean;
+    /**
+     * True if the agent is a finished (killed/merged) head retained in the history list. Archived agents are read-only — they have no live session or worktree.
+     */
+    archived?: boolean;
+    /**
+     * How an archived agent ended ("killed" | "merged"); null/absent for active agents.
+     */
+    end_state?: string | null;
 };
 

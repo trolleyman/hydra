@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -22,7 +23,9 @@ import (
 	"github.com/trolleyman/hydra/internal/paths"
 	"github.com/trolleyman/hydra/internal/projects"
 	"github.com/trolleyman/hydra/internal/sandbox"
+	"github.com/trolleyman/hydra/internal/services"
 	"github.com/trolleyman/hydra/internal/session"
+	"github.com/trolleyman/hydra/internal/usage"
 )
 
 const version = "0.1.0"
@@ -49,11 +52,49 @@ type Server struct {
 	DB              *db.Store
 	StartTime       time.Time
 	Development     bool // set when running under mage dev / mage DevAutoReload
+	// BackgroundCtx is the server-lifetime context (cancelled on shutdown). It's
+	// handed to detached best-effort work started by a request — e.g. async title
+	// refinement — so that work outlives the request but still dies on shutdown.
+	BackgroundCtx context.Context
 	// Artifacts generates/caches diff artifacts (screenshots etc.), one Manager
 	// per registered project (resolved per request). nil disables the feature.
 	Artifacts *artifacts.Registry
 
+	// Services supervises each project's [[services]] (long-running host/sandbox
+	// commands, e.g. an emulator pool). nil disables the feature (e.g. in tests).
+	Services *services.Manager
+
 	lastSandboxError atomic.Value // holds string
+
+	// claudeUsage caches the account-global Claude Code usage snapshot, lazily
+	// initialised on first request (the probe is host-account-wide, so it's not
+	// scoped per project).
+	claudeUsageOnce sync.Once
+	claudeUsage     *usage.Cache
+}
+
+// claudeUsageTTL is how long a probed usage snapshot is served before re-probing.
+const claudeUsageTTL = 30 * time.Second
+
+// claudeUsageEnabled gates the /api/usage/claude probe. Disabled for now: the
+// probe drives `claude /usage` under a PTY (up to ~20s) and a never-settling TUI
+// could spike CPU / make the daemon feel stuck. When disabled the endpoint still
+// responds, but reports "unavailable" without probing, so the UI indicator just
+// hides. Flip back to true to re-enable.
+const claudeUsageEnabled = false
+
+// claudeUsageCache returns the lazily-created usage cache. The probe runs the
+// host `claude` CLI in the default project root (a directory the user's real
+// Claude is most likely to already trust); the probe also auto-accepts the
+// trust prompt, so an untrusted dir still works without mutating ~/.claude.json.
+func (s *Server) claudeUsageCache() *usage.Cache {
+	s.claudeUsageOnce.Do(func() {
+		root := s.ProjectRoot
+		s.claudeUsage = usage.NewCache(claudeUsageTTL, func(ctx context.Context) (usage.Snapshot, error) {
+			return usage.Probe(ctx, "claude", root, usage.HostEnv())
+		})
+	})
+	return s.claudeUsage
 }
 
 // SetSandboxError records the most recent sandbox-availability error (or clears
@@ -143,12 +184,19 @@ func (s *Server) CheckHealth(_ context.Context, _ api.CheckHealthRequestObject) 
 
 func (s *Server) ListProjects(_ context.Context, _ api.ListProjectsRequestObject) (api.ListProjectsResponseObject, error) {
 	ps := s.ProjectsManager.ListProjects()
+	// One DB query gives unread counts for every project; missing keys mean zero.
+	unread, err := s.DB.CountUnreadByProject()
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
 	resp := make(api.ListProjects200JSONResponse, len(ps))
 	for i, p := range ps {
+		count := unread[p.Path]
 		resp[i] = api.ProjectInfo{
-			Id:   p.ID,
-			Path: p.Path,
-			Name: p.Name,
+			Id:          p.ID,
+			Path:        p.Path,
+			Name:        p.Name,
+			UnreadCount: &count,
 		}
 	}
 	return resp, nil
@@ -216,6 +264,10 @@ func (s *Server) AddProject(_ context.Context, request api.AddProjectRequestObje
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
+	// Start the newly-added project's [[services]] (no-op if it declares none).
+	if s.Services != nil {
+		s.Services.StartProject(p.Path)
+	}
 	return api.AddProject201JSONResponse(api.ProjectInfo{
 		Id:   p.ID,
 		Path: p.Path,
@@ -247,6 +299,11 @@ func (s *Server) GetProjectConfigToml(_ context.Context, request api.GetProjectC
 }
 
 func (s *Server) RemoveProject(_ context.Context, request api.RemoveProjectRequestObject) (api.RemoveProjectResponseObject, error) {
+	// Resolve the path before removal so we can stop its services afterwards.
+	var removedPath string
+	if p := s.ProjectsManager.GetByID(request.ProjectId); p != nil {
+		removedPath = p.Path
+	}
 	found, err := s.ProjectsManager.RemoveProject(request.ProjectId)
 	if err != nil {
 		return api.RemoveProject500JSONResponse{
@@ -262,7 +319,46 @@ func (s *Server) RemoveProject(_ context.Context, request api.RemoveProjectReque
 			Details: "project not found",
 		}, nil
 	}
+	// Tear down the removed project's [[services]].
+	if s.Services != nil && removedPath != "" {
+		s.Services.StopProject(removedPath)
+	}
 	return api.RemoveProject204Response{}, nil
+}
+
+// agentResponse converts a heads.Head into its API representation. Centralised
+// so every endpoint returns an identically-shaped agent (id, title, status, …).
+func agentResponse(h heads.Head) api.AgentResponse {
+	var createdAt *int64
+	if h.CreatedAt != 0 {
+		createdAt = &h.CreatedAt
+	}
+	title := h.Title
+	archived := h.Archived
+	var endState *string
+	if h.EndState != "" {
+		es := h.EndState
+		endState = &es
+	}
+	return api.AgentResponse{
+		Id:               h.ID,
+		Title:            &title,
+		BranchName:       h.Branch,
+		WorktreePath:     h.Worktree,
+		ProjectPath:      h.ProjectPath,
+		SessionPid:       h.SessionPID,
+		SessionStatus:    h.SessionStatus,
+		AgentType:        string(h.AgentType),
+		PrePrompt:        h.PrePrompt,
+		Prompt:           h.Prompt,
+		BaseBranch:       h.BaseBranch,
+		Ephemeral:        &h.Ephemeral,
+		CreatedAt:        createdAt,
+		AgentStatus:      h.AgentStatus,
+		HasUnreadChanges: &h.HasUnreadChanges,
+		Archived:         &archived,
+		EndState:         endState,
+	}
 }
 
 func (s *Server) ListAgents(ctx context.Context, request api.ListAgentsRequestObject) (api.ListAgentsResponseObject, error) {
@@ -280,25 +376,34 @@ func (s *Server) ListAgents(ctx context.Context, request api.ListAgentsRequestOb
 	}
 	resp := make(api.ListAgents200JSONResponse, len(headList))
 	for i, h := range headList {
-		var createdAt *int64
-		if h.CreatedAt != 0 {
-			createdAt = &h.CreatedAt
+		resp[i] = agentResponse(h)
+	}
+	return resp, nil
+}
+
+func (s *Server) ListArchivedAgents(_ context.Context, request api.ListArchivedAgentsRequestObject) (api.ListArchivedAgentsResponseObject, error) {
+	projectRoot, err := s.resolveProjectRoot(request.ProjectId)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	limit, offset := 0, 0
+	if request.Params.Limit != nil {
+		limit = *request.Params.Limit
+	}
+	if request.Params.Offset != nil && *request.Params.Offset > 0 {
+		offset = *request.Params.Offset
+	}
+	headList, err := heads.ListArchivedHeads(s.DB, projectRoot, limit, offset)
+	if err != nil {
+		return nil, &apiError{ //errtrace:skip
+			Code: 500,
+			Type: api.ErrorResponseErrorInternalError,
+			Err:  err,
 		}
-		resp[i] = api.AgentResponse{
-			Id:            h.ID,
-			BranchName:    h.Branch,
-			WorktreePath:  h.Worktree,
-			ProjectPath:   h.ProjectPath,
-			SessionPid:    h.SessionPID,
-			SessionStatus: h.SessionStatus,
-			AgentType:     string(h.AgentType),
-			PrePrompt:     h.PrePrompt,
-			Prompt:        h.Prompt,
-			BaseBranch:    h.BaseBranch,
-			Ephemeral:     &h.Ephemeral,
-			CreatedAt:     createdAt,
-			AgentStatus:   h.AgentStatus,
-		}
+	}
+	resp := make(api.ListArchivedAgents200JSONResponse, len(headList))
+	for i, h := range headList {
+		resp[i] = agentResponse(h)
 	}
 	return resp, nil
 }
@@ -326,6 +431,65 @@ func (s *Server) GetStatus(_ context.Context, _ api.GetStatusRequestObject) (api
 		DefaultProjectId: &defaultProjectID,
 		Development:      &development,
 	}), nil
+}
+
+func (s *Server) GetClaudeUsage(ctx context.Context, request api.GetClaudeUsageRequestObject) (api.GetClaudeUsageResponseObject, error) {
+	if !claudeUsageEnabled {
+		// Probe disabled: respond without spawning `claude /usage`. Reported as
+		// unavailable so the frontend indicator quietly hides.
+		msg := "Claude usage probe is disabled"
+		return api.GetClaudeUsage200JSONResponse(api.ClaudeUsageResponse{
+			Available: false,
+			Error:     &msg,
+		}), nil
+	}
+
+	force := request.Params.Refresh != nil && *request.Params.Refresh
+	snap, err := s.claudeUsageCache().Get(ctx, force)
+	if err != nil {
+		// No snapshot at all (CLI never produced one): report unavailable rather
+		// than 500, so the indicator can quietly hide.
+		msg := err.Error()
+		return api.GetClaudeUsage200JSONResponse(api.ClaudeUsageResponse{
+			Available: false,
+			Error:     &msg,
+		}), nil
+	}
+
+	resp := api.ClaudeUsageResponse{Available: snap.Available}
+	if snap.Error != "" {
+		e := snap.Error
+		resp.Error = &e
+	}
+	if !snap.CapturedAt.IsZero() {
+		t := snap.CapturedAt
+		resp.CapturedAt = &t
+	}
+	if snap.AccountTier != "" {
+		tier := snap.AccountTier
+		resp.AccountTier = &tier
+	}
+	resp.SessionPercentUsed = f64ToF32(snap.SessionPercentUsed)
+	resp.SessionResetsAt = snap.SessionResetsAt
+	if snap.SessionResetText != "" {
+		txt := snap.SessionResetText
+		resp.SessionResetText = &txt
+	}
+	resp.WeeklyPercentUsed = f64ToF32(snap.WeeklyPercentUsed)
+	if snap.WeeklyResetText != "" {
+		txt := snap.WeeklyResetText
+		resp.WeeklyResetText = &txt
+	}
+	return api.GetClaudeUsage200JSONResponse(resp), nil
+}
+
+// f64ToF32 converts an optional float64 to an optional float32 for the API.
+func f64ToF32(v *float64) *float32 {
+	if v == nil {
+		return nil
+	}
+	f := float32(*v)
+	return &f
 }
 
 func (s *Server) GetConfig(_ context.Context, request api.GetConfigRequestObject) (api.GetConfigResponseObject, error) {
@@ -381,6 +545,14 @@ func (s *Server) GetConfig(_ context.Context, request api.GetConfigRequestObject
 		resp.Artifacts = &arts
 	}
 
+	if len(cfg.Services) > 0 {
+		svcs := make([]api.ServiceScript, len(cfg.Services))
+		for i, svc := range cfg.Services {
+			svcs[i] = toAPIServiceScript(svc)
+		}
+		resp.Services = &svcs
+	}
+
 	return api.GetConfig200JSONResponse(resp), nil
 }
 
@@ -408,6 +580,26 @@ func fromAPIArtifactScript(a api.ArtifactScript) config.ArtifactScript {
 	return out
 }
 
+// toAPIServiceScript converts an internal ServiceScript to the API representation.
+func toAPIServiceScript(svc config.ServiceScript) api.ServiceScript {
+	out := api.ServiceScript{Name: svc.Name, Command: svc.Command}
+	if svc.Host {
+		out.Host = &svc.Host
+	}
+	out.MaxRestarts = svc.MaxRestarts
+	return out
+}
+
+// fromAPIServiceScript converts an API ServiceScript to the internal representation.
+func fromAPIServiceScript(svc api.ServiceScript) config.ServiceScript {
+	out := config.ServiceScript{Name: svc.Name, Command: svc.Command}
+	if svc.Host != nil {
+		out.Host = *svc.Host
+	}
+	out.MaxRestarts = svc.MaxRestarts
+	return out
+}
+
 // toAPIAgentConfig converts an internal AgentConfig to the API representation.
 func toAPIAgentConfig(c config.AgentConfig) api.AgentConfig {
 	out := api.AgentConfig{
@@ -420,6 +612,7 @@ func toAPIAgentConfig(c config.AgentConfig) api.AgentConfig {
 			RestoreRo:      &c.Sandbox.RestoreRO,
 			CowPaths:       &c.Sandbox.CowPaths,
 			PreSpawnScript: c.Sandbox.PreSpawnScript,
+			PreExitScript:  c.Sandbox.PreExitScript,
 		}
 		if c.Sandbox.Network != nil {
 			out.Sandbox.Network = &api.NetworkConfig{
@@ -450,6 +643,9 @@ func fromAPIAgentConfig(a api.AgentConfig) config.AgentConfig {
 		}
 		if a.Sandbox.PreSpawnScript != nil && *a.Sandbox.PreSpawnScript != "" {
 			sb.PreSpawnScript = a.Sandbox.PreSpawnScript
+		}
+		if a.Sandbox.PreExitScript != nil && *a.Sandbox.PreExitScript != "" {
+			sb.PreExitScript = a.Sandbox.PreExitScript
 		}
 		if a.Sandbox.Network != nil {
 			sb.Network = &config.NetworkConfig{Enabled: a.Sandbox.Network.Enabled}
@@ -484,6 +680,14 @@ func (s *Server) SaveConfig(_ context.Context, request api.SaveConfigRequestObje
 			newCfg.Artifacts = append(newCfg.Artifacts, fromAPIArtifactScript(a))
 		}
 	}
+	// A non-nil services list (even empty) is authoritative; a nil list (older
+	// clients / defaults-only saves) leaves the existing [[services]] untouched.
+	if request.Body.Services != nil {
+		newCfg.Services = make([]config.ServiceScript, 0, len(*request.Body.Services))
+		for _, svc := range *request.Body.Services {
+			newCfg.Services = append(newCfg.Services, fromAPIServiceScript(svc))
+		}
+	}
 
 	scope := api.SaveConfigParamsScopeProject
 	if request.Params.Scope != nil {
@@ -503,6 +707,14 @@ func (s *Server) SaveConfig(_ context.Context, request api.SaveConfigRequestObje
 
 	if err := config.SaveToFile(savePath, newCfg); err != nil {
 		return nil, errtrace.Wrap(err)
+	}
+
+	// Restart the project's services so config changes (added/removed/edited
+	// [[services]]) take effect immediately. Only for project-scope saves: a
+	// user-scope save would have to restart every registered project, and the
+	// merged result is reloaded from disk by RestartProject anyway.
+	if s.Services != nil && scope == api.SaveConfigParamsScopeProject {
+		s.Services.RestartProject(projectRoot)
 	}
 
 	return api.SaveConfig200Response{}, nil
@@ -573,35 +785,18 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 	}
 
 	head, err := heads.SpawnHead(ctx, s.Sessions, s.DB, projectRoot, heads.SpawnHeadOptions{
-		ID:         id,
-		PrePrompt:  prePrompt,
-		Prompt:     prompt,
-		AgentType:  agentType,
-		BaseBranch: baseBranch,
-		Ephemeral:  ephemeral,
+		ID:            id,
+		PrePrompt:     prePrompt,
+		Prompt:        prompt,
+		AgentType:     agentType,
+		BaseBranch:    baseBranch,
+		Ephemeral:     ephemeral,
+		BackgroundCtx: s.BackgroundCtx,
 	})
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
-	var spawnCreatedAt *int64
-	if head.CreatedAt != 0 {
-		spawnCreatedAt = &head.CreatedAt
-	}
-	return api.SpawnAgent201JSONResponse(api.AgentResponse{
-		Id:            head.ID,
-		BranchName:    head.Branch,
-		WorktreePath:  head.Worktree,
-		ProjectPath:   head.ProjectPath,
-		SessionPid:    head.SessionPID,
-		SessionStatus: head.SessionStatus,
-		AgentType:     string(head.AgentType),
-		PrePrompt:     head.PrePrompt,
-		Prompt:        head.Prompt,
-		BaseBranch:    head.BaseBranch,
-		Ephemeral:     &head.Ephemeral,
-		CreatedAt:     spawnCreatedAt,
-		AgentStatus:   head.AgentStatus,
-	}), nil
+	return api.SpawnAgent201JSONResponse(agentResponse(*head)), nil
 }
 
 func (s *Server) GetAgent(ctx context.Context, request api.GetAgentRequestObject) (api.GetAgentResponseObject, error) {
@@ -614,31 +809,86 @@ func (s *Server) GetAgent(ctx context.Context, request api.GetAgentRequestObject
 		return nil, errtrace.Wrap(err)
 	}
 	if head == nil {
+		// Fall back to the archived (killed/merged) record, so an archived
+		// agent's read-only page still loads on a cold open / hard refresh.
+		head, err = heads.GetArchivedHeadByID(s.DB, request.Id)
+		if err != nil {
+			return nil, errtrace.Wrap(err)
+		}
+	}
+	if head == nil {
 		return api.GetAgent404JSONResponse{
 			Code:    404,
 			Error:   api.ErrorResponseErrorNotFound,
 			Details: "agent not found",
 		}, nil
 	}
-	var getCreatedAt *int64
-	if head.CreatedAt != 0 {
-		getCreatedAt = &head.CreatedAt
+	return api.GetAgent200JSONResponse(agentResponse(*head)), nil
+}
+
+// UpdateAgent renames an agent's user-facing title. This is a display-only
+// change: the agent's stable ID, branch, worktree and live session are
+// untouched, so it is cheap and safe even while the agent is running.
+func (s *Server) UpdateAgent(ctx context.Context, request api.UpdateAgentRequestObject) (api.UpdateAgentResponseObject, error) {
+	if request.Body == nil {
+		return api.UpdateAgent400JSONResponse{
+			Code:    400,
+			Error:   api.ErrorResponseErrorBadRequest,
+			Details: "request body is required",
+		}, nil
 	}
-	return api.GetAgent200JSONResponse(api.AgentResponse{
-		Id:            head.ID,
-		BranchName:    head.Branch,
-		WorktreePath:  head.Worktree,
-		ProjectPath:   head.ProjectPath,
-		SessionPid:    head.SessionPID,
-		SessionStatus: head.SessionStatus,
-		AgentType:     string(head.AgentType),
-		PrePrompt:     head.PrePrompt,
-		Prompt:        head.Prompt,
-		BaseBranch:    head.BaseBranch,
-		Ephemeral:     &head.Ephemeral,
-		CreatedAt:     getCreatedAt,
-		AgentStatus:   head.AgentStatus,
-	}), nil
+	title := strings.TrimSpace(request.Body.Title)
+	if title == "" {
+		return api.UpdateAgent400JSONResponse{
+			Code:    400,
+			Error:   api.ErrorResponseErrorBadRequest,
+			Details: "title must not be empty",
+		}, nil
+	}
+
+	projectRoot, err := s.resolveProjectRoot(request.ProjectId)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	head, err := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, request.Id)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	if head == nil {
+		return api.UpdateAgent404JSONResponse{
+			Code:    404,
+			Error:   api.ErrorResponseErrorNotFound,
+			Details: "agent not found",
+		}, nil
+	}
+
+	if err := s.DB.UpdateAgentTitle(request.Id, title); err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	head.Title = title
+	return api.UpdateAgent200JSONResponse(agentResponse(*head)), nil
+}
+
+func (s *Server) MarkAgentRead(ctx context.Context, request api.MarkAgentReadRequestObject) (api.MarkAgentReadResponseObject, error) {
+	projectRoot, err := s.resolveProjectRoot(request.ProjectId)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	head, err := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, request.Id)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	if head == nil {
+		return api.MarkAgentRead404JSONResponse{
+			Code:    404,
+			Error:   api.ErrorResponseErrorNotFound,
+			Details: "agent not found",
+		}, nil
+	}
+	if err := s.DB.MarkAgentRead(request.Id); err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	return api.MarkAgentRead204Response{}, nil
 }
 
 func (s *Server) MergeAgent(ctx context.Context, request api.MergeAgentRequestObject) (api.MergeAgentResponseObject, error) {
@@ -702,7 +952,7 @@ func (s *Server) MergeAgent(ctx context.Context, request api.MergeAgentRequestOb
 	}
 
 	// Kill cleanup without re-doing the CAS (already in "merging" state).
-	if err := heads.KillHeadNoLock(ctx, s.Sessions, s.DB, *head); err != nil {
+	if err := heads.KillHeadNoLock(ctx, s.Sessions, s.DB, *head, "merged"); err != nil {
 		return nil, errtrace.Wrap(err)
 	}
 
@@ -782,8 +1032,10 @@ func (s *Server) RestartAgent(ctx context.Context, request api.RestartAgentReque
 	agentType := head.AgentType
 	baseBranch := head.BaseBranch
 
-	// Kill the existing head (container, worktree, branch).
-	if err := heads.KillHead(ctx, s.Sessions, s.DB, *head); err != nil {
+	// Kill the existing head (container, worktree, branch). The respawn below
+	// reuses the same ID and un-archives the record, so the end state here is
+	// transient; record "killed" anyway in case the respawn fails.
+	if err := heads.KillHead(ctx, s.Sessions, s.DB, *head, "killed"); err != nil {
 		if errors.Is(err, db.ErrOperationInProgress) {
 			return api.RestartAgent409JSONResponse{
 				Code:    409,
@@ -805,35 +1057,18 @@ func (s *Server) RestartAgent(ctx context.Context, request api.RestartAgentReque
 	}
 
 	newHead, err := heads.SpawnHead(ctx, s.Sessions, s.DB, projectRoot, heads.SpawnHeadOptions{
-		ID:         id,
-		PrePrompt:  prePrompt,
-		Prompt:     prompt,
-		AgentType:  agentType,
-		BaseBranch: baseBranch,
+		ID:            id,
+		PrePrompt:     prePrompt,
+		Prompt:        prompt,
+		AgentType:     agentType,
+		BaseBranch:    baseBranch,
+		BackgroundCtx: s.BackgroundCtx,
 	})
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
 
-	var restartCreatedAt *int64
-	if newHead.CreatedAt != 0 {
-		restartCreatedAt = &newHead.CreatedAt
-	}
-	return api.RestartAgent200JSONResponse(api.AgentResponse{
-		Id:            newHead.ID,
-		BranchName:    newHead.Branch,
-		WorktreePath:  newHead.Worktree,
-		ProjectPath:   newHead.ProjectPath,
-		SessionPid:    newHead.SessionPID,
-		SessionStatus: newHead.SessionStatus,
-		AgentType:     string(newHead.AgentType),
-		PrePrompt:     newHead.PrePrompt,
-		Prompt:        newHead.Prompt,
-		BaseBranch:    newHead.BaseBranch,
-		Ephemeral:     &newHead.Ephemeral,
-		CreatedAt:     restartCreatedAt,
-		AgentStatus:   newHead.AgentStatus,
-	}), nil
+	return api.RestartAgent200JSONResponse(agentResponse(*newHead)), nil
 }
 
 func (s *Server) KillAgent(ctx context.Context, request api.KillAgentRequestObject) (api.KillAgentResponseObject, error) {
@@ -854,7 +1089,7 @@ func (s *Server) KillAgent(ctx context.Context, request api.KillAgentRequestObje
 		}, nil
 	}
 
-	if err := heads.KillHead(ctx, s.Sessions, s.DB, *head); err != nil {
+	if err := heads.KillHead(ctx, s.Sessions, s.DB, *head, "killed"); err != nil {
 		if errors.Is(err, db.ErrOperationInProgress) {
 			return api.KillAgent409JSONResponse{
 				Code:    409,
@@ -866,6 +1101,51 @@ func (s *Server) KillAgent(ctx context.Context, request api.KillAgentRequestObje
 	}
 
 	return api.KillAgent204Response{}, nil
+}
+
+// PurgeAgent permanently deletes an agent (live or archived): it kills any live
+// session, removes the worktree/branch and on-disk files, deletes the Claude
+// session-history directory, and hard-deletes the DB record. Unlike KillAgent,
+// nothing is retained in the archived-history list. See heads.PurgeHead.
+func (s *Server) PurgeAgent(ctx context.Context, request api.PurgeAgentRequestObject) (api.PurgeAgentResponseObject, error) {
+	projectRoot, err := s.resolveProjectRoot(request.ProjectId)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	log.Printf("api: purge agent request: id=%q, project=%q", request.Id, projectRoot)
+
+	// Resolve a live head first; fall back to the archived record (the common
+	// case — purging from the read-only archived-history view).
+	head, err := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, request.Id)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	if head == nil {
+		head, err = heads.GetArchivedHeadByID(s.DB, request.Id)
+		if err != nil {
+			return nil, errtrace.Wrap(err)
+		}
+	}
+	if head == nil {
+		return api.PurgeAgent404JSONResponse{
+			Code:    404,
+			Error:   api.ErrorResponseErrorNotFound,
+			Details: "agent not found",
+		}, nil
+	}
+
+	if err := heads.PurgeHead(ctx, s.Sessions, s.DB, *head); err != nil {
+		if errors.Is(err, db.ErrOperationInProgress) {
+			return api.PurgeAgent409JSONResponse{
+				Code:    409,
+				Error:   api.ErrorResponseErrorConflict,
+				Details: "operation already in progress",
+			}, nil
+		}
+		return nil, errtrace.Wrap(err)
+	}
+
+	return api.PurgeAgent204Response{}, nil
 }
 
 func (s *Server) GetAgentCommits(ctx context.Context, request api.GetAgentCommitsRequestObject) (api.GetAgentCommitsResponseObject, error) {

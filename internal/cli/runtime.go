@@ -12,11 +12,13 @@ import (
 	"github.com/trolleyman/hydra/internal/artifacts"
 	"github.com/trolleyman/hydra/internal/daemon"
 	"github.com/trolleyman/hydra/internal/db"
+	"github.com/trolleyman/hydra/internal/git"
 	"github.com/trolleyman/hydra/internal/heads"
 	httppkg "github.com/trolleyman/hydra/internal/http"
 	"github.com/trolleyman/hydra/internal/paths"
 	"github.com/trolleyman/hydra/internal/projects"
 	"github.com/trolleyman/hydra/internal/sandbox"
+	"github.com/trolleyman/hydra/internal/services"
 	"github.com/trolleyman/hydra/internal/session"
 )
 
@@ -28,6 +30,7 @@ type daemonRuntime struct {
 	handler     http.Handler
 	store       *db.Store
 	reg         *session.Registry
+	services    *services.Manager
 	projectRoot string
 }
 
@@ -63,6 +66,9 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 	// One artifacts Manager per registered project, created lazily on first use.
 	artifactReg := artifacts.NewRegistry()
 
+	// Supervises each project's [[services]] (e.g. a host-side emulator pool).
+	svcMgr := services.NewManager()
+
 	server := &httppkg.Server{
 		WorktreesDir:    worktreesDir,
 		ProjectRoot:     projectRoot,
@@ -73,6 +79,8 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 		StartTime:       time.Now(),
 		Development:     os.Getenv("HYDRA_DEV_RESTART") == "1",
 		Artifacts:       artifactReg,
+		Services:        svcMgr,
+		BackgroundCtx:   ctx,
 	}
 
 	if ok, reason := sandbox.Available(); !ok {
@@ -80,8 +88,20 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 		server.SetSandboxError(errtrace.Errorf("%s", reason))
 	}
 
-	if err := store.PruneDeletedAgents(30 * 24 * time.Hour); err != nil {
-		log.Printf("warn: prune deleted agents: %v", err)
+	// Archived agents (killed/merged heads) are kept indefinitely so they stay
+	// browsable in the history list — we no longer prune soft-deleted rows on
+	// boot. PruneDeletedAgents is retained for a future opt-in retention window
+	// if the table ever grows uncomfortably large.
+	_ = store.PruneDeletedAgents
+
+	// One-time backfill: heads killed/merged before the EndState column existed
+	// were soft-deleted with an empty EndState, so they don't appear in the
+	// archived-history list. Upgrade the ones that actually ran to "killed" so
+	// they become browsable; aborted spawns (never ran) stay excluded. Idempotent.
+	if n, err := store.BackfillArchivedEndState(); err != nil {
+		log.Printf("warn: backfill archived end_state: %v", err)
+	} else if n > 0 {
+		log.Printf("Backfilled %d pre-existing soft-deleted agent(s) into the archived history", n)
 	}
 
 	// The pollers and boot-time resume cover every registered project, not just
@@ -90,14 +110,55 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 	// too. roots is re-evaluated each cycle so runtime add/remove is picked up.
 	roots := func() []string { return projectRoots(pm) }
 
-	// Resume heads that were running before a restart (best-effort), and clear
-	// out any ephemeral artifact checkouts left behind by a crash mid-generation.
-	// Only touch projects that already have an artifacts dir, so we don't create
-	// empty ones in projects that never generated artifacts.
+	// Migrate every registered project from the old flat .hydra/<dir> layout to
+	// .hydra/local/<dir> before anything touches their worktrees or caches. The
+	// boot project was already migrated by db.Open above; this covers projects
+	// loaded from disk that share this daemon. Idempotent and best-effort.
+	for _, root := range roots() {
+		if err := paths.MigrateHydraLayout(root); err != nil {
+			log.Printf("warn: migrate .hydra layout in %s: %v", root, err)
+		}
+	}
+
+	// Correct archived heads that were merged but recorded as "killed" (the
+	// backfill above defaults everything to "killed", and CLI merges historically
+	// archived via the kill path). A merge leaves a "Merge branch 'hydra/<id>'"
+	// commit, so git history recovers the distinction. Per project, best-effort;
+	// fast-forward merges leave no merge commit and so remain "killed".
+	for _, root := range roots() {
+		merged, err := git.MergedHydraBranches(root)
+		if err != nil {
+			log.Printf("warn: detect merged branches in %s: %v", root, err)
+			continue
+		}
+		if len(merged) == 0 {
+			continue
+		}
+		names := make([]string, 0, len(merged))
+		for n := range merged {
+			names = append(names, n)
+		}
+		if n, err := store.SetArchivedEndStateMerged(root, names); err != nil {
+			log.Printf("warn: correct merged end_state in %s: %v", root, err)
+		} else if n > 0 {
+			log.Printf("Corrected %d archived agent(s) to end_state=merged in %s", n, root)
+		}
+	}
+
+	// Resume heads that were running before a restart (best-effort), clear out
+	// any ephemeral artifact checkouts left behind by a crash mid-generation, and
+	// migrate any cache still in the old flat key layout to the current
+	// commit/<sha> & worktree/<hash> layout. Only touch projects that already have
+	// an artifacts dir, so we don't create empty ones in projects that never
+	// generated artifacts.
 	for _, root := range roots() {
 		resumeHeadsOnBoot(reg, store, root)
 		if _, err := os.Stat(paths.GetArtifactsDirFromProjectRoot(root)); err == nil {
-			artifactReg.Manager(root).CleanCheckouts()
+			mgr := artifactReg.Manager(root)
+			if n := mgr.MigrateLegacyLayout(); n > 0 {
+				log.Printf("Migrated %d artifact cache entr(y/ies) to the new layout in %s", n, root)
+			}
+			mgr.CleanCheckouts()
 		}
 	}
 
@@ -111,12 +172,19 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 	go heads.RunJSONStatusPoller(ctx, store, roots)
 	go runStoragePruner(ctx, artifactReg, roots)
 
+	// Start each registered project's [[services]]. Done after the pollers so a
+	// slow service launch never delays request serving; StopAll on shutdown.
+	for _, root := range roots() {
+		svcMgr.StartProject(root)
+	}
+
 	mux := buildMux(server)
 	return &daemonRuntime{
 		server:      server,
 		handler:     httppkg.LoggingMiddleware(mux),
 		store:       store,
 		reg:         reg,
+		services:    svcMgr,
 		projectRoot: projectRoot,
 	}, nil
 }
@@ -165,6 +233,8 @@ func buildMux(server *httppkg.Server) *http.ServeMux {
 	mux.HandleFunc("/artifacts/projects/{project_id}/log", server.HandleArtifactLog)
 	mux.HandleFunc("/repository/projects/{project_id}/blob", server.HandleRepositoryBlob)
 	mux.HandleFunc("/uploads/projects/{project_id}", server.HandleUpload)
+	mux.HandleFunc("GET /folder-picker/available", server.HandleFolderPickerAvailable)
+	mux.HandleFunc("POST /folder-picker/open", server.HandleFolderPickerOpen)
 	mux.Handle("/.well-known/", apiHandler)
 	registerFrontend(mux)
 	return mux
@@ -237,7 +307,9 @@ func resumeHeadsOnBoot(reg *session.Registry, store *db.Store, projectRoot strin
 		// left behind (e.g. a crash mid-test) so it doesn't linger.
 		if h.Ephemeral {
 			log.Printf("daemon: cleaning up orphaned ephemeral head %s after restart", h.ID)
-			if err := heads.KillHeadNoLock(context.Background(), reg, store, h); err != nil {
+			// "" end state: ephemeral test heads are not part of the browsable
+			// archived history, so they stay out of the archived list.
+			if err := heads.KillHeadNoLock(context.Background(), reg, store, h, ""); err != nil {
 				log.Printf("warn: cleanup ephemeral head %s: %v", h.ID, err)
 			}
 			continue

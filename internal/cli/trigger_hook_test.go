@@ -44,24 +44,6 @@ func TestStatusLogFilePathHonorsEnv(t *testing.T) {
 	}
 }
 
-func TestStopStatus(t *testing.T) {
-	cases := []struct {
-		msg  string
-		want string
-	}{
-		{"All tests pass and the feature works.", "finished"},
-		{"Which approach would you prefer?", "waiting"},
-		{"Should I proceed?  \n", "waiting"}, // trailing whitespace tolerated
-		{"", "finished"},
-		{"Done.", "finished"},
-	}
-	for _, c := range cases {
-		if got := string(stopStatus(c.msg)); got != c.want {
-			t.Errorf("stopStatus(%q) = %q, want %q", c.msg, got, c.want)
-		}
-	}
-}
-
 func TestIsUserInputTool(t *testing.T) {
 	for _, tool := range []string{"AskUserQuestion", "ExitPlanMode"} {
 		if !isUserInputTool(tool) {
@@ -138,6 +120,33 @@ func TestTriggerHookPromptSubmitRunning(t *testing.T) {
 		payload := map[string]interface{}{"hook_event_name": c.event}
 		if got := runTriggerHookForTest(t, "claude", "", payload); got != c.want {
 			t.Errorf("event %q: status = %q, want %q", c.event, got, c.want)
+		}
+	}
+}
+
+// TestTriggerHookSessionStartSource covers resume vs fresh start: a SessionStart
+// with source="resume" (claude --continue/--resume) means the agent restored its
+// conversation and is idle waiting for the user, so it must report "waiting", not
+// "running" — otherwise a resumed agent lingers as "running" after a daemon
+// restart. Any other source (or none) is a fresh start and stays "running".
+func TestTriggerHookSessionStartSource(t *testing.T) {
+	cases := []struct {
+		source string
+		want   api.AgentStatus
+	}{
+		{"resume", api.Waiting},
+		{"startup", api.Running},
+		{"clear", api.Running},
+		{"compact", api.Running},
+		{"", api.Running},
+	}
+	for _, c := range cases {
+		payload := map[string]interface{}{"hook_event_name": "SessionStart"}
+		if c.source != "" {
+			payload["source"] = c.source
+		}
+		if got := runTriggerHookForTest(t, "claude", "", payload); got != c.want {
+			t.Errorf("SessionStart source %q: status = %q, want %q", c.source, got, c.want)
 		}
 	}
 }

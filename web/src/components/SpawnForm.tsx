@@ -5,20 +5,12 @@ import { formatError } from '../api/format_error'
 import { uploadFile, extractFiles, isImageFile } from '../api/uploads'
 import { Zap, LoaderCircle, Paperclip, X, FileText } from 'lucide-react'
 import { Tooltip } from './Tooltip'
-import { StorageKeys, promptDraftKey, readLocal, writeLocal } from '../lib/storage'
+import { ImageLightbox } from './ImageLightbox'
+import { StorageKeys, promptDraftKey, promptScrollKey, imageCounterKey, readLocal, writeLocal } from '../lib/storage'
+import { HighlightedTextarea } from '../lib/markdown'
+import { type Attachment, spawnDraftKey, loadAttachments, saveAttachments, nextAttachmentId } from '../lib/spawnDrafts'
 
 type AgentTypeOption = 'claude' | 'gemini' | 'copilot'
-
-// A pasted/attached file in the spawn form. Its absolute `path` (set once the
-// upload resolves) is appended to the prompt on submit so the agent can read it.
-interface Attachment {
-  id: number
-  filename: string
-  path: string | null
-  previewUrl?: string
-  uploading: boolean
-  error?: string
-}
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/i.test(navigator.platform)
 
@@ -132,34 +124,43 @@ export function SpawnForm({
   const [error, setError] = useState<string | null>(null)
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const [dragOver, setDragOver] = useState(false)
-  const attachIdRef = useRef(0)
+  // Index into the image-only attachment list while the lightbox is open; null
+  // when closed.
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
+  // Numbers generically-named pasted images (image.png, image.png, …) as
+  // image1.png, image2.png, … so each can be referred to distinctly in the
+  // prompt. Per project + layout (persisted via imageCounterKey) so the count
+  // doesn't bleed across projects, and reset after a successful spawn.
+  const imageCounterRef = useRef(0)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  // Tracks every image preview object URL we create, so they can all be revoked
-  // on unmount without relying on the (stale) attachments closure.
-  const objectUrlsRef = useRef<Set<string>>(new Set())
+  // Mirrors `attachments` into a ref so the project-switch effect can stash the
+  // outgoing project's attachments without depending on (and re-running for)
+  // every attachment change.
+  const attachmentsRef = useRef<Attachment[]>([])
   const animatedPlaceholder = useTypewriter(PLACEHOLDERS)
 
   useEffect(() => {
-    const urls = objectUrlsRef.current
-    return () => {
-      urls.forEach((u) => URL.revokeObjectURL(u))
-    }
-  }, [])
+    attachmentsRef.current = attachments
+  }, [attachments])
 
   useEffect(() => {
     writeLocal(StorageKeys.defaultAgentType, agentType)
   }, [agentType])
 
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  // The resizable element is the whole card (textarea + footer), so the drag
+  // grip sits at the bottom-right of the entire box rather than just the
+  // textarea. We persist/restore the card's height for compact mode.
+  const cardRef = useRef<HTMLDivElement>(null)
 
-  // Persist textarea height for compact mode
+  // Persist card height for compact mode
   useEffect(() => {
-    if (!compact || !textareaRef.current) return
+    if (!compact || !cardRef.current) return
 
-    const textarea = textareaRef.current
+    const card = cardRef.current
     const savedHeight = readLocal(StorageKeys.spawnHeight)
     if (savedHeight) {
-      textarea.style.height = `${savedHeight}px`
+      card.style.height = `${savedHeight}px`
     }
 
     let timer: ReturnType<typeof setTimeout>
@@ -175,12 +176,52 @@ export function SpawnForm({
       }
     })
 
-    observer.observe(textarea)
+    observer.observe(card)
     return () => {
       observer.disconnect()
       clearTimeout(timer)
     }
   }, [compact])
+
+  // Custom drag-to-resize handle for the spawn card. We use a styled grab bar
+  // (matching the sidebar width resizer) rather than the native textarea resize
+  // grip, which looked awkward poking out of the card's rounded gradient corner.
+  // Dragging sets the card height directly; the ResizeObserver above persists it
+  // for the compact box.
+  function handleCardResizeStart(e: React.MouseEvent) {
+    e.preventDefault()
+    const card = cardRef.current
+    if (!card) return
+    const startY = e.clientY
+    const startHeight = card.offsetHeight
+    const min = compact ? 128 : 180
+    document.body.style.cursor = 'ns-resize'
+    document.body.style.userSelect = 'none'
+    const onMove = (ev: MouseEvent) => {
+      card.style.height = `${Math.max(min, startHeight + ev.clientY - startY)}px`
+    }
+    const onUp = () => {
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+    }
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+  }
+
+  // The grab bar rendered at the bottom of each spawn card.
+  function renderResizeHandle() {
+    return (
+      <div
+        onMouseDown={handleCardResizeStart}
+        className="group shrink-0 h-2 -mt-1.5 flex items-center justify-center cursor-ns-resize"
+        title="Drag to resize"
+      >
+        <div className="h-0.5 w-10 rounded-full bg-gray-200 dark:bg-gray-600 group-hover:bg-blue-400/70 group-active:bg-blue-500 transition-colors" />
+      </div>
+    )
+  }
 
   useEffect(() => {
     if (!compact) textareaRef.current?.focus()
@@ -190,16 +231,25 @@ export function SpawnForm({
   // reloads and project switches. The compact (sidebar) and full-page boxes use
   // distinct keys so their drafts never bleed into one another.
   const draftKey = projectId ? promptDraftKey(projectId, compact) : null
+  const scrollKey = projectId ? promptScrollKey(projectId, compact) : null
 
   // Load the saved draft on mount and whenever the project changes, clearing the
-  // box when the new project has no draft.
+  // box when the new project has no draft, then restore that project's saved
+  // scroll position. The scroll offset is restored in a rAF because the
+  // textarea's scrollable range only exists after the setPrompt above commits
+  // the new text to the DOM.
   useEffect(() => {
     if (!draftKey) {
       setPrompt('')
       return
     }
     setPrompt(readLocal(draftKey) ?? '')
-  }, [draftKey])
+    const saved = scrollKey ? Number(readLocal(scrollKey)) || 0 : 0
+    const raf = requestAnimationFrame(() => {
+      if (textareaRef.current) textareaRef.current.scrollTop = saved
+    })
+    return () => cancelAnimationFrame(raf)
+  }, [draftKey, scrollKey])
 
   function handlePromptChange(value: string) {
     setPrompt(value)
@@ -207,19 +257,72 @@ export function SpawnForm({
     writeLocal(draftKey, value || null)
   }
 
+  // Persist the textarea's scroll offset so it travels with the draft when
+  // switching projects (saved live on scroll; restored by the load effect above).
+  function handlePromptScroll(e: React.UIEvent<HTMLTextAreaElement>) {
+    if (scrollKey) writeLocal(scrollKey, String(e.currentTarget.scrollTop))
+  }
+
+  // Per-project attachments + image counter, swapped in/out as the project (or
+  // layout) changes so each box keeps its own — just like the text draft. The
+  // attachments live in an in-session module cache (their thumbnails are object
+  // URLs that can't be persisted); the counter is mirrored to localStorage.
+  const storeKey = projectId ? spawnDraftKey(projectId, compact) : null
+  const counterKey = projectId ? imageCounterKey(projectId, compact) : null
+  const prevStoreKeyRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    const prev = prevStoreKeyRef.current
+    if (prev === storeKey) return
+    // Stash the outgoing project's attachments before loading the new one's.
+    if (prev) saveAttachments(prev, attachmentsRef.current)
+    if (storeKey) {
+      setAttachments(loadAttachments(storeKey))
+      imageCounterRef.current = Number(readLocal(counterKey!)) || 0
+    } else {
+      setAttachments([])
+      imageCounterRef.current = 0
+    }
+    prevStoreKeyRef.current = storeKey
+  }, [storeKey, counterKey])
+
+  // Persist the current box's attachments to the cache on unmount (the
+  // full-page form remounts when navigating between projects).
+  useEffect(() => {
+    return () => {
+      const key = prevStoreKeyRef.current
+      if (key) saveAttachments(key, attachmentsRef.current)
+    }
+  }, [])
+
   function handleIdChange(value: string) {
     setAgentId(slugify(value, 40, true))
     setIdManuallyEdited(true)
   }
 
+  // Clipboard screenshots all arrive named "image.png", so a multi-image prompt
+  // ends up with several indistinguishable attachments. Rename those generic
+  // (or unnamed) images to image1.png, image2.png, … so the on-disk path — and
+  // therefore the reference the user can type in the prompt — is unique. Files
+  // with a real name (e.g. a dragged "diagram.png") keep it.
+  function numberGenericImage(file: File): File {
+    if (!isImageFile(file)) return file
+    const stem = file.name.replace(/\.[^.]*$/, '')
+    if (stem !== '' && stem.toLowerCase() !== 'image') return file
+    const ext = (file.name.match(/\.([^.]+)$/)?.[1] || file.type.split('/')[1] || 'png').toLowerCase()
+    const n = ++imageCounterRef.current
+    if (counterKey) writeLocal(counterKey, String(imageCounterRef.current))
+    return new File([file], `image${n}.${ext}`, { type: file.type, lastModified: file.lastModified })
+  }
+
   // Upload each file, tracking it as an attachment chip. The uploaded path is
   // appended to the prompt on submit (and so wired through to the agent).
-  function addFiles(files: File[]) {
+  function addFiles(rawFiles: File[]) {
+    const files = rawFiles.map(numberGenericImage)
     for (const file of files) {
-      const id = attachIdRef.current++
+      const id = nextAttachmentId()
       const previewUrl = isImageFile(file) ? URL.createObjectURL(file) : undefined
-      if (previewUrl) objectUrlsRef.current.add(previewUrl)
-      setAttachments((prev) => [...prev, { id, filename: file.name || 'pasted-image', path: null, previewUrl, uploading: true }])
+      setAttachments((prev) => [...prev, { id, filename: file.name || 'pasted-image', path: null, previewUrl, size: file.size, uploading: true }])
       uploadFile(projectId, file)
         .then((res) => {
           setAttachments((prev) => prev.map((a) => (a.id === id ? { ...a, path: res.path, uploading: false } : a)))
@@ -233,10 +336,7 @@ export function SpawnForm({
   function removeAttachment(id: number) {
     setAttachments((prev) => {
       const found = prev.find((a) => a.id === id)
-      if (found?.previewUrl) {
-        URL.revokeObjectURL(found.previewUrl)
-        objectUrlsRef.current.delete(found.previewUrl)
-      }
+      if (found?.previewUrl) URL.revokeObjectURL(found.previewUrl)
       return prev.filter((a) => a.id !== id)
     })
   }
@@ -263,6 +363,10 @@ export function SpawnForm({
 
   const uploading = attachments.some((a) => a.uploading)
   const readyAttachments = attachments.filter((a) => a.path && !a.error)
+  // Image attachments (those with a preview), in chip order — the lightbox
+  // navigates this list, and each thumbnail opens its own index here.
+  const imageAttachments = attachments.filter((a) => a.previewUrl)
+  const lightboxImages = imageAttachments.map((a) => ({ url: a.previewUrl!, filename: a.filename, size: a.size }))
   const canSubmit = (!!prompt.trim() || readyAttachments.length > 0) && !uploading
 
   async function handleSubmit(e: React.FormEvent) {
@@ -285,11 +389,15 @@ export function SpawnForm({
       const agent = await api.default.spawnAgent(projectId ?? '', req)
       setPrompt('')
       if (draftKey) writeLocal(draftKey, null)
+      if (scrollKey) writeLocal(scrollKey, null)
       setAgentId('')
       setIdManuallyEdited(false)
       attachments.forEach((a) => a.previewUrl && URL.revokeObjectURL(a.previewUrl))
-      objectUrlsRef.current.clear()
       setAttachments([])
+      if (storeKey) saveAttachments(storeKey, [])
+      setLightboxIndex(null)
+      imageCounterRef.current = 0
+      if (counterKey) writeLocal(counterKey, null)
       onSpawned?.(agent)
     } catch (err) {
       setError(formatError(err))
@@ -305,30 +413,45 @@ export function SpawnForm({
     const text = size === 'sm' ? 'text-[10px]' : 'text-xs'
     return (
       <div className={`flex flex-wrap gap-1.5 px-3 ${size === 'sm' ? 'pb-1.5' : 'pb-2'}`}>
-        {attachments.map((a) => (
-          <div
-            key={a.id}
-            className={`group relative flex items-center gap-1.5 rounded-md border px-1.5 py-1 ${text} ${a.error ? 'border-red-300 bg-red-50 dark:border-red-800 dark:bg-red-900/20' : 'border-gray-200 bg-gray-50 dark:border-gray-600 dark:bg-gray-700/60'}`}
-            title={a.error ? a.error : a.filename}
-          >
-            {a.previewUrl ? (
-              <img src={a.previewUrl} alt={a.filename} className={`${thumb} rounded object-cover`} />
-            ) : (
-              <FileText className={`${size === 'sm' ? 'w-3.5 h-3.5' : 'w-4 h-4'} text-gray-400 shrink-0`} />
-            )}
-            <span className="max-w-[120px] truncate text-gray-600 dark:text-gray-300">{a.filename}</span>
-            {a.uploading && <LoaderCircle className="w-3 h-3 animate-spin text-gray-400 shrink-0" />}
-            {a.error && <span className="text-red-500 shrink-0">failed</span>}
-            <button
-              type="button"
-              onClick={() => removeAttachment(a.id)}
-              className="ml-0.5 rounded p-0.5 text-gray-400 hover:text-gray-700 hover:bg-gray-200 dark:hover:text-gray-100 dark:hover:bg-gray-600 cursor-pointer shrink-0"
-              aria-label={`Remove ${a.filename}`}
+        {attachments.map((a) => {
+          // Clicking anywhere on an image chip (the thumbnail or its filename)
+          // opens the lightbox — only the X stays separate. Non-image files
+          // aren't clickable. The cursor-pointer / role=button makes the chip's
+          // clickability obvious.
+          const isImage = !!a.previewUrl
+          const openLightbox = isImage
+            ? () => setLightboxIndex(imageAttachments.findIndex((img) => img.id === a.id))
+            : undefined
+          return (
+            <div
+              key={a.id}
+              onClick={openLightbox}
+              onKeyDown={openLightbox ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openLightbox() } } : undefined}
+              role={isImage ? 'button' : undefined}
+              tabIndex={isImage ? 0 : undefined}
+              className={`group relative flex items-center gap-1.5 rounded-md border px-1.5 py-1 ${text} ${isImage ? 'cursor-pointer' : ''} ${a.error ? 'border-red-300 bg-red-50 dark:border-red-800 dark:bg-red-900/20' : 'border-gray-200 bg-gray-50 dark:border-gray-600 dark:bg-gray-700/60'}`}
+              title={a.error ? a.error : isImage ? `View ${a.filename}` : a.filename}
+              aria-label={isImage ? `View ${a.filename}` : undefined}
             >
-              <X className="w-3 h-3" />
-            </button>
-          </div>
-        ))}
+              {a.previewUrl ? (
+                <img src={a.previewUrl} alt={a.filename} className={`${thumb} rounded object-cover shrink-0`} />
+              ) : (
+                <FileText className={`${size === 'sm' ? 'w-3.5 h-3.5' : 'w-4 h-4'} text-gray-400 shrink-0`} />
+              )}
+              <span className="max-w-[120px] truncate text-gray-600 dark:text-gray-300">{a.filename}</span>
+              {a.uploading && <LoaderCircle className="w-3 h-3 animate-spin text-gray-400 shrink-0" />}
+              {a.error && <span className="text-red-500 shrink-0">failed</span>}
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); removeAttachment(a.id) }}
+                className="ml-0.5 rounded p-0.5 text-gray-400 hover:text-gray-700 hover:bg-gray-200 dark:hover:text-gray-100 dark:hover:bg-gray-600 cursor-pointer shrink-0"
+                aria-label={`Remove ${a.filename}`}
+              >
+                <X className="w-3 h-3" />
+              </button>
+            </div>
+          )
+        })}
       </div>
     )
   }
@@ -343,28 +466,43 @@ export function SpawnForm({
   const derivedIdPlaceholder = generateId(prompt) || 'auto-generated…'
   const submitHint = isMac ? '⌘↵ to spawn' : 'Ctrl+Enter to spawn'
 
+  // Shared across both layout variants. The index can fall out of range if an
+  // image is removed while open, so clamp it and close when there are none left.
+  const lightbox =
+    lightboxIndex !== null && lightboxImages.length > 0 ? (
+      <ImageLightbox
+        images={lightboxImages}
+        index={Math.min(lightboxIndex, lightboxImages.length - 1)}
+        onIndexChange={setLightboxIndex}
+        onClose={() => setLightboxIndex(null)}
+      />
+    ) : null
+
   if (compact) {
     return (
+      <>
       <form onSubmit={handleSubmit} className="px-3 py-3 border-b border-gray-100 dark:border-gray-700">
         <input ref={fileInputRef} type="file" multiple className="hidden" onChange={handleFileInput} />
         <div className={`relative rounded-xl p-[1.5px] transition-colors duration-200 ${disabled ? 'bg-gray-100 dark:bg-gray-700' : 'bg-gray-200 dark:bg-gray-600 focus-within:bg-gradient-to-br focus-within:from-blue-500 focus-within:via-indigo-500 focus-within:to-purple-600 focus-within:shadow-md focus-within:shadow-blue-500/20'}`}>
-          <div className="rounded-[10px] bg-white dark:bg-gray-800 overflow-hidden">
-            <textarea
+          <div ref={cardRef} className="rounded-[10px] bg-white dark:bg-gray-800 overflow-hidden flex flex-col min-h-[128px]">
+            <HighlightedTextarea
               ref={textareaRef}
               value={prompt}
               onChange={(e) => handlePromptChange(e.target.value)}
               onKeyDown={handleKeyDown}
+              onScroll={handlePromptScroll}
               onPaste={handlePaste}
               onDrop={handleDrop}
               onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
               onDragLeave={() => setDragOver(false)}
               placeholder={disabled ? 'Select a project first…' : (prompt ? 'Describe a task…' : animatedPlaceholder)}
-              rows={2}
+              rows={3}
               disabled={loading || disabled}
-              className={`w-full px-3 pt-2.5 pb-1 text-xs text-gray-800 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 bg-transparent resize-y focus:outline-none leading-relaxed disabled:opacity-50 min-h-[48px] ${dragOver ? 'ring-2 ring-blue-400 rounded' : ''}`}
+              wrapperClassName={`w-full flex-1 min-h-0 ${dragOver ? 'ring-2 ring-blue-400 rounded' : ''}`}
+              textClassName="px-3 pt-2.5 pb-1 text-xs leading-relaxed placeholder-gray-400 dark:placeholder-gray-500 disabled:opacity-50"
             />
             {renderAttachments('sm')}
-            <div className="flex items-center justify-between px-2 pb-2 gap-2">
+            <div className="flex items-center justify-between px-2 pb-2 gap-2 shrink-0">
               <div className="flex items-center gap-1 min-w-0 flex-1">
                 <Tooltip content="Attach files" side="top">
                   <button
@@ -400,17 +538,21 @@ export function SpawnForm({
                 {loading ? '…' : 'Spawn'}
               </button>
             </div>
+            {renderResizeHandle()}
           </div>
         </div>
         {error && (
           <p className="mt-1.5 text-[10px] text-red-500 leading-snug">{error}</p>
         )}
       </form>
+      {lightbox}
+      </>
     )
   }
 
   // Full-page (empty state) variant
   return (
+    <>
     <div className="flex-1 flex flex-col items-center justify-center p-8">
       <div className="w-full max-w-4xl">
         <div className="text-center mb-8">
@@ -427,13 +569,14 @@ export function SpawnForm({
           <input ref={fileInputRef} type="file" multiple className="hidden" onChange={handleFileInput} />
           {/* Gradient border card */}
           <div className="relative rounded-2xl p-[1.5px] bg-gradient-to-br from-blue-500 via-indigo-500 to-purple-600 animate-gradient shadow-2xl shadow-blue-500/20">
-            <div className="rounded-[14px] bg-white dark:bg-gray-800">
+            <div ref={cardRef} className="rounded-[14px] bg-white dark:bg-gray-800 overflow-hidden flex flex-col min-h-[180px]">
               {/* Prompt textarea */}
-              <textarea
+              <HighlightedTextarea
                 ref={textareaRef}
                 value={prompt}
                 onChange={(e) => handlePromptChange(e.target.value)}
                 onKeyDown={handleKeyDown}
+                onScroll={handlePromptScroll}
                 onPaste={handlePaste}
                 onDrop={handleDrop}
                 onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
@@ -441,13 +584,14 @@ export function SpawnForm({
                 placeholder={prompt ? 'Describe what you need…' : animatedPlaceholder}
                 rows={6}
                 disabled={loading}
-                className={`w-full px-4 pt-4 pb-2 text-sm text-gray-800 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 bg-transparent resize-y focus:outline-none leading-relaxed disabled:opacity-50 min-h-[120px] ${dragOver ? 'ring-2 ring-blue-400 rounded' : ''}`}
+                wrapperClassName={`w-full flex-1 min-h-0 ${dragOver ? 'ring-2 ring-blue-400 rounded' : ''}`}
+                textClassName="px-4 pt-4 pb-2 text-sm leading-relaxed placeholder-gray-400 dark:placeholder-gray-500 disabled:opacity-50"
               />
 
               {renderAttachments('md')}
 
               {/* Footer bar */}
-              <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100 dark:border-gray-700 gap-4">
+              <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100 dark:border-gray-700 gap-4 shrink-0">
                 <div className="flex items-center gap-2 min-w-0 flex-1">
                   {/* Attach files */}
                   <Tooltip content="Attach files" side="top">
@@ -517,6 +661,7 @@ export function SpawnForm({
                   </button>
                 </div>
               </div>
+              {renderResizeHandle()}
             </div>
           </div>
 
@@ -528,5 +673,7 @@ export function SpawnForm({
         </form>
       </div>
     </div>
+    {lightbox}
+    </>
   )
 }
