@@ -17,8 +17,19 @@ import {
 type Seg =
   | { kind: 'text'; value: string }
   | { kind: 'code'; marker: string; value: string }
+  // A fenced ```code block```. `raw` is the exact matched source (fences and all)
+  // so the textarea overlay stays glyph-aligned; `value` is just the inner code
+  // and `lang` the optional info string for read-only rendering.
+  | { kind: 'codeblock'; raw: string; lang: string; value: string }
   | { kind: 'bold'; marker: string; value: string }
   | { kind: 'italic'; marker: string; value: string }
+
+// Fenced code block: an opening ``` (with an optional info string on the rest of
+// the line), then any number of lines, then a closing ```. Matched before the
+// inline patterns and allowed to span newlines. Non-greedy so it stops at the
+// first closing fence. A fence with no closing ``` is left unmatched and falls
+// through to inline/plain handling.
+const FENCE_RE = /^```([^\n]*)\n([\s\S]*?)\n```/
 
 // Inline patterns, tried in order at each position. `**`/`__` must precede the
 // single-char `*`/`_` so the longer marker wins. Each pattern is anchored to
@@ -42,6 +53,21 @@ function parseInline(text: string): Seg[] {
   let i = 0
   while (i < text.length) {
     const rest = text.slice(i)
+    // Fenced code blocks only open at the start of a line (start of input or
+    // just after a newline), matching how they're written in practice.
+    const atLineStart = i === 0 || text[i - 1] === '\n'
+    if (atLineStart) {
+      const fm = FENCE_RE.exec(rest)
+      if (fm) {
+        if (buf) {
+          segs.push({ kind: 'text', value: buf })
+          buf = ''
+        }
+        segs.push({ kind: 'codeblock', raw: fm[0], lang: fm[1].trim(), value: fm[2] })
+        i += fm[0].length
+        continue
+      }
+    }
     let hit: { kind: 'code' | 'bold' | 'italic'; m: RegExpExecArray } | null = null
     for (const p of PATTERNS) {
       const m = p.re.exec(rest)
@@ -100,6 +126,15 @@ export function renderMarkdown(text: string, opts: RenderMarkdownOptions = {}): 
             {s.value}
           </code>
         )
+      case 'codeblock':
+        return (
+          <code
+            key={i}
+            className="block my-1 rounded bg-gray-200/70 dark:bg-gray-700/60 px-2 py-1 font-mono text-[0.9em] text-pink-600 dark:text-pink-300 whitespace-pre-wrap break-words"
+          >
+            {s.value}
+          </code>
+        )
       case 'bold':
         return (
           <strong key={i} className="font-semibold">
@@ -127,16 +162,26 @@ function renderMarkdownSource(text: string): ReactNode {
   return segs.map((s, i) => {
     if (s.kind === 'text') return <span key={i}>{s.value}</span>
     if (s.kind === 'code') {
-      // No padding and no size change here: the backdrop must stay glyph-aligned
-      // with the textarea, so we only tint + add a (zero-layout-impact) clone-
-      // decorated background. The monospace font does widen the run, but the
-      // line height is untouched. `box-decoration-clone` keeps the background
-      // tidy when a code span wraps.
+      // Tint + a (zero-layout-impact) clone-decorated background only. We must
+      // NOT switch to a monospace font here: the textarea underneath uses the
+      // inherited (proportional) font, so a font-mono run in the backdrop would
+      // be a different width and the visible caret would drift from the typed
+      // text — worse with every code span on the line. `box-decoration-clone`
+      // keeps the background tidy when a code span wraps.
       return (
-        <span key={i} className="rounded box-decoration-clone bg-gray-200/70 dark:bg-gray-700/60 font-mono text-pink-600 dark:text-pink-300">
+        <span key={i} className="rounded box-decoration-clone bg-gray-200/70 dark:bg-gray-700/60 text-pink-600 dark:text-pink-300">
           {s.marker}
           {s.value}
           {s.marker}
+        </span>
+      )
+    }
+    if (s.kind === 'codeblock') {
+      // Same constraint as inline code: tint + background only, no font swap, so
+      // the multi-line backdrop stays glyph-aligned with the textarea caret.
+      return (
+        <span key={i} className="rounded box-decoration-clone bg-gray-200/70 dark:bg-gray-700/60 text-pink-600 dark:text-pink-300">
+          {s.raw}
         </span>
       )
     }
