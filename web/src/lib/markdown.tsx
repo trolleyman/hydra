@@ -6,6 +6,7 @@ import {
   type ReactNode,
   type TextareaHTMLAttributes,
 } from 'react'
+import hljs from 'highlight.js'
 
 // Simple inline-markdown support. We deliberately do NOT pull in a full
 // markdown library (or handle block constructs like #headings): the only goal
@@ -128,6 +129,26 @@ function trimAroundBlocks(segs: Seg[]): Seg[] {
 const CODE_CLASS =
   'rounded box-decoration-clone bg-gray-200/70 dark:bg-gray-700/60 px-1 font-mono text-[0.9em] text-pink-600 dark:text-pink-300'
 
+// Block-code styling for read-only renders. Unlike inline code this is NOT
+// tinted: a fenced block reads as plain monospace source on a subtle card, and
+// (when the info string names a language highlight.js recognises) its tokens are
+// coloured by the shared `.hljs-*` theme. The `.hljs-*` token classes carry their
+// own colours, so we deliberately do NOT add the `.hljs` root class here — that
+// would also pull in github.css's own white background and padding.
+const CODEBLOCK_CLASS =
+  'block my-1 rounded bg-gray-100 dark:bg-gray-800/70 px-2 py-1 font-mono text-[0.85em] text-gray-800 dark:text-gray-100 whitespace-pre-wrap break-words'
+
+// highlightCode returns highlight.js token HTML for `code` when `lang` names a
+// recognised language, or null to fall back to plain (uncoloured) monospace text.
+function highlightCode(code: string, lang: string): string | null {
+  if (!code || !lang || !hljs.getLanguage(lang)) return null
+  try {
+    return hljs.highlight(code, { language: lang, ignoreIllegals: true }).value
+  } catch {
+    return null
+  }
+}
+
 export interface RenderMarkdownOptions {
   // When true, text that begins with a `$` is rendered entirely as a code span
   // (the `$` included), overriding all other markdown parsing. Used for agent
@@ -150,17 +171,19 @@ export function renderMarkdown(text: string, opts: RenderMarkdownOptions = {}): 
             {s.value}
           </code>
         )
-      case 'codeblock':
+      case 'codeblock': {
+        const html = highlightCode(s.value, s.lang)
+        if (html != null) {
+          return <code key={i} className={CODEBLOCK_CLASS} dangerouslySetInnerHTML={{ __html: html }} />
+        }
         return (
-          <code
-            key={i}
-            className="block my-1 rounded bg-gray-200/70 dark:bg-gray-700/60 px-2 py-1 font-mono text-[0.9em] text-pink-600 dark:text-pink-300 whitespace-pre-wrap break-words"
-          >
-            {/* A single space keeps an empty block one line tall (so the
-                highlighted chip is still visible) instead of collapsing. */}
+          <code key={i} className={CODEBLOCK_CLASS}>
+            {/* A single space keeps an empty block one line tall (so the chip is
+                still visible) instead of collapsing. */}
             {s.value === '' ? ' ' : s.value}
           </code>
         )
+      }
       case 'bold':
         return (
           <strong key={i} className="font-semibold">
@@ -216,14 +239,14 @@ function renderMarkdownSource(text: string): ReactNode {
       )
     }
     if (s.kind === 'codeblock') {
-      // Same constraint as inline code: tint + background only, no font swap, so
-      // the multi-line backdrop stays glyph-aligned with the textarea caret. To
-      // read as a block (not just another inline-code chip) the fence lines are
-      // dimmed like emphasis markers, the inner code keeps the code tint, and the
-      // whole thing sits on a slightly stronger background.
+      // A code block in the editor isn't tinted (and can't be syntax-highlighted:
+      // a monospace/coloured run would change glyph widths and drift the caret).
+      // It just gets a rounded background "card" with the fence lines dimmed like
+      // emphasis markers; the code itself keeps the backdrop's default text colour
+      // so it reads as plain source under the caret.
       const { open, body, close } = splitFence(s.raw)
       return (
-        <span key={i} className="rounded box-decoration-clone bg-gray-200/80 dark:bg-gray-700/70 text-pink-600 dark:text-pink-300">
+        <span key={i} className="rounded box-decoration-clone bg-gray-200/80 dark:bg-gray-700/70">
           <span className="opacity-50">{open}</span>
           {body}
           <span className="opacity-50">{close}</span>
