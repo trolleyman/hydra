@@ -102,8 +102,9 @@ function parseInline(text: string): Seg[] {
 // codeblock segment. A codeblock renders as its own display:block element, so
 // in a `whitespace-pre-wrap` container the literal newline that separated the
 // fence from its surrounding prose would otherwise add a redundant blank line.
-// READ-ONLY ONLY: this is lossy, so the textarea overlay (which needs
-// char-for-char fidelity) must not use it.
+// Both the read-only render AND the textarea overlay render codeblocks as
+// blocks, so both trim here: the block's own line breaks reproduce exactly the
+// lines those newlines would have, keeping the overlay glyph-aligned.
 function trimAroundBlocks(segs: Seg[]): Seg[] {
   const out = segs.map((s) => ({ ...s }))
   out.forEach((s, i) => {
@@ -120,23 +121,24 @@ function trimAroundBlocks(segs: Seg[]): Seg[] {
   return out.filter((s) => !(s.kind === 'text' && s.value === ''))
 }
 
-// Inline-code styling for read-only renders. Deliberately uses only HORIZONTAL
+// Inline-code styling for read-only renders. NOT tinted — it's just the default
+// text colour in a rounded monospace chip. Deliberately uses only HORIZONTAL
 // padding and a slightly smaller (never larger) em size: vertical padding or a
 // bigger font would change the line height, and we want a line with a code span
 // to stay exactly as tall as a plain one. `box-decoration-clone` makes the
 // rounded chip + background repeat cleanly on each fragment when a long code
 // span wraps across lines rather than leaving a broken/clipped box.
 const CODE_CLASS =
-  'rounded box-decoration-clone bg-gray-200/70 dark:bg-gray-700/60 px-1 font-mono text-[0.9em] text-pink-600 dark:text-pink-300'
+  'rounded box-decoration-clone bg-gray-200/70 dark:bg-gray-700/60 px-1 font-mono text-[0.9em]'
 
-// Block-code styling for read-only renders. Unlike inline code this is NOT
-// tinted: a fenced block reads as plain monospace source on a subtle card, and
-// (when the info string names a language highlight.js recognises) its tokens are
-// coloured by the shared `.hljs-*` theme. The `.hljs-*` token classes carry their
-// own colours, so we deliberately do NOT add the `.hljs` root class here — that
-// would also pull in github.css's own white background and padding.
+// Block-code styling for read-only renders. Uses the SAME rounded background as
+// inline code (just block-level with a touch of padding) so the two read as one
+// family. Not tinted either; when the info string names a language highlight.js
+// recognises, its tokens are coloured by the shared `.hljs-*` theme. The
+// `.hljs-*` token classes carry their own colours, so we deliberately do NOT add
+// the `.hljs` root class — that would also pull in github.css's white background.
 const CODEBLOCK_CLASS =
-  'block my-1 rounded bg-gray-100 dark:bg-gray-800/70 px-2 py-1 font-mono text-[0.85em] text-gray-800 dark:text-gray-100 whitespace-pre-wrap break-words'
+  'block my-1 rounded bg-gray-200/70 dark:bg-gray-700/60 px-2 py-1 font-mono text-[0.85em] text-gray-800 dark:text-gray-100 whitespace-pre-wrap break-words'
 
 // highlightCode returns highlight.js token HTML for `code` when `lang` names a
 // recognised language, or null to fall back to plain (uncoloured) monospace text.
@@ -220,7 +222,10 @@ function splitFence(raw: string): { open: string; body: string; close: string } 
 // underneath, but tints code spans and dims emphasis markers so the structure
 // reads as highlighted source rather than rendered output.
 function renderMarkdownSource(text: string): ReactNode {
-  const segs = parseInline(text)
+  // Trim the newline that hugs each fenced block: the block element below
+  // supplies that line break itself, so keeping the literal newline too would
+  // push everything after the block down a line and drift the caret.
+  const segs = trimAroundBlocks(parseInline(text))
   return segs.map((s, i) => {
     if (s.kind === 'text') return <span key={i}>{s.value}</span>
     if (s.kind === 'code') {
@@ -239,14 +244,16 @@ function renderMarkdownSource(text: string): ReactNode {
       )
     }
     if (s.kind === 'codeblock') {
-      // A code block in the editor isn't tinted (and can't be syntax-highlighted:
-      // a monospace/coloured run would change glyph widths and drift the caret).
-      // It just gets a rounded background "card" with the fence lines dimmed like
-      // emphasis markers; the code itself keeps the backdrop's default text colour
-      // so it reads as plain source under the caret.
+      // Rendered as ONE full-width block so the whole code block sits inside a
+      // single rounded background, not a separate chip per wrapped line. It can't
+      // be tinted or syntax-highlighted (a monospace/coloured run would change
+      // glyph widths and drift the caret), and it must carry NO padding/margin
+      // (which would shift glyphs and break alignment) — just a background. With
+      // the hugging newline trimmed above, the block's own line breaks reproduce
+      // the textarea's lines exactly. Fence lines are dimmed like emphasis markers.
       const { open, body, close } = splitFence(s.raw)
       return (
-        <span key={i} className="rounded box-decoration-clone bg-gray-200/80 dark:bg-gray-700/70">
+        <span key={i} className="block rounded bg-gray-200/80 dark:bg-gray-700/70 break-words">
           <span className="opacity-50">{open}</span>
           {body}
           <span className="opacity-50">{close}</span>
