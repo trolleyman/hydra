@@ -478,20 +478,13 @@ export function SpawnForm({
       />
     ) : null
 
-  // A fenced ``` code block is far taller than prose and gets clipped in the
-  // default-sized box, so grow the editor to give it room — but ONLY when one is
-  // actually present, so a plain prompt keeps the compact default size. min-h is
-  // a floor: in compact mode the card's height is also user-draggable/persisted,
-  // and this just raises the minimum while a code block is in the draft.
-  const promptHasCodeBlock = /(^|\n)```/.test(prompt)
-
   if (compact) {
     return (
       <>
       <form onSubmit={handleSubmit} className="px-3 py-3 border-b border-gray-100 dark:border-gray-700">
         <input ref={fileInputRef} type="file" multiple className="hidden" onChange={handleFileInput} />
         <div className={`relative rounded-xl p-[1.5px] transition-colors duration-200 ${disabled ? 'bg-gray-100 dark:bg-gray-700' : 'bg-gray-200 dark:bg-gray-600 focus-within:bg-gradient-to-br focus-within:from-blue-500 focus-within:via-indigo-500 focus-within:to-purple-600 focus-within:shadow-md focus-within:shadow-blue-500/20'}`}>
-          <div ref={cardRef} className={`rounded-[10px] bg-white dark:bg-gray-800 overflow-hidden flex flex-col ${promptHasCodeBlock ? 'min-h-[360px]' : 'min-h-[128px]'}`}>
+          <div ref={cardRef} className="rounded-[10px] bg-white dark:bg-gray-800 overflow-hidden flex flex-col min-h-[128px]">
             <HighlightedTextarea
               ref={textareaRef}
               value={prompt}
@@ -505,7 +498,7 @@ export function SpawnForm({
               placeholder={disabled ? 'Select a project first…' : (prompt ? 'Describe a task…' : animatedPlaceholder)}
               rows={3}
               disabled={loading || disabled}
-              wrapperClassName={`w-full flex-1 ${promptHasCodeBlock ? 'min-h-[300px]' : 'min-h-[72px]'} ${dragOver ? 'ring-2 ring-blue-400 rounded' : ''}`}
+              wrapperClassName={`w-full flex-1 min-h-[72px] ${dragOver ? 'ring-2 ring-blue-400 rounded' : ''}`}
               textClassName="px-3 pt-2.5 pb-1 text-xs leading-relaxed placeholder-gray-400 dark:placeholder-gray-500 disabled:opacity-50"
             />
             {renderAttachments('sm')}
@@ -576,7 +569,7 @@ export function SpawnForm({
           <input ref={fileInputRef} type="file" multiple className="hidden" onChange={handleFileInput} />
           {/* Gradient border card */}
           <div className="relative rounded-2xl p-[1.5px] bg-gradient-to-br from-blue-500 via-indigo-500 to-purple-600 animate-gradient shadow-2xl shadow-blue-500/20">
-            <div ref={cardRef} className={`rounded-[14px] bg-white dark:bg-gray-800 overflow-hidden flex flex-col ${promptHasCodeBlock ? 'min-h-[520px]' : 'min-h-[180px]'}`}>
+            <div ref={cardRef} className="rounded-[14px] bg-white dark:bg-gray-800 overflow-hidden flex flex-col min-h-[180px]">
               {/* Prompt textarea */}
               <HighlightedTextarea
                 ref={textareaRef}
@@ -591,7 +584,7 @@ export function SpawnForm({
                 placeholder={prompt ? 'Describe what you need…' : animatedPlaceholder}
                 rows={6}
                 disabled={loading}
-                wrapperClassName={`w-full flex-1 ${promptHasCodeBlock ? 'min-h-[460px]' : 'min-h-[120px]'} ${dragOver ? 'ring-2 ring-blue-400 rounded' : ''}`}
+                wrapperClassName={`w-full flex-1 min-h-[120px] ${dragOver ? 'ring-2 ring-blue-400 rounded' : ''}`}
                 textClassName="px-4 pt-4 pb-2 text-sm leading-relaxed placeholder-gray-400 dark:placeholder-gray-500 disabled:opacity-50"
               />
 
