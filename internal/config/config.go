@@ -40,6 +40,7 @@ const DefaultPrePrompt = "You are a head (AI agent) of Hydra, an AI orchestratio
 	"- `cow_paths` — worktree-relative paths mounted copy-on-write from the project root (you can read and overwrite them; writes stay in your worktree and never touch the real files).\n" +
 	"- `network.enabled` / `network.allowed_hosts` — outbound network access and its host allow-list.\n" +
 	"- `pre_spawn_script` — a bash script run inside the sandbox once, when the agent is first spawned (e.g. `mise trust`).\n" +
+	"- `post_exit_script` — a bash script run on the host (unsandboxed) when a head ends, for host-side teardown the sandbox can't do.\n" +
 	"- `pre_prompt` — the standing instructions you are reading now.\n" +
 	"\n" +
 	"## Workflow\n" +
@@ -79,7 +80,43 @@ type SandboxConfig struct {
 	// arbitrary setup). It runs via /bin/sh in the agent's worktree with the
 	// same environment and confinement as the agent. nil/empty = no script.
 	PreSpawnScript *string `toml:"pre_spawn_script"`
+	// PostExitScript is an optional shell script run on the HOST (unsandboxed)
+	// when a head ends — i.e. on kill/merge/restart/ephemeral-cleanup, after the
+	// session, worktree and branch are torn down. It is best-effort and bounded
+	// by a timeout. The same HYDRA_* head-context variables as the agent are
+	// exported, plus HYDRA_END_STATE ("killed"|"merged"|""). Use it for host-side
+	// teardown the sandbox can't do — e.g. releasing a per-head emulator slot.
+	// nil/empty = no script. Unlike PreSpawnScript it runs unconfined, so it has
+	// full access to the host: only set it to commands you trust.
+	PostExitScript *string `toml:"post_exit_script"`
 }
+
+// ServiceScript describes a per-project long-running command Hydra supervises
+// while the project is registered with the daemon. It is started on daemon boot
+// (and when the project is added), restarted with capped backoff if it exits
+// unexpectedly, and process-group-killed on daemon shutdown / project removal /
+// config save. The canonical use is a host-side resource pool (e.g. a pool of
+// Android emulators) shared by all heads of a project.
+type ServiceScript struct {
+	// Name uniquely identifies the service; used as the UI label and in logs.
+	Name string `toml:"name"`
+	// Command is the shell command run (via `bash -c`) from the project root.
+	Command string `toml:"command"`
+	// Host, when true, runs the command directly on the host with NO sandbox —
+	// full access to the machine, network and credentials. Required for services
+	// that need host devices the sandbox hides (e.g. /dev/kvm for emulators).
+	// Default false (the command is confined like an agent, rooted at the project).
+	Host bool `toml:"host"`
+	// MaxRestarts bounds how many times Hydra relaunches the command after an
+	// unexpected exit before giving up and marking the service failed. nil =
+	// default (DefaultServiceMaxRestarts); 0 = never restart. The counter resets
+	// once the process has stayed up past the backoff window.
+	MaxRestarts *int `toml:"max_restarts"`
+}
+
+// DefaultServiceMaxRestarts is the restart cap applied when a service does not
+// set max_restarts.
+const DefaultServiceMaxRestarts = 3
 
 // AgentConfig holds per-agent-type configuration.
 type AgentConfig struct {
@@ -125,6 +162,8 @@ type Config struct {
 	Agents map[string]AgentConfig `toml:"agents"`
 	// Artifacts are per-project visual-artifact generation scripts.
 	Artifacts []ArtifactScript `toml:"artifacts"`
+	// Services are per-project long-running commands the daemon supervises.
+	Services []ServiceScript `toml:"services"`
 }
 
 // rawConfig is the intermediate decode target. It accepts BOTH the legacy
@@ -142,6 +181,7 @@ type rawConfig struct {
 	Sandbox   *SandboxConfig `toml:"sandbox"`
 	// Shared.
 	Artifacts []ArtifactScript `toml:"artifacts"`
+	Services  []ServiceScript  `toml:"services"`
 }
 
 // reservedTopLevel are the top-level TOML names that are NOT agent tables. Any
@@ -151,7 +191,7 @@ type rawConfig struct {
 // (claude/gemini/bash/copilot).
 var reservedTopLevel = map[string]bool{
 	"defaults": true, "agents": true,
-	"pre_prompt": true, "sandbox": true, "artifacts": true,
+	"pre_prompt": true, "sandbox": true, "artifacts": true, "services": true,
 }
 
 // GetUserConfigPath returns the path to the global user configuration file.
@@ -233,6 +273,7 @@ func decodeConfig(data []byte) (Config, error) {
 	}
 
 	cfg.Artifacts = raw.Artifacts
+	cfg.Services = raw.Services
 
 	// Defaults: legacy [defaults] first, then the new top-level fields win.
 	if raw.Defaults != nil {
@@ -301,6 +342,10 @@ func (c *Config) Merge(other Config) {
 	if other.Artifacts != nil {
 		c.Artifacts = other.Artifacts
 	}
+	// Service scripts are replaced wholesale when the other config sets any.
+	if other.Services != nil {
+		c.Services = other.Services
+	}
 }
 
 // clone returns a deep-enough copy of the AgentConfig that Merge can mutate it
@@ -361,6 +406,9 @@ func (s *SandboxConfig) Merge(other SandboxConfig) {
 	}
 	if other.PreSpawnScript != nil {
 		s.PreSpawnScript = other.PreSpawnScript
+	}
+	if other.PostExitScript != nil {
+		s.PostExitScript = other.PostExitScript
 	}
 }
 
@@ -456,6 +504,16 @@ func (c Config) ResolveSandboxOptions(agentType string) (writable, masked, resto
 		}
 	}
 	return writable, masked, restore, cow, net, preSpawn
+}
+
+// ResolvePostExitScript returns the host-side post-exit script for an agent type
+// (the per-agent override, else the defaults), or "" when none is configured.
+func (c Config) ResolvePostExitScript(agentType string) string {
+	resolved := c.GetResolvedConfig(agentType)
+	if sb := resolved.Sandbox; sb != nil && sb.PostExitScript != nil {
+		return *sb.PostExitScript
+	}
+	return ""
 }
 
 // Save saves a configuration to the project-specific configuration file.
@@ -594,6 +652,17 @@ func defaultsSpec() []specEntry {
 			},
 		},
 		{
+			table: "sandbox", key: "post_exit_script",
+			doc: "shell script run on the HOST (unsandboxed) when a head ends — gets HYDRA_* + HYDRA_END_STATE; e.g. release a per-head resource.",
+			def: func() string { return `""` },
+			get: func(a AgentConfig) (string, bool) {
+				if a.Sandbox != nil && a.Sandbox.PostExitScript != nil && *a.Sandbox.PostExitScript != "" {
+					return tomlStringValue(*a.Sandbox.PostExitScript), true
+				}
+				return "", false
+			},
+		},
+		{
 			table: "sandbox.network", key: "enabled",
 			doc: "allow outbound network access from the sandbox (default true).",
 			def: func() string { return "true" },
@@ -714,6 +783,74 @@ func emitArtifactsAuthoritative(out *[]string, arts []ArtifactScript, meta map[s
 	}
 }
 
+// servicesDocLines is the Hydra-owned documentation block emitted before the
+// [[services]] section. Like every doc block it uses docPrefix, so it is
+// replaced (kept current) on each save.
+func servicesDocLines() []string {
+	return []string{
+		docPrefix + " [[services]]: per-project long-running commands the daemon supervises while the",
+		docPrefix + " project is registered. Each is started on daemon boot (and when the project is",
+		docPrefix + " added), restarted with capped backoff if it exits unexpectedly, and",
+		docPrefix + " process-group-killed on daemon shutdown, project removal, or a config save.",
+		docPrefix + " Fields:",
+		docPrefix + "   name          unique label, shown in the UI and logs (required).",
+		docPrefix + "   command       shell command run via `bash -c` from the project root (required).",
+		docPrefix + "   host          run on the host with NO sandbox — full machine/credential access;",
+		docPrefix + "                 needed for host devices the sandbox hides, e.g. /dev/kvm (default false).",
+		docPrefix + fmt.Sprintf("   max_restarts  relaunch cap after an unexpected exit (default %d; 0 = never).", DefaultServiceMaxRestarts),
+	}
+}
+
+// servicesExampleLines is a commented-out example shown when no services exist.
+func servicesExampleLines() []string {
+	return []string{
+		"# [[services]]",
+		`# name = "emu-pool"`,
+		`# command = "scripts/emu-pool.sh up 3 --foreground"`,
+		"# host = true",
+		"# max_restarts = 3",
+	}
+}
+
+// serviceFieldLines renders the field assignments of one service.
+func serviceFieldLines(svc ServiceScript) []string {
+	out := []string{
+		"name = " + tomlStringValue(svc.Name),
+		"command = " + tomlStringValue(svc.Command),
+	}
+	if svc.Host {
+		out = append(out, "host = true")
+	}
+	if svc.MaxRestarts != nil {
+		out = append(out, fmt.Sprintf("max_restarts = %d", *svc.MaxRestarts))
+	}
+	return out
+}
+
+// emitServicesAuthoritative renders svcs as the source of truth, preserving any
+// hand-written comments matched to an existing service by name. An empty list
+// falls back to the commented example so the documentation never stands alone.
+func emitServicesAuthoritative(out *[]string, svcs []ServiceScript, meta map[string]artifactComments) {
+	rendered := 0
+	for _, svc := range svcs {
+		if svc.Name == "" && svc.Command == "" {
+			continue
+		}
+		if rendered > 0 {
+			*out = append(*out, "")
+		}
+		rendered++
+		m := meta[svc.Name]
+		*out = append(*out, m.leading...)
+		*out = append(*out, "[[services]]")
+		*out = append(*out, m.interior...)
+		*out = append(*out, serviceFieldLines(svc)...)
+	}
+	if rendered == 0 {
+		*out = append(*out, servicesExampleLines()...)
+	}
+}
+
 // existingAnalysis captures everything renderConfig needs to read from a prior
 // config file: the user comments attached to managed tables and keys, and the
 // existing [[artifacts]] blocks with their preserved comments. It is derived
@@ -725,6 +862,8 @@ type existingAnalysis struct {
 	keyComments    map[string][]string         // "normTable\x00key" -> preceding user comments
 	artifactBlocks [][]string                  // verbatim [[artifacts]] blocks, in source order
 	artifactMeta   map[string]artifactComments // artifact name -> preserved comments
+	serviceBlocks  [][]string                  // verbatim [[services]] blocks, in source order
+	serviceMeta    map[string]artifactComments // service name -> preserved comments
 }
 
 // tomlItem is one top-level TOML expression (a table header or a key/value),
@@ -832,6 +971,7 @@ func analyzeExisting(data []byte, keys map[string]bool) *existingAnalysis {
 		tableComments: map[string][]string{},
 		keyComments:   map[string][]string{},
 		artifactMeta:  map[string]artifactComments{},
+		serviceMeta:   map[string]artifactComments{},
 	}
 	if len(data) == 0 {
 		return res
@@ -859,37 +999,48 @@ func analyzeExisting(data []byte, keys map[string]bool) *existingAnalysis {
 	prevEnd := -1
 	curNorm := "" // normalized managed table for the current section (root = "")
 
-	// Accumulators for the [[artifacts]] block currently being read.
+	// Accumulators for the array-of-tables ([[artifacts]] / [[services]]) block
+	// currently being read. curArray is the normalized table name, which routes
+	// the flushed block to the right slice; an unknown name falls back to
+	// artifacts, preserving the historical "all array tables are artifacts"
+	// behaviour for back-compat.
 	inArray := false
+	curArray := ""
 	var artLeading, artInterior []string
 	var artName string
 	artHeaderLine, artLastLine := 0, 0
-	flushArtifact := func() {
+	flushArray := func() {
 		if !inArray {
 			return
 		}
 		block := append([]string{}, userComments(artLeading, keys)...)
 		block = append(block, lines[artHeaderLine:artLastLine+1]...)
-		res.artifactBlocks = append(res.artifactBlocks, block)
-		if artName != "" {
-			res.artifactMeta[artName] = artifactComments{
-				leading:  userComments(artLeading, keys),
-				interior: artInterior,
+		meta := artifactComments{leading: userComments(artLeading, keys), interior: artInterior}
+		if curArray == "services" {
+			res.serviceBlocks = append(res.serviceBlocks, block)
+			if artName != "" {
+				res.serviceMeta[artName] = meta
+			}
+		} else {
+			res.artifactBlocks = append(res.artifactBlocks, block)
+			if artName != "" {
+				res.artifactMeta[artName] = meta
 			}
 		}
-		inArray, artLeading, artInterior, artName = false, nil, nil, ""
+		inArray, curArray, artLeading, artInterior, artName = false, "", nil, nil, ""
 	}
 
 	for _, it := range items {
 		g := gap(prevEnd, it.startLine)
 		switch it.kind {
 		case unstable.ArrayTable:
-			flushArtifact()
+			flushArray()
 			inArray = true
+			curArray = it.norm
 			artLeading = g
 			artHeaderLine, artLastLine = it.startLine, it.endLine
 		case unstable.Table:
-			flushArtifact()
+			flushArray()
 			curNorm = it.norm
 			if uc := userComments(g, keys); len(uc) > 0 {
 				res.tableComments[curNorm] = append(res.tableComments[curNorm], uc...)
@@ -913,7 +1064,7 @@ func analyzeExisting(data []byte, keys map[string]bool) *existingAnalysis {
 			prevEnd = it.endLine
 		}
 	}
-	flushArtifact()
+	flushArray()
 	return res
 }
 
@@ -980,6 +1131,8 @@ func renderConfig(existing []byte, cfg Config) string {
 	tableComments := prior.tableComments // normalized table -> leading user comments
 	artifactBlocks := prior.artifactBlocks
 	artifactMeta := prior.artifactMeta // name -> preserved comments
+	serviceBlocks := prior.serviceBlocks
+	serviceMeta := prior.serviceMeta // name -> preserved comments
 
 	var out []string
 	spec := defaultsSpec()
@@ -1032,6 +1185,24 @@ func renderConfig(existing []byte, cfg Config) string {
 		// Preserve mode (no explicit list, e.g. a defaults-only save): keep the
 		// existing artifact blocks verbatim.
 		for i, block := range artifactBlocks {
+			if i > 0 {
+				out = append(out, "")
+			}
+			out = append(out, block...)
+		}
+	}
+
+	// Services: documentation block, then the service tables. Mirrors artifacts:
+	// an authoritative list (from the editor) takes effect, a nil list preserves
+	// the existing [[services]] blocks verbatim, and an absence shows an example.
+	out = appendBlank(out)
+	out = append(out, servicesDocLines()...)
+	if cfg.Services != nil {
+		emitServicesAuthoritative(&out, cfg.Services, serviceMeta)
+	} else if len(serviceBlocks) == 0 {
+		out = append(out, servicesExampleLines()...)
+	} else {
+		for i, block := range serviceBlocks {
 			if i > 0 {
 				out = append(out, "")
 			}
@@ -1166,6 +1337,9 @@ func emitAgent(out *[]string, name string, a AgentConfig, keyComments, tableComm
 	if sb.PreSpawnScript != nil && *sb.PreSpawnScript != "" {
 		emitSetField(out, name+".sandbox", "pre_spawn_script", tomlStringValue(*sb.PreSpawnScript), true, keyComments)
 	}
+	if sb.PostExitScript != nil && *sb.PostExitScript != "" {
+		emitSetField(out, name+".sandbox", "post_exit_script", tomlStringValue(*sb.PostExitScript), true, keyComments)
+	}
 	if nw := sb.Network; nw != nil && (nw.Enabled != nil || len(nw.AllowedHosts) > 0) {
 		*out = appendBlank(*out)
 		if tc := tableComments[name+".sandbox.network"]; len(tc) > 0 {
@@ -1202,6 +1376,9 @@ func sandboxHasContent(sb *SandboxConfig) bool {
 		return true
 	}
 	if sb.PreSpawnScript != nil && *sb.PreSpawnScript != "" {
+		return true
+	}
+	if sb.PostExitScript != nil && *sb.PostExitScript != "" {
 		return true
 	}
 	return sb.Network != nil && (sb.Network.Enabled != nil || len(sb.Network.AllowedHosts) > 0)

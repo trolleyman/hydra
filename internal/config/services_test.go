@@ -1,0 +1,151 @@
+package config
+
+import (
+	"strings"
+	"testing"
+)
+
+func intPtr(i int) *int { return &i }
+
+// TestPostExitScriptRoundTrip checks that a post_exit_script survives a
+// render -> parse round-trip and resolves for an agent.
+func TestPostExitScriptRoundTrip(t *testing.T) {
+	cfg := Config{
+		Defaults: AgentConfig{
+			Sandbox: &SandboxConfig{PostExitScript: strPtr("emu-release.sh\necho done")},
+		},
+	}
+
+	tomlStr := renderConfig(nil, cfg)
+	if !strings.Contains(tomlStr, "post_exit_script = ") {
+		t.Fatalf("rendered config missing post_exit_script:\n%s", tomlStr)
+	}
+
+	parsed, err := decodeConfig([]byte(tomlStr))
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got := parsed.ResolvePostExitScript("claude"); got != "emu-release.sh\necho done" {
+		t.Fatalf("resolved postExit mismatch: %q", got)
+	}
+}
+
+// TestPostExitScriptAgentOverride checks the per-agent override wins.
+func TestPostExitScriptAgentOverride(t *testing.T) {
+	cfg := Config{
+		Defaults: AgentConfig{Sandbox: &SandboxConfig{PostExitScript: strPtr("default")}},
+		Agents: map[string]AgentConfig{
+			"claude": {Sandbox: &SandboxConfig{PostExitScript: strPtr("claude-only")}},
+		},
+	}
+	if got := cfg.ResolvePostExitScript("claude"); got != "claude-only" {
+		t.Fatalf("claude override: got %q", got)
+	}
+	if got := cfg.ResolvePostExitScript("gemini"); got != "default" {
+		t.Fatalf("gemini inherits default: got %q", got)
+	}
+}
+
+// TestServicesRoundTrip checks [[services]] blocks survive a render -> parse
+// round-trip with all fields intact.
+func TestServicesRoundTrip(t *testing.T) {
+	cfg := Config{
+		Services: []ServiceScript{
+			{Name: "emu-pool", Command: "scripts/emu-pool.sh up 3 --foreground", Host: true, MaxRestarts: intPtr(5)},
+			{Name: "indexer", Command: "bun run indexer"},
+		},
+	}
+
+	tomlStr := renderConfig(nil, cfg)
+	if !strings.Contains(tomlStr, "[[services]]") {
+		t.Fatalf("rendered config missing [[services]]:\n%s", tomlStr)
+	}
+
+	parsed, err := decodeConfig([]byte(tomlStr))
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(parsed.Services) != 2 {
+		t.Fatalf("expected 2 services, got %d: %+v", len(parsed.Services), parsed.Services)
+	}
+	emu := parsed.Services[0]
+	if emu.Name != "emu-pool" || emu.Command != "scripts/emu-pool.sh up 3 --foreground" || !emu.Host {
+		t.Fatalf("emu-pool round-trip mismatch: %+v", emu)
+	}
+	if emu.MaxRestarts == nil || *emu.MaxRestarts != 5 {
+		t.Fatalf("emu-pool max_restarts mismatch: %+v", emu.MaxRestarts)
+	}
+	idx := parsed.Services[1]
+	if idx.Name != "indexer" || idx.Host || idx.MaxRestarts != nil {
+		t.Fatalf("indexer round-trip mismatch: %+v", idx)
+	}
+}
+
+// TestServicesNotParsedAsArtifacts guards the renderer against the historical
+// "all array tables are artifacts" behaviour: a file holding BOTH [[artifacts]]
+// and [[services]] must keep them distinct across a defaults-only re-render
+// (nil Artifacts/Services = preserve mode).
+func TestServicesNotParsedAsArtifacts(t *testing.T) {
+	src := `[[artifacts]]
+name = "shots"
+command = "bun run shots"
+
+[[services]]
+name = "emu-pool"
+command = "emu up"
+host = true
+`
+	parsed, err := decodeConfig([]byte(src))
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(parsed.Artifacts) != 1 || parsed.Artifacts[0].Name != "shots" {
+		t.Fatalf("artifacts mis-parsed: %+v", parsed.Artifacts)
+	}
+	if len(parsed.Services) != 1 || parsed.Services[0].Name != "emu-pool" || !parsed.Services[0].Host {
+		t.Fatalf("services mis-parsed: %+v", parsed.Services)
+	}
+
+	// A defaults-only save (nil lists) preserves both blocks verbatim and does
+	// not duplicate the service into the artifacts section. Count exact header
+	// lines (the doc blocks also mention "[[artifacts]]:"/"[[services]]:").
+	countHeaders := func(text, header string) int {
+		n := 0
+		for _, ln := range strings.Split(text, "\n") {
+			if strings.TrimSpace(ln) == header {
+				n++
+			}
+		}
+		return n
+	}
+	rendered := renderConfig([]byte(src), Config{})
+	if countHeaders(rendered, "[[artifacts]]") != 1 {
+		t.Fatalf("expected exactly one [[artifacts]] header after preserve render:\n%s", rendered)
+	}
+	if countHeaders(rendered, "[[services]]") != 1 {
+		t.Fatalf("expected exactly one [[services]] header after preserve render:\n%s", rendered)
+	}
+	reparsed, err := decodeConfig([]byte(rendered))
+	if err != nil {
+		t.Fatalf("re-decode: %v", err)
+	}
+	if len(reparsed.Artifacts) != 1 || len(reparsed.Services) != 1 {
+		t.Fatalf("preserve render lost a block: arts=%+v svcs=%+v", reparsed.Artifacts, reparsed.Services)
+	}
+}
+
+// TestServicesAuthoritativeDelete checks an explicit empty list clears services.
+func TestServicesAuthoritativeDelete(t *testing.T) {
+	src := `[[services]]
+name = "emu-pool"
+command = "emu up"
+`
+	rendered := renderConfig([]byte(src), Config{Services: []ServiceScript{}})
+	parsed, err := decodeConfig([]byte(rendered))
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(parsed.Services) != 0 {
+		t.Fatalf("expected services cleared, got %+v", parsed.Services)
+	}
+}
