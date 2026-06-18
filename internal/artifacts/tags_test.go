@@ -71,7 +71,7 @@ func TestNormalizeTags(t *testing.T) {
 // leaves a tagless file with no tags.
 func TestScanOutputsReadsTagSidecars(t *testing.T) {
 	m := NewManager(t.TempDir())
-	const script, key = "shot", "cabc"
+	const script, key = "shot", "commit/abc"
 	dir := m.entryDir(script, key)
 
 	writeArtifact(t, m, script, key, "home.png", []byte("PNG"))
@@ -110,7 +110,7 @@ func TestScanOutputsReadsTagSidecars(t *testing.T) {
 // than failing the scan, and the file still appears (untagged).
 func TestScanOutputsMalformedSidecar(t *testing.T) {
 	m := NewManager(t.TempDir())
-	const script, key = "shot", "cdef"
+	const script, key = "shot", "commit/def"
 	dir := m.entryDir(script, key)
 
 	writeArtifact(t, m, script, key, "home.png", []byte("PNG"))

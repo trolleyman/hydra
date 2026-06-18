@@ -275,14 +275,14 @@ func TestBlobPath(t *testing.T) {
 	m := NewManager(t.TempDir())
 
 	// Valid request resolves to a path inside the entry dir.
-	got, ct, err := m.BlobPath("shots", "cabc123", "sub/home.png")
+	got, ct, err := m.BlobPath("shots", "commit/abc123", "sub/home.png")
 	if err != nil {
 		t.Fatalf("valid blob path rejected: %v", err)
 	}
 	if ct != "image/png" {
 		t.Errorf("content type = %q", ct)
 	}
-	base := m.entryDir("shots", "cabc123")
+	base := m.entryDir("shots", "commit/abc123")
 	if rel, _ := filepath.Rel(base, got); rel != filepath.FromSlash("sub/home.png") {
 		t.Errorf("resolved outside base: %q", got)
 	}
@@ -291,13 +291,13 @@ func TestBlobPath(t *testing.T) {
 	if _, _, err := m.BlobPath("shots", "nothex!", "home.png"); err == nil {
 		t.Error("expected bad-key rejection")
 	}
-	if _, _, err := m.BlobPath("shots", "cabc123", "home.txt"); err == nil {
+	if _, _, err := m.BlobPath("shots", "commit/abc123", "home.txt"); err == nil {
 		t.Error("expected unsupported-type rejection")
 	}
 
 	// Traversal attempts must stay contained within the entry dir (rooted, not escaping).
 	for _, file := range []string{"../../etc/passwd.png", "/etc/passwd.png", "a/../../b.png"} {
-		p, _, err := m.BlobPath("shots", "cabc123", file)
+		p, _, err := m.BlobPath("shots", "commit/abc123", file)
 		if err != nil {
 			continue // rejected outright is also fine
 		}
@@ -309,6 +309,68 @@ func TestBlobPath(t *testing.T) {
 
 func hasDotDotPrefix(rel string) bool {
 	return rel == ".." || (len(rel) >= 3 && rel[:3] == ".."+string(filepath.Separator))
+}
+
+func TestMigrateLegacyLayout(t *testing.T) {
+	m := NewManager(t.TempDir())
+	const sha = "a6a44867d80c2401f8a3648cd06c5c7c005db467"
+	const wHash = "deadbeef"
+
+	// Seed two entries in the old flat layout (c<sha> commit, w<hash> worktree),
+	// each with a meta.json carrying the old key and a blob file alongside.
+	seedLegacy := func(script, name, key string) {
+		dir := filepath.Join(m.outDir(), script, name)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := writeMeta(dir, Meta{Script: script, Key: key, Status: StatusReady, Files: []FileMeta{{Name: "home.png"}}}); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "home.png"), []byte("PNG"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	seedLegacy("shots", "c"+sha, "c"+sha)
+	seedLegacy("shots", "w"+wHash, "w"+wHash)
+
+	if n := m.MigrateLegacyLayout(); n != 2 {
+		t.Fatalf("migrated = %d, want 2", n)
+	}
+
+	// Old dirs gone; new <kind>/<id> dirs present with the blob moved and the
+	// persisted key rewritten to match the new path.
+	check := func(oldName, newKey string) {
+		if _, err := os.Stat(filepath.Join(m.outDir(), "shots", oldName)); !os.IsNotExist(err) {
+			t.Errorf("legacy dir %q still present", oldName)
+		}
+		newDir := m.entryDir("shots", newKey)
+		if _, err := os.Stat(filepath.Join(newDir, "home.png")); err != nil {
+			t.Errorf("blob not moved for %q: %v", newKey, err)
+		}
+		meta, ok := readMeta(newDir)
+		if !ok {
+			t.Fatalf("meta missing for %q", newKey)
+		}
+		if meta.Key != newKey {
+			t.Errorf("meta.Key = %q, want %q", meta.Key, newKey)
+		}
+	}
+	check("c"+sha, "commit/"+sha)
+	check("w"+wHash, "worktree/"+wHash)
+
+	// Idempotent: a second run finds nothing to move.
+	if n := m.MigrateLegacyLayout(); n != 0 {
+		t.Errorf("second run migrated = %d, want 0", n)
+	}
+
+	// A legacy entry whose new-format dir already exists is dropped, not moved.
+	seedLegacy("shots", "c"+sha, "c"+sha)
+	if n := m.MigrateLegacyLayout(); n != 0 {
+		t.Errorf("migrated over existing = %d, want 0", n)
+	}
+	if _, err := os.Stat(filepath.Join(m.outDir(), "shots", "c"+sha)); !os.IsNotExist(err) {
+		t.Error("stale legacy dir not removed when new-format entry exists")
+	}
 }
 
 func TestCompare(t *testing.T) {
@@ -391,23 +453,23 @@ func TestManagerComparePixelEqual(t *testing.T) {
 	other := image.NewRGBA(image.Rect(0, 0, 8, 8))
 	otherPNG := encodePNG(t, other, png.DefaultCompression)
 
-	writeArtifact(t, m, script, "cleft", "same.png", defaultPNG)
-	writeArtifact(t, m, script, "cleft", "diff.png", defaultPNG)
-	writeArtifact(t, m, script, "cleft", "note.svg", []byte("<svg>a</svg>"))
-	writeArtifact(t, m, script, "cright", "same.png", fastPNG)
-	writeArtifact(t, m, script, "cright", "diff.png", otherPNG)
-	writeArtifact(t, m, script, "cright", "note.svg", []byte("<svg>b</svg>"))
+	writeArtifact(t, m, script, "commit/left", "same.png", defaultPNG)
+	writeArtifact(t, m, script, "commit/left", "diff.png", defaultPNG)
+	writeArtifact(t, m, script, "commit/left", "note.svg", []byte("<svg>a</svg>"))
+	writeArtifact(t, m, script, "commit/right", "same.png", fastPNG)
+	writeArtifact(t, m, script, "commit/right", "diff.png", otherPNG)
+	writeArtifact(t, m, script, "commit/right", "note.svg", []byte("<svg>b</svg>"))
 
-	leftFiles, _, err := scanOutputs(m.entryDir(script, "cleft"))
+	leftFiles, _, err := scanOutputs(m.entryDir(script, "commit/left"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	rightFiles, _, err := scanOutputs(m.entryDir(script, "cright"))
+	rightFiles, _, err := scanOutputs(m.entryDir(script, "commit/right"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	left := Meta{Script: script, Key: "cleft", Files: leftFiles}
-	right := Meta{Script: script, Key: "cright", Files: rightFiles}
+	left := Meta{Script: script, Key: "commit/left", Files: leftFiles}
+	right := Meta{Script: script, Key: "commit/right", Files: rightFiles}
 
 	got := map[string]ChangeType{}
 	for _, d := range m.Compare(left, right) {
@@ -464,10 +526,10 @@ func TestManagerCompareVideoFrames(t *testing.T) {
 	}
 	diff := encodeTestWebM(t, "testsrc2", "one") // genuinely different frames
 
-	writeArtifact(t, m, script, "cleft", "clip.webm", same1)
-	writeArtifact(t, m, script, "cleft", "other.webm", same1)
-	writeArtifact(t, m, script, "cright", "clip.webm", same2)
-	writeArtifact(t, m, script, "cright", "other.webm", diff)
+	writeArtifact(t, m, script, "commit/left", "clip.webm", same1)
+	writeArtifact(t, m, script, "commit/left", "other.webm", same1)
+	writeArtifact(t, m, script, "commit/right", "clip.webm", same2)
+	writeArtifact(t, m, script, "commit/right", "other.webm", diff)
 
 	left, right := scanPair(t, m, script)
 	byName := map[string]FileDelta{}
@@ -488,8 +550,8 @@ func TestManagerCompareVideoFrames(t *testing.T) {
 func TestManagerCompareVideoUnverified(t *testing.T) {
 	m := NewManager(t.TempDir())
 	const script = "rec"
-	writeArtifact(t, m, script, "cleft", "clip.webm", []byte("first"))
-	writeArtifact(t, m, script, "cright", "clip.webm", []byte("second"))
+	writeArtifact(t, m, script, "commit/left", "clip.webm", []byte("first"))
+	writeArtifact(t, m, script, "commit/right", "clip.webm", []byte("second"))
 
 	// Empty PATH so exec.LookPath("ffmpeg") fails and the frame check can't run.
 	t.Setenv("PATH", "")
@@ -509,13 +571,13 @@ func TestManagerCompareVideoUnverified(t *testing.T) {
 // scanPair scans the cleft/cright entry dirs of script into a left/right Meta.
 func scanPair(t *testing.T, m *Manager, script string) (Meta, Meta) {
 	t.Helper()
-	leftFiles, _, err := scanOutputs(m.entryDir(script, "cleft"))
+	leftFiles, _, err := scanOutputs(m.entryDir(script, "commit/left"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	rightFiles, _, err := scanOutputs(m.entryDir(script, "cright"))
+	rightFiles, _, err := scanOutputs(m.entryDir(script, "commit/right"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	return Meta{Script: script, Key: "cleft", Files: leftFiles}, Meta{Script: script, Key: "cright", Files: rightFiles}
+	return Meta{Script: script, Key: "commit/left", Files: leftFiles}, Meta{Script: script, Key: "commit/right", Files: rightFiles}
 }

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
-import { TerminalEvent, type TerminalStatusEvent, type TerminalDataEvent, AgentStatus } from '../api'
+import { TerminalEvent, type TerminalStatusEvent, type TerminalDataEvent, type TerminalDiffRefreshEvent, AgentStatus } from '../api'
 import { RefreshCw, Plus, X, ChevronDown, Shield, ShieldOff } from 'lucide-react'
 import { Tooltip } from './Tooltip'
 import { uploadFile, extractFiles } from '../api/uploads'
@@ -21,7 +21,7 @@ interface PaneProps {
   active: boolean
   reconnectAttempt: number
   onStatusUpdate?: (status: string) => void
-  onDiffRefresh?: () => void
+  onDiffRefresh?: (headMoved: boolean) => void
   onMetrics?: (m: { cols: number; rows: number; cellHeight: number }) => void
 }
 
@@ -243,7 +243,8 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
               return
             }
             case TerminalEvent.type.DIFF_REFRESH: {
-              onDiffRefresh?.()
+              const refreshEvent = msg as TerminalDiffRefreshEvent
+              onDiffRefresh?.(refreshEvent.head_moved ?? false)
               return
             }
             case TerminalEvent.type.DATA: {
@@ -442,7 +443,7 @@ interface Props {
   isEphemeral?: boolean
   onRefresh?: () => void
   onStatusUpdate?: (status: string) => void
-  onDiffRefresh?: () => void
+  onDiffRefresh?: (headMoved: boolean) => void
 }
 
 export function AgentTerminal({ agentId, projectId, onRefresh, onStatusUpdate, onDiffRefresh }: Props) {

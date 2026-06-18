@@ -1847,11 +1847,25 @@ components:
         mapping:
           status: '#/components/schemas/TerminalStatusEvent'
           data: '#/components/schemas/TerminalDataEvent'
-          diff_refresh: '#/components/schemas/TerminalEvent'
+          diff_refresh: '#/components/schemas/TerminalDiffRefreshEvent'
       properties:
         type:
           type: string
           enum: [status, data, diff_refresh]
+
+    TerminalDiffRefreshEvent:
+      allOf:
+        - $ref: '#/components/schemas/TerminalEvent'
+        - type: object
+          properties:
+            head_moved:
+              type: boolean
+              description: >-
+                True when this refresh was triggered by a new commit (HEAD
+                moved), as opposed to an uncommitted working-tree change. The
+                diff viewer uses it to also re-snapshot per-commit artifacts
+                (screenshots), which are memoized by commit SHA, while a plain
+                working-tree change only re-fetches the diff text.
 
     TerminalStatusEvent:
       allOf:

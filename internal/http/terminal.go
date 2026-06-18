@@ -64,6 +64,17 @@ type terminalStatusEvent struct {
 	Status string `json:"status"`
 }
 
+// terminalDiffRefreshEvent tells the diff viewer to re-fetch. HeadMoved
+// distinguishes a new commit (HEAD moved) from a plain uncommitted edit: the
+// client re-fetches the diff text on either, but only re-snapshots the
+// per-commit artifacts (screenshots) when the commit actually changed, since
+// those are memoized by commit SHA and regenerating them on every edit would
+// be wasted work.
+type terminalDiffRefreshEvent struct {
+	terminalEvent
+	HeadMoved bool `json:"head_moved"`
+}
+
 type safeConn struct {
 	*websocket.Conn
 	mu sync.Mutex
@@ -92,6 +103,15 @@ func sendStatusUpdate(conn *safeConn, status string) {
 
 func sendTerminalEvent(conn *safeConn, eventType string) {
 	msg := terminalEvent{Type: eventType}
+	data, _ := json.Marshal(msg)
+	_ = conn.WriteMessage(websocket.TextMessage, data)
+}
+
+// sendDiffRefresh emits a diff_refresh event, flagging whether the worktree
+// change was a new commit (headMoved) so the client knows to also regenerate
+// the per-commit artifacts.
+func sendDiffRefresh(conn *safeConn, headMoved bool) {
+	msg := terminalDiffRefreshEvent{terminalEvent: terminalEvent{Type: "diff_refresh"}, HeadMoved: headMoved}
 	data, _ := json.Marshal(msg)
 	_ = conn.WriteMessage(websocket.TextMessage, data)
 }
@@ -376,7 +396,9 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 
 		// checkAndEmit recomputes the worktree fingerprint and emits diff_refresh only
 		// when it has changed since the last emit. Read-only git commands (status, log,
-		// diff) and idle ticks therefore never trigger a client re-fetch.
+		// diff) and idle ticks therefore never trigger a client re-fetch. It also
+		// reports, via the event's head_moved flag, whether HEAD advanced (a commit) so
+		// the client re-snapshots the per-commit artifacts only then, not on every edit.
 		checkAndEmit := func() {
 			if worktree == "" {
 				return
@@ -386,10 +408,12 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			lastHash = h
-			if c, err := git.ResolveRef(worktree, "HEAD"); err == nil {
+			headMoved := false
+			if c, err := git.ResolveRef(worktree, "HEAD"); err == nil && c != lastHead {
 				lastHead = c
+				headMoved = true
 			}
-			sendTerminalEvent(conn, "diff_refresh")
+			sendDiffRefresh(conn, headMoved)
 		}
 
 		// checkHeadAndEmit is a cheap HEAD-only check (a single git rev-parse, no

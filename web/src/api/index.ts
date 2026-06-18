@@ -41,6 +41,7 @@ export type { SandboxConfig } from './models/SandboxConfig';
 export type { SpawnAgentRequest } from './models/SpawnAgentRequest';
 export type { StatusResponse } from './models/StatusResponse';
 export type { TerminalDataEvent } from './models/TerminalDataEvent';
+export type { TerminalDiffRefreshEvent } from './models/TerminalDiffRefreshEvent';
 export { TerminalEvent } from './models/TerminalEvent';
 export type { TerminalStatusEvent } from './models/TerminalStatusEvent';
 export type { UncommittedSummary } from './models/UncommittedSummary';

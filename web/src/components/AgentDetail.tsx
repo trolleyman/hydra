@@ -184,6 +184,10 @@ export function AgentDetail({
   const updateAgentInStore = useAgentStore((s) => s.updateAgent)
   const [, setTick] = useState(0)
   const [diffRefreshTrigger, setDiffRefreshTrigger] = useState(0)
+  // Bumped only when the refresh was a new commit (HEAD moved), so the diff
+  // viewer re-snapshots the per-commit artifacts (screenshots) on commit — not
+  // on every uncommitted working-tree edit, which would rebuild them needlessly.
+  const [artifactRefreshTrigger, setArtifactRefreshTrigger] = useState(0)
   const scrollRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -565,11 +569,14 @@ export function AgentDetail({
           projectId={projectId}
           isEphemeral={agent.ephemeral}
           onRefresh={onRefresh}
-          onDiffRefresh={() => setDiffRefreshTrigger((t) => t + 1)}
+          onDiffRefresh={(headMoved) => {
+            setDiffRefreshTrigger((t) => t + 1)
+            if (headMoved) setArtifactRefreshTrigger((t) => t + 1)
+          }}
         />
 
         {/* Diff viewer */}
-        <DiffViewer agent={agent} projectId={projectId} externalRefreshTrigger={diffRefreshTrigger} />
+        <DiffViewer agent={agent} projectId={projectId} externalRefreshTrigger={diffRefreshTrigger} externalArtifactRefresh={artifactRefreshTrigger} />
       </div>
     </div>
   )
