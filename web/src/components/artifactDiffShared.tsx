@@ -43,8 +43,14 @@ export function makeAuxOpen(pick: (e: React.MouseEvent) => string) {
 // Default/bounds for the draggable media height (see useMediaResize). The base
 // matches IMG_CLASS's max-h-[480px] so a card opens at the same size as before.
 export const DEFAULT_IMG_MAX_H = 480
-export const MIN_IMG_MAX_H = 160
 export const MAX_IMG_MAX_H = 1600
+// Minimum on-screen extent (px) for the SMALLER of the two media dimensions. The
+// drag is clamped so neither side shrinks below this, rather than flooring the
+// height directly: a fixed height floor is wrong for a wide image (it's width-
+// bound, so its rendered height is already below the floor and the drag can't
+// shrink it at all). With aspect = width/height, the height floor that keeps the
+// smaller side at MIN_IMG_DIM is MIN_IMG_DIM * max(1, 1/aspect).
+export const MIN_IMG_DIM = 80
 // Pointer travel (px) past which a press-and-move counts as a resize drag rather
 // than a click — so a drag on the A/B media resizes without also flipping sides.
 const DRAG_THRESHOLD = 4
@@ -79,14 +85,32 @@ export function useMediaResize() {
     dragged.current = false
     const startX = e.clientX
     const startY = e.clientY
-    const startH = current.current
+    // Measure the media the grip belongs to. onResizeStart is bound both to the grip
+    // and (in the click-to-flip views) to the whole media box, so look inside the
+    // event target first, then fall back to its parent (the grip is an empty sibling
+    // of the media). The rect gives us two things:
+    //   - aspect ratio, so horizontal pointer travel maps correctly (see onMove), and
+    //   - the actual on-screen height to start from. Starting from the stored max-
+    //     height would add a dead zone for a width-bound image, where the rendered
+    //     height is well below the max-height and a shrink drag would do nothing until
+    //     the max-height caught up.
+    const host = e.currentTarget as HTMLElement
+    const media = (host.querySelector('img, video, canvas') ??
+      host.parentElement?.querySelector('img, video, canvas')) as HTMLElement | null
+    const rect = media?.getBoundingClientRect()
+    const aspect = rect && rect.height > 0 ? rect.width / rect.height : 1
+    const startH = rect && rect.height > 0 ? rect.height : current.current
+    // Floor the height so the smaller of the two dimensions stays >= MIN_IMG_DIM.
+    const minH = MIN_IMG_DIM * Math.max(1, 1 / aspect)
     const onMove = (ev: PointerEvent) => {
-      // The grip is a bottom-right (nwse) corner handle, so down-AND-right grows
-      // the media. Sum the horizontal and vertical deltas so a purely horizontal
-      // drag to the right enlarges it just as a downward drag does.
-      const delta = (ev.clientX - startX) + (ev.clientY - startY)
-      if (Math.abs(delta) > DRAG_THRESHOLD) dragged.current = true
-      setMaxHeight(Math.max(MIN_IMG_MAX_H, Math.min(MAX_IMG_MAX_H, startH + delta)))
+      // The grip is a bottom-right (nwse) corner handle. Vertical pointer motion maps
+      // 1:1 to the rendered height; horizontal motion is divided by the aspect ratio
+      // because the rendered width is height*aspect — so moving the corner right by N
+      // px grows the width by N px (not N*aspect), keeping the grip under the pointer.
+      const dx = ev.clientX - startX
+      const dy = ev.clientY - startY
+      if (Math.hypot(dx, dy) > DRAG_THRESHOLD) dragged.current = true
+      setMaxHeight(Math.max(minH, Math.min(MAX_IMG_MAX_H, startH + dy + dx / aspect)))
     }
     const onUp = () => {
       window.removeEventListener('pointermove', onMove)
