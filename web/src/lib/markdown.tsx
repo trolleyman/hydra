@@ -95,6 +95,28 @@ function parseInline(text: string): Seg[] {
   return segs
 }
 
+// trimAroundBlocks drops the single newline directly before/after a fenced
+// codeblock segment. A codeblock renders as its own display:block element, so
+// in a `whitespace-pre-wrap` container the literal newline that separated the
+// fence from its surrounding prose would otherwise add a redundant blank line.
+// READ-ONLY ONLY: this is lossy, so the textarea overlay (which needs
+// char-for-char fidelity) must not use it.
+function trimAroundBlocks(segs: Seg[]): Seg[] {
+  const out = segs.map((s) => ({ ...s }))
+  out.forEach((s, i) => {
+    if (s.kind !== 'codeblock') return
+    const prev = out[i - 1]
+    if (prev && prev.kind === 'text' && prev.value.endsWith('\n')) {
+      prev.value = prev.value.slice(0, -1)
+    }
+    const next = out[i + 1]
+    if (next && next.kind === 'text' && next.value.startsWith('\n')) {
+      next.value = next.value.slice(1)
+    }
+  })
+  return out.filter((s) => !(s.kind === 'text' && s.value === ''))
+}
+
 // Inline-code styling for read-only renders. Deliberately uses only HORIZONTAL
 // padding and a slightly smaller (never larger) em size: vertical padding or a
 // bigger font would change the line height, and we want a line with a code span
@@ -117,7 +139,7 @@ export function renderMarkdown(text: string, opts: RenderMarkdownOptions = {}): 
   if (opts.dollarCommand && text.startsWith('$')) {
     return <code className={CODE_CLASS}>{text}</code>
   }
-  const segs = parseInline(text)
+  const segs = trimAroundBlocks(parseInline(text))
   return segs.map((s, i) => {
     switch (s.kind) {
       case 'code':
