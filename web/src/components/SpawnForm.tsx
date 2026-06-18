@@ -498,7 +498,7 @@ export function SpawnForm({
               placeholder={disabled ? 'Select a project first…' : (prompt ? 'Describe a task…' : animatedPlaceholder)}
               rows={3}
               disabled={loading || disabled}
-              wrapperClassName={`w-full flex-1 min-h-[72px] ${dragOver ? 'ring-2 ring-blue-400 rounded' : ''}`}
+              wrapperClassName={`w-full flex-1 min-h-0 ${dragOver ? 'ring-2 ring-blue-400 rounded' : ''}`}
               textClassName="px-3 pt-2.5 pb-1 text-xs leading-relaxed placeholder-gray-400 dark:placeholder-gray-500 disabled:opacity-50"
             />
             {renderAttachments('sm')}
@@ -584,7 +584,7 @@ export function SpawnForm({
                 placeholder={prompt ? 'Describe what you need…' : animatedPlaceholder}
                 rows={6}
                 disabled={loading}
-                wrapperClassName={`w-full flex-1 min-h-[120px] ${dragOver ? 'ring-2 ring-blue-400 rounded' : ''}`}
+                wrapperClassName={`w-full flex-1 min-h-0 ${dragOver ? 'ring-2 ring-blue-400 rounded' : ''}`}
                 textClassName="px-4 pt-4 pb-2 text-sm leading-relaxed placeholder-gray-400 dark:placeholder-gray-500 disabled:opacity-50"
               />
 
