@@ -25,11 +25,13 @@ type Seg =
   | { kind: 'italic'; marker: string; value: string }
 
 // Fenced code block: an opening ``` (with an optional info string on the rest of
-// the line), then any number of lines, then a closing ```. Matched before the
-// inline patterns and allowed to span newlines. Non-greedy so it stops at the
-// first closing fence. A fence with no closing ``` is left unmatched and falls
-// through to inline/plain handling.
-const FENCE_RE = /^```([^\n]*)\n([\s\S]*?)\n```/
+// the line), then any number of lines, then a closing ``` at the start of a
+// line. Matched before the inline patterns and allowed to span newlines.
+// Non-greedy so it stops at the first closing fence. The body group is optional
+// so an empty block (```\n```, nothing between the fences) still matches and gets
+// highlighted. A fence with no closing ``` is left unmatched and falls through to
+// inline/plain handling.
+const FENCE_RE = /^```([^\n]*)\n(?:([\s\S]*?)\n)?```/
 
 // Inline patterns, tried in order at each position. `**`/`__` must precede the
 // single-char `*`/`_` so the longer marker wins. Each pattern is anchored to
@@ -63,7 +65,7 @@ function parseInline(text: string): Seg[] {
           segs.push({ kind: 'text', value: buf })
           buf = ''
         }
-        segs.push({ kind: 'codeblock', raw: fm[0], lang: fm[1].trim(), value: fm[2] })
+        segs.push({ kind: 'codeblock', raw: fm[0], lang: fm[1].trim(), value: fm[2] ?? '' })
         i += fm[0].length
         continue
       }
@@ -154,7 +156,9 @@ export function renderMarkdown(text: string, opts: RenderMarkdownOptions = {}): 
             key={i}
             className="block my-1 rounded bg-gray-200/70 dark:bg-gray-700/60 px-2 py-1 font-mono text-[0.9em] text-pink-600 dark:text-pink-300 whitespace-pre-wrap break-words"
           >
-            {s.value}
+            {/* A single space keeps an empty block one line tall (so the
+                highlighted chip is still visible) instead of collapsing. */}
+            {s.value === '' ? ' ' : s.value}
           </code>
         )
       case 'bold':
@@ -173,6 +177,19 @@ export function renderMarkdown(text: string, opts: RenderMarkdownOptions = {}): 
         return <span key={i}>{s.value}</span>
     }
   })
+}
+
+// splitFence breaks a fenced block's exact source into its opening fence line
+// (```lang), its body (the inner code, including the surrounding newlines) and
+// its closing ``` fence. open + body + close === raw exactly, so the textarea
+// overlay can style the three parts differently without losing a single glyph.
+function splitFence(raw: string): { open: string; body: string; close: string } {
+  const firstNl = raw.indexOf('\n')
+  const open = firstNl === -1 ? raw : raw.slice(0, firstNl)
+  const afterOpen = firstNl === -1 ? '' : raw.slice(firstNl)
+  const lastFence = afterOpen.lastIndexOf('```')
+  if (lastFence === -1) return { open, body: afterOpen, close: '' }
+  return { open, body: afterOpen.slice(0, lastFence), close: afterOpen.slice(lastFence) }
 }
 
 // renderMarkdownSource renders text for a textarea overlay: it keeps every
@@ -200,10 +217,16 @@ function renderMarkdownSource(text: string): ReactNode {
     }
     if (s.kind === 'codeblock') {
       // Same constraint as inline code: tint + background only, no font swap, so
-      // the multi-line backdrop stays glyph-aligned with the textarea caret.
+      // the multi-line backdrop stays glyph-aligned with the textarea caret. To
+      // read as a block (not just another inline-code chip) the fence lines are
+      // dimmed like emphasis markers, the inner code keeps the code tint, and the
+      // whole thing sits on a slightly stronger background.
+      const { open, body, close } = splitFence(s.raw)
       return (
-        <span key={i} className="rounded box-decoration-clone bg-gray-200/70 dark:bg-gray-700/60 text-pink-600 dark:text-pink-300">
-          {s.raw}
+        <span key={i} className="rounded box-decoration-clone bg-gray-200/80 dark:bg-gray-700/70 text-pink-600 dark:text-pink-300">
+          <span className="opacity-50">{open}</span>
+          {body}
+          <span className="opacity-50">{close}</span>
         </span>
       )
     }
@@ -234,7 +257,7 @@ type HighlightedTextareaProps = Omit<TextareaHTMLAttributes<HTMLTextAreaElement>
 // keeps a visible caret but transparent text so only the highlighted backdrop
 // shows through.
 export const HighlightedTextarea = forwardRef<HTMLTextAreaElement, HighlightedTextareaProps>(
-  function HighlightedTextarea({ value, textClassName = '', wrapperClassName = '', onScroll, ...rest }, ref) {
+  function HighlightedTextarea({ value, textClassName = '', wrapperClassName = '', onScroll, style, ...rest }, ref) {
     const innerRef = useRef<HTMLTextAreaElement>(null)
     const backdropRef = useRef<HTMLDivElement>(null)
     useImperativeHandle(ref, () => innerRef.current as HTMLTextAreaElement)
@@ -261,6 +284,12 @@ export const HighlightedTextarea = forwardRef<HTMLTextAreaElement, HighlightedTe
         <div
           ref={backdropRef}
           aria-hidden="true"
+          // Reserve the scrollbar gutter on both layers (matching the textarea
+          // below). Without this, once the textarea overflows its scrollbar
+          // narrows its wrap column relative to this backdrop, the two layers
+          // wrap text at different widths, and the mismatch drifts the visible
+          // (highlighted) text away from the real (selectable) text.
+          style={{ scrollbarGutter: 'stable' }}
           className={`absolute inset-0 overflow-hidden pointer-events-none whitespace-pre-wrap break-words text-gray-800 dark:text-gray-100 ${textClassName}`}
         >
           {renderMarkdownSource(value)}
@@ -275,6 +304,9 @@ export const HighlightedTextarea = forwardRef<HTMLTextAreaElement, HighlightedTe
             syncScroll()
             onScroll?.(e)
           }}
+          // Match the backdrop's reserved scrollbar gutter so both layers wrap
+          // text at the same width (see the backdrop above).
+          style={{ scrollbarGutter: 'stable', ...style }}
           className={`absolute inset-0 w-full h-full resize-none bg-transparent text-transparent caret-gray-800 dark:caret-gray-100 focus:outline-none ${textClassName}`}
           {...rest}
         />
