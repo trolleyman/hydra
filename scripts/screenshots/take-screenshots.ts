@@ -45,6 +45,15 @@ import ffmpegStatic from 'ffmpeg-static'
 // luck.
 const SIM_NOW = new Date('2025-01-01T12:00:00Z')
 
+// A markdown-rich spawn-prompt draft seeded into the spawn box for the
+// inline-markdown demo. Long enough to wrap in the box (so the wrapped inline-
+// code chip is captured), and includes a literal "$ …" run that must stay
+// ordinary code in a prompt (the $-command override is activity-only).
+const MARKDOWN_DEMO_PROMPT =
+  "Add **simple inline-markdown** rendering so prompts and the live-activity line aren't flat text.\n\n" +
+  'Highlight `inline code`, *italic* and **bold** as you type. A long command in backticks like `go test ./internal/heads/... -run TestResumeLazy -count=1 -race -v` wraps across lines, each fragment keeping its own rounded background, and a line that contains `code` stays exactly as tall as a plain one.\n\n' +
+  'Note: a literal `$ run-this-command --now` in the prompt is just code, not a command — that override is activity-only.'
+
 const OUT = required('HYDRA_ARTIFACT_OUTPUT')
 // HYDRA_ARTIFACT_SOURCE is the checkout root. Fall back to the repo root two
 // levels up from this script so it also works when run by hand.
@@ -242,6 +251,11 @@ try {
       // focuses on a page's header region — e.g. the agent detail title bar —
       // rather than the long content (terminal, diff) below it.
       viewportOnly?: boolean
+      // Seeds an unsent spawn-prompt draft (both the compact + full layout keys)
+      // before the app boots, so the spawn box renders pre-filled — used to
+      // document the live inline-markdown highlighting (and its line-wrapping)
+      // in the textarea overlay without driving keystrokes.
+      seedPrompt?: string
       // Seeds the artifact tag filter (localStorage key built from project+agent)
       // before the app boots, so the artifacts panel renders with a filter applied.
       // Each array lists a scope's HIDDEN values (e.g. { theme: ['dark'] } drops
@@ -279,6 +293,20 @@ try {
       // prev/next arrows, "1 / 2" counter). Also shows the numbered-paste naming
       // (image1.png) on the chips behind. Rendered on the full-page spawn form.
       { name: 'spawn-image-lightbox', path: '/project/sim-project/', attachImages: ['web/public/android-chrome-512x512.png', 'web/public/apple-touch-icon.png'] },
+      // The inline-markdown rendering (the markdown-pass feature). The spawn box
+      // is seeded with a markdown draft so the textarea overlay shows live
+      // highlighting — `code`, *italic*, **bold**, and a long inline-code
+      // reference wrapping across lines — and the sidebar shows the rendered
+      // live-activity lines: agent-md's markdown activity and agent-3's
+      // "$ …"-command activity (rendered wholly as code, overriding markdown).
+      // Full-page so both the box and the sidebar activity land in one shot.
+      { name: 'spawn-markdown', path: '/project/sim-project/', seedPrompt: MARKDOWN_DEMO_PROMPT },
+      // The agent-detail prompt block rendering the same markdown: code/bold/
+      // italic, an inline-code span that wraps, the tightened gap under the
+      // metadata row, and the soft bottom fade as the tall prompt scrolls out of
+      // view. Viewport-only to focus on the header + prompt (agent-md's seeded
+      // prompt overflows the block's max height, so the fade is visible).
+      { name: 'agent-markdown', path: '/project/sim-project/agent/agent-md', viewportOnly: true },
       // The repository view: a GitHub-style browser with a file/folder tree on
       // the left and the picked file rendered on the right. Simulation mode
       // serves a small mock repo (see internal/http/simulation.go) and opens
@@ -547,6 +575,19 @@ try {
               // ignore storage failures
             }
           }, pg.tagFilter)
+        }
+        // Seed an unsent spawn-prompt draft so the spawn box renders pre-filled.
+        // The keys must match web/src/lib/storage.ts promptDraftKey(projectId,
+        // compact) for both layouts; these pages are all the sim project.
+        if (pg.seedPrompt) {
+          await ctx.addInitScript((text) => {
+            try {
+              localStorage.setItem('hydra-prompt-draft-full-sim-project', text)
+              localStorage.setItem('hydra-prompt-draft-compact-sim-project', text)
+            } catch {
+              // ignore storage failures
+            }
+          }, pg.seedPrompt)
         }
         await ctx.addInitScript(() => {
           // Pre-trust the simulated project so the first-open "Trust this

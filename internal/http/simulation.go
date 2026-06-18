@@ -121,7 +121,26 @@ const simAgent1Prompt = "Let agents be renamed with a human-friendly title inste
 	"- Render the title in the sidebar and the detail header, with an inline rename (pencil) control; keep the Copy-ID button exposing the underlying id.\n" +
 	"- Fall back to the id when no title is set, and persist the title across daemon restarts."
 
+// simAgentMdPrompt is the seeded prompt for the markdown-demo agent (agent-md),
+// shared by ListAgents and GetAgent. It is written to exercise the inline-
+// markdown renderer thoroughly: `code`, *italic* and **bold** runs, a long
+// inline-code reference that wraps across lines, a line that mixes code with
+// prose (to prove a code span doesn't change the line height), and a literal
+// "$ …" run that must stay ordinary code in a prompt (the $-command override is
+// activity-only). It is also long enough to overflow the detail PromptBlock's
+// max height so the bottom-fade-on-scroll is visible.
+const simAgentMdPrompt = "Add **simple inline-markdown** rendering so prompts and the live-activity line aren't flat text.\n\n" +
+	"- In the spawn box and this detail view, highlight `inline code`, *italic* and **bold** runs — but leave #headings alone.\n" +
+	"- Reuse the same pass for the live-activity line; when an activity begins with a `$`, render the whole line as a command (e.g. a build or test invocation), overriding markdown — but do that *only* for activity, never for a prompt.\n" +
+	"- A long inline-code reference such as `web/src/components/AgentComponents.tsx` must wrap across lines cleanly, and a line that contains `code` must stay exactly as tall as a `plain` one.\n" +
+	"- A long command in backticks like `go test ./internal/heads/... -run TestResumeLazy -count=1 -race -v` should wrap mid-span, with each line fragment keeping its own rounded code background.\n" +
+	"- Proof the override is activity-only: this literal `$ run-this-command --now` sitting inside the prompt should stay ordinary code, not a highlighted command line.\n" +
+	"- Tighten the gap between the metadata above and this box, and add a soft bottom fade so a tall prompt doesn't cut off hard as it scrolls out of view.\n" +
+	"- Keep it dependency-free: a tiny hand-rolled tokenizer beats pulling in a whole markdown library just for `code`, *italic* and **bold**.\n" +
+	"- Finally, share one renderer across the spawn box, the agent-detail prompt and the sidebar activity line so the three never drift apart."
+
 func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, projectId string) {
+	createdAt0 := simNow().Add(-30 * time.Minute).Unix()
 	createdAt1 := simNow().Add(-1 * time.Hour).Unix()
 	createdAt2 := simNow().Add(-2 * time.Hour).Unix()
 	createdAt3 := simNow().Add(-3 * time.Hour).Unix()
@@ -131,6 +150,25 @@ func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, pr
 	unread := true
 
 	resp := api.ListAgents200JSONResponse{
+		{
+			// Markdown-rendering demo agent. Its live-activity line carries inline
+			// markdown (code + bold + italic) so the sidebar shows the rendered
+			// activity; see agent-3 for the $-command override.
+			Id:            "agent-md",
+			Title:         ptr("Add inline markdown rendering"),
+			AgentType:     "claude",
+			BaseBranch:    "main",
+			BranchName:    ptr("hydra/feat-markdown"),
+			SessionPid:    1004,
+			SessionStatus: "running",
+			CreatedAt:     &createdAt0,
+			Prompt:        simAgentMdPrompt,
+			AgentStatus: &api.AgentStatusInfo{
+				Status:    running,
+				Timestamp: simNow().Format(time.RFC3339),
+				Activity:  ptr("Wrapping `renderMarkdown()` over the **prompt** & *activity*"),
+			},
+		},
 		{
 			Id:            "agent-1",
 			Title:         ptr("Add renameable agent titles"),
@@ -177,6 +215,9 @@ func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, pr
 			AgentStatus: &api.AgentStatusInfo{
 				Status:    running,
 				Timestamp: simNow().Format(time.RFC3339),
+				// A "$"-prefixed activity renders as a command (whole line styled
+				// as code), overriding markdown — demos the activity-only override.
+				Activity: ptr("$ go test ./internal/heads/ -run TestResumeLazy"),
 			},
 		},
 	}
@@ -257,6 +298,26 @@ func (s *SimulationServer) GetAgent(w http.ResponseWriter, r *http.Request, proj
 			AgentStatus: &api.AgentStatusInfo{
 				Status:    api.Running,
 				Timestamp: simNow().Format(time.RFC3339),
+			},
+		})
+		return
+	}
+	if id == "agent-md" {
+		createdAt := simNow().Add(-30 * time.Minute).Unix()
+		api.WriteJSON(w, http.StatusOK, api.AgentResponse{
+			Id:            "agent-md",
+			Title:         ptr("Add inline markdown rendering"),
+			AgentType:     "claude",
+			BaseBranch:    "main",
+			BranchName:    ptr("hydra/feat-markdown"),
+			SessionPid:    1004,
+			SessionStatus: "running",
+			CreatedAt:     &createdAt,
+			Prompt:        simAgentMdPrompt,
+			AgentStatus: &api.AgentStatusInfo{
+				Status:    api.Running,
+				Timestamp: simNow().Format(time.RFC3339),
+				Activity:  ptr("Wrapping `renderMarkdown()` over the **prompt** & *activity*"),
 			},
 		})
 		return
