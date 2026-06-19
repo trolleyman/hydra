@@ -6,6 +6,48 @@ import (
 )
 
 func intPtr(i int) *int { return &i }
+func boolPtr(b bool) *bool { return &b }
+
+// TestEnabledFlagRoundTrip checks that enabled = false survives a render -> parse
+// round-trip for both services and artifacts, that an absent flag means enabled
+// (IsEnabled true), and that the default (enabled) emits no `enabled` line.
+func TestEnabledFlagRoundTrip(t *testing.T) {
+	cfg := Config{
+		Services: []ServiceScript{
+			{Name: "off-svc", Command: "true", Enabled: boolPtr(false)},
+			{Name: "on-svc", Command: "true"},
+		},
+		Artifacts: []ArtifactScript{
+			{Name: "off-art", Command: "true", Enabled: boolPtr(false)},
+			{Name: "on-art", Command: "true"},
+		},
+	}
+
+	tomlStr := renderConfig(nil, cfg)
+	if got := strings.Count(tomlStr, "enabled = false"); got != 2 {
+		t.Fatalf("expected exactly 2 `enabled = false` lines (one per disabled item), got %d:\n%s", got, tomlStr)
+	}
+
+	parsed, err := decodeConfig([]byte(tomlStr))
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(parsed.Services) != 2 || len(parsed.Artifacts) != 2 {
+		t.Fatalf("expected 2 services + 2 artifacts, got %d + %d", len(parsed.Services), len(parsed.Artifacts))
+	}
+	if parsed.Services[0].IsEnabled() {
+		t.Fatalf("off-svc should be disabled: %+v", parsed.Services[0])
+	}
+	if !parsed.Services[1].IsEnabled() || parsed.Services[1].Enabled != nil {
+		t.Fatalf("on-svc should be enabled with no explicit flag: %+v", parsed.Services[1])
+	}
+	if parsed.Artifacts[0].IsEnabled() {
+		t.Fatalf("off-art should be disabled: %+v", parsed.Artifacts[0])
+	}
+	if !parsed.Artifacts[1].IsEnabled() || parsed.Artifacts[1].Enabled != nil {
+		t.Fatalf("on-art should be enabled with no explicit flag: %+v", parsed.Artifacts[1])
+	}
+}
 
 // TestPreExitScriptRoundTrip checks that a pre_exit_script survives a
 // render -> parse round-trip and resolves for an agent.

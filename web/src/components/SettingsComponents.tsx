@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 import type { AgentConfig, AgentResponse, ArtifactScript, ConfigResponse, NetworkConfig, ProjectInfo, SandboxConfig } from '../api'
 import { useEffect, useState } from 'react'
-import { X, Plus, Globe, FolderOpen, EyeOff, Eye, Layers, Monitor, Sparkles, Terminal, Image, AlertTriangle, Server, RotateCw, CheckCircle2, Loader2 } from 'lucide-react'
+import { X, Plus, Globe, FolderOpen, EyeOff, Eye, Layers, Monitor, Sparkles, Terminal, Image, AlertTriangle, Server, RotateCw, CheckCircle2, Loader2, Save, AlertCircle } from 'lucide-react'
 import { api } from '../stores/apiClient'
 import type { ServiceScript, ServiceStatus } from '../api'
 import { InfoTooltip } from './InfoTooltip'
@@ -9,6 +9,21 @@ import { AgentTerminal } from './AgentTerminal'
 import { ShellEditor } from './ShellEditor'
 
 export type SettingsSection = 'all' | 'claude' | 'gemini' | 'copilot' | 'defaults'
+
+// ── EnabledToggle ─────────────────────────────────────────────────────────────
+// A small on/off switch used to enable or disable a single artifact or service
+// without deleting it. Green + "Enabled" when on; muted + "Disabled" when off.
+function EnabledToggle({ enabled, onChange }: { enabled: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <label className="relative inline-flex items-center cursor-pointer select-none">
+      <input type="checkbox" className="sr-only peer" checked={enabled} onChange={(e) => onChange(e.target.checked)} />
+      <div className="w-9 h-5 bg-gray-300 dark:bg-gray-600 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-emerald-400/40 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-500"></div>
+      <span className={`ml-2 text-xs font-semibold ${enabled ? 'text-emerald-600 dark:text-emerald-400' : 'text-gray-400 dark:text-gray-500'}`}>
+        {enabled ? 'Enabled' : 'Disabled'}
+      </span>
+    </label>
+  )
+}
 
 // ── PathListEditor ──────────────────────────────────────────────────────────────
 // Edits a list of filesystem paths (writable / masked / restore-RO / allowed hosts).
@@ -399,10 +414,18 @@ export function ArtifactsEditor({
         )}
         {artifacts.map((a, index) => {
           const unsafe = a.unsafe_host === true
+          const enabled = a.enabled !== false
           return (
-            <div key={index} className="rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50/40 dark:bg-gray-800/20 p-4 space-y-3">
+            <div key={index} className={`rounded-xl border p-4 space-y-3 transition-colors ${enabled ? 'border-gray-200 dark:border-gray-700 bg-gray-50/40 dark:bg-gray-800/20' : 'border-dashed border-gray-300 dark:border-gray-600 bg-gray-100/70 dark:bg-gray-900/40'}`}>
               <div className="flex items-start gap-2">
                 <div className="flex-1 space-y-3">
+                  <div className="flex items-center gap-2">
+                    <EnabledToggle enabled={enabled} onChange={(v) => update(index, { enabled: v ? undefined : false })} />
+                    {!enabled && (
+                      <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400 dark:text-gray-500">— skipped in the diff viewer</span>
+                    )}
+                  </div>
+                  <div className={`space-y-3 transition-opacity ${enabled ? '' : 'opacity-50'}`}>
                   <div className="flex items-end gap-4 flex-wrap">
                     <div className="space-y-1 flex-1 min-w-[12rem]">
                       <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">Name</label>
@@ -462,6 +485,7 @@ export function ArtifactsEditor({
                       <span>Runs unsandboxed on the host with full access to your credentials. Only use for audited, self-contained commands.</span>
                     </div>
                   )}
+                  </div>
                 </div>
                 <button
                   onClick={() => remove(index)}
@@ -601,10 +625,18 @@ export function ServicesEditor({
         )}
         {services.map((svc, index) => {
           const host = svc.host === true
+          const enabled = svc.enabled !== false
           return (
-            <div key={index} className="rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50/40 dark:bg-gray-800/20 p-4 space-y-3">
+            <div key={index} className={`rounded-xl border p-4 space-y-3 transition-colors ${enabled ? 'border-gray-200 dark:border-gray-700 bg-gray-50/40 dark:bg-gray-800/20' : 'border-dashed border-gray-300 dark:border-gray-600 bg-gray-100/70 dark:bg-gray-900/40'}`}>
               <div className="flex items-start gap-2">
                 <div className="flex-1 space-y-3">
+                  <div className="flex items-center gap-2">
+                    <EnabledToggle enabled={enabled} onChange={(v) => update(index, { enabled: v ? undefined : false })} />
+                    {!enabled && (
+                      <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400 dark:text-gray-500">— not supervised</span>
+                    )}
+                  </div>
+                  <div className={`space-y-3 transition-opacity ${enabled ? '' : 'opacity-50'}`}>
                   <div className="flex items-end gap-4 flex-wrap">
                     <div className="space-y-1 flex-1 min-w-[12rem]">
                       <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">Name</label>
@@ -649,7 +681,9 @@ export function ServicesEditor({
                       </span>
                     </label>
                     <div className="h-[38px] flex items-center ml-auto">
-                      <ServiceStateBadge status={statusByName.get(svc.name)} />
+                      {enabled
+                        ? <ServiceStateBadge status={statusByName.get(svc.name)} />
+                        : <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-gray-400 dark:text-gray-500"><X className="w-3.5 h-3.5" />Disabled</span>}
                     </div>
                   </div>
                   <div className="space-y-1">
@@ -673,6 +707,7 @@ export function ServicesEditor({
                       <span className="font-mono break-all">{statusByName.get(svc.name)?.message}</span>
                     </div>
                   )}
+                  </div>
                 </div>
                 <button
                   onClick={() => remove(index)}
@@ -693,6 +728,38 @@ export function ServicesEditor({
           Add Service
         </button>
       </div>
+    </div>
+  )
+}
+
+// ── FloatingSaveBar ───────────────────────────────────────────────────────────
+// A bar pinned to the bottom of the viewport that appears whenever there are
+// unsaved changes, so the user can save from anywhere on a long settings page
+// without scrolling back to the top button.
+export function FloatingSaveBar({
+  visible,
+  saving,
+  onSave,
+}: {
+  visible: boolean
+  saving: boolean
+  onSave: () => void
+}) {
+  if (!visible) return null
+  return (
+    <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-3 pl-4 pr-2 py-2 rounded-2xl bg-white/95 dark:bg-gray-800/95 backdrop-blur shadow-2xl border border-orange-200 dark:border-orange-800 animate-in fade-in slide-in-from-bottom-2 duration-200">
+      <div className="flex items-center gap-1.5 text-orange-600 dark:text-orange-400 text-sm font-semibold">
+        <AlertCircle className="w-4 h-4" />
+        Unsaved changes
+      </div>
+      <button
+        onClick={onSave}
+        disabled={saving}
+        className="flex items-center gap-2 px-5 py-2 rounded-xl text-sm font-bold bg-blue-600 text-white hover:bg-blue-700 transition-all shadow-lg shadow-blue-500/25 active:scale-95 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+      >
+        <Save className="w-4 h-4" />
+        {saving ? 'Saving…' : 'Save'}
+      </button>
     </div>
   )
 }

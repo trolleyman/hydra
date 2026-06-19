@@ -22,5 +22,9 @@ export type ServiceScript = {
      * Relaunch cap after an unexpected exit (null = default 3; 0 = never restart)
      */
     max_restarts?: number | null;
+    /**
+     * Whether the daemon supervises this service (absent/null or true = enabled; false = skipped)
+     */
+    enabled?: boolean | null;
 };
 
