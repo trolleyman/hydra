@@ -161,17 +161,36 @@ For sandboxed **bash terminals**, `pre_spawn_script` is still intentionally skip
 (it is a once-per-head agent hook; interactive shells open repeatedly), unchanged
 from today's behaviour.
 
-## Known limitations (spike — follow-ups)
+## Robustness
 
-- **Reaping:** the supervisor is pid-1 and reaps its direct children, but orphaned
-  grandchildren that reparent to it could linger as zombies. A dedicated reaper was
-  intentionally omitted to avoid racing Go's `os/exec` child reaping.
-- **Locking:** `ensureNamespaceHost` holds a global lock across the launch
-  (including the up-to-10s socket wait); fine at current concurrency, worth making
-  per-head later.
-- **One policy for all:** everyone in the namespace shares seccomp / network / masks
-  / writable paths, and a supervisor crash takes all of that head's terminals with
-  it. The unsandboxed host shell stays separate by design.
+- **Reaping:** we do not pass bwrap's `--as-pid-1`, so bwrap installs its own reaper
+  as pid 1 of the namespace and our supervisor runs as its child. The supervisor
+  reaps its own direct children (agent, terminals) via `cmd.Wait`; orphaned
+  grandchildren reparent to bwrap's pid-1 reaper and are collected there — they do
+  not accumulate as zombies.
+- **Per-head launch, no global stall:** the supervisor registry holds its lock only
+  to claim a head's slot; the slow launch (build + start + up-to-10s socket wait)
+  runs without the lock, and concurrent callers for the same head block on that
+  slot's `ready` channel instead of relaunching. One head's launch never stalls
+  another's.
+- **Crash eviction + synchronous teardown:** a single watcher goroutine is the sole
+  waiter on each supervisor. If the supervisor exits — a crash or an explicit
+  `removeNamespaceHost` kill — the watcher evicts the registry slot, runs cleanup,
+  and removes the socket dir. So a crashed host is not left cached: the next
+  attach/resume re-creates a fresh one (the child sessions get EOF and exit, and
+  lazy resume brings the head back). `removeNamespaceHost` kills then blocks on the
+  watcher, so teardown is complete before the worktree is removed.
 
-All of the above is gated off by default; with `HYDRA_SHARED_NS` unset the behaviour
-is exactly as before (one bwrap per session, bash terminals get COW read-only).
+## Remaining design properties (not bugs)
+
+- **One policy per namespace:** everyone in a head's namespace shares its seccomp /
+  network / masks / writable paths — which is the intended behaviour (a shared
+  terminal should have the same confinement as the agent). A supervisor crash takes
+  that head's terminals with it; they come back on the next attach via the eviction
+  + re-create path above. The unsandboxed "Regular shell (host)" stays a separate,
+  unconfined process by design.
+- **Pre-spawn for terminals:** sandboxed bash terminals still skip `pre_spawn_script`
+  (a once-per-head agent hook), unchanged from the standalone behaviour.
+
+All of this is gated off by default; with `HYDRA_SHARED_NS` unset the behaviour is
+exactly as before (one bwrap per session, bash terminals get COW read-only).

@@ -5,6 +5,7 @@ package heads
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -64,5 +65,66 @@ func TestRunPreExitInNamespaceTimeout(t *testing.T) {
 	}
 	if elapsed := time.Since(start); elapsed > 5*time.Second {
 		t.Errorf("timeout was not enforced promptly (took %s)", elapsed)
+	}
+}
+
+// registerStubHost inserts a ready registry slot whose "supervisor" is the given
+// process, with a watcher running, and returns a channel closed when its cleanup
+// runs. Used to exercise the eviction/teardown logic without bwrap.
+func registerStubHost(t *testing.T, id string, proc *exec.Cmd) chan struct{} {
+	t.Helper()
+	if err := proc.Start(); err != nil {
+		t.Fatalf("start stub supervisor: %v", err)
+	}
+	cleaned := make(chan struct{})
+	h := &nsHost{id: id, proc: proc, sockDir: t.TempDir(), cleanup: func() { close(cleaned) }, done: make(chan struct{})}
+	e := &nsHostEntry{ready: make(chan struct{}), host: h}
+	close(e.ready)
+	nsHosts.mu.Lock()
+	nsHosts.m[id] = e
+	nsHosts.mu.Unlock()
+	go watchNamespaceHost(id, h, e)
+	return cleaned
+}
+
+// TestRemoveNamespaceHostSynchronous verifies removeNamespaceHost kills the
+// supervisor, waits for the watcher to reclaim resources, and evicts the slot —
+// all before it returns.
+func TestRemoveNamespaceHostSynchronous(t *testing.T) {
+	const id = "ns-remove-test"
+	cleaned := registerStubHost(t, id, exec.Command("sleep", "30"))
+
+	if _, ok := namespaceHostFor(id); !ok {
+		t.Fatal("host should be present before removal")
+	}
+
+	removeNamespaceHost(id)
+
+	select {
+	case <-cleaned:
+	default:
+		t.Error("cleanup should have run before removeNamespaceHost returned")
+	}
+	if _, ok := namespaceHostFor(id); ok {
+		t.Error("host should be evicted after removeNamespaceHost")
+	}
+}
+
+// TestNamespaceHostEvictedOnExit verifies the watcher evicts a supervisor that
+// exits on its own (a crash), so a later lookup re-creates a fresh one.
+func TestNamespaceHostEvictedOnExit(t *testing.T) {
+	const id = "ns-crash-test"
+	registerStubHost(t, id, exec.Command("sleep", "0.1"))
+
+	deadline := time.After(5 * time.Second)
+	for {
+		if _, ok := namespaceHostFor(id); !ok {
+			return // evicted as expected
+		}
+		select {
+		case <-deadline:
+			t.Fatal("supervisor exit did not evict the registry slot")
+		case <-time.After(20 * time.Millisecond):
+		}
 	}
 }

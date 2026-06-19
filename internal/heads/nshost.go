@@ -32,42 +32,94 @@ func sharedNSEnabled() bool {
 	return false
 }
 
-// nsHost is a running per-head supervisor: one bwrap whose pid-1 spawns PTY
-// children sharing its namespace (and writable COW overlay).
+// nsHost is a running per-head supervisor: one bwrap (pid 1 of which is bwrap's
+// own reaper; our supervisor runs as its child) that spawns PTY children sharing
+// its namespace and writable COW overlay.
 type nsHost struct {
 	id      string
 	proc    *exec.Cmd
 	client  *nshost.Client
 	sockDir string
 	cleanup func()
+	// done is closed once the supervisor has exited and its resources are
+	// reclaimed (by the watcher). removeNamespaceHost blocks on it for a
+	// synchronous teardown.
+	done chan struct{}
+}
+
+// nsHostEntry is the registry slot for a head's supervisor. ready is closed once
+// host/err are populated, so concurrent callers for the same head wait for the
+// single in-flight launch instead of double-launching — and the global lock is
+// only ever held briefly (never across the launch + socket wait).
+type nsHostEntry struct {
+	ready chan struct{}
+	host  *nsHost
+	err   error
 }
 
 var nsHosts = struct {
 	mu sync.Mutex
-	m  map[string]*nsHost
-}{m: map[string]*nsHost{}}
+	m  map[string]*nsHostEntry
+}{m: map[string]*nsHostEntry{}}
 
-// namespaceHostFor returns the live supervisor for a head, if one exists.
+// namespaceHostFor returns the live supervisor for a head, if one exists and its
+// launch succeeded.
 func namespaceHostFor(id string) (*nsHost, bool) {
 	nsHosts.mu.Lock()
-	defer nsHosts.mu.Unlock()
-	h, ok := nsHosts.m[id]
-	return h, ok
+	e, ok := nsHosts.m[id]
+	nsHosts.mu.Unlock()
+	if !ok {
+		return nil, false
+	}
+	<-e.ready
+	return e.host, e.host != nil
 }
 
-// ensureNamespaceHost launches (once per head) the supervisor bwrap that owns
-// the head's shared namespace and returns a client for spawning children in it.
-// base is the sandbox the agent would otherwise run in; the supervisor reuses it
-// verbatim (same binds, masks, network, writable COW) but runs __sandbox-init
-// instead of the agent, and additionally exposes the control-socket dir writable
-// so its listener is reachable from the daemon via the same bind-mounted path.
+// ensureNamespaceHost launches (once per head) the supervisor bwrap that owns the
+// head's shared namespace and returns a client for spawning children in it. The
+// global lock is held only to claim the registry slot; the slow launch runs
+// without it, and concurrent callers for the same head block on the slot's ready
+// channel rather than relaunching.
 func ensureNamespaceHost(projectRoot, id string, base sandbox.Options) (*nsHost, error) {
 	nsHosts.mu.Lock()
-	defer nsHosts.mu.Unlock()
-	if h, ok := nsHosts.m[id]; ok {
-		return h, nil
+	if e, ok := nsHosts.m[id]; ok {
+		nsHosts.mu.Unlock()
+		<-e.ready
+		return e.host, errtrace.Wrap(e.err)
 	}
+	e := &nsHostEntry{ready: make(chan struct{})}
+	nsHosts.m[id] = e
+	nsHosts.mu.Unlock()
 
+	host, err := launchNamespaceHost(projectRoot, id, base)
+	e.host, e.err = host, err
+	if err == nil {
+		// Watch the supervisor: if it exits (crash or explicit kill), evict the slot
+		// and reclaim resources, so a later attach/resume re-creates a fresh host.
+		// Started before ready is closed so a concurrent removeNamespaceHost always
+		// has a watcher to close done.
+		go watchNamespaceHost(id, host, e)
+	}
+	close(e.ready)
+
+	if err != nil {
+		// Drop the failed slot so a later spawn can retry.
+		nsHosts.mu.Lock()
+		if nsHosts.m[id] == e {
+			delete(nsHosts.m, id)
+		}
+		nsHosts.mu.Unlock()
+		return nil, errtrace.Wrap(err)
+	}
+	return host, nil
+}
+
+// launchNamespaceHost does the actual (slow) work of starting a supervisor bwrap:
+// it reuses base verbatim (same binds, masks, network, writable COW) but runs
+// __sandbox-init instead of the agent, and additionally exposes the control-socket
+// dir writable so its listener is reachable from the daemon via the same
+// bind-mounted path.
+func launchNamespaceHost(projectRoot, id string, base sandbox.Options) (*nsHost, error) {
 	sockDir := filepath.Join(paths.GetHydraDirFromProjectRoot(projectRoot), "ns", id)
 	if err := os.MkdirAll(sockDir, 0o700); err != nil {
 		return nil, errtrace.Wrap(fmt.Errorf("create ns socket dir: %w", err))
@@ -104,30 +156,47 @@ func ensureNamespaceHost(projectRoot, id string, base sandbox.Options) (*nsHost,
 		return nil, errtrace.Wrap(err)
 	}
 
-	h := &nsHost{id: id, proc: cmd, client: nshost.Dial(sockPath), sockDir: sockDir, cleanup: spec.Cleanup}
-	nsHosts.m[id] = h
 	log.Printf("heads: namespace host ready for %s (pid %d)", id, cmd.Process.Pid)
-	return h, nil
+	return &nsHost{id: id, proc: cmd, client: nshost.Dial(sockPath), sockDir: sockDir, cleanup: spec.Cleanup, done: make(chan struct{})}, nil
 }
 
-// removeNamespaceHost tears down a head's supervisor and its socket dir.
-// Best-effort; safe to call for heads that never had one.
-func removeNamespaceHost(id string) {
+// watchNamespaceHost is the sole waiter on the supervisor process. It blocks until
+// the supervisor exits — whether on its own (crash) or because removeNamespaceHost
+// killed it — then evicts the registry slot, runs the spec cleanup, removes the
+// socket dir, and signals done.
+func watchNamespaceHost(id string, h *nsHost, e *nsHostEntry) {
+	_ = h.proc.Wait()
 	nsHosts.mu.Lock()
-	h, ok := nsHosts.m[id]
-	delete(nsHosts.m, id)
+	if nsHosts.m[id] == e {
+		delete(nsHosts.m, id)
+	}
 	nsHosts.mu.Unlock()
-	if !ok {
-		return
-	}
-	if h.proc != nil && h.proc.Process != nil {
-		_ = h.proc.Process.Kill()
-		_, _ = h.proc.Process.Wait()
-	}
 	if h.cleanup != nil {
 		h.cleanup()
 	}
 	_ = os.RemoveAll(h.sockDir)
+	close(h.done)
+}
+
+// removeNamespaceHost tears down a head's supervisor synchronously: it signals the
+// process and waits for the watcher to reclaim everything. Best-effort; safe to
+// call for heads that never had one.
+func removeNamespaceHost(id string) {
+	nsHosts.mu.Lock()
+	e, ok := nsHosts.m[id]
+	nsHosts.mu.Unlock()
+	if !ok {
+		return
+	}
+	<-e.ready
+	h := e.host
+	if h == nil {
+		return // launch failed; the slot was already dropped by ensureNamespaceHost
+	}
+	if h.proc != nil && h.proc.Process != nil {
+		_ = h.proc.Process.Kill()
+	}
+	<-h.done // watcher evicts the slot and reclaims resources
 }
 
 // startAgentSession starts the agent either in its own sandbox (default) or, when
