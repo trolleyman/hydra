@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -60,16 +61,22 @@ func TestWrapPreSpawnExecutes(t *testing.T) {
 		t.Fatalf("marker did not reappear on the second launch: %v", err)
 	}
 
-	// A non-zero exit gates the launch: the real command must NOT exec. This is
-	// the failure semantics the change extends to resume — a failing script
-	// aborts resume too, so scripts must be robust.
+	// A non-zero exit gates the launch AND reports it: the real command must NOT
+	// exec, and the failure must surface as a diagnostic (not a silent early exit).
+	// This is the failure semantics the change extends to resume — a failing script
+	// aborts resume too, so it must be visible.
 	gate := filepath.Join(dir, "should-not-exist")
 	gateArgv := []string{"/bin/sh", "-c", "echo leaked > " + q(gate)}
-	if err := run(t, WrapPreSpawn("exit 3", gateArgv)); err == nil {
-		t.Fatal("expected non-zero exit from a failing pre-spawn script")
+	gateWrapped := WrapPreSpawn("exit 3", gateArgv)
+	gateOut, gateErr := exec.Command(gateWrapped[0], gateWrapped[1:]...).CombinedOutput() //errtrace:skip
+	if gateErr == nil {
+		t.Fatalf("expected non-zero exit from a failing pre-spawn script; output: %s", gateOut)
 	}
 	if _, err := os.Stat(gate); err == nil {
 		t.Fatal("real command ran despite a failing pre-spawn script (launch not gated)")
+	}
+	if !strings.Contains(string(gateOut), "pre_spawn_script failed") {
+		t.Fatalf("expected a pre-spawn failure diagnostic; got: %q", gateOut)
 	}
 }
 
@@ -89,9 +96,10 @@ func TestWithPreSpawn(t *testing.T) {
 		t.Errorf("empty argv: got %v, want nil", got)
 	}
 
-	// Script set, no shebang: defaults to /bin/bash -c, exec'ing argv via "$@".
+	// Script set, no shebang: defaults to /bin/bash -c, exec'ing argv via "$@"
+	// after an EXIT trap that reports a gating failure.
 	got := withPreSpawn("mise trust", argv)
-	want := []string{"/bin/bash", "-c", "mise trust\nexec \"$@\"", "hydra-pre-spawn", "claude", "--dangerously-skip-permissions"}
+	want := []string{"/bin/bash", "-c", preSpawnExitTrap + "\nmise trust\ntrap - EXIT\nexec \"$@\"", "hydra-pre-spawn", "claude", "--dangerously-skip-permissions"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("wrapped argv:\n got %#v\nwant %#v", got, want)
 	}
@@ -100,7 +108,7 @@ func TestWithPreSpawn(t *testing.T) {
 	// included, is passed verbatim to `-c`.
 	body := "#!/bin/zsh\nset -o pipefail\nmise trust"
 	got = withPreSpawn(body, argv)
-	want = []string{"/bin/zsh", "-c", body + "\nexec \"$@\"", "hydra-pre-spawn", "claude", "--dangerously-skip-permissions"}
+	want = []string{"/bin/zsh", "-c", preSpawnExitTrap + "\n" + body + "\ntrap - EXIT\nexec \"$@\"", "hydra-pre-spawn", "claude", "--dangerously-skip-permissions"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("zsh shebang:\n got %#v\nwant %#v", got, want)
 	}

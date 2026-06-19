@@ -102,8 +102,9 @@ type Options struct {
 	Argv []string
 	// PreSpawnScript is an optional shell script run inside the sandbox via
 	// /bin/bash immediately before Argv (same worktree, env and confinement). The
-	// real command execs after it returns; an explicit non-zero `exit` in the
-	// script aborts the launch. Empty to skip. Ignored when NoSandbox is set.
+	// real command execs after it returns; an explicit non-zero `exit` (or a
+	// `set -e` failure) aborts the launch and prints a diagnostic to the terminal
+	// (see preSpawnExitTrap). Empty to skip. Ignored when NoSandbox is set.
 	PreSpawnScript string
 
 	// HardenGUI hides the per-user runtime dir and unsets DISPLAY/WAYLAND/etc
@@ -117,10 +118,21 @@ type Options struct {
 	NoSandbox bool
 }
 
+// preSpawnExitTrap is installed before the pre-spawn script runs and fires only
+// when the script aborts the launch: an explicit `exit N`, or a `set -e` failure,
+// terminates the shell before it reaches `exec`, leaving this EXIT trap to run.
+// It prints a clear, greppable diagnostic to the terminal so a gated launch reads
+// as "your pre_spawn_script failed" rather than an agent that died on startup for
+// no visible reason (the same failure mode on spawn and on resume). The trap is
+// cleared immediately before `exec`, and a successful `exec` replaces the process
+// image, so a script that falls through never triggers it.
+const preSpawnExitTrap = `trap 'hydra_ec=$?; printf "\n[hydra] pre_spawn_script failed (exit %s) — agent not started; fix or clear pre_spawn_script, then relaunch\n" "$hydra_ec" >&2' EXIT`
+
 // withPreSpawn wraps argv so that script runs inside the sandbox before the real
 // command. The script shares the agent's shell: falling through it execs argv,
-// while an explicit `exit N` aborts the launch. Returns argv unchanged when no
-// script is configured. Used by the platform BuildSpec impls.
+// while an explicit `exit N` (or a `set -e` failure) aborts the launch and prints
+// the preSpawnExitTrap diagnostic. Returns argv unchanged when no script is
+// configured. Used by the platform BuildSpec impls.
 //
 // The interpreter honors the script's `#!` shebang line (so e.g. `#!/bin/zsh`
 // runs under zsh, `#!/usr/bin/env bash` under bash). With no shebang it defaults
@@ -132,8 +144,11 @@ func withPreSpawn(script string, argv []string) []string {
 		return argv
 	}
 	interp := preSpawnInterp(script)
-	// $0 is the wrapper name; $@ is the original argv, exec'd after the script.
-	wrapper := script + "\nexec \"$@\""
+	// Run the script in the agent's own shell (so its exports carry into the
+	// exec'd agent), guarded by an EXIT trap that reports a gating failure. $0 is
+	// the wrapper name; $@ is the original argv, exec'd once the script falls
+	// through (the trap is cleared first so exec-failure isn't misreported).
+	wrapper := preSpawnExitTrap + "\n" + script + "\ntrap - EXIT\nexec \"$@\""
 	cmd := append(interp, "-c", wrapper, "hydra-pre-spawn")
 	return append(cmd, argv...)
 }
