@@ -1680,7 +1680,7 @@ components:
         pre_spawn_script:
           type: string
           nullable: true
-          description: Bash script run inside the sandbox once, when the agent is first spawned — not on resume or for bash shells (e.g. `mise trust`)
+          description: Bash script run inside the sandbox before every agent launch — both spawn and resume — so it must be idempotent. Not run for bash shells (e.g. `mise trust`)
         pre_exit_script:
           type: string
           nullable: true

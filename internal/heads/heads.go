@@ -380,11 +380,9 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 	// Build the sandbox launch options.
 	cfg, _ := config.Load(projectRoot)
 	writable, masked, restore, cowPaths, net, preSpawn := cfg.ResolveSandboxOptions(string(opts.AgentType))
-	// Pre-spawn is a once-per-head hook: it runs only when a head is first
-	// spawned, never on a resume (where the prior conversation is restored).
-	if opts.Resume {
-		preSpawn = ""
-	}
+	// Pre-spawn is per-launch sandbox setup, not a once-per-head constructor: it
+	// runs on every agent launch — spawn and resume alike (see ResumeHead) — so a
+	// configured script must be idempotent.
 	// COW mounts are re-applied on every launch (they are mount-time, not
 	// persistent), with a per-head writable upper so the agent's overwrites
 	// persist across resumes but never touch the real source.
@@ -666,9 +664,12 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 	home := currentUser.HomeDir
 
 	cfg, _ := config.Load(projectRoot)
-	// Pre-spawn runs once, at the head's initial spawn — not on resume (the agent
-	// is being restored, not freshly created), so the returned script is ignored.
-	writable, masked, restore, cowPaths, net, _ := cfg.ResolveSandboxOptions(string(head.AgentType))
+	// Pre-spawn is per-launch sandbox setup, so it runs on resume too: resume
+	// re-launches the agent in a fresh sandbox, and re-running the script is the
+	// only way a pre_spawn_script added (or changed) after a head was created ever
+	// reaches that head. It must therefore be idempotent — it runs on every launch
+	// — and, as on spawn, a non-zero exit gates the launch (here, aborts resume).
+	writable, masked, restore, cowPaths, net, preSpawn := cfg.ResolveSandboxOptions(string(head.AgentType))
 	seed, err := seedHead(projectRoot, head.ID, head.AgentType, worktreePath, home, head.PrePrompt)
 	if err != nil {
 		return errtrace.Wrap(err)
@@ -686,20 +687,21 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 	env = append(env, headContextEnv(head.ID, head.AgentType, projectRoot, worktreePath, derefStr(head.Branch), head.BaseBranch)...)
 
 	sess, err := startAgentSession(reg, projectRoot, head.ID, head.AgentType, worktreePath, rows, cols, sandbox.Options{
-		AgentType:     head.AgentType,
-		WorktreePath:  worktreePath,
-		GitCommonDir:  gitCommonDir(projectRoot),
-		Home:          home,
-		WritablePaths: append(writable, seed.WritablePaths...),
-		MaskedPaths:   masked,
-		RestoreRO:     restore,
-		Network:       net,
-		Binds:         seed.Binds,
-		CowMounts:     cowMounts,
-		Env:           env,
-		Argv:          argv,
-		HardenGUI:     true,
-		Seccomp:       true,
+		AgentType:      head.AgentType,
+		WorktreePath:   worktreePath,
+		GitCommonDir:   gitCommonDir(projectRoot),
+		Home:           home,
+		WritablePaths:  append(writable, seed.WritablePaths...),
+		MaskedPaths:    masked,
+		RestoreRO:      restore,
+		Network:        net,
+		Binds:          seed.Binds,
+		CowMounts:      cowMounts,
+		Env:            env,
+		Argv:           argv,
+		PreSpawnScript: preSpawn,
+		HardenGUI:      true,
+		Seccomp:        true,
 	})
 	if err != nil {
 		return errtrace.Wrap(err)

@@ -39,7 +39,7 @@ const DefaultPrePrompt = "You are a head (AI agent) of Hydra, an AI orchestratio
 	"- `restore_ro` — paths re-exposed read-only after a parent was masked.\n" +
 	"- `cow_paths` — worktree-relative paths mounted copy-on-write from the project root (you can read and overwrite them; writes stay in your worktree and never touch the real files).\n" +
 	"- `network.enabled` / `network.allowed_hosts` — outbound network access and its host allow-list.\n" +
-	"- `pre_spawn_script` — a bash script run inside the sandbox once, when the agent is first spawned (e.g. `mise trust`).\n" +
+	"- `pre_spawn_script` — a bash script run inside the sandbox before every agent launch (both spawn and resume, so it must be idempotent), e.g. `mise trust`.\n" +
 	"- `pre_exit_script` — a bash script run inside a sandbox when a head ends (before its worktree is removed), for per-head teardown such as releasing a claimed resource.\n" +
 	"- `pre_prompt` — the standing instructions you are reading now.\n" +
 	"\n" +
@@ -663,7 +663,7 @@ func defaultsSpec() []specEntry {
 		},
 		{
 			table: "sandbox", key: "pre_spawn_script",
-			doc: "shell script run in the sandbox once before each agent launches (e.g. mise trust).",
+			doc: "shell script run in the sandbox before every agent launch — spawn and resume, so it must be idempotent (e.g. mise trust).",
 			def: func() string { return `""` },
 			get: func(a AgentConfig) (string, bool) {
 				if a.Sandbox != nil && a.Sandbox.PreSpawnScript != nil && *a.Sandbox.PreSpawnScript != "" {

@@ -610,7 +610,7 @@ type SandboxConfig struct {
 	// PreExitScript Bash script run in a sandbox when a head ends, after the agent's session is killed but before its worktree is removed. Runs with the head's sandbox policy, cwd = worktree, with HYDRA_* head context + HYDRA_END_STATE. For per-head teardown such as releasing a claimed resource.
 	PreExitScript *string `json:"pre_exit_script"`
 
-	// PreSpawnScript Bash script run inside the sandbox once, when the agent is first spawned — not on resume or for bash shells (e.g. `mise trust`)
+	// PreSpawnScript Bash script run inside the sandbox before every agent launch — both spawn and resume — so it must be idempotent. Not run for bash shells (e.g. `mise trust`)
 	PreSpawnScript *string   `json:"pre_spawn_script"`
 	RestoreRo      *[]string `json:"restore_ro"`
 	WritablePaths  *[]string `json:"writable_paths"`

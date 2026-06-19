@@ -15,7 +15,7 @@ export type SandboxConfig = {
      */
     cow_paths?: Array<string> | null;
     /**
-     * Bash script run inside the sandbox once, when the agent is first spawned — not on resume or for bash shells (e.g. `mise trust`)
+     * Bash script run inside the sandbox before every agent launch — both spawn and resume — so it must be idempotent. Not run for bash shells (e.g. `mise trust`)
      */
     pre_spawn_script?: string | null;
     /**
