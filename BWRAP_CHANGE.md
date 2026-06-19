@@ -153,13 +153,15 @@ Both lifecycle hooks run **in the head's one shared bwrap** when the flag is on,
 each sees (and writes to) the same COW overlay as the agent:
 
 - `pre_spawn_script` — wrapped around the agent child's argv (runs, then `exec`s the
-  agent), exactly as `withPreSpawn` does for the standalone path.
+  agent), exactly as `withPreSpawn` does for the standalone path. It runs on every
+  agent launch — spawn and resume alike — so it must be idempotent; a gating failure
+  prints a diagnostic to the agent's terminal (see `withPreSpawn`).
 - `pre_exit_script` — spawned as a child of the still-live supervisor during kill,
   before the supervisor is torn down.
 
 For sandboxed **bash terminals**, `pre_spawn_script` is still intentionally skipped
-(it is a once-per-head agent hook; interactive shells open repeatedly), unchanged
-from today's behaviour.
+(it is an agent-launch hook, and interactive shells open repeatedly over a head's
+life), unchanged from today's behaviour.
 
 ## Robustness
 
@@ -190,7 +192,7 @@ from today's behaviour.
   + re-create path above. The unsandboxed "Regular shell (host)" stays a separate,
   unconfined process by design.
 - **Pre-spawn for terminals:** sandboxed bash terminals still skip `pre_spawn_script`
-  (a once-per-head agent hook), unchanged from the standalone behaviour.
+  (an agent-launch hook, not a per-shell one), unchanged from the standalone behaviour.
 
 All of this is gated off by default; with `HYDRA_SHARED_NS` unset the behaviour is
 exactly as before (one bwrap per session, bash terminals get COW read-only).
