@@ -124,13 +124,20 @@ func (s *Server) resolveArtifactPlan(projectRoot string, head *heads.Head, param
 		return nil, nil
 	}
 
-	// Union of names present on either side, sorted for stable output.
+	// Union of names present on either side, sorted for stable output. Scripts the
+	// live (human-controlled) config explicitly disables are dropped, mirroring how
+	// unsafe_host defers to the live config rather than a diffed ref's claims.
+	disabled := disabledArtifacts(liveCfg)
 	nameSet := map[string]struct{}{}
 	for n := range leftByName {
-		nameSet[n] = struct{}{}
+		if !disabled[n] {
+			nameSet[n] = struct{}{}
+		}
 	}
 	for n := range rightByName {
-		nameSet[n] = struct{}{}
+		if !disabled[n] {
+			nameSet[n] = struct{}{}
+		}
 	}
 	names := make([]string, 0, len(nameSet))
 	for n := range nameSet {
@@ -237,6 +244,19 @@ func artifactSpecsByName(projectRoot string, v artifacts.Version, liveCfg config
 		byName[spec.Name] = spec
 	}
 	return byName, nil
+}
+
+// disabledArtifacts returns the set of script names the live config marks
+// enabled = false. The live config is human-controlled, so it — not a diffed
+// ref's config — decides whether a script runs.
+func disabledArtifacts(cfg config.Config) map[string]bool {
+	disabled := map[string]bool{}
+	for _, s := range cfg.Artifacts {
+		if s.Name != "" && !s.IsEnabled() {
+			disabled[s.Name] = true
+		}
+	}
+	return disabled
 }
 
 // trustedHostCommands returns the set of name+command pairs that the live config

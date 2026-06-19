@@ -10,6 +10,7 @@ import { useToastStore } from '../../stores/toastStore'
 import {
   type SettingsSection,
   SettingsContent,
+  FloatingSaveBar,
 } from '../../components/SettingsComponents'
 
 export const Route = createFileRoute('/project/$projectId/settings')({
@@ -182,6 +183,7 @@ function ProjectSettingsPage() {
           projectId={projectId}
         />
       </div>
+      <FloatingSaveBar visible={hasUnsavedChanges} saving={saving} onSave={handleSave} />
     </div>
   )
 }

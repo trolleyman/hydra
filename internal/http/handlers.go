@@ -565,6 +565,7 @@ func toAPIArtifactScript(a config.ArtifactScript) api.ArtifactScript {
 	if a.UnsafeHost {
 		out.UnsafeHost = &a.UnsafeHost
 	}
+	out.Enabled = a.Enabled
 	return out
 }
 
@@ -577,6 +578,7 @@ func fromAPIArtifactScript(a api.ArtifactScript) config.ArtifactScript {
 	if a.UnsafeHost != nil {
 		out.UnsafeHost = *a.UnsafeHost
 	}
+	out.Enabled = a.Enabled
 	return out
 }
 
@@ -587,6 +589,7 @@ func toAPIServiceScript(svc config.ServiceScript) api.ServiceScript {
 		out.Host = &svc.Host
 	}
 	out.MaxRestarts = svc.MaxRestarts
+	out.Enabled = svc.Enabled
 	return out
 }
 
@@ -597,6 +600,7 @@ func fromAPIServiceScript(svc api.ServiceScript) config.ServiceScript {
 		out.Host = *svc.Host
 	}
 	out.MaxRestarts = svc.MaxRestarts
+	out.Enabled = svc.Enabled
 	return out
 }
 

@@ -114,7 +114,16 @@ type ServiceScript struct {
 	// default (DefaultServiceMaxRestarts); 0 = never restart. The counter resets
 	// once the process has stayed up past the backoff window.
 	MaxRestarts *int `toml:"max_restarts"`
+	// Enabled gates whether the service is supervised at all. nil or true means
+	// active; false means the daemon skips it entirely (not started, restarted,
+	// or shown a live status). nil is the default so configs written before this
+	// flag keep their services running.
+	Enabled *bool `toml:"enabled"`
 }
+
+// IsEnabled reports whether the service should be supervised. An absent flag
+// (nil) means enabled, for backward compatibility with pre-flag configs.
+func (s ServiceScript) IsEnabled() bool { return s.Enabled == nil || *s.Enabled }
 
 // DefaultServiceMaxRestarts is the restart cap applied when a service does not
 // set max_restarts.
@@ -155,7 +164,17 @@ type ArtifactScript struct {
 	// runs against. Heavy build scripts are the most tempted to set this and the
 	// ones running the most untrusted code; prefer leaving it off.
 	UnsafeHost bool `toml:"unsafe_host"`
+	// Enabled gates whether the diff viewer runs this script. nil or true means
+	// active; false means it is skipped entirely. nil is the default so configs
+	// written before this flag keep their artifacts running. Like unsafe_host,
+	// the live (human-controlled) config is authoritative — a disabled script is
+	// skipped regardless of what a diffed ref's own config claims.
+	Enabled *bool `toml:"enabled"`
 }
+
+// IsEnabled reports whether the artifact script should run. An absent flag (nil)
+// means enabled, for backward compatibility with pre-flag configs.
+func (a ArtifactScript) IsEnabled() bool { return a.Enabled == nil || *a.Enabled }
 
 type Config struct {
 	// Defaults for all agents.
@@ -713,6 +732,7 @@ func artifactsDocLines() []string {
 		docPrefix + "   timeout_sec  max seconds the command may run (0 = built-in default).",
 		docPrefix + "   unsafe_host  run on the host with NO sandbox — full access to your machine and",
 		docPrefix + "                credentials; only for audited, self-contained commands (default false).",
+		docPrefix + "   enabled      set false to skip this script in the diff viewer (default true).",
 		docPrefix + " Formats: .png, .jpg and .gif are diffed pixel-by-pixel; .webm video is diffed",
 		docPrefix + " frame-by-frame when ffmpeg is installed (otherwise by byte hash). Other types",
 		docPrefix + " (.webp .avif .svg .bmp .pdf) are compared by byte hash. Video is .webm ONLY, and",
@@ -758,6 +778,9 @@ func artifactFieldLines(a ArtifactScript) []string {
 	if a.UnsafeHost {
 		out = append(out, "unsafe_host = true")
 	}
+	if a.Enabled != nil && !*a.Enabled {
+		out = append(out, "enabled = false")
+	}
 	return out
 }
 
@@ -800,6 +823,7 @@ func servicesDocLines() []string {
 		docPrefix + "   host          run on the host with NO sandbox — full machine/credential access;",
 		docPrefix + "                 needed for host devices the sandbox hides, e.g. /dev/kvm (default false).",
 		docPrefix + fmt.Sprintf("   max_restarts  relaunch cap after an unexpected exit (default %d; 0 = never).", DefaultServiceMaxRestarts),
+		docPrefix + "   enabled       set false to stop the daemon supervising this service (default true).",
 	}
 }
 
@@ -825,6 +849,9 @@ func serviceFieldLines(svc ServiceScript) []string {
 	}
 	if svc.MaxRestarts != nil {
 		out = append(out, fmt.Sprintf("max_restarts = %d", *svc.MaxRestarts))
+	}
+	if svc.Enabled != nil && !*svc.Enabled {
+		out = append(out, "enabled = false")
 	}
 	return out
 }

@@ -141,6 +141,9 @@ func (m *Manager) StartProject(root string) {
 		if strings.TrimSpace(spec.Command) == "" {
 			continue
 		}
+		if !spec.IsEnabled() {
+			continue // explicitly disabled in config
+		}
 		sv := &supervised{
 			spec: spec,
 			sink: &lineSink{prefix: "service[" + shortName(root) + "/" + spec.Name + "]:"},

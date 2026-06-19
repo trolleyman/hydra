@@ -22,5 +22,9 @@ export type ArtifactScript = {
      * Run on the host with NO sandbox — full access to the machine and credentials (default false)
      */
     unsafe_host?: boolean;
+    /**
+     * Whether the diff viewer runs this script (absent/null or true = enabled; false = skipped)
+     */
+    enabled?: boolean | null;
 };
 

@@ -86,7 +86,7 @@ function sectionFor(name: string): string {
   if (name.startsWith('archived')) return 'archived'
   if (name.startsWith('agent-')) return 'agent'
   if (name.startsWith('spawn')) return 'spawn'
-  if (name === 'settings' || name === 'services-warning') return 'settings'
+  if (name.startsWith('settings') || name === 'services-warning') return 'settings'
   if (name === 'nested-folders') return 'diff'
   return 'overview'
 }
@@ -288,6 +288,13 @@ try {
       // play() no-op keeps the pair paused so the frame is byte-stable. Only
       // meaningful on the artifacts (agent-1) page, paired with imageDiffMode.
       videoDiff?: { seek: number }
+      // Settings only: turn OFF the "Enabled" switch on the seeded [[artifacts]]
+      // and [[services]] entries (the EnabledToggle in web/.../SettingsComponents).
+      // Flipping each to disabled both mutes/labels its card "Disabled" AND marks
+      // the config dirty, so the bottom-pinned FloatingSaveBar appears — one shot
+      // documenting the disabled-entry styling and the floating save affordance.
+      // Pair with scrollTo: 'Diff Artifacts' so the two editors fill the viewport.
+      disableSettingsEntries?: boolean
     }[] = [
       { name: 'home', path: '/' },
       // The unread-changes indicator: the agent sidebar shows an amber dot on the
@@ -377,6 +384,21 @@ try {
       // next to the project name. Full-page + tall viewport so both the top-bar
       // warning and the failed service card at the bottom are in one shot.
       { name: 'services-warning', path: '/project/mobile-app/settings', viewport: { width: 1280, height: 2900 } },
+      // The settings page with both the "Diff Artifacts" and "Services" editors
+      // turned OFF, scrolled so those two sections fill the viewport. Toggling
+      // each entry's "Enabled" switch off documents the disabled-card styling
+      // (dashed border, dimmed body, "Disabled" label/badge) and, because that
+      // edits the config, brings up the bottom-pinned FloatingSaveBar — so the
+      // floating "Unsaved changes" save affordance is captured too, exactly as it
+      // looks from the bottom of a long settings page. scrollTo forces a viewport
+      // capture, which includes the fixed save bar.
+      {
+        name: 'settings-disabled-save',
+        path: '/project/sim-project/settings',
+        viewport: { width: 1280, height: 1100 },
+        disableSettingsEntries: true,
+        scrollTo: 'Diff Artifacts',
+      },
       // The agent detail header showing the new user-facing title: the sidebar
       // and header render the mutable title (e.g. "Add renameable agent titles")
       // in place of the stable ID, with a rename (pencil) button beside it and
@@ -763,6 +785,24 @@ try {
         if (pg.click) {
           // Open a popover (e.g. the branch selector) so the capture documents it.
           await page.click(pg.click)
+          await settle(page)
+        }
+        if (pg.disableSettingsEntries) {
+          // Flip the seeded artifact + service entries to disabled. Each section's
+          // single entry carries exactly one EnabledToggle — its sr-only "peer"
+          // checkbox is the only such input inside that section card (the network
+          // toggle lives in the separate agent-config card), so scoping to the
+          // card's heading targets it unambiguously. Clicking an already-checked
+          // toggle flips enabled→false: the card mutes + reads "Disabled", and the
+          // config goes dirty so the FloatingSaveBar slides in at the bottom.
+          await page.evaluate(() => {
+            for (const heading of ['Diff Artifacts', 'Services']) {
+              const h2 = Array.from(document.querySelectorAll('h2')).find((e) => e.textContent?.trim() === heading)
+              const card = h2?.closest('.rounded-xl') as HTMLElement | null
+              const toggle = card?.querySelector('input.sr-only') as HTMLInputElement | null
+              if (toggle?.checked) toggle.click()
+            }
+          })
           await settle(page)
         }
         if (pg.scrollTo) {

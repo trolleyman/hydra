@@ -262,6 +262,9 @@ type ArtifactScript struct {
 	// Command Shell command run via `sh -c` in the checkout directory
 	Command string `json:"command"`
 
+	// Enabled Whether the diff viewer runs this script (absent/null or true = enabled; false = skipped)
+	Enabled *bool `json:"enabled"`
+
 	// Name Unique label, also used as the cache directory
 	Name string `json:"name"`
 
@@ -617,6 +620,9 @@ type SandboxConfig struct {
 type ServiceScript struct {
 	// Command Shell command run via `bash -c` from the project root
 	Command string `json:"command"`
+
+	// Enabled Whether the daemon supervises this service (absent/null or true = enabled; false = skipped)
+	Enabled *bool `json:"enabled"`
 
 	// Host Run on the host with NO sandbox — needed for host devices the sandbox hides, e.g. /dev/kvm (default false)
 	Host *bool `json:"host,omitempty"`
