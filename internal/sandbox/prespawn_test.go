@@ -1,9 +1,77 @@
 package sandbox
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
 	"reflect"
 	"testing"
 )
+
+// TestWrapPreSpawnExecutes runs the production pre-spawn wrapper as a real
+// process to verify the runtime behavior the manual resume check exercises:
+// the script runs, the real command execs after it, a non-zero exit gates the
+// launch, and re-running it re-creates a deleted marker (the "marker reappears
+// on resume" property — every launch, spawn or resume, re-runs the script). It
+// uses WrapPreSpawn directly, the same wrapper startAgentSession applies on both
+// the spawn and the resume path. (The bwrap confinement around it can't run
+// nested in CI, so this exercises the wrapper itself, not the full sandbox.)
+func TestWrapPreSpawnExecutes(t *testing.T) {
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "marker")     // written by the pre-spawn script
+	execMarker := filepath.Join(dir, "execed") // written by the "real" command
+
+	// Single-quote the temp paths so the embedded script is shell-safe.
+	q := func(p string) string { return "'" + p + "'" }
+	script := "echo spawned > " + q(marker)
+	argv := []string{"/bin/sh", "-c", "echo ran > " + q(execMarker)}
+
+	run := func(t *testing.T, wrapped []string) error {
+		t.Helper()
+		cmd := exec.Command(wrapped[0], wrapped[1:]...) //errtrace:skip
+		out, err := cmd.CombinedOutput()
+		if len(out) > 0 {
+			t.Logf("output: %s", out)
+		}
+		return err
+	}
+
+	wrapped := WrapPreSpawn(script, argv)
+	if err := run(t, wrapped); err != nil {
+		t.Fatalf("run wrapped pre-spawn: %v", err)
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("pre-spawn script did not run (no marker): %v", err)
+	}
+	if _, err := os.Stat(execMarker); err != nil {
+		t.Fatalf("real command did not exec after the script: %v", err)
+	}
+
+	// Resume analog: delete the marker and launch again — the script re-runs and
+	// the marker reappears (so a script added/changed after a head exists reaches
+	// it on the next launch, and idempotent scripts converge).
+	if err := os.Remove(marker); err != nil {
+		t.Fatalf("remove marker: %v", err)
+	}
+	if err := run(t, wrapped); err != nil {
+		t.Fatalf("re-run wrapped pre-spawn: %v", err)
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("marker did not reappear on the second launch: %v", err)
+	}
+
+	// A non-zero exit gates the launch: the real command must NOT exec. This is
+	// the failure semantics the change extends to resume — a failing script
+	// aborts resume too, so scripts must be robust.
+	gate := filepath.Join(dir, "should-not-exist")
+	gateArgv := []string{"/bin/sh", "-c", "echo leaked > " + q(gate)}
+	if err := run(t, WrapPreSpawn("exit 3", gateArgv)); err == nil {
+		t.Fatal("expected non-zero exit from a failing pre-spawn script")
+	}
+	if _, err := os.Stat(gate); err == nil {
+		t.Fatal("real command ran despite a failing pre-spawn script (launch not gated)")
+	}
+}
 
 func TestWithPreSpawn(t *testing.T) {
 	argv := []string{"claude", "--dangerously-skip-permissions"}
