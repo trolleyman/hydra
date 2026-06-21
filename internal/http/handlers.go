@@ -866,9 +866,13 @@ func (s *Server) GetAgent(ctx context.Context, request api.GetAgentRequestObject
 	return api.GetAgent200JSONResponse(agentResponse(*head)), nil
 }
 
-// UpdateAgent renames an agent's user-facing title. This is a display-only
-// change: the agent's stable ID, branch, worktree and live session are
-// untouched, so it is cheap and safe even while the agent is running.
+// UpdateAgent patches an agent's mutable fields (title and/or base branch).
+// Both are cheap metadata-only changes: the agent's stable ID, branch, worktree
+// and live session are untouched, so it is safe even while the agent is running.
+//
+// base_branch updates only which branch the agent is considered based on (used
+// by update-from-base and the diff view); it does NOT move existing commits.
+// Rebasing the agent's branch onto the new base, if wanted, is left to the user.
 func (s *Server) UpdateAgent(ctx context.Context, request api.UpdateAgentRequestObject) (api.UpdateAgentResponseObject, error) {
 	if request.Body == nil {
 		return api.UpdateAgent400JSONResponse{
@@ -877,13 +881,36 @@ func (s *Server) UpdateAgent(ctx context.Context, request api.UpdateAgentRequest
 			Details: "request body is required",
 		}, nil
 	}
-	title := strings.TrimSpace(request.Body.Title)
-	if title == "" {
+	if request.Body.Title == nil && request.Body.BaseBranch == nil {
 		return api.UpdateAgent400JSONResponse{
 			Code:    400,
 			Error:   api.ErrorResponseErrorBadRequest,
-			Details: "title must not be empty",
+			Details: "at least one field (title or base_branch) is required",
 		}, nil
+	}
+
+	var title string
+	if request.Body.Title != nil {
+		title = strings.TrimSpace(*request.Body.Title)
+		if title == "" {
+			return api.UpdateAgent400JSONResponse{
+				Code:    400,
+				Error:   api.ErrorResponseErrorBadRequest,
+				Details: "title must not be empty",
+			}, nil
+		}
+	}
+
+	var baseBranch string
+	if request.Body.BaseBranch != nil {
+		baseBranch = strings.TrimSpace(*request.Body.BaseBranch)
+		if baseBranch == "" {
+			return api.UpdateAgent400JSONResponse{
+				Code:    400,
+				Error:   api.ErrorResponseErrorBadRequest,
+				Details: "base_branch must not be empty",
+			}, nil
+		}
 	}
 
 	projectRoot, err := s.resolveProjectRoot(request.ProjectId)
@@ -902,10 +929,29 @@ func (s *Server) UpdateAgent(ctx context.Context, request api.UpdateAgentRequest
 		}, nil
 	}
 
-	if err := s.DB.UpdateAgentTitle(request.Id, title); err != nil {
-		return nil, errtrace.Wrap(err)
+	if baseBranch != "" {
+		// Validate the new base resolves to a real commit before persisting, so
+		// update-from-base and diffs don't later fail against a bogus ref.
+		if _, err := git.ResolveRef(projectRoot, baseBranch); err != nil {
+			return api.UpdateAgent400JSONResponse{
+				Code:    400,
+				Error:   api.ErrorResponseErrorBadRequest,
+				Details: fmt.Sprintf("base branch %q does not exist: %v", baseBranch, err),
+			}, nil
+		}
+		if err := s.DB.UpdateAgentBaseBranch(request.Id, baseBranch); err != nil {
+			return nil, errtrace.Wrap(err)
+		}
+		head.BaseBranch = baseBranch
 	}
-	head.Title = title
+
+	if title != "" {
+		if err := s.DB.UpdateAgentTitle(request.Id, title); err != nil {
+			return nil, errtrace.Wrap(err)
+		}
+		head.Title = title
+	}
+
 	s.notifyAgentsChanged(projectRoot, false)
 	return api.UpdateAgent200JSONResponse(agentResponse(*head)), nil
 }
@@ -1214,8 +1260,21 @@ func (s *Server) listCommitsCached(projectRoot, baseBranch, headBranch string) (
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
-	s.commitsCache.put(key, commits)
+	s.commitsCache.put(key, commits, commitsCost(commits))
 	return commits, nil
+}
+
+// commitsCost estimates the in-memory byte size of a commit list, used to charge
+// the entry against the cache's byte budget. It need only be roughly proportional
+// to the real footprint; per-string overhead is a flat constant per commit.
+func commitsCost(commits []git.CommitInfo) int64 {
+	const perCommitOverhead = 128 // struct + string headers, approximate
+	var n int64
+	for _, c := range commits {
+		n += perCommitOverhead +
+			int64(len(c.SHA)+len(c.ShortSHA)+len(c.Message)+len(c.Subject)+len(c.AuthorName)+len(c.AuthorEmail)+len(c.Timestamp))
+	}
+	return n
 }
 
 // getDiffCached returns the parsed diff. A committed-only diff (both refs resolve
@@ -1252,8 +1311,36 @@ func (s *Server) getDiffCached(projectRoot, diffRoot, baseRef, headRef string, i
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
-	s.diffCache.put(key, diff)
+	s.diffCache.put(key, diff, diffCost(diff))
 	return diff, nil
+}
+
+// diffCost estimates the in-memory byte size of a parsed diff, used to charge the
+// entry against the cache's byte budget. A diff's footprint is dominated by its
+// lines (each carries a Content string plus two *int line numbers), so it sums the
+// line content with a flat per-line overhead; this is what makes a huge
+// generated-file diff register as expensive and either evict aggressively or skip
+// caching, instead of silently retaining many gigabytes.
+func diffCost(files []git.DiffFile) int64 {
+	const (
+		perFileOverhead = 96 // struct + Path/OldPath string headers, approximate
+		perHunkOverhead = 48 // struct + Header string, approximate
+		perLineOverhead = 64 // DiffLine struct + string header + two *int allocations
+	)
+	var n int64
+	for _, f := range files {
+		n += perFileOverhead + int64(len(f.Path))
+		if f.OldPath != nil {
+			n += int64(len(*f.OldPath))
+		}
+		for _, h := range f.Hunks {
+			n += perHunkOverhead + int64(len(h.Header))
+			for _, l := range h.Lines {
+				n += perLineOverhead + int64(len(l.Content))
+			}
+		}
+	}
+	return n
 }
 
 func (s *Server) GetAgentCommits(ctx context.Context, request api.GetAgentCommitsRequestObject) (api.GetAgentCommitsResponseObject, error) {

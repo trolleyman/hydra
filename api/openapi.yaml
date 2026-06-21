@@ -1411,11 +1411,21 @@ components:
 
     UpdateAgentRequest:
       type: object
-      required: [title]
+      description: >-
+        Patch an agent's mutable fields. Provide any subset; at least one field
+        is required. Omitted fields are left unchanged.
       properties:
         title:
           type: string
-          description: New user-facing display name for the agent. Trimmed; must be non-empty.
+          description: New user-facing display name for the agent. Trimmed; must be non-empty if provided.
+        base_branch:
+          type: string
+          description: >-
+            New base branch for the agent. This is a metadata-only change: it
+            updates which branch the agent is considered to be based on (used by
+            update-from-base and the diff view) but does NOT move existing
+            commits. Rebasing the agent's branch onto the new base, if desired,
+            is left to the user. Must be an existing ref.
 
     AgentStatus:
       type: string

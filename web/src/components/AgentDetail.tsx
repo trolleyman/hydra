@@ -187,6 +187,9 @@ export function AgentDetail({
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleDraft, setTitleDraft] = useState('')
   const [savingTitle, setSavingTitle] = useState(false)
+  const [editingBase, setEditingBase] = useState(false)
+  const [baseDraft, setBaseDraft] = useState('')
+  const [savingBase, setSavingBase] = useState(false)
   const updateAgentInStore = useAgentStore((s) => s.updateAgent)
   const [, setTick] = useState(0)
   const [diffRefreshTrigger, setDiffRefreshTrigger] = useState(0)
@@ -419,6 +422,34 @@ export function AgentDetail({
     }
   }
 
+  function startEditingBase() {
+    setBaseDraft(agent.base_branch || '')
+    setEditingBase(true)
+  }
+
+  // Changing the base branch is metadata-only: it updates what update-from-base
+  // merges in and what the diff compares against, but does NOT rebase existing
+  // commits (the user can do that with git if they want). The backend validates
+  // the ref exists and returns a 400 we surface as a toast.
+  async function saveBase() {
+    const next = baseDraft.trim()
+    if (!next || next === (agent.base_branch || '')) {
+      setEditingBase(false)
+      return
+    }
+    setSavingBase(true)
+    try {
+      const updated = await api.default.updateAgent(projectId ?? '', agent.id, { base_branch: next })
+      updateAgentInStore(updated)
+      setEditingBase(false)
+      useToastStore.getState().show({ message: `Base branch set to ${next} (commits not moved)`, type: 'success' })
+    } catch (err) {
+      useToastStore.getState().show({ message: `Failed to set base branch: ${formatError(err)}`, type: 'error' })
+    } finally {
+      setSavingBase(false)
+    }
+  }
+
   // Archived agents are read-only: render the history view instead of the live
   // terminal/diff. Placed after all hooks above so hook order stays stable when
   // the same mounted component switches between a live and an archived agent.
@@ -556,6 +587,40 @@ export function AgentDetail({
                 {agent.branch_name}
               </span>
             )}
+            <span className="text-gray-300 dark:text-gray-600">|</span>
+            {/* Base branch. Editing it is metadata-only: it changes what
+                update-from-base merges in and what the diff compares against,
+                but does not rebase existing commits. */}
+            <span className="text-xs font-mono text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
+              <span className="font-sans text-gray-400 dark:text-gray-500">base</span>
+              {editingBase ? (
+                <input
+                  autoFocus
+                  value={baseDraft}
+                  disabled={savingBase}
+                  onChange={(e) => setBaseDraft(e.target.value)}
+                  onBlur={saveBase}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault()
+                      void saveBase()
+                    } else if (e.key === 'Escape') {
+                      e.preventDefault()
+                      setEditingBase(false)
+                    }
+                  }}
+                  className="bg-transparent border-b border-blue-400 focus:outline-none font-mono text-xs w-36 disabled:opacity-50"
+                />
+              ) : (
+                <button
+                  onClick={startEditingBase}
+                  title="Change base branch (metadata only — does not rebase commits)"
+                  className="hover:text-gray-700 dark:hover:text-gray-200 underline decoration-dotted underline-offset-2 cursor-pointer"
+                >
+                  {agent.base_branch || '—'}
+                </button>
+              )}
+            </span>
             <span className="text-gray-300 dark:text-gray-600">|</span>
             {agent.created_at !== 0 && agent.created_at !== undefined && (
               <span className="text-xs text-gray-500 dark:text-gray-400">
