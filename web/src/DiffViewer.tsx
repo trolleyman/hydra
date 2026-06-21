@@ -429,6 +429,18 @@ const FULL_MAX_LINES = 6000
 // max_full_changes), so a large diff doesn't ship every big file's full content.
 const HIDDEN_FILE_THRESHOLD = 1000
 
+// Files at or below this many lines are syntax-highlighted synchronously during
+// render (cheap, no flash). Larger files are highlighted off the critical render
+// path in an idle callback, so a big diff paints immediately (plain text) and the
+// colours swap in without blocking the main thread. Highlighting always runs over
+// the whole file either way, so multi-line constructs stay correct.
+const HL_SYNC_MAX = 600
+
+const EMPTY_HIGHLIGHT = {
+  highlightedOld: new Map<number, string>(),
+  highlightedNew: new Map<number, string>(),
+}
+
 // buildHighlightMaps syntax-highlights a flat run of diff lines as a whole
 // (so multi-line constructs — block comments, template strings — highlight
 // correctly) and returns per-line-number → HTML maps for the old and new sides.
@@ -627,20 +639,45 @@ const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onComment, 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hunksSig, file.binary, file.expanded, isHidden, isCollapsed])
 
-  // Highlight the full file when available, else just the visible `-U3` hunks.
-  // Skip entirely when the body isn't rendered (collapsed/hidden/binary): the file
-  // now carries its full content, so highlighting it unseen is wasted main-thread
-  // work. Recomputes when the file is expanded/shown.
-  const { highlightedOld, highlightedNew } = useMemo(() => {
-    const empty = { highlightedOld: new Map<number, string>(), highlightedNew: new Map<number, string>() }
-    if (file.binary || isCollapsed || isHidden) return empty
-    const source = fullLines ?? (file.hunks ? file.hunks.flatMap((h) => h.lines) : [])
-    if (source.length === 0) return empty
-    return buildHighlightMaps(source, lang)
-    // hunksSig (not file.hunks identity) so an unchanged file isn't re-highlighted
+  // Lines to highlight: the whole file when expanded (so multi-line constructs
+  // stay correct), else the visible `-U3` hunks. Null when nothing is rendered
+  // (binary/collapsed/hidden) — highlighting an unseen body would be wasted work.
+  const highlightSource = useMemo<DiffLine[] | null>(() => {
+    if (file.binary || isCollapsed || isHidden) return null
+    const lines = fullLines ?? (file.hunks ? file.hunks.flatMap((h) => h.lines) : [])
+    return lines.length ? lines : null
+    // hunksSig (not file.hunks identity) so an unchanged file isn't recomputed
     // when an unrelated file changes and the whole diff object is replaced.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fullLines, hunksSig, file.binary, isCollapsed, isHidden, lang])
+  }, [fullLines, hunksSig, file.binary, isCollapsed, isHidden])
+
+  // Small files highlight inline (no flash). Large files would block the main
+  // thread if every one highlighted during the same render, so they paint as
+  // plain text and colourise from an idle callback. Whole-file input keeps the
+  // highlighting correct; a web worker could move it fully off-thread, but idle
+  // scheduling is simpler and already splits the work one file at a time.
+  const syncHighlight = useMemo(
+    () => (highlightSource && highlightSource.length <= HL_SYNC_MAX ? buildHighlightMaps(highlightSource, lang) : null),
+    [highlightSource, lang],
+  )
+  const [deferredHighlight, setDeferredHighlight] = useState(EMPTY_HIGHLIGHT)
+  useEffect(() => {
+    if (!highlightSource || highlightSource.length <= HL_SYNC_MAX) return
+    setDeferredHighlight(EMPTY_HIGHLIGHT)
+    let cancelled = false
+    const run = () => { if (!cancelled) setDeferredHighlight(buildHighlightMaps(highlightSource, lang)) }
+    const w = window as unknown as {
+      requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number
+      cancelIdleCallback?: (id: number) => void
+    }
+    const id = w.requestIdleCallback ? w.requestIdleCallback(run, { timeout: 800 }) : window.setTimeout(run, 0)
+    return () => {
+      cancelled = true
+      if (w.requestIdleCallback && w.cancelIdleCallback) w.cancelIdleCallback(id)
+      else window.clearTimeout(id)
+    }
+  }, [highlightSource, lang])
+  const { highlightedOld, highlightedNew } = syncHighlight ?? deferredHighlight
 
   const segments = useMemo(() => (fullLines ? buildSegments(fullLines, reveal) : null), [fullLines, reveal])
 
