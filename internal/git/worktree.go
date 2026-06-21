@@ -184,6 +184,50 @@ func AddDetachedWorktree(projectRoot, worktreePath, ref string) error {
 	return nil
 }
 
+// CheckoutDetached switches an existing worktree to ref in detached-HEAD state,
+// discarding any tracked local changes (`git checkout --detach --force`). Only
+// files that differ between the worktree's current commit and ref are rewritten,
+// so switching between nearby commits is far cheaper than recreating the worktree
+// from scratch. It does NOT remove untracked/ignored files — pair it with
+// CleanWorktree when reusing a worktree across refs.
+func CheckoutDetached(worktreeDir, ref string) error {
+	if err := ValidateRef(ref); err != nil {
+		return errtrace.Wrap(fmt.Errorf("ref: %w", err))
+	}
+	cmd := exec.Command("git", "-C", worktreeDir, "checkout", "--detach", "--force", ref)
+	common.PrintExecCmd(cmd)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return errtrace.Wrap(fmt.Errorf("git checkout --detach: %w", err))
+	}
+	return nil
+}
+
+// CleanWorktree removes untracked files and directories from a worktree
+// (`git clean -fd`) while deliberately LEAVING git-ignored files in place — so a
+// reused checkout keeps warm dependency/build caches (e.g. node_modules) rather
+// than re-fetching them on every ref switch. (Use a stronger `-fdx` only if a
+// generator proves sensitive to stale ignored output.)
+func CleanWorktree(worktreeDir string) error {
+	cmd := exec.Command("git", "-C", worktreeDir, "clean", "-fd")
+	common.PrintExecCmd(cmd)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return errtrace.Wrap(fmt.Errorf("git clean: %w", err))
+	}
+	return nil
+}
+
+// PruneWorktrees runs `git worktree prune`, dropping the admin entries git keeps
+// for worktree directories that no longer exist on disk (e.g. ones removed by a
+// crash or an external `rm -rf`). Best-effort cleanup, safe to call on boot.
+func PruneWorktrees(projectRoot string) error {
+	_, err := gitOutput(projectRoot, "worktree", "prune")
+	return errtrace.Wrap(err)
+}
+
 // WorktreeStateHash returns a hex digest that changes whenever the working-tree
 // content of dir changes: it folds in HEAD, the porcelain status, the tracked
 // diff against HEAD, and the names+sizes of untracked files.

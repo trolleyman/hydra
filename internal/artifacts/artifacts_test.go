@@ -90,13 +90,28 @@ func TestGenerateAndCache(t *testing.T) {
 		t.Fatalf("expected cache hit ready, got %s", again.Status)
 	}
 
-	// The ephemeral checkout subdir must be cleaned up (the .gitignore stays).
-	entries, _ := os.ReadDir(m.checkoutsDir())
+	// Generation borrows a reusable worktree slot rather than a per-commit checkout,
+	// so a slot persists after generation (kept warm for reuse) — that's expected,
+	// not a leak. CleanCheckouts (the boot / crash-recovery sweep) must wipe them.
+	if slots, _ := os.ReadDir(m.slotsDir()); len(slotDirs(slots)) == 0 {
+		t.Error("expected a reusable slot worktree to persist after generation")
+	}
+	m.CleanCheckouts()
+	if slots, _ := os.ReadDir(m.slotsDir()); len(slotDirs(slots)) != 0 {
+		t.Errorf("CleanCheckouts left slot worktrees behind: %v", slotDirs(slots))
+	}
+}
+
+// slotDirs returns the subdirectory names among entries (ignoring the .gitignore
+// file the slots dir carries).
+func slotDirs(entries []os.DirEntry) []string {
+	var dirs []string
 	for _, e := range entries {
 		if e.IsDir() {
-			t.Errorf("checkout not cleaned: %s", e.Name())
+			dirs = append(dirs, e.Name())
 		}
 	}
+	return dirs
 }
 
 func TestGenerateError(t *testing.T) {

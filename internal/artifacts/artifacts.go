@@ -475,6 +475,10 @@ type Manager struct {
 	subs       map[int]chan Event   // event subscribers (live progress streaming)
 	nextSub    int                  // next subscriber id
 	sem        chan struct{}        // bounds concurrent generations (maxConcurrentGen)
+
+	// pool reuses a bounded set of detached worktrees for commit checkouts rather
+	// than creating/destroying one per generation (PLAN #51).
+	pool *slotPool
 }
 
 // NewManager returns a Manager for the given project root.
@@ -489,6 +493,7 @@ func NewManager(projectRoot string) *Manager {
 		subs:        map[int]chan Event{},
 		sem:         make(chan struct{}, maxConcurrentGen),
 	}
+	m.pool = newSlotPool(m.projectRoot, m.slotsDir(), maxSlots)
 	_ = paths.CreateGitignoreAllInDir(m.root())
 	return m
 }
@@ -578,6 +583,7 @@ func (r *Registry) Snapshot() map[string]*Manager {
 func (m *Manager) root() string         { return paths.GetArtifactsDirFromProjectRoot(m.projectRoot) }
 func (m *Manager) outDir() string       { return filepath.Join(m.root(), "out") }
 func (m *Manager) checkoutsDir() string { return filepath.Join(m.root(), "checkouts") }
+func (m *Manager) slotsDir() string     { return filepath.Join(m.root(), "slots") }
 
 // entryDir is the on-disk cache dir for a (script, key) pair. key is a
 // "<kind>/<id>" path (see versionKey), so the entry nests as
@@ -750,26 +756,19 @@ func (m *Manager) generate(spec config.ArtifactScript, v Version, key, ref strin
 		return meta
 	}
 
-	// Resolve the directory the script runs in.
+	// Resolve the directory the script runs in. For a commit ref (no caller-supplied
+	// worktree) borrow a reusable slot from the pool — checked out at `ref` (an
+	// already-resolved commit SHA) — rather than creating and destroying a full
+	// worktree per generation (PLAN #51). Released for reuse when generation ends.
 	runDir := v.WorktreeDir
 	if runDir == "" {
-		// The checkout is an ephemeral, internal worktree, so keep it as a single
-		// flat dir rather than mirroring the cache key's "<kind>/<id>" nesting:
-		// AddDetachedWorktree gitignores the checkout's *parent*, and a nested
-		// parent would both leave an empty <kind> dir behind on cleanup and race a
-		// sibling checkout (base + head generate concurrently) sharing that parent.
-		co := filepath.Join(m.checkoutsDir(), strings.ReplaceAll(key, "/", "-"))
-		_ = git.RemoveWorktree(m.projectRoot, co) // clear any stale checkout
-		_ = os.RemoveAll(co)
-		if err := git.AddDetachedWorktree(m.projectRoot, co, ref); err != nil {
+		s, err := m.pool.acquire(ref)
+		if err != nil {
 			meta.Status, meta.Error = StatusError, fmt.Sprintf("checkout %s: %v", ref, err)
 			return meta
 		}
-		defer func() {
-			_ = git.RemoveWorktree(m.projectRoot, co)
-			_ = os.RemoveAll(co)
-		}()
-		runDir = co
+		defer m.pool.release(s)
+		runDir = s.path
 	}
 
 	timeout := defaultTimeout
@@ -957,11 +956,14 @@ func (m *Manager) BlobPath(script, key, file string) (path, contentType string, 
 	return full, ct, nil
 }
 
-// CleanCheckouts removes leftover ephemeral checkouts. Safe to call on boot,
-// before any generation is in flight.
+// CleanCheckouts removes leftover ephemeral checkouts and resets the worktree-slot
+// pool. Safe to call on boot, before any generation is in flight — this is also
+// the crash-recovery path: a process that died mid-generation leaves slot (and,
+// pre-slot-pool, per-commit checkout) worktrees behind, which this wipes and
+// prunes so the pool starts clean and recreates slots on demand.
 func (m *Manager) CleanCheckouts() {
-	_, _ = exec.Command("git", "-C", m.projectRoot, "worktree", "prune").Output()
-	_ = os.RemoveAll(m.checkoutsDir())
+	_ = os.RemoveAll(m.checkoutsDir()) // legacy per-commit checkouts (pre-slot-pool)
+	m.pool.clean()                     // slot worktrees + `git worktree prune`
 }
 
 // legacyKeyRe matches a cache-entry dir in the old flat layout, where the kind
