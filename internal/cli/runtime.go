@@ -330,7 +330,7 @@ func resumeHeadsOnBoot(reg *session.Registry, store *db.Store, projectRoot strin
 		// browser/TUI reported for this project rather than the narrow 80x24
 		// default — otherwise the agent repaints at 80 cols and that wrapped output
 		// is baked into the scrollback before the first client ever attaches.
-		rows, cols := heads.LoadResumeSize(projectRoot)
+		rows, cols := heads.LoadResumeSize(projectRoot, h.ID)
 		if err := heads.ResumeHead(reg, store, projectRoot, h, rows, cols); err != nil {
 			log.Printf("warn: resume head %s: %v", h.ID, err)
 			errMsg := err.Error()

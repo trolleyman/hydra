@@ -178,11 +178,11 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 	}
 	// Client-seeded initial PTY size. Used only when we have to start or resume a
 	// session here, so a fresh/resumed agent renders at the right width straight
-	// away instead of flashing the default and reflowing. Falls back to the
-	// project's last persisted geometry (then 80x24) when absent or out of range.
-	// This never resizes an already-live PTY — that path attaches with 0,0 and
-	// waits for the client's settled resize.
-	defRows, defCols := heads.LoadResumeSize(projectRoot)
+	// away instead of flashing the default and reflowing. Falls back to this
+	// head's last persisted geometry (then the project fallback, then 80x24) when
+	// absent or out of range. This never resizes an already-live PTY — that path
+	// attaches with 0,0 and waits for the client's settled resize.
+	defRows, defCols := heads.LoadResumeSize(projectRoot, agentID)
 	initRows, initCols := parseTermSize(r, defRows, defCols)
 	log.Printf("terminal ws: resolved projectRoot: %q, useShell: %v", projectRoot, useShell)
 
@@ -323,9 +323,11 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 				var msg termResizeMsg
 				if err := json.Unmarshal(data, &msg); err == nil && msg.Type == "resize" && msg.Cols > 0 && msg.Rows > 0 {
 					_ = s.Sessions.Resize(sessionID, uint16(msg.Rows), uint16(msg.Cols))
-					// Remember this size so a later clientless resume (daemon boot,
-					// TUI) seeds the PTY at the right width instead of 80x24.
-					heads.SaveResumeSize(projectRoot, uint16(msg.Rows), uint16(msg.Cols))
+					// Remember this size for this head so a later clientless resume
+					// (daemon boot, TUI) seeds the PTY at the right width instead of
+					// 80x24. The agent tab and the head's bash tabs share one panel, so
+					// either keys the same head.
+					heads.SaveResumeSize(projectRoot, agentID, uint16(msg.Rows), uint16(msg.Cols))
 				}
 			}
 		}
