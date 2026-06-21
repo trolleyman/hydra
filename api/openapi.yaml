@@ -993,6 +993,102 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /api/projects/{project_id}/repository/artifacts:
+    get:
+      summary: List the artifact scripts configured at a ref
+      description: >-
+        Lists the names of the enabled [[artifacts]] scripts defined in the
+        ref's .hydra/config.toml. This is cheap — it only reads config and does
+        NOT generate anything. The repository browser uses it to decide whether
+        to show the dynamic ".hydra/artifacts" folder and what to list inside it.
+      operationId: getRepositoryArtifacts
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            type: string
+          description: Project ID
+        - in: query
+          name: ref
+          required: false
+          schema:
+            type: string
+          description: Git ref whose config to read (defaults to HEAD)
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RepositoryArtifactsResponse'
+        '404':
+          description: Project Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/projects/{project_id}/repository/artifacts/{name}:
+    get:
+      summary: Generate (or load) one artifact script's output for a ref
+      description: >-
+        Runs (or returns the cached result of) the named [[artifacts]] script
+        against a single ref and reports its outputs single-sided (no diff —
+        the repository browser shows one ref at a time). Generation is lazy:
+        this is only called when the user opens the script in the browser.
+      operationId: getRepositoryArtifact
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            type: string
+          description: Project ID
+        - in: path
+          name: name
+          required: true
+          schema:
+            type: string
+          description: The artifact script name
+        - in: query
+          name: ref
+          required: false
+          schema:
+            type: string
+          description: Git ref to generate the artifact for (defaults to HEAD)
+        - in: query
+          name: refresh
+          required: false
+          schema:
+            type: boolean
+          description: When true, discard the cached result and regenerate (chiefly to retry a cached failure)
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RepositoryArtifactResponse'
+        '404':
+          description: Project not found, or no such script configured at the ref
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /api/projects/{project_id}/agents/{id}:
     get:
       summary: Get a specific Hydra agent by ID
@@ -1315,11 +1411,21 @@ components:
 
     UpdateAgentRequest:
       type: object
-      required: [title]
+      description: >-
+        Patch an agent's mutable fields. Provide any subset; at least one field
+        is required. Omitted fields are left unchanged.
       properties:
         title:
           type: string
-          description: New user-facing display name for the agent. Trimmed; must be non-empty.
+          description: New user-facing display name for the agent. Trimmed; must be non-empty if provided.
+        base_branch:
+          type: string
+          description: >-
+            New base branch for the agent. This is a metadata-only change: it
+            updates which branch the agent is considered to be based on (used by
+            update-from-base and the diff view) but does NOT move existing
+            commits. Rebasing the agent's branch onto the new base, if desired,
+            is left to the user. Must be an existing ref.
 
     AgentStatus:
       type: string
@@ -1510,6 +1616,97 @@ components:
           items:
             $ref: '#/components/schemas/RepositoryBranch'
           description: Branches ordered with Hydra agent branches first, then the rest
+
+    RepositoryArtifactScript:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          description: The configured artifact script name
+
+    RepositoryArtifactsResponse:
+      type: object
+      required: [ref, scripts]
+      properties:
+        ref:
+          type: string
+          description: The git ref the script list was read from
+        scripts:
+          type: array
+          items:
+            $ref: '#/components/schemas/RepositoryArtifactScript'
+          description: The enabled artifact scripts defined at this ref, sorted by name
+
+    RepositoryArtifactFile:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          description: Output file's relative path (forward-slashed)
+        url:
+          type: string
+          nullable: true
+          description: URL to fetch the file's bytes (an artifacts blob URL); null while still generating
+        tags:
+          type: array
+          nullable: true
+          items:
+            type: string
+          description: >-
+            Labels for this file, read from a sibling JSON sidecar
+            (<file>.meta, {"tags": [...]}). A "category::value" tag is a scoped
+            label. Null/absent when the file has no tags.
+        fps:
+          type: number
+          format: double
+          nullable: true
+          description: Frame rate of a video file, read from its sidecar; sizes the video viewer's frame-step.
+
+    RepositoryArtifactResponse:
+      type: object
+      required: [name, status, files]
+      properties:
+        name:
+          type: string
+          description: The artifact script name
+        status:
+          type: string
+          enum: [ready, generating, error]
+        error:
+          type: string
+          nullable: true
+          description: Set only when generation failed (status "error").
+        started_at:
+          type: integer
+          format: int64
+          nullable: true
+          description: Unix time (seconds) generation started, so the UI can show elapsed time. Only set while generating.
+        progress:
+          type: string
+          nullable: true
+          description: >-
+            Latest progress line of the in-flight generation, from
+            `::hydra:progress::` marker lines (falling back to the latest stdout
+            line). Only set while generating.
+        log:
+          type: array
+          nullable: true
+          description: >-
+            Captured stdout+stderr lines of the in-flight generation, surfaced
+            as a live log. Only populated while generating; once settled, fetch
+            log_url instead.
+          items:
+            $ref: '#/components/schemas/ArtifactLogLine'
+        log_url:
+          type: string
+          nullable: true
+          description: URL to fetch the persisted build log once generation has settled. Null while generating or if no log was captured.
+        files:
+          type: array
+          items:
+            $ref: '#/components/schemas/RepositoryArtifactFile'
 
     DiffLine:
       type: object

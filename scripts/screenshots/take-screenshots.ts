@@ -371,6 +371,12 @@ try {
       // like the diff viewer's tree. Deep-linking the leaf file auto-expands the
       // chain so the compacted row is visible.
       { name: 'repository-compact-folders', path: '/project/sim-project/repository/main/config/env/staging/region/eu/settings.toml' },
+      // The repository view's artifacts viewer: the dynamic ".hydra/artifacts"
+      // folder (nested under the real .hydra/ folder) lists each configured
+      // [[artifacts]] script as a "file"; deep-linking one lazily generates it for
+      // the ref and renders its outputs single-sided. The deep link auto-expands
+      // .hydra → artifacts; "screenshots" returns a ready set of mock images.
+      { name: 'repository-artifacts', path: '/project/sim-project/repository/main/.hydra/artifacts/screenshots' },
       // The project settings page, landing on the "All Agents" / Global Defaults
       // tab. Simulation seeds a multi-line pre-spawn script (GetConfig in
       // internal/http/simulation.go), so the capture documents the sandbox

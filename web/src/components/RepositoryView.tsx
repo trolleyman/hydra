@@ -10,8 +10,10 @@ import {
   ChevronDown, ChevronRight, File as FileIcon, Folder, FolderOpen, FileText,
   Bot, GitBranch,
   LoaderCircle, Settings, Check, FileQuestion, FileSymlink, CornerDownRight,
+  Images, Camera,
 } from 'lucide-react'
 import { getFileIcon } from '../lib/fileIcons'
+import { RepositoryArtifactsView } from './RepositoryArtifactsView'
 
 // ── File tree model ────────────────────────────────────────────────────────────
 
@@ -20,6 +22,24 @@ type TreeNode = {
   path: string
   type: 'file' | 'dir'
   children: TreeNode[]
+  // Marks the synthetic ".hydra/artifacts" folder ('dir') and each artifact
+  // script under it ('script'), so TreeRow renders a distinct icon and the page
+  // routes a click to the artifacts viewer instead of fetching a file.
+  artifact?: 'dir' | 'script'
+}
+
+// ARTIFACTS_DIR is the virtual path of the dynamic artifacts folder, nested under
+// the repo's real .hydra/ folder. A script "file" lives at ARTIFACTS_DIR/<name>.
+// The real on-disk cache is .hydra/local/artifacts (gitignored), so this path
+// never collides with a tracked file in practice — but injection guards anyway.
+const ARTIFACTS_DIR = '.hydra/artifacts'
+
+// artifactScriptOf returns the script name when a path points at a synthetic
+// artifact "file" (ARTIFACTS_DIR/<name>), or null otherwise (incl. the folder).
+function artifactScriptOf(path: string | null): string | null {
+  if (!path) return null
+  const prefix = ARTIFACTS_DIR + '/'
+  return path.startsWith(prefix) ? path.slice(prefix.length) : null
 }
 
 // buildTree turns a flat list of repo-relative file paths into a nested,
@@ -399,7 +419,9 @@ function TreeRow({
           className="w-full flex items-center gap-1.5 pr-2 py-1 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors cursor-pointer text-left"
         >
           {isOpen ? <ChevronDown className="w-3.5 h-3.5 shrink-0 text-gray-400" /> : <ChevronRight className="w-3.5 h-3.5 shrink-0 text-gray-400" />}
-          {showIcons && (isOpen ? <FolderOpen className="w-4 h-4 shrink-0 text-blue-500" /> : <Folder className="w-4 h-4 shrink-0 text-blue-500" />)}
+          {showIcons && (node.artifact === 'dir'
+            ? <Images className="w-4 h-4 shrink-0 text-pink-500" />
+            : isOpen ? <FolderOpen className="w-4 h-4 shrink-0 text-blue-500" /> : <Folder className="w-4 h-4 shrink-0 text-blue-500" />)}
           <span className="truncate">{node.name}</span>
         </button>
         {isOpen && node.children.map((child) => (
@@ -409,7 +431,9 @@ function TreeRow({
     )
   }
 
-  const { Icon, className } = getFileIcon(node.name)
+  const { Icon, className } = node.artifact === 'script'
+    ? { Icon: Camera, className: 'text-pink-500' }
+    : getFileIcon(node.name)
   return (
     <button
       onClick={() => onSelect(node.path)}
@@ -597,6 +621,9 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
 
   const [files, setFiles] = useState<string[]>([])
   const [defaultPath, setDefaultPath] = useState<string | null>(null)
+  // Names of [[artifacts]] scripts configured at the current ref; drives the
+  // dynamic ".hydra/artifacts" folder. null while loading, [] when none.
+  const [artifactScripts, setArtifactScripts] = useState<string[] | null>(null)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [treeLoading, setTreeLoading] = useState(true)
   const [treeError, setTreeError] = useState<string | null>(null)
@@ -637,6 +664,32 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
 
   const parsed = useMemo(() => parseSplat(splat, branches), [splat, branches])
   const tree = useMemo(() => compactTree(buildTree(files)), [files])
+
+  // Inject the synthetic ".hydra/artifacts" folder (with one "file" per configured
+  // script) into the real tree, under the existing .hydra/ folder. Built after
+  // compaction so it isn't merged, and skipped if a real tracked file already lives
+  // at .hydra/artifacts/* (collision safety) or no scripts are configured.
+  const displayTree = useMemo(() => {
+    if (!artifactScripts || artifactScripts.length === 0) return tree
+    if (files.some((f) => f === ARTIFACTS_DIR || f.startsWith(ARTIFACTS_DIR + '/'))) return tree
+    const scriptNodes: TreeNode[] = artifactScripts.map((name) => ({
+      name, path: `${ARTIFACTS_DIR}/${name}`, type: 'file', children: [], artifact: 'script',
+    }))
+    const artifactsDir: TreeNode = { name: 'artifacts', path: ARTIFACTS_DIR, type: 'dir', children: scriptNodes, artifact: 'dir' }
+    let injected = false
+    const next = tree.map((node) => {
+      if (node.type === 'dir' && node.name === '.hydra') {
+        injected = true
+        return { ...node, children: [artifactsDir, ...node.children] } // dirs-first
+      }
+      return node
+    })
+    // No real .hydra folder in the tree — synthesize one holding just artifacts.
+    return injected ? next : [{ name: '.hydra', path: '.hydra', type: 'dir' as const, children: [artifactsDir] }, ...tree]
+  }, [tree, artifactScripts, files])
+
+  // The script name when the URL points at a synthetic artifact "file", else null.
+  const artifactScript = artifactScriptOf(parsed.path)
 
   // queryRef: the ref to actually fetch from. null/"" → server default (HEAD).
   // Selecting the current branch explicitly (e.g. /repository/main/README.md)
@@ -693,9 +746,23 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, queryRef, ready])
 
-  // Load the file content for the displayed path.
+  // Load the artifact-script list for the resolved ref (cheap — config only, no
+  // generation). Drives the dynamic ".hydra/artifacts" folder; [] hides it.
   useEffect(() => {
-    if (!ready || !viewPath) { setFile(null); return }
+    if (!ready) return
+    let cancelled = false
+    setArtifactScripts(null)
+    api.default.getRepositoryArtifacts(projectId, queryRef)
+      .then((r) => { if (!cancelled) setArtifactScripts(r.scripts.map((s) => s.name)) })
+      .catch(() => { if (!cancelled) setArtifactScripts([]) })
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, queryRef, ready])
+
+  // Load the file content for the displayed path. Synthetic artifact paths are not
+  // real files — they render the artifacts viewer instead — so skip the fetch.
+  useEffect(() => {
+    if (!ready || !viewPath || artifactScriptOf(viewPath)) { setFile(null); return }
     let cancelled = false
     // Clear the previously-shown file so the pane shows a loading icon instead
     // of the stale file while the new one is fetched.
@@ -772,10 +839,10 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
             </div>
           ) : treeError ? (
             <div className="px-3 py-4 text-xs text-red-500 text-center">{treeError}</div>
-          ) : tree.length === 0 ? (
+          ) : displayTree.length === 0 ? (
             <div className="px-3 py-4 text-xs text-gray-400 dark:text-gray-500 text-center">No tracked files</div>
           ) : (
-            tree.map((node) => (
+            displayTree.map((node) => (
               <TreeRow key={node.path} node={node} depth={0} expanded={expanded} toggle={toggle} selectedPath={viewPath} onSelect={selectFile} showIcons={settings.showIcons} />
             ))
           )}
@@ -793,9 +860,11 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
         <div className="px-4 py-2 border-b border-gray-200 dark:border-gray-700 flex items-center gap-2 shrink-0">
           {viewPath ? (
             <>
-              {file?.symlink
-                ? <FileSymlink className={`w-4 h-4 shrink-0 ${settings.showIcons ? 'text-teal-500' : 'text-gray-400'}`} />
-                : (() => { const { Icon, className } = getFileIcon(viewPath.split('/').pop() ?? viewPath); return <Icon className={`w-4 h-4 shrink-0 ${settings.showIcons ? className : 'text-gray-400'}`} /> })()}
+              {artifactScript
+                ? <Camera className={`w-4 h-4 shrink-0 ${settings.showIcons ? 'text-pink-500' : 'text-gray-400'}`} />
+                : file?.symlink
+                  ? <FileSymlink className={`w-4 h-4 shrink-0 ${settings.showIcons ? 'text-teal-500' : 'text-gray-400'}`} />
+                  : (() => { const { Icon, className } = getFileIcon(viewPath.split('/').pop() ?? viewPath); return <Icon className={`w-4 h-4 shrink-0 ${settings.showIcons ? className : 'text-gray-400'}`} /> })()}
               <span className="text-sm font-mono text-gray-700 dark:text-gray-300 truncate">{viewPath}</span>
               {file?.symlink && file.symlink_target && (
                 <span className="flex items-center gap-1 text-xs font-mono text-gray-400 dark:text-gray-500 truncate shrink min-w-0" title={`Symlink → ${file.symlink_target}`}>
@@ -820,7 +889,14 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
         </div>
 
         <div ref={contentRef} className="flex-1 flex flex-col min-h-0 overflow-auto">
-          {notFound && viewPath ? (
+          {artifactScript ? (
+            <RepositoryArtifactsView
+              key={`${refStr}:${artifactScript}`}
+              projectId={projectId}
+              refQuery={queryRef}
+              scriptName={artifactScript}
+            />
+          ) : notFound && viewPath ? (
             <FileNotFound path={viewPath} refStr={refStr} />
           ) : error ? (
             <div className="flex-1 flex items-center justify-center text-sm text-red-500 px-4 text-center">{error}</div>

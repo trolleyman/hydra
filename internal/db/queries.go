@@ -65,6 +65,49 @@ func (s *Store) ListAgents(projectRoot string) ([]Agent, error) {
 	return agents, nil
 }
 
+// GetAgentTermSize returns the last terminal geometry recorded for an active
+// agent, or (0,0) if none was recorded or the agent is unknown.
+func (s *Store) GetAgentTermSize(id string) (rows, cols uint16, err error) {
+	var a Agent
+	e := s.reader().Select("term_rows", "term_cols").First(&a, "id = ?", id).Error
+	if errors.Is(e, gorm.ErrRecordNotFound) {
+		return 0, 0, nil
+	}
+	if e != nil {
+		return 0, 0, errtrace.Wrap(e)
+	}
+	return uint16(a.TermRows), uint16(a.TermCols), nil
+}
+
+// SetAgentTermSize records the last terminal geometry a client reported for an
+// agent. It writes only the two columns (UpdateColumns skips the UpdatedAt
+// bump and hooks), so resizing a terminal never reorders agents in any
+// updated_at-sorted view.
+func (s *Store) SetAgentTermSize(id string, rows, cols uint16) error {
+	result := s.db.Model(&Agent{}).Where("id = ?", id).UpdateColumns(map[string]interface{}{
+		"term_rows": rows,
+		"term_cols": cols,
+	})
+	return errtrace.Wrap(result.Error)
+}
+
+// LatestTermSizeForProject returns the most recently active agent's terminal
+// geometry for a project — the fallback used to seed a head that has no size of
+// its own yet. Returns (0,0) if no active agent has a recorded size.
+func (s *Store) LatestTermSizeForProject(projectRoot string) (rows, cols uint16, err error) {
+	var a Agent
+	e := s.reader().Select("term_rows", "term_cols").
+		Where("project_path = ? AND term_rows > 0 AND term_cols > 0", projectRoot).
+		Order("updated_at DESC").First(&a).Error
+	if errors.Is(e, gorm.ErrRecordNotFound) {
+		return 0, 0, nil
+	}
+	if e != nil {
+		return 0, 0, errtrace.Wrap(e)
+	}
+	return uint16(a.TermRows), uint16(a.TermCols), nil
+}
+
 // UpdateSessionInfo updates the session PID and status for an agent.
 func (s *Store) UpdateSessionInfo(id string, pid int, status string) error {
 	updates := map[string]interface{}{
@@ -141,6 +184,13 @@ func (s *Store) CountUnreadByProject() (map[string]int, error) {
 // UpdateAgentTitle updates the user-facing display title for an agent.
 func (s *Store) UpdateAgentTitle(id, title string) error {
 	result := s.db.Model(&Agent{}).Where("id = ?", id).Update("title", title)
+	return errtrace.Wrap(result.Error)
+}
+
+// UpdateAgentBaseBranch updates the base branch an agent is considered based on.
+// Metadata only: it does not touch the agent's branch, worktree or commits.
+func (s *Store) UpdateAgentBaseBranch(id, baseBranch string) error {
+	result := s.db.Model(&Agent{}).Where("id = ?", id).Update("base_branch", baseBranch)
 	return errtrace.Wrap(result.Error)
 }
 

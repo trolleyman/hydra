@@ -2,10 +2,17 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
+/**
+ * Patch an agent's mutable fields. Provide any subset; at least one field is required. Omitted fields are left unchanged.
+ */
 export type UpdateAgentRequest = {
     /**
-     * New user-facing display name for the agent. Trimmed; must be non-empty.
+     * New user-facing display name for the agent. Trimmed; must be non-empty if provided.
      */
-    title: string;
+    title?: string;
+    /**
+     * New base branch for the agent. This is a metadata-only change: it updates which branch the agent is considered to be based on (used by update-from-base and the diff view) but does NOT move existing commits. Rebasing the agent's branch onto the new base, if desired, is left to the user. Must be an existing ref.
+     */
+    base_branch?: string;
 };
 

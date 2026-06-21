@@ -1111,7 +1111,7 @@ func simArtifactSets(id string) []api.ArtifactSet {
 		// reveals the two side-by-side stdout+stderr logs (stderr in red).
 		{
 			Name:          "components",
-			Status:        api.Generating,
+			Status:        api.ArtifactSetStatusGenerating,
 			LeftProgress:  &leftProgress,
 			RightProgress: &rightProgress,
 			StartedAt:     &startedAt,
@@ -1122,7 +1122,7 @@ func simArtifactSets(id string) []api.ArtifactSet {
 		// Failure: the error (script stderr tail) renders monospaced; refresh retries.
 		{
 			Name:   "storybook",
-			Status: api.Error,
+			Status: api.ArtifactSetStatusError,
 			Error:  ptr("exited 1: error: Cannot find module 'playwright'\n  at file:///app/scripts/screenshots/take-screenshots.ts:21:1"),
 			Files:  []api.ArtifactFile{},
 		},
@@ -1132,7 +1132,7 @@ func simArtifactSets(id string) []api.ArtifactSet {
 		// everything behind a whole-set error.
 		{
 			Name:      "dashboard",
-			Status:    api.Ready,
+			Status:    api.ArtifactSetStatusReady,
 			Changed:   true,
 			LeftError: ptr("exited 1: Error: page.goto: net::ERR_CONNECTION_REFUSED at http://localhost:3000/dashboard\n  at /app/scripts/screenshots/take-screenshots.ts:88:14"),
 			Files: []api.ArtifactFile{
@@ -1152,7 +1152,7 @@ func simArtifactSets(id string) []api.ArtifactSet {
 		// still a card (expandable, refreshable). Its file is unchanged across sides.
 		{
 			Name:    "emails",
-			Status:  api.Ready,
+			Status:  api.ArtifactSetStatusReady,
 			Changed: false,
 			Files: []api.ArtifactFile{
 				{
@@ -1182,7 +1182,7 @@ func artTags(tags ...string) *[]string {
 func simReadyChangedSet() api.ArtifactSet {
 	return api.ArtifactSet{
 		Name:    "screenshots",
-		Status:  api.Ready,
+		Status:  api.ArtifactSetStatusReady,
 		Changed: true,
 		Files: []api.ArtifactFile{
 			{
@@ -1252,6 +1252,7 @@ func (s *SimulationServer) SendAgentInput(w http.ResponseWriter, r *http.Request
 // (lexical) order, so the browser renders a stable, GitHub-like tree.
 var simRepoOrder = []string{
 	".gitignore",
+	".hydra/config.toml",
 	"CLAUDE.md",
 	"LICENSE",
 	"README.md",
@@ -1286,8 +1287,13 @@ const simLogoPNGBase64 = "iVBORw0KGgoAAAANSUhEUgAAAIAAAABgCAIAAABaGO0eAAAC10lEQV
 
 // simRepoFiles holds the simulated content for each path in simRepoOrder.
 var simRepoFiles = map[string]string{
-	".gitignore": "node_modules/\ndist/\n.env\n*.log\n",
-	"CLAUDE.md":  "# Project guidelines\n\nThis demo repo powers Hydra's **Repository** view.\n\n- Use `bun` instead of `npm`.\n- Run the formatter before committing.\n",
+	".gitignore": "node_modules/\ndist/\n.env\n*.log\n.hydra/local/\n",
+	// The project config. Its [[artifacts]] blocks are what the repository
+	// browser's dynamic ".hydra/artifacts" folder lists (the names here match the
+	// scripts GetRepositoryArtifacts returns below).
+	".hydra/config.toml": "[[artifacts]]\nname = \"screenshots\"\ncommand = \"bun run screenshots.ts\"\ntimeout_sec = 900\n\n" +
+		"[[artifacts]]\nname = \"components\"\ncommand = \"bun run storybook-shots.ts\"\n",
+	"CLAUDE.md": "# Project guidelines\n\nThis demo repo powers Hydra's **Repository** view.\n\n- Use `bun` instead of `npm`.\n- Run the formatter before committing.\n",
 	"LICENSE":    "MIT License\n\nCopyright (c) 2026 Hydra Demo\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction.\n",
 	"hydra.toml": "pre_prompt = \"\"\"\n- Use bun instead of npm\n\"\"\"\n\n[sandbox]\nwritable_paths = [\"~/.cache/go-build\"]\n",
 	// A deeply-nested single-child chain; each folder holds only the next, so the
@@ -1408,6 +1414,58 @@ func (s *SimulationServer) HandleRepositoryBlob(w http.ResponseWriter, r *http.R
 	w.Header().Set("Content-Type", "image/png")
 	w.Header().Set("Cache-Control", "public, max-age=300")
 	_, _ = w.Write(png)
+}
+
+// GetRepositoryArtifacts lists the artifact scripts the simulated repo declares in
+// .hydra/config.toml, so the repository browser shows its dynamic
+// ".hydra/artifacts" folder with these entries.
+func (s *SimulationServer) GetRepositoryArtifacts(w http.ResponseWriter, r *http.Request, projectId string, params api.GetRepositoryArtifactsParams) {
+	ref := "HEAD"
+	if params.Ref != nil && *params.Ref != "" {
+		ref = *params.Ref
+	}
+	api.WriteJSON(w, http.StatusOK, api.RepositoryArtifactsResponse{
+		Ref: ref,
+		Scripts: []api.RepositoryArtifactScript{
+			{Name: "screenshots"},
+			{Name: "components"},
+		},
+	})
+}
+
+// GetRepositoryArtifact returns a single-sided artifact set for the simulated repo.
+// "screenshots" renders a few inline-SVG images (mixing desktop + phone shapes to
+// show off the flex-wrap layout); "components" demonstrates the in-flight
+// generating state; any other name is a 404.
+func (s *SimulationServer) GetRepositoryArtifact(w http.ResponseWriter, r *http.Request, projectId string, name string, params api.GetRepositoryArtifactParams) {
+	logURL := "/artifacts/projects/" + projectId + "/log?script=" + name + "&key=commit/a1b2c3d"
+	switch name {
+	case "screenshots":
+		api.WriteJSON(w, http.StatusOK, api.RepositoryArtifactResponse{
+			Name:   "screenshots",
+			Status: api.RepositoryArtifactResponseStatusReady,
+			LogUrl: &logURL,
+			Files: []api.RepositoryArtifactFile{
+				{Name: "home.png", Url: ptr(simSVG("home", "#15803d", 360, 220)), Tags: artTags("theme::light", "viewport::desktop")},
+				{Name: "home-dark.png", Url: ptr(simSVG("home dark", "#166534", 360, 220)), Tags: artTags("theme::dark", "viewport::desktop")},
+				{Name: "login-phone.png", Url: ptr(simSVG("login", "#1d4ed8", 150, 300)), Tags: artTags("theme::light", "viewport::phone")},
+			},
+		})
+	case "components":
+		startedAt := simNow().Add(-6 * time.Second).Unix()
+		progress := "rendering Button.stories 3/8"
+		log := simArtifactLog()
+		api.WriteJSON(w, http.StatusOK, api.RepositoryArtifactResponse{
+			Name:      "components",
+			Status:    api.RepositoryArtifactResponseStatusGenerating,
+			StartedAt: &startedAt,
+			Progress:  &progress,
+			Log:       &log,
+			Files:     []api.RepositoryArtifactFile{},
+		})
+	default:
+		api.WriteError(w, http.StatusNotFound, "artifact script not found: "+name)
+	}
 }
 
 func (s *SimulationServer) GetConfig(w http.ResponseWriter, r *http.Request, projectId string, params api.GetConfigParams) {
