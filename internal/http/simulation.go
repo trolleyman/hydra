@@ -1609,7 +1609,12 @@ func (s *SimulationServer) HandleArtifactsWS(w http.ResponseWriter, r *http.Requ
 
 // expandHunkContext adds extra context lines before/after a hunk's existing lines
 // when the requested context is greater than the default 3.
-func expandHunkContext(hunk api.DiffHunk, extraCtx int, fileExt string) api.DiffHunk {
+// expandHunkContext pads a hunk with up to extraCtx synthetic context lines on
+// each side. The prefix stops at line 1 and the suffix stops at the file's known
+// extent (fileLastOld/fileLastNew — the largest line numbers across the file's
+// real hunks), so a full-context request (git diff -U<huge> in production)
+// returns the complete short fixture rather than an unbounded fabricated tail.
+func expandHunkContext(hunk api.DiffHunk, extraCtx, fileLastOld, fileLastNew int, fileExt string) api.DiffHunk {
 	if extraCtx <= 0 {
 		return hunk
 	}
@@ -1647,11 +1652,15 @@ func expandHunkContext(hunk api.DiffHunk, extraCtx int, fileExt string) api.Diff
 		})
 	}
 
-	// Append context lines after the hunk
+	// Append context lines after the hunk, stopping at the file's last line so
+	// we never fabricate content past the (short) fixture's real end.
 	var suffix []api.DiffLine
 	for i := 1; i <= extraCtx; i++ {
 		oldN := lastOld + i
 		newN := lastNew + i
+		if oldN > fileLastOld || newN > fileLastNew {
+			break
+		}
 		suffix = append(suffix, api.DiffLine{
 			Type:       api.Context,
 			Content:    comment + fmt.Sprintf(" context line %d", oldN),
@@ -1678,9 +1687,24 @@ func expandDiffContext(files []api.DiffFile, context int) []api.DiffFile {
 		if len(parts) > 1 {
 			ext = parts[len(parts)-1]
 		}
+		// The file's real extent: the largest old/new line numbers across its
+		// hunks. Synthetic suffix context stops here so we don't fabricate lines
+		// past the fixture's end (which would make every file look 1000 lines
+		// long under a full-context request).
+		lastOld, lastNew := 0, 0
+		for _, h := range f.Hunks {
+			for _, l := range h.Lines {
+				if l.OldLineNum != nil && *l.OldLineNum > lastOld {
+					lastOld = *l.OldLineNum
+				}
+				if l.NewLineNum != nil && *l.NewLineNum > lastNew {
+					lastNew = *l.NewLineNum
+				}
+			}
+		}
 		hunks := make([]api.DiffHunk, len(f.Hunks))
 		for j, h := range f.Hunks {
-			hunks[j] = expandHunkContext(h, extra, ext)
+			hunks[j] = expandHunkContext(h, extra, lastOld, lastNew, ext)
 		}
 		f.Hunks = hunks
 		result[i] = f
