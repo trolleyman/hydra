@@ -31,6 +31,12 @@ type Agent struct {
 	SessionPID    int    // PID of the running sandbox session, 0 if not running
 	SessionStatus string `gorm:"default:pending"` // pending|building|starting|running|stopped
 
+	// Terminal — last PTY geometry a client reported for this head, used to seed
+	// a clientless resume (daemon boot, TUI) at the right width instead of 80x24.
+	// 0 = never reported.
+	TermRows int
+	TermCols int
+
 	// Agent — updated by JSON poller reading .hydra/local/status/<id>.json
 	AgentStatus     *string // starting|running|waiting|stopped (nil = not yet reported)
 	AgentStatusTime string  // RFC3339 of last AgentStatus update
