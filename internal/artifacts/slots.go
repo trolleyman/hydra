@@ -54,15 +54,23 @@ func newSlotPool(projectRoot, dir string, max int) *slotPool {
 // acquire returns a worktree checked out at the given commit SHA. The caller must
 // release it when done. The slow git work (checkout / worktree add) runs without
 // the pool lock held, so concurrent acquires/releases never block on it.
-func (p *slotPool) acquire(sha string) (*slot, error) {
+//
+// cleanIgnored requests a pristine tree (git-ignored files removed too); see
+// checkout. It also disables the affinity shortcut: a same-SHA hit reuses a slot
+// with no git work at all, which would keep a prior run's ignored output, so when
+// a pristine tree is wanted we always fall through to a checkout+clean instead.
+func (p *slotPool) acquire(sha string, cleanIgnored bool) (*slot, error) {
 	p.mu.Lock()
 	for {
 		// 1. Affinity: a free slot already on this commit — reuse with zero git work.
-		for i, s := range p.free {
-			if s.sha == sha {
-				p.free = append(p.free[:i], p.free[i+1:]...)
-				p.mu.Unlock()
-				return s, nil
+		//    Only when the caller doesn't need ignored files wiped (see above).
+		if !cleanIgnored {
+			for i, s := range p.free {
+				if s.sha == sha {
+					p.free = append(p.free[:i], p.free[i+1:]...)
+					p.mu.Unlock()
+					return s, nil
+				}
 			}
 		}
 
@@ -71,7 +79,7 @@ func (p *slotPool) acquire(sha string) (*slot, error) {
 			s := p.free[len(p.free)-1]
 			p.free = p.free[:len(p.free)-1]
 			p.mu.Unlock()
-			if err := p.checkout(s, sha); err != nil {
+			if err := p.checkout(s, sha, cleanIgnored); err != nil {
 				// Checkout failed; the slot may be in a bad state. Forget its SHA and
 				// return it to the free list so a later acquire can try to repair it
 				// (checkout --force / a fresh clean), and wake a waiter.
@@ -131,12 +139,14 @@ func (p *slotPool) create(s *slot, sha string) error {
 }
 
 // checkout switches an existing slot to sha incrementally, then removes stray
-// untracked files (keeping ignored caches warm).
-func (p *slotPool) checkout(s *slot, sha string) error {
+// untracked files. cleanIgnored=false keeps ignored caches warm (`git clean -fd`);
+// true wipes them too for a pristine tree (`git clean -fdx`). A freshly created
+// slot is pristine already, so only this reuse path needs the clean.
+func (p *slotPool) checkout(s *slot, sha string, cleanIgnored bool) error {
 	if err := git.CheckoutDetached(s.path, sha); err != nil {
 		return errtrace.Wrap(err)
 	}
-	if err := git.CleanWorktree(s.path); err != nil {
+	if err := git.CleanWorktree(s.path, cleanIgnored); err != nil {
 		return errtrace.Wrap(err)
 	}
 	s.sha = sha

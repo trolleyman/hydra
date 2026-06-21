@@ -205,12 +205,17 @@ func CheckoutDetached(worktreeDir, ref string) error {
 }
 
 // CleanWorktree removes untracked files and directories from a worktree
-// (`git clean -fd`) while deliberately LEAVING git-ignored files in place — so a
-// reused checkout keeps warm dependency/build caches (e.g. node_modules) rather
-// than re-fetching them on every ref switch. (Use a stronger `-fdx` only if a
-// generator proves sensitive to stale ignored output.)
-func CleanWorktree(worktreeDir string) error {
-	cmd := exec.Command("git", "-C", worktreeDir, "clean", "-fd")
+// (`git clean -fd`). By default it LEAVES git-ignored files in place — so a reused
+// checkout keeps warm dependency/build caches (e.g. node_modules) rather than
+// re-fetching them on every ref switch. When includeIgnored is true it adds `-x`
+// (`git clean -fdx`), wiping ignored files too for a fully pristine tree — slower,
+// but safe against stale ignored output leaking between commits.
+func CleanWorktree(worktreeDir string, includeIgnored bool) error {
+	args := []string{"-C", worktreeDir, "clean", "-fd"}
+	if includeIgnored {
+		args = append(args, "-x")
+	}
+	cmd := exec.Command("git", args...)
 	common.PrintExecCmd(cmd)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

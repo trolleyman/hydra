@@ -259,6 +259,9 @@ type ArtifactLogLineStream string
 
 // ArtifactScript A per-project command that renders visual artifacts (e.g. screenshots) of a checkout, shown side-by-side in the diff viewer
 type ArtifactScript struct {
+	// CleanIgnored Also delete git-ignored files (e.g. node_modules) before each run — a pristine checkout (git clean -fdx) instead of the default that keeps caches warm (-fd). Slower; only if stale ignored output can leak between commits (default false)
+	CleanIgnored *bool `json:"clean_ignored,omitempty"`
+
 	// Command Shell command run via `sh -c` in the checkout directory
 	Command string `json:"command"`
 

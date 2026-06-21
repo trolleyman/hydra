@@ -1716,6 +1716,9 @@ components:
         unsafe_host:
           type: boolean
           description: Run on the host with NO sandbox — full access to the machine and credentials (default false)
+        clean_ignored:
+          type: boolean
+          description: Also delete git-ignored files (e.g. node_modules) before each run — a pristine checkout (git clean -fdx) instead of the default that keeps caches warm (-fd). Slower; only if stale ignored output can leak between commits (default false)
         enabled:
           type: boolean
           nullable: true

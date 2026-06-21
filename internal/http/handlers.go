@@ -574,6 +574,9 @@ func toAPIArtifactScript(a config.ArtifactScript) api.ArtifactScript {
 	if a.UnsafeHost {
 		out.UnsafeHost = &a.UnsafeHost
 	}
+	if a.CleanIgnored {
+		out.CleanIgnored = &a.CleanIgnored
+	}
 	out.Enabled = a.Enabled
 	return out
 }
@@ -586,6 +589,9 @@ func fromAPIArtifactScript(a api.ArtifactScript) config.ArtifactScript {
 	}
 	if a.UnsafeHost != nil {
 		out.UnsafeHost = *a.UnsafeHost
+	}
+	if a.CleanIgnored != nil {
+		out.CleanIgnored = *a.CleanIgnored
 	}
 	out.Enabled = a.Enabled
 	return out
