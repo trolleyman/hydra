@@ -987,11 +987,11 @@ func simFile(path string, ct api.DiffFileChangeType, add, del int, header string
 const maxSimContext = 1000
 
 func simContext(params api.GetAgentDiffParams) int {
-	// full_context asks for whole-file expansion; the sim has no real git, so
-	// approximate it with the largest context it supports.
-	if params.FullContext != nil && *params.FullContext {
-		return maxSimContext
-	}
+	// Deliberately ignore full_context: the fixtures are compact -U3 hunks, not
+	// whole-file-contiguous content, so synthesizing full context for them just
+	// yields a long, unhelpful diff on load (bad for screenshots). The real
+	// server handles full_context; the sim keeps the compact view and still
+	// expands a file on demand via an explicit larger Context (network expand).
 	if params.Context != nil {
 		return min(*params.Context, maxSimContext)
 	}
@@ -1757,12 +1757,6 @@ func expandDiffContext(files []api.DiffFile, context int) []api.DiffFile {
 			hunks[j] = expandHunkContext(h, extra, lastOld, lastNew, ext)
 		}
 		f.Hunks = hunks
-		// A full-context request (context maxed out via full_context) expands each
-		// file to its whole content, so mark it expanded — mirrors the real
-		// server, letting the dev UI drive the client-side reveal model.
-		if context >= maxSimContext && !f.Binary {
-			f.Expanded = ptr(true)
-		}
 		result[i] = f
 	}
 	return result
