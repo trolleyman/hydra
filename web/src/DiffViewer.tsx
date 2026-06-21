@@ -288,7 +288,10 @@ const UnifiedHunk = memo(function UnifiedHunk({ hunk, highlightedOld, highlighte
             {openCommentIdx === idx && (
               <CommentRow
                 onSubmit={async (text) => {
-                  await onComment(isAdd ? line.new_line_num! : line.old_line_num!, isAdd || line.type === 'context', text)
+                  // Context lines exist on both sides; comment against the new side
+                  // (like the side-by-side view) so the line number matches isNew.
+                  const isNew = isAdd || line.type === 'context'
+                  await onComment(isNew ? line.new_line_num! : line.old_line_num!, isNew, text)
                   setOpenCommentIdx(null)
                 }}
                 onCancel={() => setOpenCommentIdx(null)}
@@ -804,6 +807,21 @@ type RightSel = { type: 'uncommitted' } | { type: 'latest' } | { type: 'commit';
 
 function commitIdx(sha: string, commits: CommitInfo[]): number {
   return commits.findIndex((c) => c.sha === sha)
+}
+
+type DiffParams = { baseRef?: string; headRef?: string; ignoreWhitespace?: boolean; includeUncommitted?: boolean }
+
+// buildDiffParams maps the left/right selectors to the getAgentDiff query
+// params. Shared by every diff fetch (initial load, silent refresh, per-file
+// full fetch, context expansion) so they stay in lock-step.
+function buildDiffParams(leftSel: LeftSel, rightSel: RightSel, ignoreWhitespace: boolean, commits: CommitInfo[]): DiffParams {
+  const params: DiffParams = {}
+  if (ignoreWhitespace) params.ignoreWhitespace = true
+  if (leftSel.type === 'commit') params.baseRef = leftSel.sha
+  else if (leftSel.type === 'latest' && commits.length > 0) params.baseRef = commits[0].sha
+  if (rightSel.type === 'uncommitted') params.includeUncommitted = true
+  else if (rightSel.type === 'commit') params.headRef = rightSel.sha
+  return params
 }
 
 function formatShortLabel(commit: CommitInfo | null | undefined, sha: string): string {
@@ -1690,12 +1708,7 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
     fileContextsRef.current.set(path, context)
     setFileContexts(new Map(fileContextsRef.current))
 
-    const params: { baseRef?: string; headRef?: string; ignoreWhitespace?: boolean; includeUncommitted?: boolean } = {}
-    if (ignoreWhitespace) params.ignoreWhitespace = true
-    if (leftSel.type === 'commit') params.baseRef = leftSel.sha
-    else if (leftSel.type === 'latest' && commitsRef.current.length > 0) params.baseRef = commitsRef.current[0].sha
-    if (rightSel.type === 'uncommitted') params.includeUncommitted = true
-    else if (rightSel.type === 'commit') params.headRef = rightSel.sha
+    const params = buildDiffParams(leftSel, rightSel, ignoreWhitespace, commitsRef.current)
 
     try {
       const fileDiff = await api.default.getAgentDiff(projectId ?? '', agent.id,
@@ -1725,12 +1738,7 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
   // changes (and FileDiff refetches) whenever the compared refs change.
   const fetchFullFile = useCallback(async (path: string): Promise<DiffLine[] | null> => {
     if (!agent.branch_name) return null
-    const params: { baseRef?: string; headRef?: string; ignoreWhitespace?: boolean; includeUncommitted?: boolean } = {}
-    if (ignoreWhitespace) params.ignoreWhitespace = true
-    if (leftSel.type === 'commit') params.baseRef = leftSel.sha
-    else if (leftSel.type === 'latest' && commitsRef.current.length > 0) params.baseRef = commitsRef.current[0].sha
-    if (rightSel.type === 'uncommitted') params.includeUncommitted = true
-    else if (rightSel.type === 'commit') params.headRef = rightSel.sha
+    const params = buildDiffParams(leftSel, rightSel, ignoreWhitespace, commitsRef.current)
 
     try {
       const d = await api.default.getAgentDiff(projectId ?? '', agent.id,
@@ -1774,12 +1782,7 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
     fileContextsRef.current = new Map()
     setFileContexts(new Map())
 
-    const params: { baseRef?: string; headRef?: string; ignoreWhitespace?: boolean; includeUncommitted?: boolean } = {}
-    if (ignoreWhitespace) params.ignoreWhitespace = true
-    if (leftSel.type === 'commit') params.baseRef = leftSel.sha
-    else if (leftSel.type === 'latest' && commitsRef.current.length > 0) params.baseRef = commitsRef.current[0].sha
-    if (rightSel.type === 'uncommitted') params.includeUncommitted = true
-    else if (rightSel.type === 'commit') params.headRef = rightSel.sha
+    const params = buildDiffParams(leftSel, rightSel, ignoreWhitespace, commitsRef.current)
 
     // Fetch the full diff in one request (all files, all hunks).
     api.default.getAgentDiff(projectId ?? '', agent.id,
@@ -1798,14 +1801,11 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
   }, [agent.id, agent.branch_name, projectId, leftSel, rightSel, refreshKey, ignoreWhitespace, applyHiddenFiles])
 
   // Version params for the artifacts panel, mirroring the diff request logic.
-  const artifactParams = useMemo(() => {
-    const p: { baseRef?: string; headRef?: string; includeUncommitted?: boolean } = {}
-    if (leftSel.type === 'commit') p.baseRef = leftSel.sha
-    else if (leftSel.type === 'latest' && commits.length > 0) p.baseRef = commits[0].sha
-    if (rightSel.type === 'uncommitted') p.includeUncommitted = true
-    else if (rightSel.type === 'commit') p.headRef = rightSel.sha
-    return p
-  }, [leftSel, rightSel, commits])
+  // Artifacts (e.g. screenshots) don't care about whitespace, so pass false.
+  const artifactParams = useMemo(
+    () => buildDiffParams(leftSel, rightSel, false, commits),
+    [leftSel, rightSel, commits],
+  )
 
   // Keep a ref to expandFileDiff so the silent refresh can call it without stale closures.
   const expandFileDiffRef = useRef(expandFileDiff)
@@ -1886,12 +1886,7 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
       // a newer refresh landed mid-fetch and we run again.
       const servicing = latestTriggerRef.current
 
-      const params: { baseRef?: string; headRef?: string; ignoreWhitespace?: boolean; includeUncommitted?: boolean } = {}
-      if (ignoreWhitespace) params.ignoreWhitespace = true
-      if (leftSel.type === 'commit') params.baseRef = leftSel.sha
-      else if (leftSel.type === 'latest' && commitsRef.current.length > 0) params.baseRef = commitsRef.current[0].sha
-      if (rightSel.type === 'uncommitted') params.includeUncommitted = true
-      else if (rightSel.type === 'commit') params.headRef = rightSel.sha
+      const params = buildDiffParams(leftSel, rightSel, ignoreWhitespace, commitsRef.current)
 
       // Snapshot current per-file contexts before async work
       const contextsSnap = new Map(fileContextsRef.current)
