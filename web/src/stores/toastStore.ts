@@ -10,7 +10,9 @@ export interface Toast {
 
 interface ToastState {
   toasts: Toast[]
-  show: (options: { message: string; type?: ToastType; duration?: number }) => void
+  // Returns the new toast's id, so callers showing a persistent toast
+  // (duration: 0) can later dismiss() it — e.g. a "Merging…" indicator.
+  show: (options: { message: string; type?: ToastType; duration?: number }) => number
   dismiss: (id: number) => void
 }
 
@@ -26,6 +28,7 @@ export const useToastStore = create<ToastState>((set) => ({
         set((state) => ({ toasts: state.toasts.filter((t) => t.id !== id) }))
       }, duration)
     }
+    return id
   },
   dismiss: (id) => set((state) => ({ toasts: state.toasts.filter((t) => t.id !== id) })),
 }))

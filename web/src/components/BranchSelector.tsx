@@ -1,0 +1,92 @@
+import { useEffect, useRef, useState } from 'react'
+import { Bot, GitBranch, ChevronDown, Check } from 'lucide-react'
+import type { RepositoryBranch } from '../api'
+
+// shortSha collapses a full/long commit SHA to a readable prefix, leaving
+// branch names (and anything that isn't a hex SHA) untouched.
+export function shortSha(ref: string): string {
+  return /^[0-9a-f]{7,40}$/i.test(ref) ? ref.slice(0, 8) : ref
+}
+
+// BranchSelector is a dropdown for picking a branch (or showing a detached
+// commit). It is shared between the repository view's branch switcher and the
+// agent detail header's base-branch editor. `activeRef` is the currently
+// selected branch/commit; `isKnownBranch` says whether it appears in `branches`
+// (so a bare commit SHA renders as a short SHA rather than a missing branch).
+export function BranchSelector({
+  branches, activeRef, isKnownBranch, onSelect, title = 'Switch branch',
+}: {
+  branches: RepositoryBranch[]
+  activeRef: string
+  isKnownBranch: boolean
+  onSelect: (name: string) => void
+  title?: string
+}) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    function handleClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [open])
+
+  const agentBranches = branches.filter((b) => b.is_agent)
+  const otherBranches = branches.filter((b) => !b.is_agent)
+
+  const Row = ({ b }: { b: RepositoryBranch }) => (
+    <button
+      onClick={() => { onSelect(b.name); setOpen(false) }}
+      className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left text-xs text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors cursor-pointer"
+    >
+      {b.is_agent ? <Bot className="w-3.5 h-3.5 shrink-0 text-purple-500" /> : <GitBranch className="w-3.5 h-3.5 shrink-0 text-gray-400" />}
+      <span className="truncate font-mono">{b.name}</span>
+      {b.is_current && <span className="ml-1 text-[9px] px-1 py-px rounded bg-gray-200 dark:bg-gray-600 text-gray-600 dark:text-gray-300 shrink-0">HEAD</span>}
+      {b.name === activeRef && <Check className="w-3.5 h-3.5 ml-auto shrink-0 text-blue-500" />}
+    </button>
+  )
+
+  return (
+    <div ref={ref} className="relative shrink-0">
+      <button
+        title={title}
+        onClick={() => setOpen((o) => !o)}
+        className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border text-xs font-medium transition-colors cursor-pointer max-w-[14rem] ${open
+          ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800'
+          : 'text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
+          }`}
+      >
+        <GitBranch className="w-3.5 h-3.5 shrink-0" />
+        <span className="truncate font-mono">{isKnownBranch ? activeRef : shortSha(activeRef)}</span>
+        <ChevronDown className="w-3.5 h-3.5 shrink-0 opacity-60" />
+      </button>
+
+      {open && (
+        <div className="absolute left-0 top-full mt-1 w-64 max-h-80 overflow-y-auto bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50 py-1">
+          {!isKnownBranch && activeRef && (
+            <div className="px-2.5 py-1.5 text-xs text-gray-500 dark:text-gray-400 border-b border-gray-100 dark:border-gray-700 flex items-center gap-2">
+              <Check className="w-3.5 h-3.5 shrink-0 text-blue-500" />
+              <span className="truncate font-mono">{shortSha(activeRef)}</span>
+              <span className="ml-auto text-[9px] uppercase tracking-wide">commit</span>
+            </div>
+          )}
+          {agentBranches.length > 0 && (
+            <>
+              <p className="px-2.5 pt-1.5 pb-1 text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide">Agent branches</p>
+              {agentBranches.map((b) => <Row key={b.name} b={b} />)}
+            </>
+          )}
+          {otherBranches.length > 0 && (
+            <>
+              <p className="px-2.5 pt-2 pb-1 text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide">Branches</p>
+              {otherBranches.map((b) => <Row key={b.name} b={b} />)}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}

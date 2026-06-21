@@ -2,8 +2,9 @@ import { useState, useEffect, useRef } from 'react'
 import { api } from '../stores/apiClient'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from '../lib/agentViewPrefs'
 import { formatError } from '../api/format_error'
-import type { AgentResponse } from '../api'
+import type { AgentResponse, RepositoryBranch } from '../api'
 import { AgentTerminal } from './AgentTerminal'
+import { BranchSelector } from './BranchSelector'
 import { DiffViewer } from '../DiffViewer'
 import { formatStartedAgo, agentStatusBadge, archivedEndStateBadge } from './AgentComponents'
 import { LoaderCircle, Merge, Trash2, Tag, RotateCcw, FolderSync, Copy, Check, Pencil, Archive, TerminalSquare } from 'lucide-react'
@@ -187,9 +188,8 @@ export function AgentDetail({
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleDraft, setTitleDraft] = useState('')
   const [savingTitle, setSavingTitle] = useState(false)
-  const [editingBase, setEditingBase] = useState(false)
-  const [baseDraft, setBaseDraft] = useState('')
   const [savingBase, setSavingBase] = useState(false)
+  const [branches, setBranches] = useState<RepositoryBranch[] | null>(null)
   const updateAgentInStore = useAgentStore((s) => s.updateAgent)
   const [, setTick] = useState(0)
   const [diffRefreshTrigger, setDiffRefreshTrigger] = useState(0)
@@ -204,6 +204,18 @@ export function AgentDetail({
     const id = setInterval(() => setTick((n) => n + 1), 1000)
     return () => clearInterval(id)
   }, [agent.created_at])
+
+  // Load the repo's branch list for the base-branch selector. Cheap (`git
+  // branch`); failures just leave the selector showing the current base as
+  // static text.
+  useEffect(() => {
+    if (!projectId) return
+    let cancelled = false
+    api.default.getRepositoryBranches(projectId)
+      .then((r) => { if (!cancelled) setBranches(r.branches) })
+      .catch(() => { if (!cancelled) setBranches([]) })
+    return () => { cancelled = true }
+  }, [projectId])
 
   // Restore & persist the page scroll position per agent, so each agent's detail
   // page behaves like its own page. Content below the fold (terminal, diff)
@@ -291,27 +303,29 @@ export function AgentDetail({
     })
   }
 
-  async function handleMerge() {
-    // Check for uncommitted changes before showing the confirm dialog.
-    let uncommittedWarning = ''
-    try {
-      const d = await api.default.getAgentDiffFiles(projectId ?? '', agent.id, undefined, undefined, true)
-      if (d.uncommitted_changes) {
-        const tracked = d.uncommitted_summary?.tracked_count ?? 0
-        const untracked = d.uncommitted_summary?.untracked_count ?? 0
-        const total = tracked + untracked
-        uncommittedWarning = `\n\n⚠️ This agent has ${total} uncommitted file change${total !== 1 ? 's' : ''} that will be lost when merging.`
-      }
-    } catch { /* ignore — proceed without warning */ }
+  function handleMerge() {
+    const baseMessage = `Are you sure you want to merge agent "${agent.id}"?`
+    const tail = `\n\nThis will merge the agent's branch into the base branch, then stop the sandbox session and clean up.`
 
+    // Show the dialog immediately so it never lags behind a slow git query.
+    // The uncommitted-changes check runs in the background and folds its
+    // warning into the open dialog when it returns.
     useDialogStore.getState().show({
       title: 'Merge Agent',
-      message: `Are you sure you want to merge agent "${agent.id}"?${uncommittedWarning}\n\nThis will merge the agent's branch into the base branch, then stop the sandbox session and clean up.`,
-      type: uncommittedWarning ? 'warning' : 'confirm',
+      message: baseMessage + tail,
+      type: 'confirm',
       onConfirm: async () => {
         setMerging(true)
+        // A persistent toast keeps the merge visible even after the dialog
+        // closes and the agent is moved into the archived history.
+        const toastId = useToastStore.getState().show({
+          message: `Merging agent "${agent.id}"…`,
+          type: 'info',
+          duration: 0,
+        })
         try {
           await api.default.mergeAgent(projectId ?? '', agent.id)
+          useToastStore.getState().dismiss(toastId)
           useToastStore.getState().show({
             message: `Agent "${agent.id}" merged into ${agent.base_branch}`,
             type: 'success',
@@ -337,10 +351,28 @@ export function AgentDetail({
             })
           }
         } finally {
+          useToastStore.getState().dismiss(toastId)
           setMerging(false)
         }
       }
     })
+
+    // Background: warn about uncommitted changes that the merge would discard,
+    // patched into the dialog if it's still open by the time the query returns.
+    void (async () => {
+      try {
+        const d = await api.default.getAgentDiffFiles(projectId ?? '', agent.id, undefined, undefined, true)
+        if (!d.uncommitted_changes) return
+        const tracked = d.uncommitted_summary?.tracked_count ?? 0
+        const untracked = d.uncommitted_summary?.untracked_count ?? 0
+        const total = tracked + untracked
+        const warning = `\n\n⚠️ This agent has ${total} uncommitted file change${total !== 1 ? 's' : ''} that will be lost when merging.`
+        const dialog = useDialogStore.getState()
+        if (dialog.title === 'Merge Agent') {
+          dialog.update({ message: baseMessage + warning + tail, type: 'warning' })
+        }
+      } catch { /* ignore — proceed without warning */ }
+    })()
   }
 
   async function handleUpdateFromBase() {
@@ -422,26 +454,16 @@ export function AgentDetail({
     }
   }
 
-  function startEditingBase() {
-    setBaseDraft(agent.base_branch || '')
-    setEditingBase(true)
-  }
-
   // Changing the base branch is metadata-only: it updates what update-from-base
   // merges in and what the diff compares against, but does NOT rebase existing
   // commits (the user can do that with git if they want). The backend validates
   // the ref exists and returns a 400 we surface as a toast.
-  async function saveBase() {
-    const next = baseDraft.trim()
-    if (!next || next === (agent.base_branch || '')) {
-      setEditingBase(false)
-      return
-    }
+  async function saveBase(next: string) {
+    if (!next || next === (agent.base_branch || '')) return
     setSavingBase(true)
     try {
       const updated = await api.default.updateAgent(projectId ?? '', agent.id, { base_branch: next })
       updateAgentInStore(updated)
-      setEditingBase(false)
       useToastStore.getState().show({ message: `Base branch set to ${next} (commits not moved)`, type: 'success' })
     } catch (err) {
       useToastStore.getState().show({ message: `Failed to set base branch: ${formatError(err)}`, type: 'error' })
@@ -593,32 +615,19 @@ export function AgentDetail({
                 but does not rebase existing commits. */}
             <span className="text-xs font-mono text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
               <span className="font-sans text-gray-400 dark:text-gray-500">base</span>
-              {editingBase ? (
-                <input
-                  autoFocus
-                  value={baseDraft}
-                  disabled={savingBase}
-                  onChange={(e) => setBaseDraft(e.target.value)}
-                  onBlur={saveBase}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault()
-                      void saveBase()
-                    } else if (e.key === 'Escape') {
-                      e.preventDefault()
-                      setEditingBase(false)
-                    }
-                  }}
-                  className="bg-transparent border-b border-blue-400 focus:outline-none font-mono text-xs w-36 disabled:opacity-50"
+              {branches !== null && !savingBase ? (
+                <BranchSelector
+                  branches={branches}
+                  activeRef={agent.base_branch || ''}
+                  isKnownBranch={branches.some((b) => b.name === agent.base_branch)}
+                  onSelect={(name) => void saveBase(name)}
+                  title="Change base branch (metadata only — does not rebase commits)"
                 />
               ) : (
-                <button
-                  onClick={startEditingBase}
-                  title="Change base branch (metadata only — does not rebase commits)"
-                  className="hover:text-gray-700 dark:hover:text-gray-200 underline decoration-dotted underline-offset-2 cursor-pointer"
-                >
+                <span className="flex items-center gap-1.5 px-2.5 py-1.5">
+                  {savingBase && <LoaderCircle className="w-3 h-3 animate-spin" />}
                   {agent.base_branch || '—'}
-                </button>
+                </span>
               )}
             </span>
             <span className="text-gray-300 dark:text-gray-600">|</span>
