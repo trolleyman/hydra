@@ -19,19 +19,6 @@ import (
 	"github.com/trolleyman/hydra/internal/session"
 )
 
-// sharedNSEnabled reports whether the experimental shared-namespace host is on
-// (env HYDRA_SHARED_NS=1). When set, a head's agent and its sandboxed bash
-// terminals run as children of one supervisor inside a single bwrap, so they
-// share that sandbox's writable copy-on-write overlay (see internal/nshost)
-// instead of bash getting the COW sources read-only. Off by default.
-func sharedNSEnabled() bool {
-	switch os.Getenv("HYDRA_SHARED_NS") {
-	case "1", "true", "yes":
-		return true
-	}
-	return false
-}
-
 // nsHost is a running per-head supervisor: one bwrap (pid 1 of which is bwrap's
 // own reaper; our supervisor runs as its child) that spawns PTY children sharing
 // its namespace and writable COW overlay.
@@ -199,22 +186,18 @@ func removeNamespaceHost(id string) {
 	<-h.done // watcher evicts the slot and reclaims resources
 }
 
-// startAgentSession starts the agent either in its own sandbox (default) or, when
-// the shared-namespace flag is on, as a child of the head's supervisor so it
-// shares the writable COW overlay with bash terminals. sb carries the agent's
+// startAgentSession starts the agent as a child of the head's supervisor (the
+// "namespace host") so it shares one bwrap — and one writable copy-on-write
+// overlay — with the head's sandboxed bash terminals. sb carries the agent's
 // argv, env and the pre-spawn script.
 func startAgentSession(reg *session.Registry, projectRoot, id string, agentType sandbox.AgentType, worktree string, rows, cols uint16, sb sandbox.Options) (*session.Session, error) {
-	if !sharedNSEnabled() {
-		return reg.Start(session.StartOptions{ID: id, Rows: rows, Cols: cols, Sandbox: sb})
-	}
-
 	host, err := ensureNamespaceHost(projectRoot, id, sb)
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
 	// Wrap the pre-spawn script around the agent's argv so it runs inside the
 	// supervisor's bwrap (the same one the agent and bash terminals share), exactly
-	// as withPreSpawn does for the standalone path — its writes land in the shared
+	// as withPreSpawn does for a standalone sandbox — its writes land in the shared
 	// COW overlay and are visible to every sibling terminal.
 	argv := sandbox.WrapPreSpawn(sb.PreSpawnScript, sb.Argv)
 	sp, err := host.client.Spawn(nshost.SpawnRequest{Argv: argv, Env: sb.Env, Cwd: worktree, Rows: rows, Cols: cols})
