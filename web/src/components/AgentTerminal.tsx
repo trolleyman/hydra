@@ -78,6 +78,11 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
   const killTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastSentSize = useRef({ cols: 0, rows: 0 })
   const stabilizeRafRef = useRef<number | null>(null)
+  // True while we're polling for a settled layout width (initial connect or a
+  // pane re-activation). Resize events that fire during this window measure a
+  // half-settled layout, so fitAndSend suppresses their sends and lets the
+  // stabilizer emit the one authoritative size once the width stops changing.
+  const settlingRef = useRef(false)
   const [showCopiedAt, setShowCopiedAt] = useState(0)
   const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
@@ -121,9 +126,52 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
     // PTY size (see loadLastGeometry). Only the active pane reaches here with a
     // valid measurement, so this never records a hidden pane's stale 0-size.
     if (active) saveLastGeometry(cols, rows)
+    // Only the visible pane drives the shared PTY size. A hidden pane's
+    // ResizeObserver still fires (e.g. switching tabs flips it to display:none,
+    // and the panel-resize drag re-lays-out every pane), and during the layout
+    // transition it can briefly measure a too-narrow width — sending that would
+    // reflow the agent narrow and bake the wrap into the scrollback, exactly the
+    // corruption seen when re-showing a pane after closing a sibling tab.
+    if (!active) return
+    // Likewise suppress sends while a stabilizer is still settling the width;
+    // it will emit the final size with force once the layout stops moving.
+    if (settlingRef.current && !force) return
     if (!force && cols === lastSentSize.current.cols && rows === lastSentSize.current.rows) return
     ws.send(JSON.stringify({ type: 'resize', cols, rows }))
     lastSentSize.current = { cols, rows }
+  }
+
+  // Poll until the container width repeats across two frames (or we've waited
+  // long enough), then send the one settled size. Used both on socket open and
+  // when a previously-hidden pane is re-shown: in either case the flex layout
+  // can still be moving, and measuring mid-transition yields too few columns.
+  // While this runs, settlingRef suppresses the ResizeObserver's own sends so
+  // only the final, correct geometry reaches the backend PTY.
+  const stabilizeThenSend = useRef<() => void>(() => {})
+  stabilizeThenSend.current = () => {
+    const ws = wsRef.current
+    if (!ws || ws.readyState !== WebSocket.OPEN) return
+    if (stabilizeRafRef.current != null) cancelAnimationFrame(stabilizeRafRef.current)
+    settlingRef.current = true
+    let lastWidth = -1
+    let frames = 0
+    const tick = () => {
+      const node = containerRef.current
+      if (!node || ws.readyState !== WebSocket.OPEN) {
+        settlingRef.current = false
+        return
+      }
+      const w = node.clientWidth
+      if ((w > 0 && w === lastWidth) || frames > 30) {
+        settlingRef.current = false
+        fitAndSend.current(true)
+        return
+      }
+      lastWidth = w
+      frames++
+      stabilizeRafRef.current = requestAnimationFrame(tick)
+    }
+    stabilizeRafRef.current = requestAnimationFrame(tick)
   }
 
   // Re-fit when tab becomes visible (after display:none -> display:block). The
@@ -131,11 +179,13 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
   // hidden would compute a wrong (often too-small) geometry.
   useEffect(() => {
     if (!active) return
-    // Two rAFs: let the browser apply the display:flex and run layout before we
-    // measure, otherwise the fit reads stale dimensions and the agent ends up
-    // sized for the wrong terminal.
+    // The pane just went display:none -> display:flex. The container only has
+    // its real size once displayed and the flex layout has settled, so stabilize
+    // on the width before sending — a bare fit here can read a half-laid-out
+    // (too-narrow) size and reflow the agent narrow, which then sticks in the
+    // scrollback. This is the close-a-sibling-tab / switch-back-to-agent case.
     const raf = requestAnimationFrame(() => {
-      requestAnimationFrame(() => fitAndSend.current())
+      requestAnimationFrame(() => stabilizeThenSend.current())
     })
     return () => cancelAnimationFrame(raf)
   }, [active])
@@ -206,25 +256,9 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
       // agent) the flex layout can still be settling when the socket opens;
       // measuring then yields too few columns, and sending that reflows the
       // agent's output narrow — which sticks in the scrollback and stays narrow
-      // while detached. Poll until the width repeats across two frames (or we've
-      // waited long enough) so we only ever send the final, correct size. The
-      // backend replays the session's scrollback on attach, so content renders
-      // without any buffer wiggling.
-      let lastWidth = -1
-      let frames = 0
-      const tick = () => {
-        const node = containerRef.current
-        if (!node || ws.readyState !== WebSocket.OPEN) return
-        const w = node.clientWidth
-        if ((w > 0 && w === lastWidth) || frames > 30) {
-          fitAndSend.current(true)
-          return
-        }
-        lastWidth = w
-        frames++
-        stabilizeRafRef.current = requestAnimationFrame(tick)
-      }
-      stabilizeRafRef.current = requestAnimationFrame(tick)
+      // while detached. The backend replays the session's scrollback on attach,
+      // so content renders without any buffer wiggling.
+      stabilizeThenSend.current()
     }
 
     ws.onmessage = (e: MessageEvent) => {
