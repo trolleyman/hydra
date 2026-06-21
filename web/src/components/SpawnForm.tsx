@@ -14,66 +14,6 @@ type AgentTypeOption = 'claude' | 'gemini' | 'copilot'
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/i.test(navigator.platform)
 
-const PLACEHOLDERS = [
-  'Add a dark mode toggle to the settings page',
-  'Refactor the authentication middleware',
-  'Create a unit test for the Docker module',
-  'Implement a new API endpoint for user profiles',
-  'Fix the memory leak in the terminal component',
-  'Update the README with installation instructions',
-  'Migrate the database to use PostgreSQL',
-  'Add a search bar to the project list',
-  'Optimize the image loading performance',
-  'Integrate Sentry for error tracking',
-  'Build a custom dashboard for agent metrics',
-  'Implement role-based access control',
-  'Add support for multiple languages',
-  'Refactor the CSS using Tailwind',
-  'Create a CI/CD pipeline with GitHub Actions',
-  'Implement a real-time notification system',
-  'Add a copy to clipboard button',
-  'Fix the layout issues on mobile',
-  'Update the OpenAPI documentation',
-  'Implement a file upload feature',
-  'Add a progress bar to the build step',
-  'Dockerize the backend service',
-]
-
-function useTypewriter(phrases: string[], typingSpeed = 60, deletingSpeed = 30, pauseTime = 2500) {
-  const [shuffledPhrases] = useState(() => [...phrases].sort(() => Math.random() - 0.5))
-  const [index, setIndex] = useState(0)
-  const [subIndex, setSubIndex] = useState(0)
-  const [reverse, setReverse] = useState(false)
-  const [isPaused, setIsPaused] = useState(false)
-
-  useEffect(() => {
-    if (isPaused) return
-
-    if (subIndex === shuffledPhrases[index].length + 1 && !reverse) {
-      setIsPaused(true)
-      const timeout = setTimeout(() => {
-        setReverse(true)
-        setIsPaused(false)
-      }, pauseTime)
-      return () => clearTimeout(timeout)
-    }
-
-    if (subIndex === 0 && reverse) {
-      setReverse(false)
-      setIndex((prev) => (prev + 1) % shuffledPhrases.length)
-      return
-    }
-
-    const timeout = setTimeout(() => {
-      setSubIndex((prev) => prev + (reverse ? -1 : 1))
-    }, reverse ? deletingSpeed : typingSpeed)
-
-    return () => clearTimeout(timeout)
-  }, [subIndex, index, reverse, shuffledPhrases, typingSpeed, deletingSpeed, pauseTime, isPaused])
-
-  return shuffledPhrases[index].substring(0, subIndex)
-}
-
 function slugify(text: string, maxLength = 40, allowTrailingHyphen = false): string {
   let slug = text
     .toLowerCase()
@@ -137,7 +77,6 @@ export function SpawnForm({
   // outgoing project's attachments without depending on (and re-running for)
   // every attachment change.
   const attachmentsRef = useRef<Attachment[]>([])
-  const animatedPlaceholder = useTypewriter(PLACEHOLDERS)
 
   useEffect(() => {
     attachmentsRef.current = attachments
@@ -495,7 +434,7 @@ export function SpawnForm({
               onDrop={handleDrop}
               onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
               onDragLeave={() => setDragOver(false)}
-              placeholder={disabled ? 'Select a project first…' : (prompt ? 'Describe a task…' : animatedPlaceholder)}
+              placeholder={disabled ? 'Select a project first…' : 'Describe a task…'}
               rows={3}
               disabled={loading || disabled}
               wrapperClassName={`w-full flex-1 min-h-0 ${dragOver ? 'ring-2 ring-blue-400 rounded' : ''}`}
@@ -581,7 +520,7 @@ export function SpawnForm({
                 onDrop={handleDrop}
                 onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
                 onDragLeave={() => setDragOver(false)}
-                placeholder={prompt ? 'Describe what you need…' : animatedPlaceholder}
+                placeholder="Describe what you need…"
                 rows={6}
                 disabled={loading}
                 wrapperClassName={`w-full flex-1 min-h-0 ${dragOver ? 'ring-2 ring-blue-400 rounded' : ''}`}

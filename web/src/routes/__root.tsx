@@ -1043,8 +1043,8 @@ function RootLayout() {
                     }}
                     className={
                       repositoryActive
-                        ? 'w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-sm font-medium bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
-                        : 'w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors'
+                        ? 'w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-sm font-medium cursor-pointer bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
+                        : 'w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-sm font-medium cursor-pointer text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors'
                     }
                   >
                     <FolderGit2 className="w-4 h-4 shrink-0" />

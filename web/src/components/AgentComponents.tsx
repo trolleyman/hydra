@@ -143,8 +143,12 @@ export function AgentSidebarItem({
       className={`relative w-full text-left px-3 py-2.5 rounded-lg transition-colors cursor-pointer ${
         selected
           ? 'bg-blue-50 border border-blue-200 dark:bg-blue-900/30 dark:border-blue-800'
-          : 'hover:bg-gray-100 dark:hover:bg-gray-700 border border-transparent'
-      } ${archived && !selected ? 'opacity-60 hover:opacity-100' : ''}`}
+          : archived
+            // Archived rows brighten their text on hover (opacity) rather than
+            // taking a full-width background highlight like live rows do.
+            ? 'opacity-60 hover:opacity-100 border border-transparent'
+            : 'hover:bg-gray-100 dark:hover:bg-gray-700 border border-transparent'
+      }`}
     >
       <div className="flex items-center gap-2 min-w-0">
         <span
