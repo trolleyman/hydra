@@ -576,11 +576,12 @@ func StartShellSession(reg *session.Registry, projectRoot string, head Head, row
 	// the pre-spawn config it runs is the bash agent's.
 	env = append(env, headContextEnv(head.ID, sandbox.AgentTypeBash, projectRoot, worktreePath, derefStr(head.Branch), head.BaseBranch)...)
 
-	// Shared-namespace mode: if the head's agent is running inside a supervisor,
-	// spawn this bash terminal as a sibling child of that one bwrap. It then
-	// shares the agent's single writable COW overlay — the whole point of the
-	// namespace host — rather than getting the COW sources read-only.
-	if sandboxed && sharedNSEnabled() {
+	// If the head's agent is running inside a supervisor, spawn this bash terminal
+	// as a sibling child of that one bwrap. It then shares the agent's single
+	// writable COW overlay — the whole point of the namespace host — rather than
+	// getting the COW sources read-only. When no supervisor is live (e.g. the agent
+	// has not started yet), we fall through to a standalone read-only-COW sandbox.
+	if sandboxed {
 		if host, ok := namespaceHostFor(head.ID); ok {
 			sp, err := host.client.Spawn(nshost.SpawnRequest{
 				Argv: []string{"/bin/bash"},
@@ -866,21 +867,19 @@ func runPreExitScript(ctx context.Context, head Head, endState string) {
 	env = append(env, headContextEnv(head.ID, head.AgentType, head.ProjectPath, worktree, derefStr(head.Branch), head.BaseBranch)...)
 	env = append(env, "HYDRA_END_STATE="+endState)
 
-	// Shared-namespace mode: run the hook inside the head's live supervisor so it
-	// executes in the SAME bwrap as the agent — sharing the writable COW overlay and
-	// seeing the agent's writes — rather than in a fresh sandbox. Falls through to
-	// the standalone sandbox below when there is no namespace host for this head.
-	if sharedNSEnabled() {
-		if host, ok := namespaceHostFor(head.ID); ok {
-			log.Printf("heads: running pre_exit_script for agent %s in namespace host (end_state=%q)", head.ID, endState)
-			out, err := runPreExitInNamespace(runCtx, host, worktree, env, script)
-			if err != nil {
-				log.Printf("warn: pre_exit_script for %s failed: %v; output:\n%s", head.ID, err, bytes.TrimSpace(out))
-			} else if trimmed := bytes.TrimSpace(out); len(trimmed) > 0 {
-				log.Printf("heads: pre_exit_script for %s output:\n%s", head.ID, trimmed)
-			}
-			return
+	// Run the hook inside the head's live supervisor so it executes in the SAME
+	// bwrap as the agent — sharing the writable COW overlay and seeing the agent's
+	// writes — rather than in a fresh sandbox. Falls through to the standalone
+	// sandbox below when there is no namespace host for this head.
+	if host, ok := namespaceHostFor(head.ID); ok {
+		log.Printf("heads: running pre_exit_script for agent %s in namespace host (end_state=%q)", head.ID, endState)
+		out, err := runPreExitInNamespace(runCtx, host, worktree, env, script)
+		if err != nil {
+			log.Printf("warn: pre_exit_script for %s failed: %v; output:\n%s", head.ID, err, bytes.TrimSpace(out))
+		} else if trimmed := bytes.TrimSpace(out); len(trimmed) > 0 {
+			log.Printf("heads: pre_exit_script for %s output:\n%s", head.ID, trimmed)
 		}
+		return
 	}
 
 	spec, err := sandbox.BuildSpec(sandbox.Options{

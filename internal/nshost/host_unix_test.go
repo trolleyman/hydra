@@ -19,7 +19,7 @@ import (
 // lets the agent and its bash terminals share one writable copy-on-write path.
 //
 // The overlay itself needs an overlay-capable bwrap and is exercised on a real
-// host by running the daemon with HYDRA_SHARED_NS=1; here we validate the
+// host by the daemon's per-head namespace supervisor; here we validate the
 // spawn/fd-passing/exit machinery that carries it.
 func TestSupervisorSharedWrites(t *testing.T) {
 	dir := t.TempDir()
