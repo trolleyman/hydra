@@ -603,7 +603,10 @@ const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onComment, 
   const [fullLines, setFullLines] = useState<DiffLine[] | null>(null)
   const [reveal, setReveal] = useState<RevealMap>(new Map())
 
-  const eligibleForFull = !file.binary && !isHidden && (file.additions + file.deletions) <= FULL_MAX_CHANGES
+  // Don't fetch full content for a collapsed file: its body isn't rendered, so
+  // the fetch is pure waste until the user expands it (a large diff with many
+  // collapsed files would otherwise fire a request per file on load).
+  const eligibleForFull = !file.binary && !isHidden && !isCollapsed && (file.additions + file.deletions) <= FULL_MAX_CHANGES
   // Signature of the visible hunks. A background refresh hands us new file
   // objects even when nothing changed, so keying the refetch on identity would
   // re-pull every file's full content on every refresh. The string signature is
