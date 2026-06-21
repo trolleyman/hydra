@@ -1015,6 +1015,15 @@ func simApplyContext(files []api.DiffFile, params api.GetAgentDiffParams) []api.
 // full-context diff of a real file, so the viewer collapses the unchanged runs
 // itself (rather than us shipping a long fabricated tail). Files are marked
 // Expanded; binary / hunkless files pass through untouched.
+//
+// Line numbers are recomputed from the line types rather than trusting the
+// fixtures' stated numbers: the hand-written fixtures don't always keep the
+// old/new offset consistent across hunks, and any inconsistency would make the
+// reconstructed content non-contiguous — which the client rejects, falling back
+// to rendering the whole thing uncollapsed (a wall of synthetic lines). The old
+// side stays the source of truth for gap sizing (it's monotonic in the
+// fixtures); new line numbers are derived so the result is always a valid,
+// contiguous diff.
 func simReconstructFull(f api.DiffFile) api.DiffFile {
 	if f.Binary || len(f.Hunks) == 0 {
 		return f
@@ -1024,23 +1033,34 @@ func simReconstructFull(f api.DiffFile) api.DiffFile {
 		ext = parts[len(parts)-1]
 	}
 	var lines []api.DiffLine
-	curOld, curNew := 1, 1
+	oldN, newN := 1, 1
 	for _, h := range f.Hunks {
-		// Fill the unchanged region before this hunk. It's identical on both
-		// sides, so old and new advance together (the gap length is the same).
-		for gap := h.OldStart - curOld; gap > 0; gap-- {
-			lines = append(lines, synthContextLine(ext, curOld, curNew))
-			curOld++
-			curNew++
+		// Fill the unchanged region before this hunk (sized by the old side); it's
+		// identical on both sides, so old and new advance together.
+		for gap := h.OldStart - oldN; gap > 0; gap-- {
+			lines = append(lines, synthContextLine(ext, oldN, newN))
+			oldN++
+			newN++
 		}
-		lines = append(lines, h.Lines...)
+		// Re-emit the hunk's lines, renumbering by type so the whole file stays a
+		// self-consistent, contiguous diff regardless of the fixture's numbers.
 		for _, l := range h.Lines {
-			if l.OldLineNum != nil && *l.OldLineNum >= curOld {
-				curOld = *l.OldLineNum + 1
+			nl := api.DiffLine{Type: l.Type, Content: l.Content}
+			switch l.Type {
+			case api.Deletion:
+				nl.OldLineNum = ptr(oldN)
+				oldN++
+			case api.Addition:
+				nl.NewLineNum = ptr(newN)
+				newN++
+			case api.Context:
+				nl.OldLineNum, nl.NewLineNum = ptr(oldN), ptr(newN)
+				oldN++
+				newN++
+			default:
+				nl.OldLineNum, nl.NewLineNum = l.OldLineNum, l.NewLineNum
 			}
-			if l.NewLineNum != nil && *l.NewLineNum >= curNew {
-				curNew = *l.NewLineNum + 1
-			}
+			lines = append(lines, nl)
 		}
 	}
 	f.Hunks = []api.DiffHunk{{Header: f.Hunks[0].Header, OldStart: 1, NewStart: 1, Lines: lines}}
