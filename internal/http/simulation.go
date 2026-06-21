@@ -470,7 +470,6 @@ func (s *SimulationServer) GetAgentCommits(w http.ResponseWriter, r *http.Reques
 }
 
 func (s *SimulationServer) GetAgentDiff(w http.ResponseWriter, r *http.Request, projectId string, id string, params api.GetAgentDiffParams) {
-	ctx := simContext(params)
 	if id == "agent-2" {
 		// Mock uncommitted changes
 		uncommitted := true
@@ -521,7 +520,7 @@ func (s *SimulationServer) GetAgentDiff(w http.ResponseWriter, r *http.Request, 
 				},
 			},
 		}
-		resp.Files = expandDiffContext(resp.Files, ctx)
+		resp.Files = simApplyContext(resp.Files, params)
 		api.WriteJSON(w, http.StatusOK, resp)
 		return
 	}
@@ -888,7 +887,7 @@ func (s *SimulationServer) GetAgentDiff(w http.ResponseWriter, r *http.Request, 
 				},
 			},
 		}
-		resp.Files = expandDiffContext(resp.Files, ctx)
+		resp.Files = simApplyContext(resp.Files, params)
 		api.WriteJSON(w, http.StatusOK, resp)
 		return
 	}
@@ -952,7 +951,7 @@ func (s *SimulationServer) GetAgentDiff(w http.ResponseWriter, r *http.Request, 
 				),
 			},
 		}
-		resp.Files = expandDiffContext(resp.Files, ctx)
+		resp.Files = simApplyContext(resp.Files, params)
 		api.WriteJSON(w, http.StatusOK, resp)
 		return
 	}
@@ -987,15 +986,75 @@ func simFile(path string, ct api.DiffFileChangeType, add, del int, header string
 const maxSimContext = 1000
 
 func simContext(params api.GetAgentDiffParams) int {
-	// Deliberately ignore full_context: the fixtures are compact -U3 hunks, not
-	// whole-file-contiguous content, so synthesizing full context for them just
-	// yields a long, unhelpful diff on load (bad for screenshots). The real
-	// server handles full_context; the sim keeps the compact view and still
-	// expands a file on demand via an explicit larger Context (network expand).
 	if params.Context != nil {
 		return min(*params.Context, maxSimContext)
 	}
 	return 3
+}
+
+// simApplyContext renders a fixture diff at the requested context. For a
+// full_context request it reconstructs each file as a single contiguous
+// whole-file hunk (mirroring `git diff -U<huge>` in production) so the diff
+// viewer drives its full-content reveal model — compact, with "··· N lines ···"
+// collapses and no fabricated edge arrows. Otherwise it just widens each hunk's
+// surrounding context (network-expand on demand).
+func simApplyContext(files []api.DiffFile, params api.GetAgentDiffParams) []api.DiffFile {
+	if params.FullContext != nil && *params.FullContext {
+		out := make([]api.DiffFile, len(files))
+		for i, f := range files {
+			out[i] = simReconstructFull(f)
+		}
+		return out
+	}
+	return expandDiffContext(files, simContext(params))
+}
+
+// simReconstructFull rebuilds a fixture file as one contiguous whole-file hunk
+// spanning line 1 through its last real line, filling the unchanged gaps before
+// and between its hunks with synthetic context lines. The result looks like a
+// full-context diff of a real file, so the viewer collapses the unchanged runs
+// itself (rather than us shipping a long fabricated tail). Files are marked
+// Expanded; binary / hunkless files pass through untouched.
+func simReconstructFull(f api.DiffFile) api.DiffFile {
+	if f.Binary || len(f.Hunks) == 0 {
+		return f
+	}
+	ext := ""
+	if parts := strings.Split(f.Path, "."); len(parts) > 1 {
+		ext = parts[len(parts)-1]
+	}
+	var lines []api.DiffLine
+	curOld, curNew := 1, 1
+	for _, h := range f.Hunks {
+		// Fill the unchanged region before this hunk. It's identical on both
+		// sides, so old and new advance together (the gap length is the same).
+		for gap := h.OldStart - curOld; gap > 0; gap-- {
+			lines = append(lines, synthContextLine(ext, curOld, curNew))
+			curOld++
+			curNew++
+		}
+		lines = append(lines, h.Lines...)
+		for _, l := range h.Lines {
+			if l.OldLineNum != nil && *l.OldLineNum >= curOld {
+				curOld = *l.OldLineNum + 1
+			}
+			if l.NewLineNum != nil && *l.NewLineNum >= curNew {
+				curNew = *l.NewLineNum + 1
+			}
+		}
+	}
+	f.Hunks = []api.DiffHunk{{Header: f.Hunks[0].Header, OldStart: 1, NewStart: 1, Lines: lines}}
+	f.Expanded = ptr(true)
+	return f
+}
+
+func synthContextLine(ext string, oldN, newN int) api.DiffLine {
+	return api.DiffLine{
+		Type:       api.Context,
+		Content:    fmt.Sprintf("// context line %d", oldN),
+		OldLineNum: ptr(oldN),
+		NewLineNum: ptr(newN),
+	}
 }
 
 func (s *SimulationServer) GetAgentDiffFiles(w http.ResponseWriter, r *http.Request, projectId string, id string, params api.GetAgentDiffFilesParams) {
