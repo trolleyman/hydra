@@ -10,6 +10,8 @@ import (
 
 	"braces.dev/errtrace"
 	"github.com/trolleyman/hydra/internal/api"
+	"github.com/trolleyman/hydra/internal/artifacts"
+	"github.com/trolleyman/hydra/internal/config"
 	"github.com/trolleyman/hydra/internal/git"
 )
 
@@ -302,6 +304,141 @@ func (s *Server) HandleRepositoryBlob(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", ct)
 	w.Header().Set("Cache-Control", "public, max-age=300")
 	_, _ = w.Write(data)
+}
+
+// repositoryArtifactNames lists the enabled [[artifacts]] script names defined at
+// a ref, sorted. It reads the ref's own .hydra/config.toml (via artifactSpecsByName,
+// shared with the diff viewer) and drops scripts the live config disables. Returns
+// an empty list — never an error — when there is no artifacts manager or no
+// readable config, so the repository browser simply shows no artifacts folder.
+func (s *Server) repositoryArtifactNames(projectRoot, ref string) ([]string, error) {
+	if s.Artifacts == nil {
+		return nil, nil
+	}
+	liveCfg, err := config.Load(projectRoot)
+	if err != nil {
+		return nil, nil //nolint:nilerr // a missing/unreadable config means "no artifacts"
+	}
+	byName, err := artifactSpecsByName(projectRoot, artifacts.Version{Ref: ref}, liveCfg)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	disabled := disabledArtifacts(liveCfg)
+	names := make([]string, 0, len(byName))
+	for n := range byName {
+		if !disabled[n] {
+			names = append(names, n)
+		}
+	}
+	sort.Strings(names)
+	return names, nil
+}
+
+// GetRepositoryArtifacts lists the artifact scripts configured at a ref so the
+// repository browser can show its dynamic ".hydra/artifacts" folder. It only reads
+// config — nothing is generated here (generation is lazy, on GetRepositoryArtifact).
+func (s *Server) GetRepositoryArtifacts(_ context.Context, request api.GetRepositoryArtifactsRequestObject) (api.GetRepositoryArtifactsResponseObject, error) {
+	projectRoot, err := s.resolveProjectRoot(request.ProjectId)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	ref := repoRef(request.Params.Ref)
+	names, err := s.repositoryArtifactNames(projectRoot, ref)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	scripts := make([]api.RepositoryArtifactScript, 0, len(names))
+	for _, n := range names {
+		scripts = append(scripts, api.RepositoryArtifactScript{Name: n})
+	}
+	return api.GetRepositoryArtifacts200JSONResponse{Ref: ref, Scripts: scripts}, nil
+}
+
+// GetRepositoryArtifact runs (or returns the cached result of) one artifact script
+// for a single ref and reports its outputs single-sided — the repository browser
+// shows one ref at a time, so there is no before/after comparison. Generation is
+// lazy: this is only called when the user opens the script in the browser.
+func (s *Server) GetRepositoryArtifact(_ context.Context, request api.GetRepositoryArtifactRequestObject) (api.GetRepositoryArtifactResponseObject, error) {
+	projectRoot, err := s.resolveProjectRoot(request.ProjectId)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	ref := repoRef(request.Params.Ref)
+	notFound := api.GetRepositoryArtifact404JSONResponse{
+		Code:    404,
+		Error:   api.ErrorResponseErrorNotFound,
+		Details: "artifact script not found: " + request.Name,
+	}
+	if s.Artifacts == nil {
+		return notFound, nil
+	}
+	liveCfg, err := config.Load(projectRoot)
+	if err != nil {
+		return notFound, nil //nolint:nilerr // no config → no such script
+	}
+	v := artifacts.Version{Ref: ref}
+	byName, err := artifactSpecsByName(projectRoot, v, liveCfg)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	spec, ok := byName[request.Name]
+	if !ok || disabledArtifacts(liveCfg)[request.Name] {
+		return notFound, nil
+	}
+
+	mgr := s.Artifacts.Manager(projectRoot)
+	// A refresh request discards the cached result before generating, chiefly to
+	// retry a cached failure (which otherwise sticks until the ref changes).
+	if request.Params.Refresh != nil && *request.Params.Refresh {
+		_ = mgr.Invalidate(request.Name, v)
+	}
+	meta, err := mgr.Get(spec, v)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	return api.GetRepositoryArtifact200JSONResponse(s.buildRepositoryArtifact(request.ProjectId, request.Name, mgr, meta)), nil
+}
+
+// buildRepositoryArtifact folds one generated (or in-flight) script's metadata into
+// the single-sided API shape: every output file with a blob URL, plus the live
+// progress/log while generating and a persisted-log URL once settled.
+func (s *Server) buildRepositoryArtifact(projectID, name string, mgr *artifacts.Manager, meta artifacts.Meta) api.RepositoryArtifactResponse {
+	resp := api.RepositoryArtifactResponse{Name: name, Files: []api.RepositoryArtifactFile{}}
+
+	switch meta.Status {
+	case artifacts.StatusGenerating:
+		resp.Status = api.RepositoryArtifactResponseStatusGenerating
+		// Surface the live progress + log only while generating; once settled the
+		// log is fetched from log_url instead (it is not kept in memory).
+		resp.Progress = nonEmptyPtr(meta.Progress)
+		resp.Log = ptr(toAPILog(meta.Log))
+		if meta.StartedAt > 0 {
+			resp.StartedAt = &meta.StartedAt
+		}
+		return resp
+	case artifacts.StatusError:
+		resp.Status = api.RepositoryArtifactResponseStatusError
+		resp.Error = nonEmptyPtr(meta.Error)
+	default:
+		resp.Status = api.RepositoryArtifactResponseStatusReady
+	}
+
+	if mgr.HasLog(name, meta.Key) {
+		resp.LogUrl = ptr(logURL(projectID, name, meta.Key))
+	}
+	for _, f := range meta.Files {
+		af := api.RepositoryArtifactFile{Name: f.Name, Url: ptr(blobURL(projectID, name, meta.Key, f.Name))}
+		if len(f.Tags) > 0 {
+			tags := append([]string(nil), f.Tags...)
+			af.Tags = &tags
+		}
+		if f.Fps > 0 {
+			fps := f.Fps
+			af.Fps = &fps
+		}
+		resp.Files = append(resp.Files, af)
+	}
+	return resp
 }
 
 // ptrOrNil returns nil for an empty string, else a pointer to s. It adapts query

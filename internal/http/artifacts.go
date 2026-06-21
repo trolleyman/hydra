@@ -295,7 +295,7 @@ func (s *Server) buildArtifactSet(projectID, name string, leftSpec, rightSpec *c
 		rightMeta = artifacts.Meta{Status: artifacts.StatusReady}
 	}
 	if lerr != nil || rerr != nil {
-		set.Status = api.Error
+		set.Status = api.ArtifactSetStatusError
 		msg := joinErrs(lerr, rerr)
 		set.Error = &msg
 		return set
@@ -329,7 +329,7 @@ func (s *Server) buildArtifactSet(projectID, name string, leftSpec, rightSpec *c
 	// render, so a broken "before" build doesn't hide the "after" screenshots.
 	switch {
 	case leftMeta.Status == artifacts.StatusGenerating || rightMeta.Status == artifacts.StatusGenerating:
-		set.Status = api.Generating
+		set.Status = api.ArtifactSetStatusGenerating
 		// Surface the tags known so far from any side that has already settled (a
 		// settled side carries its files; a still-generating one has none), so the
 		// tag filter can appear while the other side is still building.
@@ -338,12 +338,12 @@ func (s *Server) buildArtifactSet(projectID, name string, leftSpec, rightSpec *c
 		}
 		return set
 	case leftErrored && rightErrored:
-		set.Status = api.Error
+		set.Status = api.ArtifactSetStatusError
 		msg := joinMetaErrs(leftMeta, rightMeta)
 		set.Error = &msg
 		return set
 	default:
-		set.Status = api.Ready
+		set.Status = api.ArtifactSetStatusReady
 	}
 
 	// One side failed but the other rendered: report that side's error so the

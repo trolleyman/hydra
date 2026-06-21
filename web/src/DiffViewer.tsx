@@ -2,10 +2,10 @@ import { useEffect, useRef, useState, useCallback, Fragment, useMemo, memo } fro
 import hljs from 'highlight.js'
 import { api } from './stores/apiClient'
 import { formatError } from './api/format_error'
-import type { AgentResponse, CommitInfo, DiffFile, DiffHunk, DiffResponse } from './api'
+import type { AgentResponse, CommitInfo, DiffFile, DiffHunk, DiffLine, DiffResponse } from './api'
 import {
   Plus, Calendar, TriangleAlert,
-  ChevronDown, ChevronRight, ChevronLeft, Check, LoaderCircle, RefreshCw, RotateCcw,
+  ChevronDown, ChevronUp, ChevronRight, ChevronLeft, Check, LoaderCircle, RefreshCw, RotateCcw,
   Settings, Copy, Folder, FolderOpen, X, GitMerge, Bot,
   MoveRight, MessageSquarePlus, FolderSync,
   SquarePlus, SquareMinus, SquareArrowRight,
@@ -207,6 +207,27 @@ function CommentRow({ onSubmit, onCancel }: { onSubmit: (text: string) => Promis
   )
 }
 
+// CommentButton overlays a line-number gutter cell and reveals a small "add
+// comment" button centred over the gutter on hover. The button has a solid
+// button-style background so the icon stays legible on top of code/line
+// backgrounds, and its tooltip sits directly above the icon's centre.
+function CommentButton({ onClick }: { onClick: () => void }) {
+  return (
+    <Tooltip
+      content="Add comment"
+      side="top"
+      className="absolute inset-0 z-10 items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+    >
+      <button
+        onClick={(e) => { e.stopPropagation(); onClick() }}
+        className="flex items-center justify-center w-4 h-4 rounded bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 shadow-sm hover:bg-blue-50 dark:hover:bg-blue-900/40 cursor-pointer"
+      >
+        <MessageSquarePlus className="w-3 h-3 text-blue-500" />
+      </button>
+    </Tooltip>
+  )
+}
+
 // Computes the number of lines hidden between two adjacent hunks.
 function computeGap(prevHunk: DiffHunk, nextHunk: DiffHunk): number {
   let lastNewLine = 0
@@ -249,14 +270,7 @@ const UnifiedHunk = memo(function UnifiedHunk({ hunk, highlightedOld, highlighte
                 <span className={UNIFIED_LINE_NUM_CLASS}>{line.old_line_num ?? ''}</span>
                 <span className={UNIFIED_LINE_NUM_CLASS}>{line.new_line_num ?? ''}</span>
                 {!isNoNewline && (
-                  <Tooltip content="Add comment">
-                    <button
-                      onClick={() => setOpenCommentIdx(openCommentIdx === idx ? null : idx)}
-                      className="absolute inset-0 opacity-0 group-hover:opacity-100 flex items-center justify-center cursor-pointer z-10 hover:bg-blue-500/10 transition-opacity"
-                    >
-                      <MessageSquarePlus className="w-3 h-3 text-blue-500" />
-                    </button>
-                  </Tooltip>
+                  <CommentButton onClick={() => setOpenCommentIdx(openCommentIdx === idx ? null : idx)} />
                 )}
               </div>
               <span className={`select-none font-mono text-xs leading-5 w-4 text-center shrink-0 ${isAdd ? 'text-green-600 dark:text-green-400' : isDel ? 'text-red-600 dark:text-red-400' : 'text-gray-300 dark:text-gray-700'
@@ -274,7 +288,10 @@ const UnifiedHunk = memo(function UnifiedHunk({ hunk, highlightedOld, highlighte
             {openCommentIdx === idx && (
               <CommentRow
                 onSubmit={async (text) => {
-                  await onComment(isAdd ? line.new_line_num! : line.old_line_num!, isAdd || line.type === 'context', text)
+                  // Context lines exist on both sides; comment against the new side
+                  // (like the side-by-side view) so the line number matches isNew.
+                  const isNew = isAdd || line.type === 'context'
+                  await onComment(isNew ? line.new_line_num! : line.old_line_num!, isNew, text)
                   setOpenCommentIdx(null)
                 }}
                 onCancel={() => setOpenCommentIdx(null)}
@@ -312,14 +329,7 @@ const SideBySideHunk = memo(function SideBySideHunk({ hunk, highlightedOld, high
                 <div className="relative flex shrink-0 select-none">
                   <span className={SBS_LINE_NUM}>{line.oldLineNum ?? ''}</span>
                   {line.oldLineNum != null && (
-                    <Tooltip content="Add comment">
-                      <button
-                        onClick={() => setOpenCommentIdx(openCommentIdx === idx ? null : idx)}
-                        className="absolute inset-0 opacity-0 group-hover:opacity-100 flex items-center justify-center cursor-pointer z-10 hover:bg-blue-500/10 transition-opacity"
-                      >
-                        <MessageSquarePlus className="w-3 h-3 text-blue-500" />
-                      </button>
-                    </Tooltip>
+                    <CommentButton onClick={() => setOpenCommentIdx(openCommentIdx === idx ? null : idx)} />
                   )}
                 </div>
                 <span className={`select-none font-mono text-xs w-3 shrink-0 text-center leading-5 ${line.oldType === 'deletion' ? 'text-red-500' : 'text-gray-300 dark:text-gray-700'}`}>
@@ -334,14 +344,7 @@ const SideBySideHunk = memo(function SideBySideHunk({ hunk, highlightedOld, high
                 <div className="relative flex shrink-0 select-none">
                   <span className={SBS_LINE_NUM}>{line.newLineNum ?? ''}</span>
                   {line.newLineNum != null && (
-                    <Tooltip content="Add comment">
-                      <button
-                        onClick={() => setOpenCommentIdx(openCommentIdx === idx ? null : idx)}
-                        className="absolute inset-0 opacity-0 group-hover:opacity-100 flex items-center justify-center cursor-pointer z-10 hover:bg-blue-500/10 transition-opacity"
-                      >
-                        <MessageSquarePlus className="w-3 h-3 text-blue-500" />
-                      </button>
-                    </Tooltip>
+                    <CommentButton onClick={() => setOpenCommentIdx(openCommentIdx === idx ? null : idx)} />
                   )}
                 </div>
                 <span className={`select-none font-mono text-xs w-3 shrink-0 text-center leading-5 ${line.newType === 'addition' ? 'text-green-500' : 'text-gray-300 dark:text-gray-700'}`}>
@@ -410,7 +413,178 @@ function ChangeTypeIcon({ type, className = 'w-3.5 h-3.5' }: { type: string; cla
 const EXPANDER_ROW = 'flex items-center bg-blue-50 dark:bg-blue-950/30 border-y border-blue-100 dark:border-blue-900/50 px-2 py-0.5'
 const EXPANDER_BTN = 'p-0.5 rounded hover:bg-blue-100 dark:hover:bg-blue-900/50 text-blue-500 cursor-pointer'
 
-const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onComment, isCollapsed, onToggleCollapse, onExpand, isHidden, onShow, currentContext }: {
+// Default surrounding-context lines shown around each change (mirrors the git
+// `-U3` the diff is first fetched with), and how many extra lines each ⌄/⌃
+// expander reveals per click.
+const CTX = 3
+const EXPAND_STEP = 20
+// Files with more than this many changed lines, or whose full content exceeds
+// this many lines, keep the lightweight `-U3` view + network expansion rather
+// than fetching/highlighting the whole file client-side.
+const FULL_MAX_CHANGES = 2000
+const FULL_MAX_LINES = 6000
+
+// buildHighlightMaps syntax-highlights a flat run of diff lines as a whole
+// (so multi-line constructs — block comments, template strings — highlight
+// correctly) and returns per-line-number → HTML maps for the old and new sides.
+function buildHighlightMaps(lines: DiffLine[], lang: string) {
+  const oldLines: Array<{ lineNum: number; content: string }> = []
+  const newLines: Array<{ lineNum: number; content: string }> = []
+  for (const l of lines) {
+    if ((l.type === 'context' || l.type === 'deletion') && l.old_line_num != null)
+      oldLines.push({ lineNum: l.old_line_num, content: l.content })
+    if ((l.type === 'context' || l.type === 'addition') && l.new_line_num != null)
+      newLines.push({ lineNum: l.new_line_num, content: l.content })
+  }
+  const highlight = (ls: typeof oldLines): Map<number, string> => {
+    if (ls.length === 0) return new Map()
+    const h = highlightCode(ls.map((l) => l.content).join('\n'), lang)
+    const map = new Map<number, string>()
+    ls.forEach((l, i) => { if (h[i] !== undefined) map.set(l.lineNum, h[i]) })
+    return map
+  }
+  return { highlightedOld: highlight(oldLines), highlightedNew: highlight(newLines) }
+}
+
+const isChangeLine = (l: DiffLine) => l.type === 'addition' || l.type === 'deletion'
+
+// isContiguous verifies the line-number sequence has no gaps, i.e. these lines
+// really are the *entire* file (`git diff -U<huge>`) and not several hunks with
+// hidden lines between them. Only then is client-side reveal correct.
+function isContiguous(lines: DiffLine[]): boolean {
+  let prevOld: number | null = null
+  let prevNew: number | null = null
+  for (const l of lines) {
+    if (l.old_line_num != null) {
+      if (prevOld != null && l.old_line_num !== prevOld + 1) return false
+      prevOld = l.old_line_num
+    }
+    if (l.new_line_num != null) {
+      if (prevNew != null && l.new_line_num !== prevNew + 1) return false
+      prevNew = l.new_line_num
+    }
+  }
+  return true
+}
+
+// How many context lines a region currently shows at its top (adjacent to the
+// preceding change) and bottom (adjacent to the following change). Absent ⇒
+// region uses its default.
+type RevealMap = Map<string, { top?: number; bot?: number }>
+
+interface RenderSeg {
+  kind: 'lines' | 'gap' | 'topedge' | 'botedge'
+  key: string
+  lines?: DiffLine[]
+  regionId?: string
+  hidden?: number
+  top?: number     // resolved context lines shown at the region's top
+  bot?: number     // resolved context lines shown at the region's bottom
+  length?: number  // total lines in the region
+}
+
+const regionKey = (l: DiffLine) => `${l.old_line_num ?? 'x'}:${l.new_line_num ?? 'x'}`
+
+// buildSegments turns a fully-fetched file (every line as a diff line) plus the
+// user's per-region reveal state into a flat list of render segments: runs of
+// visible lines interleaved with collapsed-region expanders. Each unchanged run
+// between (or around) changes shows `CTX` lines next to the change by default
+// and collapses the rest behind an expander; expanders that would hide nothing
+// (short gaps, the file's true top/bottom once fully revealed) are omitted, so
+// e.g. a 1-line gap simply renders the line and the top expander vanishes at
+// line 1 / the bottom expander at EOF.
+function buildSegments(fullLines: DiffLine[], reveal: RevealMap): RenderSeg[] {
+  const n = fullLines.length
+  const runs: { change: boolean; s: number; e: number }[] = []
+  let i = 0
+  while (i < n) {
+    const change = isChangeLine(fullLines[i])
+    let e = i + 1
+    while (e < n && isChangeLine(fullLines[e]) === change) e++
+    runs.push({ change, s: i, e })
+    i = e
+  }
+
+  const segs: RenderSeg[] = []
+  runs.forEach((run, ri) => {
+    if (run.change) {
+      segs.push({ kind: 'lines', key: `b${run.s}`, lines: fullLines.slice(run.s, run.e) })
+      return
+    }
+    const L = run.e - run.s
+    const isLead = ri === 0
+    const isTrail = ri === runs.length - 1
+    const id = regionKey(fullLines[run.s])
+    const ov = reveal.get(id)
+    const top = Math.min(L, ov?.top ?? (isLead ? 0 : CTX))
+    const bot = Math.min(L - top, ov?.bot ?? (isTrail ? 0 : CTX))
+    const hidden = L - top - bot
+    if (hidden <= 0) {
+      segs.push({ kind: 'lines', key: `c${run.s}`, lines: fullLines.slice(run.s, run.e) })
+      return
+    }
+    if (top > 0) segs.push({ kind: 'lines', key: `ct${run.s}`, lines: fullLines.slice(run.s, run.s + top) })
+    segs.push({
+      kind: isLead ? 'topedge' : isTrail ? 'botedge' : 'gap',
+      key: `g${run.s}`, regionId: id, hidden, top, bot, length: L,
+    })
+    if (bot > 0) segs.push({ kind: 'lines', key: `cb${run.s}`, lines: fullLines.slice(run.e - bot, run.e) })
+  })
+  return segs
+}
+
+function GapCount({ hidden, onClick }: { hidden: number; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className="flex-1 text-center text-xs text-blue-400 dark:text-blue-500 font-mono py-0.5 hover:bg-blue-100/50 dark:hover:bg-blue-900/30 rounded cursor-pointer"
+    >
+      ···  {hidden} line{hidden !== 1 ? 's' : ''}  ···
+    </button>
+  )
+}
+
+// GapExpander sits between two changes. Both ⌄ (reveal more after the upper
+// change) and ⌃ (reveal more before the lower change) live together on the left;
+// the "··· N lines ···" label reveals the whole gap.
+function GapExpander({ seg, onDown, onUp, onAll }: {
+  seg: RenderSeg; onDown: () => void; onUp: () => void; onAll: () => void
+}) {
+  return (
+    <div className={EXPANDER_ROW}>
+      <div className="flex items-center gap-0.5 shrink-0 mr-1">
+        <Tooltip side="top" content={`Expand down ${EXPAND_STEP} lines`}>
+          <button onClick={onDown} className={EXPANDER_BTN}><ChevronDown className="w-3 h-3" /></button>
+        </Tooltip>
+        <Tooltip side="top" content={`Expand up ${EXPAND_STEP} lines`}>
+          <button onClick={onUp} className={EXPANDER_BTN}><ChevronUp className="w-3 h-3" /></button>
+        </Tooltip>
+      </div>
+      <GapCount hidden={seg.hidden!} onClick={onAll} />
+    </div>
+  )
+}
+
+// EdgeExpander reveals the file's hidden top (⌃, toward line 1) or bottom (⌄,
+// toward EOF). It is only rendered while lines remain hidden, so it disappears
+// once the file's first/last line is reached.
+function EdgeExpander({ seg, onStep, onAll }: {
+  seg: RenderSeg; onStep: () => void; onAll: () => void
+}) {
+  const up = seg.kind === 'topedge'
+  return (
+    <div className={EXPANDER_ROW}>
+      <Tooltip side="top" content={`Expand ${up ? 'up' : 'down'} ${EXPAND_STEP} lines`}>
+        <button onClick={onStep} className={`${EXPANDER_BTN} mr-1`}>
+          {up ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+        </button>
+      </Tooltip>
+      <GapCount hidden={seg.hidden!} onClick={onAll} />
+    </div>
+  )
+}
+
+const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onComment, isCollapsed, onToggleCollapse, onExpand, onFetchFull, isHidden, onShow, currentContext }: {
   file: DiffFile
   sideBySide: boolean
   fileRef?: (el: HTMLDivElement | null) => void
@@ -418,34 +592,77 @@ const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onComment, 
   isCollapsed: boolean
   onToggleCollapse: (path: string) => void
   onExpand: (path: string, context: number) => void
+  onFetchFull: (path: string) => Promise<DiffLine[] | null>
   isHidden?: boolean
   onShow?: () => void
   currentContext: number
 }) {
   const lang = getLanguage(file.path)
-  const { highlightedOld, highlightedNew } = useMemo(() => {
-    if (file.binary || !file.hunks) return { highlightedOld: new Map<number, string>(), highlightedNew: new Map<number, string>() }
-    const oldLines: Array<{ lineNum: number; content: string }> = []
-    const newLines: Array<{ lineNum: number; content: string }> = []
-    for (const hunk of file.hunks) {
-      for (const l of hunk.lines) {
-        if ((l.type === 'context' || l.type === 'deletion') && l.old_line_num != null)
-          oldLines.push({ lineNum: l.old_line_num, content: l.content })
-        if ((l.type === 'context' || l.type === 'addition') && l.new_line_num != null)
-          newLines.push({ lineNum: l.new_line_num, content: l.content })
+
+  // Whole-file content, fetched once in the background so context expansion is
+  // instant (no network round-trip) and highlighting is correct across the
+  // whole file. Null while pending, or when the file is too large / not
+  // contiguous, in which case we fall back to the `-U3` hunks + network expand.
+  const [fullLines, setFullLines] = useState<DiffLine[] | null>(null)
+  const [reveal, setReveal] = useState<RevealMap>(new Map())
+
+  // Don't fetch full content for a collapsed file: its body isn't rendered, so
+  // the fetch is pure waste until the user expands it (a large diff with many
+  // collapsed files would otherwise fire a request per file on load).
+  const eligibleForFull = !file.binary && !isHidden && !isCollapsed && (file.additions + file.deletions) <= FULL_MAX_CHANGES
+  // Signature of the visible hunks. A background refresh hands us new file
+  // objects even when nothing changed, so keying the refetch on identity would
+  // re-pull every file's full content on every refresh. The string signature is
+  // stable across no-op refreshes, so we only refetch when content truly changes.
+  const hunksSig = useMemo(() => JSON.stringify(file.hunks), [file.hunks])
+  useEffect(() => {
+    if (!eligibleForFull) { setFullLines(null); return }
+    let cancelled = false
+    onFetchFull(file.path).then((lines) => {
+      if (cancelled) return
+      if (!lines || lines.length === 0 || lines.length > FULL_MAX_LINES || !isContiguous(lines)) {
+        setFullLines(null)
+        return
       }
-    }
-    const highlight = (lines: typeof oldLines): Map<number, string> => {
-      if (lines.length === 0) return new Map()
-      const highlighted = highlightCode(lines.map((l) => l.content).join('\n'), lang)
-      const map = new Map<number, string>()
-      lines.forEach((l, i) => { if (highlighted[i] !== undefined) map.set(l.lineNum, highlighted[i]) })
-      return map
-    }
-    return { highlightedOld: highlight(oldLines), highlightedNew: highlight(newLines) }
-  }, [file.hunks, file.binary, lang])
+      setReveal(new Map())
+      setFullLines(lines)
+    }).catch(() => { if (!cancelled) setFullLines(null) })
+    return () => { cancelled = true }
+    // hunksSig changes when the diff content changes (refetch full); onFetchFull
+    // identity changes when the diff params change (refetch full).
+  }, [eligibleForFull, onFetchFull, file.path, hunksSig])
+
+  // Highlight the full file when available, else just the visible `-U3` hunks.
+  const { highlightedOld, highlightedNew } = useMemo(() => {
+    const source = fullLines ?? (file.hunks ? file.hunks.flatMap((h) => h.lines) : [])
+    if (file.binary || source.length === 0) return { highlightedOld: new Map<number, string>(), highlightedNew: new Map<number, string>() }
+    return buildHighlightMaps(source, lang)
+    // hunksSig (not file.hunks identity) so an unchanged file isn't re-highlighted
+    // when an unrelated file changes and the whole diff object is replaced.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fullLines, hunksSig, file.binary, lang])
+
+  const segments = useMemo(() => (fullLines ? buildSegments(fullLines, reveal) : null), [fullLines, reveal])
+
+  const setRegion = useCallback((id: string, patch: { top?: number; bot?: number }) => {
+    setReveal((prev) => {
+      const next = new Map(prev)
+      next.set(id, { ...(next.get(id) ?? {}), ...patch })
+      return next
+    })
+  }, [])
 
   const expand = (newCtx: number) => onExpand(file.path, newCtx)
+
+  const synthHunk = (lines: DiffLine[]): DiffHunk => ({ header: '', old_start: 0, new_start: 0, lines })
+
+  const renderLines = (lines: DiffLine[], key: string) => (
+    sideBySide
+      ? <SideBySideHunk key={key} hunk={synthHunk(lines)} highlightedOld={highlightedOld} highlightedNew={highlightedNew}
+        onComment={(ln, isNew, txt) => onComment(file.path, ln, isNew, txt)} />
+      : <UnifiedHunk key={key} hunk={synthHunk(lines)} highlightedOld={highlightedOld} highlightedNew={highlightedNew}
+        onComment={(ln, isNew, txt) => onComment(file.path, ln, isNew, txt)} />
+  )
 
   return (
     <div ref={fileRef} className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden mb-4 bg-white dark:bg-gray-900 shadow-sm">
@@ -498,7 +715,30 @@ const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onComment, 
             </div>
           ) : !file.hunks || file.hunks.length === 0 ? (
             <div className="px-4 py-3 text-xs text-gray-400 dark:text-gray-500 italic">No changes</div>
+          ) : segments ? (
+            // Full-file model: every expander reveals already-fetched lines
+            // client-side (no network), per-region, with whole-file highlighting.
+            <div className="overflow-hidden">
+              {segments.map((seg) => {
+                if (seg.kind === 'lines') return renderLines(seg.lines!, seg.key)
+                if (seg.kind === 'gap') return (
+                  <GapExpander key={seg.key} seg={seg}
+                    onDown={() => setRegion(seg.regionId!, { top: seg.top! + EXPAND_STEP })}
+                    onUp={() => setRegion(seg.regionId!, { bot: seg.bot! + EXPAND_STEP })}
+                    onAll={() => setRegion(seg.regionId!, { top: seg.length! })} />
+                )
+                return (
+                  <EdgeExpander key={seg.key} seg={seg}
+                    onStep={() => setRegion(seg.regionId!, seg.kind === 'topedge'
+                      ? { bot: seg.bot! + EXPAND_STEP } : { top: seg.top! + EXPAND_STEP })}
+                    onAll={() => setRegion(seg.regionId!, seg.kind === 'topedge'
+                      ? { bot: seg.length! } : { top: seg.length! })} />
+                )
+              })}
+            </div>
           ) : (
+            // Fallback for very large files: keep the `-U3` hunks and widen the
+            // whole-file context over the network on expand.
             <div className="overflow-hidden">
               {file.hunks.map((hunk, i) => {
                 const isFirst = i === 0
@@ -508,31 +748,30 @@ const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onComment, 
                 const atTopOfFile = isFirst && hunk.new_start <= 1 && hunk.old_start <= 1
                 return (
                   <Fragment key={hunk.header}>
-                    {/* Expander above first hunk (only if not at start of file) */}
                     {isFirst && !atTopOfFile && (
-                      <div className={`${EXPANDER_ROW} justify-center cursor-pointer`} onClick={() => expand(currentContext + 5)}>
-                        <ChevronDown className="w-3 h-3 text-blue-400 rotate-180" />
+                      <div className={EXPANDER_ROW}>
+                        <Tooltip side="top" content={`Expand up ${EXPAND_STEP} lines`}>
+                          <button onClick={() => expand(currentContext + EXPAND_STEP)} className={`${EXPANDER_BTN} mr-1`}>
+                            <ChevronUp className="w-3 h-3" />
+                          </button>
+                        </Tooltip>
                       </div>
                     )}
-                    {/* Gap expander between hunks */}
                     {!isFirst && gapSize > 0 && (
                       <div className={EXPANDER_ROW}>
-                        <Tooltip content="Expand upper hunk down 5 lines">
-                          <button onClick={() => expand(currentContext + 5)} className={EXPANDER_BTN}>
-                            <ChevronDown className="w-3 h-3" />
-                          </button>
-                        </Tooltip>
-                        <button
-                          onClick={() => expand(Math.max(currentContext, Math.ceil(gapSize / 2) + 1))}
-                          className="flex-1 text-center text-xs text-blue-400 dark:text-blue-500 font-mono py-0.5 hover:bg-blue-100/50 dark:hover:bg-blue-900/30 rounded cursor-pointer"
-                        >
-                          ···  {gapSize} line{gapSize !== 1 ? 's' : ''}  ···
-                        </button>
-                        <Tooltip content="Expand lower hunk up 5 lines">
-                          <button onClick={() => expand(currentContext + 5)} className={EXPANDER_BTN}>
-                            <ChevronDown className="w-3 h-3 rotate-180" />
-                          </button>
-                        </Tooltip>
+                        <div className="flex items-center gap-0.5 shrink-0 mr-1">
+                          <Tooltip side="top" content={`Expand down ${EXPAND_STEP} lines`}>
+                            <button onClick={() => expand(currentContext + EXPAND_STEP)} className={EXPANDER_BTN}>
+                              <ChevronDown className="w-3 h-3" />
+                            </button>
+                          </Tooltip>
+                          <Tooltip side="top" content={`Expand up ${EXPAND_STEP} lines`}>
+                            <button onClick={() => expand(currentContext + EXPAND_STEP)} className={EXPANDER_BTN}>
+                              <ChevronUp className="w-3 h-3" />
+                            </button>
+                          </Tooltip>
+                        </div>
+                        <GapCount hidden={gapSize} onClick={() => expand(currentContext + Math.max(gapSize, EXPAND_STEP))} />
                       </div>
                     )}
                     {sideBySide
@@ -541,10 +780,13 @@ const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onComment, 
                       : <UnifiedHunk hunk={hunk} highlightedOld={highlightedOld} highlightedNew={highlightedNew}
                         onComment={(ln, isNew, txt) => onComment(file.path, ln, isNew, txt)} />
                     }
-                    {/* Expander below last hunk */}
                     {isLast && (
-                      <div className={`${EXPANDER_ROW} justify-center cursor-pointer`} onClick={() => expand(currentContext + 5)}>
-                        <ChevronDown className="w-3 h-3 text-blue-400" />
+                      <div className={EXPANDER_ROW}>
+                        <Tooltip side="top" content={`Expand down ${EXPAND_STEP} lines`}>
+                          <button onClick={() => expand(currentContext + EXPAND_STEP)} className={`${EXPANDER_BTN} mr-1`}>
+                            <ChevronDown className="w-3 h-3" />
+                          </button>
+                        </Tooltip>
                       </div>
                     )}
                   </Fragment>
@@ -565,6 +807,21 @@ type RightSel = { type: 'uncommitted' } | { type: 'latest' } | { type: 'commit';
 
 function commitIdx(sha: string, commits: CommitInfo[]): number {
   return commits.findIndex((c) => c.sha === sha)
+}
+
+type DiffParams = { baseRef?: string; headRef?: string; ignoreWhitespace?: boolean; includeUncommitted?: boolean }
+
+// buildDiffParams maps the left/right selectors to the getAgentDiff query
+// params. Shared by every diff fetch (initial load, silent refresh, per-file
+// full fetch, context expansion) so they stay in lock-step.
+function buildDiffParams(leftSel: LeftSel, rightSel: RightSel, ignoreWhitespace: boolean, commits: CommitInfo[]): DiffParams {
+  const params: DiffParams = {}
+  if (ignoreWhitespace) params.ignoreWhitespace = true
+  if (leftSel.type === 'commit') params.baseRef = leftSel.sha
+  else if (leftSel.type === 'latest' && commits.length > 0) params.baseRef = commits[0].sha
+  if (rightSel.type === 'uncommitted') params.includeUncommitted = true
+  else if (rightSel.type === 'commit') params.headRef = rightSel.sha
+  return params
 }
 
 function formatShortLabel(commit: CommitInfo | null | undefined, sha: string): string {
@@ -1345,6 +1602,9 @@ function SettingsPopup({ fileView, onFileViewChange, sideBySide, onSideBySideCha
   )
 }
 
+// A context width large enough to pull a whole file as a single diff hunk.
+const FULL_FILE_CONTEXT = 1_000_000
+
 // ── Main DiffViewer component ─────────────────────────────────────────────────
 
 export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalArtifactRefresh }: { agent: AgentResponse; projectId: string | null; externalRefreshTrigger?: number; externalArtifactRefresh?: number }) {
@@ -1448,22 +1708,20 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
     fileContextsRef.current.set(path, context)
     setFileContexts(new Map(fileContextsRef.current))
 
-    const params: { baseRef?: string; headRef?: string; ignoreWhitespace?: boolean; includeUncommitted?: boolean } = {}
-    if (ignoreWhitespace) params.ignoreWhitespace = true
-    if (leftSel.type === 'commit') params.baseRef = leftSel.sha
-    else if (leftSel.type === 'latest' && commitsRef.current.length > 0) params.baseRef = commitsRef.current[0].sha
-    if (rightSel.type === 'uncommitted') params.includeUncommitted = true
-    else if (rightSel.type === 'commit') params.headRef = rightSel.sha
+    const params = buildDiffParams(leftSel, rightSel, ignoreWhitespace, commitsRef.current)
 
     try {
       const fileDiff = await api.default.getAgentDiff(projectId ?? '', agent.id,
         params.baseRef, params.headRef, params.ignoreWhitespace, params.includeUncommitted, path, context)
 
+      // Select by path rather than [0] — the backend may return more than the
+      // requested file (e.g. the simulation server ignores the path filter).
+      const updated = fileDiff.files.find((x) => x.path === path)
       setDiff((prev) => {
         if (!prev) return prev
         const nextFiles = prev.files.map((f) => {
           if (f.path === path) {
-            return { ...f, hunks: fileDiff.files[0]?.hunks ?? [] }
+            return { ...f, hunks: updated?.hunks ?? [] }
           }
           return f
         })
@@ -1473,6 +1731,28 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
       console.error('Failed to fetch file diff:', e)
     }
   }, [agent.id, projectId, leftSel, rightSel, ignoreWhitespace])
+
+  // fetchFullFile fetches one file's *entire* content (as a single full-context
+  // diff) so FileDiff can reveal hidden lines client-side and highlight the whole
+  // file. Returns null on failure. Its identity depends on the diff params, so it
+  // changes (and FileDiff refetches) whenever the compared refs change.
+  const fetchFullFile = useCallback(async (path: string): Promise<DiffLine[] | null> => {
+    if (!agent.branch_name) return null
+    const params = buildDiffParams(leftSel, rightSel, ignoreWhitespace, commitsRef.current)
+
+    try {
+      const d = await api.default.getAgentDiff(projectId ?? '', agent.id,
+        params.baseRef, params.headRef, params.ignoreWhitespace, params.includeUncommitted, path, FULL_FILE_CONTEXT)
+      // Select by path rather than [0]: a backend may return more than the
+      // requested file (the simulation server ignores the path filter), and
+      // taking [0] would give every file the first file's content.
+      const f = d.files.find((x) => x.path === path)
+      if (!f || f.binary || !f.hunks) return null
+      return f.hunks.flatMap((h) => h.lines)
+    } catch {
+      return null
+    }
+  }, [agent.id, agent.branch_name, projectId, leftSel, rightSel, ignoreWhitespace])
 
   // Compute hidden-file state from a fresh diff response.
   // Files > 1000 changed lines start hidden, unless the user has explicitly shown them.
@@ -1502,12 +1782,7 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
     fileContextsRef.current = new Map()
     setFileContexts(new Map())
 
-    const params: { baseRef?: string; headRef?: string; ignoreWhitespace?: boolean; includeUncommitted?: boolean } = {}
-    if (ignoreWhitespace) params.ignoreWhitespace = true
-    if (leftSel.type === 'commit') params.baseRef = leftSel.sha
-    else if (leftSel.type === 'latest' && commitsRef.current.length > 0) params.baseRef = commitsRef.current[0].sha
-    if (rightSel.type === 'uncommitted') params.includeUncommitted = true
-    else if (rightSel.type === 'commit') params.headRef = rightSel.sha
+    const params = buildDiffParams(leftSel, rightSel, ignoreWhitespace, commitsRef.current)
 
     // Fetch the full diff in one request (all files, all hunks).
     api.default.getAgentDiff(projectId ?? '', agent.id,
@@ -1526,14 +1801,11 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
   }, [agent.id, agent.branch_name, projectId, leftSel, rightSel, refreshKey, ignoreWhitespace, applyHiddenFiles])
 
   // Version params for the artifacts panel, mirroring the diff request logic.
-  const artifactParams = useMemo(() => {
-    const p: { baseRef?: string; headRef?: string; includeUncommitted?: boolean } = {}
-    if (leftSel.type === 'commit') p.baseRef = leftSel.sha
-    else if (leftSel.type === 'latest' && commits.length > 0) p.baseRef = commits[0].sha
-    if (rightSel.type === 'uncommitted') p.includeUncommitted = true
-    else if (rightSel.type === 'commit') p.headRef = rightSel.sha
-    return p
-  }, [leftSel, rightSel, commits])
+  // Artifacts (e.g. screenshots) don't care about whitespace, so pass false.
+  const artifactParams = useMemo(
+    () => buildDiffParams(leftSel, rightSel, false, commits),
+    [leftSel, rightSel, commits],
+  )
 
   // Keep a ref to expandFileDiff so the silent refresh can call it without stale closures.
   const expandFileDiffRef = useRef(expandFileDiff)
@@ -1614,12 +1886,7 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
       // a newer refresh landed mid-fetch and we run again.
       const servicing = latestTriggerRef.current
 
-      const params: { baseRef?: string; headRef?: string; ignoreWhitespace?: boolean; includeUncommitted?: boolean } = {}
-      if (ignoreWhitespace) params.ignoreWhitespace = true
-      if (leftSel.type === 'commit') params.baseRef = leftSel.sha
-      else if (leftSel.type === 'latest' && commitsRef.current.length > 0) params.baseRef = commitsRef.current[0].sha
-      if (rightSel.type === 'uncommitted') params.includeUncommitted = true
-      else if (rightSel.type === 'commit') params.headRef = rightSel.sha
+      const params = buildDiffParams(leftSel, rightSel, ignoreWhitespace, commitsRef.current)
 
       // Snapshot current per-file contexts before async work
       const contextsSnap = new Map(fileContextsRef.current)
@@ -1989,6 +2256,7 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
                   onToggleCollapse={toggleFileCollapse}
                   onComment={handleComment}
                   onExpand={expandFileDiff}
+                  onFetchFull={fetchFullFile}
                   isHidden={hiddenFiles.has(diff.files[singleFileIdx].path)}
                   onShow={getShowCallback(diff.files[singleFileIdx].path)}
                   fileRef={getFileRef(diff.files[singleFileIdx].path)}
@@ -2002,6 +2270,7 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
                   onToggleCollapse={toggleFileCollapse}
                   onComment={handleComment}
                   onExpand={expandFileDiff}
+                  onFetchFull={fetchFullFile}
                   isHidden={hiddenFiles.has(f.path)}
                   onShow={getShowCallback(f.path)}
                   fileRef={getFileRef(f.path)}

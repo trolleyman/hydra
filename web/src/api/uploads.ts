@@ -29,6 +29,14 @@ export async function uploadFile(projectId: string | null, file: File): Promise<
   return (await res.json()) as UploadResult
 }
 
+// URL that serves a stored upload's bytes by its on-disk filename, so the UI can
+// render an image attachment (thumbnail + lightbox) for a path embedded in an
+// already-submitted prompt. Backed by GET /uploads/projects/{id}/blob.
+export function uploadBlobUrl(projectId: string | null, filename: string): string {
+  const pid = projectId ? encodeURIComponent(projectId) : '_'
+  return `/uploads/projects/${pid}/blob?name=${encodeURIComponent(filename)}`
+}
+
 const IMAGE_RE = /^image\//
 
 /**

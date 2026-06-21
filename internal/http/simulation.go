@@ -141,6 +141,21 @@ const simAgentMdPrompt = "Add **simple inline-markdown** rendering so prompts an
 	"- Keep it dependency-free: a tiny hand-rolled tokenizer beats pulling in a whole markdown library just for `code`, *italic* and **bold**.\n" +
 	"- Finally, share one renderer across the spawn box, the agent-detail prompt and the sidebar activity line so the three never drift apart."
 
+// simAgent2Prompt is agent-2's seeded prompt. It opens with task text, then
+// lists upload paths the way the spawn form appends them — three images and one
+// non-image (.pdf) — so the agent-2 detail page's PromptBlock renders them as
+// attachment chips (image thumbnails + a generic icon) instead of raw links.
+// agent-2 already sits in ListAgents, so its detail page renders straight from
+// the store (no one-shot getAgent, which never resolves in simulation), and no
+// other shot captures its detail view — so adding this prompt is churn-free. See
+// take-screenshots.ts agent-prompt-attachments, which serves the thumbnails a
+// fixed image so they render deterministically.
+const simAgent2Prompt = "Migrate the auth providers to OAuth 2.0 with PKCE. Match the attached sign-in mockups (light + dark) and the error states; the full provider list is in the spec PDF.\n\n" +
+	"/home/you/acme/.hydra/local/uploads/1782072241514128486-signin-light.png\n" +
+	"/home/you/acme/.hydra/local/uploads/1782072347433312262-signin-dark.png\n" +
+	"/home/you/acme/.hydra/local/uploads/1782072458377091686-error-states.png\n" +
+	"/home/you/acme/.hydra/local/uploads/1782072717310298418-oauth-providers.pdf"
+
 func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, projectId string) {
 	createdAt0 := simNow().Add(-30 * time.Minute).Unix()
 	createdAt1 := simNow().Add(-1 * time.Hour).Unix()
@@ -197,6 +212,10 @@ func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, pr
 			SessionStatus:    "running",
 			CreatedAt:        &createdAt2,
 			HasUnreadChanges: &unread,
+			// Carries upload paths so its detail-page PromptBlock renders the
+			// attachment chips (agent-prompt-attachments shot). Not shown in the
+			// sidebar, so the home/unread shots are unaffected.
+			Prompt: simAgent2Prompt,
 			AgentStatus: &api.AgentStatusInfo{
 				Status:      waiting,
 				Timestamp:   simNow().Format(time.RFC3339),
@@ -339,6 +358,32 @@ func (s *SimulationServer) GetAgent(w http.ResponseWriter, r *http.Request, proj
 			AgentStatus: &api.AgentStatusInfo{
 				Status:    api.Running,
 				Timestamp: simNow().Format(time.RFC3339),
+			},
+		})
+		return
+	}
+	if id == "agent-2" {
+		// agent-2 carries upload paths in its prompt so its detail page documents
+		// the PromptBlock attachment chips (agent-prompt-attachments shot). Mirrors
+		// its ListAgents entry; served here too so a direct/cold load of the detail
+		// URL resolves even before the agent list poll populates the store.
+		createdAt := simNow().Add(-2 * time.Hour).Unix()
+		unread := true
+		api.WriteJSON(w, http.StatusOK, api.AgentResponse{
+			Id:               "agent-2",
+			Title:            ptr("Migrate auth providers to OAuth"),
+			AgentType:        "gemini",
+			BaseBranch:       "main",
+			BranchName:       ptr("hydra/feat-2"),
+			SessionPid:       1002,
+			SessionStatus:    "running",
+			CreatedAt:        &createdAt,
+			HasUnreadChanges: &unread,
+			Prompt:           simAgent2Prompt,
+			AgentStatus: &api.AgentStatusInfo{
+				Status:      api.Waiting,
+				Timestamp:   simNow().Format(time.RFC3339),
+				LastMessage: ptr("The spike is built, tested, and committed. Here's what landed…"),
 			},
 		})
 		return
@@ -1066,7 +1111,7 @@ func simArtifactSets(id string) []api.ArtifactSet {
 		// reveals the two side-by-side stdout+stderr logs (stderr in red).
 		{
 			Name:          "components",
-			Status:        api.Generating,
+			Status:        api.ArtifactSetStatusGenerating,
 			LeftProgress:  &leftProgress,
 			RightProgress: &rightProgress,
 			StartedAt:     &startedAt,
@@ -1077,7 +1122,7 @@ func simArtifactSets(id string) []api.ArtifactSet {
 		// Failure: the error (script stderr tail) renders monospaced; refresh retries.
 		{
 			Name:   "storybook",
-			Status: api.Error,
+			Status: api.ArtifactSetStatusError,
 			Error:  ptr("exited 1: error: Cannot find module 'playwright'\n  at file:///app/scripts/screenshots/take-screenshots.ts:21:1"),
 			Files:  []api.ArtifactFile{},
 		},
@@ -1087,7 +1132,7 @@ func simArtifactSets(id string) []api.ArtifactSet {
 		// everything behind a whole-set error.
 		{
 			Name:      "dashboard",
-			Status:    api.Ready,
+			Status:    api.ArtifactSetStatusReady,
 			Changed:   true,
 			LeftError: ptr("exited 1: Error: page.goto: net::ERR_CONNECTION_REFUSED at http://localhost:3000/dashboard\n  at /app/scripts/screenshots/take-screenshots.ts:88:14"),
 			Files: []api.ArtifactFile{
@@ -1107,7 +1152,7 @@ func simArtifactSets(id string) []api.ArtifactSet {
 		// still a card (expandable, refreshable). Its file is unchanged across sides.
 		{
 			Name:    "emails",
-			Status:  api.Ready,
+			Status:  api.ArtifactSetStatusReady,
 			Changed: false,
 			Files: []api.ArtifactFile{
 				{
@@ -1137,7 +1182,7 @@ func artTags(tags ...string) *[]string {
 func simReadyChangedSet() api.ArtifactSet {
 	return api.ArtifactSet{
 		Name:    "screenshots",
-		Status:  api.Ready,
+		Status:  api.ArtifactSetStatusReady,
 		Changed: true,
 		Files: []api.ArtifactFile{
 			{
@@ -1207,6 +1252,7 @@ func (s *SimulationServer) SendAgentInput(w http.ResponseWriter, r *http.Request
 // (lexical) order, so the browser renders a stable, GitHub-like tree.
 var simRepoOrder = []string{
 	".gitignore",
+	".hydra/config.toml",
 	"CLAUDE.md",
 	"LICENSE",
 	"README.md",
@@ -1241,8 +1287,13 @@ const simLogoPNGBase64 = "iVBORw0KGgoAAAANSUhEUgAAAIAAAABgCAIAAABaGO0eAAAC10lEQV
 
 // simRepoFiles holds the simulated content for each path in simRepoOrder.
 var simRepoFiles = map[string]string{
-	".gitignore": "node_modules/\ndist/\n.env\n*.log\n",
-	"CLAUDE.md":  "# Project guidelines\n\nThis demo repo powers Hydra's **Repository** view.\n\n- Use `bun` instead of `npm`.\n- Run the formatter before committing.\n",
+	".gitignore": "node_modules/\ndist/\n.env\n*.log\n.hydra/local/\n",
+	// The project config. Its [[artifacts]] blocks are what the repository
+	// browser's dynamic ".hydra/artifacts" folder lists (the names here match the
+	// scripts GetRepositoryArtifacts returns below).
+	".hydra/config.toml": "[[artifacts]]\nname = \"screenshots\"\ncommand = \"bun run screenshots.ts\"\ntimeout_sec = 900\n\n" +
+		"[[artifacts]]\nname = \"components\"\ncommand = \"bun run storybook-shots.ts\"\n",
+	"CLAUDE.md": "# Project guidelines\n\nThis demo repo powers Hydra's **Repository** view.\n\n- Use `bun` instead of `npm`.\n- Run the formatter before committing.\n",
 	"LICENSE":    "MIT License\n\nCopyright (c) 2026 Hydra Demo\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction.\n",
 	"hydra.toml": "pre_prompt = \"\"\"\n- Use bun instead of npm\n\"\"\"\n\n[sandbox]\nwritable_paths = [\"~/.cache/go-build\"]\n",
 	// A deeply-nested single-child chain; each folder holds only the next, so the
@@ -1363,6 +1414,58 @@ func (s *SimulationServer) HandleRepositoryBlob(w http.ResponseWriter, r *http.R
 	w.Header().Set("Content-Type", "image/png")
 	w.Header().Set("Cache-Control", "public, max-age=300")
 	_, _ = w.Write(png)
+}
+
+// GetRepositoryArtifacts lists the artifact scripts the simulated repo declares in
+// .hydra/config.toml, so the repository browser shows its dynamic
+// ".hydra/artifacts" folder with these entries.
+func (s *SimulationServer) GetRepositoryArtifacts(w http.ResponseWriter, r *http.Request, projectId string, params api.GetRepositoryArtifactsParams) {
+	ref := "HEAD"
+	if params.Ref != nil && *params.Ref != "" {
+		ref = *params.Ref
+	}
+	api.WriteJSON(w, http.StatusOK, api.RepositoryArtifactsResponse{
+		Ref: ref,
+		Scripts: []api.RepositoryArtifactScript{
+			{Name: "screenshots"},
+			{Name: "components"},
+		},
+	})
+}
+
+// GetRepositoryArtifact returns a single-sided artifact set for the simulated repo.
+// "screenshots" renders a few inline-SVG images (mixing desktop + phone shapes to
+// show off the flex-wrap layout); "components" demonstrates the in-flight
+// generating state; any other name is a 404.
+func (s *SimulationServer) GetRepositoryArtifact(w http.ResponseWriter, r *http.Request, projectId string, name string, params api.GetRepositoryArtifactParams) {
+	logURL := "/artifacts/projects/" + projectId + "/log?script=" + name + "&key=commit/a1b2c3d"
+	switch name {
+	case "screenshots":
+		api.WriteJSON(w, http.StatusOK, api.RepositoryArtifactResponse{
+			Name:   "screenshots",
+			Status: api.RepositoryArtifactResponseStatusReady,
+			LogUrl: &logURL,
+			Files: []api.RepositoryArtifactFile{
+				{Name: "home.png", Url: ptr(simSVG("home", "#15803d", 360, 220)), Tags: artTags("theme::light", "viewport::desktop")},
+				{Name: "home-dark.png", Url: ptr(simSVG("home dark", "#166534", 360, 220)), Tags: artTags("theme::dark", "viewport::desktop")},
+				{Name: "login-phone.png", Url: ptr(simSVG("login", "#1d4ed8", 150, 300)), Tags: artTags("theme::light", "viewport::phone")},
+			},
+		})
+	case "components":
+		startedAt := simNow().Add(-6 * time.Second).Unix()
+		progress := "rendering Button.stories 3/8"
+		log := simArtifactLog()
+		api.WriteJSON(w, http.StatusOK, api.RepositoryArtifactResponse{
+			Name:      "components",
+			Status:    api.RepositoryArtifactResponseStatusGenerating,
+			StartedAt: &startedAt,
+			Progress:  &progress,
+			Log:       &log,
+			Files:     []api.RepositoryArtifactFile{},
+		})
+	default:
+		api.WriteError(w, http.StatusNotFound, "artifact script not found: "+name)
+	}
 }
 
 func (s *SimulationServer) GetConfig(w http.ResponseWriter, r *http.Request, projectId string, params api.GetConfigParams) {
@@ -1551,7 +1654,12 @@ func (s *SimulationServer) HandleArtifactsWS(w http.ResponseWriter, r *http.Requ
 
 // expandHunkContext adds extra context lines before/after a hunk's existing lines
 // when the requested context is greater than the default 3.
-func expandHunkContext(hunk api.DiffHunk, extraCtx int, fileExt string) api.DiffHunk {
+// expandHunkContext pads a hunk with up to extraCtx synthetic context lines on
+// each side. The prefix stops at line 1 and the suffix stops at the file's known
+// extent (fileLastOld/fileLastNew — the largest line numbers across the file's
+// real hunks), so a full-context request (git diff -U<huge> in production)
+// returns the complete short fixture rather than an unbounded fabricated tail.
+func expandHunkContext(hunk api.DiffHunk, extraCtx, fileLastOld, fileLastNew int, fileExt string) api.DiffHunk {
 	if extraCtx <= 0 {
 		return hunk
 	}
@@ -1589,11 +1697,15 @@ func expandHunkContext(hunk api.DiffHunk, extraCtx int, fileExt string) api.Diff
 		})
 	}
 
-	// Append context lines after the hunk
+	// Append context lines after the hunk, stopping at the file's last line so
+	// we never fabricate content past the (short) fixture's real end.
 	var suffix []api.DiffLine
 	for i := 1; i <= extraCtx; i++ {
 		oldN := lastOld + i
 		newN := lastNew + i
+		if oldN > fileLastOld || newN > fileLastNew {
+			break
+		}
 		suffix = append(suffix, api.DiffLine{
 			Type:       api.Context,
 			Content:    comment + fmt.Sprintf(" context line %d", oldN),
@@ -1620,9 +1732,24 @@ func expandDiffContext(files []api.DiffFile, context int) []api.DiffFile {
 		if len(parts) > 1 {
 			ext = parts[len(parts)-1]
 		}
+		// The file's real extent: the largest old/new line numbers across its
+		// hunks. Synthetic suffix context stops here so we don't fabricate lines
+		// past the fixture's end (which would make every file look 1000 lines
+		// long under a full-context request).
+		lastOld, lastNew := 0, 0
+		for _, h := range f.Hunks {
+			for _, l := range h.Lines {
+				if l.OldLineNum != nil && *l.OldLineNum > lastOld {
+					lastOld = *l.OldLineNum
+				}
+				if l.NewLineNum != nil && *l.NewLineNum > lastNew {
+					lastNew = *l.NewLineNum
+				}
+			}
+		}
 		hunks := make([]api.DiffHunk, len(f.Hunks))
 		for j, h := range f.Hunks {
-			hunks[j] = expandHunkContext(h, extra, ext)
+			hunks[j] = expandHunkContext(h, extra, lastOld, lastNew, ext)
 		}
 		f.Hunks = hunks
 		result[i] = f

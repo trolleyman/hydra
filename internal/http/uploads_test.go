@@ -130,6 +130,64 @@ func TestHandleUploadRejectsGet(t *testing.T) {
 	}
 }
 
+func TestHandleUploadBlob(t *testing.T) {
+	s, projID, root := newUploadServer(t)
+
+	// Seed a file in the uploads dir as if it had been uploaded earlier.
+	dir := paths.GetUploadsDirFromProjectRoot(root)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := []byte("\x89PNG fake image bytes")
+	name := "1782072241514128486-image1.png"
+	if err := os.WriteFile(filepath.Join(dir, name), content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	serve := func(query string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, "/uploads/projects/"+projID+"/blob?name="+query, nil)
+		req.SetPathValue("project_id", projID)
+		rr := httptest.NewRecorder()
+		s.HandleUploadBlob(rr, req)
+		return rr
+	}
+
+	// Happy path: serves the bytes with an image content type.
+	rr := serve(name)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if !bytes.Equal(rr.Body.Bytes(), content) {
+		t.Errorf("served content mismatch")
+	}
+	if ct := rr.Header().Get("Content-Type"); !strings.HasPrefix(ct, "image/") {
+		t.Errorf("expected image content type, got %q", ct)
+	}
+
+	// Traversal / path-separator names are rejected (404, never escape the dir).
+	for _, bad := range []string{"", "..", "../uploads_test.go", "..%2f..%2fetc%2fpasswd", "sub/file.png"} {
+		if got := serve(bad).Code; got != http.StatusNotFound {
+			t.Errorf("name %q: expected 404, got %d", bad, got)
+		}
+	}
+
+	// A well-formed but absent name is a 404.
+	if got := serve("9999-missing.png").Code; got != http.StatusNotFound {
+		t.Errorf("missing file: expected 404, got %d", got)
+	}
+}
+
+func TestHandleUploadBlobUnknownProject(t *testing.T) {
+	s, _, _ := newUploadServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/uploads/projects/nope/blob?name=x.png", nil)
+	req.SetPathValue("project_id", "nope")
+	rr := httptest.NewRecorder()
+	s.HandleUploadBlob(rr, req)
+	if rr.Code != http.StatusNotFound {
+		t.Errorf("expected 404 for unknown project, got %d", rr.Code)
+	}
+}
+
 func TestPruneUploads(t *testing.T) {
 	root := t.TempDir()
 	dir := paths.GetUploadsDirFromProjectRoot(root)

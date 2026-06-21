@@ -54,6 +54,46 @@ func artifactRepo(t *testing.T, baseTOML, headTOML string) (root, baseRef string
 	return root, baseRef
 }
 
+func TestRepositoryArtifactNames(t *testing.T) {
+	cfg := `
+[[artifacts]]
+name = "videos"
+command = "rec"
+
+[[artifacts]]
+name = "screenshots"
+command = "shot"
+
+[[artifacts]]
+name = "off"
+command = "nope"
+enabled = false
+`
+	root, _ := artifactRepo(t, "# none yet\n", cfg)
+
+	// No artifacts registry → no names (the folder simply doesn't show).
+	none := &Server{}
+	if names, err := none.repositoryArtifactNames(root, "HEAD"); err != nil || names != nil {
+		t.Fatalf("nil Artifacts: got names=%v err=%v, want nil/nil", names, err)
+	}
+
+	s := &Server{Artifacts: artifacts.NewRegistry()}
+	names, err := s.repositoryArtifactNames(root, "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Sorted, with the disabled "off" script dropped.
+	want := []string{"screenshots", "videos"}
+	if len(names) != len(want) {
+		t.Fatalf("got %v, want %v", names, want)
+	}
+	for i := range want {
+		if names[i] != want[i] {
+			t.Fatalf("got %v, want %v", names, want)
+		}
+	}
+}
+
 func TestArtifactSpecsByName_MatchAcrossRefs(t *testing.T) {
 	base := `
 [[artifacts]]

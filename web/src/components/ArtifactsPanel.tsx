@@ -496,7 +496,7 @@ function fileMatchesFilter(file: ArtifactFile, filter: ArtifactTagFilter): boole
 
 // TagBadge renders one of a file's tags: a scoped label as a two-tone
 // category/value pill, a free-form tag as a single solid pill.
-function TagBadge({ tag }: { tag: string }) {
+export function TagBadge({ tag }: { tag: string }) {
   const scoped = parseScopedTag(tag)
   if (scoped) {
     return (
@@ -669,7 +669,7 @@ function formatElapsed(secs: number): string {
 // ElapsedTime shows how long an in-flight generation has been running, ticking
 // once a second. startedAt is a Unix time in seconds (from the backend, so it
 // survives reloads/reconnects).
-function ElapsedTime({ startedAt }: { startedAt: number }) {
+export function ElapsedTime({ startedAt }: { startedAt: number }) {
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 1000)
@@ -681,7 +681,7 @@ function ElapsedTime({ startedAt }: { startedAt: number }) {
 // LogView shows the live stdout+stderr log of a generating artifact: scrollable,
 // monospaced, auto-following the tail unless the user scrolls up, with stderr
 // lines in red.
-function LogView({ log, emptyText = 'Waiting for output…' }: { log: ArtifactLogLine[]; emptyText?: string }) {
+export function LogView({ log, emptyText = 'Waiting for output…' }: { log: ArtifactLogLine[]; emptyText?: string }) {
   const ref = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
   // Whether to keep pinned to the bottom; flips off only when the user scrolls up.

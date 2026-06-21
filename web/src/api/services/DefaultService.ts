@@ -12,6 +12,8 @@ import type { ConfigResponse } from '../models/ConfigResponse';
 import type { ConfigTomlResponse } from '../models/ConfigTomlResponse';
 import type { DiffResponse } from '../models/DiffResponse';
 import type { ProjectInfo } from '../models/ProjectInfo';
+import type { RepositoryArtifactResponse } from '../models/RepositoryArtifactResponse';
+import type { RepositoryArtifactsResponse } from '../models/RepositoryArtifactsResponse';
 import type { RepositoryBranchesResponse } from '../models/RepositoryBranchesResponse';
 import type { RepositoryFileResponse } from '../models/RepositoryFileResponse';
 import type { RepositoryTreeResponse } from '../models/RepositoryTreeResponse';
@@ -696,6 +698,66 @@ export class DefaultService {
             },
             errors: {
                 404: `Project Not Found`,
+                500: `Internal Server Error`,
+            },
+        });
+    }
+    /**
+     * List the artifact scripts configured at a ref
+     * Lists the names of the enabled [[artifacts]] scripts defined in the ref's .hydra/config.toml. This is cheap — it only reads config and does NOT generate anything. The repository browser uses it to decide whether to show the dynamic ".hydra/artifacts" folder and what to list inside it.
+     * @param projectId Project ID
+     * @param ref Git ref whose config to read (defaults to HEAD)
+     * @returns RepositoryArtifactsResponse OK
+     * @throws ApiError
+     */
+    public getRepositoryArtifacts(
+        projectId: string,
+        ref?: string,
+    ): CancelablePromise<RepositoryArtifactsResponse> {
+        return this.httpRequest.request({
+            method: 'GET',
+            url: '/api/projects/{project_id}/repository/artifacts',
+            path: {
+                'project_id': projectId,
+            },
+            query: {
+                'ref': ref,
+            },
+            errors: {
+                404: `Project Not Found`,
+                500: `Internal Server Error`,
+            },
+        });
+    }
+    /**
+     * Generate (or load) one artifact script's output for a ref
+     * Runs (or returns the cached result of) the named [[artifacts]] script against a single ref and reports its outputs single-sided (no diff — the repository browser shows one ref at a time). Generation is lazy: this is only called when the user opens the script in the browser.
+     * @param projectId Project ID
+     * @param name The artifact script name
+     * @param ref Git ref to generate the artifact for (defaults to HEAD)
+     * @param refresh When true, discard the cached result and regenerate (chiefly to retry a cached failure)
+     * @returns RepositoryArtifactResponse OK
+     * @throws ApiError
+     */
+    public getRepositoryArtifact(
+        projectId: string,
+        name: string,
+        ref?: string,
+        refresh?: boolean,
+    ): CancelablePromise<RepositoryArtifactResponse> {
+        return this.httpRequest.request({
+            method: 'GET',
+            url: '/api/projects/{project_id}/repository/artifacts/{name}',
+            path: {
+                'project_id': projectId,
+                'name': name,
+            },
+            query: {
+                'ref': ref,
+                'refresh': refresh,
+            },
+            errors: {
+                404: `Project not found, or no such script configured at the ref`,
                 500: `Internal Server Error`,
             },
         });

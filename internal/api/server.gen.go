@@ -45,9 +45,9 @@ const (
 
 // Defines values for ArtifactSetStatus.
 const (
-	Error      ArtifactSetStatus = "error"
-	Generating ArtifactSetStatus = "generating"
-	Ready      ArtifactSetStatus = "ready"
+	ArtifactSetStatusError      ArtifactSetStatus = "error"
+	ArtifactSetStatusGenerating ArtifactSetStatus = "generating"
+	ArtifactSetStatusReady      ArtifactSetStatus = "ready"
 )
 
 // Defines values for DiffFileChangeType.
@@ -82,6 +82,13 @@ const (
 const (
 	MergeConflictErrorErrorConflict      MergeConflictErrorError = "conflict"
 	MergeConflictErrorErrorMergeConflict MergeConflictErrorError = "merge_conflict"
+)
+
+// Defines values for RepositoryArtifactResponseStatus.
+const (
+	RepositoryArtifactResponseStatusError      RepositoryArtifactResponseStatus = "error"
+	RepositoryArtifactResponseStatusGenerating RepositoryArtifactResponseStatus = "generating"
+	RepositoryArtifactResponseStatusReady      RepositoryArtifactResponseStatus = "ready"
 )
 
 // Defines values for ServiceStatusState.
@@ -540,6 +547,62 @@ type ProjectInfo struct {
 	UnreadCount *int `json:"unread_count,omitempty"`
 }
 
+// RepositoryArtifactFile defines model for RepositoryArtifactFile.
+type RepositoryArtifactFile struct {
+	// Fps Frame rate of a video file, read from its sidecar; sizes the video viewer's frame-step.
+	Fps *float64 `json:"fps"`
+
+	// Name Output file's relative path (forward-slashed)
+	Name string `json:"name"`
+
+	// Tags Labels for this file, read from a sibling JSON sidecar (<file>.meta, {"tags": [...]}). A "category::value" tag is a scoped label. Null/absent when the file has no tags.
+	Tags *[]string `json:"tags"`
+
+	// Url URL to fetch the file's bytes (an artifacts blob URL); null while still generating
+	Url *string `json:"url"`
+}
+
+// RepositoryArtifactResponse defines model for RepositoryArtifactResponse.
+type RepositoryArtifactResponse struct {
+	// Error Set only when generation failed (status "error").
+	Error *string                  `json:"error"`
+	Files []RepositoryArtifactFile `json:"files"`
+
+	// Log Captured stdout+stderr lines of the in-flight generation, surfaced as a live log. Only populated while generating; once settled, fetch log_url instead.
+	Log *[]ArtifactLogLine `json:"log"`
+
+	// LogUrl URL to fetch the persisted build log once generation has settled. Null while generating or if no log was captured.
+	LogUrl *string `json:"log_url"`
+
+	// Name The artifact script name
+	Name string `json:"name"`
+
+	// Progress Latest progress line of the in-flight generation, from `::hydra:progress::` marker lines (falling back to the latest stdout line). Only set while generating.
+	Progress *string `json:"progress"`
+
+	// StartedAt Unix time (seconds) generation started, so the UI can show elapsed time. Only set while generating.
+	StartedAt *int64                           `json:"started_at"`
+	Status    RepositoryArtifactResponseStatus `json:"status"`
+}
+
+// RepositoryArtifactResponseStatus defines model for RepositoryArtifactResponse.Status.
+type RepositoryArtifactResponseStatus string
+
+// RepositoryArtifactScript defines model for RepositoryArtifactScript.
+type RepositoryArtifactScript struct {
+	// Name The configured artifact script name
+	Name string `json:"name"`
+}
+
+// RepositoryArtifactsResponse defines model for RepositoryArtifactsResponse.
+type RepositoryArtifactsResponse struct {
+	// Ref The git ref the script list was read from
+	Ref string `json:"ref"`
+
+	// Scripts The enabled artifact scripts defined at this ref, sorted by name
+	Scripts []RepositoryArtifactScript `json:"scripts"`
+}
+
 // RepositoryBranch defines model for RepositoryBranch.
 type RepositoryBranch struct {
 	// IsAgent True for Hydra agent branches (hydra/*), which are listed first
@@ -834,6 +897,21 @@ type SaveConfigParams struct {
 // SaveConfigParamsScope defines parameters for SaveConfig.
 type SaveConfigParamsScope string
 
+// GetRepositoryArtifactsParams defines parameters for GetRepositoryArtifacts.
+type GetRepositoryArtifactsParams struct {
+	// Ref Git ref whose config to read (defaults to HEAD)
+	Ref *string `form:"ref,omitempty" json:"ref,omitempty"`
+}
+
+// GetRepositoryArtifactParams defines parameters for GetRepositoryArtifact.
+type GetRepositoryArtifactParams struct {
+	// Ref Git ref to generate the artifact for (defaults to HEAD)
+	Ref *string `form:"ref,omitempty" json:"ref,omitempty"`
+
+	// Refresh When true, discard the cached result and regenerate (chiefly to retry a cached failure)
+	Refresh *bool `form:"refresh,omitempty" json:"refresh,omitempty"`
+}
+
 // GetRepositoryFileParams defines parameters for GetRepositoryFile.
 type GetRepositoryFileParams struct {
 	// Path Repo-relative path of the file to read
@@ -944,6 +1022,12 @@ type ServerInterface interface {
 	// Get the raw .hydra/config.toml content for the trust prompt the UI shows on first open
 	// (GET /api/projects/{project_id}/config-toml)
 	GetProjectConfigToml(w http.ResponseWriter, r *http.Request, projectId string)
+	// List the artifact scripts configured at a ref
+	// (GET /api/projects/{project_id}/repository/artifacts)
+	GetRepositoryArtifacts(w http.ResponseWriter, r *http.Request, projectId string, params GetRepositoryArtifactsParams)
+	// Generate (or load) one artifact script's output for a ref
+	// (GET /api/projects/{project_id}/repository/artifacts/{name})
+	GetRepositoryArtifact(w http.ResponseWriter, r *http.Request, projectId string, name string, params GetRepositoryArtifactParams)
 	// List the branches available for the project's repository
 	// (GET /api/projects/{project_id}/repository/branches)
 	GetRepositoryBranches(w http.ResponseWriter, r *http.Request, projectId string)
@@ -1806,6 +1890,95 @@ func (siw *ServerInterfaceWrapper) GetProjectConfigToml(w http.ResponseWriter, r
 	handler.ServeHTTP(w, r)
 }
 
+// GetRepositoryArtifacts operation middleware
+func (siw *ServerInterfaceWrapper) GetRepositoryArtifacts(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetRepositoryArtifactsParams
+
+	// ------------- Optional query parameter "ref" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "ref", r.URL.Query(), &params.Ref)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "ref", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetRepositoryArtifacts(w, r, projectId, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetRepositoryArtifact operation middleware
+func (siw *ServerInterfaceWrapper) GetRepositoryArtifact(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "name" -------------
+	var name string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", r.PathValue("name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetRepositoryArtifactParams
+
+	// ------------- Optional query parameter "ref" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "ref", r.URL.Query(), &params.Ref)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "ref", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "refresh" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "refresh", r.URL.Query(), &params.Refresh)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "refresh", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetRepositoryArtifact(w, r, projectId, name, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetRepositoryBranches operation middleware
 func (siw *ServerInterfaceWrapper) GetRepositoryBranches(w http.ResponseWriter, r *http.Request) {
 
@@ -2167,6 +2340,8 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/config", wrapper.GetConfig)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/config", wrapper.SaveConfig)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/config-toml", wrapper.GetProjectConfigToml)
+	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/repository/artifacts", wrapper.GetRepositoryArtifacts)
+	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/repository/artifacts/{name}", wrapper.GetRepositoryArtifact)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/repository/branches", wrapper.GetRepositoryBranches)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/repository/file", wrapper.GetRepositoryFile)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/repository/tree", wrapper.GetRepositoryTree)
@@ -3080,6 +3255,79 @@ func (response GetProjectConfigToml500JSONResponse) VisitGetProjectConfigTomlRes
 	return json.NewEncoder(w).Encode(response)
 }
 
+type GetRepositoryArtifactsRequestObject struct {
+	ProjectId string `json:"project_id"`
+	Params    GetRepositoryArtifactsParams
+}
+
+type GetRepositoryArtifactsResponseObject interface {
+	VisitGetRepositoryArtifactsResponse(w http.ResponseWriter) error
+}
+
+type GetRepositoryArtifacts200JSONResponse RepositoryArtifactsResponse
+
+func (response GetRepositoryArtifacts200JSONResponse) VisitGetRepositoryArtifactsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetRepositoryArtifacts404JSONResponse ErrorResponse
+
+func (response GetRepositoryArtifacts404JSONResponse) VisitGetRepositoryArtifactsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetRepositoryArtifacts500JSONResponse ErrorResponse
+
+func (response GetRepositoryArtifacts500JSONResponse) VisitGetRepositoryArtifactsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetRepositoryArtifactRequestObject struct {
+	ProjectId string `json:"project_id"`
+	Name      string `json:"name"`
+	Params    GetRepositoryArtifactParams
+}
+
+type GetRepositoryArtifactResponseObject interface {
+	VisitGetRepositoryArtifactResponse(w http.ResponseWriter) error
+}
+
+type GetRepositoryArtifact200JSONResponse RepositoryArtifactResponse
+
+func (response GetRepositoryArtifact200JSONResponse) VisitGetRepositoryArtifactResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetRepositoryArtifact404JSONResponse ErrorResponse
+
+func (response GetRepositoryArtifact404JSONResponse) VisitGetRepositoryArtifactResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetRepositoryArtifact500JSONResponse ErrorResponse
+
+func (response GetRepositoryArtifact500JSONResponse) VisitGetRepositoryArtifactResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 type GetRepositoryBranchesRequestObject struct {
 	ProjectId string `json:"project_id"`
 }
@@ -3381,6 +3629,12 @@ type StrictServerInterface interface {
 	// Get the raw .hydra/config.toml content for the trust prompt the UI shows on first open
 	// (GET /api/projects/{project_id}/config-toml)
 	GetProjectConfigToml(ctx context.Context, request GetProjectConfigTomlRequestObject) (GetProjectConfigTomlResponseObject, error)
+	// List the artifact scripts configured at a ref
+	// (GET /api/projects/{project_id}/repository/artifacts)
+	GetRepositoryArtifacts(ctx context.Context, request GetRepositoryArtifactsRequestObject) (GetRepositoryArtifactsResponseObject, error)
+	// Generate (or load) one artifact script's output for a ref
+	// (GET /api/projects/{project_id}/repository/artifacts/{name})
+	GetRepositoryArtifact(ctx context.Context, request GetRepositoryArtifactRequestObject) (GetRepositoryArtifactResponseObject, error)
 	// List the branches available for the project's repository
 	// (GET /api/projects/{project_id}/repository/branches)
 	GetRepositoryBranches(ctx context.Context, request GetRepositoryBranchesRequestObject) (GetRepositoryBranchesResponseObject, error)
@@ -4099,6 +4353,61 @@ func (sh *strictHandler) GetProjectConfigToml(w http.ResponseWriter, r *http.Req
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetProjectConfigTomlResponseObject); ok {
 		if err := validResponse.VisitGetProjectConfigTomlResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetRepositoryArtifacts operation middleware
+func (sh *strictHandler) GetRepositoryArtifacts(w http.ResponseWriter, r *http.Request, projectId string, params GetRepositoryArtifactsParams) {
+	var request GetRepositoryArtifactsRequestObject
+
+	request.ProjectId = projectId
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetRepositoryArtifacts(ctx, request.(GetRepositoryArtifactsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetRepositoryArtifacts")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetRepositoryArtifactsResponseObject); ok {
+		if err := validResponse.VisitGetRepositoryArtifactsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetRepositoryArtifact operation middleware
+func (sh *strictHandler) GetRepositoryArtifact(w http.ResponseWriter, r *http.Request, projectId string, name string, params GetRepositoryArtifactParams) {
+	var request GetRepositoryArtifactRequestObject
+
+	request.ProjectId = projectId
+	request.Name = name
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetRepositoryArtifact(ctx, request.(GetRepositoryArtifactRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetRepositoryArtifact")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetRepositoryArtifactResponseObject); ok {
+		if err := validResponse.VisitGetRepositoryArtifactResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

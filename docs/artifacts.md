@@ -8,6 +8,14 @@ your uncommitted working tree) and shows the outputs that differ, side by side.
 Configure them as `[[artifacts]]` blocks in `.hydra/config.toml`, or via the
 **Diff Artifacts** editor in the web Settings page (which writes the same config).
 
+The same scripts are also browsable **single-sided** in the repository view: a
+dynamic `.hydra/artifacts` folder appears in the file tree (nested under the real
+`.hydra/` folder) whenever the ref configures at least one script. Each script
+shows as a "file"; opening it **lazily** generates that script for the ref you are
+browsing — nothing runs until you click — and renders its output files (no
+before/after, since the repository view shows one ref at a time). A refresh button
+regenerates, chiefly to retry a cached failure.
+
 ## Configuring
 
 ```toml
