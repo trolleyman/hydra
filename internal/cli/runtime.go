@@ -12,6 +12,7 @@ import (
 	"github.com/trolleyman/hydra/internal/artifacts"
 	"github.com/trolleyman/hydra/internal/daemon"
 	"github.com/trolleyman/hydra/internal/db"
+	"github.com/trolleyman/hydra/internal/events"
 	"github.com/trolleyman/hydra/internal/git"
 	"github.com/trolleyman/hydra/internal/heads"
 	httppkg "github.com/trolleyman/hydra/internal/http"
@@ -69,6 +70,11 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 	// Supervises each project's [[services]] (e.g. a host-side emulator pool).
 	svcMgr := services.NewManager()
 
+	// Fans change events to web clients over the events WS, replacing per-tab
+	// polling. A supervised service's state transition pushes services_changed.
+	eventHub := events.NewHub()
+	svcMgr.SetOnChange(eventHub.ServicesChanged)
+
 	server := &httppkg.Server{
 		WorktreesDir:    worktreesDir,
 		ProjectRoot:     projectRoot,
@@ -80,6 +86,7 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 		Development:     os.Getenv("HYDRA_DEV_RESTART") == "1",
 		Artifacts:       artifactReg,
 		Services:        svcMgr,
+		Events:          eventHub,
 		BackgroundCtx:   ctx,
 	}
 
@@ -164,12 +171,12 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 
 	// Immediate first poller cycles before accepting requests.
 	for _, root := range roots() {
-		heads.ReconcileLivenessOnce(reg, store, root)
+		heads.ReconcileLivenessOnce(reg, store, root, eventHub)
 		heads.RunJSONStatusPollerOnce(store, root)
 	}
 
-	go heads.RunLivenessReconciler(ctx, reg, store, roots)
-	go heads.RunJSONStatusPoller(ctx, store, roots)
+	go heads.RunLivenessReconciler(ctx, reg, store, roots, eventHub)
+	go heads.RunJSONStatusPoller(ctx, store, roots, eventHub)
 	go runStoragePruner(ctx, artifactReg, roots)
 
 	// Start each registered project's [[services]]. Done after the pollers so a
@@ -228,6 +235,7 @@ func buildMux(server *httppkg.Server) *http.ServeMux {
 	mux.Handle("/health", apiHandler)
 	mux.HandleFunc("/ws/projects/{project_id}/agents/{id}/terminal", server.HandleTerminalWS)
 	mux.HandleFunc("/ws/projects/{project_id}/agents/{id}/artifacts", server.HandleArtifactsWS)
+	mux.HandleFunc("/ws/projects/{project_id}/events", server.HandleEventsWS)
 	mux.HandleFunc("POST /shells/projects/{project_id}/agents/{id}/close", server.HandleShellClose)
 	mux.HandleFunc("/artifacts/projects/{project_id}/blob", server.HandleArtifactBlob)
 	mux.HandleFunc("/artifacts/projects/{project_id}/log", server.HandleArtifactLog)

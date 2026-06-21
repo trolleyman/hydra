@@ -60,6 +60,9 @@ type Status struct {
 type supervised struct {
 	spec config.ServiceScript
 	sink *lineSink
+	// onChange, if set, is called (outside the lock) whenever a set() actually
+	// changes the service's State, so the manager can push a services_changed event.
+	onChange func()
 
 	mu     sync.Mutex
 	status Status
@@ -73,8 +76,15 @@ func (s *supervised) snapshot() Status {
 
 func (s *supervised) set(mut func(*Status)) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	before := s.status.State
 	mut(&s.status)
+	changed := s.status.State != before
+	s.mu.Unlock()
+	// Notify only on a genuine State transition (set() also churns PID/message),
+	// and outside the lock so the callback can publish without contending.
+	if changed && s.onChange != nil {
+		s.onChange()
+	}
 }
 
 // projectServices is the set of supervisors for one registered project.
@@ -90,12 +100,22 @@ type Manager struct {
 	mu       sync.Mutex
 	projects map[string]*projectServices
 
+	// onChange, if set, is invoked with the project root whenever a supervised
+	// service's State transitions, so the daemon can push a services_changed event.
+	// Set once at startup before any project is supervised (see SetOnChange).
+	onChange func(root string)
+
 	// Timing knobs (overridable in tests).
 	initialBackoff  time.Duration
 	maxBackoff      time.Duration
 	stableThreshold time.Duration // run longer than this and the restart counter resets
 	stopGrace       time.Duration // SIGTERM -> SIGKILL window on stop
 }
+
+// SetOnChange registers a callback invoked (with the project root) whenever a
+// supervised service's State changes. Call it once before StartProject; it is not
+// safe to change while services are running.
+func (m *Manager) SetOnChange(fn func(root string)) { m.onChange = fn }
 
 // NewManager returns a Manager with production timing defaults.
 func NewManager() *Manager {
@@ -147,6 +167,11 @@ func (m *Manager) StartProject(root string) {
 		sv := &supervised{
 			spec: spec,
 			sink: &lineSink{prefix: "service[" + shortName(root) + "/" + spec.Name + "]:"},
+			onChange: func() {
+				if m.onChange != nil {
+					m.onChange(root)
+				}
+			},
 			status: Status{
 				Name:        spec.Name,
 				Command:     spec.Command,

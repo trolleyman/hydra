@@ -19,6 +19,7 @@ import (
 	"github.com/trolleyman/hydra/internal/artifacts"
 	"github.com/trolleyman/hydra/internal/config"
 	"github.com/trolleyman/hydra/internal/db"
+	"github.com/trolleyman/hydra/internal/events"
 	"github.com/trolleyman/hydra/internal/git"
 	"github.com/trolleyman/hydra/internal/heads"
 	"github.com/trolleyman/hydra/internal/paths"
@@ -64,6 +65,12 @@ type Server struct {
 	// Services supervises each project's [[services]] (long-running host/sandbox
 	// commands, e.g. an emulator pool). nil disables the feature (e.g. in tests).
 	Services *services.Manager
+
+	// Events fans "something changed, refetch it" signals to web clients over the
+	// events WebSocket, replacing per-tab polling (PLAN #50). nil disables push
+	// (clients fall back to their slow safety-net poll); the Hub methods are
+	// nil-safe so producers need not guard.
+	Events *events.Hub
 
 	lastSandboxError atomic.Value // holds string
 
@@ -183,6 +190,18 @@ func (s *Server) resolveProjectRoot(projectID string) (string, error) {
 		return p.Path, nil
 	}
 	return norm, nil
+}
+
+// notifyAgentsChanged pushes an agents_changed event for projectRoot (and, when
+// crossProject is true, a broadcast projects_changed for the cross-project unread
+// totals) so web clients refetch immediately instead of waiting for their poll.
+// s.Events is nil-safe. Spawn/kill/merge change the per-project list and the
+// unread totals, so they pass crossProject=true.
+func (s *Server) notifyAgentsChanged(projectRoot string, crossProject bool) {
+	s.Events.AgentsChanged(projectRoot)
+	if crossProject {
+		s.Events.ProjectsChanged()
+	}
 }
 
 // --- StrictServerInterface implementations ---
@@ -811,10 +830,12 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 		BaseBranch:    baseBranch,
 		Ephemeral:     ephemeral,
 		BackgroundCtx: s.BackgroundCtx,
+		OnTitleChange: func() { s.notifyAgentsChanged(projectRoot, false) },
 	})
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
+	s.notifyAgentsChanged(projectRoot, true)
 	return api.SpawnAgent201JSONResponse(agentResponse(*head)), nil
 }
 
@@ -885,6 +906,7 @@ func (s *Server) UpdateAgent(ctx context.Context, request api.UpdateAgentRequest
 		return nil, errtrace.Wrap(err)
 	}
 	head.Title = title
+	s.notifyAgentsChanged(projectRoot, false)
 	return api.UpdateAgent200JSONResponse(agentResponse(*head)), nil
 }
 
@@ -907,6 +929,9 @@ func (s *Server) MarkAgentRead(ctx context.Context, request api.MarkAgentReadReq
 	if err := s.DB.MarkAgentRead(request.Id); err != nil {
 		return nil, errtrace.Wrap(err)
 	}
+	// Clearing the unread flag changes both this project's list and the
+	// cross-project unread totals.
+	s.notifyAgentsChanged(projectRoot, true)
 	return api.MarkAgentRead204Response{}, nil
 }
 
@@ -975,6 +1000,7 @@ func (s *Server) MergeAgent(ctx context.Context, request api.MergeAgentRequestOb
 		return nil, errtrace.Wrap(err)
 	}
 
+	s.notifyAgentsChanged(projectRoot, true)
 	return api.MergeAgent204Response{}, nil
 }
 
@@ -1119,6 +1145,7 @@ func (s *Server) KillAgent(ctx context.Context, request api.KillAgentRequestObje
 		return nil, errtrace.Wrap(err)
 	}
 
+	s.notifyAgentsChanged(projectRoot, true)
 	return api.KillAgent204Response{}, nil
 }
 
@@ -1164,6 +1191,7 @@ func (s *Server) PurgeAgent(ctx context.Context, request api.PurgeAgentRequestOb
 		return nil, errtrace.Wrap(err)
 	}
 
+	s.notifyAgentsChanged(projectRoot, true)
 	return api.PurgeAgent204Response{}, nil
 }
 
@@ -1186,8 +1214,21 @@ func (s *Server) listCommitsCached(projectRoot, baseBranch, headBranch string) (
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
-	s.commitsCache.put(key, commits)
+	s.commitsCache.put(key, commits, commitsCost(commits))
 	return commits, nil
+}
+
+// commitsCost estimates the in-memory byte size of a commit list, used to charge
+// the entry against the cache's byte budget. It need only be roughly proportional
+// to the real footprint; per-string overhead is a flat constant per commit.
+func commitsCost(commits []git.CommitInfo) int64 {
+	const perCommitOverhead = 128 // struct + string headers, approximate
+	var n int64
+	for _, c := range commits {
+		n += perCommitOverhead +
+			int64(len(c.SHA)+len(c.ShortSHA)+len(c.Message)+len(c.Subject)+len(c.AuthorName)+len(c.AuthorEmail)+len(c.Timestamp))
+	}
+	return n
 }
 
 // getDiffCached returns the parsed diff. A committed-only diff (both refs resolve
@@ -1224,8 +1265,36 @@ func (s *Server) getDiffCached(projectRoot, diffRoot, baseRef, headRef string, i
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
-	s.diffCache.put(key, diff)
+	s.diffCache.put(key, diff, diffCost(diff))
 	return diff, nil
+}
+
+// diffCost estimates the in-memory byte size of a parsed diff, used to charge the
+// entry against the cache's byte budget. A diff's footprint is dominated by its
+// lines (each carries a Content string plus two *int line numbers), so it sums the
+// line content with a flat per-line overhead; this is what makes a huge
+// generated-file diff register as expensive and either evict aggressively or skip
+// caching, instead of silently retaining many gigabytes.
+func diffCost(files []git.DiffFile) int64 {
+	const (
+		perFileOverhead = 96 // struct + Path/OldPath string headers, approximate
+		perHunkOverhead = 48 // struct + Header string, approximate
+		perLineOverhead = 64 // DiffLine struct + string header + two *int allocations
+	)
+	var n int64
+	for _, f := range files {
+		n += perFileOverhead + int64(len(f.Path))
+		if f.OldPath != nil {
+			n += int64(len(*f.OldPath))
+		}
+		for _, h := range f.Hunks {
+			n += perHunkOverhead + int64(len(h.Header))
+			for _, l := range h.Lines {
+				n += perLineOverhead + int64(len(l.Content))
+			}
+		}
+	}
+	return n
 }
 
 func (s *Server) GetAgentCommits(ctx context.Context, request api.GetAgentCommitsRequestObject) (api.GetAgentCommitsResponseObject, error) {

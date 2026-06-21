@@ -5,6 +5,12 @@ import { useProjectStore } from '../stores/projectStore'
 import { useAgentStore, ARCHIVED_PAGE_SIZE } from '../stores/agentStore'
 import { usePageActive } from '../lib/usePageActive'
 import { startVisibilityPolling } from '../lib/visibilityPolling'
+import { useEventStream } from '../lib/useEventStream'
+
+// Fallback poll interval used as a safety net behind the events WebSocket: pushes
+// drive refetches immediately, but a slow periodic poll still recovers if the
+// socket is briefly down or an event is missed. Much lighter than the old 5–10s.
+const EVENT_FALLBACK_MS = 30_000
 import type { ProjectInfo, AgentResponse } from '../api'
 import { ApiError, ErrorResponse } from '../api'
 import { formatError } from '../api/format_error'
@@ -72,10 +78,14 @@ function forwardSidebarWheelToMain(e: WheelEvent<HTMLDivElement>) {
 
 function ServiceHealthWarning({ projectId }: { projectId: string | null }) {
   const [failed, setFailed] = useState<string[]>([])
+  const refetchRef = useRef<() => void>(() => {})
 
   useEffect(() => {
     setFailed([])
-    if (!projectId) return
+    if (!projectId) {
+      refetchRef.current = () => {}
+      return
+    }
     let active = true
     const tick = async () => {
       try {
@@ -85,12 +95,17 @@ function ServiceHealthWarning({ projectId }: { projectId: string | null }) {
         // best-effort
       }
     }
-    const stop = startVisibilityPolling(() => void tick(), 5000)
+    refetchRef.current = () => void tick()
+    const stop = startVisibilityPolling(() => void tick(), EVENT_FALLBACK_MS)
     return () => {
       active = false
+      refetchRef.current = () => {}
       stop()
     }
   }, [projectId])
+
+  // Refresh the failed-service indicator the instant a service's state changes.
+  useEventStream(projectId, { onServicesChanged: () => refetchRef.current() })
 
   if (failed.length === 0) return null
   return (
@@ -558,10 +573,14 @@ function RootLayout() {
     }
   }, [themeMode])
 
-  // Poll agents for selected project
+  // Agent list for the selected project: refreshed by the events stream (below),
+  // with a slow visibility-gated poll as a fallback. refetchAgentsRef lets the
+  // event handler trigger a fetch without restarting this effect.
+  const refetchAgentsRef = useRef<() => void>(() => {})
   useEffect(() => {
     if (!currentProjectId) {
       setAgents([])
+      refetchAgentsRef.current = () => {}
       return
     }
 
@@ -576,9 +595,11 @@ function RootLayout() {
       }
     }
 
-    const stop = startVisibilityPolling(fetchAgents, 5_000)
+    refetchAgentsRef.current = () => void fetchAgents()
+    const stop = startVisibilityPolling(fetchAgents, EVENT_FALLBACK_MS)
     return () => {
       cancelled = true
+      refetchAgentsRef.current = () => {}
       stop()
     }
   }, [currentProjectId, setAgents])
@@ -674,6 +695,10 @@ function RootLayout() {
     document.title = parts.join(' · ')
   }, [anyUnread, titleProjectName, titleAgentName, onRepository])
 
+  // System status + project list: refreshed by the events stream, with a slow
+  // visibility-gated fallback poll. refetchStatusRef lets the event handler
+  // trigger a refresh without restarting the effect (which owns the uptime ticker).
+  const refetchStatusRef = useRef<() => void>(() => {})
   useEffect(() => {
     let cancelled = false
     let ticker: ReturnType<typeof setInterval> | null = null
@@ -719,13 +744,23 @@ function RootLayout() {
       }
     }
 
-    const stop = startVisibilityPolling(fetchStatus, 10_000)
+    refetchStatusRef.current = () => void fetchStatus()
+    const stop = startVisibilityPolling(fetchStatus, EVENT_FALLBACK_MS)
     return () => {
       cancelled = true
+      refetchStatusRef.current = () => {}
       stop()
       if (ticker !== null) clearInterval(ticker)
     }
   }, [setProjects, setSelectedProjectId])
+
+  // Server-push: refetch agents / projects the moment the daemon signals a change,
+  // instead of relying on the (now slow) fallback polls above. The stream also
+  // fires once on connect, so selecting a project loads it immediately.
+  useEventStream(currentProjectId, {
+    onAgentsChanged: () => refetchAgentsRef.current(),
+    onProjectsChanged: () => refetchStatusRef.current(),
+  })
 
   // When the app lands on the bare root path ("/") but a project is already
   // selected — restored from localStorage, or auto-selected above — the index

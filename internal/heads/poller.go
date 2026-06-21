@@ -9,6 +9,7 @@ import (
 
 	"github.com/trolleyman/hydra/internal/api"
 	"github.com/trolleyman/hydra/internal/db"
+	"github.com/trolleyman/hydra/internal/events"
 	"github.com/trolleyman/hydra/internal/paths"
 	"github.com/trolleyman/hydra/internal/session"
 )
@@ -19,7 +20,7 @@ import (
 //
 // roots returns the set of project roots to reconcile on each tick; it is
 // re-evaluated every cycle so projects added/removed at runtime are picked up.
-func RunLivenessReconciler(ctx context.Context, reg *session.Registry, store *db.Store, roots func() []string) {
+func RunLivenessReconciler(ctx context.Context, reg *session.Registry, store *db.Store, roots func() []string, hub *events.Hub) {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 	for {
@@ -28,14 +29,16 @@ func RunLivenessReconciler(ctx context.Context, reg *session.Registry, store *db
 			return
 		case <-ticker.C:
 			for _, root := range roots() {
-				ReconcileLivenessOnce(reg, store, root)
+				ReconcileLivenessOnce(reg, store, root, hub)
 			}
 		}
 	}
 }
 
-// ReconcileLivenessOnce performs a single liveness reconciliation cycle.
-func ReconcileLivenessOnce(reg *session.Registry, store *db.Store, projectRoot string) {
+// ReconcileLivenessOnce performs a single liveness reconciliation cycle. When a
+// session's status actually transitions it publishes an agents_changed event on
+// hub (nil hub = no-op) so web clients refetch without polling.
+func ReconcileLivenessOnce(reg *session.Registry, store *db.Store, projectRoot string, hub *events.Hub) {
 	live := make(map[string]session.Info)
 	if reg != nil {
 		for _, info := range reg.Snapshot() {
@@ -49,6 +52,7 @@ func ReconcileLivenessOnce(reg *session.Registry, store *db.Store, projectRoot s
 		return
 	}
 
+	changed := false
 	for _, a := range dbAgents {
 		info, ok := live[a.ID]
 		switch {
@@ -56,12 +60,21 @@ func ReconcileLivenessOnce(reg *session.Registry, store *db.Store, projectRoot s
 			if err := store.UpdateSessionInfo(a.ID, info.PID, "running"); err != nil {
 				log.Printf("warn: liveness reconciler: update %s: %v", a.ID, err)
 			}
+			// This runs every tick for a live agent (idempotent); only a genuine
+			// transition into "running" is a change worth pushing.
+			if a.SessionStatus != "running" {
+				changed = true
+			}
 		case a.SessionStatus == "running":
 			// Was running but the session is gone (exited or daemon restarted).
 			if err := store.UpdateSessionInfo(a.ID, 0, "stopped"); err != nil {
 				log.Printf("warn: liveness reconciler: mark stopped %s: %v", a.ID, err)
 			}
+			changed = true
 		}
+	}
+	if changed {
+		hub.AgentsChanged(projectRoot)
 	}
 }
 
@@ -80,7 +93,7 @@ const graceUnread = 5 * time.Second
 // DB every 1 second. roots returns the set of project roots to poll on each
 // tick; it is re-evaluated every cycle so projects added/removed at runtime are
 // picked up.
-func RunJSONStatusPoller(ctx context.Context, store *db.Store, roots func() []string) {
+func RunJSONStatusPoller(ctx context.Context, store *db.Store, roots func() []string, hub *events.Hub) {
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 	// One debouncer for the lifetime of the loop: its pending-unread state must
@@ -92,7 +105,7 @@ func RunJSONStatusPoller(ctx context.Context, store *db.Store, roots func() []st
 			return
 		case <-ticker.C:
 			for _, root := range roots() {
-				pollJSONStatusOnce(store, root, deb)
+				pollJSONStatusOnce(store, root, deb, hub)
 			}
 		}
 	}
@@ -103,7 +116,7 @@ func RunJSONStatusPoller(ctx context.Context, store *db.Store, roots func() []st
 // it is only the boot warmup; the long-lived RunJSONStatusPoller loop owns the
 // persistent debouncer that actually resolves them.
 func RunJSONStatusPollerOnce(store *db.Store, projectRoot string) {
-	pollJSONStatusOnce(store, projectRoot, newUnreadDebouncer())
+	pollJSONStatusOnce(store, projectRoot, newUnreadDebouncer(), nil)
 }
 
 // pendingUnread records a running→finished/waiting transition whose unread flag
@@ -174,7 +187,7 @@ func isUserInputEvent(event *string) bool {
 	}
 }
 
-func pollJSONStatusOnce(store *db.Store, projectRoot string, deb *unreadDebouncer) {
+func pollJSONStatusOnce(store *db.Store, projectRoot string, deb *unreadDebouncer, hub *events.Hub) {
 	agents, err := store.ListAgents(projectRoot)
 	if err != nil {
 		log.Printf("warn: json status poller: list agents: %v", err)
@@ -182,6 +195,7 @@ func pollJSONStatusOnce(store *db.Store, projectRoot string, deb *unreadDebounce
 	}
 
 	now := time.Now()
+	changed := false
 	for _, a := range agents {
 		if a.SessionStatus != "running" {
 			deb.forget(a.ID)
@@ -209,6 +223,8 @@ func pollJSONStatusOnce(store *db.Store, projectRoot string, deb *unreadDebounce
 			immediate := prevRunning && agentStatus == "waiting" && isUserInputEvent(info.Event)
 			if err := store.UpdateAgentStatus(a.ID, agentStatus, info.Timestamp, immediate); err != nil {
 				log.Printf("warn: json status poller: update agent status for %s: %v", a.ID, err)
+			} else {
+				changed = true
 			}
 			switch {
 			case immediate:
@@ -227,8 +243,18 @@ func pollJSONStatusOnce(store *db.Store, projectRoot string, deb *unreadDebounce
 		if deb.ready(a.ID, agentStatus, now) {
 			if err := store.RaiseUnread(a.ID); err != nil {
 				log.Printf("warn: json status poller: raise unread for %s: %v", a.ID, err)
+			} else {
+				changed = true
 			}
 		}
+	}
+
+	// Coalesced push: one agents_changed for the project if anything moved this
+	// tick. A raised unread flag is also a cross-project signal, but the
+	// projects_changed nudge for that is left to the (slow) fallback poll to keep
+	// the hot 1s path cheap; the in-project list still updates immediately.
+	if changed {
+		hub.AgentsChanged(projectRoot)
 	}
 }
 

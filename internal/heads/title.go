@@ -63,7 +63,7 @@ const titleGenTimeout = 25 * time.Second
 // the prompt-derived title in place. Runs detached from the request lifecycle,
 // but bound to ctx (the server-lifetime context) so it — and its `claude` child
 // — are cancelled on shutdown rather than left orphaned.
-func generateTitleAsync(ctx context.Context, store *db.Store, id, prompt string) {
+func generateTitleAsync(ctx context.Context, store *db.Store, id, prompt string, onChange func()) {
 	if store == nil || strings.TrimSpace(prompt) == "" {
 		return
 	}
@@ -85,6 +85,9 @@ func generateTitleAsync(ctx context.Context, store *db.Store, id, prompt string)
 			return
 		}
 		log.Printf("heads: generated title for %s: %q", id, title)
+		if onChange != nil {
+			onChange()
+		}
 	}()
 }
 
