@@ -232,6 +232,7 @@ func buildMux(server *httppkg.Server) *http.ServeMux {
 	mux.HandleFunc("/artifacts/projects/{project_id}/blob", server.HandleArtifactBlob)
 	mux.HandleFunc("/artifacts/projects/{project_id}/log", server.HandleArtifactLog)
 	mux.HandleFunc("/repository/projects/{project_id}/blob", server.HandleRepositoryBlob)
+	mux.HandleFunc("GET /uploads/projects/{project_id}/blob", server.HandleUploadBlob)
 	mux.HandleFunc("/uploads/projects/{project_id}", server.HandleUpload)
 	mux.HandleFunc("GET /folder-picker/available", server.HandleFolderPickerAvailable)
 	mux.HandleFunc("POST /folder-picker/open", server.HandleFolderPickerOpen)

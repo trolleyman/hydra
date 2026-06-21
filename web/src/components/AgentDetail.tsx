@@ -1,9 +1,13 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { api } from '../stores/apiClient'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from '../lib/agentViewPrefs'
 import { formatError } from '../api/format_error'
 import type { AgentResponse } from '../api'
 import { AgentTerminal } from './AgentTerminal'
+import { AttachmentChips } from './AttachmentChips'
+import { ImageLightbox } from './ImageLightbox'
+import { uploadBlobUrl } from '../api/uploads'
+import type { Attachment } from '../lib/spawnDrafts'
 import { DiffViewer } from '../DiffViewer'
 import { formatStartedAgo, agentStatusBadge, archivedEndStateBadge } from './AgentComponents'
 import { LoaderCircle, Merge, Trash2, Tag, RotateCcw, FolderSync, Copy, Check, Pencil, Archive, TerminalSquare } from 'lucide-react'
@@ -14,19 +18,76 @@ import { useDialogStore } from '../stores/dialogStore'
 import { useToastStore } from '../stores/toastStore'
 import { useAgentStore } from '../stores/agentStore'
 
-function PromptBlock({ prompt }: { prompt: string }) {
+// Matches an upload path the spawn form embeds in a prompt: any token containing
+// the uploads dir followed by the on-disk filename (sanitized to [A-Za-z0-9._-]
+// by uniqueUploadName, so the run stops cleanly at trailing punctuation).
+const UPLOAD_PATH_RE = /\S*\.hydra\/local\/uploads\/[A-Za-z0-9._-]+/g
+const IMAGE_EXT_RE = /\.(png|jpe?g|gif|webp|bmp|svg|avif|ico|tiff?)$/i
+
+// Splits a submitted prompt into its display text and the upload attachments it
+// references. The paths (appended by the spawn form, usually as trailing lines)
+// are lifted out and shown as chips instead of raw links; the leftover text is
+// tidied so removing them doesn't leave dangling blank lines.
+function parsePrompt(prompt: string, projectId: string | null): { text: string; attachments: Attachment[] } {
+  const seen = new Set<string>()
+  const attachments: Attachment[] = []
+  let id = 0
+  for (const m of prompt.matchAll(UPLOAD_PATH_RE)) {
+    const full = m[0]
+    if (seen.has(full)) continue
+    seen.add(full)
+    const base = full.split('/').pop() ?? full
+    attachments.push({
+      id: id++,
+      // Drop the "<unixnano>-" prefix uniqueUploadName adds, for a tidy label.
+      filename: base.replace(/^\d+-/, ''),
+      path: full,
+      previewUrl: IMAGE_EXT_RE.test(base) ? uploadBlobUrl(projectId, base) : undefined,
+      size: 0,
+      uploading: false,
+    })
+  }
+  const text = prompt
+    .replace(UPLOAD_PATH_RE, '')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+  return { text, attachments }
+}
+
+function PromptBlock({ prompt, projectId }: { prompt: string; projectId: string | null }) {
   // A box that scrolls when the prompt is tall; short prompts show no scrollbar
   // since the content fits under the max-height. The negative top margin tucks
   // it a little closer to the metadata above, and the bottom gradient softens
   // the cutoff as a long prompt scrolls out of view.
+  const { text, attachments } = useMemo(() => parsePrompt(prompt, projectId), [prompt, projectId])
+  // Index into the image-only attachments while the lightbox is open; clicking a
+  // thumbnail opens it here, mirroring the spawn form.
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
+  const imageAttachments = attachments.filter((a) => a.previewUrl)
+  const lightboxImages = imageAttachments.map((a) => ({ url: a.previewUrl!, filename: a.filename, size: a.size }))
   return (
     <div className="relative -mt-2 mb-6 p-4 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
       {/* A taller max-height means most prompts (incl. a code block or two)
           don't need to scroll at all. */}
       <div className="overflow-y-auto max-h-96">
-        <p className="text-sm text-gray-800 dark:text-gray-200 whitespace-pre-wrap">{renderMarkdown(prompt)}</p>
+        {text && <p className="text-sm text-gray-800 dark:text-gray-200 whitespace-pre-wrap">{renderMarkdown(text)}</p>}
+        <AttachmentChips
+          attachments={attachments}
+          size="md"
+          className={text ? 'pt-3' : ''}
+          onOpenImage={(id) => setLightboxIndex(imageAttachments.findIndex((img) => img.id === id))}
+        />
       </div>
       <div className="pointer-events-none absolute inset-x-0 bottom-0 h-6 rounded-b-lg bg-gradient-to-t from-gray-50 dark:from-gray-800 to-transparent" />
+      {lightboxIndex !== null && lightboxImages.length > 0 && (
+        <ImageLightbox
+          images={lightboxImages}
+          index={Math.min(lightboxIndex, lightboxImages.length - 1)}
+          onIndexChange={setLightboxIndex}
+          onClose={() => setLightboxIndex(null)}
+        />
+      )}
     </div>
   )
 }
@@ -130,7 +191,7 @@ function ArchivedAgentDetail({ agent, projectId, onPurged }: { agent: AgentRespo
         </div>
 
         {/* Prompt */}
-        {agent.prompt && <PromptBlock key={agent.id} prompt={agent.prompt} />}
+        {agent.prompt && <PromptBlock key={agent.id} prompt={agent.prompt} projectId={projectId} />}
 
         {/* Grayed-out terminal placeholder with a (not-yet-wired) Resume button. */}
         <div className="rounded-lg border border-dashed border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 p-8 flex flex-col items-center justify-center text-center gap-3">
@@ -567,7 +628,7 @@ export function AgentDetail({
         </div>
 
         {/* Prompt */}
-        {agent.prompt && <PromptBlock key={agent.id} prompt={agent.prompt} />}
+        {agent.prompt && <PromptBlock key={agent.id} prompt={agent.prompt} projectId={projectId} />}
 
         {/* Terminal */}
         <AgentTerminal

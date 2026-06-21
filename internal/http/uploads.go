@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -93,6 +94,46 @@ func (s *Server) HandleUpload(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(uploadResponse{Path: dest, Filename: name})
+}
+
+// safeUploadName matches the names uniqueUploadName produces (and nothing with a
+// path separator or traversal), so HandleUploadBlob can serve only real uploads.
+var safeUploadName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
+
+// HandleUploadBlob serves a previously uploaded file by its on-disk name so the
+// web UI can render image attachments (thumbnails + a fullscreen lightbox) for
+// the upload paths embedded in an agent's prompt. Registered outside the OpenAPI
+// mux because it returns raw bytes, not JSON. GET only; the `name` query param is
+// the bare on-disk filename (no path), validated against safeUploadName so a
+// crafted value can't escape the uploads dir.
+func (s *Server) HandleUploadBlob(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("project_id")
+	projectRoot, err := s.resolveProjectRoot(projectID)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	name := r.URL.Query().Get("name")
+	if !safeUploadName.MatchString(name) {
+		http.NotFound(w, r)
+		return
+	}
+	full := filepath.Join(paths.GetUploadsDirFromProjectRoot(projectRoot), name)
+	f, err := os.Open(full)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil || info.IsDir() {
+		http.NotFound(w, r)
+		return
+	}
+	// http.ServeContent infers the Content-Type from the extension (and content
+	// sniffing) and handles range/conditional requests.
+	w.Header().Set("Cache-Control", "public, max-age=300")
+	http.ServeContent(w, r, name, info.ModTime(), f)
 }
 
 // uniqueUploadName builds a collision-resistant, filesystem-safe name that keeps
