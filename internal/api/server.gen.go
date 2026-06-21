@@ -750,10 +750,13 @@ type UncommittedSummary struct {
 	UntrackedCount int `json:"untracked_count"`
 }
 
-// UpdateAgentRequest defines model for UpdateAgentRequest.
+// UpdateAgentRequest Patch an agent's mutable fields. Provide any subset; at least one field is required. Omitted fields are left unchanged.
 type UpdateAgentRequest struct {
-	// Title New user-facing display name for the agent. Trimmed; must be non-empty.
-	Title string `json:"title"`
+	// BaseBranch New base branch for the agent. This is a metadata-only change: it updates which branch the agent is considered to be based on (used by update-from-base and the diff view) but does NOT move existing commits. Rebasing the agent's branch onto the new base, if desired, is left to the user. Must be an existing ref.
+	BaseBranch *string `json:"base_branch,omitempty"`
+
+	// Title New user-facing display name for the agent. Trimmed; must be non-empty if provided.
+	Title *string `json:"title,omitempty"`
 }
 
 // ListArchivedAgentsParams defines parameters for ListArchivedAgents.

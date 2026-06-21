@@ -350,8 +350,18 @@ func (m Model) resumeSelected() (tea.Model, tea.Cmd) {
 	reg := m.reg
 	store := m.store
 
+	// Seed the resumed PTY at the size the agent is actually shown at in the TUI
+	// (the log-viewport region), so its output wraps to match. The TUI views
+	// read-only and never resizes the live PTY, so this is the final width for a
+	// TUI-only viewer — fall back to the last persisted geometry only before the
+	// first WindowSizeMsg, when the window size isn't known yet.
+	rows, cols := m.agentViewSize()
+	if rows == 0 || cols == 0 {
+		rows, cols = heads.LoadResumeSize(store, headCopy.ProjectPath, headCopy.ID)
+	}
+
 	return m, func() tea.Msg {
-		if err := heads.ResumeHead(reg, store, headCopy.ProjectPath, headCopy, 24, 80); err != nil {
+		if err := heads.ResumeHead(reg, store, headCopy.ProjectPath, headCopy, rows, cols); err != nil {
 			return errMsg{err}
 		}
 		return resumeDoneMsg(headCopy.ID)
@@ -818,6 +828,21 @@ func (m *Model) updateViewportSize() {
 	logH := max(bodyH-infoH-1, 1) // minus info panel and separator
 	m.logViewport.Width = max(rightW, 1)
 	m.logViewport.Height = logH
+}
+
+// agentViewSize returns the size of the log-viewport region an agent's output is
+// shown in (mirrors updateViewportSize). It's the right width to seed a resumed
+// PTY so the agent's wrapping matches what the TUI renders — the TUI attaches
+// read-only at 0,0 and never resizes the live PTY, so for a TUI-only viewer this
+// resume size is the final size. Returns 0,0 before the first WindowSizeMsg.
+func (m Model) agentViewSize() (rows, cols uint16) {
+	if m.width == 0 || m.height == 0 {
+		return 0, 0
+	}
+	rightW := max(m.width-m.sidebarWidth()-1, 1)
+	bodyH := m.height - 2
+	logH := max(bodyH-infoH-1, 1)
+	return uint16(logH), uint16(rightW)
 }
 
 func (m Model) selectedHead() *heads.Head {
