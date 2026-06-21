@@ -141,6 +141,21 @@ const simAgentMdPrompt = "Add **simple inline-markdown** rendering so prompts an
 	"- Keep it dependency-free: a tiny hand-rolled tokenizer beats pulling in a whole markdown library just for `code`, *italic* and **bold**.\n" +
 	"- Finally, share one renderer across the spawn box, the agent-detail prompt and the sidebar activity line so the three never drift apart."
 
+// simAgent2Prompt is agent-2's seeded prompt. It opens with task text, then
+// lists upload paths the way the spawn form appends them — three images and one
+// non-image (.pdf) — so the agent-2 detail page's PromptBlock renders them as
+// attachment chips (image thumbnails + a generic icon) instead of raw links.
+// agent-2 already sits in ListAgents, so its detail page renders straight from
+// the store (no one-shot getAgent, which never resolves in simulation), and no
+// other shot captures its detail view — so adding this prompt is churn-free. See
+// take-screenshots.ts agent-prompt-attachments, which serves the thumbnails a
+// fixed image so they render deterministically.
+const simAgent2Prompt = "Migrate the auth providers to OAuth 2.0 with PKCE. Match the attached sign-in mockups (light + dark) and the error states; the full provider list is in the spec PDF.\n\n" +
+	"/home/you/acme/.hydra/local/uploads/1782072241514128486-signin-light.png\n" +
+	"/home/you/acme/.hydra/local/uploads/1782072347433312262-signin-dark.png\n" +
+	"/home/you/acme/.hydra/local/uploads/1782072458377091686-error-states.png\n" +
+	"/home/you/acme/.hydra/local/uploads/1782072717310298418-oauth-providers.pdf"
+
 func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, projectId string) {
 	createdAt0 := simNow().Add(-30 * time.Minute).Unix()
 	createdAt1 := simNow().Add(-1 * time.Hour).Unix()
@@ -197,6 +212,10 @@ func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, pr
 			SessionStatus:    "running",
 			CreatedAt:        &createdAt2,
 			HasUnreadChanges: &unread,
+			// Carries upload paths so its detail-page PromptBlock renders the
+			// attachment chips (agent-prompt-attachments shot). Not shown in the
+			// sidebar, so the home/unread shots are unaffected.
+			Prompt: simAgent2Prompt,
 			AgentStatus: &api.AgentStatusInfo{
 				Status:      waiting,
 				Timestamp:   simNow().Format(time.RFC3339),
@@ -339,6 +358,32 @@ func (s *SimulationServer) GetAgent(w http.ResponseWriter, r *http.Request, proj
 			AgentStatus: &api.AgentStatusInfo{
 				Status:    api.Running,
 				Timestamp: simNow().Format(time.RFC3339),
+			},
+		})
+		return
+	}
+	if id == "agent-2" {
+		// agent-2 carries upload paths in its prompt so its detail page documents
+		// the PromptBlock attachment chips (agent-prompt-attachments shot). Mirrors
+		// its ListAgents entry; served here too so a direct/cold load of the detail
+		// URL resolves even before the agent list poll populates the store.
+		createdAt := simNow().Add(-2 * time.Hour).Unix()
+		unread := true
+		api.WriteJSON(w, http.StatusOK, api.AgentResponse{
+			Id:               "agent-2",
+			Title:            ptr("Migrate auth providers to OAuth"),
+			AgentType:        "gemini",
+			BaseBranch:       "main",
+			BranchName:       ptr("hydra/feat-2"),
+			SessionPid:       1002,
+			SessionStatus:    "running",
+			CreatedAt:        &createdAt,
+			HasUnreadChanges: &unread,
+			Prompt:           simAgent2Prompt,
+			AgentStatus: &api.AgentStatusInfo{
+				Status:      api.Waiting,
+				Timestamp:   simNow().Format(time.RFC3339),
+				LastMessage: ptr("The spike is built, tested, and committed. Here's what landed…"),
 			},
 		})
 		return

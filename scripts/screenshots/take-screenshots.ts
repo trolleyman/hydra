@@ -252,6 +252,12 @@ try {
       // focuses on a page's header region — e.g. the agent detail title bar —
       // rather than the long content (terminal, diff) below it.
       viewportOnly?: boolean
+      // Stubs the upload-serving endpoint (GET /uploads/.../blob) with this
+      // checkout-relative PNG, so a prompt block that references upload images
+      // renders its attachment-chip thumbnails (and lightbox) from a fixed,
+      // deterministic image — no real uploads dir needed. After load, waits for
+      // the chips to render. Used by the agent-prompt-attachments shot.
+      stubUpload?: string
       // Seeds an unsent spawn-prompt draft (both the compact + full layout keys)
       // before the app boots, so the spawn box renders pre-filled — used to
       // document the live inline-markdown highlighting (and its line-wrapping)
@@ -416,6 +422,16 @@ try {
       // cancels). Documents the rename UX. The pencil is the only lucide-pencil
       // icon on the page, so the :has() selector targets it unambiguously.
       { name: 'agent-rename', path: '/project/sim-project/agent/agent-1', viewportOnly: true, click: 'button:has(svg.lucide-pencil)' },
+      // The agent-detail prompt block rendering the upload paths a prompt carries
+      // as attachment chips instead of raw links: three image thumbnails (served a
+      // fixed stub PNG) and one non-image file shown with a generic icon, the
+      // descriptive prompt text above them. Clicking an image opens the same
+      // fullscreen lightbox the spawn form uses (documented by spawn-image-lightbox).
+      // Viewport-only to focus on the header + prompt block. agent-2's seeded
+      // prompt (simulation.go simAgent2Prompt) carries the paths; it's already in
+      // ListAgents so the detail page renders from the store (the one-shot getAgent
+      // never resolves in simulation); stubUpload serves the thumbnails.
+      { name: 'agent-prompt-attachments', path: '/project/sim-project/agent/agent-2', viewportOnly: true, stubUpload: 'web/public/android-chrome-512x512.png' },
       { name: 'nested-folders', path: '/project/sim-project/agent/agent-3', scrollTo: 'Changes' },
       // A read-only archived (killed/merged) agent page: no live terminal/diff,
       // just the prompt and a (not-yet-wired) Resume affordance. The grayed
@@ -677,6 +693,16 @@ try {
           // page renders its in-flight loading state when captured.
           await page.route(pg.holdRequest, () => { /* hold open */ })
         }
+        if (pg.stubUpload) {
+          // Serve every upload-blob request (GET /uploads/.../blob) the same fixed
+          // repo PNG so the prompt block's image-attachment thumbnails render a
+          // deterministic image. Set before goto so the initial chip <img> loads
+          // are fulfilled (and networkidle can settle). Read once per shot.
+          const buf = readFileSync(join(SRC, pg.stubUpload))
+          await page.route('**/uploads/**', (route) =>
+            route.fulfill({ status: 200, contentType: 'image/png', body: buf }),
+          )
+        }
         // A held request keeps the network busy forever, so networkidle would
         // never resolve — wait only for the DOM for those pages.
         await page.goto(base + pg.path, { waitUntil: pg.holdRequest ? 'domcontentloaded' : 'networkidle' })
@@ -703,6 +729,15 @@ try {
           await page.waitForFunction(() =>
             (document.querySelector('.xterm-rows')?.textContent ?? '').includes('agent@hydra-sim:~$'),
           )
+          await settle(page)
+        }
+        if (pg.stubUpload) {
+          // Wait until the prompt block's image-attachment chips have rendered
+          // (each image chip carries an aria-label="View <file>") so the capture
+          // always includes the thumbnails. The detail page resolves this agent
+          // via the one-shot getAgent fallback, so the chips appear shortly after
+          // load; this guards the (otherwise rare) race against settle().
+          await page.waitForFunction(() => document.querySelectorAll('[aria-label^="View "]').length > 0)
           await settle(page)
         }
         if (pg.tallSpawn) {

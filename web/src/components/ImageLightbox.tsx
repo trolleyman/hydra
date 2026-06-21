@@ -4,7 +4,8 @@ import { X, ChevronLeft, ChevronRight } from 'lucide-react'
 export interface LightboxImage {
   url: string
   filename: string
-  /** File size in bytes, shown in the caption. */
+  /** File size in bytes, shown in the caption. Omit/0 when unknown (e.g. an
+   *  image referenced only by path), in which case the size is left out. */
   size: number
 }
 
@@ -100,7 +101,7 @@ export function ImageLightbox({
           {[
             <span key="name" className="text-white/70">{current.filename}</span>,
             dims && <span key="dims" className="text-white/40">{dims.w} × {dims.h}</span>,
-            <span key="size" className="text-white/40">{formatBytes(current.size)}</span>,
+            current.size > 0 && <span key="size" className="text-white/40">{formatBytes(current.size)}</span>,
             count > 1 && <span key="count" className="text-white/40">{index + 1} / {count}</span>,
           ]
             .filter(Boolean)
