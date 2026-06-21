@@ -1698,11 +1698,14 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
       const fileDiff = await api.default.getAgentDiff(projectId ?? '', agent.id,
         params.baseRef, params.headRef, params.ignoreWhitespace, params.includeUncommitted, path, context)
 
+      // Select by path rather than [0] — the backend may return more than the
+      // requested file (e.g. the simulation server ignores the path filter).
+      const updated = fileDiff.files.find((x) => x.path === path)
       setDiff((prev) => {
         if (!prev) return prev
         const nextFiles = prev.files.map((f) => {
           if (f.path === path) {
-            return { ...f, hunks: fileDiff.files[0]?.hunks ?? [] }
+            return { ...f, hunks: updated?.hunks ?? [] }
           }
           return f
         })
@@ -1729,7 +1732,10 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
     try {
       const d = await api.default.getAgentDiff(projectId ?? '', agent.id,
         params.baseRef, params.headRef, params.ignoreWhitespace, params.includeUncommitted, path, FULL_FILE_CONTEXT)
-      const f = d.files[0]
+      // Select by path rather than [0]: a backend may return more than the
+      // requested file (the simulation server ignores the path filter), and
+      // taking [0] would give every file the first file's content.
+      const f = d.files.find((x) => x.path === path)
       if (!f || f.binary || !f.hunks) return null
       return f.hunks.flatMap((h) => h.lines)
     } catch {
