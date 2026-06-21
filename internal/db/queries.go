@@ -12,6 +12,17 @@ import (
 // ErrOperationInProgress is returned when a TrySetHeadStatus CAS fails.
 var ErrOperationInProgress = errors.New("operation already in progress")
 
+// reader returns the query-only read pool used by the read methods below, so
+// concurrent reads don't serialise behind the single writer connection. Falls
+// back to the writer if a Store was built without a read pool (defensive — Open
+// always sets one).
+func (s *Store) reader() *gorm.DB {
+	if s.read != nil {
+		return s.read
+	}
+	return s.db
+}
+
 // UpsertAgent inserts or updates an agent record (restoring soft-deleted records).
 func (s *Store) UpsertAgent(a *Agent) error {
 	result := s.db.Unscoped().Save(a)
@@ -35,7 +46,7 @@ func (s *Store) ImportIfAbsent(a *Agent) error {
 // GetAgent returns the agent with the given ID, or nil if not found.
 func (s *Store) GetAgent(id string) (*Agent, error) {
 	var a Agent
-	err := s.db.First(&a, "id = ?", id).Error
+	err := s.reader().First(&a, "id = ?", id).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
@@ -48,7 +59,7 @@ func (s *Store) GetAgent(id string) (*Agent, error) {
 // ListAgents returns all active (non-soft-deleted) agents for the given project.
 func (s *Store) ListAgents(projectRoot string) ([]Agent, error) {
 	var agents []Agent
-	if err := s.db.Where("project_path = ?", projectRoot).Order("created_at DESC").Find(&agents).Error; err != nil {
+	if err := s.reader().Where("project_path = ?", projectRoot).Order("created_at DESC").Find(&agents).Error; err != nil {
 		return nil, errtrace.Wrap(err)
 	}
 	return agents, nil
@@ -112,7 +123,7 @@ func (s *Store) CountUnreadByProject() (map[string]int, error) {
 	}
 	// Exclude ephemeral agents: the sidebar hides them, so they must not inflate
 	// the per-project count either.
-	err := s.db.Model(&Agent{}).
+	err := s.reader().Model(&Agent{}).
 		Select("project_path, count(*) as n").
 		Where("has_unread_changes = ? AND ephemeral = ?", true, false).
 		Group("project_path").
@@ -157,7 +168,7 @@ func (s *Store) ArchiveAgent(id, endState string) error {
 // Aborted spawns (soft-deleted but EndState "") are excluded.
 func (s *Store) ListArchivedAgents(projectRoot string, limit, offset int) ([]Agent, error) {
 	var agents []Agent
-	q := s.db.Unscoped().
+	q := s.reader().Unscoped().
 		Where("project_path = ? AND deleted_at IS NOT NULL AND end_state <> ? AND ephemeral = ?", projectRoot, "", false).
 		Order("created_at DESC")
 	if limit > 0 {
@@ -176,7 +187,7 @@ func (s *Store) ListArchivedAgents(projectRoot string, limit, offset int) ([]Age
 // such archived record exists (active agents are not returned here).
 func (s *Store) GetArchivedAgent(id string) (*Agent, error) {
 	var a Agent
-	err := s.db.Unscoped().
+	err := s.reader().Unscoped().
 		Where("id = ? AND deleted_at IS NOT NULL AND end_state <> ?", id, "").
 		First(&a).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
