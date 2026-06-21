@@ -628,14 +628,19 @@ const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onComment, 
   }, [hunksSig, file.binary, file.expanded, isHidden, isCollapsed])
 
   // Highlight the full file when available, else just the visible `-U3` hunks.
+  // Skip entirely when the body isn't rendered (collapsed/hidden/binary): the file
+  // now carries its full content, so highlighting it unseen is wasted main-thread
+  // work. Recomputes when the file is expanded/shown.
   const { highlightedOld, highlightedNew } = useMemo(() => {
+    const empty = { highlightedOld: new Map<number, string>(), highlightedNew: new Map<number, string>() }
+    if (file.binary || isCollapsed || isHidden) return empty
     const source = fullLines ?? (file.hunks ? file.hunks.flatMap((h) => h.lines) : [])
-    if (file.binary || source.length === 0) return { highlightedOld: new Map<number, string>(), highlightedNew: new Map<number, string>() }
+    if (source.length === 0) return empty
     return buildHighlightMaps(source, lang)
     // hunksSig (not file.hunks identity) so an unchanged file isn't re-highlighted
     // when an unrelated file changes and the whole diff object is replaced.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fullLines, hunksSig, file.binary, lang])
+  }, [fullLines, hunksSig, file.binary, isCollapsed, isHidden, lang])
 
   const segments = useMemo(() => (fullLines ? buildSegments(fullLines, reveal) : null), [fullLines, reveal])
 
@@ -1743,6 +1748,42 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
     setHiddenFiles((prev) => { const next = new Set(prev); next.delete(path); return next })
   }, [])
 
+  // Per-path content signatures + the file objects last handed to React, used to
+  // reconcile a freshly-fetched diff against what's already shown. A background
+  // refresh hands us an all-new file array even when most files are byte-identical;
+  // re-rendering every FileDiff then re-stringifies and re-highlights each file's
+  // (now full) content on the main thread, which janks the always-mounted viewer
+  // while an agent is actively working. reconcileFiles reuses the previous object
+  // for unchanged files so memo()'d FileDiffs skip the work entirely, and reports
+  // whether anything changed at all (so a true no-op skips setDiff).
+  const prevFileSigByPathRef = useRef<Map<string, string>>(new Map())
+  const prevFilesByPathRef = useRef<Map<string, DiffFile>>(new Map())
+
+  const reconcileFiles = useCallback((newFiles: DiffFile[]): { files: DiffFile[]; changed: boolean } => {
+    const prevSig = prevFileSigByPathRef.current
+    const prevFiles = prevFilesByPathRef.current
+    const nextSig = new Map<string, string>()
+    const nextFiles = new Map<string, DiffFile>()
+    let changed = newFiles.length !== prevFiles.size
+    const files = newFiles.map((f) => {
+      const sig = JSON.stringify(f)
+      nextSig.set(f.path, sig)
+      if (prevSig.get(f.path) === sig) {
+        // Identical content — reuse the existing object so its FileDiff (memo)
+        // doesn't re-render, re-stringify, or re-highlight.
+        const reused = prevFiles.get(f.path)!
+        nextFiles.set(f.path, reused)
+        return reused
+      }
+      changed = true
+      nextFiles.set(f.path, f)
+      return f
+    })
+    prevFileSigByPathRef.current = nextSig
+    prevFilesByPathRef.current = nextFiles
+    return { files, changed }
+  }, [])
+
   useEffect(() => {
     if (!agent.branch_name) return
     let cancelled = false
@@ -1761,16 +1802,16 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
       params.baseRef, params.headRef, params.ignoreWhitespace, params.includeUncommitted, undefined, 3, true, HIDDEN_FILE_THRESHOLD, FULL_MAX_LINES)
       .then((d) => {
         if (!cancelled) {
-          lastDiffSigRef.current = JSON.stringify(d.files)
-          setDiff(d)
-          applyHiddenFiles(d.files)
+          const { files } = reconcileFiles(d.files)
+          setDiff({ ...d, files })
+          applyHiddenFiles(files)
           setLoadingDiff(false)
         }
       })
       .catch((e) => { if (!cancelled) { setDiffError(formatError(e)); setLoadingDiff(false) } })
 
     return () => { cancelled = true }
-  }, [agent.id, agent.branch_name, projectId, leftSel, rightSel, refreshKey, ignoreWhitespace, applyHiddenFiles])
+  }, [agent.id, agent.branch_name, projectId, leftSel, rightSel, refreshKey, ignoreWhitespace, applyHiddenFiles, reconcileFiles])
 
   // Version params for the artifacts panel, mirroring the diff request logic.
   // Artifacts (e.g. screenshots) don't care about whitespace, so pass false.
@@ -1797,12 +1838,6 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
     return root.contains(sel.getRangeAt(0).commonAncestorContainer)
   }, [])
 
-  // Signature of the last-applied diff content. A background refresh re-fetches the
-  // full diff every 20s (see internal/http/terminal.go); when nothing has actually
-  // changed we must NOT replace the diff state, or the re-render resets the user's
-  // text selection (and discards their per-file context expansions) for no reason.
-  const lastDiffSigRef = useRef<string | null>(null)
-
   // Signature of the last-applied commits list. A silent refresh must not call
   // setCommits with an identical list: that re-renders DiffViewer for nothing, and a
   // re-render is enough to disturb an in-progress text selection (issue #34).
@@ -1811,15 +1846,14 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
   // Apply a silently-fetched diff and re-apply the user's per-file context expansions.
   // No-ops when the content is byte-identical to what's already shown.
   const applySilentDiff = useCallback((d: DiffResponse, contexts: Map<string, number>) => {
-    const sig = JSON.stringify(d.files)
-    if (sig === lastDiffSigRef.current) return
-    lastDiffSigRef.current = sig
-    setDiff(d)
-    applyHiddenFiles(d.files)
+    const { files, changed } = reconcileFiles(d.files)
+    if (!changed) return
+    setDiff({ ...d, files })
+    applyHiddenFiles(files)
     for (const [path, ctx] of contexts) {
       if (ctx > 3) expandFileDiffRef.current(path, ctx).catch(() => { })
     }
-  }, [applyHiddenFiles])
+  }, [applyHiddenFiles, reconcileFiles])
 
   // A background refresh deferred because the user had an active selection. Flushed
   // by the selectionchange listener once the selection clears. Latest fetch wins.
@@ -1965,11 +1999,26 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
 
   const [commentSent, setCommentSent] = useState(false)
 
+  // Latest-value refs so handleComment (passed to every FileDiff) keeps a stable
+  // identity across silent refreshes. Depending on diff/commits/sel directly would
+  // give it a new identity on each refresh and re-render every FileDiff, defeating
+  // their memo() — the main cost behind the agent-view jank.
+  const diffRef = useRef(diff)
+  diffRef.current = diff
+  const leftSelRef = useRef(leftSel)
+  leftSelRef.current = leftSel
+  const rightSelRef = useRef(rightSel)
+  rightSelRef.current = rightSel
+
   const handleComment = useCallback(async (path: string, lineNum: number, isNew: boolean, text: string) => {
+    const leftSel = leftSelRef.current
+    const rightSel = rightSelRef.current
+    const commits = commitsRef.current
+    const diff = diffRef.current
     const fromLabel = leftSel.type === 'base'
       ? agent.base_branch
       : leftSel.type === 'latest'
-        ? (commitsRef.current[0]?.short_sha ? `HEAD (${commitsRef.current[0].short_sha})` : 'HEAD')
+        ? (commits[0]?.short_sha ? `HEAD (${commits[0].short_sha})` : 'HEAD')
         : (commits.find(c => c.sha === leftSel.sha)?.short_sha ?? leftSel.sha.slice(0, 8))
     const toLabel = rightSel.type === 'latest' ? 'latest commit'
       : rightSel.type === 'uncommitted' ? 'uncommitted changes'
@@ -2006,7 +2055,7 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
     } catch (e) {
       console.error('Failed to send comment:', e)
     }
-  }, [agent.id, agent.base_branch, projectId, leftSel, rightSel, commits, diff])
+  }, [agent.id, agent.base_branch, projectId])
 
   const [isResizing, setIsResizing] = useState(false)
   const startResizing = useCallback((e: React.MouseEvent) => {
