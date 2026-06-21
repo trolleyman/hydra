@@ -268,6 +268,10 @@ type SpawnHeadOptions struct {
 	// It must NOT be the request context (which ends when the spawn handler
 	// returns). nil falls back to context.Background().
 	BackgroundCtx context.Context
+	// OnTitleChange, if set, is called after the async title refinement persists a
+	// new title, so the caller can push an agents_changed event instead of waiting
+	// for the next poll. Best-effort, runs on the title goroutine; nil = no-op.
+	OnTitleChange func()
 }
 
 // SpawnHead creates a new git worktree, branch, and sandbox session for an agent.
@@ -444,7 +448,7 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 		if bgCtx == nil {
 			bgCtx = context.Background()
 		}
-		generateTitleAsync(bgCtx, store, opts.ID, opts.Prompt)
+		generateTitleAsync(bgCtx, store, opts.ID, opts.Prompt, opts.OnTitleChange)
 	}
 
 	return &Head{
