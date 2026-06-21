@@ -141,20 +141,20 @@ const simAgentMdPrompt = "Add **simple inline-markdown** rendering so prompts an
 	"- Keep it dependency-free: a tiny hand-rolled tokenizer beats pulling in a whole markdown library just for `code`, *italic* and **bold**.\n" +
 	"- Finally, share one renderer across the spawn box, the agent-detail prompt and the sidebar activity line so the three never drift apart."
 
-// simAgentUploadsPrompt is the seeded prompt for the upload-attachments demo
-// agent (agent-uploads), reached only via GetAgent (the detail page's one-shot
-// fallback) so it adds no row to the sidebar/home shots. It opens with a couple
-// of descriptive lines, then lists upload paths the way the spawn form appends
-// them — three images and one non-image file. The detail PromptBlock lifts those
-// paths out and renders them as attachment chips (image thumbnails + a generic
-// icon for the .pdf) instead of raw links; see take-screenshots.ts
-// agent-prompt-attachments, which serves the thumbnails a fixed image.
-const simAgentUploadsPrompt = "In the agent detail view, stop dumping raw upload paths into the prompt block and render them as the same attachment chips the spawn box uses — image thumbnails that open a fullscreen lightbox on click, other files as a labelled icon.\n\n" +
-	"Match the attached mockups (light + dark) and the spacing shown in the detail shot:\n" +
-	"/home/you/acme/.hydra/local/uploads/1782072241514128486-prompt-chips-light.png\n" +
-	"/home/you/acme/.hydra/local/uploads/1782072347433312262-prompt-chips-dark.png\n" +
-	"/home/you/acme/.hydra/local/uploads/1782072458377091686-lightbox-open.png\n" +
-	"/home/you/acme/.hydra/local/uploads/1782072717310298418-design-notes.pdf"
+// simAgent2Prompt is agent-2's seeded prompt. It opens with task text, then
+// lists upload paths the way the spawn form appends them — three images and one
+// non-image (.pdf) — so the agent-2 detail page's PromptBlock renders them as
+// attachment chips (image thumbnails + a generic icon) instead of raw links.
+// agent-2 already sits in ListAgents, so its detail page renders straight from
+// the store (no one-shot getAgent, which never resolves in simulation), and no
+// other shot captures its detail view — so adding this prompt is churn-free. See
+// take-screenshots.ts agent-prompt-attachments, which serves the thumbnails a
+// fixed image so they render deterministically.
+const simAgent2Prompt = "Migrate the auth providers to OAuth 2.0 with PKCE. Match the attached sign-in mockups (light + dark) and the error states; the full provider list is in the spec PDF.\n\n" +
+	"/home/you/acme/.hydra/local/uploads/1782072241514128486-signin-light.png\n" +
+	"/home/you/acme/.hydra/local/uploads/1782072347433312262-signin-dark.png\n" +
+	"/home/you/acme/.hydra/local/uploads/1782072458377091686-error-states.png\n" +
+	"/home/you/acme/.hydra/local/uploads/1782072717310298418-oauth-providers.pdf"
 
 func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, projectId string) {
 	createdAt0 := simNow().Add(-30 * time.Minute).Unix()
@@ -212,6 +212,10 @@ func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, pr
 			SessionStatus:    "running",
 			CreatedAt:        &createdAt2,
 			HasUnreadChanges: &unread,
+			// Carries upload paths so its detail-page PromptBlock renders the
+			// attachment chips (agent-prompt-attachments shot). Not shown in the
+			// sidebar, so the home/unread shots are unaffected.
+			Prompt: simAgent2Prompt,
 			AgentStatus: &api.AgentStatusInfo{
 				Status:      waiting,
 				Timestamp:   simNow().Format(time.RFC3339),
@@ -358,29 +362,28 @@ func (s *SimulationServer) GetAgent(w http.ResponseWriter, r *http.Request, proj
 		})
 		return
 	}
-	if id == "agent-uploads" {
-		// Upload-attachments demo. Modelled as an archived (merged) agent so the
-		// detail page renders it from the one-shot getAgent fallback without it
-		// needing a row in ListAgents/ListArchivedAgents — keeping the home and
-		// sidebar shots unchanged. Its prompt carries upload paths the PromptBlock
-		// renders as attachment chips.
-		createdAt := simNow().Add(-90 * time.Minute).Unix()
-		archived := true
-		merged := "merged"
+	if id == "agent-2" {
+		// agent-2 carries upload paths in its prompt so its detail page documents
+		// the PromptBlock attachment chips (agent-prompt-attachments shot). Mirrors
+		// its ListAgents entry; served here too so a direct/cold load of the detail
+		// URL resolves even before the agent list poll populates the store.
+		createdAt := simNow().Add(-2 * time.Hour).Unix()
+		unread := true
 		api.WriteJSON(w, http.StatusOK, api.AgentResponse{
-			Id:            "agent-uploads",
-			Title:         ptr("Render prompt uploads as attachment chips"),
-			AgentType:     "claude",
-			BaseBranch:    "main",
-			BranchName:    ptr("hydra/feat-upload-chips"),
-			SessionStatus: "stopped",
-			CreatedAt:     &createdAt,
-			Prompt:        simAgentUploadsPrompt,
-			Archived:      &archived,
-			EndState:      &merged,
+			Id:               "agent-2",
+			Title:            ptr("Migrate auth providers to OAuth"),
+			AgentType:        "gemini",
+			BaseBranch:       "main",
+			BranchName:       ptr("hydra/feat-2"),
+			SessionPid:       1002,
+			SessionStatus:    "running",
+			CreatedAt:        &createdAt,
+			HasUnreadChanges: &unread,
+			Prompt:           simAgent2Prompt,
 			AgentStatus: &api.AgentStatusInfo{
-				Status:    api.Finished,
-				Timestamp: simNow().Format(time.RFC3339),
+				Status:      api.Waiting,
+				Timestamp:   simNow().Format(time.RFC3339),
+				LastMessage: ptr("The spike is built, tested, and committed. Here's what landed…"),
 			},
 		})
 		return

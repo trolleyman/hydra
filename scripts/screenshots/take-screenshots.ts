@@ -421,10 +421,11 @@ try {
       // fixed stub PNG) and one non-image file shown with a generic icon, the
       // descriptive prompt text above them. Clicking an image opens the same
       // fullscreen lightbox the spawn form uses (documented by spawn-image-lightbox).
-      // Viewport-only to focus on the header + prompt block. agent-uploads is a
-      // simulated agent whose seeded prompt (simulation.go simAgentUploadsPrompt)
-      // carries the paths; stubUpload serves the thumbnails deterministically.
-      { name: 'agent-prompt-attachments', path: '/project/sim-project/agent/agent-uploads', viewportOnly: true, stubUpload: 'web/public/android-chrome-512x512.png' },
+      // Viewport-only to focus on the header + prompt block. agent-2's seeded
+      // prompt (simulation.go simAgent2Prompt) carries the paths; it's already in
+      // ListAgents so the detail page renders from the store (the one-shot getAgent
+      // never resolves in simulation); stubUpload serves the thumbnails.
+      { name: 'agent-prompt-attachments', path: '/project/sim-project/agent/agent-2', viewportOnly: true, stubUpload: 'web/public/android-chrome-512x512.png' },
       { name: 'nested-folders', path: '/project/sim-project/agent/agent-3', scrollTo: 'Changes' },
       // A read-only archived (killed/merged) agent page: no live terminal/diff,
       // just the prompt and a (not-yet-wired) Resume affordance. The grayed
