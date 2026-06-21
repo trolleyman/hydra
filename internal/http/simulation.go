@@ -141,6 +141,21 @@ const simAgentMdPrompt = "Add **simple inline-markdown** rendering so prompts an
 	"- Keep it dependency-free: a tiny hand-rolled tokenizer beats pulling in a whole markdown library just for `code`, *italic* and **bold**.\n" +
 	"- Finally, share one renderer across the spawn box, the agent-detail prompt and the sidebar activity line so the three never drift apart."
 
+// simAgentUploadsPrompt is the seeded prompt for the upload-attachments demo
+// agent (agent-uploads), reached only via GetAgent (the detail page's one-shot
+// fallback) so it adds no row to the sidebar/home shots. It opens with a couple
+// of descriptive lines, then lists upload paths the way the spawn form appends
+// them — three images and one non-image file. The detail PromptBlock lifts those
+// paths out and renders them as attachment chips (image thumbnails + a generic
+// icon for the .pdf) instead of raw links; see take-screenshots.ts
+// agent-prompt-attachments, which serves the thumbnails a fixed image.
+const simAgentUploadsPrompt = "In the agent detail view, stop dumping raw upload paths into the prompt block and render them as the same attachment chips the spawn box uses — image thumbnails that open a fullscreen lightbox on click, other files as a labelled icon.\n\n" +
+	"Match the attached mockups (light + dark) and the spacing shown in the detail shot:\n" +
+	"/home/you/acme/.hydra/local/uploads/1782072241514128486-prompt-chips-light.png\n" +
+	"/home/you/acme/.hydra/local/uploads/1782072347433312262-prompt-chips-dark.png\n" +
+	"/home/you/acme/.hydra/local/uploads/1782072458377091686-lightbox-open.png\n" +
+	"/home/you/acme/.hydra/local/uploads/1782072717310298418-design-notes.pdf"
+
 func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, projectId string) {
 	createdAt0 := simNow().Add(-30 * time.Minute).Unix()
 	createdAt1 := simNow().Add(-1 * time.Hour).Unix()
@@ -338,6 +353,33 @@ func (s *SimulationServer) GetAgent(w http.ResponseWriter, r *http.Request, proj
 			Prompt:        "Refactor the auth providers into a deeply nested package layout so the diff tree shows VS Code-style compacted folders.",
 			AgentStatus: &api.AgentStatusInfo{
 				Status:    api.Running,
+				Timestamp: simNow().Format(time.RFC3339),
+			},
+		})
+		return
+	}
+	if id == "agent-uploads" {
+		// Upload-attachments demo. Modelled as an archived (merged) agent so the
+		// detail page renders it from the one-shot getAgent fallback without it
+		// needing a row in ListAgents/ListArchivedAgents — keeping the home and
+		// sidebar shots unchanged. Its prompt carries upload paths the PromptBlock
+		// renders as attachment chips.
+		createdAt := simNow().Add(-90 * time.Minute).Unix()
+		archived := true
+		merged := "merged"
+		api.WriteJSON(w, http.StatusOK, api.AgentResponse{
+			Id:            "agent-uploads",
+			Title:         ptr("Render prompt uploads as attachment chips"),
+			AgentType:     "claude",
+			BaseBranch:    "main",
+			BranchName:    ptr("hydra/feat-upload-chips"),
+			SessionStatus: "stopped",
+			CreatedAt:     &createdAt,
+			Prompt:        simAgentUploadsPrompt,
+			Archived:      &archived,
+			EndState:      &merged,
+			AgentStatus: &api.AgentStatusInfo{
+				Status:    api.Finished,
 				Timestamp: simNow().Format(time.RFC3339),
 			},
 		})
