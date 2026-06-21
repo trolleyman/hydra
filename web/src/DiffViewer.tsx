@@ -418,6 +418,10 @@ const EXPANDER_BTN = 'p-0.5 rounded hover:bg-blue-100 dark:hover:bg-blue-900/50 
 // expander reveals per click.
 const CTX = 3
 const EXPAND_STEP = 20
+// An unchanged run that would hide this few lines behind an expander isn't worth
+// collapsing — a "··· 1 line ···" toggle saves no vertical space and just adds a
+// click — so show those lines inline instead.
+const MIN_COLLAPSE_GAP = 1
 // Files whose full content exceeds this many lines keep the lightweight `-U3`
 // view + network expansion rather than rendering the whole file client-side.
 // The server applies the same cap when deciding which files to expand in the
@@ -536,7 +540,7 @@ function buildSegments(fullLines: DiffLine[], reveal: RevealMap): RenderSeg[] {
     const top = Math.min(L, ov?.top ?? (isLead ? 0 : CTX))
     const bot = Math.min(L - top, ov?.bot ?? (isTrail ? 0 : CTX))
     const hidden = L - top - bot
-    if (hidden <= 0) {
+    if (hidden <= MIN_COLLAPSE_GAP) {
       segs.push({ kind: 'lines', key: `c${run.s}`, lines: fullLines.slice(run.s, run.e) })
       return
     }
