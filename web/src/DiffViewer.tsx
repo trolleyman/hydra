@@ -418,11 +418,16 @@ const EXPANDER_BTN = 'p-0.5 rounded hover:bg-blue-100 dark:hover:bg-blue-900/50 
 // expander reveals per click.
 const CTX = 3
 const EXPAND_STEP = 20
-// Files with more than this many changed lines, or whose full content exceeds
-// this many lines, keep the lightweight `-U3` view + network expansion rather
-// than fetching/highlighting the whole file client-side.
-const FULL_MAX_CHANGES = 2000
+// Files whose full content exceeds this many lines keep the lightweight `-U3`
+// view + network expansion rather than rendering the whole file client-side.
+// The server applies the same cap when deciding which files to expand in the
+// full_context response (max_full_lines); this is the matching client guard.
 const FULL_MAX_LINES = 6000
+
+// Files with at least this many changed lines start hidden ("Load diff" button)
+// and aren't auto-expanded in the full_context response (passed as
+// max_full_changes), so a large diff doesn't ship every big file's full content.
+const HIDDEN_FILE_THRESHOLD = 1000
 
 // buildHighlightMaps syntax-highlights a flat run of diff lines as a whole
 // (so multi-line constructs — block comments, template strings — highlight
@@ -584,7 +589,7 @@ function EdgeExpander({ seg, onStep, onAll }: {
   )
 }
 
-const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onComment, isCollapsed, onToggleCollapse, onExpand, onFetchFull, isHidden, onShow, currentContext }: {
+const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onComment, isCollapsed, onToggleCollapse, onExpand, isHidden, onShow, currentContext }: {
   file: DiffFile
   sideBySide: boolean
   fileRef?: (el: HTMLDivElement | null) => void
@@ -592,45 +597,35 @@ const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onComment, 
   isCollapsed: boolean
   onToggleCollapse: (path: string) => void
   onExpand: (path: string, context: number) => void
-  onFetchFull: (path: string) => Promise<DiffLine[] | null>
   isHidden?: boolean
   onShow?: () => void
   currentContext: number
 }) {
   const lang = getLanguage(file.path)
 
-  // Whole-file content, fetched once in the background so context expansion is
-  // instant (no network round-trip) and highlighting is correct across the
-  // whole file. Null while pending, or when the file is too large / not
-  // contiguous, in which case we fall back to the `-U3` hunks + network expand.
-  const [fullLines, setFullLines] = useState<DiffLine[] | null>(null)
   const [reveal, setReveal] = useState<RevealMap>(new Map())
 
-  // Don't fetch full content for a collapsed file: its body isn't rendered, so
-  // the fetch is pure waste until the user expands it (a large diff with many
-  // collapsed files would otherwise fire a request per file on load).
-  const eligibleForFull = !file.binary && !isHidden && !isCollapsed && (file.additions + file.deletions) <= FULL_MAX_CHANGES
   // Signature of the visible hunks. A background refresh hands us new file
-  // objects even when nothing changed, so keying the refetch on identity would
-  // re-pull every file's full content on every refresh. The string signature is
-  // stable across no-op refreshes, so we only refetch when content truly changes.
+  // objects even when nothing changed, so keying derived work on identity would
+  // recompute on every refresh. The string signature is stable across no-op
+  // refreshes, so we only recompute when content truly changes.
   const hunksSig = useMemo(() => JSON.stringify(file.hunks), [file.hunks])
-  useEffect(() => {
-    if (!eligibleForFull) { setFullLines(null); return }
-    let cancelled = false
-    onFetchFull(file.path).then((lines) => {
-      if (cancelled) return
-      if (!lines || lines.length === 0 || lines.length > FULL_MAX_LINES || !isContiguous(lines)) {
-        setFullLines(null)
-        return
-      }
-      setReveal(new Map())
-      setFullLines(lines)
-    }).catch(() => { if (!cancelled) setFullLines(null) })
-    return () => { cancelled = true }
-    // hunksSig changes when the diff content changes (refetch full); onFetchFull
-    // identity changes when the diff params change (refetch full).
-  }, [eligibleForFull, onFetchFull, file.path, hunksSig])
+
+  // Whole-file content for the reveal/collapse model. The server returns each
+  // eligible file's entire content in the main diff response (full_context) and
+  // marks it `expanded`, so we derive the line list straight from the hunks —
+  // no per-file round-trip. Files the server left at windowed context (too
+  // large) aren't marked expanded and fall through to the `-U3` hunks + network
+  // expand below. The size/contiguity checks are a defensive guard so a
+  // malformed response can't drive the reveal model with non-whole-file lines.
+  const fullLines = useMemo<DiffLine[] | null>(() => {
+    if (file.binary || isHidden || isCollapsed || !file.expanded) return null
+    const lines = file.hunks ? file.hunks.flatMap((h) => h.lines) : []
+    if (lines.length === 0 || lines.length > FULL_MAX_LINES || !isContiguous(lines)) return null
+    return lines
+    // hunksSig stands in for file.hunks identity (stable across no-op refreshes).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hunksSig, file.binary, file.expanded, isHidden, isCollapsed])
 
   // Highlight the full file when available, else just the visible `-U3` hunks.
   const { highlightedOld, highlightedNew } = useMemo(() => {
@@ -1602,9 +1597,6 @@ function SettingsPopup({ fileView, onFileViewChange, sideBySide, onSideBySideCha
   )
 }
 
-// A context width large enough to pull a whole file as a single diff hunk.
-const FULL_FILE_CONTEXT = 1_000_000
-
 // ── Main DiffViewer component ─────────────────────────────────────────────────
 
 export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalArtifactRefresh }: { agent: AgentResponse; projectId: string | null; externalRefreshTrigger?: number; externalArtifactRefresh?: number }) {
@@ -1732,35 +1724,13 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
     }
   }, [agent.id, projectId, leftSel, rightSel, ignoreWhitespace])
 
-  // fetchFullFile fetches one file's *entire* content (as a single full-context
-  // diff) so FileDiff can reveal hidden lines client-side and highlight the whole
-  // file. Returns null on failure. Its identity depends on the diff params, so it
-  // changes (and FileDiff refetches) whenever the compared refs change.
-  const fetchFullFile = useCallback(async (path: string): Promise<DiffLine[] | null> => {
-    if (!agent.branch_name) return null
-    const params = buildDiffParams(leftSel, rightSel, ignoreWhitespace, commitsRef.current)
-
-    try {
-      const d = await api.default.getAgentDiff(projectId ?? '', agent.id,
-        params.baseRef, params.headRef, params.ignoreWhitespace, params.includeUncommitted, path, FULL_FILE_CONTEXT)
-      // Select by path rather than [0]: a backend may return more than the
-      // requested file (the simulation server ignores the path filter), and
-      // taking [0] would give every file the first file's content.
-      const f = d.files.find((x) => x.path === path)
-      if (!f || f.binary || !f.hunks) return null
-      return f.hunks.flatMap((h) => h.lines)
-    } catch {
-      return null
-    }
-  }, [agent.id, agent.branch_name, projectId, leftSel, rightSel, ignoreWhitespace])
-
   // Compute hidden-file state from a fresh diff response.
-  // Files > 1000 changed lines start hidden, unless the user has explicitly shown them.
+  // Large files (HIDDEN_FILE_THRESHOLD changed lines) start hidden, unless the user has explicitly shown them.
   const applyHiddenFiles = useCallback((files: DiffFile[]) => {
     setHiddenFiles(() => {
       const next = new Set<string>()
       for (const f of files) {
-        if (!userShownFilesRef.current.has(f.path) && f.additions + f.deletions >= 1000) {
+        if (!userShownFilesRef.current.has(f.path) && f.additions + f.deletions >= HIDDEN_FILE_THRESHOLD) {
           next.add(f.path)
         }
       }
@@ -1784,9 +1754,11 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
 
     const params = buildDiffParams(leftSel, rightSel, ignoreWhitespace, commitsRef.current)
 
-    // Fetch the full diff in one request (all files, all hunks).
+    // Fetch the whole diff in one request: all files at -U3, plus each eligible
+    // file's full content inline (full_context) so context expansion needs no
+    // per-file follow-up requests.
     api.default.getAgentDiff(projectId ?? '', agent.id,
-      params.baseRef, params.headRef, params.ignoreWhitespace, params.includeUncommitted, undefined, 3)
+      params.baseRef, params.headRef, params.ignoreWhitespace, params.includeUncommitted, undefined, 3, true, HIDDEN_FILE_THRESHOLD, FULL_MAX_LINES)
       .then((d) => {
         if (!cancelled) {
           lastDiffSigRef.current = JSON.stringify(d.files)
@@ -1906,7 +1878,7 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
 
       // Fetch full diff silently — preserves open comments since we diff against previous state.
       const diffP = api.default.getAgentDiff(projectId ?? '', agent.id,
-        params.baseRef, params.headRef, params.ignoreWhitespace, params.includeUncommitted, undefined, 3)
+        params.baseRef, params.headRef, params.ignoreWhitespace, params.includeUncommitted, undefined, 3, true, HIDDEN_FILE_THRESHOLD, FULL_MAX_LINES)
         .then((d) => {
           // Defer applying while the user is selecting text — otherwise the re-render
           // wipes their selection. The selectionchange listener flushes it later.
@@ -2256,7 +2228,6 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
                   onToggleCollapse={toggleFileCollapse}
                   onComment={handleComment}
                   onExpand={expandFileDiff}
-                  onFetchFull={fetchFullFile}
                   isHidden={hiddenFiles.has(diff.files[singleFileIdx].path)}
                   onShow={getShowCallback(diff.files[singleFileIdx].path)}
                   fileRef={getFileRef(diff.files[singleFileIdx].path)}
@@ -2270,7 +2241,6 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
                   onToggleCollapse={toggleFileCollapse}
                   onComment={handleComment}
                   onExpand={expandFileDiff}
-                  onFetchFull={fetchFullFile}
                   isHidden={hiddenFiles.has(f.path)}
                   onShow={getShowCallback(f.path)}
                   fileRef={getFileRef(f.path)}

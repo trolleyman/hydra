@@ -422,8 +422,11 @@ type DiffFile struct {
 	ChangeType DiffFileChangeType `json:"change_type"`
 
 	// Deletions Number of deleted lines
-	Deletions int        `json:"deletions"`
-	Hunks     []DiffHunk `json:"hunks"`
+	Deletions int `json:"deletions"`
+
+	// Expanded True when hunks contain the file's entire content as a single whole-file hunk (full_context view), so the client can drive the context reveal/collapse model without re-fetching. Absent/false means the file is shown at the requested windowed context.
+	Expanded *bool      `json:"expanded,omitempty"`
+	Hunks    []DiffHunk `json:"hunks"`
 
 	// OldPath Original file path (only set for renamed files)
 	OldPath *string `json:"old_path"`
@@ -865,6 +868,15 @@ type GetAgentDiffParams struct {
 
 	// Context Number of lines of context to show (defaults to 3)
 	Context *int `form:"context,omitempty" json:"context,omitempty"`
+
+	// FullContext Return each file's full content (so the client can expand context without further round-trips), in a single request for all files. Files larger than max_full_lines are returned at the normal context instead. Ignored when a specific path is requested.
+	FullContext *bool `form:"full_context,omitempty" json:"full_context,omitempty"`
+
+	// MaxFullChanges Only auto-expand files with at most this many changed lines. Larger files (which the client also hides by default) keep the normal context so their full content isn't shipped until requested. Only meaningful with full_context.
+	MaxFullChanges *int `form:"max_full_changes,omitempty" json:"max_full_changes,omitempty"`
+
+	// MaxFullLines Upper bound on the full content shipped per expanded file. A file whose whole content exceeds this stays at the normal context. Only meaningful with full_context.
+	MaxFullLines *int `form:"max_full_lines,omitempty" json:"max_full_lines,omitempty"`
 }
 
 // GetAgentDiffFilesParams defines parameters for GetAgentDiffFiles.
@@ -1514,6 +1526,30 @@ func (siw *ServerInterfaceWrapper) GetAgentDiff(w http.ResponseWriter, r *http.R
 	err = runtime.BindQueryParameter("form", true, false, "context", r.URL.Query(), &params.Context)
 	if err != nil {
 		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "context", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "full_context" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "full_context", r.URL.Query(), &params.FullContext)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "full_context", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "max_full_changes" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "max_full_changes", r.URL.Query(), &params.MaxFullChanges)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "max_full_changes", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "max_full_lines" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "max_full_lines", r.URL.Query(), &params.MaxFullLines)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "max_full_lines", Err: err})
 		return
 	}
 

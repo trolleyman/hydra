@@ -123,7 +123,14 @@ func LoggingMiddleware(next http.Handler) http.Handler {
 			}
 		}
 
-		log.Printf("%s %s %d %s%s", r.Method, r.URL.Path, rec.statusCode, time.Since(start).Round(time.Millisecond), errorSuffix)
+		// Include the query string so distinct requests to the same path (e.g.
+		// per-file diff fetches with different ?path=&context=) are tellable apart
+		// in the log instead of all collapsing to an identical-looking line.
+		uri := r.URL.Path
+		if r.URL.RawQuery != "" {
+			uri += "?" + r.URL.RawQuery
+		}
+		log.Printf("%s %s %d %s%s", r.Method, uri, rec.statusCode, time.Since(start).Round(time.Millisecond), errorSuffix)
 
 		if rec.statusCode == http.StatusInternalServerError {
 			if et.err != nil {

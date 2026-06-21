@@ -58,6 +58,10 @@ type DiffFile struct {
 	Deletions  int
 	Binary     bool
 	Hunks      []DiffHunk
+	// Expanded is set by the full-context view when Hunks hold the file's entire
+	// content (a single whole-file hunk) rather than the default windowed context,
+	// so the client can render the reveal/collapse model without re-fetching.
+	Expanded bool
 }
 
 // UncommittedSummary holds counts of uncommitted changes.
@@ -132,6 +136,18 @@ func GetCommitInfo(projectRoot, ref string) (*CommitInfo, error) {
 // GetDiff returns the parsed diff between baseRef and headRef.
 // If headRef is empty, diffs baseRef against the working tree (uncommitted changes).
 func GetDiff(projectRoot, baseRef, headRef string, ignoreWhitespace, useTripleDot bool, path string, context int) ([]DiffFile, error) {
+	var paths []string
+	if path != "" {
+		paths = []string{path}
+	}
+	return errtrace.Wrap2(GetDiffPaths(projectRoot, baseRef, headRef, ignoreWhitespace, useTripleDot, paths, context))
+}
+
+// GetDiffPaths is GetDiff scoped to a set of pathspecs in a single git call. An
+// empty paths slice diffs every changed file. Used by the full-context view to
+// expand many files at once without one git invocation (or HTTP request) per
+// file.
+func GetDiffPaths(projectRoot, baseRef, headRef string, ignoreWhitespace, useTripleDot bool, paths []string, context int) ([]DiffFile, error) {
 	args := []string{"diff", fmt.Sprintf("-U%d", context)}
 	if ignoreWhitespace {
 		args = append(args, "--ignore-space-change")
@@ -143,8 +159,9 @@ func GetDiff(projectRoot, baseRef, headRef string, ignoreWhitespace, useTripleDo
 	} else {
 		args = append(args, baseRef, headRef)
 	}
-	if path != "" {
-		args = append(args, "--", path)
+	if len(paths) > 0 {
+		args = append(args, "--")
+		args = append(args, paths...)
 	}
 
 	out, err := gitOutput(projectRoot, args...)

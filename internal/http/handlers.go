@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -1284,8 +1285,16 @@ func commitsCost(commits []git.CommitInfo) int64 {
 // the project root); refs are resolved against projectRoot. The key folds in every
 // option that changes the output (refs, whitespace, dot-mode, path, context).
 func (s *Server) getDiffCached(projectRoot, diffRoot, baseRef, headRef string, ignoreWhitespace, useTripleDot bool, path string, contextLines int, includeUncommitted bool) ([]git.DiffFile, error) {
+	var paths []string
+	if path != "" {
+		paths = []string{path}
+	}
+	return errtrace.Wrap2(s.getDiffCachedPaths(projectRoot, diffRoot, baseRef, headRef, ignoreWhitespace, useTripleDot, paths, contextLines, includeUncommitted))
+}
+
+func (s *Server) getDiffCachedPaths(projectRoot, diffRoot, baseRef, headRef string, ignoreWhitespace, useTripleDot bool, paths []string, contextLines int, includeUncommitted bool) ([]git.DiffFile, error) {
 	live := func() ([]git.DiffFile, error) {
-		return git.GetDiff(diffRoot, baseRef, headRef, ignoreWhitespace, useTripleDot, path, contextLines)
+		return git.GetDiffPaths(diffRoot, baseRef, headRef, ignoreWhitespace, useTripleDot, paths, contextLines)
 	}
 	if includeUncommitted {
 		return live()
@@ -1303,7 +1312,10 @@ func (s *Server) getDiffCached(projectRoot, diffRoot, baseRef, headRef string, i
 	if ignoreWhitespace {
 		ws = "ws1"
 	}
-	key := strings.Join([]string{projectRoot, baseSHA, headSHA, dot, ws, "ctx" + strconv.Itoa(contextLines), path}, "\x00")
+	// Join paths with a separator that can't appear in a path so distinct path
+	// sets map to distinct keys. A single path or the empty (all-files) set
+	// collapse to the same key shape they used before this became paths-based.
+	key := strings.Join([]string{projectRoot, baseSHA, headSHA, dot, ws, "ctx" + strconv.Itoa(contextLines), strings.Join(paths, "\x01")}, "\x00")
 	if v, ok := s.diffCache.get(key); ok {
 		return v, nil
 	}
@@ -1313,6 +1325,73 @@ func (s *Server) getDiffCached(projectRoot, diffRoot, baseRef, headRef string, i
 	}
 	s.diffCache.put(key, diff, diffCost(diff))
 	return diff, nil
+}
+
+// fullFileContext is a context width large enough to pull each file as a single
+// whole-file hunk, so the client can reveal hidden lines without re-fetching.
+// Mirrors the web client's FULL_FILE_CONTEXT.
+const fullFileContext = 1_000_000
+
+// getFullContextDiff returns the whole diff with every eligible file expanded to
+// its full content in a single response, so the client need not fire one request
+// per file. It runs the normal-context diff (for change counts and the
+// large-file fallback) plus one scoped full-context diff over only the files
+// small enough to expand, then merges. Files whose change count or expanded line
+// count exceeds maxFullLines keep their normal-context hunks.
+func (s *Server) getFullContextDiff(projectRoot, diffRoot, baseRef, headRef string, ignoreWhitespace, useTripleDot bool, normalContext, maxFullChanges, maxFullLines int, includeUncommitted bool) ([]git.DiffFile, error) {
+	base, err := s.getDiffCachedPaths(projectRoot, diffRoot, baseRef, headRef, ignoreWhitespace, useTripleDot, nil, normalContext, includeUncommitted)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+
+	// Only expand files small enough to be worth shipping in full: the
+	// changed-line cap keeps the expensive full-context git call (and the extra
+	// payload) off large files the client hides by default anyway.
+	var candidates []string
+	for _, f := range base {
+		if f.Binary || len(f.Hunks) == 0 {
+			continue
+		}
+		if f.Additions+f.Deletions > maxFullChanges {
+			continue
+		}
+		candidates = append(candidates, f.Path)
+	}
+	if len(candidates) == 0 {
+		return base, nil
+	}
+	sort.Strings(candidates)
+
+	full, err := s.getDiffCachedPaths(projectRoot, diffRoot, baseRef, headRef, ignoreWhitespace, useTripleDot, candidates, fullFileContext, includeUncommitted)
+	if err != nil {
+		// Full expansion is best-effort: fall back to the normal-context diff.
+		return base, nil
+	}
+	fullByPath := make(map[string]git.DiffFile, len(full))
+	for _, f := range full {
+		fullByPath[f.Path] = f
+	}
+	// base is the cached normal-context slice — copy it before swapping hunks in
+	// so we don't mutate the cache entry shared with non-full-context callers.
+	merged := append([]git.DiffFile(nil), base...)
+	for i := range merged {
+		ff, ok := fullByPath[merged[i].Path]
+		if !ok {
+			continue
+		}
+		// Drop the full version if expansion blew past the cap (e.g. a few changed
+		// lines scattered through a very long file); keep the normal-context hunks.
+		lines := 0
+		for _, h := range ff.Hunks {
+			lines += len(h.Lines)
+		}
+		if lines > maxFullLines {
+			continue
+		}
+		merged[i].Hunks = ff.Hunks
+		merged[i].Expanded = true
+	}
+	return merged, nil
 }
 
 // diffCost estimates the in-memory byte size of a parsed diff, used to charge the
@@ -1446,6 +1525,16 @@ func (s *Server) GetAgentDiff(ctx context.Context, request api.GetAgentDiffReque
 		contextLines = *request.Params.Context
 	}
 
+	fullContext := request.Params.FullContext != nil && *request.Params.FullContext
+	maxFullChanges := 1000
+	if request.Params.MaxFullChanges != nil {
+		maxFullChanges = *request.Params.MaxFullChanges
+	}
+	maxFullLines := 6000
+	if request.Params.MaxFullLines != nil {
+		maxFullLines = *request.Params.MaxFullLines
+	}
+
 	// Use triple-dot (merge-base) diff when using default branch refs (whole MR view).
 	// Use double-dot when specific commits are given (commit-to-commit view).
 	useTripleDot := (request.Params.BaseRef == nil || *request.Params.BaseRef == "") &&
@@ -1472,7 +1561,15 @@ func (s *Server) GetAgentDiff(ctx context.Context, request api.GetAgentDiffReque
 		}
 	}
 
-	diffFiles, err := s.getDiffCached(projectRoot, diffRoot, baseRef, headRef, ignoreWhitespace, useTripleDot, path, contextLines, includeUncommitted)
+	// full_context expands every eligible file in one response (no per-file
+	// follow-up requests). It only applies to the whole-diff view; a specific
+	// path request keeps the single-file path.
+	var diffFiles []git.DiffFile
+	if fullContext && path == "" {
+		diffFiles, err = s.getFullContextDiff(projectRoot, diffRoot, baseRef, headRef, ignoreWhitespace, useTripleDot, contextLines, maxFullChanges, maxFullLines, includeUncommitted)
+	} else {
+		diffFiles, err = s.getDiffCached(projectRoot, diffRoot, baseRef, headRef, ignoreWhitespace, useTripleDot, path, contextLines, includeUncommitted)
+	}
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
@@ -1533,6 +1630,11 @@ func (s *Server) GetAgentDiff(ctx context.Context, request api.GetAgentDiffReque
 				Lines:    apiLines,
 			}
 		}
+		var expanded *bool
+		if f.Expanded {
+			t := true
+			expanded = &t
+		}
 		apiFiles[i] = api.DiffFile{
 			Path:       f.Path,
 			OldPath:    f.OldPath,
@@ -1540,6 +1642,7 @@ func (s *Server) GetAgentDiff(ctx context.Context, request api.GetAgentDiffReque
 			Additions:  f.Additions,
 			Deletions:  f.Deletions,
 			Binary:     f.Binary,
+			Expanded:   expanded,
 			Hunks:      apiHunks,
 		}
 	}

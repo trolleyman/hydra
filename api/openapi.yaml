@@ -543,6 +543,37 @@ paths:
             type: integer
             default: 3
           description: Number of lines of context to show (defaults to 3)
+        - in: query
+          name: full_context
+          required: false
+          schema:
+            type: boolean
+          description: >-
+            Return each file's full content (so the client can expand context
+            without further round-trips), in a single request for all files.
+            Files larger than max_full_lines are returned at the normal context
+            instead. Ignored when a specific path is requested.
+        - in: query
+          name: max_full_changes
+          required: false
+          schema:
+            type: integer
+            default: 1000
+          description: >-
+            Only auto-expand files with at most this many changed lines. Larger
+            files (which the client also hides by default) keep the normal
+            context so their full content isn't shipped until requested. Only
+            meaningful with full_context.
+        - in: query
+          name: max_full_lines
+          required: false
+          schema:
+            type: integer
+            default: 6000
+          description: >-
+            Upper bound on the full content shipped per expanded file. A file
+            whose whole content exceeds this stays at the normal context. Only
+            meaningful with full_context.
       responses:
         '200':
           description: OK
@@ -1769,6 +1800,13 @@ components:
         binary:
           type: boolean
           description: True if this is a binary file
+        expanded:
+          type: boolean
+          description: >-
+            True when hunks contain the file's entire content as a single
+            whole-file hunk (full_context view), so the client can drive the
+            context reveal/collapse model without re-fetching. Absent/false means
+            the file is shown at the requested windowed context.
         hunks:
           type: array
           items:

@@ -368,6 +368,9 @@ export class DefaultService {
      * @param includeUncommitted Include uncommitted changes in the worktree in the diff
      * @param path Only return the diff for this specific file path
      * @param context Number of lines of context to show (defaults to 3)
+     * @param fullContext Return each file's full content (so the client can expand context without further round-trips), in a single request for all files. Files larger than max_full_lines are returned at the normal context instead. Ignored when a specific path is requested.
+     * @param maxFullChanges Only auto-expand files with at most this many changed lines. Larger files (which the client also hides by default) keep the normal context so their full content isn't shipped until requested. Only meaningful with full_context.
+     * @param maxFullLines Upper bound on the full content shipped per expanded file. A file whose whole content exceeds this stays at the normal context. Only meaningful with full_context.
      * @returns DiffResponse OK
      * @throws ApiError
      */
@@ -380,6 +383,9 @@ export class DefaultService {
         includeUncommitted?: boolean,
         path?: string,
         context: number = 3,
+        fullContext?: boolean,
+        maxFullChanges: number = 1000,
+        maxFullLines: number = 6000,
     ): CancelablePromise<DiffResponse> {
         return this.httpRequest.request({
             method: 'GET',
@@ -395,6 +401,9 @@ export class DefaultService {
                 'include_uncommitted': includeUncommitted,
                 'path': path,
                 'context': context,
+                'full_context': fullContext,
+                'max_full_changes': maxFullChanges,
+                'max_full_lines': maxFullLines,
             },
             errors: {
                 404: `Not Found`,
