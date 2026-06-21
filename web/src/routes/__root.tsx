@@ -4,6 +4,7 @@ import { api } from '../stores/apiClient'
 import { useProjectStore } from '../stores/projectStore'
 import { useAgentStore, ARCHIVED_PAGE_SIZE } from '../stores/agentStore'
 import { usePageActive } from '../lib/usePageActive'
+import { startVisibilityPolling } from '../lib/visibilityPolling'
 import type { ProjectInfo, AgentResponse } from '../api'
 import { ApiError, ErrorResponse } from '../api'
 import { formatError } from '../api/format_error'
@@ -84,11 +85,10 @@ function ServiceHealthWarning({ projectId }: { projectId: string | null }) {
         // best-effort
       }
     }
-    void tick()
-    const id = setInterval(tick, 5000)
+    const stop = startVisibilityPolling(() => void tick(), 5000)
     return () => {
       active = false
-      clearInterval(id)
+      stop()
     }
   }, [projectId])
 
@@ -576,11 +576,10 @@ function RootLayout() {
       }
     }
 
-    fetchAgents()
-    const interval = setInterval(fetchAgents, 5_000)
+    const stop = startVisibilityPolling(fetchAgents, 5_000)
     return () => {
       cancelled = true
-      clearInterval(interval)
+      stop()
     }
   }, [currentProjectId, setAgents])
 
@@ -720,11 +719,10 @@ function RootLayout() {
       }
     }
 
-    fetchStatus()
-    const pollInterval = setInterval(fetchStatus, 10_000)
+    const stop = startVisibilityPolling(fetchStatus, 10_000)
     return () => {
       cancelled = true
-      clearInterval(pollInterval)
+      stop()
       if (ticker !== null) clearInterval(ticker)
     }
   }, [setProjects, setSelectedProjectId])

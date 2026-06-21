@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Gauge, Loader2 } from 'lucide-react'
 import { api } from '../stores/apiClient'
+import { startVisibilityPolling } from '../lib/visibilityPolling'
 import { Tooltip } from './Tooltip'
 import type { ClaudeUsageResponse } from '../api'
 
@@ -54,11 +55,10 @@ export function ClaudeUsageIndicator() {
 
   useEffect(() => {
     mounted.current = true
-    fetchUsage(false)
-    const poll = setInterval(() => fetchUsage(false), POLL_MS)
+    const stop = startVisibilityPolling(() => void fetchUsage(false), POLL_MS)
     return () => {
       mounted.current = false
-      clearInterval(poll)
+      stop()
     }
   }, [fetchUsage])
 
