@@ -162,6 +162,18 @@ func (c *Client) MergeAgent(ctx context.Context, id string) error {
 	return errtrace.Wrap(c.do(ctx, http.MethodPost, "/api/projects/"+c.ProjectID+"/agents/"+id+"/merge", nil, nil))
 }
 
+// SetAgentBaseBranch updates the base branch an agent is considered based on.
+// This is a metadata-only change (used by update-from-base and the diff view);
+// it does not move the agent's commits. Returns the updated agent.
+func (c *Client) SetAgentBaseBranch(ctx context.Context, id, baseBranch string) (*api.AgentResponse, error) {
+	body := api.UpdateAgentRequest{BaseBranch: &baseBranch}
+	var resp api.AgentResponse
+	if err := c.do(ctx, http.MethodPatch, "/api/projects/"+c.ProjectID+"/agents/"+id, body, &resp); err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	return &resp, nil
+}
+
 // DialTerminal opens a websocket to the agent's terminal (or its shell tab).
 func (c *Client) DialTerminal(id string, shell bool) (*websocket.Conn, error) {
 	dialer := &websocket.Dialer{
