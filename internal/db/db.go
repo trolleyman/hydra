@@ -39,6 +39,25 @@ func Open(projectRoot string) (*Store, error) {
 		return nil, errtrace.Wrap(fmt.Errorf("open database: %w", err))
 	}
 
+	// SQLite permits only a single writer at a time. The daemon shares one *Store
+	// across many concurrent goroutines (HTTP handlers, the liveness reconciler,
+	// the JSON status poller, terminal-WS attach). If database/sql is left to open
+	// several pooled connections, two of them racing to write — or a writer racing
+	// a WAL checkpoint — block on the busy handler for the full _busy_timeout and
+	// then fail with "database is locked" (SQLITE_BUSY). Funnel all in-process
+	// access through a single connection so those goroutines queue cheaply in Go
+	// instead of contending for the file lock. Every query here is sub-millisecond,
+	// so serialization is far cheaper than the 5s busy-waits it replaces; the DSN's
+	// _busy_timeout remains the cross-process safety net for the CLI commands
+	// (merge/tui) that open the same file in a separate process.
+	sqlDB, err := gormDB.DB()
+	if err != nil {
+		return nil, errtrace.Wrap(fmt.Errorf("get sql.DB: %w", err))
+	}
+	sqlDB.SetMaxOpenConns(1)
+	sqlDB.SetMaxIdleConns(1)
+	sqlDB.SetConnMaxLifetime(0)
+
 	if err := gormDB.AutoMigrate(&Agent{}); err != nil {
 		return nil, errtrace.Wrap(fmt.Errorf("auto migrate: %w", err))
 	}
