@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -71,6 +72,14 @@ type Server struct {
 	// scoped per project).
 	claudeUsageOnce sync.Once
 	claudeUsage     *usage.Cache
+
+	// Memoise git history reads keyed by resolved commit SHAs. Commits are
+	// immutable, so the commit list and committed diff between a fixed pair of SHAs
+	// never change — repeated reads (e.g. a terminal-WS reconnect re-loading the
+	// diff/commits panels) can be served without re-invoking git. Only committed
+	// state is cached; the uncommitted/working-tree diff is always recomputed live.
+	commitsCache immutableCache[[]git.CommitInfo]
+	diffCache    immutableCache[[]git.DiffFile]
 }
 
 // claudeUsageTTL is how long a probed usage snapshot is served before re-probing.
@@ -1152,6 +1161,67 @@ func (s *Server) PurgeAgent(ctx context.Context, request api.PurgeAgentRequestOb
 	return api.PurgeAgent204Response{}, nil
 }
 
+// listCommitsCached returns the commits between baseBranch and headBranch, served
+// from cache when both refs resolve to commit SHAs — commits are immutable, so the
+// result is stable for a given (baseSHA, headSHA) pair. If either ref fails to
+// resolve it falls back to a direct, uncached read. The key is namespaced by
+// project root so the single shared daemon never crosses repos.
+func (s *Server) listCommitsCached(projectRoot, baseBranch, headBranch string) ([]git.CommitInfo, error) {
+	baseSHA, errBase := git.ResolveRef(projectRoot, baseBranch)
+	headSHA, errHead := git.ResolveRef(projectRoot, headBranch)
+	if errBase != nil || errHead != nil {
+		return git.ListCommits(projectRoot, baseBranch, headBranch)
+	}
+	key := strings.Join([]string{projectRoot, baseSHA, headSHA}, "\x00")
+	if v, ok := s.commitsCache.get(key); ok {
+		return v, nil
+	}
+	commits, err := git.ListCommits(projectRoot, baseBranch, headBranch)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	s.commitsCache.put(key, commits)
+	return commits, nil
+}
+
+// getDiffCached returns the parsed diff. A committed-only diff (both refs resolve
+// to commit SHAs) is immutable and served from cache; an uncommitted diff reflects
+// the mutable working tree, so it is always recomputed live and never cached.
+// diffRoot is where git runs (the agent worktree for uncommitted diffs, otherwise
+// the project root); refs are resolved against projectRoot. The key folds in every
+// option that changes the output (refs, whitespace, dot-mode, path, context).
+func (s *Server) getDiffCached(projectRoot, diffRoot, baseRef, headRef string, ignoreWhitespace, useTripleDot bool, path string, contextLines int, includeUncommitted bool) ([]git.DiffFile, error) {
+	live := func() ([]git.DiffFile, error) {
+		return git.GetDiff(diffRoot, baseRef, headRef, ignoreWhitespace, useTripleDot, path, contextLines)
+	}
+	if includeUncommitted {
+		return live()
+	}
+	baseSHA, errBase := git.ResolveRef(projectRoot, baseRef)
+	headSHA, errHead := git.ResolveRef(projectRoot, headRef)
+	if errBase != nil || errHead != nil {
+		return live()
+	}
+	dot := "2dot"
+	if useTripleDot {
+		dot = "3dot"
+	}
+	ws := "ws0"
+	if ignoreWhitespace {
+		ws = "ws1"
+	}
+	key := strings.Join([]string{projectRoot, baseSHA, headSHA, dot, ws, "ctx" + strconv.Itoa(contextLines), path}, "\x00")
+	if v, ok := s.diffCache.get(key); ok {
+		return v, nil
+	}
+	diff, err := live()
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	s.diffCache.put(key, diff)
+	return diff, nil
+}
+
 func (s *Server) GetAgentCommits(ctx context.Context, request api.GetAgentCommitsRequestObject) (api.GetAgentCommitsResponseObject, error) {
 	projectRoot, err := s.resolveProjectRoot(request.ProjectId)
 	if err != nil {
@@ -1178,7 +1248,7 @@ func (s *Server) GetAgentCommits(ctx context.Context, request api.GetAgentCommit
 		return api.GetAgentCommits200JSONResponse{}, nil
 	}
 
-	commits, err := git.ListCommits(projectRoot, baseBranch, headBranch)
+	commits, err := s.listCommitsCached(projectRoot, baseBranch, headBranch)
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
@@ -1281,7 +1351,7 @@ func (s *Server) GetAgentDiff(ctx context.Context, request api.GetAgentDiffReque
 		}
 	}
 
-	diffFiles, err := git.GetDiff(diffRoot, baseRef, headRef, ignoreWhitespace, useTripleDot, path, contextLines)
+	diffFiles, err := s.getDiffCached(projectRoot, diffRoot, baseRef, headRef, ignoreWhitespace, useTripleDot, path, contextLines, includeUncommitted)
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
