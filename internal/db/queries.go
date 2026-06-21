@@ -69,7 +69,7 @@ func (s *Store) ListAgents(projectRoot string) ([]Agent, error) {
 // agent, or (0,0) if none was recorded or the agent is unknown.
 func (s *Store) GetAgentTermSize(id string) (rows, cols uint16, err error) {
 	var a Agent
-	e := s.db.Select("term_rows", "term_cols").First(&a, "id = ?", id).Error
+	e := s.reader().Select("term_rows", "term_cols").First(&a, "id = ?", id).Error
 	if errors.Is(e, gorm.ErrRecordNotFound) {
 		return 0, 0, nil
 	}
@@ -96,7 +96,7 @@ func (s *Store) SetAgentTermSize(id string, rows, cols uint16) error {
 // its own yet. Returns (0,0) if no active agent has a recorded size.
 func (s *Store) LatestTermSizeForProject(projectRoot string) (rows, cols uint16, err error) {
 	var a Agent
-	e := s.db.Select("term_rows", "term_cols").
+	e := s.reader().Select("term_rows", "term_cols").
 		Where("project_path = ? AND term_rows > 0 AND term_cols > 0", projectRoot).
 		Order("updated_at DESC").First(&a).Error
 	if errors.Is(e, gorm.ErrRecordNotFound) {
