@@ -357,7 +357,7 @@ func (m Model) resumeSelected() (tea.Model, tea.Cmd) {
 	// first WindowSizeMsg, when the window size isn't known yet.
 	rows, cols := m.agentViewSize()
 	if rows == 0 || cols == 0 {
-		rows, cols = heads.LoadResumeSize(headCopy.ProjectPath, headCopy.ID)
+		rows, cols = heads.LoadResumeSize(store, headCopy.ProjectPath, headCopy.ID)
 	}
 
 	return m, func() tea.Msg {

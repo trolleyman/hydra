@@ -182,7 +182,7 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 	// head's last persisted geometry (then the project fallback, then 80x24) when
 	// absent or out of range. This never resizes an already-live PTY — that path
 	// attaches with 0,0 and waits for the client's settled resize.
-	defRows, defCols := heads.LoadResumeSize(projectRoot, agentID)
+	defRows, defCols := heads.LoadResumeSize(s.DB, projectRoot, agentID)
 	initRows, initCols := parseTermSize(r, defRows, defCols)
 	log.Printf("terminal ws: resolved projectRoot: %q, useShell: %v", projectRoot, useShell)
 
@@ -327,7 +327,7 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 					// (daemon boot, TUI) seeds the PTY at the right width instead of
 					// 80x24. The agent tab and the head's bash tabs share one panel, so
 					// either keys the same head.
-					heads.SaveResumeSize(projectRoot, agentID, uint16(msg.Rows), uint16(msg.Cols))
+					heads.SaveResumeSize(s.DB, agentID, uint16(msg.Rows), uint16(msg.Cols))
 				}
 			}
 		}

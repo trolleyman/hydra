@@ -121,13 +121,6 @@ func GetDBPathFromProjectRoot(projectRoot string) string {
 	return filepath.Join(GetStateDirFromProjectRoot(projectRoot), "db.sqlite3")
 }
 
-// GetTerminalGeometryPath returns the file recording the last terminal geometry
-// a client reported for the project. It seeds clientless PTY resumes (daemon
-// boot, TUI) at the right width instead of the 80x24 default.
-func GetTerminalGeometryPath(projectRoot string) string {
-	return filepath.Join(GetStateDirFromProjectRoot(projectRoot), "terminal-geometry.json")
-}
-
 func GetStatusDirFromProjectRoot(projectRoot string) string {
 	return filepath.Join(GetHydraLocalDirFromProjectRoot(projectRoot), "status")
 }
