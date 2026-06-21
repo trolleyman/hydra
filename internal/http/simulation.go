@@ -1489,6 +1489,30 @@ func (s *SimulationServer) HandleTerminalWS(w http.ResponseWriter, r *http.Reque
 	}
 }
 
+// HandleEventsWS mirrors the real server's events stream. Simulation data is
+// static, so it just sends the one-time "refetch everything" nudge on connect and
+// then holds the connection open (ignoring client messages) until the peer
+// closes — enough for the client to do its initial load without a reconnect loop.
+func (s *SimulationServer) HandleEventsWS(w http.ResponseWriter, r *http.Request) {
+	rawConn, err := wsUpgrader.Upgrade(w, r, nil)
+	if err != nil {
+		return
+	}
+	conn := &safeConn{Conn: rawConn}
+	defer conn.Close()
+
+	for _, t := range []string{"agents_changed", "projects_changed", "services_changed"} {
+		if err := conn.WriteJSON(eventMsg{Type: t}); err != nil {
+			return
+		}
+	}
+	for {
+		if _, _, err := conn.ReadMessage(); err != nil {
+			return
+		}
+	}
+}
+
 // HandleArtifactsWS streams the mock artifact sets over a WebSocket, mirroring
 // the real server's endpoint. It sends one snapshot (the simulated states,
 // including the in-flight set's live log) and then keeps the connection open,
