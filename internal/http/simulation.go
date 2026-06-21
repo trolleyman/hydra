@@ -929,9 +929,21 @@ func simFile(path string, ct api.DiffFileChangeType, add, del int, header string
 	}
 }
 
+// maxSimContext caps the requested diff context. The real server feeds the
+// value to `git diff -U<n>`, which never emits more context than a file
+// actually has, so its memory is bounded by the checkout. The simulation has no
+// backing file: expandHunkContext *synthesizes* one "context line N" per
+// requested line, per hunk, so an unbounded client value (e.g. a stray
+// ?context=5000000) allocates millions of DiffLines — each with a heap string
+// and two heap *int — across every hunk, ballooning RSS into the gigabytes (a
+// single large request OOM-kills the process). The mock diffs are tiny and the
+// UI only ever asks for gapSize/2 (tens of lines), so this ceiling is far above
+// any legitimate request while keeping a hostile/buggy one cheap.
+const maxSimContext = 1000
+
 func simContext(params api.GetAgentDiffParams) int {
 	if params.Context != nil {
-		return *params.Context
+		return min(*params.Context, maxSimContext)
 	}
 	return 3
 }
