@@ -762,7 +762,7 @@ func (m *Manager) generate(spec config.ArtifactScript, v Version, key, ref strin
 	// worktree per generation (PLAN #51). Released for reuse when generation ends.
 	runDir := v.WorktreeDir
 	if runDir == "" {
-		s, err := m.pool.acquire(ref)
+		s, err := m.pool.acquire(ref, spec.CleanIgnored)
 		if err != nil {
 			meta.Status, meta.Error = StatusError, fmt.Sprintf("checkout %s: %v", ref, err)
 			return meta

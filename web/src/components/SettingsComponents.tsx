@@ -414,6 +414,7 @@ export function ArtifactsEditor({
         )}
         {artifacts.map((a, index) => {
           const unsafe = a.unsafe_host === true
+          const cleanIgnored = a.clean_ignored === true
           const enabled = a.enabled !== false
           return (
             <div key={index} className={`rounded-xl border p-4 space-y-3 transition-colors ${enabled ? 'border-gray-200 dark:border-gray-700 bg-gray-50/40 dark:bg-gray-800/20' : 'border-dashed border-gray-300 dark:border-gray-600 bg-gray-100/70 dark:bg-gray-900/40'}`}>
@@ -466,6 +467,21 @@ export function ArtifactsEditor({
                         <InfoTooltip title="Unsafe Host Execution">
                           <p>Runs the command directly on the host with <strong>no sandbox</strong> — full access to your machine, network, and credentials.</p>
                           <p className="mt-1.5">The command executes the <em>diffed ref's</em> code, so only enable this for a self-contained, audited command you trust against every ref you compare.</p>
+                        </InfoTooltip>
+                      </span>
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer h-[38px]">
+                      <input
+                        type="checkbox"
+                        checked={cleanIgnored}
+                        onChange={(e) => update(index, { clean_ignored: e.target.checked ? true : undefined })}
+                        className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                      />
+                      <span className="text-xs font-medium text-gray-600 dark:text-gray-300 flex items-center gap-1">
+                        Pristine checkout
+                        <InfoTooltip title="Pristine Checkout">
+                          <p>Artifact runs reuse a small pool of checkouts, switching commits with <code className="font-mono">git checkout</code> — this resets tracked files but keeps git-ignored caches (e.g. <code className="font-mono">node_modules</code>) warm between runs.</p>
+                          <p className="mt-1.5">Enable this to also wipe ignored files before each run (<code className="font-mono">git clean -fdx</code> instead of <code className="font-mono">-fd</code>) for a fully clean tree. Slower — only needed if stale ignored output can leak between commits.</p>
                         </InfoTooltip>
                       </span>
                     </label>

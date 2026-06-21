@@ -52,7 +52,7 @@ func TestSlotPoolAffinityAndReuse(t *testing.T) {
 	p := newTestPool(t, repo, maxSlots)
 
 	// 1. Fresh acquire creates one slot, checked out at A.
-	s1, err := p.acquire(shaA)
+	s1, err := p.acquire(shaA, false)
 	if err != nil {
 		t.Fatalf("acquire A: %v", err)
 	}
@@ -65,7 +65,7 @@ func TestSlotPoolAffinityAndReuse(t *testing.T) {
 	p.release(s1)
 
 	// 2. Re-acquire the same SHA → affinity hit: same slot, no new slot.
-	s2, err := p.acquire(shaA)
+	s2, err := p.acquire(shaA, false)
 	if err != nil {
 		t.Fatalf("re-acquire A: %v", err)
 	}
@@ -78,7 +78,7 @@ func TestSlotPoolAffinityAndReuse(t *testing.T) {
 	p.release(s2)
 
 	// 3. Acquire a different SHA → reuse the slot via incremental checkout, no growth.
-	s3, err := p.acquire(shaB)
+	s3, err := p.acquire(shaB, false)
 	if err != nil {
 		t.Fatalf("acquire B: %v", err)
 	}
@@ -103,11 +103,11 @@ func TestSlotPoolCap(t *testing.T) {
 	p := newTestPool(t, repo, 2)
 
 	// Hold both slots (same SHA, none free, so each forces a create up to the cap).
-	a, err := p.acquire(sha)
+	a, err := p.acquire(sha, false)
 	if err != nil {
 		t.Fatalf("acquire 1: %v", err)
 	}
-	b, err := p.acquire(sha)
+	b, err := p.acquire(sha, false)
 	if err != nil {
 		t.Fatalf("acquire 2: %v", err)
 	}
@@ -118,7 +118,7 @@ func TestSlotPoolCap(t *testing.T) {
 	// A third acquire must block until a slot is released.
 	got := make(chan *slot, 1)
 	go func() {
-		s, err := p.acquire(sha)
+		s, err := p.acquire(sha, false)
 		if err != nil {
 			t.Errorf("acquire 3: %v", err)
 		}
@@ -158,7 +158,7 @@ func TestSlotPoolCleanCrashRecovery(t *testing.T) {
 	// First pool creates a slot, then we drop the pool WITHOUT cleaning — mimicking
 	// a process that died mid-generation, leaving a registered worktree behind.
 	p1 := newTestPool(t, repo, maxSlots)
-	s, err := p1.acquire(sha)
+	s, err := p1.acquire(sha, false)
 	if err != nil {
 		t.Fatalf("acquire: %v", err)
 	}
@@ -179,6 +179,52 @@ func TestSlotPoolCleanCrashRecovery(t *testing.T) {
 	if worktreeRegistered(t, repo, s.path) {
 		t.Error("dangling worktree registration not pruned")
 	}
+}
+
+// TestSlotPoolCleanIgnored verifies the clean policy: an ignored file left in a
+// slot by a prior run survives a default (warm-cache) reuse but is wiped when the
+// next acquire requests a pristine tree (cleanIgnored=true) — which also bypasses
+// the affinity shortcut so the clean actually runs.
+func TestSlotPoolCleanIgnored(t *testing.T) {
+	repo := initRepo(t)
+	// Ignore *.cache so a generated cache file is an *ignored* untracked file —
+	// the only kind `git clean -fd` keeps and `-fdx` removes.
+	gitRun(t, repo, "config", "core.excludesFile", "/dev/null") // be explicit: only .gitignore
+	sha := commitFile(t, repo, ".gitignore", "*.cache\n")
+
+	p := newTestPool(t, repo, maxSlots)
+
+	// First run: acquire, drop an ignored cache file into the slot, release.
+	s, err := p.acquire(sha, false)
+	if err != nil {
+		t.Fatalf("acquire: %v", err)
+	}
+	cache := filepath.Join(s.path, "dep.cache")
+	if err := os.WriteFile(cache, []byte("warm"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p.release(s)
+
+	// Default reuse (warm cache): affinity hit, no clean — the ignored file survives.
+	s2, err := p.acquire(sha, false)
+	if err != nil {
+		t.Fatalf("warm acquire: %v", err)
+	}
+	if _, err := os.Stat(cache); err != nil {
+		t.Errorf("default reuse should keep ignored cache, but it was removed: %v", err)
+	}
+	p.release(s2)
+
+	// Pristine reuse: cleanIgnored skips affinity and runs `git clean -fdx`, so the
+	// ignored file is wiped.
+	s3, err := p.acquire(sha, true)
+	if err != nil {
+		t.Fatalf("pristine acquire: %v", err)
+	}
+	if _, err := os.Stat(cache); !os.IsNotExist(err) {
+		t.Errorf("pristine reuse should remove ignored cache, but it remains: err=%v", err)
+	}
+	p.release(s3)
 }
 
 func readMarker(t *testing.T, slotPath string) string {

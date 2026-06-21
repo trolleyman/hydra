@@ -164,6 +164,17 @@ type ArtifactScript struct {
 	// runs against. Heavy build scripts are the most tempted to set this and the
 	// ones running the most untrusted code; prefer leaving it off.
 	UnsafeHost bool `toml:"unsafe_host"`
+	// CleanIgnored, when true, also removes git-ignored files (dependency/build
+	// caches like node_modules) from the checkout before each run — `git clean
+	// -fdx` instead of the default `git clean -fd`. Artifact generations reuse a
+	// small pool of worktrees (see internal/artifacts), switching commits with
+	// `git checkout --force`, which resets *tracked* files but leaves *ignored*
+	// files in place so caches stay warm between runs. Leave this false for that
+	// speed (a cold install/build every generation is slow). Set it true only if
+	// your generator can be contaminated by a previous run's ignored output (stale
+	// build artifacts leaking between commits): it trades the warm cache for a
+	// guaranteed-pristine tree. Default false.
+	CleanIgnored bool `toml:"clean_ignored"`
 	// Enabled gates whether the diff viewer runs this script. nil or true means
 	// active; false means it is skipped entirely. nil is the default so configs
 	// written before this flag keep their artifacts running. Like unsafe_host,
@@ -732,6 +743,10 @@ func artifactsDocLines() []string {
 		docPrefix + "   timeout_sec  max seconds the command may run (0 = built-in default).",
 		docPrefix + "   unsafe_host  run on the host with NO sandbox — full access to your machine and",
 		docPrefix + "                credentials; only for audited, self-contained commands (default false).",
+		docPrefix + "   clean_ignored  also delete git-ignored files (e.g. node_modules) before each run —",
+		docPrefix + "                a pristine checkout (git clean -fdx) instead of the default that keeps",
+		docPrefix + "                dependency/build caches warm (-fd). Slower; set true only if stale",
+		docPrefix + "                ignored output can leak between commits (default false).",
 		docPrefix + "   enabled      set false to skip this script in the diff viewer (default true).",
 		docPrefix + " Formats: .png, .jpg and .gif are diffed pixel-by-pixel; .webm video is diffed",
 		docPrefix + " frame-by-frame when ffmpeg is installed (otherwise by byte hash). Other types",
@@ -777,6 +792,9 @@ func artifactFieldLines(a ArtifactScript) []string {
 	}
 	if a.UnsafeHost {
 		out = append(out, "unsafe_host = true")
+	}
+	if a.CleanIgnored {
+		out = append(out, "clean_ignored = true")
 	}
 	if a.Enabled != nil && !*a.Enabled {
 		out = append(out, "enabled = false")

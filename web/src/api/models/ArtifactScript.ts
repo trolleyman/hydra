@@ -23,6 +23,10 @@ export type ArtifactScript = {
      */
     unsafe_host?: boolean;
     /**
+     * Also delete git-ignored files (e.g. node_modules) before each run — a pristine checkout (git clean -fdx) instead of the default that keeps caches warm (-fd). Slower; only if stale ignored output can leak between commits (default false)
+     */
+    clean_ignored?: boolean;
+    /**
      * Whether the diff viewer runs this script (absent/null or true = enabled; false = skipped)
      */
     enabled?: boolean | null;
