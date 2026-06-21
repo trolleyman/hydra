@@ -351,7 +351,10 @@ func (m Model) resumeSelected() (tea.Model, tea.Cmd) {
 	store := m.store
 
 	return m, func() tea.Msg {
-		if err := heads.ResumeHead(reg, store, headCopy.ProjectPath, headCopy, 24, 80); err != nil {
+		// Seed from the last reported geometry rather than a hardcoded 80x24, so
+		// the agent resumes at a sane width before the attach sends the real size.
+		rows, cols := heads.LoadResumeSize(headCopy.ProjectPath)
+		if err := heads.ResumeHead(reg, store, headCopy.ProjectPath, headCopy, rows, cols); err != nil {
 			return errMsg{err}
 		}
 		return resumeDoneMsg(headCopy.ID)

@@ -326,7 +326,12 @@ func resumeHeadsOnBoot(reg *session.Registry, store *db.Store, projectRoot strin
 			continue
 		}
 		log.Printf("daemon: resuming head %s after restart", h.ID)
-		if err := heads.ResumeHead(reg, store, projectRoot, h, 24, 80); err != nil {
+		// No client is connected on boot, so seed the PTY from the last geometry a
+		// browser/TUI reported for this project rather than the narrow 80x24
+		// default — otherwise the agent repaints at 80 cols and that wrapped output
+		// is baked into the scrollback before the first client ever attaches.
+		rows, cols := heads.LoadResumeSize(projectRoot)
+		if err := heads.ResumeHead(reg, store, projectRoot, h, rows, cols); err != nil {
 			log.Printf("warn: resume head %s: %v", h.ID, err)
 			errMsg := err.Error()
 			_ = store.ClearHeadStatus(h.ID, &errMsg)
