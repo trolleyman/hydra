@@ -866,9 +866,13 @@ func (s *Server) GetAgent(ctx context.Context, request api.GetAgentRequestObject
 	return api.GetAgent200JSONResponse(agentResponse(*head)), nil
 }
 
-// UpdateAgent renames an agent's user-facing title. This is a display-only
-// change: the agent's stable ID, branch, worktree and live session are
-// untouched, so it is cheap and safe even while the agent is running.
+// UpdateAgent patches an agent's mutable fields (title and/or base branch).
+// Both are cheap metadata-only changes: the agent's stable ID, branch, worktree
+// and live session are untouched, so it is safe even while the agent is running.
+//
+// base_branch updates only which branch the agent is considered based on (used
+// by update-from-base and the diff view); it does NOT move existing commits.
+// Rebasing the agent's branch onto the new base, if wanted, is left to the user.
 func (s *Server) UpdateAgent(ctx context.Context, request api.UpdateAgentRequestObject) (api.UpdateAgentResponseObject, error) {
 	if request.Body == nil {
 		return api.UpdateAgent400JSONResponse{
@@ -877,13 +881,36 @@ func (s *Server) UpdateAgent(ctx context.Context, request api.UpdateAgentRequest
 			Details: "request body is required",
 		}, nil
 	}
-	title := strings.TrimSpace(request.Body.Title)
-	if title == "" {
+	if request.Body.Title == nil && request.Body.BaseBranch == nil {
 		return api.UpdateAgent400JSONResponse{
 			Code:    400,
 			Error:   api.ErrorResponseErrorBadRequest,
-			Details: "title must not be empty",
+			Details: "at least one field (title or base_branch) is required",
 		}, nil
+	}
+
+	var title string
+	if request.Body.Title != nil {
+		title = strings.TrimSpace(*request.Body.Title)
+		if title == "" {
+			return api.UpdateAgent400JSONResponse{
+				Code:    400,
+				Error:   api.ErrorResponseErrorBadRequest,
+				Details: "title must not be empty",
+			}, nil
+		}
+	}
+
+	var baseBranch string
+	if request.Body.BaseBranch != nil {
+		baseBranch = strings.TrimSpace(*request.Body.BaseBranch)
+		if baseBranch == "" {
+			return api.UpdateAgent400JSONResponse{
+				Code:    400,
+				Error:   api.ErrorResponseErrorBadRequest,
+				Details: "base_branch must not be empty",
+			}, nil
+		}
 	}
 
 	projectRoot, err := s.resolveProjectRoot(request.ProjectId)
@@ -902,10 +929,29 @@ func (s *Server) UpdateAgent(ctx context.Context, request api.UpdateAgentRequest
 		}, nil
 	}
 
-	if err := s.DB.UpdateAgentTitle(request.Id, title); err != nil {
-		return nil, errtrace.Wrap(err)
+	if baseBranch != "" {
+		// Validate the new base resolves to a real commit before persisting, so
+		// update-from-base and diffs don't later fail against a bogus ref.
+		if _, err := git.ResolveRef(projectRoot, baseBranch); err != nil {
+			return api.UpdateAgent400JSONResponse{
+				Code:    400,
+				Error:   api.ErrorResponseErrorBadRequest,
+				Details: fmt.Sprintf("base branch %q does not exist: %v", baseBranch, err),
+			}, nil
+		}
+		if err := s.DB.UpdateAgentBaseBranch(request.Id, baseBranch); err != nil {
+			return nil, errtrace.Wrap(err)
+		}
+		head.BaseBranch = baseBranch
 	}
-	head.Title = title
+
+	if title != "" {
+		if err := s.DB.UpdateAgentTitle(request.Id, title); err != nil {
+			return nil, errtrace.Wrap(err)
+		}
+		head.Title = title
+	}
+
 	s.notifyAgentsChanged(projectRoot, false)
 	return api.UpdateAgent200JSONResponse(agentResponse(*head)), nil
 }

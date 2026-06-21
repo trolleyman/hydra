@@ -144,6 +144,13 @@ func (s *Store) UpdateAgentTitle(id, title string) error {
 	return errtrace.Wrap(result.Error)
 }
 
+// UpdateAgentBaseBranch updates the base branch an agent is considered based on.
+// Metadata only: it does not touch the agent's branch, worktree or commits.
+func (s *Store) UpdateAgentBaseBranch(id, baseBranch string) error {
+	result := s.db.Model(&Agent{}).Where("id = ?", id).Update("base_branch", baseBranch)
+	return errtrace.Wrap(result.Error)
+}
+
 // SoftDeleteAgent soft-deletes the agent with the given ID.
 func (s *Store) SoftDeleteAgent(id string) error {
 	result := s.db.Delete(&Agent{}, "id = ?", id)
