@@ -125,6 +125,13 @@ func GetStatusDirFromProjectRoot(projectRoot string) string {
 	return filepath.Join(GetHydraLocalDirFromProjectRoot(projectRoot), "status")
 }
 
+// GetNamespaceSocketDirFromProjectRoot returns the (gitignored) directory holding
+// a head's namespace-host control socket. Like the other generated dirs it sits
+// under .hydra/local; the sockets themselves are recreated on each launch.
+func GetNamespaceSocketDirFromProjectRoot(projectRoot, id string) string {
+	return filepath.Join(GetHydraLocalDirFromProjectRoot(projectRoot), "ns", id)
+}
+
 func GetStatusJsonFromProjectRoot(projectRoot, id string) string {
 	return filepath.Join(GetStatusDirFromProjectRoot(projectRoot), id+".json")
 }
@@ -165,7 +172,7 @@ func CreateGitignoreAllInDir(dir string) error {
 // hydraLocalSubdirs are the generated .hydra subdirectories that used to sit at
 // the .hydra top level and now live under .hydra/local. MigrateHydraLayout moves
 // any it finds at the old location.
-var hydraLocalSubdirs = []string{"worktrees", "state", "artifacts", "uploads", "status", "cache", "cow"}
+var hydraLocalSubdirs = []string{"worktrees", "state", "artifacts", "uploads", "status", "cache", "cow", "ns"}
 
 // MigrateHydraLayout moves a project created under the old flat layout
 // (.hydra/<dir>) into the consolidated one (.hydra/local/<dir>). It is idempotent

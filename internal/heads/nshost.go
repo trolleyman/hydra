@@ -107,7 +107,7 @@ func ensureNamespaceHost(projectRoot, id string, base sandbox.Options) (*nsHost,
 // dir writable so its listener is reachable from the daemon via the same
 // bind-mounted path.
 func launchNamespaceHost(projectRoot, id string, base sandbox.Options) (*nsHost, error) {
-	sockDir := filepath.Join(paths.GetHydraDirFromProjectRoot(projectRoot), "ns", id)
+	sockDir := paths.GetNamespaceSocketDirFromProjectRoot(projectRoot, id)
 	if err := os.MkdirAll(sockDir, 0o700); err != nil {
 		return nil, errtrace.Wrap(fmt.Errorf("create ns socket dir: %w", err))
 	}
