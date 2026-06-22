@@ -241,6 +241,22 @@ function computeGap(prevHunk: DiffHunk, nextHunk: DiffHunk): number {
   return Math.max(0, nextStart - lastLine - 1)
 }
 
+// trailingContext counts the unchanged context lines at the very end of a hunk,
+// ignoring a trailing "no newline" marker. `git diff -U<n>` emits up to `n`
+// context lines after the last change, so when a hunk shows fewer than the
+// requested context it has run out of file — the hunk already reaches EOF and
+// there is nothing left below to expand into.
+function trailingContext(hunk: DiffHunk): number {
+  let count = 0
+  for (let i = hunk.lines.length - 1; i >= 0; i--) {
+    const t = hunk.lines[i].type
+    if (t === 'no_newline') continue
+    if (t === 'context') { count++; continue }
+    break
+  }
+  return count
+}
+
 // ── Diff Hunk rendering ───────────────────────────────────────────────────────
 
 const UNIFIED_LINE_NUM_CLASS = 'select-none text-right pr-2 text-gray-400 dark:text-gray-600 text-xs font-mono w-10 shrink-0 border-r border-gray-200 dark:border-gray-700 leading-5'
@@ -787,6 +803,7 @@ const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onComment, 
                 const prevHunk = isFirst ? null : file.hunks[i - 1]
                 const gapSize = prevHunk ? computeGap(prevHunk, hunk) : 0
                 const atTopOfFile = isFirst && hunk.new_start <= 1 && hunk.old_start <= 1
+                const atEndOfFile = isLast && trailingContext(hunk) < currentContext
                 return (
                   <Fragment key={hunk.header}>
                     {isFirst && !atTopOfFile && (
@@ -821,7 +838,7 @@ const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onComment, 
                       : <UnifiedHunk hunk={hunk} highlightedOld={highlightedOld} highlightedNew={highlightedNew}
                         onComment={(ln, isNew, txt) => onComment(file.path, ln, isNew, txt)} />
                     }
-                    {isLast && (
+                    {isLast && !atEndOfFile && (
                       <div className={EXPANDER_ROW}>
                         <Tooltip side="top" content={`Expand down ${EXPAND_STEP} lines`}>
                           <button onClick={() => expand(currentContext + EXPAND_STEP)} className={`${EXPANDER_BTN} mr-1`}>
@@ -1510,13 +1527,13 @@ function FileRow({ file, isActive, onClick, indent = 0 }: {
       style={{ paddingLeft: `${10 + indent}px`, paddingRight: '10px' }}
     >
       {(() => { const { Icon, className } = getFileIcon(file.path.split('/').pop() ?? file.path); return <Icon className={`w-3.5 h-3.5 shrink-0 ${className}`} /> })()}
-      <Tooltip content={file.path}>
+      <Tooltip content={file.path} className="min-w-0">
         <span className="font-mono text-[10px] truncate flex-1 min-w-0 text-gray-700 dark:text-gray-300">
           {file.path.split('/').pop()}
         </span>
       </Tooltip>
-      <ChangeTypeIcon type={file.change_type} className="w-3 h-3" />
-      <div className="flex items-center gap-1 shrink-0">
+      <ChangeTypeIcon type={file.change_type} className="w-3 h-3 shrink-0" />
+      <div className="flex items-center gap-1 shrink-0 ml-auto">
         {file.additions > 0 && <span className="text-[10px] text-green-600 dark:text-green-400">+{file.additions}</span>}
         {file.deletions > 0 && <span className="text-[10px] text-red-600 dark:text-red-400">−{file.deletions}</span>}
       </div>

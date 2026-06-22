@@ -885,6 +885,16 @@ func (s *SimulationServer) GetAgentDiff(w http.ResponseWriter, r *http.Request, 
 						},
 					},
 				},
+				// Deliberately long path: exercises sidebar filename truncation
+				// and the right-aligned add/del counts.
+				simFile(
+					"internal/app/services/notifications/providers/webhooks/outbound/delivery_retry_scheduler_with_exponential_backoff.go",
+					api.DiffFileChangeTypeAdded, 1024, 0,
+					"@@ -0,0 +1,3 @@", 0, 1,
+					api.DiffLine{Type: api.Addition, Content: "package webhooks", NewLineNum: ptr(1)},
+					api.DiffLine{Type: api.Addition, Content: "", NewLineNum: ptr(2)},
+					api.DiffLine{Type: api.Addition, Content: "// DeliveryRetryScheduler retries failed webhook deliveries.", NewLineNum: ptr(3)},
+				),
 			},
 		}
 		resp.Files = simApplyContext(resp.Files, params)
@@ -1088,6 +1098,7 @@ func (s *SimulationServer) GetAgentDiffFiles(w http.ResponseWriter, r *http.Requ
 				{Path: "internal/http/server.go", ChangeType: api.DiffFileChangeTypeModified, Additions: 12, Deletions: 3},
 				{Path: "internal/db/model.go", ChangeType: api.DiffFileChangeTypeDeleted, Additions: 0, Deletions: 42},
 				{Path: "internal/db/schema.go", ChangeType: api.DiffFileChangeTypeAdded, Additions: 58, Deletions: 0},
+				{Path: "internal/app/services/notifications/providers/webhooks/outbound/delivery_retry_scheduler_with_exponential_backoff.go", ChangeType: api.DiffFileChangeTypeAdded, Additions: 1024, Deletions: 0},
 			},
 		}
 		api.WriteJSON(w, http.StatusOK, resp)
@@ -1377,7 +1388,7 @@ var simRepoFiles = map[string]string{
 	// scripts GetRepositoryArtifacts returns below).
 	".hydra/config.toml": "[[artifacts]]\nname = \"screenshots\"\ncommand = \"bun run screenshots.ts\"\ntimeout_sec = 900\n\n" +
 		"[[artifacts]]\nname = \"components\"\ncommand = \"bun run storybook-shots.ts\"\n",
-	"CLAUDE.md": "# Project guidelines\n\nThis demo repo powers Hydra's **Repository** view.\n\n- Use `bun` instead of `npm`.\n- Run the formatter before committing.\n",
+	"CLAUDE.md":  "# Project guidelines\n\nThis demo repo powers Hydra's **Repository** view.\n\n- Use `bun` instead of `npm`.\n- Run the formatter before committing.\n",
 	"LICENSE":    "MIT License\n\nCopyright (c) 2026 Hydra Demo\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction.\n",
 	"hydra.toml": "pre_prompt = \"\"\"\n- Use bun instead of npm\n\"\"\"\n\n[sandbox]\nwritable_paths = [\"~/.cache/go-build\"]\n",
 	// A deeply-nested single-child chain; each folder holds only the next, so the
