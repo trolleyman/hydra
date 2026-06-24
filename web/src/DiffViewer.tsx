@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback, Fragment, useMemo, memo } from 'react'
-import hljs from 'highlight.js'
+import { highlightLines } from './lib/highlightCore'
+import { highlightSides } from './lib/highlightClient'
 import { api } from './stores/apiClient'
 import { formatError } from './api/format_error'
 import type { AgentResponse, CommitInfo, DiffFile, DiffHunk, DiffLine, DiffResponse } from './api'
@@ -38,55 +39,6 @@ function getLanguage(filePath: string): string {
   if (lower === 'makefile') return 'makefile'
   const ext = lower.split('.').pop() ?? ''
   return EXT_LANG_MAP[ext] ?? 'plaintext'
-}
-
-function splitHighlightedLines(html: string): string[] {
-  const lines: string[] = []
-  let current = ''
-  const openSpans: string[] = []
-  let i = 0
-
-  while (i < html.length) {
-    if (html[i] === '<') {
-      const end = html.indexOf('>', i)
-      if (end === -1) { current += html.slice(i); break }
-      const tag = html.slice(i, end + 1)
-      if (tag.startsWith('<span')) {
-        openSpans.push(tag)
-        current += tag
-      } else if (tag === '</span>') {
-        openSpans.pop()
-        current += tag
-      } else {
-        current += tag
-      }
-      i = end + 1
-    } else if (html[i] === '\n') {
-      current += openSpans.map(() => '</span>').join('')
-      lines.push(current)
-      current = openSpans.join('')
-      i++
-    } else {
-      current += html[i]
-      i++
-    }
-  }
-  if (current.replace(/<[^>]*>/g, '') !== '' || current.includes('<span')) {
-    current += openSpans.map(() => '</span>').join('')
-    lines.push(current)
-  }
-  return lines
-}
-
-function highlightCode(code: string, language: string): string[] {
-  try {
-    const result = hljs.highlight(code, { language, ignoreIllegals: true })
-    return splitHighlightedLines(result.value)
-  } catch {
-    return code.split('\n').map((l) =>
-      l.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    )
-  }
 }
 
 // ── Diff line building helpers ────────────────────────────────────────────────
@@ -453,36 +405,54 @@ const FULL_MAX_LINES = 6000
 const HIDDEN_FILE_THRESHOLD = 1000
 
 // Files at or below this many lines are syntax-highlighted synchronously during
-// render (cheap, no flash). Larger files are highlighted off the critical render
-// path in an idle callback, so a big diff paints immediately (plain text) and the
-// colours swap in without blocking the main thread. Highlighting always runs over
-// the whole file either way, so multi-line constructs stay correct.
-const HL_SYNC_MAX = 600
+// render: tiny inputs are cheap, so highlighting inline avoids both a plain→
+// coloured flash and the round-trip overhead of dispatching to a worker. Larger
+// files (the ones that actually stack up into a long main-thread task when a
+// multi-file diff renders) are highlighted off-thread in the Web Worker pool
+// (`highlightClient`): they paint immediately as plain text and the colours
+// stream in as each highlight completes. Highlighting always runs over the whole
+// file either way, so multi-line constructs stay correct.
+const HL_SYNC_MAX = 80
 
 const EMPTY_HIGHLIGHT = {
   highlightedOld: new Map<number, string>(),
   highlightedNew: new Map<number, string>(),
 }
 
-// buildHighlightMaps syntax-highlights a flat run of diff lines as a whole
-// (so multi-line constructs — block comments, template strings — highlight
-// correctly) and returns per-line-number → HTML maps for the old and new sides.
-function buildHighlightMaps(lines: DiffLine[], lang: string) {
-  const oldLines: Array<{ lineNum: number; content: string }> = []
-  const newLines: Array<{ lineNum: number; content: string }> = []
+interface SideLine { lineNum: number; content: string }
+
+// extractSides splits a flat run of diff lines into the old-side and new-side
+// line lists (number + content), preserving file order so the joined content
+// highlights as a whole.
+function extractSides(lines: DiffLine[]): { oldLines: SideLine[]; newLines: SideLine[] } {
+  const oldLines: SideLine[] = []
+  const newLines: SideLine[] = []
   for (const l of lines) {
     if ((l.type === 'context' || l.type === 'deletion') && l.old_line_num != null)
       oldLines.push({ lineNum: l.old_line_num, content: l.content })
     if ((l.type === 'context' || l.type === 'addition') && l.new_line_num != null)
       newLines.push({ lineNum: l.new_line_num, content: l.content })
   }
-  const highlight = (ls: typeof oldLines): Map<number, string> => {
-    if (ls.length === 0) return new Map()
-    const h = highlightCode(ls.map((l) => l.content).join('\n'), lang)
-    const map = new Map<number, string>()
-    ls.forEach((l, i) => { if (h[i] !== undefined) map.set(l.lineNum, h[i]) })
-    return map
-  }
+  return { oldLines, newLines }
+}
+
+// mapFromHtml zips a side's lines back together with the per-line highlighted
+// HTML returned by the highlighter into a line-number → HTML map.
+function mapFromHtml(ls: SideLine[], html: string[] | null): Map<number, string> {
+  const map = new Map<number, string>()
+  if (!html) return map
+  ls.forEach((l, i) => { if (html[i] !== undefined) map.set(l.lineNum, html[i]) })
+  return map
+}
+
+// buildHighlightMaps syntax-highlights a flat run of diff lines synchronously
+// (so multi-line constructs — block comments, template strings — highlight
+// correctly) and returns per-line-number → HTML maps for the old and new sides.
+// Used only for the small-file fast path; larger files go through the worker.
+function buildHighlightMaps(lines: DiffLine[], lang: string) {
+  const { oldLines, newLines } = extractSides(lines)
+  const highlight = (ls: SideLine[]): Map<number, string> =>
+    mapFromHtml(ls, ls.length ? highlightLines(ls.map((l) => l.content).join('\n'), lang) : null)
   return { highlightedOld: highlight(oldLines), highlightedNew: highlight(newLines) }
 }
 
@@ -682,33 +652,36 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onCo
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fullLines, hunksSig, file.binary, isCollapsed, isHidden])
 
-  // Small files highlight inline (no flash). Large files would block the main
-  // thread if every one highlighted during the same render, so they paint as
-  // plain text and colourise from an idle callback. Whole-file input keeps the
-  // highlighting correct; a web worker could move it fully off-thread, but idle
-  // scheduling is simpler and already splits the work one file at a time.
+  // Small files highlight inline (no flash, no worker round-trip). Larger files
+  // would block the main thread if every one highlighted during the same render,
+  // so they paint as plain text and colourise from the Web Worker pool — the
+  // hljs work runs fully off the UI thread. Whole-file input keeps the
+  // highlighting correct regardless of which path runs.
   const syncHighlight = useMemo(
     () => (highlightSource && highlightSource.length <= HL_SYNC_MAX ? buildHighlightMaps(highlightSource, lang) : null),
     [highlightSource, lang],
   )
-  const [deferredHighlight, setDeferredHighlight] = useState(EMPTY_HIGHLIGHT)
+  const [asyncHighlight, setAsyncHighlight] = useState(EMPTY_HIGHLIGHT)
   useEffect(() => {
     if (!highlightSource || highlightSource.length <= HL_SYNC_MAX) return
-    setDeferredHighlight(EMPTY_HIGHLIGHT)
+    // Repaint as plain text while the worker highlights the new content.
+    setAsyncHighlight(EMPTY_HIGHLIGHT)
     let cancelled = false
-    const run = () => { if (!cancelled) setDeferredHighlight(buildHighlightMaps(highlightSource, lang)) }
-    const w = window as unknown as {
-      requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number
-      cancelIdleCallback?: (id: number) => void
-    }
-    const id = w.requestIdleCallback ? w.requestIdleCallback(run, { timeout: 800 }) : window.setTimeout(run, 0)
-    return () => {
-      cancelled = true
-      if (w.requestIdleCallback && w.cancelIdleCallback) w.cancelIdleCallback(id)
-      else window.clearTimeout(id)
-    }
+    const { oldLines, newLines } = extractSides(highlightSource)
+    highlightSides(
+      lang,
+      oldLines.length ? oldLines.map((l) => l.content).join('\n') : null,
+      newLines.length ? newLines.map((l) => l.content).join('\n') : null,
+    ).then((res) => {
+      if (cancelled) return
+      setAsyncHighlight({
+        highlightedOld: mapFromHtml(oldLines, res.old),
+        highlightedNew: mapFromHtml(newLines, res.new),
+      })
+    })
+    return () => { cancelled = true }
   }, [highlightSource, lang])
-  const { highlightedOld, highlightedNew } = syncHighlight ?? deferredHighlight
+  const { highlightedOld, highlightedNew } = syncHighlight ?? asyncHighlight
 
   // A file with whole-file content but no additions/deletions (e.g. a pure
   // rename) has nothing to collapse — render its lines plainly rather than
