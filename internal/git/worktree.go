@@ -184,6 +184,29 @@ func AddDetachedWorktree(projectRoot, worktreePath, ref string) error {
 	return nil
 }
 
+// AddWorktreeForBranch runs `git worktree add <path> <branch>`, checking out an
+// EXISTING branch (no -b) so that commits made in the worktree advance that
+// branch. It is used to merge into a base branch that is not currently checked
+// out anywhere; pair it with RemoveWorktree once done. Fails if the branch is
+// already checked out in another worktree (git's own guard).
+func AddWorktreeForBranch(projectRoot, worktreePath, branch string) error {
+	if err := ValidateRef(branch); err != nil {
+		return errtrace.Wrap(fmt.Errorf("branch: %w", err))
+	}
+	if err := paths.CreateGitignoreAllInDir(filepath.Dir(worktreePath)); err != nil {
+		return errtrace.Wrap(err)
+	}
+	cmd := exec.Command("git", "-C", projectRoot,
+		"worktree", "add", worktreePath, branch)
+	common.PrintExecCmd(cmd)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return errtrace.Wrap(fmt.Errorf("git worktree add: %w", err))
+	}
+	return nil
+}
+
 // CheckoutDetached switches an existing worktree to ref in detached-HEAD state,
 // discarding any tracked local changes (`git checkout --detach --force`). Only
 // files that differ between the worktree's current commit and ref are rewritten,

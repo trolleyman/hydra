@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { api } from '../stores/apiClient'
-import type { AgentResponse, SpawnAgentRequest } from '../api'
+import type { AgentResponse, SpawnAgentRequest, RepositoryBranch } from '../api'
+import { BranchSelector } from './BranchSelector'
 import { formatError } from '../api/format_error'
 import { uploadFile, extractFiles, isImageFile } from '../api/uploads'
 import { Zap, LoaderCircle, Paperclip } from 'lucide-react'
@@ -63,6 +64,11 @@ export function SpawnForm({
   })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Base branch the new agent will be created from. Defaults to the project's
+  // current branch; can be pointed at another agent's hydra/<id> branch to stack
+  // agents on top of one another. `branches` is null until the list loads.
+  const [branches, setBranches] = useState<RepositoryBranch[] | null>(null)
+  const [baseBranch, setBaseBranch] = useState('')
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const [dragOver, setDragOver] = useState(false)
   // Index into the image-only attachment list while the lightbox is open; null
@@ -86,6 +92,28 @@ export function SpawnForm({
   useEffect(() => {
     writeLocal(StorageKeys.defaultAgentType, agentType)
   }, [agentType])
+
+  // Load the project's branches for the base-branch selector and default the
+  // selection to the current branch. Re-runs (and resets) when the project
+  // changes; ignores the result if the project switched mid-flight.
+  useEffect(() => {
+    if (!projectId) {
+      setBranches(null)
+      setBaseBranch('')
+      return
+    }
+    let cancelled = false
+    api.default.getRepositoryBranches(projectId)
+      .then((res) => {
+        if (cancelled) return
+        setBranches(res.branches)
+        setBaseBranch(res.current || res.branches[0]?.name || '')
+      })
+      .catch(() => {
+        if (!cancelled) setBranches(null)
+      })
+    return () => { cancelled = true }
+  }, [projectId])
 
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   // The resizable element is the whole card (textarea + footer), so the drag
@@ -325,6 +353,7 @@ export function SpawnForm({
         prompt: finalPrompt,
         agent_type: agentType,
         id: finalId || generateId(base) || generateId(readyAttachments[0]?.filename ?? '') || 'attachment',
+        ...(baseBranch ? { base_branch: baseBranch } : {}),
       }
       const agent = await api.default.spawnAgent(projectId ?? '', req)
       setPrompt('')
@@ -357,6 +386,32 @@ export function SpawnForm({
         onRemove={removeAttachment}
         onOpenImage={(id) => setLightboxIndex(imageAttachments.findIndex((img) => img.id === id))}
       />
+    )
+  }
+
+  // The base-branch picker, shown immediately left of the Spawn button. Hidden
+  // until branches load (or if the project has none). In the narrow compact
+  // footer it shrinks and truncates; on the full-page form it sizes to content.
+  function renderBranchSelector(compactSel: boolean) {
+    if (!branches || branches.length === 0) return null
+    const selector = (
+      <BranchSelector
+        branches={branches}
+        activeRef={baseBranch}
+        isKnownBranch={branches.some((b) => b.name === baseBranch)}
+        onSelect={setBaseBranch}
+        title="Base branch to create the agent from (pick an agent branch to stack on it)"
+        flexible={compactSel}
+      />
+    )
+    if (compactSel) {
+      return <div className="flex min-w-0 max-w-[8rem] shrink">{selector}</div>
+    }
+    return (
+      <div className="flex items-center gap-1.5 shrink-0">
+        <span className="hidden sm:inline text-xs text-gray-400 dark:text-gray-500">from</span>
+        {selector}
+      </div>
     )
   }
 
@@ -406,7 +461,7 @@ export function SpawnForm({
               textClassName="px-3 pt-2.5 pb-1 text-xs leading-relaxed placeholder-gray-400 dark:placeholder-gray-500 disabled:opacity-50"
             />
             {renderAttachments('sm')}
-            <div className="flex items-center justify-between px-2 pb-2 gap-2 shrink-0">
+            <div className="flex items-center justify-between px-2 pb-2 gap-1.5 shrink-0">
               <div className="flex items-center gap-1 min-w-0 flex-1">
                 <Tooltip content="Attach files" side="top">
                   <button
@@ -434,6 +489,7 @@ export function SpawnForm({
                   className="min-w-0 flex-1 text-[10px] text-gray-500 dark:text-gray-400 bg-transparent font-mono focus:outline-none placeholder-gray-300 dark:placeholder-gray-600 truncate ml-1"
                 />
               </div>
+              {renderBranchSelector(true)}
               <button
                 type="submit"
                 disabled={!canSubmit || loading || disabled}
@@ -546,6 +602,7 @@ export function SpawnForm({
                   </div>
                 </div>
                 <div className="flex items-center gap-3 shrink-0 self-end sm:self-auto">
+                  {renderBranchSelector(false)}
                   <span className="hidden sm:inline text-xs text-gray-400 dark:text-gray-500">{submitHint}</span>
                   <button
                     type="submit"

@@ -365,16 +365,25 @@ export function AgentDetail({
   }
 
   function handleMerge() {
+    // If this agent is stacked on another agent (its base branch is another
+    // agent's branch), the merge advances that parent agent's branch — name it,
+    // and warn when the parent is still running since its working files will
+    // shift underneath it.
+    const parent = useAgentStore.getState().agents.find((a) => a.branch_name === agent.base_branch)
+    const target = parent ? `agent "${parent.id}"'s branch (${agent.base_branch})` : `the base branch (${agent.base_branch})`
     const baseMessage = `Are you sure you want to merge agent "${agent.id}"?`
-    const tail = `\n\nThis will merge the agent's branch into the base branch, then stop the sandbox session and clean up.`
+    const parentWarning = parent && parent.session_status === 'running'
+      ? `\n\n⚠️ Parent agent "${parent.id}" is currently running — merging will change its working files while it works.`
+      : ''
+    const tail = `\n\nThis will merge the agent's branch into ${target}, then stop the sandbox session and clean up.`
 
     // Show the dialog immediately so it never lags behind a slow git query.
     // The uncommitted-changes check runs in the background and folds its
     // warning into the open dialog when it returns.
     useDialogStore.getState().show({
       title: 'Merge Agent',
-      message: baseMessage + tail,
-      type: 'confirm',
+      message: baseMessage + parentWarning + tail,
+      type: parentWarning ? 'warning' : 'confirm',
       onConfirm: async () => {
         setMerging(true)
         // A persistent toast keeps the merge visible even after the dialog
@@ -430,7 +439,7 @@ export function AgentDetail({
         const warning = `\n\n⚠️ This agent has ${total} uncommitted file change${total !== 1 ? 's' : ''} that will be lost when merging.`
         const dialog = useDialogStore.getState()
         if (dialog.title === 'Merge Agent') {
-          dialog.update({ message: baseMessage + warning + tail, type: 'warning' })
+          dialog.update({ message: baseMessage + parentWarning + warning + tail, type: 'warning' })
         }
       } catch { /* ignore — proceed without warning */ }
     })()

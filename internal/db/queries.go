@@ -65,6 +65,17 @@ func (s *Store) ListAgents(projectRoot string) ([]Agent, error) {
 	return agents, nil
 }
 
+// AgentsByBaseBranch returns the active (non-soft-deleted) agents in the given
+// project whose base branch is baseBranch. Used to reparent stacked agents when
+// the branch they sit on is merged away.
+func (s *Store) AgentsByBaseBranch(projectRoot, baseBranch string) ([]Agent, error) {
+	var agents []Agent
+	if err := s.reader().Where("project_path = ? AND base_branch = ?", projectRoot, baseBranch).Find(&agents).Error; err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	return agents, nil
+}
+
 // GetAgentTermSize returns the last terminal geometry recorded for an active
 // agent, or (0,0) if none was recorded or the agent is unknown.
 func (s *Store) GetAgentTermSize(id string) (rows, cols uint16, err error) {

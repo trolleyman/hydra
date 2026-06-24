@@ -1027,10 +1027,41 @@ func (s *Server) MergeAgent(ctx context.Context, request api.MergeAgentRequestOb
 		return nil, &apiError{Code: 400, Type: api.ErrorResponseErrorBadRequest, Err: err} //errtrace:skip
 	}
 
+	// Merge the agent's branch INTO its base branch (which may be another agent's
+	// hydra/<id> branch for stacked agents), not into whatever the project root
+	// happens to have checked out. ResolveMergeDir gives us a worktree where the
+	// base branch is checked out so the merge can advance it.
+	target := head.BaseBranch
+	if err := git.ValidateRef(target); err != nil {
+		errMsg := fmt.Sprintf("invalid base branch %q: %v", target, err)
+		if s.DB != nil {
+			_ = s.DB.ClearHeadStatus(head.ID, &errMsg)
+		}
+		return api.MergeAgent409JSONResponse(api.MergeConflictError{
+			Error:   api.MergeConflictErrorErrorMergeConflict,
+			Code:    409,
+			Details: errMsg,
+		}), nil
+	}
+
+	mergeDir, cleanup, err := heads.ResolveMergeDir(projectRoot, target)
+	if err != nil {
+		errMsg := fmt.Sprintf("merge failed: could not check out base branch %q: %v", target, err)
+		if s.DB != nil {
+			_ = s.DB.ClearHeadStatus(head.ID, &errMsg)
+		}
+		return api.MergeAgent409JSONResponse(api.MergeConflictError{
+			Error:   api.MergeConflictErrorErrorMergeConflict,
+			Code:    409,
+			Details: errMsg,
+		}), nil
+	}
+	defer cleanup()
+
 	// Get author info from git config
 	authorName, authorEmail := gitConfigVal(projectRoot, "user.name"), gitConfigVal(projectRoot, "user.email")
 
-	if err := git.Merge(projectRoot, branchName, authorName, authorEmail); err != nil {
+	if err := git.Merge(mergeDir, branchName, authorName, authorEmail); err != nil {
 		errMsg := fmt.Sprintf("merge failed: %v", err)
 		if s.DB != nil {
 			_ = s.DB.ClearHeadStatus(head.ID, &errMsg)
@@ -1040,6 +1071,21 @@ func (s *Server) MergeAgent(ctx context.Context, request api.MergeAgentRequestOb
 			Code:    409,
 			Details: errMsg,
 		}), nil
+	}
+
+	// Reparent stacked children: any agent based on this agent's branch is moved
+	// onto the branch we just merged into, so it doesn't dangle when this branch
+	// is deleted. Metadata only (matches the base-branch editor's semantics).
+	if s.DB != nil {
+		children, err := s.DB.AgentsByBaseBranch(projectRoot, branchName)
+		if err != nil {
+			return nil, errtrace.Wrap(err)
+		}
+		for _, child := range children {
+			if err := s.DB.UpdateAgentBaseBranch(child.ID, target); err != nil {
+				return nil, errtrace.Wrap(err)
+			}
+		}
 	}
 
 	// Kill cleanup without re-doing the CAS (already in "merging" state).

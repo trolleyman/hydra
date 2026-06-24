@@ -178,6 +178,51 @@ func GetHeadByID(ctx context.Context, reg *session.Registry, store *db.Store, pr
 	return nil, nil
 }
 
+// ResolveMergeDir returns a working directory in which target is checked out, so
+// a merge can advance that branch. It is the mechanism behind merging a stacked
+// agent into its base branch (which may be another agent's branch). Resolution:
+//
+//  1. If target is an agent branch hydra/<id> whose worktree exists and has that
+//     branch checked out, use that worktree (the parent agent's checkout).
+//  2. Else if target is the project root's current branch, use the project root
+//     (the common case: merging into main).
+//  3. Else create a throwaway worktree checked out on target, returned with a
+//     cleanup that removes it. (Handles a base branch checked out nowhere.)
+//
+// cleanup is always non-nil and must be called by the caller (it is a no-op for
+// cases 1 and 2).
+func ResolveMergeDir(projectRoot, target string) (dir string, cleanup func(), err error) {
+	noop := func() {}
+
+	if strings.HasPrefix(target, "hydra/") {
+		id := strings.TrimPrefix(target, "hydra/")
+		wt := paths.GetWorktreeDirFromProjectRoot(projectRoot, id)
+		if _, statErr := os.Stat(wt); statErr == nil {
+			if cur, brErr := git.GetCurrentBranch(wt); brErr == nil && cur == target {
+				return wt, noop, nil
+			}
+		}
+	}
+
+	if cur, brErr := git.GetCurrentBranch(projectRoot); brErr == nil && cur == target {
+		return projectRoot, noop, nil
+	}
+
+	tmp, err := os.MkdirTemp("", "hydra-merge-")
+	if err != nil {
+		return "", noop, errtrace.Wrap(err)
+	}
+	if err := git.AddWorktreeForBranch(projectRoot, tmp, target); err != nil {
+		_ = os.RemoveAll(tmp)
+		return "", noop, errtrace.Wrap(err)
+	}
+	cleanup = func() {
+		_ = git.RemoveWorktree(projectRoot, tmp)
+		_ = os.RemoveAll(tmp)
+	}
+	return tmp, cleanup, nil
+}
+
 // ListArchivedHeads returns a page of archived (killed/merged) heads for the
 // project, newest-archived first. limit <= 0 returns all; offset paginates.
 // Archived heads carry no live session or worktree and are read-only.

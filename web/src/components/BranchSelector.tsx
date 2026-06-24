@@ -50,6 +50,10 @@ export function BranchSelector({
   const agentBranches = branches.filter((b) => b.is_agent && !b.is_current)
   const otherBranches = branches.filter((b) => !b.is_agent && !b.is_current)
 
+  // The label trigger mirrors the rows: when the selected branch is an agent
+  // branch, show the purple Bot icon instead of the generic branch icon.
+  const activeIsAgent = branches.some((b) => b.name === activeRef && b.is_agent)
+
   const Row = ({ b }: { b: RepositoryBranch }) => (
     <button
       onClick={() => { onSelect(b.name); setOpen(false) }}
@@ -84,7 +88,9 @@ export function BranchSelector({
             : 'text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
             }`}
         >
-          <GitBranch className="w-3.5 h-3.5 shrink-0" />
+          {activeIsAgent
+            ? <Bot className="w-3.5 h-3.5 shrink-0 text-purple-500" />
+            : <GitBranch className="w-3.5 h-3.5 shrink-0" />}
           <span className="truncate font-mono">{isKnownBranch ? activeRef : shortSha(activeRef)}</span>
           <ChevronDown className="w-3.5 h-3.5 shrink-0 opacity-60" />
         </button>
