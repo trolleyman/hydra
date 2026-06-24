@@ -188,10 +188,12 @@ try {
   //    diff tree shows VS Code-style compacted folders (one/two/three on a
   //    single row) — see internal/http/simulation.go GetAgentDiff(agent-3).
   //
-  //    The diff viewer compares versions by hashing the output bytes and only
-  //    surfaces files that differ, so the render MUST be byte-reproducible —
-  //    otherwise unchanged UI would always look "modified". Three sources of
-  //    nondeterminism are neutralized:
+  //    The diff viewer surfaces files that differ between the two versions. It
+  //    starts from a byte hash but refines that with a pixel-level decode (see
+  //    internal/artifacts Manager.Compare), so renders need only be PIXEL-stable,
+  //    not byte-identical — cosmetic encoder/metadata jitter is ignored. We still
+  //    pin the obvious sources of *visible* nondeterminism so unchanged UI never
+  //    reads as "modified":
   //      * Chromium font anti-aliasing: pinned with the flags below
   //        (no GPU, no LCD/subpixel text, fixed hinting + color profile).
   //      * App-level animation: an init script freezes Math.random (the spawn
@@ -1352,8 +1354,10 @@ try {
           // Each ticked tile mounts a DiffCanvas that loads both images and paints
           // its overlay asynchronously, clearing the canvas's opacity-0 once ready.
           // Wait for every overlay canvas to finish so the magenta diff is fully
-          // drawn before the capture (the diff is a pure pixel compare, so once
-          // painted it's identical every render → byte-stable).
+          // drawn before the capture — otherwise a half-painted (or still-blank)
+          // overlay would itself read as a visual change. Once painted, the overlay
+          // is a deterministic pixel compare of the two images, so it renders the
+          // same every time.
           await page.waitForFunction(() => {
             const canvases = Array.from(document.querySelectorAll<HTMLCanvasElement>('[data-mkey] canvas'))
             return canvases.length > 0 && canvases.every((c) => !c.classList.contains('opacity-0'))
@@ -1465,9 +1469,12 @@ try {
     // the repository view's loading spinner (a LoaderCircle with Tailwind
     // animate-spin) over one full rotation.
     //
-    // The diff viewer compares video by byte hash (it can't decode pixels
-    // server-side), so the .webm MUST be byte-reproducible or every comparison
-    // would read "modified". Two sources of nondeterminism are removed:
+    // The diff viewer compares video by per-frame decoded-pixel hashes (ffmpeg
+    // `-f framemd5`; see internal/artifacts videoFrameHashes), so what must be
+    // stable is the decoded FRAMES — container metadata/timestamps are ignored,
+    // and the .webm need not be byte-identical. We still make the frames
+    // deterministic so a re-render never reads "modified". Two nondeterminism
+    // sources are removed:
     //   * The spin is a CSS animation, so we DON'T let it free-run on the wall
     //     clock. Pausing it via the Web Animations API doesn't stick (a style
     //     recalc resets the CSS animation-play-state back to running), so instead
@@ -1478,7 +1485,8 @@ try {
     //     input frames, but the WebM muxer stamps a wall-clock date + version
     //     strings by default; -flags/-fflags +bitexact drop those. yuv444p keeps
     //     full chroma (no subsampling), so the encode is genuinely lossless.
-    // (Verified: two full runs produce byte-identical .webm output.)
+    // (Lossless + deterministic frames keep the per-frame hashes stable run to
+    // run; bitexact muxing also makes the bytes themselves reproducible.)
     const SPIN_FRAMES = 12 // one rotation at 12fps → a 1s clip
     const ffmpegBin = ffmpegStatic as unknown as string
     const recordSpinner = async (theme: (typeof themes)[number]) => {

@@ -44,8 +44,9 @@ writable_paths = ["~/.cache/go-build", "~/.go/pkg", "~/.bun/install/cache", "~/.
 ## Outputs may be still images (.png/.jpg/.gif/.webp/.avif/.svg/.bmp/.pdf) or video
 ## (.webm) — useful for comparing an animation before/after. The viewer plays a
 ## before/after .webm pair in lockstep (synchronized scrub) and offers a per-frame
-## difference view. Because video is compared by byte hash (its pixels can't be
-## decoded server-side), encode LOSSLESS and deterministically or every run reads as
+## difference view. Video is compared by per-frame decoded-pixel hashes (via
+## ffmpeg), so container metadata/timestamps don't matter, but the decoded frames
+## must be stable: encode LOSSLESS and deterministically or a re-render reads as
 ## "modified": e.g. `ffmpeg -i in.mp4 -c:v libvpx-vp9 -lossless 1 -an out.webm`.
 ## Tags: alongside an image foo.png the command may write a JSON sidecar foo.png.meta
 ## like {"tags": ["theme::dark", "viewport::phone"]}. The diff viewer shows these as

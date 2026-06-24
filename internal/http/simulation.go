@@ -1173,6 +1173,34 @@ func simSVG(label, color string, w, h int) string {
 	return "data:image/svg+xml;base64," + base64.StdEncoding.EncodeToString([]byte(doc))
 }
 
+// simSVGUI renders a minimal, abstract UI mock — a header title, a body panel,
+// and a small status badge in the top-right corner. The before/after sides of a
+// changed image pass the same title/theme but a different badge colour + label,
+// so ONLY that small badge region differs between them. This keeps the pixel-diff
+// "Highlight" overlay meaningful: it marks just the changed badge rather than
+// painting over the whole frame (which a wholesale colour/label swap would do).
+func simSVGUI(title string, dark bool, badgeColor, badgeText string, w, h int) string {
+	bg, body, fg := "#e2e8f0", "#cbd5e1", "#0f172a"
+	if dark {
+		bg, body, fg = "#0f172a", "#1e293b", "#f1f5f9"
+	}
+	bw, bh := 56, 22      // badge box
+	bx, by := w-bw-12, 12 // top-right, 12px inset
+	doc := fmt.Sprintf(`<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%d">`+
+		`<rect width="%d" height="%d" fill="%s"/>`+
+		`<text x="16" y="30" font-family="sans-serif" font-size="16" fill="%s">%s</text>`+
+		`<rect x="12" y="48" width="%d" height="%d" rx="8" fill="%s"/>`+
+		`<rect x="%d" y="%d" width="%d" height="%d" rx="6" fill="%s"/>`+
+		`<text x="%d" y="%d" font-family="sans-serif" font-size="11" fill="white" text-anchor="middle">%s</text>`+
+		`</svg>`,
+		w, h, w, h, bg,
+		fg, title,
+		w-24, h-60, body,
+		bx, by, bw, bh, badgeColor,
+		bx+bw/2, by+15, badgeText)
+	return "data:image/svg+xml;base64," + base64.StdEncoding.EncodeToString([]byte(doc))
+}
+
 // simArtifactLog is a believable multi-line generation log for the in-flight
 // artifact set, so the diff viewer can document the expanded live-log view
 // (stdout plus a couple of stderr warnings rendered in red). The final stdout
@@ -1298,33 +1326,36 @@ func simReadyChangedSet() api.ArtifactSet {
 		Status:  api.ArtifactSetStatusReady,
 		Changed: true,
 		Files: []api.ArtifactFile{
+			// Each modified pair shares everything except a small top-right status
+			// badge (grey "Draft" → green "Live"), so the pixel-diff Highlight marks
+			// only that region rather than the whole frame — see simSVGUI.
 			{
 				Name:       "home.png",
 				ChangeType: api.ArtifactFileChangeTypeModified,
 				Tags:       artTags("theme::light", "viewport::desktop"),
-				LeftUrl:    ptr(simSVG("Home (before)", "#b91c1c", 360, 220)),
-				RightUrl:   ptr(simSVG("Home (after)", "#15803d", 360, 220)),
+				LeftUrl:    ptr(simSVGUI("Home", false, "#64748b", "Draft", 360, 220)),
+				RightUrl:   ptr(simSVGUI("Home", false, "#16a34a", "Live", 360, 220)),
 			},
 			{
 				Name:       "home-dark.png",
 				ChangeType: api.ArtifactFileChangeTypeModified,
 				Tags:       artTags("theme::dark", "viewport::desktop"),
-				LeftUrl:    ptr(simSVG("Home dark (before)", "#7f1d1d", 360, 220)),
-				RightUrl:   ptr(simSVG("Home dark (after)", "#166534", 360, 220)),
+				LeftUrl:    ptr(simSVGUI("Home", true, "#64748b", "Draft", 360, 220)),
+				RightUrl:   ptr(simSVGUI("Home", true, "#16a34a", "Live", 360, 220)),
 			},
 			{
 				Name:       "login-phone.png",
 				ChangeType: api.ArtifactFileChangeTypeModified,
 				Tags:       artTags("theme::light", "viewport::phone"),
-				LeftUrl:    ptr(simSVG("Login (before)", "#b91c1c", 240, 480)),
-				RightUrl:   ptr(simSVG("Login (after)", "#15803d", 240, 480)),
+				LeftUrl:    ptr(simSVGUI("Login", false, "#64748b", "Draft", 240, 480)),
+				RightUrl:   ptr(simSVGUI("Login", false, "#16a34a", "Live", 240, 480)),
 			},
 			{
 				Name:       "profile-phone-dark.png",
 				ChangeType: api.ArtifactFileChangeTypeModified,
 				Tags:       artTags("theme::dark", "viewport::phone"),
-				LeftUrl:    ptr(simSVG("Profile (before)", "#7f1d1d", 240, 480)),
-				RightUrl:   ptr(simSVG("Profile (after)", "#166534", 240, 480)),
+				LeftUrl:    ptr(simSVGUI("Profile", true, "#64748b", "Draft", 240, 480)),
+				RightUrl:   ptr(simSVGUI("Profile", true, "#16a34a", "Live", 240, 480)),
 			},
 			{
 				Name:       "settings-phone.png",
