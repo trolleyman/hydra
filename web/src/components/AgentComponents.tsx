@@ -210,11 +210,22 @@ export function AgentSidebarItem({
         // Reserve a fixed-height line for the live activity / last message so the
         // row keeps a constant height as the text appears, disappears, or changes
         // between status transitions — otherwise the whole sidebar jumps around.
-        // `leading-4` pins the line box to the same 1rem as the min-height so a
-        // monospace `code` chip (shell-command activity) doesn't size the line
-        // box from its taller font metrics and nudge the row up vs. plain status.
-        <div className="mt-0.5 ml-4 min-h-[1rem] leading-4 text-[11px] text-gray-400 dark:text-gray-500 truncate">
-          {renderMarkdown(agentStatusDetail(agent), { dollarCommand: true })}
+        //
+        // The height MUST NOT be driven by the rendered content's line box: an
+        // inline monospace `code` chip (shell-command activity) and plain
+        // proportional status text are baseline-aligned but have different font
+        // metrics, so even at an identical `line-height` their inline boxes
+        // distribute that height differently around the baseline and the line
+        // box's union can exceed it — making a code line taller than a plain one.
+        // Pinning line-height (the previous fix) wasn't enough for that reason.
+        // Instead lock a fixed `h-4` and center the content (`flex items-center`),
+        // clipping any overflow, so the row is exactly 1rem tall whichever font
+        // the activity uses. The inner span carries `truncate` (+ `min-w-0` so it
+        // can shrink inside the flex row) for the horizontal ellipsis.
+        <div className="mt-0.5 ml-4 h-4 flex items-center overflow-hidden text-[11px] text-gray-400 dark:text-gray-500">
+          <span className="min-w-0 truncate">
+            {renderMarkdown(agentStatusDetail(agent), { dollarCommand: true })}
+          </span>
         </div>
       )}
     </button>
