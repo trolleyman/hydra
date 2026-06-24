@@ -787,6 +787,38 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /api/projects/{project_id}/agents/{id}/unread:
+    post:
+      summary: Mark an agent as unread, raising its unread-changes flag
+      operationId: markAgentUnread
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            type: string
+          description: Project ID
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: No Content
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /api/projects/{project_id}/config:
     get:
       summary: Get the merged configuration

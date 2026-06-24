@@ -247,8 +247,9 @@ try {
       // spinner to appear.
       holdRequest?: string
       // Seeds the diff viewer's image-diff comparison mode ('hydra-diff-image-mode')
-      // before the app boots, so the artifacts panel renders before/after pairs in
-      // the chosen mode. Only meaningful on the artifacts (agent-1) page.
+      // before the app boots, so before/after image pairs render in the chosen
+      // mode. Used by the artifacts (agent-1) page and by the repository
+      // branch-compare diff's in-tree image shots (which read the same setting).
       imageDiffMode?: 'side-by-side' | 'ab' | 'slider' | 'onion'
       // Seeds the repository diff's one-file-at-a-time preference
       // ('hydra-repo-diff-single-file') before boot. Omit for the default
@@ -468,6 +469,25 @@ try {
         name: 'repository-diff-renamed',
         path: '/project/sim-project/repository',
         clicks: ['button:has(svg.lucide-git-compare)', 'button:has-text("hydra/add-line-numbers")', 'button:has-text("renderer.go")'],
+      },
+      // A modified in-tree image: the diff viewer renders the artifacts panel's
+      // before/after image differ (ImageDiffView) in place of "Binary file
+      // changed", obeying the shared image-diff mode setting. Click the changed
+      // image in the file list; side-by-side mode shows before and after at once
+      // (the sim serves a different picture per ref, so they visibly differ).
+      {
+        name: 'repository-diff-image',
+        path: '/project/sim-project/repository',
+        clicks: ['button:has(svg.lucide-git-compare)', 'button:has-text("hydra/add-line-numbers")', 'button:has-text("diff-banner.png")'],
+        imageDiffMode: 'side-by-side',
+      },
+      // An added in-tree image: only the after side exists, so the differ shows
+      // the new image beside a "No image" before placeholder.
+      {
+        name: 'repository-diff-image-added',
+        path: '/project/sim-project/repository',
+        clicks: ['button:has(svg.lucide-git-compare)', 'button:has-text("hydra/add-line-numbers")', 'button:has-text("diff-added.png")'],
+        imageDiffMode: 'side-by-side',
       },
       // The diff branch selector reopened while diffing: the dropdown checkmarks
       // the current compare branch, and clicking that branch (or the base) exits
@@ -1095,11 +1115,13 @@ try {
           )
           await settle(page)
         }
-        if (pg.imageDiffMode || pg.expandArtifact) {
+        if ((pg.imageDiffMode || pg.expandArtifact) && pg.path.includes('/agent/')) {
           // The artifacts panel populates from a WebSocket snapshot, which (unlike
           // the HTTP fetches the goto's networkidle waits for) isn't tracked by
           // networkidle. Wait for the always-present "screenshots" card so the
-          // panel is rendered before we capture it.
+          // panel is rendered before we capture it. Only the agent diff page has an
+          // artifacts panel — the repository branch-compare diff also reads
+          // imageDiffMode (for in-tree image diffs) but has no such card to wait on.
           await page.waitForFunction(() =>
             Array.from(document.querySelectorAll('button')).some((b) => b.textContent?.includes('screenshots')),
           )

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { api } from '../stores/apiClient'
 import type { ArtifactSet, ArtifactFile, ArtifactLogLine } from '../api'
-import { LoaderCircle, Image as ImageIcon, ImageOff, ChevronDown, ChevronRight, TriangleAlert, RefreshCw, ScrollText, RotateCcw, SquarePlus, SquareMinus, SquareDot } from 'lucide-react'
+import { LoaderCircle, Image as ImageIcon, ImageOff, ChevronDown, ChevronRight, TriangleAlert, RefreshCw, ScrollText, RotateCcw, SquarePlus, SquareMinus, SquareDot, Search, X } from 'lucide-react'
 import { InfoTooltip } from './InfoTooltip'
 import { loadArtifactPrefs, saveArtifactPrefs, loadTagFilter, saveTagFilter, defaultTagFilter, isDefaultTagFilter, ARTIFACT_CHANGE_CATEGORY as CHANGE_CATEGORY, type ArtifactTagFilter } from '../lib/artifactPrefs'
 import { stripAnsi } from '../lib/ansi'
@@ -387,7 +387,7 @@ function SideBySide({ left, right }: { left?: string | null; right?: string | nu
 // modes keep their own layout even when one side is missing (added/removed file),
 // substituting a "No image" placeholder; we only fall back to the side-by-side
 // pair for that mode itself, or the degenerate case of no images at all.
-function ImageDiffView({ left, right, mode }: { left?: string | null; right?: string | null; mode: ImageDiffMode }) {
+export function ImageDiffView({ left, right, mode }: { left?: string | null; right?: string | null; mode: ImageDiffMode }) {
   if (mode === 'side-by-side' || (!left && !right)) {
     return <SideBySide left={left} right={right} />
   }
@@ -503,6 +503,73 @@ function fileMatchesFilter(file: ArtifactFile, filter: ArtifactTagFilter): boole
     if (freeTags.length > 0 && freeTags.every((t) => filter.free.includes(t))) return false
   }
   return true
+}
+
+// fuzzyScore does a subsequence fuzzy match of `needle` within `haystack` (both
+// already lowercased by the caller). It returns a positive score — higher means a
+// closer match, with bonuses for characters that land at a word boundary, in a
+// consecutive run, or as a whole substring — or null when `needle` isn't a
+// subsequence of `haystack` at all.
+function fuzzyScore(needle: string, haystack: string): number | null {
+  if (!needle) return 0
+  let score = 0
+  let from = 0
+  let prev = -2
+  for (const ch of needle) {
+    const idx = haystack.indexOf(ch, from)
+    if (idx === -1) return null
+    let pts = 1
+    if (idx === prev + 1) pts += 2 // part of a consecutive run
+    if (idx === 0 || /[^a-z0-9]/.test(haystack[idx - 1])) pts += 3 // start of a word
+    score += pts
+    prev = idx
+    from = idx + 1
+  }
+  if (haystack.includes(needle)) score += 4 // reward a clean substring hit
+  return score
+}
+
+// searchScore ranks a file against a free-text search query. The query is split on
+// whitespace into words, and every word must fuzzy-match the filename or one of the
+// file's tags — if any word matches nothing, the file is excluded (null). The score
+// sums each word's best field match, so files that hit more or closer fields rank
+// higher. An empty query scores 0 (matches everything).
+function searchScore(file: ArtifactFile, query: string): number | null {
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean)
+  if (words.length === 0) return 0
+  const fields = [file.name, ...(file.tags ?? [])].map((s) => s.toLowerCase())
+  let total = 0
+  for (const w of words) {
+    let best: number | null = null
+    for (const f of fields) {
+      const s = fuzzyScore(w, f)
+      if (s !== null && (best === null || s > best)) best = s
+    }
+    if (best === null) return null
+    total += best
+  }
+  return total
+}
+
+// searchFiles drops files that don't match the query and sorts the rest by
+// descending score (ties keep input order — Array.sort is stable). An empty query
+// returns the list unchanged.
+function searchFiles(files: ArtifactFile[], query: string): ArtifactFile[] {
+  if (!query.trim()) return files
+  return files
+    .map((f, i) => ({ f, i, score: searchScore(f, query) }))
+    .filter((x): x is { f: ArtifactFile; i: number; score: number } => x.score !== null)
+    .sort((a, b) => b.score - a.score || a.i - b.i)
+    .map((x) => x.f)
+}
+
+// computeVisibleFiles is the single source of truth for which of a set's files are
+// shown, and in what order: first the tag/type/change filter hides files, then the
+// search query (when present) narrows + ranks them. Used by both the card (to
+// render) and the panel (to decide whether a card has any match while searching).
+function computeVisibleFiles(files: ArtifactFile[], filter: ArtifactTagFilter, search: string): ArtifactFile[] {
+  const filtered = filterIsActive(filter) ? files.filter((f) => fileMatchesFilter(f, filter)) : files
+  return search.trim() ? searchFiles(filtered, search) : filtered
 }
 
 // computeScopeCounts walks the files once, tallying per value how many items carry
@@ -1234,16 +1301,19 @@ function PersistedLogView({ leftUrl, rightUrl, open }: { leftUrl?: string | null
   )
 }
 
-function ArtifactSetCard({ set, mode, spans, onSpanChange, filter, onRefresh, projectId, agentId }: { set: ArtifactSet; mode: ImageDiffMode; spans: ArtifactSpans; onSpanChange: (key: string, span: number | null) => void; filter: ArtifactTagFilter; onRefresh: (name: string) => void; projectId: string | null; agentId: string }) {
+function ArtifactSetCard({ set, mode, spans, onSpanChange, filter, search, onRefresh, projectId, agentId }: { set: ArtifactSet; mode: ImageDiffMode; spans: ArtifactSpans; onSpanChange: (key: string, span: number | null) => void; filter: ArtifactTagFilter; search: string; onRefresh: (name: string) => void; projectId: string | null; agentId: string }) {
   const status = set.status as string
-  // Apply the (shared) tag filter to this card's files. The grid shows only
-  // matches; the header still reports the true diff size so "x/y changed" makes
-  // it obvious the filter is hiding some.
+  // Apply the (shared) tag filter and the search query to this card's files. The
+  // grid shows only matches — ranked by search score when searching; the header
+  // still reports the true diff size so "x/y changed" makes it obvious some are
+  // hidden.
   const isFiltered = filterIsActive(filter)
-  const visibleFiles = isFiltered ? set.files.filter((f) => fileMatchesFilter(f, filter)) : set.files
+  const searching = search.trim().length > 0
+  const narrowed = isFiltered || searching
+  const visibleFiles = computeVisibleFiles(set.files, filter, search)
   const changedFiles = visibleFiles.filter((f) => f.change_type !== 'unchanged')
   const totalChanged = set.files.filter((f) => f.change_type !== 'unchanged').length
-  const changedLabel = isFiltered && changedFiles.length !== totalChanged ? `${changedFiles.length}/${totalChanged} changed` : `${totalChanged} changed`
+  const changedLabel = narrowed && changedFiles.length !== totalChanged ? `${changedFiles.length}/${totalChanged} changed` : `${totalChanged} changed`
   const noChanges = status === 'ready' && !set.changed
   // One side failed while the other rendered (status stays "ready"): surface a
   // warning but still show the surviving side's images. Both-sides-failed is the
@@ -1289,6 +1359,12 @@ function ArtifactSetCard({ set, mode, spans, onSpanChange, filter, onRefresh, pr
   // a "·" (the two builds run in parallel), e.g. "building frontend · home 7/24".
   const progressText = [set.left_progress, set.right_progress].filter(Boolean).join(' · ')
 
+  // While a search is active, force the card open so its ranked matches are
+  // actually visible (the panel only renders cards that have a match, so an
+  // expanded card always has something to show). The saved collapsed state is left
+  // untouched, so clearing the search restores it.
+  const effectiveCollapsed = searching ? false : collapsed
+
   return (
     <div className="border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 overflow-hidden">
       {/* Give the header a resting tint that's distinct from the card body
@@ -1299,7 +1375,7 @@ function ArtifactSetCard({ set, mode, spans, onSpanChange, filter, onRefresh, pr
           onClick={() => setCollapsed((c) => !c)}
           className="flex-1 min-w-0 flex items-center gap-2 px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors cursor-pointer text-left"
         >
-          {collapsed ? <ChevronRight className="w-3.5 h-3.5 text-gray-400 shrink-0" /> : <ChevronDown className="w-3.5 h-3.5 text-gray-400 shrink-0" />}
+          {effectiveCollapsed ? <ChevronRight className="w-3.5 h-3.5 text-gray-400 shrink-0" /> : <ChevronDown className="w-3.5 h-3.5 text-gray-400 shrink-0" />}
           <ImageIcon className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400 shrink-0" />
           <span className="text-sm font-medium text-gray-700 dark:text-gray-300 truncate shrink-0">{set.name}</span>
           {status === 'generating' && (
@@ -1365,17 +1441,19 @@ function ArtifactSetCard({ set, mode, spans, onSpanChange, filter, onRefresh, pr
         </button>
       </div>
 
-      {!collapsed && (
+      {!effectiveCollapsed && (
         <div className="px-3 pb-2">
           {/* While generating, stream both builds' live logs side by side; a side
               that finishes first shows its final log instead of "waiting". */}
           {status === 'generating' && <LiveLogPanes set={set} />}
           {status === 'error' && (
             <>
+              {/* Build log at the top so "Show build log" reveals it first; the
+                  error summary follows. */}
+              <PersistedLogView leftUrl={set.left_log_url} rightUrl={set.right_log_url} open={buildLogOpen} />
               <div className="my-2 px-3 py-2 rounded-md bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 font-mono text-xs text-red-600 dark:text-red-400 whitespace-pre-wrap break-words">
                 {set.error ? stripAnsi(set.error) : 'Artifact generation failed.'}
               </div>
-              <PersistedLogView leftUrl={set.left_log_url} rightUrl={set.right_log_url} open={buildLogOpen} />
             </>
           )}
           {status === 'ready' && (
@@ -1383,6 +1461,9 @@ function ArtifactSetCard({ set, mode, spans, onSpanChange, filter, onRefresh, pr
             // unchanged by default — see the header "changes" dropdown) laid out in
             // one masonry. Empty states cover "produced nothing" vs "filtered out".
             <>
+              {/* Build log sits at the top of the body so "Show build log" reveals
+                  it without scrolling past the image grid. */}
+              <PersistedLogView leftUrl={set.left_log_url} rightUrl={set.right_log_url} open={buildLogOpen} />
               {failedSide && (
                 // One side died; show its error but keep rendering the side that
                 // succeeded (its files surface as added/removed in the grid).
@@ -1399,11 +1480,10 @@ function ArtifactSetCard({ set, mode, spans, onSpanChange, filter, onRefresh, pr
               {set.files.length === 0 ? (
                 <div className="my-2 text-xs text-gray-400 dark:text-gray-500">No artifacts produced.</div>
               ) : visibleFiles.length === 0 ? (
-                <div className="my-2 text-xs text-gray-400 dark:text-gray-500">No files match the current filters.</div>
+                <div className="my-2 text-xs text-gray-400 dark:text-gray-500">No files match {searching ? 'your search' : 'the current filters'}.</div>
               ) : (
                 <FileGrid files={visibleFiles} mode={mode} spans={spans} onSpanChange={onSpanChange} />
               )}
-              <PersistedLogView leftUrl={set.left_log_url} rightUrl={set.right_log_url} open={buildLogOpen} />
             </>
           )}
         </div>
@@ -1462,6 +1542,13 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
   // effect would race the reload and clobber the new key with the old value).
   const [tagFilter, setTagFilter] = useState<ArtifactTagFilter>(() => loadTagFilter(projectId, agentId))
   useEffect(() => { setTagFilter(loadTagFilter(projectId, agentId)) }, [projectId, agentId])
+
+  // Free-text search over filenames + tags (split-word fuzzy match + rank). Kept
+  // ephemeral — it narrows/ranks the view without persisting — and cleared when the
+  // project/agent changes since this panel is reused across agents.
+  const [search, setSearch] = useState('')
+  useEffect(() => { setSearch('') }, [projectId, agentId])
+  const searching = search.trim().length > 0
   const updateTagFilter = useCallback((f: ArtifactTagFilter) => {
     setTagFilter(f)
     saveTagFilter(projectId, agentId, f)
@@ -1675,6 +1762,31 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
             pending_tags) carries tags; ml-auto floats them to the right. */}
         {(hasTags || showTypeFilter || showChangeFilter) && (
           <div className="ml-auto flex flex-wrap items-center gap-1.5">
+            {/* Search box, leftmost in the filter group: a split-word fuzzy match +
+                rank over each file's name and tags (see searchScore). Narrows the
+                grid live and reorders the best matches first; non-matching cards
+                drop out entirely. */}
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-gray-400 dark:text-gray-500" />
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="search"
+                aria-label="Search artifacts by name or tag"
+                className="h-7 w-36 pl-7 pr-6 rounded-md border text-[11px] bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 border-gray-200 dark:border-gray-600 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+              />
+              {search && (
+                <button
+                  onClick={() => setSearch('')}
+                  title="Clear search"
+                  aria-label="Clear search"
+                  className="absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 cursor-pointer"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              )}
+            </div>
             {/* Reset to defaults — shown only when the filter has moved off its
                 default (any tag/value hidden, or the changes filter no longer hides
                 only 'unchanged'). Restores every scope to "show all" + the change
@@ -1764,7 +1876,11 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
             cards keep the previous agent's expand/collapse state (and its save
             effect would then clobber the new agent's saved prefs). Re-keying per
             agent remounts each card so it re-reads that agent's saved state. */}
-        {sets.map((s) => <ArtifactSetCard key={`${projectId ?? '_'}-${agentId}-${s.name}`} set={s} mode={imageDiffMode} spans={artifactSpans} onSpanChange={onArtifactSpanChange} filter={tagFilter} onRefresh={requestRefresh} projectId={projectId} agentId={agentId} />)}
+        {sets
+          // While searching, drop cards with no matching file so results stay
+          // clean — the surviving cards auto-expand to show their ranked matches.
+          .filter((s) => !searching || computeVisibleFiles(s.files, tagFilter, search).length > 0)
+          .map((s) => <ArtifactSetCard key={`${projectId ?? '_'}-${agentId}-${s.name}`} set={s} mode={imageDiffMode} spans={artifactSpans} onSpanChange={onArtifactSpanChange} filter={tagFilter} search={search} onRefresh={requestRefresh} projectId={projectId} agentId={agentId} />)}
       </div>
     </div>
   )

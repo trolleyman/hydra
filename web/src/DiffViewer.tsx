@@ -13,7 +13,8 @@ import {
 } from 'lucide-react'
 import { getFileIcon } from './lib/fileIcons'
 import { Tooltip } from './components/Tooltip'
-import { ArtifactsPanel, IMAGE_DIFF_MODES, type ImageDiffMode } from './components/ArtifactsPanel'
+import { ArtifactsPanel, ImageDiffView, IMAGE_DIFF_MODES, type ImageDiffMode } from './components/ArtifactsPanel'
+import { isImagePath, agentBlobUrl } from './lib/imageDiff'
 import { useArtifactSpans } from './lib/artifactColumns'
 import { useDialogStore } from './stores/dialogStore'
 import { StorageKeys, readLocal, writeLocal } from './lib/storage'
@@ -594,7 +595,7 @@ function EdgeExpander({ seg, onStep, onAll }: {
   )
 }
 
-export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onComment, isCollapsed, onToggleCollapse, onExpand, isHidden, onShow, currentContext, readOnly, headless }: {
+export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onComment, isCollapsed, onToggleCollapse, onExpand, isHidden, onShow, currentContext, readOnly, headless, imageDiffMode, imageBefore, imageAfter }: {
   file: DiffFile
   sideBySide: boolean
   fileRef?: (el: HTMLDivElement | null) => void
@@ -605,6 +606,13 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onCo
   isHidden?: boolean
   onShow?: () => void
   currentContext: number
+  // An in-tree image (binary) renders the artifacts panel's before/after image
+  // differ instead of the "Binary file changed" placeholder. imageBefore/After
+  // are the raw-blob URLs for each side (null when the file was added/deleted on
+  // that side); imageDiffMode picks the comparison style (shared with artifacts).
+  imageDiffMode?: ImageDiffMode
+  imageBefore?: string | null
+  imageAfter?: string | null
   // When true, the line-level "add comment" affordances are hidden — used by the
   // repository diff view, which has no agent to send comments to.
   readOnly?: boolean
@@ -748,7 +756,12 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onCo
       )}
       {(headless || !isCollapsed) && (
         <>
-          {file.binary ? (
+          {file.binary && isImagePath(file.path) ? (
+            // In-tree image: reuse the artifacts panel's before/after differ.
+            <div className="p-3">
+              <ImageDiffView left={imageBefore} right={imageAfter} mode={imageDiffMode ?? 'ab'} />
+            </div>
+          ) : file.binary ? (
             <div className="px-4 py-3 text-xs text-gray-400 dark:text-gray-500 italic">Binary file changed</div>
           ) : isHidden ? (
             <div className="px-4 py-8 flex flex-col items-center justify-center text-gray-400 dark:text-gray-500 italic">
@@ -1889,6 +1902,24 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
     [leftSel, rightSel, commits],
   )
 
+  // Before/after raw-blob URLs for an in-tree image file in the diff, so FileDiff
+  // can render the image differ. The before side reads the base ref; the after
+  // side reads the head ref, or — when the right side is the worktree
+  // (head_ref === "", i.e. an uncommitted/untracked change) — the worktree file
+  // itself. Returns nulls for the missing side of an added/deleted file.
+  const imageUrlsFor = (file: DiffFile): { before: string | null; after: string | null } => {
+    if (!diff || !projectId || !file.binary || !isImagePath(file.path)) return { before: null, after: null }
+    const before = file.change_type === 'added'
+      ? null
+      : agentBlobUrl(projectId, agent.id, file.old_path || file.path, { ref: diff.base_ref })
+    const after = file.change_type === 'deleted'
+      ? null
+      : diff.head_ref
+        ? agentBlobUrl(projectId, agent.id, file.path, { ref: diff.head_ref })
+        : agentBlobUrl(projectId, agent.id, file.path, { worktree: true })
+    return { before, after }
+  }
+
   // Keep a ref to expandFileDiff so the silent refresh can call it without stale closures.
   const expandFileDiffRef = useRef(expandFileDiff)
   useEffect(() => { expandFileDiffRef.current = expandFileDiff }, [expandFileDiff])
@@ -2356,10 +2387,15 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
                   onShow={getShowCallback(diff.files[singleFileIdx].path)}
                   fileRef={getFileRef(diff.files[singleFileIdx].path)}
                   currentContext={fileContexts.get(diff.files[singleFileIdx].path) ?? 3}
+                  imageDiffMode={imageDiffMode}
+                  imageBefore={imageUrlsFor(diff.files[singleFileIdx]).before}
+                  imageAfter={imageUrlsFor(diff.files[singleFileIdx]).after}
                 />
               </>
             ) : (
-              diff.files.map((f) => (
+              diff.files.map((f) => {
+                const img = imageUrlsFor(f)
+                return (
                 <FileDiff key={f.path} file={f} sideBySide={sideBySide}
                   isCollapsed={collapsedFiles.has(f.path)}
                   onToggleCollapse={toggleFileCollapse}
@@ -2369,8 +2405,12 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
                   onShow={getShowCallback(f.path)}
                   fileRef={getFileRef(f.path)}
                   currentContext={fileContexts.get(f.path) ?? 3}
+                  imageDiffMode={imageDiffMode}
+                  imageBefore={img.before}
+                  imageAfter={img.after}
                 />
-              ))
+                )
+              })
             )}
           </div>
         </div>

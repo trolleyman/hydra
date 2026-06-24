@@ -1,11 +1,54 @@
 package http
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
 )
+
+// TestServeWorktreeBlob covers the agent-diff worktree blob path: a real file is
+// served from the worktree, and a path that escapes the worktree is rejected
+// (so a crafted request can't read outside it).
+func TestServeWorktreeBlob(t *testing.T) {
+	worktree := t.TempDir()
+	if err := os.WriteFile(filepath.Join(worktree, "logo.png"), []byte("PNGDATA"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{}
+
+	t.Run("serves a worktree file", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/blob", nil)
+		s.serveWorktreeBlob(rec, req, worktree, "logo.png")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200", rec.Code)
+		}
+		if got := rec.Body.String(); got != "PNGDATA" {
+			t.Fatalf("body = %q, want %q", got, "PNGDATA")
+		}
+	})
+
+	t.Run("rejects an escaping path", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/blob", nil)
+		s.serveWorktreeBlob(rec, req, worktree, "../../etc/passwd")
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("status = %d, want 404", rec.Code)
+		}
+	})
+
+	t.Run("404 for a missing file", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/blob", nil)
+		s.serveWorktreeBlob(rec, req, worktree, "nope.png")
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("status = %d, want 404", rec.Code)
+		}
+	})
+}
 
 func TestPickDefaultFile(t *testing.T) {
 	cases := []struct {
