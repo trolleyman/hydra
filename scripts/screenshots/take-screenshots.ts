@@ -376,6 +376,17 @@ try {
       // view. Viewport-only to focus on the header + prompt (agent-md's seeded
       // prompt overflows the block's max height, so the fade is visible).
       { name: 'agent-markdown', path: '/project/sim-project/agent/agent-md', viewportOnly: true },
+      // The agent-type picker dropdown, opened on the compact ("mini") spawn box
+      // in the sidebar. The picker is an icon-only trigger (the active agent's
+      // brand mark) that opens a menu listing every agent type as its canonical
+      // brand logo + name (web/src/components/AgentTypeIcon.tsx) — so this shot
+      // documents the brand icons and their accent colours. Captured on an agent
+      // page (not the project landing) so the sidebar's compact box is the only
+      // spawn form on screen — the full-page box would otherwise add a second,
+      // identical "Agent type:" picker and make the click ambiguous. viewportOnly:
+      // the menu is a fixed overlay anchored to the trigger at the top-left, so
+      // the default viewport already frames both the box and the open menu.
+      { name: 'spawn-agent-picker', path: '/project/sim-project/agent/agent-1', viewportOnly: true, click: 'button[aria-label^="Agent type:"]' },
       // The repository view: a GitHub-style browser with a file/folder tree on
       // the left and the picked file rendered on the right. Simulation mode
       // serves a small mock repo (see internal/http/simulation.go) and opens
