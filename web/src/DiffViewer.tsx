@@ -2225,7 +2225,7 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
   return (
     <div ref={rootRef} className="mt-4">
       {/* Section header */}
-      <div className="flex items-center gap-3 mb-4 flex-wrap sticky -top-6 z-30 bg-gray-50 dark:bg-gray-900 py-2 border-b border-gray-200 dark:border-gray-800 shadow-sm -mx-1 px-1">
+      <div className="flex items-center gap-3 mb-4 flex-wrap sticky top-0 z-30 bg-gray-50 dark:bg-gray-900 py-2 border-b border-gray-200 dark:border-gray-800 shadow-sm -mx-1 px-1">
         <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Changes</h2>
         {diff && (
           <div className="flex items-center gap-1.5">
