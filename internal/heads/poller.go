@@ -221,9 +221,18 @@ func pollJSONStatusOnce(store *db.Store, projectRoot string, deb *unreadDebounce
 			// its own.
 			prevRunning := a.AgentStatus != nil && *a.AgentStatus == "running"
 			immediate := prevRunning && agentStatus == "waiting" && isUserInputEvent(info.Event)
+			// Only a change the client actually renders is worth an agents_changed
+			// event: the status string flipping, or the unread flag being raised
+			// (immediate). A running agent rewrites status.json on every tool call,
+			// advancing the timestamp while staying "running" — we must persist that
+			// so statusTimeAfter stops re-firing, but it yields an identical
+			// AgentResponse (the timestamp isn't exposed), so emitting an event for it
+			// just makes every connected client refetch agents (and, via the frontend,
+			// push-status) roughly once a second for no visible change.
+			statusChanged := a.AgentStatus == nil || *a.AgentStatus != agentStatus
 			if err := store.UpdateAgentStatus(a.ID, agentStatus, info.Timestamp, immediate); err != nil {
 				log.Printf("warn: json status poller: update agent status for %s: %v", a.ID, err)
-			} else {
+			} else if statusChanged || immediate {
 				changed = true
 			}
 			switch {
