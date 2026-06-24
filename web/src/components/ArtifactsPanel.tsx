@@ -1310,10 +1310,12 @@ function ArtifactSetCard({ set, mode, columns, onWeightsChange, filter, search, 
           {status === 'generating' && <LiveLogPanes set={set} />}
           {status === 'error' && (
             <>
+              {/* Build log at the top so "Show build log" reveals it first; the
+                  error summary follows. */}
+              <PersistedLogView leftUrl={set.left_log_url} rightUrl={set.right_log_url} open={buildLogOpen} />
               <div className="my-2 px-3 py-2 rounded-md bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 font-mono text-xs text-red-600 dark:text-red-400 whitespace-pre-wrap break-words">
                 {set.error ? stripAnsi(set.error) : 'Artifact generation failed.'}
               </div>
-              <PersistedLogView leftUrl={set.left_log_url} rightUrl={set.right_log_url} open={buildLogOpen} />
             </>
           )}
           {status === 'ready' && (
@@ -1321,6 +1323,9 @@ function ArtifactSetCard({ set, mode, columns, onWeightsChange, filter, search, 
             // unchanged by default — see the header "changes" dropdown) laid out in
             // one masonry. Empty states cover "produced nothing" vs "filtered out".
             <>
+              {/* Build log sits at the top of the body so "Show build log" reveals
+                  it without scrolling past the image grid. */}
+              <PersistedLogView leftUrl={set.left_log_url} rightUrl={set.right_log_url} open={buildLogOpen} />
               {failedSide && (
                 // One side died; show its error but keep rendering the side that
                 // succeeded (its files surface as added/removed in the grid).
@@ -1341,7 +1346,6 @@ function ArtifactSetCard({ set, mode, columns, onWeightsChange, filter, search, 
               ) : (
                 <FileGrid files={visibleFiles} mode={mode} columns={columns} onWeightsChange={onWeightsChange} />
               )}
-              <PersistedLogView leftUrl={set.left_log_url} rightUrl={set.right_log_url} open={buildLogOpen} />
             </>
           )}
         </div>
