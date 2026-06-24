@@ -120,6 +120,16 @@ func (a *Attachment) Close() {
 	a.session.detach(a.attacher)
 }
 
+// Size returns the session's current PTY window size (rows, cols). An attaching
+// client uses it to size its terminal to match before rendering the replayed
+// scrollback: those bytes carry cursor moves and line wrapping computed for this
+// width, so rendering them at any other width lands every move in the wrong cell.
+func (a *Attachment) Size() (rows, cols uint16) {
+	a.session.mu.Lock()
+	defer a.session.mu.Unlock()
+	return a.session.rows, a.session.cols
+}
+
 // readLoop copies PTY output into the scrollback ring and every attacher until
 // the process exits, then reaps it and invokes onExit.
 func (s *Session) readLoop(onExit func(*Session)) {

@@ -38,7 +38,8 @@ function ArtifactChangeIcon({ type, className = 'w-3.5 h-3.5' }: { type: string;
 
 // The ways to compare a before/after image pair. Persisted in the diff viewer's
 // settings; see DiffViewer's SettingsPopup. (The magenta pixel-diff isn't a mode of
-// its own any more — it lives as a "Highlight" tab inside the Before/After mode.)
+// its own any more — it's a "Highlight" checkbox that overlays the changes on the
+// Before/After view.)
 export type ImageDiffMode = 'side-by-side' | 'ab' | 'slider' | 'onion'
 
 export const IMAGE_DIFF_MODES: { value: ImageDiffMode; label: string }[] = [
@@ -105,54 +106,61 @@ function LayerNode({ url, style }: { url?: string | null; style?: React.CSSPrope
   )
 }
 
-// A/B switch: Before / After / Highlight. Before & After stay mounted and stacked,
-// so the toggle flips which is shown for an instant, flicker-free hard switch.
-// Highlight shows the after image with every changed pixel painted magenta (the
-// pixel-diff, see DiffCanvas); it's disabled when only one side exists (an
-// added/removed file — there's nothing to diff). Clicking the image flips
-// Before↔After (not while Highlight is shown). A missing side shows the "No image"
-// placeholder; middle-click opens the currently-shown image in a new tab.
+// A/B switch: Before / After, with a Highlight checkbox. Before & After stay
+// mounted and stacked, so the toggle flips which is shown for an instant,
+// flicker-free hard switch. Clicking the image (or the buttons) flips Before↔After.
+// Ticking Highlight overlays the pixel-diff (every changed pixel painted magenta,
+// see DiffCanvas) on top of whichever side is shown, so the changes stay marked as
+// you flip between Before and After. Highlight is disabled when only one side
+// exists (an added/removed file — there's nothing to diff). A missing side shows
+// the "No image" placeholder; middle-click opens the currently-shown image in a
+// new tab.
 function ABSwitch({ left, right }: { left?: string | null; right?: string | null }) {
   const canDiff = !!left && !!right
-  const [view, setView] = useState<'before' | 'after' | 'highlight'>('after')
+  const [view, setView] = useState<'before' | 'after'>('after')
+  const [highlight, setHighlight] = useState(false)
+  const showHighlight = highlight && canDiff
   // At least one side is present (ImageDiffView only routes here otherwise); the
   // present image is the invisible sizer that gives the stacked box its size.
   const sizer = (right ?? left) as string
-  const btn = (active: boolean, disabled = false) =>
-    `text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded transition-colors ${
-      disabled ? 'opacity-40 cursor-not-allowed bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500'
-        : active ? 'bg-blue-500 text-white cursor-pointer'
-          : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600 cursor-pointer'
+  const btn = (active: boolean) =>
+    `text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded transition-colors cursor-pointer ${
+      active ? 'bg-blue-500 text-white'
+        : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600'
     }`
   return (
     <div className="min-w-0">
       <div className="flex flex-wrap items-center gap-1 mb-1">
         <button onClick={() => setView('before')} className={btn(view === 'before')}>Before</button>
         <button onClick={() => setView('after')} className={btn(view === 'after')}>After</button>
-        <button
-          onClick={() => { if (canDiff) setView('highlight') }}
-          disabled={!canDiff}
+        <label
           title={canDiff ? 'Highlight changed pixels in magenta' : 'Needs both a before and after image'}
-          className={btn(view === 'highlight', !canDiff)}
+          className={`ml-auto flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide select-none ${
+            canDiff ? 'cursor-pointer text-gray-500 dark:text-gray-400' : 'opacity-40 cursor-not-allowed text-gray-400 dark:text-gray-500'
+          }`}
         >
+          <input
+            type="checkbox"
+            checked={showHighlight}
+            disabled={!canDiff}
+            onChange={(e) => setHighlight(e.target.checked)}
+            className="accent-blue-500 cursor-pointer disabled:cursor-not-allowed"
+          />
           Highlight
-        </button>
+        </label>
       </div>
-      {view === 'highlight' && canDiff ? (
-        <DiffCanvas left={left as string} right={right as string} />
-      ) : (
-        // select-none: flipping is a rapid click target, so without this a quick
-        // double-click would highlight the "No image" placeholder text.
-        <div
-          className="relative w-full cursor-pointer select-none"
-          onClick={() => setView((v) => (v === 'before' ? 'after' : 'before'))}
-          onAuxClick={makeAuxOpen(() => (view === 'before' ? left : right) || sizer)}
-        >
-          <img src={sizer} style={{ visibility: 'hidden' }} className={`${IMG_CLASS} block`} draggable={false} />
-          <LayerNode url={right} style={{ visibility: view === 'before' ? 'hidden' : 'visible' }} />
-          <LayerNode url={left} style={{ visibility: view === 'before' ? 'visible' : 'hidden' }} />
-        </div>
-      )}
+      {/* select-none: flipping is a rapid click target, so without this a quick
+          double-click would highlight the "No image" placeholder text. */}
+      <div
+        className="relative w-full cursor-pointer select-none"
+        onClick={() => setView((v) => (v === 'before' ? 'after' : 'before'))}
+        onAuxClick={makeAuxOpen(() => (view === 'before' ? left : right) || sizer)}
+      >
+        <img src={sizer} style={{ visibility: 'hidden' }} className={`${IMG_CLASS} block`} draggable={false} />
+        <LayerNode url={right} style={{ visibility: view === 'before' ? 'hidden' : 'visible' }} />
+        <LayerNode url={left} style={{ visibility: view === 'before' ? 'visible' : 'hidden' }} />
+        {showHighlight && <DiffCanvas left={left as string} right={right as string} />}
+      </div>
     </div>
   )
 }
@@ -257,12 +265,16 @@ function loadImage(url: string): Promise<HTMLImageElement> {
   })
 }
 
-// DiffCanvas renders the "after" image with every pixel that differs from the
-// "before" image painted bright magenta. The two are aligned at the top-left and
-// compared over the union of their bounds, so a size change (or pixels present on
-// only one side) reads as a difference too. It only runs with both sides present;
-// the caller handles the single-side case. Same-origin artifact URLs keep the
-// canvas untainted so getImageData works.
+// DiffCanvas paints a transparent overlay in which every pixel that differs
+// between the before/after images is bright magenta and unchanged pixels are left
+// clear, so it can sit on top of whichever side (Before or After) is currently
+// shown and mark the changes without hiding the underlying image. The two are
+// aligned at the top-left and compared over the union of their bounds, so a size
+// change (or pixels present on only one side) reads as a difference too. It only
+// runs with both sides present; the caller handles the single-side case.
+// Same-origin artifact URLs keep the scratch canvases untainted so getImageData
+// works. The overlay is pointer-events-none so the click-to-flip gesture on the
+// wrapper still works through it.
 function DiffCanvas({ left, right }: { left: string; right: string }) {
   const ref = useRef<HTMLCanvasElement>(null)
   const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading')
@@ -283,28 +295,29 @@ function DiffCanvas({ left, right }: { left: string; right: string }) {
         const ctx = canvas.getContext('2d', { willReadFrequently: true })
         if (!ctx) { setState('error'); return }
 
-        // The visible canvas starts as the "after" image (the base); a scratch
-        // canvas holds "before" so we can read both pixel buffers and overwrite
-        // only the differing pixels with magenta.
-        ctx.clearRect(0, 0, w, h)
-        ctx.drawImage(ra, 0, 0)
-        const after = ctx.getImageData(0, 0, w, h)
+        // Read each image's pixels off its own scratch canvas, then build a
+        // transparent overlay where only the differing pixels are painted magenta.
+        const read = (img: HTMLImageElement): Uint8ClampedArray | null => {
+          const s = document.createElement('canvas')
+          s.width = w
+          s.height = h
+          const sctx = s.getContext('2d', { willReadFrequently: true })
+          if (!sctx) return null
+          sctx.drawImage(img, 0, 0)
+          return sctx.getImageData(0, 0, w, h).data
+        }
+        const before = read(la)
+        const after = read(ra)
+        if (!before || !after) { setState('error'); return }
 
-        const scratch = document.createElement('canvas')
-        scratch.width = w
-        scratch.height = h
-        const sctx = scratch.getContext('2d', { willReadFrequently: true })
-        if (!sctx) { setState('error'); return }
-        sctx.drawImage(la, 0, 0)
-        const before = sctx.getImageData(0, 0, w, h).data
-
-        const out = after.data
+        const overlay = ctx.createImageData(w, h)
+        const out = overlay.data
         for (let i = 0; i < out.length; i += 4) {
           const d =
-            Math.abs(out[i] - before[i]) +
-            Math.abs(out[i + 1] - before[i + 1]) +
-            Math.abs(out[i + 2] - before[i + 2]) +
-            Math.abs(out[i + 3] - before[i + 3])
+            Math.abs(after[i] - before[i]) +
+            Math.abs(after[i + 1] - before[i + 1]) +
+            Math.abs(after[i + 2] - before[i + 2]) +
+            Math.abs(after[i + 3] - before[i + 3])
           if (d > DIFF_PIXEL_THRESHOLD) {
             out[i] = DIFF_COLOR[0]
             out[i + 1] = DIFF_COLOR[1]
@@ -312,7 +325,7 @@ function DiffCanvas({ left, right }: { left: string; right: string }) {
             out[i + 3] = 255
           }
         }
-        ctx.putImageData(after, 0, 0)
+        ctx.putImageData(overlay, 0, 0)
         setState('ready')
       })
       .catch(() => { if (!cancelled) setState('error') })
@@ -320,19 +333,15 @@ function DiffCanvas({ left, right }: { left: string; right: string }) {
   }, [left, right])
 
   return (
-    <div className="relative w-full" onAuxClick={makeAuxOpen(() => right)}>
-      <span className={`${TAG_CLASS} left-1`}>Highlight</span>
+    <>
       <canvas
         ref={ref}
-        style={checkerStyle}
-        className={`${IMG_CLASS} block ${state === 'ready' ? '' : 'opacity-0'}`}
+        className={`${OVERLAY_CLASS} pointer-events-none border-0 ${state === 'ready' ? '' : 'opacity-0'}`}
       />
       {state !== 'ready' && (
-        <div className="absolute inset-0 flex items-center justify-center text-[11px] text-gray-400 dark:text-gray-500">
-          {state === 'error' ? 'Could not compute diff' : 'Computing diff…'}
-        </div>
+        <span className={`${TAG_CLASS} right-1`}>{state === 'error' ? 'Diff failed' : 'Diffing…'}</span>
       )}
-    </div>
+    </>
   )
 }
 
@@ -469,6 +478,24 @@ function fileMatchesFilter(file: ArtifactFile, filter: ArtifactTagFilter): boole
   return true
 }
 
+// computeScopeCounts walks the files once, tallying per value how many items carry
+// it (hasValue) under the current filters with this scope itself ignored — so a
+// value's own toggle never changes its own row. Shown dimmed beside each checkbox.
+function computeScopeCounts(
+  files: ArtifactFile[],
+  values: string[],
+  hasValue: (f: ArtifactFile, v: string) => boolean,
+  shownFilter: ArtifactTagFilter,
+): Record<string, number> {
+  const out: Record<string, number> = {}
+  for (const v of values) out[v] = 0
+  for (const f of files) {
+    if (!fileMatchesFilter(f, shownFilter)) continue
+    for (const v of values) if (hasValue(f, v)) out[v]++
+  }
+  return out
+}
+
 // TagBadge renders one of a file's tags: a scoped label as a two-tone
 // category/value pill, a free-form tag as a single solid pill.
 export function TagBadge({ tag }: { tag: string }) {
@@ -498,6 +525,7 @@ function TagScopeFilter({
   label,
   values,
   off,
+  counts,
   onToggle,
   onIsolate,
   onAll,
@@ -506,6 +534,9 @@ function TagScopeFilter({
   label: string
   values: string[]
   off: string[]
+  // Per-value item counts (see computeScopeCounts); right-aligned and dimmed in
+  // each row. Optional so a caller can omit them.
+  counts?: Record<string, number>
   onToggle: (val: string) => void
   onIsolate: (val: string) => void
   onAll: () => void
@@ -576,7 +607,12 @@ function TagScopeFilter({
                 onClick={(e) => { e.preventDefault(); if (e.shiftKey) onIsolate(v); else onToggle(v) }}
               >
                 <input type="checkbox" readOnly checked={!off.includes(v)} className="w-3.5 h-3.5 accent-blue-500 cursor-pointer shrink-0" />
-                <span className="text-gray-700 dark:text-gray-300 truncate">{v}</span>
+                <span className="text-gray-700 dark:text-gray-300 truncate min-w-0">{v}</span>
+                {counts?.[v] != null && (
+                  // How many items carry this value under the current filters,
+                  // ignoring this scope itself.
+                  <span className="ml-auto shrink-0 tabular-nums text-[10px] text-gray-400 dark:text-gray-500">{counts[v]}</span>
+                )}
               </label>
             ))}
           </div>
@@ -1516,30 +1552,53 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
   const hasTags = collectedTags.scoped.length > 0 || collectedTags.free.length > 0
 
   // The built-in "type" filter (image / video), derived from the files' own
-  // extensions rather than their tags. Offered whenever a set spans more than one
-  // type, so a reviewer can isolate the videos (or the stills); shown after the
-  // user-defined tag scopes.
+  // extensions rather than their tags. Always offered (so the bar's built-ins are
+  // a stable fixture, not something that appears only when a set happens to mix
+  // both); listed after the user-defined tag scopes. Values are the media types
+  // actually present.
   const fileTypes = useMemo(() => {
     const types = new Set<string>()
     for (const s of sets ?? []) for (const f of s.files) types.add(fileMediaType(f))
     return [...types].sort()
   }, [sets])
-  const showTypeFilter = fileTypes.length > 1
+  const showTypeFilter = fileTypes.length > 0
   // Values turned off (hidden), mirroring the user scopes' inverted model.
   const typeOff = tagFilter.scoped[TYPE_CATEGORY] ?? []
 
   // The built-in "changes" filter (added / removed / modified / unchanged), derived
   // from each file's change_type. Replaces the old per-card "show unchanged" toggle:
   // unchanged is hidden by default (seeded in loadTagFilter), and this dropdown is
-  // how you reveal it or narrow to e.g. only added files. Offered whenever a set has
-  // more than one change type, or any unchanged files (so they can be revealed).
-  const changeTypes = useMemo(() => {
-    const present = new Set<string>()
-    for (const s of sets ?? []) for (const f of s.files) present.add(f.change_type as string)
-    return CHANGE_TYPE_ORDER.filter((c) => present.has(c))
-  }, [sets])
-  const showChangeFilter = changeTypes.length > 1 || changeTypes.includes('unchanged')
+  // how you reveal it or narrow to e.g. only added files. Always offered, and always
+  // lists all four change types (even ones no file currently has) so added/removed
+  // are a constant, predictable option — their per-value counts read 0/0 when absent.
+  const changeTypes = CHANGE_TYPE_ORDER
+  const showChangeFilter = true
   const changeOff = tagFilter.scoped[CHANGE_CATEGORY] ?? []
+
+  // Per-value item counts for each filter dropdown (see computeScopeCounts).
+  // Flatten the files once; `shownFilter` is the current filter with this scope
+  // cleared, so each value's count reflects the other active filters but not its
+  // own toggle.
+  const allFiles = useMemo(() => (sets ?? []).flatMap((s) => s.files), [sets])
+  const scopeCounts = useCallback(
+    (cat: string, values: string[]): Record<string, number> => {
+      const hasValue = (f: ArtifactFile, v: string) =>
+        cat === TYPE_CATEGORY ? fileMediaType(f) === v
+          : cat === CHANGE_CATEGORY ? (f.change_type as string) === v
+            : (f.tags ?? []).includes(`${cat}::${v}`)
+      const shownFilter: ArtifactTagFilter = { ...tagFilter, scoped: { ...tagFilter.scoped, [cat]: [] } }
+      return computeScopeCounts(allFiles, values, hasValue, shownFilter)
+    },
+    [allFiles, tagFilter],
+  )
+  const freeCounts = useCallback(
+    (values: string[]): Record<string, number> => {
+      const hasValue = (f: ArtifactFile, v: string) => (f.tags ?? []).includes(v)
+      const shownFilter: ArtifactTagFilter = { ...tagFilter, free: [] }
+      return computeScopeCounts(allFiles, values, hasValue, shownFilter)
+    },
+    [allFiles, tagFilter],
+  )
 
   if (error) {
     return (
@@ -1578,7 +1637,7 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
           <p><strong>Images &amp; video.</strong> <code className="text-blue-300">.png .jpg .gif</code> are diffed pixel-by-pixel (so cosmetic re-encodes are ignored); <code className="text-blue-300">.webm</code> video is diffed frame-by-frame when <strong>ffmpeg</strong> is installed, falling back to a byte-hash comparison otherwise (shown with a <em>byte-compared</em> badge, since that verdict may be spurious). Other types — <code className="text-blue-300">.webp .avif .svg .bmp .pdf</code> — are byte-hash compared. Encode video as <strong>lossless</strong> <code className="text-blue-300">.webm</code> (e.g. <code className="text-blue-300">ffmpeg … -c:v libvpx-vp9 -lossless 1</code>) so identical frames stay identical.</p>
           <p>A script with no visual changes — or one still generating — collapses to a single header row; click it to expand. The two sides (base and head) build in parallel, so the expanded card shows their <strong>build logs side by side</strong> (Before / After, stderr in red); once finished, reopen them any time with the <strong>build log</strong> button (the scroll icon next to refresh in the card header). The refresh button beside it re-runs a script — handy to retry a failure or re-render even when nothing visibly changed.</p>
           <p>The header shows each side's latest <code className="text-blue-300">stdout</code> line as live progress. To surface a cleaner message, print a line prefixed with <code className="text-blue-300">::hydra:progress::</code> (e.g. <code className="text-blue-300">echo "::hydra:progress:: capturing home 3/24"</code>) — Hydra strips the prefix, shows the rest as the progress line, and from then on ignores ordinary <code className="text-blue-300">stdout</code> for the header, so a noisy build can't hijack it. The full output still lands in the build log.</p>
-          <p><strong>Tags &amp; filter.</strong> Alongside an image <code className="text-blue-300">home.png</code> the script can write a JSON sidecar <code className="text-blue-300">home.png.meta</code> like <code className="text-blue-300">{'{'}"tags": ["theme::dark", "viewport::phone"]{'}'}</code>. Tags show as labels on each file and as a filter on this bar. A <code className="text-blue-300">category::value</code> tag is a <em>scoped</em> label — only one value per category is kept on a file (the last wins), and each category gets a filter button listing its values. Every value starts <em>on</em>; uncheck one to hide the files carrying it, or use <strong>all</strong> / <strong>clear</strong> (top of the menu) to toggle them in bulk. Shift-click a value to isolate it (hide everything else). Plain tags work the same way under a "tags" button. Handy when a script emits many shots (light/dark, phone/desktop) and you want to see just one slice. A built-in <strong>changes</strong> filter (added / removed / modified / unchanged, from each file's diff state) leads the bar — unchanged files are hidden by default, so use it to reveal them or to focus on one kind of change. A built-in <strong>type</strong> filter (image / video, from each file's extension) appears after your tags whenever a set mixes both.</p>
+          <p><strong>Tags &amp; filter.</strong> Alongside an image <code className="text-blue-300">home.png</code> the script can write a JSON sidecar <code className="text-blue-300">home.png.meta</code> like <code className="text-blue-300">{'{'}"tags": ["theme::dark", "viewport::phone"]{'}'}</code>. Tags show as labels on each file and as a filter on this bar. A <code className="text-blue-300">category::value</code> tag is a <em>scoped</em> label — only one value per category is kept on a file (the last wins), and each category gets a filter button listing its values. Every value starts <em>on</em>; uncheck one to hide the files carrying it, or use <strong>all</strong> / <strong>clear</strong> (top of the menu) to toggle them in bulk. Shift-click a value to isolate it (hide everything else). Each value also shows a dimmed count on the right — how many items carry it under your current filters (ignoring this scope itself). Plain tags work the same way under a "tags" button. Handy when a script emits many shots (light/dark, phone/desktop) and you want to see just one slice. Two built-in filters are always present: a <strong>type</strong> filter (image / video, from each file's extension) and a <strong>changes</strong> filter (added / removed / modified / unchanged, from each file's diff state) — the latter always offers all four kinds even when none are present, and hides unchanged files by default, so use it to reveal them or to focus on one kind of change.</p>
         </InfoTooltip>
         {/* One compact filter button per tag scope on the header bar — a button
             for each scoped category (theme / viewport / …) and one "tags" button
@@ -1607,6 +1666,7 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
                 label={cat}
                 values={values}
                 off={tagFilter.scoped[cat] ?? []}
+                counts={scopeCounts(cat, values)}
                 onToggle={(val) => {
                   const cur = tagFilter.scoped[cat] ?? []
                   const next = cur.includes(val) ? cur.filter((x) => x !== val) : [...cur, val]
@@ -1622,6 +1682,7 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
                 label="tags"
                 values={collectedTags.free}
                 off={tagFilter.free}
+                counts={freeCounts(collectedTags.free)}
                 onToggle={(t) =>
                   updateTagFilter({ ...tagFilter, free: tagFilter.free.includes(t) ? tagFilter.free.filter((x) => x !== t) : [...tagFilter.free, t] })
                 }
@@ -1637,6 +1698,7 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
                 label={TYPE_CATEGORY}
                 values={fileTypes}
                 off={typeOff}
+                counts={scopeCounts(TYPE_CATEGORY, fileTypes)}
                 onToggle={(val) => {
                   const next = typeOff.includes(val) ? typeOff.filter((x) => x !== val) : [...typeOff, val]
                   updateTagFilter({ ...tagFilter, scoped: { ...tagFilter.scoped, [TYPE_CATEGORY]: next } })
@@ -1654,6 +1716,7 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
                 label="changes"
                 values={changeTypes}
                 off={changeOff}
+                counts={scopeCounts(CHANGE_CATEGORY, changeTypes)}
                 onToggle={(val) => {
                   const next = changeOff.includes(val) ? changeOff.filter((x) => x !== val) : [...changeOff, val]
                   updateTagFilter({ ...tagFilter, scoped: { ...tagFilter.scoped, [CHANGE_CATEGORY]: next } })

@@ -5,7 +5,7 @@ import { BranchSelector } from './BranchSelector'
 import { formatError } from '../api/format_error'
 import { uploadFile, extractFiles, isImageFile } from '../api/uploads'
 import { Zap, LoaderCircle, Paperclip, Check } from 'lucide-react'
-import { AgentTypeIcon } from './AgentTypeIcon'
+import { AgentTypeIcon, AGENT_ACCENT } from './AgentTypeIcon'
 import { Tooltip } from './Tooltip'
 import { ImageLightbox } from './ImageLightbox'
 import { AttachmentChips } from './AttachmentChips'
@@ -42,14 +42,14 @@ function generateId(prompt: string): string {
   return slugify(words)
 }
 
-// Selectable agent types with their display label and accent colour. The
-// AgentTypeOption ids line up with AgentTypeIcon's names, so the icon can be
-// rendered directly from the id.
+// Selectable agent types with their display label. The AgentTypeOption ids line
+// up with AgentTypeIcon's names, so the icon and its brand accent colour
+// (AGENT_ACCENT) can both be rendered directly from the id.
 const AGENT_TYPES: { id: AgentTypeOption; label: string; color: string }[] = [
-  { id: 'claude', label: 'Claude', color: 'text-purple-600 dark:text-purple-400' },
-  { id: 'gemini', label: 'Gemini', color: 'text-teal-600 dark:text-teal-400' },
-  { id: 'copilot', label: 'Copilot', color: 'text-blue-600 dark:text-blue-400' },
-  { id: 'codex', label: 'Codex', color: 'text-emerald-600 dark:text-emerald-400' },
+  { id: 'claude', label: 'Claude', color: AGENT_ACCENT.claude },
+  { id: 'gemini', label: 'Gemini', color: AGENT_ACCENT.gemini },
+  { id: 'copilot', label: 'Copilot', color: AGENT_ACCENT.copilot },
+  { id: 'codex', label: 'Codex', color: AGENT_ACCENT.codex },
 ]
 
 // AgentTypePicker is an icon-only trigger that opens a dropdown listing each

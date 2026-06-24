@@ -59,6 +59,15 @@ type terminalEvent struct {
 	Type string `json:"type"`
 }
 
+// terminalSizeEvent reports the PTY's current window size to a freshly-attached
+// client, sent right before the scrollback replay so the client can size its
+// terminal to match (see sendTerminalSize).
+type terminalSizeEvent struct {
+	terminalEvent
+	Cols uint `json:"cols"`
+	Rows uint `json:"rows"`
+}
+
 type terminalStatusEvent struct {
 	terminalEvent
 	Status string `json:"status"`
@@ -103,6 +112,22 @@ func sendStatusUpdate(conn *safeConn, status string) {
 
 func sendTerminalEvent(conn *safeConn, eventType string) {
 	msg := terminalEvent{Type: eventType}
+	data, _ := json.Marshal(msg)
+	_ = conn.WriteMessage(websocket.TextMessage, data)
+}
+
+// sendTerminalSize tells the client the PTY's current window size so it can size
+// its terminal to match before the replayed scrollback arrives. The scrollback
+// bytes carry cursor moves and wrapping computed for this width; rendering them
+// into a differently sized terminal lands every move in the wrong cell and
+// corrupts the history (the garble seen when switching back to an agent whose
+// layout width no longer matches the detached PTY's). The client refits to its
+// own layout once the replay is in, sending one resize that reflows cleanly.
+func sendTerminalSize(conn *safeConn, rows, cols uint16) {
+	if rows == 0 || cols == 0 {
+		return
+	}
+	msg := terminalSizeEvent{terminalEvent: terminalEvent{Type: "size"}, Cols: uint(cols), Rows: uint(rows)}
 	data, _ := json.Marshal(msg)
 	_ = conn.WriteMessage(websocket.TextMessage, data)
 }
@@ -297,6 +322,15 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 		sendStatusUpdate(conn, "waiting")
 	} else {
 		sendStatusUpdate(conn, "running")
+	}
+
+	// Announce the PTY's current size before any output flows. The scrollback the
+	// output goroutine is about to replay was produced at this width, so the
+	// client sizes its terminal to match first (otherwise the replay's cursor
+	// moves land in the wrong cells and the history renders garbled). Sent here,
+	// synchronously, so it precedes the snapshot the goroutine emits below.
+	if rows, cols := att.Size(); rows > 0 && cols > 0 {
+		sendTerminalSize(conn, rows, cols)
 	}
 
 	done := make(chan struct{})

@@ -2314,10 +2314,11 @@ components:
           status: '#/components/schemas/TerminalStatusEvent'
           data: '#/components/schemas/TerminalDataEvent'
           diff_refresh: '#/components/schemas/TerminalDiffRefreshEvent'
+          size: '#/components/schemas/TerminalSizeEvent'
       properties:
         type:
           type: string
-          enum: [status, data, diff_refresh]
+          enum: [status, data, diff_refresh, size]
 
     TerminalDiffRefreshEvent:
       allOf:
@@ -2349,4 +2350,19 @@ components:
             data:
               type: string
               description: Base64 encoded binary data or plain string
+
+    TerminalSizeEvent:
+      allOf:
+        - $ref: '#/components/schemas/TerminalEvent'
+        - type: object
+          description: >-
+            The PTY's current window size, sent on attach right before the
+            scrollback replay so the client can size its terminal to match. The
+            replayed bytes carry cursor moves and wrapping computed for this
+            width; rendering them at a different width corrupts the history.
+          properties:
+            cols:
+              type: integer
+            rows:
+              type: integer
 

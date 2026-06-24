@@ -10,6 +10,7 @@ export namespace TerminalEvent {
         STATUS = 'status',
         DATA = 'data',
         DIFF_REFRESH = 'diff_refresh',
+        SIZE = 'size',
     }
 }
 

@@ -345,6 +345,21 @@ try {
       // prev/next arrows, "1 / 2" counter). Also shows the numbered-paste naming
       // (image1.png) on the chips behind. Rendered on the full-page spawn form.
       { name: 'spawn-image-lightbox', path: '/project/sim-project/', attachImages: ['web/public/android-chrome-512x512.png', 'web/public/apple-touch-icon.png'] },
+      // The full-page spawn form's base-branch selector, opened so the capture
+      // documents the dropdown: the current branch (HEAD), agent branches, and
+      // other branches. Verifies the menu renders below the "from" trigger and
+      // escapes the spawn card's `overflow-hidden` clipping (the BranchSelector
+      // portal fix) — the bug where the dropdown didn't show when selected. The
+      // branch list comes from the simulation server. Scoped to .max-w-4xl so it
+      // opens the full-page form's selector, not the compact sidebar box's (both
+      // carry the same title).
+      { name: 'spawn-branch-selector', path: '/project/sim-project/', click: '.max-w-4xl button[title^="Base branch"]' },
+      // The same dropdown opened from the compact spawn box in the top-left
+      // sidebar (the mini form rendered on every project page). Scoped to the
+      // `aside` so the click lands on the sidebar selector rather than the
+      // full-page form's (both carry the same "Base branch" title). Verifies the
+      // portal-rendered menu escapes the narrow sidebar's clipping too.
+      { name: 'spawn-branch-selector-mini', path: '/project/sim-project/', click: 'aside button[title^="Base branch"]' },
       // The inline-markdown rendering (the markdown-pass feature). The spawn box
       // is seeded with a markdown draft so the textarea overlay shows live
       // highlighting — `code`, *italic*, **bold**, and a long inline-code
@@ -361,6 +376,17 @@ try {
       // view. Viewport-only to focus on the header + prompt (agent-md's seeded
       // prompt overflows the block's max height, so the fade is visible).
       { name: 'agent-markdown', path: '/project/sim-project/agent/agent-md', viewportOnly: true },
+      // The agent-type picker dropdown, opened on the compact ("mini") spawn box
+      // in the sidebar. The picker is an icon-only trigger (the active agent's
+      // brand mark) that opens a menu listing every agent type as its canonical
+      // brand logo + name (web/src/components/AgentTypeIcon.tsx) — so this shot
+      // documents the brand icons and their accent colours. Captured on an agent
+      // page (not the project landing) so the sidebar's compact box is the only
+      // spawn form on screen — the full-page box would otherwise add a second,
+      // identical "Agent type:" picker and make the click ambiguous. viewportOnly:
+      // the menu is a fixed overlay anchored to the trigger at the top-left, so
+      // the default viewport already frames both the box and the open menu.
+      { name: 'spawn-agent-picker', path: '/project/sim-project/agent/agent-1', viewportOnly: true, click: 'button[aria-label^="Agent type:"]' },
       // The repository view: a GitHub-style browser with a file/folder tree on
       // the left and the picked file rendered on the right. Simulation mode
       // serves a small mock repo (see internal/http/simulation.go) and opens
