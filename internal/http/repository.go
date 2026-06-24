@@ -5,7 +5,9 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"os"
 	"path"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -14,6 +16,7 @@ import (
 	"github.com/trolleyman/hydra/internal/artifacts"
 	"github.com/trolleyman/hydra/internal/config"
 	"github.com/trolleyman/hydra/internal/git"
+	"github.com/trolleyman/hydra/internal/heads"
 )
 
 // maxRepositoryFileBytes caps how much of a file the repository browser will
@@ -406,6 +409,90 @@ func (s *Server) HandleRepositoryBlob(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", ct)
 	w.Header().Set("Cache-Control", "public, max-age=300")
 	_, _ = w.Write(data)
+}
+
+// HandleAgentBlob serves the raw bytes of a repo-relative file as seen in an
+// agent's diff, so the diff viewer can render an image differ for in-tree images
+// the same way the artifacts panel does. It is registered outside the OpenAPI
+// mux (like HandleRepositoryBlob) because it returns raw bytes.
+//
+// With a `ref` it reads the committed blob from the project root — the agent's
+// branch commits live there, so base_ref/head_ref SHAs resolve. With
+// `worktree=true` it instead reads the file straight from the agent's worktree
+// directory, which is how the diff's uncommitted (head_ref == "") and untracked
+// images are served (they exist only on disk, not at any ref). Query: path
+// (required), and either ref or worktree=true.
+func (s *Server) HandleAgentBlob(w http.ResponseWriter, r *http.Request) {
+	projectRoot, err := s.resolveProjectRoot(r.PathValue("project_id"))
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	q := r.URL.Query()
+	filePath := strings.TrimPrefix(path.Clean(q.Get("path")), "/")
+	if filePath == "" || filePath == "." {
+		http.Error(w, "no file path given", http.StatusBadRequest)
+		return
+	}
+
+	if q.Get("worktree") == "true" {
+		head, err := heads.GetHeadByID(r.Context(), s.Sessions, s.DB, projectRoot, r.PathValue("id"))
+		if err != nil || head == nil || head.Worktree == nil {
+			http.NotFound(w, r)
+			return
+		}
+		s.serveWorktreeBlob(w, r, *head.Worktree, filePath)
+		return
+	}
+
+	ref := repoRef(ptrOrNil(q.Get("ref")))
+	// Resolve symlinks so an <img> pointing at a symlinked image serves the real
+	// bytes rather than the link's target text (matches HandleRepositoryBlob).
+	if mode, err := git.LsTreeEntryMode(projectRoot, ref, filePath); err == nil && mode == gitSymlinkMode {
+		final, finalMode, _, ok := resolveSymlink(projectRoot, ref, filePath)
+		if !ok || finalMode == gitDirMode {
+			http.NotFound(w, r)
+			return
+		}
+		filePath = final
+	}
+	data, err := git.ShowFile(projectRoot, ref, filePath)
+	if err != nil {
+		http.Error(w, "invalid blob request", http.StatusBadRequest)
+		return
+	}
+	if data == nil {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", http.DetectContentType(data))
+	w.Header().Set("Cache-Control", "public, max-age=300")
+	_, _ = w.Write(data)
+}
+
+// serveWorktreeBlob serves a repo-relative file straight from an agent's worktree
+// directory. relPath has already been path.Clean'd and stripped of a leading
+// slash; the filepath.Rel guard rejects any path that still escapes the worktree
+// (e.g. "../secret"), so a crafted request can't read outside it.
+func (s *Server) serveWorktreeBlob(w http.ResponseWriter, r *http.Request, worktree, relPath string) {
+	full := filepath.Join(worktree, filepath.FromSlash(relPath))
+	if rel, err := filepath.Rel(worktree, full); err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		http.NotFound(w, r)
+		return
+	}
+	f, err := os.Open(full)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil || info.IsDir() {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store") // worktree contents change as the agent works
+	http.ServeContent(w, r, filepath.Base(full), info.ModTime(), f)
 }
 
 // repositoryArtifactNames lists the enabled [[artifacts]] script names defined at

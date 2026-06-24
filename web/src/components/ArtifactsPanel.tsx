@@ -350,7 +350,7 @@ function SideBySide({ left, right }: { left?: string | null; right?: string | nu
 // modes keep their own layout even when one side is missing (added/removed file),
 // substituting a "No image" placeholder; we only fall back to the side-by-side
 // pair for that mode itself, or the degenerate case of no images at all.
-function ImageDiffView({ left, right, mode }: { left?: string | null; right?: string | null; mode: ImageDiffMode }) {
+export function ImageDiffView({ left, right, mode }: { left?: string | null; right?: string | null; mode: ImageDiffMode }) {
   if (mode === 'side-by-side' || (!left && !right)) {
     return <SideBySide left={left} right={right} />
   }

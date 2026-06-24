@@ -1391,6 +1391,34 @@ const simRepoImage = "web/public/logo.png"
 // image file. Kept as a fixed blob so screenshot artifacts stay byte-stable.
 const simLogoPNGBase64 = "iVBORw0KGgoAAAANSUhEUgAAAIAAAABgCAIAAABaGO0eAAAC10lEQVR42u3dzVHDQAwF4Bw5URYVUQi0QjdUQQmQgZkcQuz900pP78njY5JZ6wPi3ecVl+86Qo9LlaAACuD3+Hz5mjufX9/Wz6f3D5PTZDAO47EEWGdQq/4WgGkDwervAphg0Kz+XoB+BtnqewA0DZSr7wRwwiBefVeA/wxV/QCAm0FV/xDg+im7Da5nVf8M4O8EZyCofgMA2YCj+m0ATAaa6ncB3F4KwsBU/TbA3avDDciq3wA4ek8UA1/1zwCa73RmoKz+IUDnm90MWKt//agHAKOf4sBAnLUZAKRggF35MANANkBed7IEwGQAX/UzBvCcPHNkbZYA/gsYBFmbGcDR6KMYsuQNNgDNy3BmSJT2GAB0XoybQa6sbRVg9Koqa7MEmL68ytoMABZ/xCprWwKw+jtbWdsMgPm3nHLWNgyw6R5DNmsbA9h9hyeYtQ0AuN1fS2VtvQDOsxudrK0LIGpuqZC1tQHCZ/bcWVsDAGRdhThrOwNAW9WizNoOAWDXFMmytscA4Cu6TFlb19PRmKtaHFnbLgC3++vsWdsWAOfZTeqszR4gam6ZNGszBgif2afL2iwBQJ5hzpW1mQGgPUGeJWuzAYB9fh8/azMAAN89AZ61rQJk2bsCm7UtAaTbOQSYtc0DJN23hZa1TQJk3zWHs7I9A0CzZxGBYRiAbMdouMEYAOt+3UCGAQDi3dKBAUMvAH31owy6AESqH8Iw0C9IrSu3D8NYvyC1rtwOBjP9gtS6cscAVPV9GJb6Bal15XYCqOp7MuwCoO9MDA0g0hcaFECtKzcWgGxPdAgA8Y70wQD1/wDmGJz6Bal15XYFqOqvGHj3C6qszRKgqr+etYX1C6qsbQmgqm+VtUH0C1LO2lD6BclmbVj9ggSzNsR+QVJ3AaD9gnS+h6D7BSn8LiboF8Q9nhz9gojHk6lfEOV48vULIhtPyn5BTON5AFBHyFEABaB9/ACuVNk1U+d1vQAAAABJRU5ErkJggg=="
 
+// The repository diff carries an in-tree image that's modified on the branch and
+// one that's added, so the diff viewer's before/after image differ (the
+// artifacts panel's ImageDiffView, reused by FileDiff for binary images) has
+// something to render instead of "Binary file changed". simDiffImageModified is
+// served as a different picture per ref (before vs after, see
+// HandleRepositoryBlob + simIsBaseRef) so the comparison shows a real change;
+// simDiffImageAdded exists only on the head side.
+const (
+	simDiffImageModified = "web/public/diff-banner.png"
+	simDiffImageAdded    = "web/public/diff-added.png"
+)
+
+// Deterministic before/after PNGs for the modified diff image (same size, a
+// recoloured + moved badge), kept as fixed blobs so screenshot artifacts stay
+// byte-stable. The added image reuses the "after" picture.
+const (
+	simDiffImageBeforeBase64 = "iVBORw0KGgoAAAANSUhEUgAAAKAAAABkCAIAAACO1KzYAAABMklEQVR4nOzaoY1CQRhG0V0ydeCfwyHogFbQVEFzOCSSNmgBM5mXm3P0iC+5+d2M8/X2R9dh9QDmEjhO4DiB4wSOEzhO4DiB4wSOEzhO4DiB4wSOEzhO4DiB4wSOEzhO4DiB4wSOG5/3c/UGJnLBcQLHCRwncJzAcQLHCRwncJzAcQLHCRwncJzAcQLHCRwncJzAcQLHCRwncJzAceP3p6/7Hv9fbo/T6gm75oLjBI4TOE7gOIHjBI4TOE7gOIHjBI4TOE7gOIHjBI4TOE7gOIHjBI4TOE7gOIHjBI4TOE7gOIHjBI4TOE7gOIHjBI4TOE7gOIHjBI4TOE7gOIHjBI4TOO7/uF1Wb2AiFxwncJzAcQLHCRwncJzAcQLHCRwncJzAcQLHCRwncJzAcd8AAAD//3IGB9IooGG7AAAAAElFTkSuQmCC"
+	simDiffImageAfterBase64  = "iVBORw0KGgoAAAANSUhEUgAAAKAAAABkCAIAAACO1KzYAAABMklEQVR4nOzTMY0CQBRF0V0yOmioUECBA3TQYQlRGCCUmKDAAVSTITfntL95yc0fh9Plj67N6gHMJXCcwHECxwkcJ3CcwHECxwkcJ3CcwHECxwkcJ3CcwHECxwkcJ3CcwHECxwkcN56P2+oNTOSD4wSOEzhO4DiB4wSOEzhO4DiB4wSOEzhO4DiB4wSOEzhO4DiB48bqAb9uXHerJ3zxOt8/XH1wnMBxAscJHCdwnMBxAscJHCdwnMBxAscJHCdwnMBxAscJHCdwnMBxAscJHCdwnMBxAscJHCdwnMBxAscJHCdwnMBxAscJHCdwnMBxAscJHCdwnMBxAscJHCdwnMBxAscJHCdwnMBxAsf9b/fH1RuYyAfHCRwncJzAcQLHCRwncJzAcQLHCRwncNw7AAD//31pB9L/B2l1AAAAAElFTkSuQmCC"
+)
+
+// simIsBaseRef reports whether a blob ref query denotes the diff's base side (the
+// browsed ref, "main") rather than the head (the agent branch). It picks which
+// version of the modified diff image (before vs after) HandleRepositoryBlob
+// serves, so the same path renders a different picture on each side of the diff.
+func simIsBaseRef(ref string) bool {
+	return ref == "" || ref == "HEAD" || ref == "main"
+}
+
 // simRepoFiles holds the simulated content for each path in simRepoOrder.
 var simRepoFiles = map[string]string{
 	".gitignore": "node_modules/\ndist/\n.env\n*.log\n.hydra/local/\n",
@@ -1572,6 +1600,22 @@ func (s *SimulationServer) GetRepositoryDiff(w http.ResponseWriter, r *http.Requ
 				},
 			},
 		},
+		{
+			// A modified in-tree image. Binary, so FileDiff swaps in the before/after
+			// image differ (ImageDiffView) in place of "Binary file changed". The
+			// blob handler serves a different picture per ref, so before ≠ after and
+			// the comparison shows a real change.
+			Path:       simDiffImageModified,
+			ChangeType: api.DiffFileChangeTypeModified,
+			Binary:     true,
+		},
+		{
+			// An added in-tree image: only the after side exists, so the differ
+			// shows the new image beside a "No image" before placeholder.
+			Path:       simDiffImageAdded,
+			ChangeType: api.DiffFileChangeTypeAdded,
+			Binary:     true,
+		},
 	}
 	if params.Path != nil && *params.Path != "" {
 		filtered := make([]api.DiffFile, 0, 1)
@@ -1654,10 +1698,28 @@ func (s *SimulationServer) GetRepositoryFile(w http.ResponseWriter, r *http.Requ
 // opens the unrendered blob in a new tab). Symlinks resolve to their target and
 // unknown paths 404, mirroring the real handler.
 func (s *SimulationServer) HandleRepositoryBlob(w http.ResponseWriter, r *http.Request) {
-	reqPath := strings.TrimPrefix(path.Clean(r.URL.Query().Get("path")), "/")
+	q := r.URL.Query()
+	reqPath := strings.TrimPrefix(path.Clean(q.Get("path")), "/")
 	w.Header().Set("Cache-Control", "public, max-age=300")
 	if reqPath == simRepoImage {
 		png, err := base64.StdEncoding.DecodeString(simLogoPNGBase64)
+		if err != nil {
+			http.Error(w, "decode error", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "image/png")
+		_, _ = w.Write(png)
+		return
+	}
+	// The diff's in-tree images: the modified one renders a different picture on
+	// each side of the diff (before vs after by ref); the added one only exists on
+	// the head side. Backs the diff viewer's before/after image differ.
+	if reqPath == simDiffImageModified || reqPath == simDiffImageAdded {
+		b64 := simDiffImageAfterBase64
+		if reqPath == simDiffImageModified && simIsBaseRef(q.Get("ref")) {
+			b64 = simDiffImageBeforeBase64
+		}
+		png, err := base64.StdEncoding.DecodeString(b64)
 		if err != nil {
 			http.Error(w, "decode error", http.StatusInternalServerError)
 			return
@@ -1676,6 +1738,14 @@ func (s *SimulationServer) HandleRepositoryBlob(w http.ResponseWriter, r *http.R
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	_, _ = w.Write([]byte(content))
+}
+
+// HandleAgentBlob serves the simulated repo's raw file bytes for an agent diff.
+// The simulation has no real worktree or refs, so it ignores ref/worktree and
+// resolves purely by path — mirroring HandleRepositoryBlob — which is enough to
+// back the diff viewer's image differ in the frontend simulation.
+func (s *SimulationServer) HandleAgentBlob(w http.ResponseWriter, r *http.Request) {
+	s.HandleRepositoryBlob(w, r)
 }
 
 // GetRepositoryArtifacts lists the artifact scripts the simulated repo declares in
