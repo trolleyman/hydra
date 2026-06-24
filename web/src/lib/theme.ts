@@ -7,7 +7,7 @@
 // header was removed (Claude-style layout), so the control moved into Settings
 // and the state had to be hoisted out of the layout component.
 
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { create } from 'zustand'
 import { Sun, Moon, Monitor } from 'lucide-react'
 import { StorageKeys, readLocal, writeLocal } from './storage'
@@ -73,4 +73,22 @@ export function useApplyTheme() {
       return () => mql.removeEventListener('change', apply)
     }
   }, [mode])
+}
+
+// useIsDark reports whether dark mode is currently active by observing the `dark`
+// class that useApplyTheme toggles on <html>. It tracks all three theme modes
+// (including live OS changes in `system` mode) without duplicating the apply
+// logic, so non-DOM consumers like the xterm log terminal — which needs explicit
+// theme colours rather than CSS classes — can react to theme changes.
+export function useIsDark(): boolean {
+  const [isDark, setIsDark] = useState(() => document.documentElement.classList.contains('dark'))
+  useEffect(() => {
+    const el = document.documentElement
+    const sync = () => setIsDark(el.classList.contains('dark'))
+    const obs = new MutationObserver(sync)
+    obs.observe(el, { attributes: true, attributeFilter: ['class'] })
+    sync()
+    return () => obs.disconnect()
+  }, [])
+  return isDark
 }
