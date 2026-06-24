@@ -7,7 +7,7 @@ import { RepositoryArtifactResponse } from '../api'
 import { formatError } from '../api/format_error'
 import { IMG_CLASS, checkerStyle } from './artifactDiffShared'
 import { isVideoArtifact } from './VideoDiffView'
-import { TagBadge, LogView, ElapsedTime, MasonryGrid, useArtifactAspects } from './ArtifactsPanel'
+import { TagBadge, LogView, ElapsedTime, MasonryGrid, useArtifactDims } from './ArtifactsPanel'
 import { useArtifactSpans } from '../lib/artifactColumns'
 
 // RepositoryArtifactsView renders one [[artifacts]] script's output for a single
@@ -127,8 +127,9 @@ export function RepositoryArtifactsView({
   // Per-tile span overrides, shared (and persisted) with the diff viewer's
   // artifacts panel. Tiles without an override auto-span by aspect ratio.
   const { spans, setSpanOverride } = useArtifactSpans()
-  // Measure each file's aspect ratio so the masonry can auto-span by shape.
-  const aspects = useArtifactAspects(
+  // Measure each file's aspect ratio + natural width so the masonry can auto-span by
+  // shape and cap the span to avoid upscaling a low-res shot (see MasonryGrid spanOf).
+  const dims = useArtifactDims(
     (data?.files ?? []).map((f) => ({ key: f.name, url: f.url ?? null, video: isVideoArtifact(f.name) })),
   )
 
@@ -229,7 +230,8 @@ export function RepositoryArtifactsView({
             items={data.files.map((f) => ({
               key: f.name,
               node: <MediaCell file={f} />,
-              aspect: aspects[f.name],
+              aspect: dims[f.name]?.aspect,
+              pxWidth: dims[f.name]?.pxWidth,
               // Video uses horizontal drag for scrubbing, so it resizes via the edge
               // handle only; images are draggable anywhere (see MasonryGrid).
               bodyResizable: !isVideoArtifact(f.name),

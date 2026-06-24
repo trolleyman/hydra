@@ -759,14 +759,20 @@ function FileRow({ file, mode }: { file: ArtifactFile; mode: ImageDiffMode }) {
   )
 }
 
-// useArtifactAspects measures each artifact's intrinsic aspect ratio (width /
-// height) by loading the media off-screen, so the masonry can pick a sensible
-// default span (wide → more columns, tall → one) without the backend reporting
-// dimensions. Images read naturalWidth/Height; videos read videoWidth/Height off a
-// metadata preload. The browser caches the fetch, so the visible <img>/<video>
-// doesn't load it twice. Returns a key→aspect map that fills in as media loads.
-export function useArtifactAspects(sources: { key: string; url: string | null; video: boolean }[]): Record<string, number> {
-  const [aspects, setAspects] = useState<Record<string, number>>({})
+// An artifact's measured intrinsic dimensions: its aspect ratio (width / height)
+// drives the default column span, and its natural pixel width lets the grid avoid
+// upscaling a low-resolution shot past 1:1 on a high-DPI/large screen (see spanOf).
+export type ArtifactDim = { aspect: number; pxWidth: number }
+
+// useArtifactDims measures each artifact's intrinsic aspect ratio and natural pixel
+// width by loading the media off-screen, so the masonry can pick a sensible default
+// span (wide → more columns, tall → one) and cap it so the shot is never blown up
+// past its own resolution — all without the backend reporting dimensions. Images read
+// naturalWidth/Height; videos read videoWidth/Height off a metadata preload. The
+// browser caches the fetch, so the visible <img>/<video> doesn't load it twice.
+// Returns a key→dims map that fills in as media loads.
+export function useArtifactDims(sources: { key: string; url: string | null; video: boolean }[]): Record<string, ArtifactDim> {
+  const [dims, setDims] = useState<Record<string, ArtifactDim>>({})
   // A stable signature of the (key,url) set so the effect only re-runs when the
   // media actually changes, not on every render's fresh array.
   const sig = sources.map((s) => `${s.key} ${s.url ?? ''}`).join('|')
@@ -776,7 +782,7 @@ export function useArtifactAspects(sources: { key: string; url: string | null; v
     let cancelled = false
     const set = (key: string, w: number, h: number) => {
       if (cancelled || !w || !h) return
-      setAspects((a) => (a[key] != null ? a : { ...a, [key]: w / h }))
+      setDims((a) => (a[key] != null ? a : { ...a, [key]: { aspect: w / h, pxWidth: w } }))
     }
     for (const s of ref.current) {
       if (!s.url) continue
@@ -793,7 +799,7 @@ export function useArtifactAspects(sources: { key: string; url: string | null; v
     }
     return () => { cancelled = true }
   }, [sig])
-  return aspects
+  return dims
 }
 
 // Balanced (shortest-column) masonry. Each tile is absolutely positioned: we
@@ -812,7 +818,7 @@ export function MasonryGrid({ items, spanScale = 1, spans, onSpanChange }: {
   // bodyResizable defaults to true; set false for tiles whose media owns horizontal
   // drag (the before/after slider, video scrubbing) — those resize via the edge
   // handle only, so the two gestures don't fight.
-  items: { key: string; node: React.ReactNode; aspect?: number; bodyResizable?: boolean }[]
+  items: { key: string; node: React.ReactNode; aspect?: number; pxWidth?: number; bodyResizable?: boolean }[]
   spanScale?: number
   spans: ArtifactSpans
   onSpanChange?: (key: string, span: number | null) => void
@@ -887,11 +893,30 @@ export function MasonryGrid({ items, spanScale = 1, spans, onSpanChange }: {
   }, [width])
 
   // Resolve a tile's span: an explicit override (from dragging) wins, otherwise the
-  // aspect-ratio default scaled for side-by-side. Clamped to the rendered columns.
-  const spanOf = useCallback((it: { key: string; aspect?: number }): number => {
-    const req = spans[it.key] ?? defaultSpanForAspect(it.aspect) * spanScale
+  // aspect-ratio default scaled for side-by-side, then capped so we never blow a
+  // shot up past its own resolution. Clamped to the rendered columns.
+  //
+  // The cap is the DPI fix: a tile's media fills its column run (w-full), so a
+  // low-resolution shot stretched across a wide run on a large/high-DPI screen gets
+  // upscaled and looks blurry. We cap the auto span to the widest run whose CSS width
+  // stays within the image's own CSS width (natural px ÷ devicePixelRatio) — i.e. the
+  // most columns it can cover at ≤1:1 device pixels. In side-by-side the run holds the
+  // before+after pair so each image only gets ~half of it, hence the spanScale budget.
+  // Explicit drag overrides bypass the cap: enlarging past native is then deliberate.
+  const spanOf = useCallback((it: { key: string; aspect?: number; pxWidth?: number }): number => {
+    let req = spans[it.key]
+    if (req == null) {
+      req = defaultSpanForAspect(it.aspect) * spanScale
+      if (it.pxWidth && layout.colW > 0) {
+        const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1
+        const budgetCss = (it.pxWidth / dpr) * spanScale
+        // tileW(s) = s*colW + (s-1)*gap ≤ budgetCss  ⇒  s ≤ (budgetCss + gap)/(colW + gap)
+        const maxSpan = Math.max(1, Math.floor((budgetCss + layout.gap) / (layout.colW + layout.gap)))
+        req = Math.min(req, maxSpan)
+      }
+    }
     return Math.max(1, Math.min(Math.round(req), layout.cols))
-  }, [spans, spanScale, layout.cols])
+  }, [spans, spanScale, layout.cols, layout.colW, layout.gap])
 
   // Place each tile into the run of `span` columns whose tallest column is currently
   // shortest (ties resolve leftmost, preserving reading order). Each tile fills its
@@ -1044,17 +1069,18 @@ function FileGrid({ files, mode, spans, onSpanChange }: {
     () => files.map((f) => ({ key: f.name, url: f.right_url ?? f.left_url ?? null, video: isVideoArtifact(f.name) })),
     [files],
   )
-  const aspects = useArtifactAspects(aspectSources)
+  const dims = useArtifactDims(aspectSources)
   const items = useMemo(
     () => files.map((f) => ({
       key: f.name,
       node: <FileRow file={f} mode={mode} />,
-      aspect: aspects[f.name],
+      aspect: dims[f.name]?.aspect,
+      pxWidth: dims[f.name]?.pxWidth,
       // The slider mode and video both use horizontal drag on the media, so let
       // those resize via the edge handle only — see MasonryGrid's bodyResizable.
       bodyResizable: mode !== 'slider' && !isVideoArtifact(f.name),
     })),
-    [files, mode, aspects],
+    [files, mode, dims],
   )
   // pt-3 so the gap above the first row matches the card body's px-3 left inset.
   return (
