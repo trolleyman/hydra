@@ -24,11 +24,6 @@ type DeployConfig struct {
 	// AuthKey is the shared secret required by non-localhost clients. Empty
 	// disables auth entirely (the previous behaviour: localhost-only access).
 	AuthKey string `toml:"auth_key"`
-	// ListenAddr overrides the web server's bind address (host:port). Empty
-	// keeps the default localhost:8080 (unreachable from other machines). Set
-	// e.g. "0.0.0.0:8080" to expose the UI on the LAN, where AuthKey then
-	// gates every non-loopback request. HYDRA_API_ADDR still overrides this.
-	ListenAddr string `toml:"listen_addr"`
 }
 
 // GenerateAuthKey returns a fresh, URL-safe random key (32 bytes of entropy)
@@ -85,17 +80,12 @@ func renderDeploy(cfg DeployConfig) string {
 		"# Localhost connections are always trusted. Any non-localhost client must\n" +
 		"# present auth_key (via the web login screen, which stores it in a cookie,\n" +
 		"# or an `Authorization: Bearer <auth_key>` header for API clients).\n" +
+		"#\n" +
+		"# This file only stores the key. The web UI binds to localhost by default;\n" +
+		"# exposing it on the network is an explicit, separate action — run\n" +
+		"# `mage prod` (production) or `mage devExpose` (development) to bind 0.0.0.0,\n" +
+		"# both of which refuse to start without this key.\n" +
 		"\n"
 	s += "auth_key = " + tomlStringValue(cfg.AuthKey) + "\n"
-	s += "\n" +
-		"# Bind address for the web UI. Default (commented) is localhost:8080, which\n" +
-		"# is only reachable from this machine. Set 0.0.0.0:8080 to expose it on the\n" +
-		"# network so you can reach it from e.g. your phone — auth_key then guards\n" +
-		"# every non-localhost request.\n"
-	if cfg.ListenAddr != "" {
-		s += "listen_addr = " + tomlStringValue(cfg.ListenAddr) + "\n"
-	} else {
-		s += "# listen_addr = \"0.0.0.0:8080\"\n"
-	}
 	return s
 }

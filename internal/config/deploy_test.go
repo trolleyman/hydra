@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/trolleyman/hydra/internal/paths"
@@ -10,7 +11,7 @@ import (
 
 func TestDeployRoundTrip(t *testing.T) {
 	root := t.TempDir()
-	want := DeployConfig{AuthKey: "test-key-123", ListenAddr: "0.0.0.0:8080"}
+	want := DeployConfig{AuthKey: "test-key-123"}
 	if err := SaveDeploy(root, want); err != nil {
 		t.Fatalf("SaveDeploy: %v", err)
 	}
@@ -43,23 +44,17 @@ func TestLoadDeployMissingFileIsZero(t *testing.T) {
 	}
 }
 
-func TestSaveDeployOmitsEmptyListenAddr(t *testing.T) {
+func TestSaveDeployWritesKey(t *testing.T) {
 	root := t.TempDir()
-	if err := SaveDeploy(root, DeployConfig{AuthKey: "k"}); err != nil {
+	if err := SaveDeploy(root, DeployConfig{AuthKey: "k3y"}); err != nil {
 		t.Fatalf("SaveDeploy: %v", err)
 	}
 	data, err := os.ReadFile(filepath.Join(root, ".hydra", "deploy.toml"))
 	if err != nil {
 		t.Fatalf("read: %v", err)
 	}
-	// An unset listen address is left commented (default localhost), so reloading
-	// yields an empty ListenAddr rather than a stray active assignment.
-	got, err := LoadDeploy(root)
-	if err != nil {
-		t.Fatalf("LoadDeploy: %v", err)
-	}
-	if got.ListenAddr != "" {
-		t.Errorf("ListenAddr = %q, want empty; file:\n%s", got.ListenAddr, data)
+	if !strings.Contains(string(data), `auth_key = "k3y"`) {
+		t.Errorf("deploy.toml missing auth_key; file:\n%s", data)
 	}
 }
 

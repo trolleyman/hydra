@@ -514,21 +514,7 @@ func (Deploy) Setup() error {
 		}
 	}
 
-	// Listen address: default localhost (local only) vs 0.0.0.0 (LAN-reachable).
-	fmt.Println()
-	fmt.Println("Bind address for the web UI:")
-	fmt.Println("  - localhost:8080  (default; only reachable from this machine)")
-	fmt.Println("  - 0.0.0.0:8080    (reachable from other devices on your network)")
-	listenDef := existing.ListenAddr
-	if listenDef == "" {
-		listenDef = "localhost:8080"
-	}
-	listen := prompt("listen_addr", listenDef)
-	if listen == "localhost:8080" {
-		listen = "" // keep the default implicit (commented) in the file
-	}
-
-	cfg := config.DeployConfig{AuthKey: key, ListenAddr: listen}
+	cfg := config.DeployConfig{AuthKey: key}
 	if err := config.SaveDeploy(projectRoot, cfg); err != nil {
 		return errtrace.Wrap(err)
 	}
@@ -541,23 +527,59 @@ func (Deploy) Setup() error {
 	fmt.Printf("\n%sAuth key:%s %s\n", colorBold, colorReset, key)
 	fmt.Println("\nLocalhost is always trusted; other devices must enter this key at the web")
 	fmt.Println("login screen (or send 'Authorization: Bearer <key>' for API calls).")
-	if listen != "" {
-		fmt.Printf("The server will bind to %s on next start; browse to http://<this-machine-ip>:%s\n", listen, portOf(listen))
-	} else {
-		fmt.Println("listen_addr is localhost (local only). To reach it from another device, re-run")
-		fmt.Println("setup and choose 0.0.0.0:8080, or edit listen_addr in the file.")
-	}
-	fmt.Println("Restart the Hydra server for changes to take effect.")
+	fmt.Println("\nA normal `mage run` / `hydra server` keeps the UI bound to localhost.")
+	fmt.Println("Opening it to the network is a separate, explicit step:")
+	fmt.Printf("  %smage prod%s        build + serve on 0.0.0.0 (production)\n", colorBold, colorReset)
+	fmt.Printf("  %smage devExpose%s   serve on 0.0.0.0 with dev auto-rebuild\n", colorBold, colorReset)
+	fmt.Println("Then browse to http://<this-machine-ip>:8080 and enter the key.")
 	return nil
 }
 
-// portOf returns the port part of a host:port address, or the whole string if
-// it has no colon.
-func portOf(addr string) string {
-	if i := strings.LastIndex(addr, ":"); i >= 0 {
-		return addr[i+1:]
+// exposedAPIAddr is the bind address used by the exposing targets (Prod /
+// DevExpose): every interface, so the UI is reachable from other devices on the
+// network. Override the port with HYDRA_PORT (default 8080).
+func exposedAPIAddr() string {
+	port := os.Getenv("HYDRA_PORT")
+	if port == "" {
+		port = "8080"
 	}
-	return addr
+	return "0.0.0.0:" + port
+}
+
+// requireAuthKey errors unless an auth key is configured, so the exposing
+// targets fail early (with guidance) rather than the server refusing to bind.
+// Opening the port to the network always requires a password.
+func requireAuthKey() error {
+	projectRoot, err := paths.GetProjectRootFromCwd()
+	if err != nil {
+		return errtrace.Wrap(err)
+	}
+	deploy, err := config.LoadDeploy(projectRoot)
+	if err != nil {
+		return errtrace.Wrap(err)
+	}
+	if deploy.AuthKey == "" {
+		return errtrace.Wrap(fmt.Errorf(
+			"no auth key configured — run `mage deploy:setup` first so the exposed port requires a password"))
+	}
+	return nil
+}
+
+// Prod builds the full project and serves the web UI on 0.0.0.0 (every network
+// interface), reachable from other devices such as your phone. Non-localhost
+// clients must present the auth key from `mage deploy:setup`; Prod refuses to
+// start without one. Override the port with HYDRA_PORT (default 8080).
+func Prod() error {
+	if err := requireAuthKey(); err != nil {
+		return errtrace.Wrap(err)
+	}
+	addGoBuildDeps()
+	addr := exposedAPIAddr()
+	os.Setenv("HYDRA_API_ADDR", addr)
+	fmt.Printf("%sServing on http://%s — reachable from other devices; auth key required%s\n", colorBold, addr, colorReset)
+	args := append([]string{"run"}, goBuildTags(false)...)
+	args = append(args, "./", "server")
+	return errtrace.Wrap(runV("go", args...))
 }
 
 // ensureDeployGitignored makes sure .hydra/deploy.toml is ignored by git (it
@@ -759,6 +781,29 @@ func getHydraOutputFile() string {
 // For auto-reload on file changes use DevAutoReload instead.
 func Dev() error {
 	os.Setenv("HYDRA_DEV_BUILD", "1")
+	return errtrace.Wrap(devServerLoop(nil))
+}
+
+// DevExpose is Dev, but binds the web UI to 0.0.0.0 (every network interface) so
+// you can iterate on the UI from another device, e.g. your phone, with the same
+// rebuild-on-UI-restart loop. Non-localhost clients must present the auth key
+// from `mage deploy:setup`; DevExpose refuses to start without one. Override the
+// port with HYDRA_PORT (default 8080).
+func DevExpose() error {
+	if err := requireAuthKey(); err != nil {
+		return errtrace.Wrap(err)
+	}
+	os.Setenv("HYDRA_DEV_BUILD", "1")
+	addr := exposedAPIAddr()
+	fmt.Printf("%sDev server exposed on http://%s — reachable from other devices; auth key required%s\n", colorBold, addr, colorReset)
+	return errtrace.Wrap(devServerLoop([]string{"HYDRA_API_ADDR=" + addr}))
+}
+
+// devServerLoop builds the frontend + backend and runs the dev server with the
+// UI restart endpoint enabled, rebuilding and restarting whenever the UI asks
+// for it (exit code devRestartExitCode). extraEnv is appended to the server's
+// environment — DevExpose uses it to set HYDRA_API_ADDR for a 0.0.0.0 bind.
+func devServerLoop(extraEnv []string) error {
 	for {
 		if err := GenerateGo(); err != nil {
 			return errtrace.Wrap(err)
@@ -779,6 +824,7 @@ func Dev() error {
 		serverCmd.Stdout = os.Stdout
 		serverCmd.Stderr = os.Stderr
 		serverCmd.Env = append(os.Environ(), "HYDRA_DEV_RESTART=1")
+		serverCmd.Env = append(serverCmd.Env, extraEnv...)
 
 		if err := serverCmd.Run(); err != nil {
 			var exitErr *exec.ExitError
