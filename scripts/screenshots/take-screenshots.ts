@@ -423,17 +423,16 @@ try {
         disableSettingsEntries: true,
         scrollTo: 'Diff Artifacts',
       },
-      // The agent detail header showing the new user-facing title: the sidebar
-      // and header render the mutable title (e.g. "Add renameable agent titles")
-      // in place of the stable ID, with a rename (pencil) button beside it and
-      // the Copy-ID button still exposing the underlying id. Viewport-only so the
-      // shot focuses on the title bar rather than the terminal/diff below.
+      // The agent detail header bar showing the user-facing title (e.g. "Add
+      // renameable agent titles") in place of the stable ID, with its actions
+      // chevron and a status dot. Viewport-only so the shot focuses on the bar
+      // rather than the terminal/diff below.
       { name: 'agent-title', path: '/project/sim-project/agent/agent-1', viewportOnly: true },
-      // The inline rename in progress: clicking the pencil swaps the title for an
-      // editable input seeded with the current title (Enter saves via PATCH, Esc
-      // cancels). Documents the rename UX. The pencil is the only lucide-pencil
-      // icon on the page, so the :has() selector targets it unambiguously.
-      { name: 'agent-rename', path: '/project/sim-project/agent/agent-1', viewportOnly: true, click: 'button:has(svg.lucide-pencil)' },
+      // The inline rename in progress: clicking the title (it carries an I-beam to
+      // signal it's editable) swaps it for an input seeded with the current title
+      // (Enter saves via PATCH, Esc cancels). The title button is tagged
+      // title="Rename", so the selector targets it unambiguously.
+      { name: 'agent-rename', path: '/project/sim-project/agent/agent-1', viewportOnly: true, click: '.sticky button[title="Rename"]' },
       // The agent-detail prompt block rendering the upload paths a prompt carries
       // as attachment chips instead of raw links: three image thumbnails (served a
       // fixed stub PNG) and one non-image file shown with a generic icon, the
