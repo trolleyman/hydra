@@ -222,10 +222,13 @@ function splitFence(raw: string): { open: string; body: string; close: string } 
 // underneath, but tints code spans and dims emphasis markers so the structure
 // reads as highlighted source rather than rendered output.
 function renderMarkdownSource(text: string): ReactNode {
-  // Trim the newline that hugs each fenced block: the block element below
-  // supplies that line break itself, so keeping the literal newline too would
-  // push everything after the block down a line and drift the caret.
-  const segs = trimAroundBlocks(parseInline(text))
+  // Unlike the read-only render, the overlay must stay char-for-char with the
+  // textarea, so we do NOT trim the newlines hugging fenced blocks and we render
+  // the block INLINE (see the codeblock branch below). parseInline guarantees
+  // the concatenated source of every segment equals `text` exactly, and in the
+  // `whitespace-pre-wrap` backdrop the literal newlines reproduce the textarea's
+  // line breaks one-for-one — so the highlight can never drift from the caret.
+  const segs = parseInline(text)
   return segs.map((s, i) => {
     if (s.kind === 'text') return <span key={i}>{s.value}</span>
     if (s.kind === 'code') {
@@ -244,22 +247,30 @@ function renderMarkdownSource(text: string): ReactNode {
       )
     }
     if (s.kind === 'codeblock') {
-      // Rendered as ONE full-width block so the whole code block sits inside a
-      // single rounded background, not a separate chip per wrapped line. It must
-      // carry NO padding/margin (which would shift glyphs and break alignment)
-      // and stays in the inherited proportional font (a font swap would change
-      // glyph widths and drift the caret). Syntax COLOURS come from the same
-      // highlight.js path as the read-only block — colour alone doesn't affect
-      // layout, and `.md-src-code` strips the theme's bold/italic, which WOULD
-      // change glyph advances. The highlighted HTML's text is exactly the inner
-      // code, so we re-add the two fence newlines around it to stay char-for-char
-      // with the source (`open` + "\n" + value + "\n" + `close` === raw). With the
-      // hugging newline trimmed above, the block's line breaks reproduce the
-      // textarea's lines exactly. Fence lines are dimmed like emphasis markers.
+      // Rendered INLINE (not display:block) so the source stays char-for-char
+      // with the textarea: the block's whole source (`open` + `body` + `close`
+      // === raw) flows in the backdrop with its literal newlines intact, and the
+      // `whitespace-pre-wrap` parent turns those into exactly the textarea's line
+      // breaks. (A display:block element instead manufactures its OWN line breaks
+      // and forced us to trim the hugging source newlines to compensate — which
+      // dropped a line whenever a block sat at the start/end of the value or hard
+      // up against a blank line, drifting the highlight off the caret.) It must
+      // carry NO padding/margin and stay in the inherited proportional font, or
+      // glyph advances shift and the caret drifts. Syntax COLOURS come from the
+      // same highlight.js path as the read-only block — colour alone doesn't
+      // affect layout, and `.md-src-code` strips the theme's bold/italic, which
+      // WOULD change glyph advances. The highlighted HTML's text is exactly the
+      // inner code, so we re-add the two fence newlines around it to stay
+      // char-for-char (`open` + "\n" + value + "\n" + `close` === raw). The
+      // rounded background follows the text per wrapped line via
+      // `box-decoration-clone`. Fence lines are dimmed like emphasis markers.
       const { open, body, close } = splitFence(s.raw)
       const html = highlightCode(s.value, s.lang)
       return (
-        <span key={i} className="md-src-code block rounded bg-gray-200/80 dark:bg-gray-700/70 break-words">
+        <span
+          key={i}
+          className="md-src-code rounded box-decoration-clone bg-gray-200/80 dark:bg-gray-700/70"
+        >
           <span className="opacity-50">{open}</span>
           {html != null ? (
             <>
