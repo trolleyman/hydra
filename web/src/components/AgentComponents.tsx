@@ -123,7 +123,10 @@ export function agentStatusDetail(agent: AgentResponse): string {
   if (status.status === 'running' || status.status === 'starting' || status.status === 'pending') {
     return status.activity || `${RUNNING_PLACEHOLDERS[stableIndex(agent.id, RUNNING_PLACEHOLDERS.length)]}…`
   }
-  if (status.last_message) return status.last_message
+  // The most recent message reads as a suggested next message (e.g. a question
+  // it's waiting on, or a short "run it"), so prefix it with a `❯ ` caret to
+  // mark it as a suggestion and set it apart from the live activity line.
+  if (status.last_message) return `❯ ${status.last_message}`
   // No message yet — keep the line meaningful for the active states.
   switch (status.status) {
     case 'building': return 'Building…'
