@@ -167,13 +167,13 @@ function ArchivedAgentDetail({ agent, projectId, onPurged }: { agent: AgentRespo
             <span className={`text-xs px-2.5 py-0.5 rounded-full font-medium ${agentTypeClass}`}>
               {agent.agent_type}
             </span>
-            <span className="text-gray-300 dark:text-gray-600">|</span>
+            <span className="text-gray-300 dark:text-gray-600">·</span>
             <span className={`text-xs px-2 py-0.5 rounded font-medium ${endBadge.className}`}>
               {endBadge.label}
             </span>
             {agent.branch_name && (
               <>
-                <span className="text-gray-300 dark:text-gray-600">|</span>
+                <span className="text-gray-300 dark:text-gray-600">·</span>
                 <span className="text-xs font-mono text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
                   <Tag className="w-3.5 h-3.5" />
                   {agent.branch_name}
@@ -182,7 +182,7 @@ function ArchivedAgentDetail({ agent, projectId, onPurged }: { agent: AgentRespo
             )}
             {agent.created_at !== 0 && agent.created_at !== undefined && (
               <>
-                <span className="text-gray-300 dark:text-gray-600">|</span>
+                <span className="text-gray-300 dark:text-gray-600">·</span>
                 <span className="text-xs text-gray-500 dark:text-gray-400">
                   created {formatStartedAgo(agent.created_at)}
                 </span>
@@ -657,20 +657,20 @@ export function AgentDetail({
             </span>
             {agent.agent_status && (
               <>
-                <span className="text-gray-300 dark:text-gray-600">|</span>
+                <span className="text-gray-300 dark:text-gray-600">·</span>
                 <span className={`text-xs px-2 py-0.5 rounded font-medium ${agentStatusBadge(agent.agent_status.status).className}`}>
                   {agentStatusBadge(agent.agent_status.status).label}
                 </span>
               </>
             )}
-            <span className="text-gray-300 dark:text-gray-600">|</span>
+            <span className="text-gray-300 dark:text-gray-600">·</span>
             {agent.branch_name && (
               <span className="text-xs font-mono text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
                 <Tag className="w-3.5 h-3.5" />
                 {agent.branch_name}
               </span>
             )}
-            <span className="text-gray-300 dark:text-gray-600">|</span>
+            <span className="text-gray-300 dark:text-gray-600">·</span>
             {/* Base branch. Editing it is metadata-only: it changes what
                 update-from-base merges in and what the diff compares against,
                 but does not rebase existing commits. */}
@@ -691,7 +691,7 @@ export function AgentDetail({
                 </span>
               )}
             </span>
-            <span className="text-gray-300 dark:text-gray-600">|</span>
+            <span className="text-gray-300 dark:text-gray-600">·</span>
             {agent.created_at !== 0 && agent.created_at !== undefined && (
               <span className="text-xs text-gray-500 dark:text-gray-400">
                 created {formatStartedAgo(agent.created_at)}
