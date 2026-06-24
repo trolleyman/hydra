@@ -397,6 +397,33 @@ try {
         clicks: ['button:has(svg.lucide-git-compare)', 'button:has-text("hydra/add-line-numbers")'],
         repoDiffSingleFile: false,
       },
+      // One file at a time, selecting each change type from the left list (the
+      // third click). heads.go is a full-context ("expanded") file, so its diff
+      // shows surrounding context collapsed behind ⌄/⌃ "··· N lines ···"
+      // expanders — documenting how context is handled.
+      {
+        name: 'repository-diff-context',
+        path: '/project/sim-project/repository',
+        clicks: ['button:has(svg.lucide-git-compare)', 'button:has-text("hydra/add-line-numbers")', 'button:has-text("heads.go")'],
+      },
+      // A removed file: the whole file shows as deletions, with the red removed tag.
+      {
+        name: 'repository-diff-removed',
+        path: '/project/sim-project/repository',
+        clicks: ['button:has(svg.lucide-git-compare)', 'button:has-text("hydra/add-line-numbers")', 'button:has-text("old_helper.go")'],
+      },
+      // An added file: the whole file shows as additions, with the green added tag.
+      {
+        name: 'repository-diff-added',
+        path: '/project/sim-project/repository',
+        clicks: ['button:has(svg.lucide-git-compare)', 'button:has-text("hydra/add-line-numbers")', 'button:has-text("lines.go")'],
+      },
+      // A renamed file: the header shows "old → new" path with the renamed tag.
+      {
+        name: 'repository-diff-renamed',
+        path: '/project/sim-project/repository',
+        clicks: ['button:has(svg.lucide-git-compare)', 'button:has-text("hydra/add-line-numbers")', 'button:has-text("renderer.go")'],
+      },
       // The diff branch selector reopened while diffing: the dropdown checkmarks
       // the current compare branch, and clicking that branch (or the base) exits
       // diff mode. Enters diff mode first (open dropdown, pick a branch), then

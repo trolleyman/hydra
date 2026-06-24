@@ -1091,7 +1091,11 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
               // copy/raw actions as the normal file view, and the diff settings.
               <>
                 {(() => { const { Icon, className } = getFileIcon(selectedDiffFile.path.split('/').pop() ?? selectedDiffFile.path); return <Icon className={`w-4 h-4 shrink-0 ${className}`} /> })()}
-                <span className="text-sm font-mono text-gray-700 dark:text-gray-300 truncate">{selectedDiffFile.path}</span>
+                <span className="text-sm font-mono text-gray-700 dark:text-gray-300 truncate">
+                  {selectedDiffFile.change_type === 'renamed' && selectedDiffFile.old_path
+                    ? <>{selectedDiffFile.old_path} <span className="text-gray-400 dark:text-gray-500">→</span> {selectedDiffFile.path}</>
+                    : selectedDiffFile.path}
+                </span>
                 <ChangeTypeIcon type={selectedDiffFile.change_type} />
                 <div className="flex items-center gap-2 shrink-0 ml-auto">
                   {!selectedDiffFile.binary && (selectedDiffFile.additions > 0 || selectedDiffFile.deletions > 0) && (
@@ -1155,7 +1159,9 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
                 <span className="text-sm">No differences between <span className="font-mono">{activeRef}</span> and <span className="font-mono">{compareRef}</span></span>
               </div>
             ) : diff ? (
-              <div className="p-4">
+              // The one-file-at-a-time view fills the pane like the file viewer
+              // (gutter flush to the edge); the all-files view keeps card padding.
+              <div className={diffSettings.singleFile ? '' : 'p-4'}>
                 {(diffSettings.singleFile
                   ? diff.files.filter((f) => f.path === selectedDiffPath)
                   : diff.files
