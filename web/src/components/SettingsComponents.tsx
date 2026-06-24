@@ -1,26 +1,34 @@
 import type { ReactNode } from 'react'
 import type { AgentConfig, AgentResponse, ArtifactScript, ConfigResponse, NetworkConfig, ProjectInfo, SandboxConfig } from '../api'
 import { useEffect, useState } from 'react'
-import { X, Plus, Globe, FolderOpen, EyeOff, Eye, Layers, Monitor, Sparkles, Terminal, Image, AlertTriangle, Server, RotateCw, CheckCircle2, Loader2, Save, AlertCircle } from 'lucide-react'
+import { X, Plus, Globe, FolderOpen, EyeOff, Eye, Layers, Terminal, Image, AlertTriangle, Server, RotateCw, CheckCircle2, Loader2, Save, AlertCircle } from 'lucide-react'
 import { api } from '../stores/apiClient'
 import type { ServiceScript, ServiceStatus } from '../api'
 import { InfoTooltip } from './InfoTooltip'
 import { AgentTerminal } from './AgentTerminal'
 import { ShellEditor } from './ShellEditor'
 import { useThemeStore, THEME_MODES, THEME_MODE_ICON, THEME_MODE_LABEL } from '../lib/theme'
+import { AgentTypeIcon, type AgentTypeIconName } from './AgentTypeIcon'
 
-// Appearance card: the light/dark/system theme selector, moved here from the old
-// top bar. Theme is a client-only preference (localStorage), so it lives in the
-// shared theme store rather than the server-backed config object on this page.
-function ThemeControl() {
+// A labelled block at the top of settings: a Title-Case heading, an optional
+// one-line description, then the control(s). Used for Theme / Scope / Agent.
+export function SettingSection({ title, description, children }: { title: string; description?: string; children: ReactNode }) {
+  return (
+    <div className="mb-5">
+      <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">{title}</h2>
+      {description && <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{description}</p>}
+      <div className="mt-2">{children}</div>
+    </div>
+  )
+}
+
+// Theme (light / dark / system). A client-only preference via the shared store —
+// no explanation text, just the segmented control under a "Theme" heading.
+function ThemeSection() {
   const mode = useThemeStore((s) => s.mode)
   const setMode = useThemeStore((s) => s.setMode)
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6 mb-6">
-      <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100 mb-1">Appearance</h2>
-      <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">
-        Choose the theme. “System” follows your operating system’s light/dark setting.
-      </p>
+    <SettingSection title="Theme">
       <div className="inline-flex rounded-lg border border-gray-200 dark:border-gray-700 p-1 bg-gray-50 dark:bg-gray-900/40">
         {THEME_MODES.map((m) => {
           const Icon = THEME_MODE_ICON[m]
@@ -43,6 +51,42 @@ function ThemeControl() {
           )
         })}
       </div>
+    </SettingSection>
+  )
+}
+
+// The agent-type selector (replaces the old tab bar) — brand icon + label per
+// agent. 'all' edits the shared defaults; the rest edit that agent's overrides.
+// Add codex here once the agent type exists (its icon already exists).
+const AGENT_OPTIONS: { id: SettingsSection; label: string; icon: AgentTypeIconName; color: string }[] = [
+  { id: 'all', label: 'All agents', icon: 'all', color: 'text-blue-600 dark:text-blue-400' },
+  { id: 'claude', label: 'Claude', icon: 'claude', color: 'text-orange-600 dark:text-orange-400' },
+  { id: 'gemini', label: 'Gemini', icon: 'gemini', color: 'text-sky-600 dark:text-sky-400' },
+  { id: 'copilot', label: 'Copilot', icon: 'copilot', color: 'text-slate-700 dark:text-slate-300' },
+]
+
+function AgentSelector({ value, onChange }: { value: SettingsSection; onChange: (s: SettingsSection) => void }) {
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {AGENT_OPTIONS.map((o) => {
+        const active = value === o.id
+        return (
+          <button
+            key={o.id}
+            type="button"
+            onClick={() => onChange(o.id)}
+            aria-pressed={active}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors cursor-pointer ${
+              active
+                ? `bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 shadow-sm ${o.color}`
+                : 'bg-gray-50 dark:bg-gray-900/40 border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
+            }`}
+          >
+            <AgentTypeIcon name={o.icon} className={`w-4 h-4 ${active ? o.color : ''}`} />
+            {o.label}
+          </button>
+        )
+      })}
     </div>
   )
 }
@@ -141,7 +185,7 @@ function SandboxPathSection({
     <div className="space-y-1.5">
       <div className="flex items-center gap-1.5">
         {icon}
-        <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">
+        <label className="text-xs font-semibold text-gray-400 dark:text-gray-500">
           {label}
         </label>
         <InfoTooltip title={tooltipTitle}>{tooltip}</InfoTooltip>
@@ -197,7 +241,7 @@ export function ConfigForm({
   return (
     <div className="space-y-6">
       <div className="space-y-1.5">
-        <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">
+        <label className="text-xs font-semibold text-gray-400 dark:text-gray-500">
           System Pre-Prompt
         </label>
         {defaultPrePrompt != null && (
@@ -250,7 +294,7 @@ export function ConfigForm({
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-1.5">
               <Globe className="w-3.5 h-3.5 text-gray-400 dark:text-gray-500" />
-              <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">
+              <label className="text-xs font-semibold text-gray-400 dark:text-gray-500">
                 Network Access
               </label>
               <InfoTooltip title="Network Access">
@@ -338,7 +382,7 @@ export function ConfigForm({
         <div className="space-y-1.5">
           <div className="flex items-center gap-1.5">
             <Terminal className="w-3.5 h-3.5 text-indigo-500 dark:text-indigo-400" />
-            <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">
+            <label className="text-xs font-semibold text-gray-400 dark:text-gray-500">
               Pre-Spawn Script
             </label>
             <InfoTooltip title="Pre-Spawn Script">
@@ -373,7 +417,7 @@ export function ConfigForm({
         <div className="space-y-1.5">
           <div className="flex items-center gap-1.5">
             <Terminal className="w-3.5 h-3.5 text-amber-500 dark:text-amber-400" />
-            <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">
+            <label className="text-xs font-semibold text-gray-400 dark:text-gray-500">
               Pre-Exit Script
             </label>
             <InfoTooltip title="Pre-Exit Script">
@@ -462,13 +506,13 @@ export function ArtifactsEditor({
                   <div className="flex items-center gap-2">
                     <EnabledToggle enabled={enabled} onChange={(v) => update(index, { enabled: v ? undefined : false })} />
                     {!enabled && (
-                      <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400 dark:text-gray-500">— skipped in the diff viewer</span>
+                      <span className="text-xs font-semibold text-gray-400 dark:text-gray-500">— skipped in the diff viewer</span>
                     )}
                   </div>
                   <div className={`space-y-3 transition-opacity ${enabled ? '' : 'opacity-50'}`}>
                   <div className="flex items-end gap-4 flex-wrap">
                     <div className="space-y-1 flex-1 min-w-[12rem]">
-                      <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">Name</label>
+                      <label className="text-xs font-semibold text-gray-400 dark:text-gray-500">Name</label>
                       <input
                         type="text"
                         value={a.name}
@@ -479,7 +523,7 @@ export function ArtifactsEditor({
                       />
                     </div>
                     <div className="space-y-1">
-                      <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest flex items-center gap-1">
+                      <label className="text-xs font-semibold text-gray-400 dark:text-gray-500 flex items-center gap-1">
                         Timeout (s)
                         <InfoTooltip title="Timeout">
                           <p>Max seconds the command may run. Leave empty (0) for the built-in default.</p>
@@ -526,7 +570,7 @@ export function ArtifactsEditor({
                     </label>
                   </div>
                   <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">Command</label>
+                    <label className="text-xs font-semibold text-gray-400 dark:text-gray-500">Command</label>
                     <ShellEditor
                       value={a.command}
                       onChange={(val) => update(index, { command: val })}
@@ -688,13 +732,13 @@ export function ServicesEditor({
                   <div className="flex items-center gap-2">
                     <EnabledToggle enabled={enabled} onChange={(v) => update(index, { enabled: v ? undefined : false })} />
                     {!enabled && (
-                      <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400 dark:text-gray-500">— not supervised</span>
+                      <span className="text-xs font-semibold text-gray-400 dark:text-gray-500">— not supervised</span>
                     )}
                   </div>
                   <div className={`space-y-3 transition-opacity ${enabled ? '' : 'opacity-50'}`}>
                   <div className="flex items-end gap-4 flex-wrap">
                     <div className="space-y-1 flex-1 min-w-[12rem]">
-                      <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">Name</label>
+                      <label className="text-xs font-semibold text-gray-400 dark:text-gray-500">Name</label>
                       <input
                         type="text"
                         value={svc.name}
@@ -705,7 +749,7 @@ export function ServicesEditor({
                       />
                     </div>
                     <div className="space-y-1">
-                      <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest flex items-center gap-1">
+                      <label className="text-xs font-semibold text-gray-400 dark:text-gray-500 flex items-center gap-1">
                         Max restarts
                         <InfoTooltip title="Max Restarts">
                           <p>How many times to relaunch the command after an unexpected exit before giving up. Leave empty for the default (3); set 0 to never restart.</p>
@@ -742,7 +786,7 @@ export function ServicesEditor({
                     </div>
                   </div>
                   <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">Command</label>
+                    <label className="text-xs font-semibold text-gray-400 dark:text-gray-500">Command</label>
                     <ShellEditor
                       value={svc.command}
                       onChange={(val) => update(index, { command: val })}
@@ -833,6 +877,7 @@ export function SettingsContent({
   onTest,
   onCloseTestAgent,
   projectId,
+  scopeSelector,
 }: {
   config: ConfigResponse
   setConfig: (c: ConfigResponse) => void
@@ -845,100 +890,45 @@ export function SettingsContent({
   onTest: (agentType: string) => void
   onCloseTestAgent: () => void
   projectId: string | null
+  // The scope (Project / Global) selector — rendered between Theme and Agent.
+  // Supplied by the project settings page; the global page passes nothing.
+  scopeSelector?: ReactNode
 }) {
-  const tabs: { id: SettingsSection; label: string; activeClass: string }[] = [
-    { id: 'all', label: 'All Agents', activeClass: 'border-blue-500 text-blue-600 dark:text-blue-400' },
-    { id: 'claude', label: 'Claude', activeClass: 'border-purple-500 text-purple-600 dark:text-purple-400' },
-    { id: 'gemini', label: 'Gemini', activeClass: 'border-teal-500 text-teal-600 dark:text-teal-400' },
-    { id: 'copilot', label: 'Copilot', activeClass: 'border-blue-500 text-blue-600 dark:text-blue-400' },
-  ]
 
   return (
     <>
-      <ThemeControl />
-      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden flex flex-col">
-        <div className="flex border-b border-gray-100 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-800/50 px-4">
-          {tabs.map(tab => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveSection(tab.id)}
-              className={`px-4 py-3 text-sm font-semibold transition-all border-b-2 cursor-pointer ${activeSection === tab.id ? tab.activeClass : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}
-            >
-              {tab.label}
-            </button>
-          ))}
+      <ThemeSection />
+      {scopeSelector}
+      <SettingSection
+        title="Agent"
+        description="Which agent these settings apply to. “All agents” is the shared default; pick a specific agent to override it just for that one."
+      >
+        <AgentSelector value={activeSection} onChange={setActiveSection} />
+      </SettingSection>
+
+      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-4 sm:p-6">
+        <div className="flex justify-end mb-3">
+          <button
+            onClick={() => onTest(activeSection === 'all' ? 'bash' : activeSection)}
+            disabled={testing}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 text-xs font-medium hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors disabled:opacity-50 cursor-pointer"
+          >
+            <Terminal className="w-3.5 h-3.5" />
+            {testing ? 'Spawning…' : 'Test'}
+          </button>
         </div>
-
-        <div className="p-6">
-          {activeSection === 'all' && (
-            <div className="animate-in fade-in slide-in-from-bottom-1 duration-200">
-              <div className="flex items-center justify-between mb-6">
-                <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 rounded-lg bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center">
-                    <Layers className="w-4 h-4 text-blue-600 dark:text-blue-400" />
-                  </div>
-                  <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">Global Defaults</h2>
-                </div>
-                <button onClick={() => onTest('bash')} disabled={testing} className="px-3 py-1.5 rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 text-xs font-medium hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors disabled:opacity-50 cursor-pointer shadow-sm">
-                  {testing ? 'Spawning...' : 'Test Terminal'}
-                </button>
-              </div>
-              <ConfigForm value={config.defaults} onChange={(defaults) => setConfig({ ...config, defaults })} inherited={inheritedConfig?.defaults ?? null} agentType="default" selectedProject={selectedProject} defaultPrePrompt={config.default_pre_prompt} />
-            </div>
-          )}
-
-          {activeSection === 'claude' && (
-            <div className="animate-in fade-in slide-in-from-bottom-1 duration-200">
-              <div className="flex items-center justify-between mb-6">
-                <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 rounded-lg bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center">
-                    <Monitor className="w-4 h-4 text-purple-600 dark:text-purple-400" />
-                  </div>
-                  <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">Claude Overrides</h2>
-                </div>
-                <button onClick={() => onTest('claude')} disabled={testing} className="px-3 py-1.5 rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 text-xs font-medium hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors disabled:opacity-50 cursor-pointer shadow-sm">
-                  {testing ? 'Spawning...' : 'Test Claude Console'}
-                </button>
-              </div>
-              <ConfigForm value={config.agents['claude'] || {}} onChange={(val) => setConfig({ ...config, agents: { ...config.agents, claude: val } })} inherited={config.defaults} agentType="claude" selectedProject={selectedProject} allAgentsPrePrompt={config.defaults.pre_prompt ?? null} />
-            </div>
-          )}
-
-          {activeSection === 'gemini' && (
-            <div className="animate-in fade-in slide-in-from-bottom-1 duration-200">
-              <div className="flex items-center justify-between mb-6">
-                <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 rounded-lg bg-teal-100 dark:bg-teal-900/30 flex items-center justify-center">
-                    <Sparkles className="w-4 h-4 text-teal-600 dark:text-teal-400" />
-                  </div>
-                  <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">Gemini Overrides</h2>
-                </div>
-                <button onClick={() => onTest('gemini')} disabled={testing} className="px-3 py-1.5 rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 text-xs font-medium hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors disabled:opacity-50 cursor-pointer shadow-sm">
-                  {testing ? 'Spawning...' : 'Test Gemini Console'}
-                </button>
-              </div>
-              <ConfigForm value={config.agents['gemini'] || {}} onChange={(val) => setConfig({ ...config, agents: { ...config.agents, gemini: val } })} inherited={config.defaults} agentType="gemini" selectedProject={selectedProject} allAgentsPrePrompt={config.defaults.pre_prompt ?? null} />
-            </div>
-          )}
-
-          {activeSection === 'copilot' && (
-            <div className="animate-in fade-in slide-in-from-bottom-1 duration-200">
-              <div className="flex items-center justify-between mb-6">
-                <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 rounded-lg bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center">
-                    <Monitor className="w-4 h-4 text-blue-600 dark:text-blue-400" />
-                  </div>
-                  <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">Copilot Overrides</h2>
-                </div>
-                <button onClick={() => onTest('copilot')} disabled={testing} className="px-3 py-1.5 rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 text-xs font-medium hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors disabled:opacity-50 cursor-pointer shadow-sm">
-                  {testing ? 'Spawning...' : 'Test Copilot Console'}
-                </button>
-              </div>
-              <ConfigForm value={config.agents['copilot'] || {}} onChange={(val) => setConfig({ ...config, agents: { ...config.agents, copilot: val } })} inherited={config.defaults} agentType="copilot" selectedProject={selectedProject} allAgentsPrePrompt={config.defaults.pre_prompt ?? null} />
-            </div>
-          )}
-
-        </div>
+        {activeSection === 'all' && (
+          <ConfigForm value={config.defaults} onChange={(defaults) => setConfig({ ...config, defaults })} inherited={inheritedConfig?.defaults ?? null} agentType="default" selectedProject={selectedProject} defaultPrePrompt={config.default_pre_prompt} />
+        )}
+        {activeSection === 'claude' && (
+          <ConfigForm value={config.agents['claude'] || {}} onChange={(val) => setConfig({ ...config, agents: { ...config.agents, claude: val } })} inherited={config.defaults} agentType="claude" selectedProject={selectedProject} allAgentsPrePrompt={config.defaults.pre_prompt ?? null} />
+        )}
+        {activeSection === 'gemini' && (
+          <ConfigForm value={config.agents['gemini'] || {}} onChange={(val) => setConfig({ ...config, agents: { ...config.agents, gemini: val } })} inherited={config.defaults} agentType="gemini" selectedProject={selectedProject} allAgentsPrePrompt={config.defaults.pre_prompt ?? null} />
+        )}
+        {activeSection === 'copilot' && (
+          <ConfigForm value={config.agents['copilot'] || {}} onChange={(val) => setConfig({ ...config, agents: { ...config.agents, copilot: val } })} inherited={config.defaults} agentType="copilot" selectedProject={selectedProject} allAgentsPrePrompt={config.defaults.pre_prompt ?? null} />
+        )}
       </div>
 
       <div className="mt-6">
