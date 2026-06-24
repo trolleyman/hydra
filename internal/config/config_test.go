@@ -312,6 +312,73 @@ func TestDecodeLegacyFormat(t *testing.T) {
 	}
 }
 
+func TestResumeContinueMessage(t *testing.T) {
+	// Unset → built-in default.
+	if got := (Config{}).ResumeContinueMessage(); got != DefaultResumePrompt {
+		t.Errorf("unset resume_prompt: got %q, want %q", got, DefaultResumePrompt)
+	}
+	// Empty string → disabled (no nudge).
+	empty := ""
+	if got := (Config{ResumePrompt: &empty}).ResumeContinueMessage(); got != "" {
+		t.Errorf("empty resume_prompt: got %q, want \"\"", got)
+	}
+	// Custom string → used verbatim.
+	custom := "Please resume the task."
+	if got := (Config{ResumePrompt: &custom}).ResumeContinueMessage(); got != custom {
+		t.Errorf("custom resume_prompt: got %q, want %q", got, custom)
+	}
+}
+
+func TestDecodeResumePrompt(t *testing.T) {
+	cfg, err := decodeConfig([]byte("resume_prompt = \"keep going\"\n"))
+	if err != nil {
+		t.Fatalf("decodeConfig: %v", err)
+	}
+	if cfg.ResumePrompt == nil || *cfg.ResumePrompt != "keep going" {
+		t.Fatalf("resume_prompt not decoded: %+v", cfg.ResumePrompt)
+	}
+	if got := cfg.ResumeContinueMessage(); got != "keep going" {
+		t.Errorf("ResumeContinueMessage: got %q", got)
+	}
+	// A bare resume_prompt key must not be mistaken for an agent table.
+	if _, ok := cfg.Agents["resume_prompt"]; ok {
+		t.Error("resume_prompt leaked into agents map")
+	}
+}
+
+func TestRenderResumePrompt(t *testing.T) {
+	// Unset → commented-out documented default.
+	if got := renderConfig(nil, Config{}); !strings.Contains(got, `# resume_prompt = "Continue"`) {
+		t.Errorf("unset resume_prompt not documented:\n%s", got)
+	}
+
+	// Explicitly set → emitted as a live key and decodes back unchanged.
+	set := "keep going"
+	rendered := renderConfig(nil, Config{ResumePrompt: &set})
+	if !strings.Contains(rendered, `resume_prompt = "keep going"`) {
+		t.Errorf("set resume_prompt not emitted:\n%s", rendered)
+	}
+	back, err := decodeConfig([]byte(rendered))
+	if err != nil {
+		t.Fatalf("re-decode: %v", err)
+	}
+	if back.ResumePrompt == nil || *back.ResumePrompt != "keep going" {
+		t.Errorf("round-trip lost resume_prompt: %+v", back.ResumePrompt)
+	}
+
+	// A structured save that omits resume_prompt (cfg.ResumePrompt == nil) must
+	// preserve the value already in the file rather than dropping it.
+	existing := []byte("resume_prompt = \"from disk\"\n")
+	preserved := renderConfig(existing, Config{})
+	if !strings.Contains(preserved, `resume_prompt = "from disk"`) {
+		t.Errorf("resume_prompt not preserved across structured save:\n%s", preserved)
+	}
+	// And it must not be duplicated.
+	if strings.Count(preserved, "resume_prompt =") != 1 {
+		t.Errorf("resume_prompt emitted more than once:\n%s", preserved)
+	}
+}
+
 func TestDecodeNewFormat(t *testing.T) {
 	const newCfg = `pre_prompt = "hello"
 

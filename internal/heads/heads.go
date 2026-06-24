@@ -714,6 +714,19 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 	home := currentUser.HomeDir
 
 	cfg, _ := config.Load(projectRoot)
+	// Capture the agent's last-known work status BEFORE the status writes below
+	// overwrite it: a "Continue" nudge is sent only to an agent that was actively
+	// working when it was cut off — never one that was idle waiting on the user
+	// (e.g. an unanswered question) or already finished. Read it from the DB so
+	// every resume path (boot, terminal attach, TUI) agrees on the same signal.
+	priorStatus := ""
+	if store != nil {
+		if a, err := store.GetAgent(head.ID); err == nil && a != nil && a.AgentStatus != nil {
+			priorStatus = *a.AgentStatus
+		}
+	}
+	nudge := cfg.ResumeContinueMessage()
+	willNudge := nudge != "" && shouldNudgeResumedAgent(priorStatus)
 	// Pre-spawn is per-launch sandbox setup, so it runs on resume too: resume
 	// re-launches the agent in a fresh sandbox, and re-running the script is the
 	// only way a pre_spawn_script added (or changed) after a head was created ever
@@ -776,7 +789,116 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 			log.Printf("warn: update resume agent status for %s: %v", head.ID, err)
 		}
 	}
+	if willNudge {
+		// The agent restored its prior conversation but won't act on it on its
+		// own, so type the nudge to make it continue. Done async because the TUI
+		// can take a while to finish rendering a large restored conversation, and
+		// ResumeHead must not block its callers (daemon boot, terminal attach).
+		// The agent's own hooks flip its status back to running once the nudge
+		// submits, so the "waiting" written above is only momentary.
+		go nudgeResumedAgent(reg, head.ID, nudge)
+	}
 	return nil
+}
+
+// shouldNudgeResumedAgent reports whether a just-resumed agent should be sent a
+// continue nudge, based on its work status at the moment it was cut off. Only an
+// agent that was actively working ("running") is nudged; one that was waiting on
+// the user, finished, or never reported a status is left alone.
+func shouldNudgeResumedAgent(priorStatus string) bool {
+	return priorStatus == string(api.Running)
+}
+
+// resumeNudgeTiming controls how nudgeResumedAgent waits for a resumed agent's
+// TUI to be ready for input. Defaults are overridden in tests for speed.
+type resumeNudgeTiming struct {
+	// minDelay is the floor before the nudge may be sent, giving the agent's
+	// input handler time to mount even if it renders nothing.
+	minDelay time.Duration
+	// quietFor is how long output must stay silent (after minDelay) before the
+	// TUI is considered done rendering its restored conversation and idle.
+	quietFor time.Duration
+	// maxWait caps the total wait so a TUI that never goes quiet (e.g. an
+	// animated status line) is still nudged eventually.
+	maxWait time.Duration
+	// enterDelay separates typing the message from pressing Enter, so the TUI
+	// registers the text before it submits.
+	enterDelay time.Duration
+	// poll is the readiness-check interval.
+	poll time.Duration
+}
+
+var defaultResumeNudge = resumeNudgeTiming{
+	minDelay:   1500 * time.Millisecond,
+	quietFor:   1200 * time.Millisecond,
+	maxWait:    25 * time.Second,
+	enterDelay: 400 * time.Millisecond,
+	poll:       150 * time.Millisecond,
+}
+
+// nudgeResumedAgent waits for a resumed agent's TUI to settle, then types the
+// given message followed by Enter into its PTY. Resume CLIs (claude --continue,
+// gemini --resume) restore the conversation but won't auto-submit a prompt
+// passed on the command line, so the only reliable way to make the agent
+// continue is to inject keystrokes once it is interactive.
+func nudgeResumedAgent(reg *session.Registry, id, message string) {
+	nudgeResumedAgentWith(reg, id, message, defaultResumeNudge)
+}
+
+func nudgeResumedAgentWith(reg *session.Registry, id, message string, t resumeNudgeTiming) {
+	att, err := reg.Attach(id, 0, 0)
+	if err != nil {
+		log.Printf("warn: resume nudge: attach %s: %v", id, err)
+		return
+	}
+	defer att.Close()
+
+	if !waitUntilQuiet(att, t) {
+		// Session died before it was ready; nothing to nudge.
+		return
+	}
+
+	// Type the message, then submit with a discrete carriage return. Sending the
+	// text and Enter separately (rather than "message\r" in one write) avoids the
+	// newline being absorbed into a bracketed paste, and gives the TUI a beat to
+	// register the typed text before it submits.
+	if err := reg.Write(id, []byte(message)); err != nil {
+		log.Printf("warn: resume nudge: type into %s: %v", id, err)
+		return
+	}
+	time.Sleep(t.enterDelay)
+	if err := reg.Write(id, []byte("\r")); err != nil {
+		log.Printf("warn: resume nudge: submit to %s: %v", id, err)
+	}
+}
+
+// waitUntilQuiet blocks until the attached session's output has been silent for
+// t.quietFor (after at least t.minDelay), or t.maxWait elapses. It returns false
+// if the session exits first.
+func waitUntilQuiet(att *session.Attachment, t resumeNudgeTiming) bool {
+	start := time.Now()
+	lastOutput := start
+	ticker := time.NewTicker(t.poll)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-att.Done:
+			return false
+		case _, ok := <-att.Output:
+			if !ok {
+				return false
+			}
+			lastOutput = time.Now()
+		case <-ticker.C:
+			now := time.Now()
+			if now.Sub(start) >= t.maxWait {
+				return true
+			}
+			if now.Sub(start) >= t.minDelay && now.Sub(lastOutput) >= t.quietFor {
+				return true
+			}
+		}
+	}
 }
 
 // KillHead removes a Hydra head in safe order: session -> worktree -> branch.
