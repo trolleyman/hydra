@@ -138,6 +138,62 @@ func (s *Server) GetRepositoryTree(_ context.Context, request api.GetRepositoryT
 	return resp, nil
 }
 
+// GetRepositoryDiff returns the diff between two arbitrary refs in the project's
+// repository, so the repository browser can compare the branch being viewed
+// against another branch. It uses a two-dot diff (base..head) — the literal
+// difference between the two trees — and reuses the same DiffFile shape and
+// expansion machinery as the agent diff.
+func (s *Server) GetRepositoryDiff(_ context.Context, request api.GetRepositoryDiffRequestObject) (api.GetRepositoryDiffResponseObject, error) {
+	projectRoot, err := s.resolveProjectRoot(request.ProjectId)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	baseRef := request.Params.BaseRef
+	headRef := request.Params.HeadRef
+
+	ignoreWhitespace := request.Params.IgnoreWhitespace != nil && *request.Params.IgnoreWhitespace
+
+	filePath := ""
+	if request.Params.Path != nil {
+		filePath = *request.Params.Path
+	}
+
+	contextLines := 3
+	if request.Params.Context != nil {
+		contextLines = *request.Params.Context
+	}
+
+	maxFullChanges := 1000
+	if request.Params.MaxFullChanges != nil {
+		maxFullChanges = *request.Params.MaxFullChanges
+	}
+	maxFullLines := 6000
+	if request.Params.MaxFullLines != nil {
+		maxFullLines = *request.Params.MaxFullLines
+	}
+	fullContext := request.Params.FullContext != nil && *request.Params.FullContext
+
+	// No worktree and no uncommitted changes for a branch-to-branch compare, so
+	// diffRoot is the project root and includeUncommitted is false throughout.
+	// useTripleDot is false: a plain base..head diff is the most predictable
+	// answer to "what differs between these two branches".
+	var diffFiles []git.DiffFile
+	if fullContext && filePath == "" {
+		diffFiles, err = s.getFullContextDiff(projectRoot, projectRoot, baseRef, headRef, ignoreWhitespace, false, contextLines, maxFullChanges, maxFullLines, false)
+	} else {
+		diffFiles, err = s.getDiffCached(projectRoot, projectRoot, baseRef, headRef, ignoreWhitespace, false, filePath, contextLines, false)
+	}
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+
+	return api.GetRepositoryDiff200JSONResponse(api.DiffResponse{
+		Files:   apiDiffFiles(diffFiles),
+		BaseRef: baseRef,
+		HeadRef: headRef,
+	}), nil
+}
+
 // GetRepositoryBranches lists the local branches of the project's repository,
 // ordering Hydra agent branches (hydra/*) first so the repository browser's
 // branch selector surfaces active agents' work at the top.

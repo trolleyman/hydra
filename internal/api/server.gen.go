@@ -924,6 +924,33 @@ type GetRepositoryArtifactParams struct {
 	Refresh *bool `form:"refresh,omitempty" json:"refresh,omitempty"`
 }
 
+// GetRepositoryDiffParams defines parameters for GetRepositoryDiff.
+type GetRepositoryDiffParams struct {
+	// BaseRef Base ref (branch or commit) to diff from
+	BaseRef string `form:"base_ref" json:"base_ref"`
+
+	// HeadRef Head ref (branch or commit) to diff to
+	HeadRef string `form:"head_ref" json:"head_ref"`
+
+	// IgnoreWhitespace Ignore whitespace changes in the diff
+	IgnoreWhitespace *bool `form:"ignore_whitespace,omitempty" json:"ignore_whitespace,omitempty"`
+
+	// Path Only return the diff for this specific file path
+	Path *string `form:"path,omitempty" json:"path,omitempty"`
+
+	// Context Number of lines of context to show (defaults to 3)
+	Context *int `form:"context,omitempty" json:"context,omitempty"`
+
+	// FullContext Return each file's full content (so the client can expand context without further round-trips), in a single request for all files. Files larger than max_full_lines are returned at the normal context instead. Ignored when a specific path is requested.
+	FullContext *bool `form:"full_context,omitempty" json:"full_context,omitempty"`
+
+	// MaxFullChanges Only auto-expand files with at most this many changed lines. Only meaningful with full_context.
+	MaxFullChanges *int `form:"max_full_changes,omitempty" json:"max_full_changes,omitempty"`
+
+	// MaxFullLines Upper bound on the full content shipped per expanded file. Only meaningful with full_context.
+	MaxFullLines *int `form:"max_full_lines,omitempty" json:"max_full_lines,omitempty"`
+}
+
 // GetRepositoryFileParams defines parameters for GetRepositoryFile.
 type GetRepositoryFileParams struct {
 	// Path Repo-relative path of the file to read
@@ -1043,6 +1070,9 @@ type ServerInterface interface {
 	// List the branches available for the project's repository
 	// (GET /api/projects/{project_id}/repository/branches)
 	GetRepositoryBranches(w http.ResponseWriter, r *http.Request, projectId string)
+	// Diff two refs in the project's repository
+	// (GET /api/projects/{project_id}/repository/diff)
+	GetRepositoryDiff(w http.ResponseWriter, r *http.Request, projectId string, params GetRepositoryDiffParams)
 	// Read the contents of a file in the project's repository
 	// (GET /api/projects/{project_id}/repository/file)
 	GetRepositoryFile(w http.ResponseWriter, r *http.Request, projectId string, params GetRepositoryFileParams)
@@ -2040,6 +2070,112 @@ func (siw *ServerInterfaceWrapper) GetRepositoryBranches(w http.ResponseWriter, 
 	handler.ServeHTTP(w, r)
 }
 
+// GetRepositoryDiff operation middleware
+func (siw *ServerInterfaceWrapper) GetRepositoryDiff(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetRepositoryDiffParams
+
+	// ------------- Required query parameter "base_ref" -------------
+
+	if paramValue := r.URL.Query().Get("base_ref"); paramValue != "" {
+
+	} else {
+		siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "base_ref"})
+		return
+	}
+
+	err = runtime.BindQueryParameter("form", true, true, "base_ref", r.URL.Query(), &params.BaseRef)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "base_ref", Err: err})
+		return
+	}
+
+	// ------------- Required query parameter "head_ref" -------------
+
+	if paramValue := r.URL.Query().Get("head_ref"); paramValue != "" {
+
+	} else {
+		siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "head_ref"})
+		return
+	}
+
+	err = runtime.BindQueryParameter("form", true, true, "head_ref", r.URL.Query(), &params.HeadRef)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "head_ref", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "ignore_whitespace" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "ignore_whitespace", r.URL.Query(), &params.IgnoreWhitespace)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "ignore_whitespace", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "path" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "path", r.URL.Query(), &params.Path)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "path", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "context" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "context", r.URL.Query(), &params.Context)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "context", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "full_context" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "full_context", r.URL.Query(), &params.FullContext)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "full_context", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "max_full_changes" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "max_full_changes", r.URL.Query(), &params.MaxFullChanges)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "max_full_changes", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "max_full_lines" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "max_full_lines", r.URL.Query(), &params.MaxFullLines)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "max_full_lines", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetRepositoryDiff(w, r, projectId, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetRepositoryFile operation middleware
 func (siw *ServerInterfaceWrapper) GetRepositoryFile(w http.ResponseWriter, r *http.Request) {
 
@@ -2379,6 +2515,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/repository/artifacts", wrapper.GetRepositoryArtifacts)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/repository/artifacts/{name}", wrapper.GetRepositoryArtifact)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/repository/branches", wrapper.GetRepositoryBranches)
+	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/repository/diff", wrapper.GetRepositoryDiff)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/repository/file", wrapper.GetRepositoryFile)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/repository/tree", wrapper.GetRepositoryTree)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/services", wrapper.GetServices)
@@ -3399,6 +3536,42 @@ func (response GetRepositoryBranches500JSONResponse) VisitGetRepositoryBranchesR
 	return json.NewEncoder(w).Encode(response)
 }
 
+type GetRepositoryDiffRequestObject struct {
+	ProjectId string `json:"project_id"`
+	Params    GetRepositoryDiffParams
+}
+
+type GetRepositoryDiffResponseObject interface {
+	VisitGetRepositoryDiffResponse(w http.ResponseWriter) error
+}
+
+type GetRepositoryDiff200JSONResponse DiffResponse
+
+func (response GetRepositoryDiff200JSONResponse) VisitGetRepositoryDiffResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetRepositoryDiff404JSONResponse ErrorResponse
+
+func (response GetRepositoryDiff404JSONResponse) VisitGetRepositoryDiffResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetRepositoryDiff500JSONResponse ErrorResponse
+
+func (response GetRepositoryDiff500JSONResponse) VisitGetRepositoryDiffResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 type GetRepositoryFileRequestObject struct {
 	ProjectId string `json:"project_id"`
 	Params    GetRepositoryFileParams
@@ -3674,6 +3847,9 @@ type StrictServerInterface interface {
 	// List the branches available for the project's repository
 	// (GET /api/projects/{project_id}/repository/branches)
 	GetRepositoryBranches(ctx context.Context, request GetRepositoryBranchesRequestObject) (GetRepositoryBranchesResponseObject, error)
+	// Diff two refs in the project's repository
+	// (GET /api/projects/{project_id}/repository/diff)
+	GetRepositoryDiff(ctx context.Context, request GetRepositoryDiffRequestObject) (GetRepositoryDiffResponseObject, error)
 	// Read the contents of a file in the project's repository
 	// (GET /api/projects/{project_id}/repository/file)
 	GetRepositoryFile(ctx context.Context, request GetRepositoryFileRequestObject) (GetRepositoryFileResponseObject, error)
@@ -4470,6 +4646,33 @@ func (sh *strictHandler) GetRepositoryBranches(w http.ResponseWriter, r *http.Re
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetRepositoryBranchesResponseObject); ok {
 		if err := validResponse.VisitGetRepositoryBranchesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetRepositoryDiff operation middleware
+func (sh *strictHandler) GetRepositoryDiff(w http.ResponseWriter, r *http.Request, projectId string, params GetRepositoryDiffParams) {
+	var request GetRepositoryDiffRequestObject
+
+	request.ProjectId = projectId
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetRepositoryDiff(ctx, request.(GetRepositoryDiffRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetRepositoryDiff")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetRepositoryDiffResponseObject); ok {
+		if err := validResponse.VisitGetRepositoryDiffResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

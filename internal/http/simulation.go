@@ -1436,6 +1436,67 @@ func (s *SimulationServer) GetRepositoryTree(w http.ResponseWriter, r *http.Requ
 	})
 }
 
+// GetRepositoryDiff returns a small mock diff between two refs so the repository
+// browser's branch-compare view renders in simulation mode. Honours a single-file
+// request (FileDiff's network-expand path).
+func (s *SimulationServer) GetRepositoryDiff(w http.ResponseWriter, r *http.Request, projectId string, params api.GetRepositoryDiffParams) {
+	files := []api.DiffFile{
+		{
+			Path:       "README.md",
+			ChangeType: api.DiffFileChangeTypeModified,
+			Additions:  2,
+			Deletions:  1,
+			Hunks: []api.DiffHunk{
+				{
+					Header:   "@@ -1,3 +1,4 @@",
+					OldStart: 1,
+					NewStart: 1,
+					Lines: []api.DiffLine{
+						{Type: api.Context, Content: "# Hydra", OldLineNum: ptr(1), NewLineNum: ptr(1)},
+						{Type: api.Deletion, Content: "Old tagline", OldLineNum: ptr(2)},
+						{Type: api.Addition, Content: "New tagline", NewLineNum: ptr(2)},
+						{Type: api.Addition, Content: "Extra line", NewLineNum: ptr(3)},
+						{Type: api.Context, Content: "", OldLineNum: ptr(3), NewLineNum: ptr(4)},
+					},
+				},
+			},
+		},
+		{
+			Path:       "internal/heads/heads.go",
+			ChangeType: api.DiffFileChangeTypeModified,
+			Additions:  1,
+			Deletions:  1,
+			Hunks: []api.DiffHunk{
+				{
+					Header:   "@@ -10,3 +10,3 @@",
+					OldStart: 10,
+					NewStart: 10,
+					Lines: []api.DiffLine{
+						{Type: api.Context, Content: "func Example() {", OldLineNum: ptr(10), NewLineNum: ptr(10)},
+						{Type: api.Deletion, Content: "\treturn old", OldLineNum: ptr(11)},
+						{Type: api.Addition, Content: "\treturn new", NewLineNum: ptr(11)},
+						{Type: api.Context, Content: "}", OldLineNum: ptr(12), NewLineNum: ptr(12)},
+					},
+				},
+			},
+		},
+	}
+	if params.Path != nil && *params.Path != "" {
+		filtered := make([]api.DiffFile, 0, 1)
+		for _, f := range files {
+			if f.Path == *params.Path {
+				filtered = append(filtered, f)
+			}
+		}
+		files = filtered
+	}
+	api.WriteJSON(w, http.StatusOK, api.DiffResponse{
+		BaseRef: params.BaseRef,
+		HeadRef: params.HeadRef,
+		Files:   files,
+	})
+}
+
 func (s *SimulationServer) GetRepositoryBranches(w http.ResponseWriter, r *http.Request, projectId string) {
 	api.WriteJSON(w, http.StatusOK, api.RepositoryBranchesResponse{
 		Current: "main",

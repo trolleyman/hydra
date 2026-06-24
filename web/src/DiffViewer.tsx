@@ -262,11 +262,12 @@ function trailingContext(hunk: DiffHunk): number {
 const UNIFIED_LINE_NUM_CLASS = 'select-none text-right pr-2 text-gray-400 dark:text-gray-600 text-xs font-mono w-10 shrink-0 border-r border-gray-200 dark:border-gray-700 leading-5'
 const UNIFIED_CODE_CLASS = 'pl-2 font-mono text-xs leading-5 flex-1 whitespace-pre-wrap break-words overflow-hidden'
 
-const UnifiedHunk = memo(function UnifiedHunk({ hunk, highlightedOld, highlightedNew, onComment }: {
+const UnifiedHunk = memo(function UnifiedHunk({ hunk, highlightedOld, highlightedNew, onComment, readOnly }: {
   hunk: DiffHunk
   highlightedOld: Map<number, string>
   highlightedNew: Map<number, string>
   onComment: (lineNum: number, isNew: boolean, text: string) => void
+  readOnly?: boolean
 }) {
   const [openCommentIdx, setOpenCommentIdx] = useState<number | null>(null)
   return (
@@ -285,7 +286,7 @@ const UnifiedHunk = memo(function UnifiedHunk({ hunk, highlightedOld, highlighte
               <div className="relative flex shrink-0 select-none">
                 <span className={UNIFIED_LINE_NUM_CLASS}>{line.old_line_num ?? ''}</span>
                 <span className={UNIFIED_LINE_NUM_CLASS}>{line.new_line_num ?? ''}</span>
-                {!isNoNewline && (
+                {!isNoNewline && !readOnly && (
                   <CommentButton onClick={() => setOpenCommentIdx(openCommentIdx === idx ? null : idx)} />
                 )}
               </div>
@@ -323,11 +324,12 @@ const UnifiedHunk = memo(function UnifiedHunk({ hunk, highlightedOld, highlighte
 const SBS_LINE_NUM = 'select-none text-right text-gray-400 dark:text-gray-600 text-xs font-mono w-8 shrink-0 pr-1 leading-5'
 const SBS_CODE = 'pl-1 font-mono text-xs leading-5 flex-1 whitespace-pre-wrap break-words overflow-hidden min-w-0'
 
-const SideBySideHunk = memo(function SideBySideHunk({ hunk, highlightedOld, highlightedNew, onComment }: {
+const SideBySideHunk = memo(function SideBySideHunk({ hunk, highlightedOld, highlightedNew, onComment, readOnly }: {
   hunk: DiffHunk
   highlightedOld: Map<number, string>
   highlightedNew: Map<number, string>
   onComment: (lineNum: number, isNew: boolean, text: string) => void
+  readOnly?: boolean
 }) {
   const [openCommentIdx, setOpenCommentIdx] = useState<number | null>(null)
   const sbsLines = buildSideBySide(hunk.lines)
@@ -344,7 +346,7 @@ const SideBySideHunk = memo(function SideBySideHunk({ hunk, highlightedOld, high
               <div className={`flex items-start flex-1 min-w-0 group relative ${oldBg}`}>
                 <div className="relative flex shrink-0 select-none">
                   <span className={SBS_LINE_NUM}>{line.oldLineNum ?? ''}</span>
-                  {line.oldLineNum != null && (
+                  {line.oldLineNum != null && !readOnly && (
                     <CommentButton onClick={() => setOpenCommentIdx(openCommentIdx === idx ? null : idx)} />
                   )}
                 </div>
@@ -359,7 +361,7 @@ const SideBySideHunk = memo(function SideBySideHunk({ hunk, highlightedOld, high
               <div className={`flex items-start flex-1 min-w-0 group relative ${newBg}`}>
                 <div className="relative flex shrink-0 select-none">
                   <span className={SBS_LINE_NUM}>{line.newLineNum ?? ''}</span>
-                  {line.newLineNum != null && (
+                  {line.newLineNum != null && !readOnly && (
                     <CommentButton onClick={() => setOpenCommentIdx(openCommentIdx === idx ? null : idx)} />
                   )}
                 </div>
@@ -621,7 +623,7 @@ function EdgeExpander({ seg, onStep, onAll }: {
   )
 }
 
-const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onComment, isCollapsed, onToggleCollapse, onExpand, isHidden, onShow, currentContext }: {
+export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onComment, isCollapsed, onToggleCollapse, onExpand, isHidden, onShow, currentContext, readOnly }: {
   file: DiffFile
   sideBySide: boolean
   fileRef?: (el: HTMLDivElement | null) => void
@@ -632,6 +634,9 @@ const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onComment, 
   isHidden?: boolean
   onShow?: () => void
   currentContext: number
+  // When true, the line-level "add comment" affordances are hidden — used by the
+  // repository diff view, which has no agent to send comments to.
+  readOnly?: boolean
 }) {
   const lang = getLanguage(file.path)
 
@@ -716,9 +721,9 @@ const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onComment, 
   const renderLines = (lines: DiffLine[], key: string) => (
     sideBySide
       ? <SideBySideHunk key={key} hunk={synthHunk(lines)} highlightedOld={highlightedOld} highlightedNew={highlightedNew}
-        onComment={(ln, isNew, txt) => onComment(file.path, ln, isNew, txt)} />
+        onComment={(ln, isNew, txt) => onComment(file.path, ln, isNew, txt)} readOnly={readOnly} />
       : <UnifiedHunk key={key} hunk={synthHunk(lines)} highlightedOld={highlightedOld} highlightedNew={highlightedNew}
-        onComment={(ln, isNew, txt) => onComment(file.path, ln, isNew, txt)} />
+        onComment={(ln, isNew, txt) => onComment(file.path, ln, isNew, txt)} readOnly={readOnly} />
   )
 
   return (
@@ -834,9 +839,9 @@ const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onComment, 
                     )}
                     {sideBySide
                       ? <SideBySideHunk hunk={hunk} highlightedOld={highlightedOld} highlightedNew={highlightedNew}
-                        onComment={(ln, isNew, txt) => onComment(file.path, ln, isNew, txt)} />
+                        onComment={(ln, isNew, txt) => onComment(file.path, ln, isNew, txt)} readOnly={readOnly} />
                       : <UnifiedHunk hunk={hunk} highlightedOld={highlightedOld} highlightedNew={highlightedNew}
-                        onComment={(ln, isNew, txt) => onComment(file.path, ln, isNew, txt)} />
+                        onComment={(ln, isNew, txt) => onComment(file.path, ln, isNew, txt)} readOnly={readOnly} />
                     }
                     {isLast && !atEndOfFile && (
                       <div className={EXPANDER_ROW}>
@@ -1516,7 +1521,7 @@ function getGroupedFiles(files: DiffFile[]): [string, DiffFile[]][] {
 
 // ── Sidebar components ────────────────────────────────────────────────────────
 
-function FileRow({ file, isActive, onClick, indent = 0 }: {
+export function FileRow({ file, isActive, onClick, indent = 0 }: {
   file: DiffFile; isActive: boolean; onClick: () => void; indent?: number
 }) {
   return (

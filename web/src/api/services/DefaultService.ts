@@ -662,6 +662,54 @@ export class DefaultService {
         });
     }
     /**
+     * Diff two refs in the project's repository
+     * Returns the diff between two arbitrary refs (branches or commits) in the project's repository. Used by the repository browser's diff view to compare the branch being viewed against another branch. Uses a two-dot diff (base..head) — the literal difference between the two trees.
+     * @param projectId Project ID
+     * @param baseRef Base ref (branch or commit) to diff from
+     * @param headRef Head ref (branch or commit) to diff to
+     * @param ignoreWhitespace Ignore whitespace changes in the diff
+     * @param path Only return the diff for this specific file path
+     * @param context Number of lines of context to show (defaults to 3)
+     * @param fullContext Return each file's full content (so the client can expand context without further round-trips), in a single request for all files. Files larger than max_full_lines are returned at the normal context instead. Ignored when a specific path is requested.
+     * @param maxFullChanges Only auto-expand files with at most this many changed lines. Only meaningful with full_context.
+     * @param maxFullLines Upper bound on the full content shipped per expanded file. Only meaningful with full_context.
+     * @returns DiffResponse OK
+     * @throws ApiError
+     */
+    public getRepositoryDiff(
+        projectId: string,
+        baseRef: string,
+        headRef: string,
+        ignoreWhitespace?: boolean,
+        path?: string,
+        context: number = 3,
+        fullContext?: boolean,
+        maxFullChanges: number = 1000,
+        maxFullLines: number = 6000,
+    ): CancelablePromise<DiffResponse> {
+        return this.httpRequest.request({
+            method: 'GET',
+            url: '/api/projects/{project_id}/repository/diff',
+            path: {
+                'project_id': projectId,
+            },
+            query: {
+                'base_ref': baseRef,
+                'head_ref': headRef,
+                'ignore_whitespace': ignoreWhitespace,
+                'path': path,
+                'context': context,
+                'full_context': fullContext,
+                'max_full_changes': maxFullChanges,
+                'max_full_lines': maxFullLines,
+            },
+            errors: {
+                404: `Project Not Found`,
+                500: `Internal Server Error`,
+            },
+        });
+    }
+    /**
      * Read the contents of a file in the project's repository
      * @param projectId Project ID
      * @param path Repo-relative path of the file to read
