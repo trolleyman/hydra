@@ -350,8 +350,10 @@ try {
       // other branches. Verifies the menu renders below the "from" trigger and
       // escapes the spawn card's `overflow-hidden` clipping (the BranchSelector
       // portal fix) — the bug where the dropdown didn't show when selected. The
-      // branch list comes from the simulation server.
-      { name: 'spawn-branch-selector', path: '/project/sim-project/', click: 'button[title^="Base branch"]' },
+      // branch list comes from the simulation server. Scoped to .max-w-4xl so it
+      // opens the full-page form's selector, not the compact sidebar box's (both
+      // carry the same title).
+      { name: 'spawn-branch-selector', path: '/project/sim-project/', click: '.max-w-4xl button[title^="Base branch"]' },
       // The inline-markdown rendering (the markdown-pass feature). The spawn box
       // is seeded with a markdown draft so the textarea overlay shows live
       // highlighting — `code`, *italic*, **bold**, and a long inline-code
