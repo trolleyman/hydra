@@ -88,7 +88,20 @@ type Server struct {
 	// state is cached; the uncommitted/working-tree diff is always recomputed live.
 	commitsCache immutableCache[[]git.CommitInfo]
 	diffCache    immutableCache[[]git.DiffFile]
+
+	// fetchMu guards the per-project background-fetch throttle used by the push
+	// status endpoint (see maybeFetchRemote): fetchActive marks a fetch in flight,
+	// fetchLast records when one last started, so concurrent or too-frequent polls
+	// don't hammer the remote.
+	fetchMu     sync.Mutex
+	fetchActive map[string]bool
+	fetchLast   map[string]time.Time
 }
+
+// remoteFetchInterval throttles background `git fetch`es kicked off by the push
+// status endpoint: at most one per project per interval, regardless of how many
+// clients are polling.
+const remoteFetchInterval = 20 * time.Second
 
 // claudeUsageTTL is how long a probed usage snapshot is served before re-probing.
 const claudeUsageTTL = 30 * time.Second

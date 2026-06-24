@@ -16,6 +16,7 @@ import type { RepositoryArtifactResponse } from '../models/RepositoryArtifactRes
 import type { RepositoryArtifactsResponse } from '../models/RepositoryArtifactsResponse';
 import type { RepositoryBranchesResponse } from '../models/RepositoryBranchesResponse';
 import type { RepositoryFileResponse } from '../models/RepositoryFileResponse';
+import type { RepositoryPushStatus } from '../models/RepositoryPushStatus';
 import type { RepositoryTreeResponse } from '../models/RepositoryTreeResponse';
 import type { ServiceStatusResponse } from '../models/ServiceStatusResponse';
 import type { SpawnAgentRequest } from '../models/SpawnAgentRequest';
@@ -780,6 +781,75 @@ export class DefaultService {
             errors: {
                 404: `Project Not Found`,
                 500: `Internal Server Error`,
+            },
+        });
+    }
+    /**
+     * Report whether the repository's current branch has commits to push
+     * Inspects the project root's currently checked-out branch and reports how far it is ahead of the remote it would be pushed to. Uses the last-known remote-tracking refs and does NOT contact the network, mirroring how `git status` reports ahead/behind. The sidebar uses this to enable or disable the Push button.
+     * @param projectId Project ID
+     * @returns RepositoryPushStatus OK
+     * @throws ApiError
+     */
+    public getRepositoryPushStatus(
+        projectId: string,
+    ): CancelablePromise<RepositoryPushStatus> {
+        return this.httpRequest.request({
+            method: 'GET',
+            url: '/api/projects/{project_id}/repository/push-status',
+            path: {
+                'project_id': projectId,
+            },
+            errors: {
+                404: `Project Not Found`,
+                500: `Internal Server Error`,
+            },
+        });
+    }
+    /**
+     * Push the repository's current branch to its remote
+     * Pushes the project root's currently checked-out branch to the remote it tracks (or origin), setting upstream tracking if not already configured. Requires network access; runs in the daemon, outside any agent sandbox. Returns the refreshed push status, with ahead normally back to zero.
+     * @param projectId Project ID
+     * @returns RepositoryPushStatus OK (branch pushed)
+     * @throws ApiError
+     */
+    public pushRepository(
+        projectId: string,
+    ): CancelablePromise<RepositoryPushStatus> {
+        return this.httpRequest.request({
+            method: 'POST',
+            url: '/api/projects/{project_id}/repository/push',
+            path: {
+                'project_id': projectId,
+            },
+            errors: {
+                400: `Bad Request (nothing to push, detached HEAD, or no remote)`,
+                404: `Project Not Found`,
+                500: `Internal Server Error (e.g. push rejected or auth failure)`,
+            },
+        });
+    }
+    /**
+     * Synchronise the repository's current branch with its remote
+     * Fetches, integrates the remote's commits into the local branch (a pull: fast-forward or merge), then pushes any local commits. The one-click "sync" the sidebar button performs. Requires network access; runs in the daemon, outside any agent sandbox. Returns the refreshed push status, normally with both ahead and behind back to zero.
+     * @param projectId Project ID
+     * @returns RepositoryPushStatus OK (branch synced)
+     * @throws ApiError
+     */
+    public syncRepository(
+        projectId: string,
+    ): CancelablePromise<RepositoryPushStatus> {
+        return this.httpRequest.request({
+            method: 'POST',
+            url: '/api/projects/{project_id}/repository/sync',
+            path: {
+                'project_id': projectId,
+            },
+            errors: {
+                400: `Bad Request (detached HEAD or no remote)`,
+                404: `Project Not Found`,
+                409: `Conflict (the pull could not be merged cleanly)`,
+                500: `Internal Server Error (e.g. fetch/push rejected or auth failure)`,
             },
         });
     }

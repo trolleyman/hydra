@@ -11,10 +11,10 @@ import { useEventStream } from '../lib/useEventStream'
 // drive refetches immediately, but a slow periodic poll still recovers if the
 // socket is briefly down or an event is missed. Much lighter than the old 5–10s.
 const EVENT_FALLBACK_MS = 30_000
-import type { ProjectInfo, AgentResponse } from '../api'
+import type { ProjectInfo, AgentResponse, RepositoryPushStatus } from '../api'
 import { ApiError, ErrorResponse } from '../api'
 import { formatError } from '../api/format_error'
-import { ChevronDown, ChevronRight, Folder, FolderGit2, FolderOpen, Plus, Settings, Check, X, LoaderCircle, AlertTriangle, PanelLeftClose, PanelLeftOpen, RotateCw } from 'lucide-react'
+import { ChevronDown, ChevronRight, Folder, FolderGit2, FolderOpen, Plus, Settings, Check, X, LoaderCircle, AlertTriangle, PanelLeftClose, PanelLeftOpen, RotateCw, ArrowUp, ArrowDown, RefreshCw } from 'lucide-react'
 import { useApplyTheme } from '../lib/theme'
 import { useSidebarStore, SIDEBAR_OVERLAY_QUERY } from '../lib/sidebar'
 import { folderPickerAvailable, openFolderPicker } from '../api/folderPicker'
@@ -34,6 +34,7 @@ export const Route = createRootRoute({
 })
 
 import { useDialogStore } from '../stores/dialogStore'
+import { useToastStore } from '../stores/toastStore'
 import { pruneArtifactPrefs } from '../lib/artifactPrefs'
 import { pruneAgentViewPrefs } from '../lib/agentViewPrefs'
 import { StorageKeys, readLocal, writeLocal, readTrustedProjects, trustProject, archivedCollapsedKey } from '../lib/storage'
@@ -649,6 +650,71 @@ function RootLayout() {
     if (!currentProjectId) setAgents([])
   }, [currentProjectId, setAgents])
 
+  // Push/pull status for the project's current branch: drives the sidebar Sync
+  // button, which shows how far ahead/behind the remote the branch is and, when
+  // clicked, pulls then pushes. Refreshed on the same slow poll as the agent
+  // list, plus on demand after a sync or when the events stream reports a change.
+  // refetchPushStatusRef lets those triggers fire a fetch without restarting it.
+  const [pushStatus, setPushStatus] = useState<RepositoryPushStatus | null>(null)
+  const [syncing, setSyncing] = useState(false)
+  const refetchPushStatusRef = useRef<() => void>(() => {})
+  useEffect(() => {
+    if (!currentProjectId) {
+      setPushStatus(null)
+      refetchPushStatusRef.current = () => {}
+      return
+    }
+
+    let cancelled = false
+    const projectId = currentProjectId
+
+    async function fetchPushStatus() {
+      try {
+        const result = await api.default.getRepositoryPushStatus(projectId)
+        if (!cancelled) setPushStatus(result)
+      } catch {
+        if (!cancelled) setPushStatus(null)
+      }
+    }
+
+    refetchPushStatusRef.current = () => void fetchPushStatus()
+    const stop = startVisibilityPolling(fetchPushStatus, EVENT_FALLBACK_MS)
+    return () => {
+      cancelled = true
+      refetchPushStatusRef.current = () => {}
+      stop()
+    }
+  }, [currentProjectId])
+
+  const handleSync = useCallback(async () => {
+    if (!currentProjectId || syncing) return
+    const projectId = currentProjectId
+    const toast = useToastStore.getState()
+    setSyncing(true)
+    const toastId = toast.show({ message: 'Syncing with remote…', type: 'info', duration: 0 })
+    try {
+      const result = await api.default.syncRepository(projectId)
+      setPushStatus(result)
+      toast.dismiss(toastId)
+      const where = result.remote && result.branch ? ` with ${result.remote}/${result.branch}` : ''
+      toast.show({ message: `Synced${where}`, type: 'success' })
+    } catch (err) {
+      toast.dismiss(toastId)
+      // A 409 means the pull couldn't merge cleanly; surface it distinctly.
+      const conflict = err instanceof ApiError && err.status === 409
+      toast.show({
+        message: conflict
+          ? `Sync failed: pull conflicts — resolve in the repository, then retry`
+          : `Sync failed: ${formatError(err)}`,
+        type: 'error',
+        duration: 6000,
+      })
+    } finally {
+      setSyncing(false)
+      refetchPushStatusRef.current()
+    }
+  }, [currentProjectId, syncing])
+
   // Archived (killed/merged) history list. Loaded lazily and paginated for
   // infinite scroll — it is historical, so unlike the live list it is not
   // polled. Reset + load the first page whenever the selected project changes.
@@ -798,8 +864,14 @@ function RootLayout() {
   // instead of relying on the (now slow) fallback polls above. The stream also
   // fires once on connect, so selecting a project loads it immediately.
   useEventStream(currentProjectId, {
-    onAgentsChanged: () => refetchAgentsRef.current(),
+    onAgentsChanged: () => {
+      refetchAgentsRef.current()
+      // A merge advances the project's branch, changing what's left to push.
+      refetchPushStatusRef.current()
+    },
     onProjectsChanged: () => refetchStatusRef.current(),
+    // A background fetch found the branch's ahead/behind changed.
+    onPushStatusChanged: () => refetchPushStatusRef.current(),
   })
 
   // When the app lands on the bare root path ("/") but a project is already
@@ -1131,39 +1203,102 @@ function RootLayout() {
 
           <SpawnForm compact projectId={currentProjectId} onSpawned={handleSpawned} disabled={!currentProjectId} />
 
-          {/* Repository view — sits between the spawn box and the agents list */}
+          {/* Repository view + Sync — sit between the spawn box and the agents list */}
           <div className="px-2 pt-2 pb-1 border-b border-gray-100 dark:border-gray-700">
             {currentProjectId ? (
               (() => {
                 const repositoryActive = /\/repository(\/|$)/.test(location.pathname)
+                const ahead = pushStatus?.ahead ?? 0
+                const behind = pushStatus?.behind ?? 0
+                const canSync = (ahead > 0 || behind > 0) && !!pushStatus?.has_remote && !!pushStatus?.branch && !syncing
+                const remote = pushStatus?.remote ?? 'remote'
+                const statusTooltip = [
+                  behind > 0 ? `${behind} behind` : null,
+                  ahead > 0 ? `${ahead} ahead` : null,
+                ].filter(Boolean).join(', ') + ` ${remote}`
+                const syncTooltip = syncing
+                  ? 'Syncing…'
+                  : !pushStatus
+                    ? 'Sync with remote'
+                    : !pushStatus.has_remote
+                      ? 'No remote to sync with'
+                      : !pushStatus.branch
+                        ? 'Detached HEAD — cannot sync'
+                        : behind > 0 && ahead > 0
+                          ? `Sync: pull ${behind}, push ${ahead}`
+                          : behind > 0
+                            ? `Pull ${behind} commit${behind === 1 ? '' : 's'} from ${remote}`
+                            : ahead > 0
+                              ? `Push ${ahead} commit${ahead === 1 ? '' : 's'} to ${remote}`
+                              : `Up to date with ${remote}`
                 return (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (repositoryActive) {
-                        // Toggle off: clicking the active Repository button returns
-                        // to the project home screen, mirroring agent deselection.
-                        navigate({ to: '/project/$projectId', params: { projectId: currentProjectId } })
-                      } else {
-                        navigate({ to: '/project/$projectId/repository', params: { projectId: currentProjectId } })
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (repositoryActive) {
+                          // Toggle off: clicking the active Repository button returns
+                          // to the project home screen, mirroring agent deselection.
+                          navigate({ to: '/project/$projectId', params: { projectId: currentProjectId } })
+                        } else {
+                          navigate({ to: '/project/$projectId/repository', params: { projectId: currentProjectId } })
+                        }
+                      }}
+                      className={
+                        repositoryActive
+                          ? 'flex-1 min-w-0 flex items-center gap-2 px-2.5 py-2 rounded-lg text-sm font-medium cursor-pointer bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
+                          : 'flex-1 min-w-0 flex items-center gap-2 px-2.5 py-2 rounded-lg text-sm font-medium cursor-pointer text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors'
                       }
-                    }}
-                    className={
-                      repositoryActive
-                        ? 'w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-sm font-medium cursor-pointer bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
-                        : 'w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-sm font-medium cursor-pointer text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors'
-                    }
-                  >
-                    <FolderGit2 className="w-4 h-4 shrink-0" />
-                    Repository
-                  </button>
+                    >
+                      <FolderGit2 className="w-4 h-4 shrink-0" />
+                      Repository
+                    </button>
+                    {/* Ahead/behind status indicator (read-only) */}
+                    {(behind > 0 || ahead > 0) && (
+                      <Tooltip content={statusTooltip} className="shrink-0">
+                        <span className="flex items-center gap-1 text-xs font-medium tabular-nums text-gray-500 dark:text-gray-400 select-none">
+                          {behind > 0 && (
+                            <span className="flex items-center text-amber-600 dark:text-amber-400">
+                              <ArrowDown className="w-3.5 h-3.5 shrink-0" />{behind}
+                            </span>
+                          )}
+                          {ahead > 0 && (
+                            <span className="flex items-center">
+                              <ArrowUp className="w-3.5 h-3.5 shrink-0" />{ahead}
+                            </span>
+                          )}
+                        </span>
+                      </Tooltip>
+                    )}
+                    {/* Sync button (pull then push) */}
+                    <Tooltip content={syncTooltip} className="shrink-0">
+                      <button
+                        type="button"
+                        onClick={handleSync}
+                        disabled={!canSync}
+                        aria-label={syncTooltip}
+                        className={
+                          canSync
+                            ? 'inline-flex items-center p-1.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer'
+                            : 'inline-flex items-center p-1.5 rounded-lg border border-gray-200 dark:border-gray-700 text-gray-300 dark:text-gray-600 cursor-not-allowed'
+                        }
+                      >
+                        <RefreshCw className={`w-4 h-4 shrink-0 ${syncing ? 'animate-spin' : ''}`} />
+                      </button>
+                    </Tooltip>
+                  </div>
                 )
               })()
             ) : (
-              <span className="flex items-center gap-2 px-2.5 py-2 rounded-lg text-sm font-medium text-gray-400 dark:text-gray-600 cursor-not-allowed">
-                <FolderGit2 className="w-4 h-4 shrink-0" />
-                Repository
-              </span>
+              <div className="flex items-center gap-1.5">
+                <span className="flex-1 min-w-0 flex items-center gap-2 px-2.5 py-2 rounded-lg text-sm font-medium text-gray-400 dark:text-gray-600 cursor-not-allowed">
+                  <FolderGit2 className="w-4 h-4 shrink-0" />
+                  Repository
+                </span>
+                <span className="inline-flex items-center p-1.5 rounded-lg border border-gray-200 dark:border-gray-700 text-gray-300 dark:text-gray-600 cursor-not-allowed">
+                  <RefreshCw className="w-4 h-4 shrink-0" />
+                </span>
+              </div>
             )}
           </div>
 

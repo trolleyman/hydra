@@ -669,6 +669,27 @@ type RepositoryFileResponse struct {
 	Truncated bool `json:"truncated"`
 }
 
+// RepositoryPushStatus defines model for RepositoryPushStatus.
+type RepositoryPushStatus struct {
+	// Ahead Number of commits on the current branch not yet on the remote
+	Ahead int `json:"ahead"`
+
+	// Behind Number of commits the remote-tracking branch has that the local branch does not. Reflects the last fetch (the server fetches in the background); 0 when the branch isn't on the remote yet.
+	Behind int `json:"behind"`
+
+	// Branch The repository's current branch, or null when HEAD is detached
+	Branch *string `json:"branch"`
+
+	// CanPush True if there is a branch, a remote, and at least one commit to push
+	CanPush bool `json:"can_push"`
+
+	// HasRemote True if the repository has a remote to push to
+	HasRemote bool `json:"has_remote"`
+
+	// Remote The remote a push would target (e.g. "origin"), or null if none
+	Remote *string `json:"remote"`
+}
+
 // RepositoryTreeResponse defines model for RepositoryTreeResponse.
 type RepositoryTreeResponse struct {
 	// DefaultPath Suggested file to open first (README.md when present), or null
@@ -1101,6 +1122,15 @@ type ServerInterface interface {
 	// Read the contents of a file in the project's repository
 	// (GET /api/projects/{project_id}/repository/file)
 	GetRepositoryFile(w http.ResponseWriter, r *http.Request, projectId string, params GetRepositoryFileParams)
+	// Push the repository's current branch to its remote
+	// (POST /api/projects/{project_id}/repository/push)
+	PushRepository(w http.ResponseWriter, r *http.Request, projectId string)
+	// Report whether the repository's current branch has commits to push
+	// (GET /api/projects/{project_id}/repository/push-status)
+	GetRepositoryPushStatus(w http.ResponseWriter, r *http.Request, projectId string)
+	// Synchronise the repository's current branch with its remote
+	// (POST /api/projects/{project_id}/repository/sync)
+	SyncRepository(w http.ResponseWriter, r *http.Request, projectId string)
 	// List the files tracked in the project's repository
 	// (GET /api/projects/{project_id}/repository/tree)
 	GetRepositoryTree(w http.ResponseWriter, r *http.Request, projectId string, params GetRepositoryTreeParams)
@@ -2286,6 +2316,81 @@ func (siw *ServerInterfaceWrapper) GetRepositoryFile(w http.ResponseWriter, r *h
 	handler.ServeHTTP(w, r)
 }
 
+// PushRepository operation middleware
+func (siw *ServerInterfaceWrapper) PushRepository(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PushRepository(w, r, projectId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetRepositoryPushStatus operation middleware
+func (siw *ServerInterfaceWrapper) GetRepositoryPushStatus(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetRepositoryPushStatus(w, r, projectId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SyncRepository operation middleware
+func (siw *ServerInterfaceWrapper) SyncRepository(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SyncRepository(w, r, projectId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetRepositoryTree operation middleware
 func (siw *ServerInterfaceWrapper) GetRepositoryTree(w http.ResponseWriter, r *http.Request) {
 
@@ -2577,6 +2682,9 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/repository/branches", wrapper.GetRepositoryBranches)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/repository/diff", wrapper.GetRepositoryDiff)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/repository/file", wrapper.GetRepositoryFile)
+	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/repository/push", wrapper.PushRepository)
+	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/repository/push-status", wrapper.GetRepositoryPushStatus)
+	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/repository/sync", wrapper.SyncRepository)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/repository/tree", wrapper.GetRepositoryTree)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/services", wrapper.GetServices)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/services/restart", wrapper.RestartServices)
@@ -3703,6 +3811,138 @@ func (response GetRepositoryFile500JSONResponse) VisitGetRepositoryFileResponse(
 	return json.NewEncoder(w).Encode(response)
 }
 
+type PushRepositoryRequestObject struct {
+	ProjectId string `json:"project_id"`
+}
+
+type PushRepositoryResponseObject interface {
+	VisitPushRepositoryResponse(w http.ResponseWriter) error
+}
+
+type PushRepository200JSONResponse RepositoryPushStatus
+
+func (response PushRepository200JSONResponse) VisitPushRepositoryResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type PushRepository400JSONResponse ErrorResponse
+
+func (response PushRepository400JSONResponse) VisitPushRepositoryResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type PushRepository404JSONResponse ErrorResponse
+
+func (response PushRepository404JSONResponse) VisitPushRepositoryResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type PushRepository500JSONResponse ErrorResponse
+
+func (response PushRepository500JSONResponse) VisitPushRepositoryResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetRepositoryPushStatusRequestObject struct {
+	ProjectId string `json:"project_id"`
+}
+
+type GetRepositoryPushStatusResponseObject interface {
+	VisitGetRepositoryPushStatusResponse(w http.ResponseWriter) error
+}
+
+type GetRepositoryPushStatus200JSONResponse RepositoryPushStatus
+
+func (response GetRepositoryPushStatus200JSONResponse) VisitGetRepositoryPushStatusResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetRepositoryPushStatus404JSONResponse ErrorResponse
+
+func (response GetRepositoryPushStatus404JSONResponse) VisitGetRepositoryPushStatusResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetRepositoryPushStatus500JSONResponse ErrorResponse
+
+func (response GetRepositoryPushStatus500JSONResponse) VisitGetRepositoryPushStatusResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type SyncRepositoryRequestObject struct {
+	ProjectId string `json:"project_id"`
+}
+
+type SyncRepositoryResponseObject interface {
+	VisitSyncRepositoryResponse(w http.ResponseWriter) error
+}
+
+type SyncRepository200JSONResponse RepositoryPushStatus
+
+func (response SyncRepository200JSONResponse) VisitSyncRepositoryResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type SyncRepository400JSONResponse ErrorResponse
+
+func (response SyncRepository400JSONResponse) VisitSyncRepositoryResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type SyncRepository404JSONResponse ErrorResponse
+
+func (response SyncRepository404JSONResponse) VisitSyncRepositoryResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type SyncRepository409JSONResponse MergeConflictError
+
+func (response SyncRepository409JSONResponse) VisitSyncRepositoryResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type SyncRepository500JSONResponse ErrorResponse
+
+func (response SyncRepository500JSONResponse) VisitSyncRepositoryResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 type GetRepositoryTreeRequestObject struct {
 	ProjectId string `json:"project_id"`
 	Params    GetRepositoryTreeParams
@@ -3951,6 +4191,15 @@ type StrictServerInterface interface {
 	// Read the contents of a file in the project's repository
 	// (GET /api/projects/{project_id}/repository/file)
 	GetRepositoryFile(ctx context.Context, request GetRepositoryFileRequestObject) (GetRepositoryFileResponseObject, error)
+	// Push the repository's current branch to its remote
+	// (POST /api/projects/{project_id}/repository/push)
+	PushRepository(ctx context.Context, request PushRepositoryRequestObject) (PushRepositoryResponseObject, error)
+	// Report whether the repository's current branch has commits to push
+	// (GET /api/projects/{project_id}/repository/push-status)
+	GetRepositoryPushStatus(ctx context.Context, request GetRepositoryPushStatusRequestObject) (GetRepositoryPushStatusResponseObject, error)
+	// Synchronise the repository's current branch with its remote
+	// (POST /api/projects/{project_id}/repository/sync)
+	SyncRepository(ctx context.Context, request SyncRepositoryRequestObject) (SyncRepositoryResponseObject, error)
 	// List the files tracked in the project's repository
 	// (GET /api/projects/{project_id}/repository/tree)
 	GetRepositoryTree(ctx context.Context, request GetRepositoryTreeRequestObject) (GetRepositoryTreeResponseObject, error)
@@ -4825,6 +5074,84 @@ func (sh *strictHandler) GetRepositoryFile(w http.ResponseWriter, r *http.Reques
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetRepositoryFileResponseObject); ok {
 		if err := validResponse.VisitGetRepositoryFileResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// PushRepository operation middleware
+func (sh *strictHandler) PushRepository(w http.ResponseWriter, r *http.Request, projectId string) {
+	var request PushRepositoryRequestObject
+
+	request.ProjectId = projectId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.PushRepository(ctx, request.(PushRepositoryRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "PushRepository")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(PushRepositoryResponseObject); ok {
+		if err := validResponse.VisitPushRepositoryResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetRepositoryPushStatus operation middleware
+func (sh *strictHandler) GetRepositoryPushStatus(w http.ResponseWriter, r *http.Request, projectId string) {
+	var request GetRepositoryPushStatusRequestObject
+
+	request.ProjectId = projectId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetRepositoryPushStatus(ctx, request.(GetRepositoryPushStatusRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetRepositoryPushStatus")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetRepositoryPushStatusResponseObject); ok {
+		if err := validResponse.VisitGetRepositoryPushStatusResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SyncRepository operation middleware
+func (sh *strictHandler) SyncRepository(w http.ResponseWriter, r *http.Request, projectId string) {
+	var request SyncRepositoryRequestObject
+
+	request.ProjectId = projectId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SyncRepository(ctx, request.(SyncRepositoryRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SyncRepository")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SyncRepositoryResponseObject); ok {
+		if err := validResponse.VisitSyncRepositoryResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

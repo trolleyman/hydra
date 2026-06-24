@@ -4,6 +4,7 @@ export interface EventStreamHandlers {
   onAgentsChanged?: () => void
   onProjectsChanged?: () => void
   onServicesChanged?: () => void
+  onPushStatusChanged?: () => void
 }
 
 // useEventStream subscribes to the daemon's per-project events WebSocket and
@@ -34,6 +35,7 @@ export function useEventStream(projectId: string | null, handlers: EventStreamHa
       if (type === 'agents_changed') h.onAgentsChanged?.()
       else if (type === 'projects_changed') h.onProjectsChanged?.()
       else if (type === 'services_changed') h.onServicesChanged?.()
+      else if (type === 'push_status_changed') h.onPushStatusChanged?.()
     }
 
     const clearReconnect = () => {

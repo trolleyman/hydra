@@ -3,6 +3,7 @@ package http
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"braces.dev/errtrace"
 	"github.com/trolleyman/hydra/internal/api"
@@ -284,6 +286,185 @@ func (s *Server) GetRepositoryBranches(_ context.Context, request api.GetReposit
 		Current:  current,
 		Branches: branches,
 	}, nil
+}
+
+// pushStatusResponse adapts a git.RemoteStatus into the API shape.
+func pushStatusResponse(st git.RemoteStatus) api.RepositoryPushStatus {
+	resp := api.RepositoryPushStatus{
+		Ahead:     st.Ahead,
+		Behind:    st.Behind,
+		HasRemote: st.HasRemote,
+		CanPush:   st.CanPush(),
+	}
+	if st.Branch != "" {
+		resp.Branch = &st.Branch
+	}
+	if st.Remote != "" {
+		resp.Remote = &st.Remote
+	}
+	return resp
+}
+
+// GetRepositoryPushStatus reports whether the project root's current branch has
+// commits to push (and how far behind the remote it is), so the sidebar can
+// enable or grey out the Push button and show a behind indicator. It returns the
+// cached state immediately and kicks off a throttled background fetch so the
+// behind count is kept fresh without blocking the response.
+func (s *Server) GetRepositoryPushStatus(_ context.Context, request api.GetRepositoryPushStatusRequestObject) (api.GetRepositoryPushStatusResponseObject, error) {
+	projectRoot, err := s.resolveProjectRoot(request.ProjectId)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	st, err := git.GetRemoteStatus(projectRoot)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	if st.HasRemote {
+		go s.maybeFetchRemote(projectRoot, st.Remote)
+	}
+	return api.GetRepositoryPushStatus200JSONResponse(pushStatusResponse(st)), nil
+}
+
+// maybeFetchRemote runs `git fetch <remote>` for projectRoot in the background,
+// at most once per remoteFetchInterval and never concurrently, so the behind
+// count stays current without a fetch on every poll. If the fetch reveals a
+// changed ahead/behind it publishes a push_status_changed event, prompting
+// clients to refetch; otherwise it stays silent so an unchanged remote doesn't
+// turn this into a poll. Best-effort: a failed/slow fetch just leaves the cached
+// (possibly stale) counts in place.
+func (s *Server) maybeFetchRemote(projectRoot, remote string) {
+	s.fetchMu.Lock()
+	if s.fetchActive == nil {
+		s.fetchActive = map[string]bool{}
+		s.fetchLast = map[string]time.Time{}
+	}
+	if s.fetchActive[projectRoot] || time.Since(s.fetchLast[projectRoot]) < remoteFetchInterval {
+		s.fetchMu.Unlock()
+		return
+	}
+	s.fetchActive[projectRoot] = true
+	s.fetchLast[projectRoot] = time.Now()
+	s.fetchMu.Unlock()
+
+	defer func() {
+		s.fetchMu.Lock()
+		s.fetchActive[projectRoot] = false
+		s.fetchMu.Unlock()
+	}()
+
+	before, _ := git.GetRemoteStatus(projectRoot)
+
+	ctx := s.BackgroundCtx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	if err := git.Fetch(ctx, projectRoot, remote); err != nil {
+		return // best-effort; keep the cached counts
+	}
+
+	after, err := git.GetRemoteStatus(projectRoot)
+	if err != nil {
+		return
+	}
+	if after.Ahead != before.Ahead || after.Behind != before.Behind {
+		s.Events.PushStatusChanged(projectRoot)
+	}
+}
+
+// PushRepository pushes the project root's current branch to its remote and
+// returns the refreshed push status.
+func (s *Server) PushRepository(_ context.Context, request api.PushRepositoryRequestObject) (api.PushRepositoryResponseObject, error) {
+	projectRoot, err := s.resolveProjectRoot(request.ProjectId)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+
+	st, err := git.GetRemoteStatus(projectRoot)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	if !st.CanPush() {
+		detail := "nothing to push"
+		switch {
+		case st.Branch == "":
+			detail = "cannot push: HEAD is detached"
+		case !st.HasRemote:
+			detail = "cannot push: repository has no remote configured"
+		}
+		return nil, &apiError{Code: 400, Type: api.ErrorResponseErrorBadRequest, Err: errors.New(detail)} //errtrace:skip
+	}
+
+	if _, err := git.Push(projectRoot); err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+
+	// Re-read so the client sees the post-push state (ahead normally back to 0).
+	after, err := git.GetRemoteStatus(projectRoot)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	return api.PushRepository200JSONResponse(pushStatusResponse(after)), nil
+}
+
+// SyncRepository fetches, integrates the remote's commits into the local branch
+// (a pull), then pushes any local commits — the one-click sync the sidebar
+// button performs. A pull that can't merge cleanly returns 409 without touching
+// the working tree.
+func (s *Server) SyncRepository(_ context.Context, request api.SyncRepositoryRequestObject) (api.SyncRepositoryResponseObject, error) {
+	projectRoot, err := s.resolveProjectRoot(request.ProjectId)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+
+	st, err := git.GetRemoteStatus(projectRoot)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	if st.Branch == "" || !st.HasRemote {
+		detail := "cannot sync: repository has no remote configured"
+		if st.Branch == "" {
+			detail = "cannot sync: HEAD is detached"
+		}
+		return nil, &apiError{Code: 400, Type: api.ErrorResponseErrorBadRequest, Err: errors.New(detail)} //errtrace:skip
+	}
+
+	authorName, authorEmail := gitConfigVal(projectRoot, "user.name"), gitConfigVal(projectRoot, "user.email")
+
+	ctx := s.BackgroundCtx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+
+	// Pull first so a push can't be rejected for being behind.
+	if err := git.Pull(ctx, projectRoot, authorName, authorEmail); err != nil {
+		var conflict *git.ConflictError
+		if errors.As(err, &conflict) {
+			return api.SyncRepository409JSONResponse(api.MergeConflictError{
+				Error:   api.MergeConflictErrorErrorMergeConflict,
+				Code:    409,
+				Details: fmt.Sprintf("pull failed: %v", conflict),
+			}), nil
+		}
+		return nil, errtrace.Wrap(err)
+	}
+
+	// Push anything local that the pull left ahead.
+	if after, err := git.GetRemoteStatus(projectRoot); err == nil && after.CanPush() {
+		if _, err := git.Push(projectRoot); err != nil {
+			return nil, errtrace.Wrap(err)
+		}
+	}
+
+	final, err := git.GetRemoteStatus(projectRoot)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	s.Events.PushStatusChanged(projectRoot)
+	return api.SyncRepository200JSONResponse(pushStatusResponse(final)), nil
 }
 
 // GetRepositoryFile returns the contents of a single repo-relative file at the
