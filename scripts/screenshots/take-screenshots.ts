@@ -1101,11 +1101,13 @@ try {
           )
           await settle(page)
         }
-        if (pg.imageDiffMode || pg.expandArtifact) {
+        if ((pg.imageDiffMode || pg.expandArtifact) && pg.path.includes('/agent/')) {
           // The artifacts panel populates from a WebSocket snapshot, which (unlike
           // the HTTP fetches the goto's networkidle waits for) isn't tracked by
           // networkidle. Wait for the always-present "screenshots" card so the
-          // panel is rendered before we capture it.
+          // panel is rendered before we capture it. Only the agent diff page has an
+          // artifacts panel — the repository branch-compare diff also reads
+          // imageDiffMode (for in-tree image diffs) but has no such card to wait on.
           await page.waitForFunction(() =>
             Array.from(document.querySelectorAll('button')).some((b) => b.textContent?.includes('screenshots')),
           )
