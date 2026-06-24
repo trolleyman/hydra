@@ -1645,7 +1645,7 @@ function SettingsPopup({ fileView, onFileViewChange, sideBySide, onSideBySideCha
 
       {open && (
         <div className="absolute right-0 top-full mt-1 w-52 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50 p-3">
-          <p className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 lowercase tracking-wide mb-2">File list</p>
+          <p className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 tracking-wide mb-2">File List</p>
           <div className="flex flex-col gap-0.5 mb-3">
             {viewOptions.map((opt) => (
               <label key={opt.value} className="flex items-center gap-2 py-0.5 cursor-pointer">
@@ -1655,7 +1655,7 @@ function SettingsPopup({ fileView, onFileViewChange, sideBySide, onSideBySideCha
               </label>
             ))}
           </div>
-          <p className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 lowercase tracking-wide mb-2">Options</p>
+          <p className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 tracking-wide mb-2">Options</p>
           <div className="flex flex-col gap-0.5">
             {[
               { checked: sideBySide, onChange: onSideBySideChange, label: 'Side by side' },
@@ -1669,7 +1669,7 @@ function SettingsPopup({ fileView, onFileViewChange, sideBySide, onSideBySideCha
               </label>
             ))}
           </div>
-          <p className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 lowercase tracking-wide mt-3 mb-2">Artifact diff</p>
+          <p className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 tracking-wide mt-3 mb-2">Artifact Diff</p>
           <div className="flex flex-col gap-0.5">
             {IMAGE_DIFF_MODES.map((opt) => (
               <label key={opt.value} className="flex items-center gap-2 py-0.5 cursor-pointer">
@@ -1682,7 +1682,7 @@ function SettingsPopup({ fileView, onFileViewChange, sideBySide, onSideBySideCha
           {/* Masonry column count for the artifact grid. Drag the dividers between
               columns (in the grid itself) to fine-tune their individual widths. */}
           <div className="flex items-center gap-2 mt-3">
-            <span className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 lowercase tracking-wide shrink-0">Columns</span>
+            <span className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 tracking-wide shrink-0">Columns</span>
             <input
               type="range"
               min={MIN_ARTIFACT_COLUMNS}
