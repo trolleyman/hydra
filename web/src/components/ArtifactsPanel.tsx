@@ -1,14 +1,15 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { api } from '../stores/apiClient'
 import type { ArtifactSet, ArtifactFile, ArtifactLogLine } from '../api'
-import { LoaderCircle, Image as ImageIcon, ImageOff, ChevronDown, ChevronRight, TriangleAlert, RefreshCw } from 'lucide-react'
+import { LoaderCircle, Image as ImageIcon, ImageOff, ChevronDown, ChevronRight, TriangleAlert, RefreshCw, ScrollText, RotateCcw } from 'lucide-react'
 import { InfoTooltip } from './InfoTooltip'
-import { loadArtifactPrefs, saveArtifactPrefs, loadTagFilter, saveTagFilter, type ArtifactTagFilter } from '../lib/artifactPrefs'
+import { loadArtifactPrefs, saveArtifactPrefs, loadTagFilter, saveTagFilter, defaultTagFilter, isDefaultTagFilter, ARTIFACT_CHANGE_CATEGORY as CHANGE_CATEGORY, type ArtifactTagFilter } from '../lib/artifactPrefs'
 import { stripAnsi } from '../lib/ansi'
 import {
   checkerStyle, IMG_CLASS, OVERLAY_CLASS, TAG_CLASS, makeAuxOpen,
-  useMediaResize, ResizeGrip, DIFF_COLOR, DIFF_PIXEL_THRESHOLD,
+  DIFF_COLOR, DIFF_PIXEL_THRESHOLD,
 } from './artifactDiffShared'
+import { type ArtifactColumns, MIN_ARTIFACT_COLUMNS, MAX_ARTIFACT_COLUMNS } from '../lib/artifactColumns'
 import { VideoDiffView, isVideoArtifact } from './VideoDiffView'
 
 const CHANGE_LABEL: Record<string, string> = {
@@ -26,51 +27,49 @@ const CHANGE_COLOR: Record<string, string> = {
 }
 
 // The ways to compare a before/after image pair. Persisted in the diff viewer's
-// settings; see DiffViewer's SettingsPopup.
-export type ImageDiffMode = 'side-by-side' | 'ab' | 'slider' | 'onion' | 'difference'
+// settings; see DiffViewer's SettingsPopup. (The magenta pixel-diff isn't a mode of
+// its own any more — it lives as a "Highlight" tab inside the Before/After mode.)
+export type ImageDiffMode = 'side-by-side' | 'ab' | 'slider' | 'onion'
 
 export const IMAGE_DIFF_MODES: { value: ImageDiffMode; label: string }[] = [
+  { value: 'ab', label: 'Before · After' },
+  { value: 'slider', label: 'Before · After (slider)' },
   { value: 'side-by-side', label: 'Side by side' },
-  { value: 'ab', label: 'Before/After' },
-  { value: 'difference', label: 'Difference (magenta)' },
-  { value: 'slider', label: 'Before/after slider' },
   { value: 'onion', label: 'Onion skin' },
 ]
 
-function ImageCell({ url, label, maxHeight, onResizeStart, consumeDrag }: { url?: string | null; label: string; maxHeight: number; onResizeStart: (e: React.PointerEvent) => void; consumeDrag: () => boolean }) {
+// Masonry column layout (ArtifactColumns / count bounds) is shared with the
+// repository artifacts view, so it lives in lib/artifactColumns. MIN_COL_PX is the
+// narrowest a column may get before the masonry clamps the rendered count down to
+// fit (and before a divider drag stops); MASONRY_GAP is the inter-column gutter.
+const MIN_COL_PX = 200
+const MASONRY_GAP = 12
+
+function ImageCell({ url, label }: { url?: string | null; label: string }) {
   return (
-    <div className="min-w-0">
+    // flex-1 min-w-0 so the two cells split their row evenly and the width-driven
+    // images (w-full) each fill their half.
+    <div className="flex-1 min-w-0">
       <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-1">{label}</div>
       {url ? (
-        // A press-and-drag anywhere on the image resizes it (onPointerDown); a plain
-        // click still opens it in a new tab via the <a>, but consumeDrag() cancels
-        // that navigation when the press turned into a drag. select-none so a drag
-        // doesn't marquee-select. draggable={false} so the image isn't ghost-dragged.
-        <div className="group relative inline-block select-none" onPointerDown={onResizeStart}>
-          <a
-            href={url}
-            target="_blank"
-            rel="noreferrer"
-            className="block"
-            onClick={(e) => { if (consumeDrag()) e.preventDefault() }}
-          >
-            <img
-              src={url}
-              loading="lazy"
-              draggable={false}
-              style={{ ...checkerStyle, maxHeight: `${maxHeight}px` }}
-              className={IMG_CLASS}
-            />
-          </a>
-          <ResizeGrip onPointerDown={onResizeStart} />
-        </div>
+        // A plain click opens the image in a new tab via the <a>. The image fills the
+        // cell width (w-full) and its height follows the aspect ratio.
+        <a href={url} target="_blank" rel="noreferrer" className="block">
+          <img
+            src={url}
+            loading="lazy"
+            draggable={false}
+            style={checkerStyle}
+            className={IMG_CLASS}
+          />
+        </a>
       ) : (
         // No image on this side (the file was added or removed). Render a panel of
         // similar visual weight to the present image — same framing, a clear "No
         // image" empty state — rather than a tiny dashed box, so the added/removed
         // (none↔image) layout doesn't look lopsided next to its counterpart.
         // select-none so rapid clicking near it never highlights the label text.
-        <div className="select-none flex flex-col items-center justify-center gap-1 w-44 h-32 rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 text-gray-400 dark:text-gray-500">
+        <div className="select-none flex flex-col items-center justify-center gap-1 w-full h-32 rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 text-gray-400 dark:text-gray-500">
           <ImageOff className="w-5 h-5" />
           <span className="text-[11px] font-medium">No image</span>
         </div>
@@ -96,42 +95,54 @@ function LayerNode({ url, style }: { url?: string | null; style?: React.CSSPrope
   )
 }
 
-// A/B switch: both sides stay mounted and stacked; clicking (or the Before/After
-// buttons) flips which one is shown for an instant, flicker-free hard switch. A
-// missing side shows the "No image" placeholder in its slot. Middle-click opens
-// the currently-shown image in a new tab.
+// A/B switch: Before / After / Highlight. Before & After stay mounted and stacked,
+// so the toggle flips which is shown for an instant, flicker-free hard switch.
+// Highlight shows the after image with every changed pixel painted magenta (the
+// pixel-diff, see DiffCanvas); it's disabled when only one side exists (an
+// added/removed file — there's nothing to diff). Clicking the image flips
+// Before↔After (not while Highlight is shown). A missing side shows the "No image"
+// placeholder; middle-click opens the currently-shown image in a new tab.
 function ABSwitch({ left, right }: { left?: string | null; right?: string | null }) {
-  const [showAfter, setShowAfter] = useState(true)
-  const { maxHeight, onResizeStart, consumeDrag } = useMediaResize()
+  const canDiff = !!left && !!right
+  const [view, setView] = useState<'before' | 'after' | 'highlight'>('after')
   // At least one side is present (ImageDiffView only routes here otherwise); the
   // present image is the invisible sizer that gives the stacked box its size.
   const sizer = (right ?? left) as string
-  const btn = (active: boolean) =>
-    `text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded cursor-pointer transition-colors ${
-      active ? 'bg-blue-500 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600'
+  const btn = (active: boolean, disabled = false) =>
+    `text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded transition-colors ${
+      disabled ? 'opacity-40 cursor-not-allowed bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500'
+        : active ? 'bg-blue-500 text-white cursor-pointer'
+          : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600 cursor-pointer'
     }`
   return (
     <div className="min-w-0">
       <div className="flex items-center gap-1 mb-1">
-        <button onClick={() => setShowAfter(false)} className={btn(!showAfter)}>Before</button>
-        <button onClick={() => setShowAfter(true)} className={btn(showAfter)}>After</button>
+        <button onClick={() => setView('before')} className={btn(view === 'before')}>Before</button>
+        <button onClick={() => setView('after')} className={btn(view === 'after')}>After</button>
+        <button
+          onClick={() => { if (canDiff) setView('highlight') }}
+          disabled={!canDiff}
+          title={canDiff ? 'Highlight changed pixels in magenta' : 'Needs both a before and after image'}
+          className={btn(view === 'highlight', !canDiff)}
+        >
+          Highlight
+        </button>
       </div>
-      <div
-        // group: reveals the resize grip on hover. select-none: flipping the A/B
-        // view is a rapid click target, so without this a quick double-click would
-        // highlight the "No image" placeholder text. A press starts a resize drag
-        // anywhere on the image (onPointerDown); a plain click still flips sides,
-        // but consumeDrag() suppresses that flip when the press turned into a drag.
-        className="group relative inline-block cursor-pointer select-none"
-        onPointerDown={onResizeStart}
-        onClick={() => { if (!consumeDrag()) setShowAfter((s) => !s) }}
-        onAuxClick={makeAuxOpen(() => (showAfter ? right : left) || sizer)}
-      >
-        <img src={sizer} style={{ visibility: 'hidden', maxHeight: `${maxHeight}px` }} className={`${IMG_CLASS} block`} draggable={false} />
-        <LayerNode url={right} style={{ maxHeight: `${maxHeight}px`, visibility: showAfter ? 'visible' : 'hidden' }} />
-        <LayerNode url={left} style={{ maxHeight: `${maxHeight}px`, visibility: showAfter ? 'hidden' : 'visible' }} />
-        <ResizeGrip onPointerDown={onResizeStart} />
-      </div>
+      {view === 'highlight' && canDiff ? (
+        <DiffCanvas left={left as string} right={right as string} />
+      ) : (
+        // select-none: flipping is a rapid click target, so without this a quick
+        // double-click would highlight the "No image" placeholder text.
+        <div
+          className="relative w-full cursor-pointer select-none"
+          onClick={() => setView((v) => (v === 'before' ? 'after' : 'before'))}
+          onAuxClick={makeAuxOpen(() => (view === 'before' ? left : right) || sizer)}
+        >
+          <img src={sizer} style={{ visibility: 'hidden' }} className={`${IMG_CLASS} block`} draggable={false} />
+          <LayerNode url={right} style={{ visibility: view === 'before' ? 'hidden' : 'visible' }} />
+          <LayerNode url={left} style={{ visibility: view === 'before' ? 'visible' : 'hidden' }} />
+        </div>
+      )}
     </div>
   )
 }
@@ -169,7 +180,7 @@ function SliderCompare({ left, right }: { left?: string | null; right?: string |
   return (
     <div
       ref={ref}
-      className="relative inline-block select-none touch-none cursor-ew-resize"
+      className="relative w-full select-none touch-none cursor-ew-resize"
       onPointerDown={(e) => {
         if (e.button !== 0) return // leave middle/right for the new-tab handler
         setDragging(true)
@@ -201,22 +212,16 @@ function SliderCompare({ left, right }: { left?: string | null; right?: string |
 // the side currently weighted by the blend.
 function OnionCompare({ left, right }: { left?: string | null; right?: string | null }) {
   const [opacity, setOpacity] = useState(50)
-  const { maxHeight, onResizeStart } = useMediaResize()
   const sizer = (right ?? left) as string
   return (
     <div className="min-w-0">
       <div
-        // A press-and-drag anywhere on the blended image resizes it; the opacity
-        // slider below is a separate row, so the box owns no left-click gesture and
-        // onResizeStart needs no consumeDrag guard. group reveals the grip on hover.
-        className="group relative inline-block select-none"
-        onPointerDown={onResizeStart}
+        className="relative w-full select-none"
         onAuxClick={makeAuxOpen(() => (opacity >= 50 ? right : left) || sizer)}
       >
-        <img src={sizer} style={{ visibility: 'hidden', maxHeight: `${maxHeight}px` }} className={`${IMG_CLASS} block`} draggable={false} />
+        <img src={sizer} style={{ visibility: 'hidden' }} className={`${IMG_CLASS} block`} draggable={false} />
         <LayerNode url={left} />
         <LayerNode url={right} style={{ opacity: opacity / 100 }} />
-        <ResizeGrip onPointerDown={onResizeStart} />
       </div>
       <div className="flex items-center gap-2 mt-1">
         <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">Before</span>
@@ -248,7 +253,7 @@ function loadImage(url: string): Promise<HTMLImageElement> {
 // only one side) reads as a difference too. It only runs with both sides present;
 // the caller handles the single-side case. Same-origin artifact URLs keep the
 // canvas untainted so getImageData works.
-function DiffCanvas({ left, right, maxHeight }: { left: string; right: string; maxHeight: number }) {
+function DiffCanvas({ left, right }: { left: string; right: string }) {
   const ref = useRef<HTMLCanvasElement>(null)
   const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading')
 
@@ -305,11 +310,11 @@ function DiffCanvas({ left, right, maxHeight }: { left: string; right: string; m
   }, [left, right])
 
   return (
-    <div className="relative inline-block" onAuxClick={makeAuxOpen(() => right)}>
-      <span className={`${TAG_CLASS} left-1`}>Diff</span>
+    <div className="relative w-full" onAuxClick={makeAuxOpen(() => right)}>
+      <span className={`${TAG_CLASS} left-1`}>Highlight</span>
       <canvas
         ref={ref}
-        style={{ ...checkerStyle, maxHeight: `${maxHeight}px` }}
+        style={checkerStyle}
         className={`${IMG_CLASS} block ${state === 'ready' ? '' : 'opacity-0'}`}
       />
       {state !== 'ready' && (
@@ -321,59 +326,13 @@ function DiffCanvas({ left, right, maxHeight }: { left: string; right: string; m
   )
 }
 
-// DiffCompare is the "difference" mode: a Before / After / Diff switch like the
-// A/B view, where the Diff tab shows the after image with every changed pixel in
-// bright magenta (see DiffCanvas). When only one side exists (added/removed file)
-// there is nothing to diff, so the Diff tab just shows the side that's present.
-function DiffCompare({ left, right }: { left?: string | null; right?: string | null }) {
-  const [view, setView] = useState<'before' | 'after' | 'diff'>('diff')
-  const { maxHeight, onResizeStart } = useMediaResize()
-  const sizer = (right ?? left) as string
-  const btn = (active: boolean) =>
-    `text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded cursor-pointer transition-colors ${
-      active ? 'bg-blue-500 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600'
-    }`
-  const canDiff = !!left && !!right
-  return (
-    <div className="min-w-0">
-      <div className="flex items-center gap-1 mb-1">
-        <button onClick={() => setView('before')} className={btn(view === 'before')}>Before</button>
-        <button onClick={() => setView('after')} className={btn(view === 'after')}>After</button>
-        <button onClick={() => setView('diff')} className={btn(view === 'diff')}>Diff</button>
-      </div>
-      {view === 'diff' && canDiff ? (
-        // A press-and-drag anywhere on the diff canvas resizes it; there's no
-        // left-click gesture here, so onResizeStart needs no consumeDrag guard.
-        <div className="group relative inline-block" onPointerDown={onResizeStart}>
-          <DiffCanvas left={left} right={right} maxHeight={maxHeight} />
-          <ResizeGrip onPointerDown={onResizeStart} />
-        </div>
-      ) : (
-        // Before/After (or the Diff tab with only one side present): show the
-        // chosen image, stacked over a hidden sizer so the box keeps its size. A
-        // press-and-drag anywhere resizes (group reveals the grip on hover too).
-        <div
-          className="group relative inline-block select-none"
-          onPointerDown={onResizeStart}
-          onAuxClick={makeAuxOpen(() => (view === 'before' ? left : right) || sizer)}
-        >
-          <img src={sizer} style={{ visibility: 'hidden', maxHeight: `${maxHeight}px` }} className={`${IMG_CLASS} block`} draggable={false} />
-          <LayerNode url={view === 'before' ? left : (right ?? left)} style={{ maxHeight: `${maxHeight}px` }} />
-          <ResizeGrip onPointerDown={onResizeStart} />
-        </div>
-      )}
-    </div>
-  )
-}
-
-// The default side-by-side pair. Holds one shared resize state so dragging the
-// grip on either image grows both before/after cells by the same amount.
+// The side-by-side pair: before and after fill half the tile width each (the cards
+// span two masonry columns in this mode, so there's room — see FileGrid).
 function SideBySide({ left, right }: { left?: string | null; right?: string | null }) {
-  const { maxHeight, onResizeStart, consumeDrag } = useMediaResize()
   return (
-    <div className="flex gap-3">
-      <ImageCell url={left} label="Before" maxHeight={maxHeight} onResizeStart={onResizeStart} consumeDrag={consumeDrag} />
-      <ImageCell url={right} label="After" maxHeight={maxHeight} onResizeStart={onResizeStart} consumeDrag={consumeDrag} />
+    <div className="flex gap-3 w-full">
+      <ImageCell url={left} label="Before" />
+      <ImageCell url={right} label="After" />
     </div>
   )
 }
@@ -387,7 +346,6 @@ function ImageDiffView({ left, right, mode }: { left?: string | null; right?: st
     return <SideBySide left={left} right={right} />
   }
   if (mode === 'ab') return <ABSwitch left={left} right={right} />
-  if (mode === 'difference') return <DiffCompare left={left} right={right} />
   if (mode === 'slider') return <SliderCompare left={left} right={right} />
   return <OnionCompare left={left} right={right} />
 }
@@ -418,6 +376,9 @@ function parseScopedTag(tag: string): { cat: string; val: string } | null {
 // (e.g. PNG screenshots alongside a .webm). The name is reserved: a user
 // `type::…` tag is ignored so it can't collide with the built-in.
 const TYPE_CATEGORY = 'type'
+// The order the built-in "changes" filter offers change_type values in (CHANGE_CATEGORY
+// lives in lib/artifactPrefs, which also seeds 'unchanged' hidden by default).
+const CHANGE_TYPE_ORDER = ['added', 'removed', 'modified', 'unchanged']
 
 // fileMediaType classifies a file as 'video' or 'image' for the built-in type
 // filter, matching how FileRow routes it (isVideoArtifact → the video viewer).
@@ -441,7 +402,7 @@ function collectTags(sets: ArtifactSet[]): CollectedTags {
   const add = (t: string) => {
     const p = parseScopedTag(t)
     if (p) {
-      if (p.cat === TYPE_CATEGORY) return // reserved for the built-in type filter
+      if (p.cat === TYPE_CATEGORY || p.cat === CHANGE_CATEGORY) return // reserved for the built-in filters
       if (!scoped.has(p.cat)) scoped.set(p.cat, new Set())
       scoped.get(p.cat)!.add(p.val)
     } else {
@@ -483,6 +444,10 @@ function fileMatchesFilter(file: ArtifactFile, filter: ArtifactTagFilter): boole
     // value for that category is turned off.
     if (cat === TYPE_CATEGORY) {
       if (off.includes(fileMediaType(file))) return false
+    } else if (cat === CHANGE_CATEGORY) {
+      // The built-in change-type scope matches the file's change_type (added/
+      // removed/modified/unchanged) — its intrinsic state, not a tag it carries.
+      if (off.includes(file.change_type as string)) return false
     } else if (off.some((v) => tags.includes(`${cat}::${v}`))) {
       return false
     }
@@ -554,7 +519,10 @@ function TagScopeFilter({
   const hiddenCount = values.filter((v) => off.includes(v)).length
   const allOn = hiddenCount === 0
   const allOff = hiddenCount === values.length && values.length > 0
-  const rowClass = 'flex items-center gap-2 px-3 py-1.5 text-xs cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors'
+  // select-none: shift-click isolates a value, but the browser's shift-click
+  // range-selects text (which starts on mousedown, so the onClick preventDefault
+  // can't stop it) — making the row unselectable avoids the stray highlight.
+  const rowClass = 'flex items-center gap-2 px-3 py-1.5 text-xs cursor-pointer select-none hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors'
 
   return (
     <div ref={ref} className="relative">
@@ -612,7 +580,8 @@ function TagScopeFilter({
 function FileRow({ file, mode }: { file: ArtifactFile; mode: ImageDiffMode }) {
   const ct = file.change_type as string
   return (
-    <div className="p-3 min-w-0 max-w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40">
+    // w-full: the masonry wrapper sets the tile's (column) width; the card fills it.
+    <div className="p-3 w-full min-w-0 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40">
       <div className="flex flex-wrap items-center gap-1.5 mb-2">
         <span className="text-xs font-medium text-gray-700 dark:text-gray-300 truncate">{file.name}</span>
         <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${CHANGE_COLOR[ct] ?? ''}`}>{CHANGE_LABEL[ct] ?? ct}</span>
@@ -640,19 +609,212 @@ function FileRow({ file, mode }: { file: ArtifactFile; mode: ImageDiffMode }) {
   )
 }
 
-// Lay the per-file before/after blocks out as flex-wrap items so a tall, narrow
-// artifact (e.g. a phone screenshot) only claims the width it needs and several
-// can share a row, while a wide desktop screenshot wraps onto its own line. Each
-// file's name + before + after stays a single, unbreakable block.
-function FileGrid({ files, mode }: { files: ArtifactFile[]; mode: ImageDiffMode }) {
+// Balanced (shortest-column) masonry. Each tile is absolutely positioned: we
+// measure every tile's rendered height with a ResizeObserver, then place tiles one
+// by one into whichever column is currently shortest — so they pack tightly with
+// minimal trailing gap while keeping a rough left-to-right, top-to-bottom reading
+// order (unlike CSS columns, which fill one column top-to-bottom before the next).
+//
+// Everything is WIDTH-driven: a tile's width is its column width, and the media
+// inside fills that width with its height following the aspect ratio. `span` is how
+// many columns a tile occupies — 1 for the single-tile modes, 2 for side-by-side
+// (its before/after pair needs the room). The column COUNT is the slider; per-column
+// WIDTHS come from `weights` (set by dragging the dividers) when they match the
+// rendered column count, else columns are equal width.
+export function MasonryGrid({ items, span, columns, onWeightsChange }: {
+  items: { key: string; node: React.ReactNode }[]
+  span: 1 | 2
+  columns: ArtifactColumns
+  onWeightsChange?: (weights: number[]) => void
+}) {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [width, setWidth] = useState(0)
+  // Measured tile heights, keyed by item key. Updated by the ResizeObserver below.
+  const [heights, setHeights] = useState<Record<string, number>>({})
+
+  // One ResizeObserver for every tile, created lazily the first time a tile ref
+  // attaches (in the commit phase, not during render). Tiles tag themselves with
+  // data-mkey so the callback knows which tile's height changed.
+  const roRef = useRef<ResizeObserver | null>(null)
+  const ensureRO = () => {
+    if (!roRef.current && typeof ResizeObserver !== 'undefined') {
+      roRef.current = new ResizeObserver((entries) => {
+        setHeights((prev) => {
+          let next = prev
+          for (const e of entries) {
+            const el = e.target as HTMLElement
+            const key = el.dataset.mkey
+            if (!key) continue
+            const h = el.offsetHeight
+            if (next[key] !== h) {
+              if (next === prev) next = { ...prev }
+              next[key] = h
+            }
+          }
+          return next
+        })
+      })
+    }
+    return roRef.current
+  }
+  useEffect(() => () => roRef.current?.disconnect(), [])
+
+  // Track the container's available width (clientWidth is the column space even
+  // while the absolutely-positioned tiles give it ~0 content height).
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    const measure = () => setWidth(el.clientWidth)
+    measure()
+    if (typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+
+  // A single stable ref callback for every tile: observe on attach, and (via the
+  // returned React 19 cleanup) unobserve on detach. The tile carries its key as a
+  // data-mkey attribute so the observer callback knows which height changed — no
+  // per-key closure, so nothing reads a ref during render.
+  const observeTile = useCallback((el: HTMLDivElement | null) => {
+    if (!el) return
+    const ro = ensureRO()
+    ro?.observe(el)
+    return () => ro?.unobserve(el)
+  }, [])
+
+  // Resolve the rendered column count and each column's left edge + width. The
+  // requested count is clamped down so no column is narrower than MIN_COL_PX.
+  const layout = useMemo(() => {
+    const gap = MASONRY_GAP
+    const w = width || 0
+    const reqCount = Math.max(MIN_ARTIFACT_COLUMNS, Math.min(MAX_ARTIFACT_COLUMNS, columns.count))
+    const fit = w > 0 ? Math.max(1, Math.floor((w + gap) / (MIN_COL_PX + gap))) : reqCount
+    const cols = Math.max(1, Math.min(reqCount, fit))
+    const clamped = cols !== reqCount
+    // Custom per-column widths only when the saved weights line up with the rendered
+    // count and the count wasn't width-clamped; otherwise equal columns.
+    let fracs: number[]
+    if (!clamped && columns.weights.length === cols && cols > 0) {
+      const sum = columns.weights.reduce((a, b) => a + b, 0)
+      fracs = sum > 0 ? columns.weights.map((x) => x / sum) : new Array(cols).fill(1 / cols)
+    } else {
+      fracs = new Array(cols).fill(1 / cols)
+    }
+    const contentW = Math.max(0, w - gap * (cols - 1))
+    const widths = fracs.map((f) => f * contentW)
+    const lefts: number[] = []
+    let acc = 0
+    for (let i = 0; i < cols; i++) { lefts.push(acc); acc += widths[i] + gap }
+    return { cols, clamped, widths, lefts, gap, contentW }
+  }, [width, columns.count, columns.weights])
+
+  // Place each tile into the shortest column (or shortest adjacent pair for span 2).
+  const placement = useMemo(() => {
+    const { cols, widths, lefts, gap } = layout
+    const sp = Math.min(span, cols)
+    const FALLBACK_H = 240 // assumed height before a tile is first measured
+    const bottoms = new Array(cols).fill(0)
+    const pos: Record<string, { left: number; top: number; width: number }> = {}
+    for (const it of items) {
+      const h = heights[it.key] ?? FALLBACK_H
+      if (sp < 2 || cols < 2) {
+        let c = 0
+        for (let i = 1; i < cols; i++) if (bottoms[i] < bottoms[c]) c = i
+        pos[it.key] = { left: lefts[c], top: bottoms[c], width: widths[c] }
+        bottoms[c] = bottoms[c] + h + gap
+      } else {
+        let c = 0
+        let best = Infinity
+        for (let i = 0; i <= cols - 2; i++) {
+          const top = Math.max(bottoms[i], bottoms[i + 1])
+          if (top < best) { best = top; c = i }
+        }
+        const top = Math.max(bottoms[c], bottoms[c + 1])
+        pos[it.key] = { left: lefts[c], top, width: widths[c] + gap + widths[c + 1] }
+        bottoms[c] = bottoms[c + 1] = top + h + gap
+      }
+    }
+    const height = bottoms.length ? Math.max(...bottoms) - gap : 0
+    return { pos, height: Math.max(0, height) }
+  }, [items, heights, layout, span])
+
+  // Divider drag: transfer width between two adjacent columns, clamped so neither
+  // drops below MIN_COL_PX. Persists via onWeightsChange (fractions, length = cols).
+  const startDrag = (i: number) => (e: React.PointerEvent) => {
+    if (e.button !== 0 || !onWeightsChange) return
+    e.preventDefault()
+    const { cols, widths, contentW } = layout
+    if (contentW <= 0) return
+    const startWidths = widths.slice()
+    const startX = e.clientX
+    const minFrac = MIN_COL_PX / contentW
+    const onMove = (ev: PointerEvent) => {
+      const dFrac = (ev.clientX - startX) / contentW
+      let a = startWidths[i] / contentW + dFrac
+      let b = startWidths[i + 1] / contentW - dFrac
+      if (a < minFrac) { b -= minFrac - a; a = minFrac }
+      if (b < minFrac) { a -= minFrac - b; b = minFrac }
+      const next = startWidths.map((wv) => wv / contentW)
+      next[i] = a
+      next[i + 1] = b
+      onWeightsChange(next.slice(0, cols))
+    }
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+  }
+
+  const showDividers = !!onWeightsChange && !layout.clamped && layout.cols > 1
   return (
-    // pt-3 so the gap above the first file row matches the card body's px-3 left
-    // inset — the top and left spacing around the grid read as equal. items-start
-    // so each card sizes to its own content height instead of stretching to match
-    // a taller neighbour on the same row (flex's default align-items: stretch),
-    // which left a short, small-image card half-empty below its image.
-    <div className="flex flex-wrap items-start gap-3 pt-3">
-      {files.map((f) => <FileRow key={f.name} file={f} mode={mode} />)}
+    <div ref={containerRef} className="relative w-full" style={{ height: placement.height }}>
+      {items.map((it) => {
+        const p = placement.pos[it.key] ?? { left: 0, top: 0, width: 0 }
+        return (
+          <div key={it.key} ref={observeTile} data-mkey={it.key} className="absolute" style={{ left: p.left, top: p.top, width: p.width }}>
+            {it.node}
+          </div>
+        )
+      })}
+      {showDividers && layout.lefts.slice(1).map((leftEdge, idx) => (
+        // A thin grab handle centred in the gap between column idx and idx+1; the
+        // blue rule appears on hover so the resize affordance stays subtle at rest.
+        <div
+          key={`div-${idx}`}
+          onPointerDown={startDrag(idx)}
+          title="Drag to resize columns"
+          className="absolute top-0 z-10 w-3 -ml-1.5 cursor-col-resize group flex justify-center touch-none"
+          style={{ left: leftEdge - layout.gap / 2, height: placement.height }}
+        >
+          <div className="w-px h-full bg-transparent group-hover:bg-blue-400/60 transition-colors" />
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// Lay the per-file before/after blocks out as a balanced masonry so a tall, narrow
+// artifact (e.g. a phone screenshot) packs in next to others with no big gap to the
+// right, while the column count/widths stay under the user's control. Side-by-side
+// cards span two columns so the before/after pair has room.
+function FileGrid({ files, mode, columns, onWeightsChange }: {
+  files: ArtifactFile[]
+  mode: ImageDiffMode
+  columns: ArtifactColumns
+  onWeightsChange?: (weights: number[]) => void
+}) {
+  const span: 1 | 2 = mode === 'side-by-side' ? 2 : 1
+  const items = useMemo(
+    () => files.map((f) => ({ key: f.name, node: <FileRow file={f} mode={mode} /> })),
+    [files, mode],
+  )
+  // pt-3 so the gap above the first row matches the card body's px-3 left inset.
+  return (
+    <div className="pt-3">
+      <MasonryGrid items={items} span={span} columns={columns} onWeightsChange={onWeightsChange} />
     </div>
   )
 }
@@ -838,10 +1000,11 @@ function LiveLogPanes({ set }: { set: ArtifactSet }) {
   )
 }
 
-// PersistedLogView lets a settled card reopen its build log: a "Show build log"
-// toggle that lazily fetches each side's persisted log (left_log_url /
-// right_log_url) and renders them in the same side-by-side panes as the live log.
-function PersistedLogView({ leftUrl, rightUrl, open, onOpenChange }: { leftUrl?: string | null; rightUrl?: string | null; open: boolean; onOpenChange: (open: boolean) => void }) {
+// PersistedLogView renders a settled card's build log when open: it lazily fetches
+// each side's persisted log (left_log_url / right_log_url) and shows them in the
+// same side-by-side panes as the live log. The open/close toggle lives in the card
+// header (the "build log" button next to refresh), so this is content-only.
+function PersistedLogView({ leftUrl, rightUrl, open }: { leftUrl?: string | null; rightUrl?: string | null; open: boolean }) {
   const [logs, setLogs] = useState<{ left: ArtifactLogLine[] | null; right: ArtifactLogLine[] | null } | null>(null)
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState<string | null>(null)
@@ -882,32 +1045,22 @@ function PersistedLogView({ leftUrl, rightUrl, open, onOpenChange }: { leftUrl?:
     return () => { cancelled = true }
   }, [open, leftUrl, rightUrl])
 
-  if (!leftUrl && !rightUrl) return null
-
-  const toggle = () => onOpenChange(!open)
+  if (!open || (!leftUrl && !rightUrl)) return null
 
   return (
     <div className="pt-1.5">
-      <button
-        onClick={toggle}
-        className="text-[11px] text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 cursor-pointer"
-      >
-        {open ? 'Hide' : 'Show'} build log
-      </button>
-      {open && (
-        loading ? (
-          <div className="my-2 text-xs text-gray-400 dark:text-gray-500">Loading log…</div>
-        ) : err ? (
-          <div className="my-2 text-xs text-red-500 dark:text-red-400">Failed to load log: {err}</div>
-        ) : (
-          <LogPanes left={logs?.left ?? null} right={logs?.right ?? null} />
-        )
+      {loading ? (
+        <div className="my-2 text-xs text-gray-400 dark:text-gray-500">Loading log…</div>
+      ) : err ? (
+        <div className="my-2 text-xs text-red-500 dark:text-red-400">Failed to load log: {err}</div>
+      ) : (
+        <LogPanes left={logs?.left ?? null} right={logs?.right ?? null} />
       )}
     </div>
   )
 }
 
-function ArtifactSetCard({ set, mode, filter, onRefresh, projectId, agentId }: { set: ArtifactSet; mode: ImageDiffMode; filter: ArtifactTagFilter; onRefresh: (name: string) => void; projectId: string | null; agentId: string }) {
+function ArtifactSetCard({ set, mode, columns, onWeightsChange, filter, onRefresh, projectId, agentId }: { set: ArtifactSet; mode: ImageDiffMode; columns: ArtifactColumns; onWeightsChange: (weights: number[]) => void; filter: ArtifactTagFilter; onRefresh: (name: string) => void; projectId: string | null; agentId: string }) {
   const status = set.status as string
   // Apply the (shared) tag filter to this card's files. The grid shows only
   // matches; the header still reports the true diff size so "x/y changed" makes
@@ -915,7 +1068,6 @@ function ArtifactSetCard({ set, mode, filter, onRefresh, projectId, agentId }: {
   const isFiltered = filterIsActive(filter)
   const visibleFiles = isFiltered ? set.files.filter((f) => fileMatchesFilter(f, filter)) : set.files
   const changedFiles = visibleFiles.filter((f) => f.change_type !== 'unchanged')
-  const unchangedFiles = visibleFiles.filter((f) => f.change_type === 'unchanged')
   const totalChanged = set.files.filter((f) => f.change_type !== 'unchanged').length
   const changedLabel = isFiltered && changedFiles.length !== totalChanged ? `${changedFiles.length}/${totalChanged} changed` : `${totalChanged} changed`
   const noChanges = status === 'ready' && !set.changed
@@ -941,14 +1093,23 @@ function ArtifactSetCard({ set, mode, filter, onRefresh, projectId, agentId }: {
   // at the call site, so switching agents remounts it and re-reads that agent's
   // saved state instead of leaking the previous agent's toggle.
   const [collapsed, setCollapsed] = useState(() => loadPrefs()?.collapsed ?? true)
-  const [showUnchanged, setShowUnchanged] = useState(() => loadPrefs()?.showUnchanged ?? false)
   const [buildLogOpen, setBuildLogOpen] = useState(() => loadPrefs()?.buildLogOpen ?? false)
 
   // Persist the view prefs whenever a toggle changes (and re-key them under the
   // current status, so they only restore while that status holds).
   useEffect(() => {
-    saveArtifactPrefs(projectId, agentId, set.name, status, { collapsed, showUnchanged, buildLogOpen })
-  }, [projectId, agentId, set.name, status, collapsed, showUnchanged, buildLogOpen])
+    saveArtifactPrefs(projectId, agentId, set.name, status, { collapsed, buildLogOpen })
+  }, [projectId, agentId, set.name, status, collapsed, buildLogOpen])
+
+  // The build log lives behind a header toggle (next to refresh) for settled cards
+  // that produced a log. Opening it also expands the card, since the log renders in
+  // the body.
+  const hasBuildLog = (status === 'ready' || status === 'error') && !!(set.left_log_url || set.right_log_url)
+  const toggleBuildLog = () => setBuildLogOpen((o) => {
+    const next = !o
+    if (next) setCollapsed(false)
+    return next
+  })
 
   // Header progress while generating: both sides' latest progress lines joined by
   // a "·" (the two builds run in parallel), e.g. "building frontend · home 7/24".
@@ -1001,6 +1162,22 @@ function ArtifactSetCard({ set, mode, filter, onRefresh, projectId, agentId }: {
             </span>
           )}
         </button>
+        {/* Show/hide the build log — sits left of refresh. Opening it expands the
+            card (the log renders in the body). Only for settled cards with a log. */}
+        {hasBuildLog && (
+          <button
+            onClick={toggleBuildLog}
+            title={buildLogOpen ? 'Hide build log' : 'Show build log'}
+            aria-label={buildLogOpen ? 'Hide build log' : 'Show build log'}
+            className={`shrink-0 px-3 flex items-center transition-colors cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700/60 ${
+              buildLogOpen
+                ? 'text-blue-600 dark:text-blue-400'
+                : 'text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300'
+            }`}
+          >
+            <ScrollText className="w-3.5 h-3.5" />
+          </button>
+        )}
         {/* Bust the per-commit cache and regenerate — chiefly to retry a failure,
             whose error is otherwise cached until the ref changes, but always
             available (even with no visual changes) so a render can be re-run. */}
@@ -1024,17 +1201,13 @@ function ArtifactSetCard({ set, mode, filter, onRefresh, projectId, agentId }: {
               <div className="my-2 px-3 py-2 rounded-md bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 font-mono text-xs text-red-600 dark:text-red-400 whitespace-pre-wrap break-words">
                 {set.error ? stripAnsi(set.error) : 'Artifact generation failed.'}
               </div>
-              <PersistedLogView leftUrl={set.left_log_url} rightUrl={set.right_log_url} open={buildLogOpen} onOpenChange={setBuildLogOpen} />
+              <PersistedLogView leftUrl={set.left_log_url} rightUrl={set.right_log_url} open={buildLogOpen} />
             </>
           )}
           {status === 'ready' && (
-            // Unified ready layout: the changed files (if any) up front, with the
-            // unchanged ones always behind a "Show N unchanged" toggle — so a card
-            // with no visual changes reads the same as a mixed one (the unchanged
-            // artifacts stay tucked away, not dumped on expand). This avoids the
-            // jarring case where a card expanded to view the log suddenly explodes
-            // all its unchanged artifacts onto the screen once a render settles to
-            // "no visual changes". Only the genuinely empty case gets a placeholder.
+            // The files matching the panel's filters (the change-type filter hides
+            // unchanged by default — see the header "changes" dropdown) laid out in
+            // one masonry. Empty states cover "produced nothing" vs "filtered out".
             <>
               {failedSide && (
                 // One side died; show its error but keep rendering the side that
@@ -1052,28 +1225,11 @@ function ArtifactSetCard({ set, mode, filter, onRefresh, projectId, agentId }: {
               {set.files.length === 0 ? (
                 <div className="my-2 text-xs text-gray-400 dark:text-gray-500">No artifacts produced.</div>
               ) : visibleFiles.length === 0 ? (
-                <div className="my-2 text-xs text-gray-400 dark:text-gray-500">No files match the current tag filter.</div>
+                <div className="my-2 text-xs text-gray-400 dark:text-gray-500">No files match the current filters.</div>
               ) : (
-                <>
-                  {/* Skip the grid entirely when nothing changed — an empty
-                      FileGrid still emits a pt-1 spacer row, which (with the
-                      toggles' own top padding) opened a big gap under the header
-                      in the no-visual-changes case. */}
-                  {changedFiles.length > 0 && <FileGrid files={changedFiles} mode={mode} />}
-                  {unchangedFiles.length > 0 && (
-                    <div className="pt-1.5">
-                      <button
-                        onClick={() => setShowUnchanged((s) => !s)}
-                        className="text-[11px] text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 cursor-pointer"
-                      >
-                        {showUnchanged ? 'Hide' : 'Show'} {unchangedFiles.length} unchanged
-                      </button>
-                      {showUnchanged && <FileGrid files={unchangedFiles} mode={mode} />}
-                    </div>
-                  )}
-                </>
+                <FileGrid files={visibleFiles} mode={mode} columns={columns} onWeightsChange={onWeightsChange} />
               )}
-              <PersistedLogView leftUrl={set.left_log_url} rightUrl={set.right_log_url} open={buildLogOpen} onOpenChange={setBuildLogOpen} />
+              <PersistedLogView leftUrl={set.left_log_url} rightUrl={set.right_log_url} open={buildLogOpen} />
             </>
           )}
         </div>
@@ -1105,7 +1261,7 @@ function artifactsWsUrl(projectId: string | null, agentId: string, baseRef?: str
   return `${protocol}//${host}/ws/projects/${pid}/agents/${encodeURIComponent(agentId)}/artifacts${qs}`
 }
 
-export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUncommitted, refreshKey, imageDiffMode }: {
+export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUncommitted, refreshKey, imageDiffMode, artifactColumns, onArtifactWeightsChange }: {
   projectId: string | null
   agentId: string
   baseRef?: string
@@ -1113,6 +1269,8 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
   includeUncommitted?: boolean
   refreshKey: number
   imageDiffMode: ImageDiffMode
+  artifactColumns: ArtifactColumns
+  onArtifactWeightsChange: (weights: number[]) => void
 }) {
   const [sets, setSets] = useState<ArtifactSet[] | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -1261,6 +1419,19 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
   // Values turned off (hidden), mirroring the user scopes' inverted model.
   const typeOff = tagFilter.scoped[TYPE_CATEGORY] ?? []
 
+  // The built-in "changes" filter (added / removed / modified / unchanged), derived
+  // from each file's change_type. Replaces the old per-card "show unchanged" toggle:
+  // unchanged is hidden by default (seeded in loadTagFilter), and this dropdown is
+  // how you reveal it or narrow to e.g. only added files. Offered whenever a set has
+  // more than one change type, or any unchanged files (so they can be revealed).
+  const changeTypes = useMemo(() => {
+    const present = new Set<string>()
+    for (const s of sets ?? []) for (const f of s.files) present.add(f.change_type as string)
+    return CHANGE_TYPE_ORDER.filter((c) => present.has(c))
+  }, [sets])
+  const showChangeFilter = changeTypes.length > 1 || changeTypes.includes('unchanged')
+  const changeOff = tagFilter.scoped[CHANGE_CATEGORY] ?? []
+
   if (error) {
     return (
       <div className="mb-4 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-xs text-red-600 dark:text-red-400">
@@ -1296,17 +1467,31 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
           <p>Each one is produced by a project-defined <strong>artifact script</strong>. Hydra checks out both the base ref and the head ref (or your uncommitted working tree), runs the script against each with <code className="text-blue-300">$HYDRA_ARTIFACT_OUTPUT</code>, <code className="text-blue-300">$HYDRA_ARTIFACT_SOURCE</code> and <code className="text-blue-300">$HYDRA_ARTIFACT_REF</code> set, and compares the images it writes. Results are cached per commit, so re-viewing a diff is free.</p>
           <p>Configure them in <code className="text-blue-300">.hydra/config.toml</code> with <code className="text-blue-300">[[artifacts]]</code> blocks (<code className="text-blue-300">name</code>, <code className="text-blue-300">command</code>, optional <code className="text-blue-300">timeout_sec</code>) — for example a script that builds the app and screenshots a page, so visual UI changes show up here in the diff viewer.</p>
           <p><strong>Images &amp; video.</strong> <code className="text-blue-300">.png .jpg .gif</code> are diffed pixel-by-pixel (so cosmetic re-encodes are ignored); <code className="text-blue-300">.webm</code> video is diffed frame-by-frame when <strong>ffmpeg</strong> is installed, falling back to a byte-hash comparison otherwise (shown with a <em>byte-compared</em> badge, since that verdict may be spurious). Other types — <code className="text-blue-300">.webp .avif .svg .bmp .pdf</code> — are byte-hash compared. Encode video as <strong>lossless</strong> <code className="text-blue-300">.webm</code> (e.g. <code className="text-blue-300">ffmpeg … -c:v libvpx-vp9 -lossless 1</code>) so identical frames stay identical.</p>
-          <p>A script with no visual changes — or one still generating — collapses to a single header row; click it to expand. The two sides (base and head) build in parallel, so the expanded card shows their <strong>build logs side by side</strong> (Before / After, stderr in red); once finished, reopen them any time with <strong>Show build log</strong>. The refresh button (top-right of each card) re-runs a script — handy to retry a failure or re-render even when nothing visibly changed.</p>
+          <p>A script with no visual changes — or one still generating — collapses to a single header row; click it to expand. The two sides (base and head) build in parallel, so the expanded card shows their <strong>build logs side by side</strong> (Before / After, stderr in red); once finished, reopen them any time with the <strong>build log</strong> button (the scroll icon next to refresh in the card header). The refresh button beside it re-runs a script — handy to retry a failure or re-render even when nothing visibly changed.</p>
           <p>The header shows each side's latest <code className="text-blue-300">stdout</code> line as live progress. To surface a cleaner message, print a line prefixed with <code className="text-blue-300">::hydra:progress::</code> (e.g. <code className="text-blue-300">echo "::hydra:progress:: capturing home 3/24"</code>) — Hydra strips the prefix, shows the rest as the progress line, and from then on ignores ordinary <code className="text-blue-300">stdout</code> for the header, so a noisy build can't hijack it. The full output still lands in the build log.</p>
-          <p><strong>Tags &amp; filter.</strong> Alongside an image <code className="text-blue-300">home.png</code> the script can write a JSON sidecar <code className="text-blue-300">home.png.meta</code> like <code className="text-blue-300">{'{'}"tags": ["theme::dark", "viewport::phone"]{'}'}</code>. Tags show as labels on each file and as a filter on this bar. A <code className="text-blue-300">category::value</code> tag is a <em>scoped</em> label — only one value per category is kept on a file (the last wins), and each category gets a filter button listing its values. Every value starts <em>on</em>; uncheck one to hide the files carrying it, or use <strong>all</strong> / <strong>clear</strong> (top of the menu) to toggle them in bulk. Shift-click a value to isolate it (hide everything else). Plain tags work the same way under a "tags" button. Handy when a script emits many shots (light/dark, phone/desktop) and you want to see just one slice. A built-in <strong>type</strong> filter (image / video, from each file's extension) appears after your tags whenever a set mixes both.</p>
+          <p><strong>Tags &amp; filter.</strong> Alongside an image <code className="text-blue-300">home.png</code> the script can write a JSON sidecar <code className="text-blue-300">home.png.meta</code> like <code className="text-blue-300">{'{'}"tags": ["theme::dark", "viewport::phone"]{'}'}</code>. Tags show as labels on each file and as a filter on this bar. A <code className="text-blue-300">category::value</code> tag is a <em>scoped</em> label — only one value per category is kept on a file (the last wins), and each category gets a filter button listing its values. Every value starts <em>on</em>; uncheck one to hide the files carrying it, or use <strong>all</strong> / <strong>clear</strong> (top of the menu) to toggle them in bulk. Shift-click a value to isolate it (hide everything else). Plain tags work the same way under a "tags" button. Handy when a script emits many shots (light/dark, phone/desktop) and you want to see just one slice. A built-in <strong>changes</strong> filter (added / removed / modified / unchanged, from each file's diff state) leads the bar — unchanged files are hidden by default, so use it to reveal them or to focus on one kind of change. A built-in <strong>type</strong> filter (image / video, from each file's extension) appears after your tags whenever a set mixes both.</p>
         </InfoTooltip>
         {/* One compact filter button per tag scope on the header bar — a button
             for each scoped category (theme / viewport / …) and one "tags" button
             for free-form tags — so each opens just its own slice instead of one
             combined menu. Shown only once some file (or a settled side, via
             pending_tags) carries tags; ml-auto floats them to the right. */}
-        {(hasTags || showTypeFilter) && (
+        {(hasTags || showTypeFilter || showChangeFilter) && (
           <div className="ml-auto flex flex-wrap items-center gap-1.5">
+            {/* Reset to defaults — shown only when the filter has moved off its
+                default (any tag/value hidden, or the changes filter no longer hides
+                only 'unchanged'). Restores every scope to "show all" + the change
+                default. Leftmost, ahead of the scope buttons. */}
+            {!isDefaultTagFilter(tagFilter) && (
+              <button
+                onClick={() => updateTagFilter(defaultTagFilter())}
+                title="Reset filters"
+                className="flex items-center gap-1 h-7 px-2.5 rounded-md border text-[11px] font-medium cursor-pointer transition-colors bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600"
+              >
+                <RotateCcw className="w-3 h-3" />
+                <span className="lowercase">reset</span>
+              </button>
+            )}
             {collectedTags.scoped.map(({ cat, values }) => (
               <TagScopeFilter
                 key={cat}
@@ -1336,7 +1521,7 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
                 onClear={() => updateTagFilter({ ...tagFilter, free: [...collectedTags.free] })}
               />
             )}
-            {/* Built-in type scope, last — image vs video, derived from the file
+            {/* Built-in type scope — image vs video, derived from the file
                 extensions rather than a tag. */}
             {showTypeFilter && (
               <TagScopeFilter
@@ -1352,6 +1537,23 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
                 onClear={() => updateTagFilter({ ...tagFilter, scoped: { ...tagFilter.scoped, [TYPE_CATEGORY]: [...fileTypes] } })}
               />
             )}
+            {/* Built-in change-type scope, last (rightmost) — added/removed/
+                modified/unchanged, with unchanged hidden by default. Replaces the
+                old per-card show-unchanged toggle. */}
+            {showChangeFilter && (
+              <TagScopeFilter
+                label="changes"
+                values={changeTypes}
+                off={changeOff}
+                onToggle={(val) => {
+                  const next = changeOff.includes(val) ? changeOff.filter((x) => x !== val) : [...changeOff, val]
+                  updateTagFilter({ ...tagFilter, scoped: { ...tagFilter.scoped, [CHANGE_CATEGORY]: next } })
+                }}
+                onIsolate={(val) => updateTagFilter({ ...tagFilter, scoped: { ...tagFilter.scoped, [CHANGE_CATEGORY]: changeTypes.filter((x) => x !== val) } })}
+                onAll={() => updateTagFilter({ ...tagFilter, scoped: { ...tagFilter.scoped, [CHANGE_CATEGORY]: [] } })}
+                onClear={() => updateTagFilter({ ...tagFilter, scoped: { ...tagFilter.scoped, [CHANGE_CATEGORY]: [...changeTypes] } })}
+              />
+            )}
           </div>
         )}
       </div>
@@ -1361,7 +1563,7 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
             cards keep the previous agent's expand/collapse state (and its save
             effect would then clobber the new agent's saved prefs). Re-keying per
             agent remounts each card so it re-reads that agent's saved state. */}
-        {sets.map((s) => <ArtifactSetCard key={`${projectId ?? '_'}-${agentId}-${s.name}`} set={s} mode={imageDiffMode} filter={tagFilter} onRefresh={requestRefresh} projectId={projectId} agentId={agentId} />)}
+        {sets.map((s) => <ArtifactSetCard key={`${projectId ?? '_'}-${agentId}-${s.name}`} set={s} mode={imageDiffMode} columns={artifactColumns} onWeightsChange={onArtifactWeightsChange} filter={tagFilter} onRefresh={requestRefresh} projectId={projectId} agentId={agentId} />)}
       </div>
     </div>
   )

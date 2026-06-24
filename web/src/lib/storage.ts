@@ -25,6 +25,10 @@ export const StorageKeys = {
   diffFileView: 'hydra-diff-file-view',
   diffSidebarWidth: 'hydra-diff-sidebar-width',
   diffImageMode: 'hydra-diff-image-mode',
+  // Artifact masonry layout: JSON {count, weights} — the column count and the
+  // (optional) per-column width fractions set by dragging the column dividers.
+  // Shared across every artifact card (one layout for the whole panel).
+  diffArtifactCols: 'hydra-diff-artifact-cols',
 
   // Last terminal geometry the client successfully sent (JSON {cols, rows}). Seeds
   // the initial PTY size on the next connection so a fresh/resumed agent renders
@@ -34,6 +38,9 @@ export const StorageKeys = {
   repoWrap: 'hydra-repo-wrap',
   repoIcons: 'hydra-repo-icons',
   repoSidebarWidth: 'hydra-repo-sidebar-width',
+  // Repository branch-compare diff: show one file at a time (default) vs all
+  // files stacked. Absent = the one-file default; 'false' = the multi-file view.
+  repoDiffSingleFile: 'hydra-repo-diff-single-file',
 
   // IDs of projects the user has reviewed and trusted (JSON array of strings).
   // Trust is a client-only concern: a project's .hydra/config.toml can run code,

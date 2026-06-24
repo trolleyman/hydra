@@ -1,8 +1,9 @@
 // Video (.webm) counterpart to ArtifactsPanel's still-image diff modes. It mirrors
-// the same comparison modes (side-by-side / before-after / slider / onion /
-// difference) and reuses the shared sizing, checkerboard, resize grip and pixel-
-// diff constants, so a .webm artifact follows the very same diff-viewer setting as
-// an image one.
+// the same comparison modes (side-by-side / before-after / slider / onion) and
+// reuses the shared width-driven sizing, checkerboard and pixel-diff constants, so
+// a .webm artifact follows the very same diff-viewer setting as an image one. The
+// before/after mode carries the magenta pixel-diff as a "Highlight" tab (the twin
+// of the image ABSwitch), so there's no separate difference mode.
 //
 // The extra problem video has over images is TIME: to compare an animation you have
 // to look at the SAME frame on each side. So both <video> elements are driven by one
@@ -18,7 +19,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { Play, Pause, Repeat, VideoOff, StepBack, StepForward } from 'lucide-react'
 import {
   checkerStyle, IMG_CLASS, OVERLAY_CLASS, TAG_CLASS, makeAuxOpen,
-  useMediaResize, ResizeGrip, DIFF_COLOR, DIFF_PIXEL_THRESHOLD,
+  DIFF_COLOR, DIFF_PIXEL_THRESHOLD,
 } from './artifactDiffShared'
 import type { ImageDiffMode } from './ArtifactsPanel'
 
@@ -37,13 +38,10 @@ const SYNC_TOL = 0.08
 // recordings/animation artifacts — at worst a missing-sidecar step is a touch
 // coarse/fine, which is fine for eyeballing a frame-by-frame diff.
 const DEFAULT_FPS = 30
-// The difference view recomputes a full-frame pixel diff on a timer rather than
+// The Highlight view recomputes a full-frame pixel diff on a timer rather than
 // every animation frame; getImageData over a large frame is costly, so ~20fps
 // keeps it responsive without pinning a core.
 const DIFF_MIN_INTERVAL = 50
-// The slider mode doesn't expose a resize grip (like its image twin — a drag there
-// moves the wipe handle), so its sizer uses the default max height.
-const MAX_SLIDER_H = 480
 
 // useVideoSync is the shared brain for a before/after video pair: it owns the two
 // <video> elements (registered via the attach callback refs), keeps them on a
@@ -239,183 +237,64 @@ function VideoLayer({ url, attach, style }: {
 // A hidden in-flow video that gives the overlay box its intrinsic size (the
 // absolute layers can't), mirroring the image modes' hidden <img> sizer. Metadata
 // is enough to know the dimensions, so it doesn't autoplay or fully buffer.
-function VideoSizer({ url, maxHeight }: { url: string; maxHeight: number }) {
-  return <video src={url} muted preload="metadata" className={`${IMG_CLASS} block`} style={{ visibility: 'hidden', maxHeight: `${maxHeight}px` }} />
+function VideoSizer({ url }: { url: string }) {
+  return <video src={url} muted preload="metadata" className={`${IMG_CLASS} block`} style={{ visibility: 'hidden' }} />
 }
 
-// Side-by-side cell, the video twin of ImageCell.
-function VideoCell({ url, attach, label, maxHeight, onResizeStart, consumeDrag }: {
+// Side-by-side cell, the video twin of ImageCell. flex-1 so the pair splits the
+// tile width evenly and each width-driven (w-full) frame fills its half.
+function VideoCell({ url, attach, label }: {
   url?: string | null
   attach: (el: HTMLVideoElement | null) => void
   label: string
-  maxHeight: number
-  onResizeStart: (e: React.PointerEvent) => void
-  consumeDrag: () => boolean
 }) {
   return (
-    <div className="min-w-0">
+    <div className="flex-1 min-w-0">
       <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-1">{label}</div>
       {url ? (
-        // A press-and-drag anywhere on the frame resizes it; a plain click still
-        // opens the .webm in a new tab via the <a>, but consumeDrag() cancels that
-        // navigation when the press turned into a drag (twin of ImageCell).
-        <div className="group relative inline-block select-none" onPointerDown={onResizeStart}>
-          <a href={url} target="_blank" rel="noreferrer" className="block" onClick={(e) => { if (consumeDrag()) e.preventDefault() }}>
-            <VideoNode url={url} attach={attach} className={IMG_CLASS} style={{ ...checkerStyle, maxHeight: `${maxHeight}px` }} />
-          </a>
-          <ResizeGrip onPointerDown={onResizeStart} />
-        </div>
+        // A plain click opens the .webm in a new tab via the <a>; the frame fills
+        // the cell width and its height follows the aspect ratio.
+        <a href={url} target="_blank" rel="noreferrer" className="block">
+          <VideoNode url={url} attach={attach} className={IMG_CLASS} style={checkerStyle} />
+        </a>
       ) : (
-        <NoVideo className="rounded-md border border-gray-200 dark:border-gray-700" style={{ width: 176, height: 128 }} />
+        <NoVideo className="w-full h-32 rounded-md border border-gray-200 dark:border-gray-700" />
       )}
     </div>
   )
 }
 
 function VideoSideBySide({ controller, left, right }: { controller: Controller; left?: string | null; right?: string | null }) {
-  const { maxHeight, onResizeStart, consumeDrag } = useMediaResize()
   return (
-    <div className="flex gap-3">
-      <VideoCell url={left} attach={controller.attachLeft} label="Before" maxHeight={maxHeight} onResizeStart={onResizeStart} consumeDrag={consumeDrag} />
-      <VideoCell url={right} attach={controller.attachRight} label="After" maxHeight={maxHeight} onResizeStart={onResizeStart} consumeDrag={consumeDrag} />
+    <div className="flex gap-3 w-full">
+      <VideoCell url={left} attach={controller.attachLeft} label="Before" />
+      <VideoCell url={right} attach={controller.attachRight} label="After" />
     </div>
   )
 }
 
-const tabBtn = (active: boolean) =>
-  `text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded cursor-pointer transition-colors ${
-    active ? 'bg-blue-500 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600'
+const tabBtn = (active: boolean, disabled = false) =>
+  `text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded transition-colors ${
+    disabled ? 'opacity-40 cursor-not-allowed bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500'
+      : active ? 'bg-blue-500 text-white cursor-pointer'
+        : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600 cursor-pointer'
   }`
 
-// Before/After hard-switch (twin of ABSwitch). Both videos stay mounted and in
-// sync; the toggle just flips which one is visible.
+// Before/After/Highlight switch (twin of the image ABSwitch). Both videos stay
+// mounted and in sync; Before/After flip which is visible. Highlight overlays the
+// magenta pixel-diff, recomputed continuously as the synced pair plays/scrubs (the
+// source videos stay mounted, hidden, under the canvas so they keep decoding).
+// Highlight is disabled when only one side exists (an added/removed file — nothing
+// to diff). Clicking the frame flips Before↔After (not while Highlight is shown).
 function VideoAB({ controller, left, right }: { controller: Controller; left?: string | null; right?: string | null }) {
-  const [showAfter, setShowAfter] = useState(true)
-  const { maxHeight, onResizeStart, consumeDrag } = useMediaResize()
-  const sizer = (right ?? left) as string
-  return (
-    <div className="min-w-0">
-      <div className="flex items-center gap-1 mb-1">
-        <button onClick={() => setShowAfter(false)} className={tabBtn(!showAfter)}>Before</button>
-        <button onClick={() => setShowAfter(true)} className={tabBtn(showAfter)}>After</button>
-      </div>
-      <div
-        className="group relative inline-block cursor-pointer select-none"
-        onPointerDown={onResizeStart}
-        onClick={() => { if (!consumeDrag()) setShowAfter((s) => !s) }}
-        onAuxClick={makeAuxOpen(() => (showAfter ? right : left) || sizer)}
-      >
-        <VideoSizer url={sizer} maxHeight={maxHeight} />
-        <VideoLayer url={right} attach={controller.attachRight} style={{ maxHeight: `${maxHeight}px`, visibility: showAfter ? 'visible' : 'hidden' }} />
-        <VideoLayer url={left} attach={controller.attachLeft} style={{ maxHeight: `${maxHeight}px`, visibility: showAfter ? 'hidden' : 'visible' }} />
-        <ResizeGrip onPointerDown={onResizeStart} />
-      </div>
-    </div>
-  )
-}
-
-// Before/after wipe (twin of SliderCompare): "after" is the base, "before" sits on
-// top clipped to the region left of the handle.
-function VideoSlider({ controller, left, right }: { controller: Controller; left?: string | null; right?: string | null }) {
-  const [pos, setPos] = useState(50)
-  const [dragging, setDragging] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
-  const sizer = (right ?? left) as string
-
-  const update = useCallback((clientX: number) => {
-    const el = ref.current
-    if (!el) return
-    const r = el.getBoundingClientRect()
-    if (r.width === 0) return
-    setPos(Math.max(0, Math.min(100, ((clientX - r.left) / r.width) * 100)))
-  }, [])
-
-  useEffect(() => {
-    if (!dragging) return
-    const onMove = (e: PointerEvent) => update(e.clientX)
-    const onUp = () => setDragging(false)
-    window.addEventListener('pointermove', onMove)
-    window.addEventListener('pointerup', onUp)
-    return () => {
-      window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('pointerup', onUp)
-    }
-  }, [dragging, update])
-
-  return (
-    <div
-      ref={ref}
-      className="relative inline-block select-none touch-none cursor-ew-resize"
-      onPointerDown={(e) => {
-        if (e.button !== 0) return
-        setDragging(true)
-        update(e.clientX)
-      }}
-      onAuxClick={makeAuxOpen((e) => {
-        const el = ref.current
-        if (!el) return sizer
-        const r = el.getBoundingClientRect()
-        const x = ((e.clientX - r.left) / r.width) * 100
-        return (x < pos ? left : right) || sizer
-      })}
-    >
-      <span className={`${TAG_CLASS} left-1`}>Before</span>
-      <span className={`${TAG_CLASS} right-1`}>After</span>
-      <VideoSizer url={sizer} maxHeight={MAX_SLIDER_H} />
-      <VideoLayer url={right} attach={controller.attachRight} />
-      <VideoLayer url={left} attach={controller.attachLeft} style={{ clipPath: `inset(0 ${100 - pos}% 0 0)` }} />
-      <div className="absolute inset-y-0 w-0.5 bg-white shadow-[0_0_0_1px_rgba(0,0,0,0.4)] pointer-events-none" style={{ left: `${pos}%` }}>
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-5 h-5 rounded-full bg-white shadow ring-1 ring-black/30" />
-      </div>
-    </div>
-  )
-}
-
-// Onion skin (twin of OnionCompare): "before" base with "after" blended over it at
-// a slider-controlled opacity.
-function VideoOnion({ controller, left, right }: { controller: Controller; left?: string | null; right?: string | null }) {
-  const [opacity, setOpacity] = useState(50)
-  const { maxHeight, onResizeStart } = useMediaResize()
-  const sizer = (right ?? left) as string
-  return (
-    <div className="min-w-0">
-      <div
-        // A press-and-drag anywhere on the blended frame resizes it (twin of the
-        // image OnionCompare); the opacity slider below is a separate row, so the
-        // box owns no left-click gesture. group reveals the grip on hover.
-        className="group relative inline-block select-none"
-        onPointerDown={onResizeStart}
-        onAuxClick={makeAuxOpen(() => (opacity >= 50 ? right : left) || sizer)}
-      >
-        <VideoSizer url={sizer} maxHeight={maxHeight} />
-        <VideoLayer url={left} attach={controller.attachLeft} />
-        <VideoLayer url={right} attach={controller.attachRight} style={{ opacity: opacity / 100 }} />
-        <ResizeGrip onPointerDown={onResizeStart} />
-      </div>
-      <div className="flex items-center gap-2 mt-1">
-        <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">Before</span>
-        <input type="range" min={0} max={100} value={opacity} onChange={(e) => setOpacity(Number(e.target.value))} className="flex-1 accent-blue-500 cursor-pointer" />
-        <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">After</span>
-      </div>
-    </div>
-  )
-}
-
-// Difference (twin of DiffCompare/DiffCanvas): Before / After / Diff tabs. On the
-// Diff tab, both frames at the current shared time are drawn to a canvas and every
-// pixel that differs is painted magenta — recomputed continuously as the pair plays
-// or is scrubbed. The two source videos stay mounted (hidden) so they keep decoding
-// frames for drawImage. With only one side present there's nothing to diff, so the
-// Diff tab shows the side that exists.
-function VideoDifference({ controller, left, right }: { controller: Controller; left?: string | null; right?: string | null }) {
-  const [view, setView] = useState<'before' | 'after' | 'diff'>('diff')
-  const { maxHeight, onResizeStart } = useMediaResize()
+  const canDiff = !!left && !!right
+  const [view, setView] = useState<'before' | 'after' | 'highlight'>('after')
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const sizer = (right ?? left) as string
-  const canDiff = !!left && !!right
-  const diffActive = view === 'diff' && canDiff
-  // Which layer to show when not drawing the diff canvas.
-  const shown = view === 'before' ? 'left' : view === 'after' ? 'right' : canDiff ? null : left ? 'left' : 'right'
+  const diffActive = view === 'highlight' && canDiff
+  // In Highlight (or a one-sided file) show the after frame under the canvas; else
+  // the chosen side.
+  const showRight = view === 'after' || view === 'highlight'
 
   useEffect(() => {
     if (!diffActive) return
@@ -472,17 +351,106 @@ function VideoDifference({ controller, left, right }: { controller: Controller; 
       <div className="flex items-center gap-1 mb-1">
         <button onClick={() => setView('before')} className={tabBtn(view === 'before')}>Before</button>
         <button onClick={() => setView('after')} className={tabBtn(view === 'after')}>After</button>
-        <button onClick={() => setView('diff')} className={tabBtn(view === 'diff')}>Diff</button>
+        <button
+          onClick={() => { if (canDiff) setView('highlight') }}
+          disabled={!canDiff}
+          title={canDiff ? 'Highlight changed pixels in magenta' : 'Needs both a before and after video'}
+          className={tabBtn(view === 'highlight', !canDiff)}
+        >
+          Highlight
+        </button>
       </div>
-      <div className="group relative inline-block select-none" onPointerDown={onResizeStart}>
-        {diffActive && <span className={`${TAG_CLASS} left-1`}>Diff</span>}
-        <VideoSizer url={sizer} maxHeight={maxHeight} />
-        <VideoLayer url={left} attach={controller.attachLeft} style={{ maxHeight: `${maxHeight}px`, visibility: shown === 'left' ? 'visible' : 'hidden' }} />
-        <VideoLayer url={right} attach={controller.attachRight} style={{ maxHeight: `${maxHeight}px`, visibility: shown === 'right' ? 'visible' : 'hidden' }} />
-        {diffActive && (
-          <canvas ref={canvasRef} style={{ ...checkerStyle, maxHeight: `${maxHeight}px` }} className={`${OVERLAY_CLASS}`} />
-        )}
-        <ResizeGrip onPointerDown={onResizeStart} />
+      <div
+        className="relative w-full cursor-pointer select-none"
+        onClick={() => { if (!diffActive) setView((v) => (v === 'before' ? 'after' : 'before')) }}
+        onAuxClick={makeAuxOpen(() => (view === 'before' ? left : right) || sizer)}
+      >
+        {diffActive && <span className={`${TAG_CLASS} left-1`}>Highlight</span>}
+        <VideoSizer url={sizer} />
+        <VideoLayer url={right} attach={controller.attachRight} style={{ visibility: showRight ? 'visible' : 'hidden' }} />
+        <VideoLayer url={left} attach={controller.attachLeft} style={{ visibility: showRight ? 'hidden' : 'visible' }} />
+        {diffActive && <canvas ref={canvasRef} style={checkerStyle} className={OVERLAY_CLASS} />}
+      </div>
+    </div>
+  )
+}
+
+// Before/after wipe (twin of SliderCompare): "after" is the base, "before" sits on
+// top clipped to the region left of the handle.
+function VideoSlider({ controller, left, right }: { controller: Controller; left?: string | null; right?: string | null }) {
+  const [pos, setPos] = useState(50)
+  const [dragging, setDragging] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  const sizer = (right ?? left) as string
+
+  const update = useCallback((clientX: number) => {
+    const el = ref.current
+    if (!el) return
+    const r = el.getBoundingClientRect()
+    if (r.width === 0) return
+    setPos(Math.max(0, Math.min(100, ((clientX - r.left) / r.width) * 100)))
+  }, [])
+
+  useEffect(() => {
+    if (!dragging) return
+    const onMove = (e: PointerEvent) => update(e.clientX)
+    const onUp = () => setDragging(false)
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    return () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+    }
+  }, [dragging, update])
+
+  return (
+    <div
+      ref={ref}
+      className="relative w-full select-none touch-none cursor-ew-resize"
+      onPointerDown={(e) => {
+        if (e.button !== 0) return
+        setDragging(true)
+        update(e.clientX)
+      }}
+      onAuxClick={makeAuxOpen((e) => {
+        const el = ref.current
+        if (!el) return sizer
+        const r = el.getBoundingClientRect()
+        const x = ((e.clientX - r.left) / r.width) * 100
+        return (x < pos ? left : right) || sizer
+      })}
+    >
+      <span className={`${TAG_CLASS} left-1`}>Before</span>
+      <span className={`${TAG_CLASS} right-1`}>After</span>
+      <VideoSizer url={sizer} />
+      <VideoLayer url={right} attach={controller.attachRight} />
+      <VideoLayer url={left} attach={controller.attachLeft} style={{ clipPath: `inset(0 ${100 - pos}% 0 0)` }} />
+      <div className="absolute inset-y-0 w-0.5 bg-white shadow-[0_0_0_1px_rgba(0,0,0,0.4)] pointer-events-none" style={{ left: `${pos}%` }}>
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-5 h-5 rounded-full bg-white shadow ring-1 ring-black/30" />
+      </div>
+    </div>
+  )
+}
+
+// Onion skin (twin of OnionCompare): "before" base with "after" blended over it at
+// a slider-controlled opacity.
+function VideoOnion({ controller, left, right }: { controller: Controller; left?: string | null; right?: string | null }) {
+  const [opacity, setOpacity] = useState(50)
+  const sizer = (right ?? left) as string
+  return (
+    <div className="min-w-0">
+      <div
+        className="relative w-full select-none"
+        onAuxClick={makeAuxOpen(() => (opacity >= 50 ? right : left) || sizer)}
+      >
+        <VideoSizer url={sizer} />
+        <VideoLayer url={left} attach={controller.attachLeft} />
+        <VideoLayer url={right} attach={controller.attachRight} style={{ opacity: opacity / 100 }} />
+      </div>
+      <div className="flex items-center gap-2 mt-1">
+        <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">Before</span>
+        <input type="range" min={0} max={100} value={opacity} onChange={(e) => setOpacity(Number(e.target.value))} className="flex-1 accent-blue-500 cursor-pointer" />
+        <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">After</span>
       </div>
     </div>
   )
@@ -553,7 +521,6 @@ export function VideoDiffView({ left, right, mode, fps }: { left?: string | null
   let body: React.ReactNode
   if (mode === 'side-by-side' || (!left && !right)) body = <VideoSideBySide controller={controller} left={left} right={right} />
   else if (mode === 'ab') body = <VideoAB controller={controller} left={left} right={right} />
-  else if (mode === 'difference') body = <VideoDifference controller={controller} left={left} right={right} />
   else if (mode === 'slider') body = <VideoSlider controller={controller} left={left} right={right} />
   else body = <VideoOnion controller={controller} left={left} right={right} />
   return (

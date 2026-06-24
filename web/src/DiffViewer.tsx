@@ -13,6 +13,7 @@ import {
 import { getFileIcon } from './lib/fileIcons'
 import { Tooltip } from './components/Tooltip'
 import { ArtifactsPanel, IMAGE_DIFF_MODES, type ImageDiffMode } from './components/ArtifactsPanel'
+import { useArtifactColumns, MIN_ARTIFACT_COLUMNS, MAX_ARTIFACT_COLUMNS } from './lib/artifactColumns'
 import { useDialogStore } from './stores/dialogStore'
 import { StorageKeys, readLocal, writeLocal } from './lib/storage'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from './lib/agentViewPrefs'
@@ -262,11 +263,12 @@ function trailingContext(hunk: DiffHunk): number {
 const UNIFIED_LINE_NUM_CLASS = 'select-none text-right pr-2 text-gray-400 dark:text-gray-600 text-xs font-mono w-10 shrink-0 border-r border-gray-200 dark:border-gray-700 leading-5'
 const UNIFIED_CODE_CLASS = 'pl-2 font-mono text-xs leading-5 flex-1 whitespace-pre-wrap break-words overflow-hidden'
 
-const UnifiedHunk = memo(function UnifiedHunk({ hunk, highlightedOld, highlightedNew, onComment }: {
+const UnifiedHunk = memo(function UnifiedHunk({ hunk, highlightedOld, highlightedNew, onComment, readOnly }: {
   hunk: DiffHunk
   highlightedOld: Map<number, string>
   highlightedNew: Map<number, string>
   onComment: (lineNum: number, isNew: boolean, text: string) => void
+  readOnly?: boolean
 }) {
   const [openCommentIdx, setOpenCommentIdx] = useState<number | null>(null)
   return (
@@ -285,7 +287,7 @@ const UnifiedHunk = memo(function UnifiedHunk({ hunk, highlightedOld, highlighte
               <div className="relative flex shrink-0 select-none">
                 <span className={UNIFIED_LINE_NUM_CLASS}>{line.old_line_num ?? ''}</span>
                 <span className={UNIFIED_LINE_NUM_CLASS}>{line.new_line_num ?? ''}</span>
-                {!isNoNewline && (
+                {!isNoNewline && !readOnly && (
                   <CommentButton onClick={() => setOpenCommentIdx(openCommentIdx === idx ? null : idx)} />
                 )}
               </div>
@@ -323,11 +325,12 @@ const UnifiedHunk = memo(function UnifiedHunk({ hunk, highlightedOld, highlighte
 const SBS_LINE_NUM = 'select-none text-right text-gray-400 dark:text-gray-600 text-xs font-mono w-8 shrink-0 pr-1 leading-5'
 const SBS_CODE = 'pl-1 font-mono text-xs leading-5 flex-1 whitespace-pre-wrap break-words overflow-hidden min-w-0'
 
-const SideBySideHunk = memo(function SideBySideHunk({ hunk, highlightedOld, highlightedNew, onComment }: {
+const SideBySideHunk = memo(function SideBySideHunk({ hunk, highlightedOld, highlightedNew, onComment, readOnly }: {
   hunk: DiffHunk
   highlightedOld: Map<number, string>
   highlightedNew: Map<number, string>
   onComment: (lineNum: number, isNew: boolean, text: string) => void
+  readOnly?: boolean
 }) {
   const [openCommentIdx, setOpenCommentIdx] = useState<number | null>(null)
   const sbsLines = buildSideBySide(hunk.lines)
@@ -344,7 +347,7 @@ const SideBySideHunk = memo(function SideBySideHunk({ hunk, highlightedOld, high
               <div className={`flex items-start flex-1 min-w-0 group relative ${oldBg}`}>
                 <div className="relative flex shrink-0 select-none">
                   <span className={SBS_LINE_NUM}>{line.oldLineNum ?? ''}</span>
-                  {line.oldLineNum != null && (
+                  {line.oldLineNum != null && !readOnly && (
                     <CommentButton onClick={() => setOpenCommentIdx(openCommentIdx === idx ? null : idx)} />
                   )}
                 </div>
@@ -359,7 +362,7 @@ const SideBySideHunk = memo(function SideBySideHunk({ hunk, highlightedOld, high
               <div className={`flex items-start flex-1 min-w-0 group relative ${newBg}`}>
                 <div className="relative flex shrink-0 select-none">
                   <span className={SBS_LINE_NUM}>{line.newLineNum ?? ''}</span>
-                  {line.newLineNum != null && (
+                  {line.newLineNum != null && !readOnly && (
                     <CommentButton onClick={() => setOpenCommentIdx(openCommentIdx === idx ? null : idx)} />
                   )}
                 </div>
@@ -412,7 +415,7 @@ function PathName({ path }: { path: string }) {
 // header and the sidebar file list): green [+] added, red [-] removed, cyan [→]
 // renamed. Modified files (the common case) get no badge. The change type is
 // conveyed by this coloured icon rather than by colouring the filename text.
-function ChangeTypeIcon({ type, className = 'w-3.5 h-3.5' }: { type: string; className?: string }) {
+export function ChangeTypeIcon({ type, className = 'w-3.5 h-3.5' }: { type: string; className?: string }) {
   const cls = `${className} shrink-0`
   switch (type) {
     case 'added':
@@ -621,7 +624,7 @@ function EdgeExpander({ seg, onStep, onAll }: {
   )
 }
 
-const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onComment, isCollapsed, onToggleCollapse, onExpand, isHidden, onShow, currentContext }: {
+export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onComment, isCollapsed, onToggleCollapse, onExpand, isHidden, onShow, currentContext, readOnly, headless }: {
   file: DiffFile
   sideBySide: boolean
   fileRef?: (el: HTMLDivElement | null) => void
@@ -632,6 +635,14 @@ const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onComment, 
   isHidden?: boolean
   onShow?: () => void
   currentContext: number
+  // When true, the line-level "add comment" affordances are hidden — used by the
+  // repository diff view, which has no agent to send comments to.
+  readOnly?: boolean
+  // When true, the per-file card chrome (border + collapsible header) is dropped
+  // and the diff body is rendered bare and always-expanded — used by the
+  // repository diff's one-file-at-a-time view, whose surrounding header already
+  // carries the filename, change type, line counts and copy/raw actions.
+  headless?: boolean
 }) {
   const lang = getLanguage(file.path)
 
@@ -699,7 +710,11 @@ const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onComment, 
   }, [highlightSource, lang])
   const { highlightedOld, highlightedNew } = syncHighlight ?? deferredHighlight
 
-  const segments = useMemo(() => (fullLines ? buildSegments(fullLines, reveal) : null), [fullLines, reveal])
+  // A file with whole-file content but no additions/deletions (e.g. a pure
+  // rename) has nothing to collapse — render its lines plainly rather than
+  // folding the entire body behind one expander.
+  const noChanges = file.additions === 0 && file.deletions === 0
+  const segments = useMemo(() => (fullLines && !noChanges ? buildSegments(fullLines, reveal) : null), [fullLines, reveal, noChanges])
 
   const setRegion = useCallback((id: string, patch: { top?: number; bot?: number }) => {
     setReveal((prev) => {
@@ -716,13 +731,14 @@ const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onComment, 
   const renderLines = (lines: DiffLine[], key: string) => (
     sideBySide
       ? <SideBySideHunk key={key} hunk={synthHunk(lines)} highlightedOld={highlightedOld} highlightedNew={highlightedNew}
-        onComment={(ln, isNew, txt) => onComment(file.path, ln, isNew, txt)} />
+        onComment={(ln, isNew, txt) => onComment(file.path, ln, isNew, txt)} readOnly={readOnly} />
       : <UnifiedHunk key={key} hunk={synthHunk(lines)} highlightedOld={highlightedOld} highlightedNew={highlightedNew}
-        onComment={(ln, isNew, txt) => onComment(file.path, ln, isNew, txt)} />
+        onComment={(ln, isNew, txt) => onComment(file.path, ln, isNew, txt)} readOnly={readOnly} />
   )
 
   return (
-    <div ref={fileRef} className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden mb-4 bg-white dark:bg-gray-900 shadow-sm">
+    <div ref={fileRef} className={headless ? '' : 'border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden mb-4 bg-white dark:bg-gray-900 shadow-sm'}>
+      {!headless && (
       <div
         className="flex items-center gap-2 px-3 py-1.5 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 z-20 cursor-pointer"
         onClick={() => onToggleCollapse(file.path)}
@@ -756,7 +772,8 @@ const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onComment, 
           </div>
         )}
       </div>
-      {!isCollapsed && (
+      )}
+      {(headless || !isCollapsed) && (
         <>
           {file.binary ? (
             <div className="px-4 py-3 text-xs text-gray-400 dark:text-gray-500 italic">Binary file changed</div>
@@ -770,6 +787,13 @@ const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onComment, 
                 Load diff
               </button>
             </div>
+          ) : noChanges ? (
+            // A whole, unchanged file (e.g. a pure rename). The one-by-one view
+            // (headless) shows it in full like the file viewer; the stacked view
+            // collapses it to a label so a rename doesn't dump the file inline.
+            headless && fullLines
+              ? <div className="overflow-hidden">{renderLines(fullLines, 'full')}</div>
+              : <div className="px-4 py-3 text-xs text-gray-400 dark:text-gray-500 italic">No changes</div>
           ) : !file.hunks || file.hunks.length === 0 ? (
             <div className="px-4 py-3 text-xs text-gray-400 dark:text-gray-500 italic">No changes</div>
           ) : segments ? (
@@ -834,9 +858,9 @@ const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onComment, 
                     )}
                     {sideBySide
                       ? <SideBySideHunk hunk={hunk} highlightedOld={highlightedOld} highlightedNew={highlightedNew}
-                        onComment={(ln, isNew, txt) => onComment(file.path, ln, isNew, txt)} />
+                        onComment={(ln, isNew, txt) => onComment(file.path, ln, isNew, txt)} readOnly={readOnly} />
                       : <UnifiedHunk hunk={hunk} highlightedOld={highlightedOld} highlightedNew={highlightedNew}
-                        onComment={(ln, isNew, txt) => onComment(file.path, ln, isNew, txt)} />
+                        onComment={(ln, isNew, txt) => onComment(file.path, ln, isNew, txt)} readOnly={readOnly} />
                     }
                     {isLast && !atEndOfFile && (
                       <div className={EXPANDER_ROW}>
@@ -1516,7 +1540,7 @@ function getGroupedFiles(files: DiffFile[]): [string, DiffFile[]][] {
 
 // ── Sidebar components ────────────────────────────────────────────────────────
 
-function FileRow({ file, isActive, onClick, indent = 0 }: {
+export function FileRow({ file, isActive, onClick, indent = 0 }: {
   file: DiffFile; isActive: boolean; onClick: () => void; indent?: number
 }) {
   return (
@@ -1580,12 +1604,13 @@ function TreeNodeView({ node, depth, collapsedFolders, toggleFolder, onFileClick
 
 function SettingsPopup({ fileView, onFileViewChange, sideBySide, onSideBySideChange,
   ignoreWhitespace, onIgnoreWhitespaceChange, singleFile, onSingleFileChange,
-  imageDiffMode, onImageDiffModeChange }: {
+  imageDiffMode, onImageDiffModeChange, artifactColumnCount, onArtifactColumnCountChange }: {
     fileView: FileView; onFileViewChange: (v: FileView) => void
     sideBySide: boolean; onSideBySideChange: (v: boolean) => void
     ignoreWhitespace: boolean; onIgnoreWhitespaceChange: (v: boolean) => void
     singleFile: boolean; onSingleFileChange: (v: boolean) => void
     imageDiffMode: ImageDiffMode; onImageDiffModeChange: (v: ImageDiffMode) => void
+    artifactColumnCount: number; onArtifactColumnCountChange: (n: number) => void
   }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -1620,7 +1645,7 @@ function SettingsPopup({ fileView, onFileViewChange, sideBySide, onSideBySideCha
 
       {open && (
         <div className="absolute right-0 top-full mt-1 w-52 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50 p-3">
-          <p className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">File list</p>
+          <p className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 tracking-wide mb-2">File List</p>
           <div className="flex flex-col gap-0.5 mb-3">
             {viewOptions.map((opt) => (
               <label key={opt.value} className="flex items-center gap-2 py-0.5 cursor-pointer">
@@ -1630,7 +1655,7 @@ function SettingsPopup({ fileView, onFileViewChange, sideBySide, onSideBySideCha
               </label>
             ))}
           </div>
-          <p className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">Options</p>
+          <p className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 tracking-wide mb-2">Options</p>
           <div className="flex flex-col gap-0.5">
             {[
               { checked: sideBySide, onChange: onSideBySideChange, label: 'Side by side' },
@@ -1644,7 +1669,7 @@ function SettingsPopup({ fileView, onFileViewChange, sideBySide, onSideBySideCha
               </label>
             ))}
           </div>
-          <p className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mt-3 mb-2">Image diff</p>
+          <p className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 tracking-wide mt-3 mb-2">Artifact Diff</p>
           <div className="flex flex-col gap-0.5">
             {IMAGE_DIFF_MODES.map((opt) => (
               <label key={opt.value} className="flex items-center gap-2 py-0.5 cursor-pointer">
@@ -1653,6 +1678,21 @@ function SettingsPopup({ fileView, onFileViewChange, sideBySide, onSideBySideCha
                 <span className="text-xs text-gray-700 dark:text-gray-300">{opt.label}</span>
               </label>
             ))}
+          </div>
+          {/* Masonry column count for the artifact grid. Drag the dividers between
+              columns (in the grid itself) to fine-tune their individual widths. */}
+          <div className="flex items-center gap-2 mt-3">
+            <span className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 tracking-wide shrink-0">Columns</span>
+            <input
+              type="range"
+              min={MIN_ARTIFACT_COLUMNS}
+              max={MAX_ARTIFACT_COLUMNS}
+              step={1}
+              value={artifactColumnCount}
+              onChange={(e) => onArtifactColumnCountChange(Number(e.target.value))}
+              className="flex-1 min-w-0 accent-blue-500 cursor-pointer"
+            />
+            <span className="text-xs tabular-nums text-gray-600 dark:text-gray-300 w-4 text-right shrink-0">{artifactColumnCount}</span>
           </div>
         </div>
       )}
@@ -1686,9 +1726,13 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
   })
   const [imageDiffMode, setImageDiffMode] = useState<ImageDiffMode>(() => {
     const stored = readLocal(StorageKeys.diffImageMode)
-    if (stored === 'side-by-side' || stored === 'ab' || stored === 'difference' || stored === 'slider' || stored === 'onion') return stored
-    return 'side-by-side'
+    if (stored === 'side-by-side' || stored === 'ab' || stored === 'slider' || stored === 'onion') return stored
+    return 'ab'
   })
+  // Artifact masonry layout — column count (slider) + per-column width fractions
+  // (dragging the dividers). One layout shared across the artifacts panel and the
+  // repository artifacts view; persisted (see lib/artifactColumns).
+  const { columns: artifactCols, setColumnCount: setArtifactColumnCount, setColumnWeights: setArtifactColumnWeights } = useArtifactColumns()
 
   const [singleFileIdx, setSingleFileIdx] = useState(0)
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set())
@@ -2237,6 +2281,7 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
             ignoreWhitespace={ignoreWhitespace} onIgnoreWhitespaceChange={setIgnoreWhitespace}
             singleFile={singleFile} onSingleFileChange={handleSingleFileChange}
             imageDiffMode={imageDiffMode} onImageDiffModeChange={setImageDiffMode}
+            artifactColumnCount={artifactCols.count} onArtifactColumnCountChange={setArtifactColumnCount}
           />
         </div>
       </div>
@@ -2266,6 +2311,8 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
           // flash a loading spinner and reset the user's selection).
           refreshKey={refreshKey + (externalArtifactRefresh ?? 0)}
           imageDiffMode={imageDiffMode}
+          artifactColumns={artifactCols}
+          onArtifactWeightsChange={setArtifactColumnWeights}
         />
       )}
 
@@ -2294,8 +2341,8 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
             style={{ width: sidebarWidth }}
           >
             <div className="px-2.5 py-2 border-b border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 flex items-center justify-between">
-              <span className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide truncate">
-                Files ({diff.files.length})
+              <span className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 truncate">
+                Files · {diff.files.length}
               </span>
             </div>
             <div className="overflow-y-auto max-h-[calc(100vh-140px)]">{renderSidebar(diff.files)}</div>

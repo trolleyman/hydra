@@ -13,7 +13,6 @@ import { ARTIFACT_PREFS_PREFIX, ARTIFACT_TAG_FILTER_PREFIX, artifactPrefsKey, ar
 
 export type ArtifactPrefs = {
   collapsed?: boolean
-  showUnchanged?: boolean
   buildLogOpen?: boolean
 }
 
@@ -48,7 +47,7 @@ export function loadArtifactPrefs(
   if (!stored) return null
   if (stored.status !== status) return null
   if (Date.now() - stored.t > ARTIFACT_TTL_MS) return null
-  return { collapsed: stored.collapsed, showUnchanged: stored.showUnchanged, buildLogOpen: stored.buildLogOpen }
+  return { collapsed: stored.collapsed, buildLogOpen: stored.buildLogOpen }
 }
 
 export function saveArtifactPrefs(
@@ -74,9 +73,38 @@ export type ArtifactTagFilter = {
   free: string[]
 }
 
+// The built-in change-type filter is a reserved scope (like the media-type one in
+// ArtifactsPanel) whose values are a file's change_type (added/removed/modified/
+// unchanged). Unlike the user scopes it defaults to HIDING unchanged, preserving
+// the old "unchanged hidden by default" behaviour — so a fresh or legacy filter
+// (no stored 'change' key) seeds ['unchanged']. Once the user touches it, the
+// stored value (even []) wins, distinguishing "show all" from "never set".
+export const ARTIFACT_CHANGE_CATEGORY = 'change'
+const DEFAULT_HIDDEN_CHANGE_TYPES = ['unchanged']
+
+// The default filter: nothing hidden, except the change-type scope hides
+// 'unchanged'. Exported so the "reset filters" affordance can restore it.
+export function defaultTagFilter(): ArtifactTagFilter {
+  return { scoped: { [ARTIFACT_CHANGE_CATEGORY]: [...DEFAULT_HIDDEN_CHANGE_TYPES] }, free: [] }
+}
+
+// isDefaultTagFilter reports whether a filter is at its default — every category
+// empty (nothing hidden) except 'change', which must be exactly its default hidden
+// set. Drives whether the "reset filters" button shows.
+export function isDefaultTagFilter(filter: ArtifactTagFilter): boolean {
+  if (filter.free.length > 0) return false
+  const cats = new Set([...Object.keys(filter.scoped), ARTIFACT_CHANGE_CATEGORY])
+  for (const cat of cats) {
+    const off = filter.scoped[cat] ?? []
+    const expected = cat === ARTIFACT_CHANGE_CATEGORY ? DEFAULT_HIDDEN_CHANGE_TYPES : []
+    if (off.length !== expected.length || off.some((v) => !expected.includes(v))) return false
+  }
+  return true
+}
+
 export function loadTagFilter(projectId: string | null, agentId: string): ArtifactTagFilter {
   const raw = readLocal(artifactTagFilterKey(projectId, agentId))
-  if (!raw) return { scoped: {}, free: [] }
+  if (!raw) return defaultTagFilter()
   try {
     const parsed = JSON.parse(raw) as { scoped?: unknown; free?: unknown }
     const scoped: Record<string, string[]> = {}
@@ -88,12 +116,15 @@ export function loadTagFilter(projectId: string | null, agentId: string): Artifa
         else if (typeof v === 'string' && v) scoped[cat] = [v]
       }
     }
+    // Seed the change-type default only when it was never stored (legacy/fresh) —
+    // an explicitly-stored value, including [], is respected.
+    if (!(ARTIFACT_CHANGE_CATEGORY in scoped)) scoped[ARTIFACT_CHANGE_CATEGORY] = [...DEFAULT_HIDDEN_CHANGE_TYPES]
     return {
       scoped,
       free: Array.isArray(parsed.free) ? parsed.free.filter((t): t is string => typeof t === 'string') : [],
     }
   } catch {
-    return { scoped: {}, free: [] }
+    return defaultTagFilter()
   }
 }
 

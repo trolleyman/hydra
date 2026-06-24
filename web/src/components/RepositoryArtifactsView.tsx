@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
-import { LoaderCircle, RefreshCw, ImageOff, TriangleAlert, Camera } from 'lucide-react'
+import { LoaderCircle, RefreshCw, ImageOff, TriangleAlert, Camera, Settings } from 'lucide-react'
 import { api } from '../stores/apiClient'
 import { ApiError } from '../api'
 import type { ArtifactLogLine, RepositoryArtifactFile } from '../api'
 import { RepositoryArtifactResponse } from '../api'
 import { formatError } from '../api/format_error'
-import { IMG_CLASS, checkerStyle, useMediaResize, ResizeGrip } from './artifactDiffShared'
+import { IMG_CLASS, checkerStyle } from './artifactDiffShared'
 import { isVideoArtifact } from './VideoDiffView'
-import { TagBadge, LogView, ElapsedTime } from './ArtifactsPanel'
+import { TagBadge, LogView, ElapsedTime, MasonryGrid } from './ArtifactsPanel'
+import { useArtifactColumns, MIN_ARTIFACT_COLUMNS, MAX_ARTIFACT_COLUMNS } from '../lib/artifactColumns'
 
 // RepositoryArtifactsView renders one [[artifacts]] script's output for a single
 // ref, single-sided (the repository browser shows one ref at a time, so there is
@@ -18,14 +19,13 @@ import { TagBadge, LogView, ElapsedTime } from './ArtifactsPanel'
 
 const POLL_MS = 2500
 
-// MediaCell shows one generated file: its name, tags, and the image (resizable,
-// click-to-open) or video. Mirrors the diff viewer's FileRow, minus the
-// before/after comparison machinery.
+// MediaCell shows one generated file: its name, tags, and the image (click-to-open)
+// or video. Mirrors the diff viewer's FileRow, minus the before/after comparison
+// machinery; width-driven (w-full) so it fills its masonry column.
 function MediaCell({ file }: { file: RepositoryArtifactFile }) {
-  const { maxHeight, onResizeStart, consumeDrag } = useMediaResize()
   const url = file.url ?? undefined
   return (
-    <div className="p-3 min-w-0 max-w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40">
+    <div className="p-3 w-full min-w-0 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40">
       <div className="flex flex-wrap items-center gap-1.5 mb-2">
         <span className="text-xs font-medium text-gray-700 dark:text-gray-300 truncate">{file.name}</span>
       </div>
@@ -35,7 +35,7 @@ function MediaCell({ file }: { file: RepositoryArtifactFile }) {
         </div>
       )}
       {!url ? (
-        <div className="select-none flex flex-col items-center justify-center gap-1 w-44 h-32 rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 text-gray-400 dark:text-gray-500">
+        <div className="select-none flex flex-col items-center justify-center gap-1 w-full h-32 rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 text-gray-400 dark:text-gray-500">
           <ImageOff className="w-5 h-5" />
           <span className="text-[11px] font-medium">No file</span>
         </div>
@@ -47,29 +47,19 @@ function MediaCell({ file }: { file: RepositoryArtifactFile }) {
           playsInline
           preload="metadata"
           className={`${IMG_CLASS} block`}
-          style={{ ...checkerStyle, maxHeight: `${maxHeight}px` }}
+          style={checkerStyle}
         />
       ) : (
-        // A press-and-drag resizes (onPointerDown); a plain click opens the image in
-        // a new tab, but consumeDrag() cancels that when the press became a drag.
-        <div className="group relative inline-block select-none" onPointerDown={onResizeStart}>
-          <a
-            href={url}
-            target="_blank"
-            rel="noreferrer"
-            className="block"
-            onClick={(e) => { if (consumeDrag()) e.preventDefault() }}
-          >
-            <img
-              src={url}
-              loading="lazy"
-              draggable={false}
-              style={{ ...checkerStyle, maxHeight: `${maxHeight}px` }}
-              className={IMG_CLASS}
-            />
-          </a>
-          <ResizeGrip onPointerDown={onResizeStart} />
-        </div>
+        // A plain click opens the image in a new tab; it fills the column width.
+        <a href={url} target="_blank" rel="noreferrer" className="block">
+          <img
+            src={url}
+            loading="lazy"
+            draggable={false}
+            style={checkerStyle}
+            className={IMG_CLASS}
+          />
+        </a>
       )}
     </div>
   )
@@ -119,6 +109,58 @@ function PersistedLog({ url }: { url: string }) {
   )
 }
 
+// A small settings popup (gear) for the artifact masonry layout — the repository
+// browser's analogue of the diff viewer's settings popup. Holds the shared
+// "Columns" slider (the dividers in the grid fine-tune individual widths). The gear
+// is a <button> with a distinct aria-label so it's unambiguous next to the file
+// browser's own settings gear.
+function ColumnsSettingsPopup({ count, onCountChange }: { count: number; onCountChange: (n: number) => void }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false) }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey) }
+  }, [open])
+  return (
+    <div ref={ref} className="relative">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        title="Artifact layout settings"
+        aria-label="Artifact layout settings"
+        className={`flex items-center justify-center w-7 h-7 rounded-md border transition-colors cursor-pointer ${
+          open
+            ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800'
+            : 'text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
+        }`}
+      >
+        <Settings className="w-3.5 h-3.5" />
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full mt-1 w-52 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50 p-3">
+          <p className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 tracking-wide mb-2">Artifact Layout</p>
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 tracking-wide shrink-0">Columns</span>
+            <input
+              type="range"
+              min={MIN_ARTIFACT_COLUMNS}
+              max={MAX_ARTIFACT_COLUMNS}
+              step={1}
+              value={count}
+              onChange={(e) => onCountChange(Number(e.target.value))}
+              className="flex-1 min-w-0 accent-blue-500 cursor-pointer"
+            />
+            <span className="text-xs tabular-nums text-gray-600 dark:text-gray-300 w-4 text-right shrink-0">{count}</span>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function RepositoryArtifactsView({
   projectId, refQuery, scriptName,
 }: {
@@ -133,6 +175,8 @@ export function RepositoryArtifactsView({
   // Bumped by the refresh button to force a regenerate (passes refresh=true once).
   const [reloadNonce, setReloadNonce] = useState(0)
   const wantRefresh = useRef(false)
+  // Masonry layout, shared (and persisted) with the diff viewer's artifacts panel.
+  const { columns, setColumnCount, setColumnWeights } = useArtifactColumns()
 
   useEffect(() => {
     let cancelled = false
@@ -183,14 +227,22 @@ export function RepositoryArtifactsView({
         {status === RepositoryArtifactResponse.status.READY && data && data.files.length === 0 && (
           <span className="text-xs text-gray-400 dark:text-gray-500">No files produced</span>
         )}
-        <button
-          onClick={onRefresh}
-          disabled={loading || generating}
-          title="Regenerate"
-          className="ml-auto flex items-center justify-center w-7 h-7 rounded-md border text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-default"
-        >
-          <RefreshCw className={`w-3.5 h-3.5 ${generating ? 'animate-spin' : ''}`} />
-        </button>
+        <div className="ml-auto flex items-center gap-2">
+          {/* Artifact layout settings (gear) — the masonry "Columns" slider, the
+              same shared knob as the diff viewer's artifacts panel (the grid's
+              dividers fine-tune individual widths). Shown once there are files. */}
+          {status === RepositoryArtifactResponse.status.READY && data && data.files.length > 1 && (
+            <ColumnsSettingsPopup count={columns.count} onCountChange={setColumnCount} />
+          )}
+          <button
+            onClick={onRefresh}
+            disabled={loading || generating}
+            title="Regenerate"
+            className="flex items-center justify-center w-7 h-7 rounded-md border text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-default"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${generating ? 'animate-spin' : ''}`} />
+          </button>
+        </div>
       </div>
 
       {/* Body */}
@@ -225,9 +277,12 @@ export function RepositoryArtifactsView({
         </div>
       ) : (
         <div className="space-y-3">
-          <div className="flex flex-wrap items-start gap-3">
-            {data.files.map((f) => <MediaCell key={f.name} file={f} />)}
-          </div>
+          <MasonryGrid
+            items={data.files.map((f) => ({ key: f.name, node: <MediaCell file={f} /> }))}
+            span={1}
+            columns={columns}
+            onWeightsChange={setColumnWeights}
+          />
           {data.log_url && <PersistedLog url={data.log_url} />}
         </div>
       )}

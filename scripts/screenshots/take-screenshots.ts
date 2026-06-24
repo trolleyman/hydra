@@ -81,13 +81,14 @@ function progress(msg: string) {
 // (repository browser, artifacts panel, …). Grouping by name prefix keeps the
 // page list (the source of truth) the only place a new shot must be declared.
 function sectionFor(name: string): string {
+  if (name.startsWith('repository-diff')) return 'repository-diff'
   if (name.startsWith('repository')) return 'repository'
   if (name.startsWith('artifact')) return 'artifacts'
   if (name.startsWith('archived')) return 'archived'
   if (name.startsWith('agent-')) return 'agent'
   if (name.startsWith('spawn')) return 'spawn'
   if (name.startsWith('settings') || name === 'services-warning') return 'settings'
-  if (name === 'nested-folders') return 'diff'
+  if (name.startsWith('diff') || name === 'nested-folders') return 'diff'
   return 'overview'
 }
 
@@ -233,6 +234,12 @@ try {
       // popover such as the repository branch selector so the screenshot
       // documents it.
       click?: string
+      // CSS selectors clicked in sequence (each followed by a settle), then a
+      // networkidle wait so any fetch a click kicks off has rendered before the
+      // capture. Used by the branch-compare diff shots, where pressing the diff
+      // button enters diff mode (and fetches the diff) and an optional second
+      // click opens the popped-out compare branch selector.
+      clicks?: string[]
       // Glob of a request to hold open (never fulfilled) so the page is captured
       // in its in-flight loading state — e.g. holding the repo file-contents
       // request so the loading spinner shows. With a request pending, networkidle
@@ -242,10 +249,26 @@ try {
       // Seeds the diff viewer's image-diff comparison mode ('hydra-diff-image-mode')
       // before the app boots, so the artifacts panel renders before/after pairs in
       // the chosen mode. Only meaningful on the artifacts (agent-1) page.
-      imageDiffMode?: 'side-by-side' | 'ab' | 'difference' | 'slider' | 'onion'
+      imageDiffMode?: 'side-by-side' | 'ab' | 'slider' | 'onion'
+      // Seeds the repository diff's one-file-at-a-time preference
+      // ('hydra-repo-diff-single-file') before boot. Omit for the default
+      // (one file at a time); set false to capture the all-files-stacked view.
+      repoDiffSingleFile?: boolean
       // Expands the named artifact card (clicks its header) after load — used to
       // document the in-flight card's live, scrollable generation log.
       expandArtifact?: string
+      // Expands the ready "screenshots" card and pins it to the top, then eager-loads
+      // every tile image and waits for the masonry to settle — so the capture shows
+      // the actual before/after artifacts (the card defaults to collapsed, which
+      // otherwise leaves these shots showing only the header row). Only meaningful on
+      // the artifacts (agent-1) page; pair with imageDiffMode.
+      showArtifacts?: boolean
+      // Eager-loads every masonry tile image and waits for the layout to settle
+      // before capturing — for the repository artifacts view, whose masonry is shown
+      // without an expand step. Keeps the width-driven layout byte-reproducible
+      // (lazy/off-screen tiles would otherwise load inconsistently). No-op when the
+      // page has no masonry tiles.
+      settleMasonry?: boolean
       // Attaches the given checkout-relative images to the spawn form's hidden
       // file input (each fed in named "image.png", so the form renumbers them
       // image1.png, image2.png …) and then opens the lightbox by clicking the
@@ -298,7 +321,9 @@ try {
       // mid-clip frame so the before/after progress bars differ; the page's
       // play() no-op keeps the pair paused so the frame is byte-stable. Only
       // meaningful on the artifacts (agent-1) page, paired with imageDiffMode.
-      videoDiff?: { seek: number }
+      // `highlight` clicks the video's "Highlight" tab (the magenta per-frame
+      // pixel-diff, which now lives inside Before/After) — pair with imageDiffMode 'ab'.
+      videoDiff?: { seek: number; highlight?: boolean }
       // Settings only: turn OFF the "Enabled" switch on the seeded [[artifacts]]
       // and [[services]] entries (the EnabledToggle in web/.../SettingsComponents).
       // Flipping each to disabled both mutes/labels its card "Disabled" AND marks
@@ -369,6 +394,68 @@ try {
         path: '/project/sim-project/repository/main/internal/server/server.go',
         click: 'button[title="Switch branch"]',
       },
+      // The branch-compare diff view: the diff button (the GitCompare icon beside
+      // the branch selector) opens the branch dropdown; picking a branch diffs it
+      // against the browsed ref. The sidebar header becomes "base → head" and the
+      // main pane shows the diff (reusing the agent diff's FileDiff/FileRow), with
+      // per-file line counts and added/removed/renamed change-type tags.
+      // Simulation serves a small mock diff with one of each change type (see
+      // GetRepositoryDiff in internal/http/simulation.go). The default is one file
+      // at a time — the main pane shows only the file selected in the left list.
+      {
+        name: 'repository-diff',
+        path: '/project/sim-project/repository',
+        clicks: ['button:has(svg.lucide-git-compare)', 'button:has-text("hydra/add-line-numbers")'],
+      },
+      // The same diff with the all-files-stacked view (a stored preference,
+      // toggled in the diff settings popup): every changed file's diff is shown
+      // at once rather than one at a time.
+      {
+        name: 'repository-diff-all',
+        path: '/project/sim-project/repository',
+        clicks: ['button:has(svg.lucide-git-compare)', 'button:has-text("hydra/add-line-numbers")'],
+        repoDiffSingleFile: false,
+      },
+      // One file at a time, selecting each change type from the left list (the
+      // third click). heads.go is a full-context ("expanded") file, so its diff
+      // shows surrounding context collapsed behind ⌄/⌃ "··· N lines ···"
+      // expanders — documenting how context is handled.
+      {
+        name: 'repository-diff-context',
+        path: '/project/sim-project/repository',
+        clicks: ['button:has(svg.lucide-git-compare)', 'button:has-text("hydra/add-line-numbers")', 'button:has-text("heads.go")'],
+      },
+      // A removed file: the whole file shows as deletions, with the red removed tag.
+      {
+        name: 'repository-diff-removed',
+        path: '/project/sim-project/repository',
+        clicks: ['button:has(svg.lucide-git-compare)', 'button:has-text("hydra/add-line-numbers")', 'button:has-text("old_helper.go")'],
+      },
+      // An added file: the whole file shows as additions, with the green added tag.
+      {
+        name: 'repository-diff-added',
+        path: '/project/sim-project/repository',
+        clicks: ['button:has(svg.lucide-git-compare)', 'button:has-text("hydra/add-line-numbers")', 'button:has-text("lines.go")'],
+      },
+      // A renamed file: the header shows "old → new" path with the renamed tag.
+      {
+        name: 'repository-diff-renamed',
+        path: '/project/sim-project/repository',
+        clicks: ['button:has(svg.lucide-git-compare)', 'button:has-text("hydra/add-line-numbers")', 'button:has-text("renderer.go")'],
+      },
+      // The diff branch selector reopened while diffing: the dropdown checkmarks
+      // the current compare branch, and clicking that branch (or the base) exits
+      // diff mode. Enters diff mode first (open dropdown, pick a branch), then
+      // reopens the now-labelled compare selector to document the checkmark.
+      {
+        name: 'repository-diff-branches',
+        path: '/project/sim-project/repository',
+        clicks: [
+          'button:has(svg.lucide-git-compare)',
+          'button:has-text("hydra/add-line-numbers")',
+          'button[title="Change or exit branch diff"]',
+        ],
+      },
       // A binary image file rendered inline via the raw blob route (PLAN.md #41k).
       { name: 'repository-image', path: '/project/sim-project/repository/main/web/public/logo.png' },
       // A symbolic link: opening server-link.go renders the file it points at
@@ -388,7 +475,19 @@ try {
       // [[artifacts]] script as a "file"; deep-linking one lazily generates it for
       // the ref and renders its outputs single-sided. The deep link auto-expands
       // .hydra → artifacts; "screenshots" returns a ready set of mock images.
-      { name: 'repository-artifacts', path: '/project/sim-project/repository/main/.hydra/artifacts/screenshots' },
+      { name: 'repository-artifacts', path: '/project/sim-project/repository/main/.hydra/artifacts/screenshots', settleMasonry: true },
+      // The repository artifacts view's settings popup, opened from the gear in its
+      // header (the masonry "Columns" slider) — the repo browser's analogue of the
+      // diff viewer's diff-settings shot. The gear carries aria-label "Artifact
+      // layout settings", distinct from the file browser's own settings gear.
+      // viewportOnly so the focus is the header + popup, not the grid below.
+      {
+        name: 'repository-artifacts-settings',
+        path: '/project/sim-project/repository/main/.hydra/artifacts/screenshots',
+        viewportOnly: true,
+        click: 'button[aria-label="Artifact layout settings"]',
+        settleMasonry: true,
+      },
       // The repository browser (a file open) at the small viewports, to document
       // how its tree + content layout reflows. Named repository-* so they tag
       // section::repository; the viewport:: axis is set explicitly for the
@@ -452,6 +551,20 @@ try {
       // never resolves in simulation); stubUpload serves the thumbnails.
       { name: 'agent-prompt-attachments', path: '/project/sim-project/agent/agent-2', viewportOnly: true, stubUpload: 'web/public/android-chrome-512x512.png' },
       { name: 'nested-folders', path: '/project/sim-project/agent/agent-3', scrollTo: 'Changes' },
+      // The diff viewer's settings popup, opened from the gear in the sticky
+      // "Changes" toolbar: the file-list view modes, the diff options (side-by-
+      // side, ignore whitespace, one-file-at-a-time), the image-diff comparison
+      // modes, and the artifact masonry "Columns" slider. The nav's settings icon
+      // is a <Link> (an <a>), so `button:has(svg.lucide-settings)` uniquely hits
+      // the diff gear. scrollTo pins the toolbar to the top; viewport capture (the
+      // popup is absolutely positioned just below the gear).
+      {
+        name: 'diff-settings',
+        path: '/project/sim-project/agent/agent-1',
+        scrollTo: 'Changes',
+        viewport: { width: 1280, height: 1000 },
+        click: 'button:has(svg.lucide-settings)',
+      },
       // A read-only archived (killed/merged) agent page: no live terminal/diff,
       // just the prompt and a (not-yet-wired) Resume affordance. The grayed
       // "Archived" sidebar section itself is already visible in the `home` shot.
@@ -465,12 +578,27 @@ try {
       // The diff viewer offers four image-diff comparison modes (a setting in the
       // diff viewer; see web/src/components/ArtifactsPanel.tsx ImageDiffView). We
       // capture the artifacts panel once per mode so each option is documented:
-      //   side-by-side — before and after shown next to each other (default)
-      //   ab           — both stacked; click to flip between them (hard switch)
+      //   side-by-side — before and after shown next to each other ('artifacts')
+      //   ab           — before/after stacked, click to flip; a "Highlight" tab
+      //                  paints the changed pixels magenta (the app's default mode)
       //   slider       — draggable divider with a hard cut between before/after
       //   onion        — before/after blended via an opacity slider
+      // Each sets showArtifacts so the "screenshots" card is expanded and its
+      // before/after masonry is actually visible (the card defaults to collapsed).
+      // The collapsed panel itself is documented by 'artifacts-collapsed' below.
       {
         name: 'artifacts',
+        path: '/project/sim-project/agent/agent-1',
+        scrollTo: 'Changes',
+        viewport: { width: 1280, height: 1280 },
+        imageDiffMode: 'side-by-side',
+        showArtifacts: true,
+      },
+      // The collapsed artifacts panel: each set is a single header row ("N changed",
+      // a spinner while generating, etc.) until clicked open — the default, opt-in
+      // state. Documents the at-a-glance overview before any card is expanded.
+      {
+        name: 'artifacts-collapsed',
         path: '/project/sim-project/agent/agent-1',
         scrollTo: 'Changes',
         viewport: { width: 1280, height: 1280 },
@@ -482,6 +610,7 @@ try {
         scrollTo: 'Changes',
         viewport: { width: 1280, height: 1280 },
         imageDiffMode: 'ab',
+        showArtifacts: true,
       },
       {
         name: 'artifacts-slider',
@@ -489,6 +618,7 @@ try {
         scrollTo: 'Changes',
         viewport: { width: 1280, height: 1280 },
         imageDiffMode: 'slider',
+        showArtifacts: true,
       },
       {
         name: 'artifacts-onion',
@@ -496,6 +626,7 @@ try {
         scrollTo: 'Changes',
         viewport: { width: 1280, height: 1280 },
         imageDiffMode: 'onion',
+        showArtifacts: true,
       },
       // The artifacts tag filter in use. agent-1's "screenshots" set tags each
       // shot by theme + viewport (scoped labels) plus a free-form "new" (see
@@ -510,6 +641,7 @@ try {
         viewport: { width: 1280, height: 1280 },
         imageDiffMode: 'side-by-side',
         tagFilter: { scoped: { theme: ['dark'] } },
+        showArtifacts: true,
       },
       // The tag-filter dropdown opened, documenting the menu itself: the fixed
       // "all" (left) / "clear" (right) header, the value checkboxes (all on by
@@ -522,6 +654,7 @@ try {
         viewport: { width: 1280, height: 1280 },
         imageDiffMode: 'side-by-side',
         openFilter: 'theme',
+        showArtifacts: true,
       },
       // The artifacts panel's info (i) tooltip, opened — documents what artifacts
       // are, the script contract, the progress marker, and the tags/filter rules
@@ -567,8 +700,9 @@ try {
       // expand it and pin the .webm row to the top. The before/after pair is
       // seeked to a mid-clip frame (paused) so the progress bars differ. Two
       // shots document the two most distinct video modes:
-      //   side-by-side — the Before / After clips next to each other + transport
-      //   difference   — the per-frame pixel diff (changed pixels painted magenta)
+      //   side-by-side   — the Before / After clips next to each other + transport
+      //   ab + Highlight — the per-frame pixel diff (changed pixels painted magenta),
+      //                    now a "Highlight" tab inside the Before/After mode
       {
         name: 'artifact-video',
         path: '/project/sim-project/agent/agent-1',
@@ -580,8 +714,8 @@ try {
         name: 'artifact-video-diff',
         path: '/project/sim-project/agent/agent-1',
         viewport: { width: 1280, height: 1000 },
-        imageDiffMode: 'difference',
-        videoDiff: { seek: 1.2 },
+        imageDiffMode: 'ab',
+        videoDiff: { seek: 1.2, highlight: true },
       },
       // ── Mobile / small-screen layout (MOBILE_PLAN.md Phase 1) ───────────────
       // The same UI captured at phone width (390×844) to document the responsive
@@ -614,7 +748,7 @@ try {
       // diff takes the full width and wraps long lines. agent-3's nested-folder
       // diff scrolled to the Changes section.
       { name: 'mobile-diff', path: '/project/sim-project/agent/agent-3', viewport: { width: 390, height: 844 }, scrollTo: 'Changes' },
-      // The agent page's sticky top bar (shown while the sidebar is collapsed):
+      // The agent page's top bar (shown while the sidebar is collapsed):
       // the show-sidebar toggle, the agent name + its actions dropdown (opened
       // here — Rename / Merge / Kill), and a status dot. Clicking the name's
       // chevron opens the menu.
@@ -683,6 +817,12 @@ try {
       // The desktop layout with the sidebar collapsed (Ctrl+. / the header
       // button): full-width content + the floating reveal button.
       { name: 'desktop-collapsed', path: '/project/sim-project/agent/agent-1', click: 'button[aria-label="Hide sidebar"]', viewportOnly: true },
+      // The artifacts panel at phone width: the masonry clamps to a single column
+      // (no column is allowed below MIN_COL_PX), the per-column dividers drop out,
+      // and the width-driven before/after tiles stack full-width — so the panel
+      // stays usable on a narrow screen. showArtifacts expands the card so the
+      // images (not just the collapsed header) are captured.
+      { name: 'mobile-artifacts', path: '/project/sim-project/agent/agent-1', viewport: { width: 390, height: 844 }, scrollTo: 'Changes', imageDiffMode: 'ab', showArtifacts: true },
     ]
     // Capture every page in both themes. Dark mode has its own colours (e.g.
     // diff add/remove backgrounds), so a light-only render would miss visual
@@ -742,6 +882,17 @@ try {
               // ignore storage failures
             }
           }, pg.imageDiffMode)
+        }
+        // Seed the repository diff's one-file-at-a-time preference so the
+        // all-files-stacked view can be captured (the default is one file).
+        if (pg.repoDiffSingleFile !== undefined) {
+          await ctx.addInitScript((single) => {
+            try {
+              localStorage.setItem('hydra-repo-diff-single-file', String(single))
+            } catch {
+              // ignore storage failures
+            }
+          }, pg.repoDiffSingleFile)
         }
         // Seed the artifact tag filter so the panel renders with a filter applied.
         // The key must match web/src/lib/storage.ts artifactTagFilterKey(projectId,
@@ -947,6 +1098,17 @@ try {
           await page.click(pg.click)
           await settle(page)
         }
+        if (pg.clicks) {
+          // Drive a short interaction (e.g. press the diff button, then open the
+          // compare branch selector). The final networkidle wait lets the diff
+          // a click fetched render before the capture.
+          for (const sel of pg.clicks) {
+            await page.click(sel)
+            await settle(page)
+          }
+          await page.waitForLoadState('networkidle')
+          await settle(page)
+        }
         if (pg.disableSettingsEntries) {
           // Flip the seeded artifact + service entries to disabled. Each section's
           // single entry carries exactly one EnabledToggle — its sr-only "peer"
@@ -1013,7 +1175,7 @@ try {
             btn?.click()
           })
           // The video viewer mounts <video> elements once the card expands. Wait
-          // for them to be attached, not visible: the difference mode keeps its
+          // for them to be attached, not visible: the Highlight view keeps its
           // videos hidden (only the diff canvas shows), so a visibility wait would
           // time out there.
           await page.waitForSelector('video', { state: 'attached' })
@@ -1045,12 +1207,66 @@ try {
               cont.scrollTop = offset - 96
             }
           })
-          // The difference mode redraws its pixel-diff canvas on a throttled rAF
+          if (pg.videoDiff.highlight) {
+            // Switch the video to its Highlight tab (the magenta per-frame pixel
+            // diff, which now lives inside the Before/After mode). The button sits
+            // in the .webm row's tab strip; find it within that file's card.
+            await page.evaluate(() => {
+              const span = Array.from(document.querySelectorAll('span')).find((s) => s.textContent?.trim() === 'loader-animation.webm')
+              const row = span?.closest('div.rounded-lg') as HTMLElement | null | undefined
+              const btn = row && Array.from(row.querySelectorAll('button')).find((b) => b.textContent?.trim() === 'Highlight')
+              ;(btn as HTMLButtonElement | undefined)?.click()
+            })
+            await settle(page)
+          }
+          // The Highlight view redraws its pixel-diff canvas on a throttled rAF
           // loop; give it real time (playwright timers, not the page's frozen
           // setTimeout) to draw the seeked frame at least once. Once drawn the
           // pixels are identical every iteration (the pair is paused), so the
           // shot stays byte-stable.
           await page.waitForTimeout(400)
+          await settle(page)
+        }
+        if (pg.showArtifacts) {
+          // Expand the ready "screenshots" card so its before/after masonry is
+          // visible (cards default to collapsed). The card only exists once the
+          // artifacts WS snapshot has populated it, so wait for its header first.
+          await page.waitForFunction(() =>
+            Array.from(document.querySelectorAll('button')).some((b) => b.textContent?.includes('screenshots')),
+          )
+          await page.evaluate(() => {
+            const btn = Array.from(document.querySelectorAll('button')).find((b) => b.textContent?.includes('screenshots'))
+            btn?.click()
+          })
+          await settle(page)
+          // Eager-load every tile image: the masonry sizes each column from the
+          // images' natural dimensions, so they must be fully decoded before it
+          // lays out — and lazy images below the fold would otherwise never load
+          // (and a half-loaded layout wouldn't be byte-reproducible). The tiles
+          // carry data-mkey (the masonry's per-tile key); scope to their <img>s.
+          await page.evaluate(() => {
+            document.querySelectorAll<HTMLImageElement>('[data-mkey] img').forEach((i) => { i.loading = 'eager' })
+          })
+          await page.waitForFunction(() => {
+            const imgs = Array.from(document.querySelectorAll<HTMLImageElement>('[data-mkey] img'))
+            return imgs.length > 0 && imgs.every((i) => i.complete && i.naturalHeight > 0)
+          })
+          // Let the masonry's ResizeObserver-driven layout settle on the now-final
+          // image heights (real timer, not the page's frozen setTimeout). The final
+          // layout is deterministic, so a fixed wait past it stays byte-stable.
+          await page.waitForTimeout(500)
+          await settle(page)
+          // Pin the "screenshots" card to the top of the scroll container so its
+          // expanded grid is the focus (same sticky-aware offset as expandArtifact).
+          await page.evaluate(() => {
+            const btn = Array.from(document.querySelectorAll('button')).find((b) => b.textContent?.includes('screenshots'))
+            const card = btn?.closest('div.rounded-lg') as HTMLElement | null | undefined
+            const cont = card?.closest('.overflow-auto') as HTMLElement | null | undefined
+            if (card && cont) {
+              const offset = card.getBoundingClientRect().top - cont.getBoundingClientRect().top + cont.scrollTop
+              cont.scrollTop = offset - 96
+            }
+          })
           await settle(page)
         }
         if (pg.artifactInfo) {
@@ -1096,6 +1312,24 @@ try {
             btn?.click()
           }, pg.openFilter)
           await settle(page)
+        }
+        if (pg.settleMasonry) {
+          // Eager-load every masonry tile image (the layout sizes columns from the
+          // images' natural dimensions) and wait for them to decode, then let the
+          // ResizeObserver-driven layout settle — so the width-driven grid is
+          // byte-reproducible. No-op when the page has no masonry tiles.
+          const hasTiles = await page.evaluate(() => document.querySelectorAll('[data-mkey] img').length > 0)
+          if (hasTiles) {
+            await page.evaluate(() => {
+              document.querySelectorAll<HTMLImageElement>('[data-mkey] img').forEach((i) => { i.loading = 'eager' })
+            })
+            await page.waitForFunction(() => {
+              const imgs = Array.from(document.querySelectorAll<HTMLImageElement>('[data-mkey] img'))
+              return imgs.length > 0 && imgs.every((i) => i.complete && i.naturalHeight > 0)
+            }).catch(() => { /* tolerate a stray never-loading image */ })
+            await page.waitForTimeout(500)
+            await settle(page)
+          }
         }
         const out = join(OUT, `${pg.name}${suffix}.png`)
         // Scrolled pages, the lightbox (a fixed, viewport-filling overlay),
