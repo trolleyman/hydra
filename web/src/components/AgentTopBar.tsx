@@ -145,8 +145,12 @@ export function AgentTopBar({
         )}
 
         {open && hasMenu && (
-          // Right-aligned to the dropdown trigger (Claude-style).
-          <div className="absolute right-0 top-full mt-1 min-w-44 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50 py-1">
+          // Right-aligned to the chevron trigger (Claude-style); offset past any
+          // inline actions (each w-7 + gap-0.5 = 1.875rem) sitting to its right.
+          <div
+            style={{ right: `calc(${inlineActions?.length ?? 0} * 1.875rem)` }}
+            className="absolute top-full mt-1 w-max bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50 py-1"
+          >
             {actions.map((a) => (
               <button
                 key={a.label}
