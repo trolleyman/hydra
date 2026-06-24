@@ -678,6 +678,63 @@ function FileNotFound({ path, refStr }: { path: string; refStr: string }) {
   )
 }
 
+// ── File path label ───────────────────────────────────────────────────────────
+
+// FilePathLabel renders the selected file's path in the content header, the same
+// way on mobile and desktop: the directory is lowlit and the filename
+// emphasised, and when the path is too wide it's the *leading* directory that's
+// clipped with a "…" — the filename stays visible (".../filename.go"), and only
+// if the filename alone overflows does it clip at its own end. Tapping it expands
+// to the full, wrapped path; tapping again collapses.
+function FilePathLabel({ path }: { path: string }) {
+  const [expanded, setExpanded] = useState(false)
+  // Collapse again whenever the displayed file changes.
+  useEffect(() => { setExpanded(false) }, [path])
+
+  const slash = path.lastIndexOf('/')
+  const dir = slash >= 0 ? path.slice(0, slash + 1) : ''
+  const name = slash >= 0 ? path.slice(slash + 1) : path
+
+  if (expanded) {
+    return (
+      <button
+        type="button"
+        onClick={() => setExpanded(false)}
+        className="min-w-0 text-left text-sm font-mono break-all cursor-pointer"
+      >
+        {dir && <span className="text-gray-400 dark:text-gray-500">{dir}</span>}
+        <span className="text-gray-700 dark:text-gray-300">{name}</span>
+      </button>
+    )
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => setExpanded(true)}
+      title={path}
+      className="flex items-center min-w-0 text-sm font-mono cursor-pointer"
+    >
+      {dir && (
+        // Leading-ellipsis: the rtl block clips + ellipsises at the *start*,
+        // while the inner plaintext span keeps the path reading left-to-right.
+        // It shrinks far more eagerly than the filename (flex-shrink 9999 vs 1),
+        // so the directory clips first and the filename only clips once it alone
+        // can't fit.
+        <span
+          className="overflow-hidden whitespace-nowrap text-gray-400 dark:text-gray-500"
+          style={{ direction: 'rtl', textOverflow: 'ellipsis', flexShrink: 9999, minWidth: 0 }}
+        >
+          <span style={{ unicodeBidi: 'plaintext' }}>{dir}</span>
+        </span>
+      )}
+      <span className="truncate text-gray-700 dark:text-gray-300" style={{ flexShrink: 1, minWidth: 0 }}>
+        {name}
+      </span>
+    </button>
+  )
+}
+
 // ── Settings persistence ──────────────────────────────────────────────────────
 
 function loadBool(key: string, def: boolean): boolean {
@@ -1121,30 +1178,47 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
         )}
         <span className="shrink-0 text-sm font-semibold text-gray-800 dark:text-gray-100">Repository</span>
         {branches !== null ? (
-          <BranchSelector
-            branches={branches}
-            activeRef={activeRef}
-            isKnownBranch={isKnownBranch}
-            onSelect={selectBranch}
-            flexible={diffActive}
-          />
+          // While diffing, the base picker is capped + shrinkable (so the
+          // base → head pair stays compact, like the diff viewer's selectors,
+          // rather than stretching across the header); otherwise it sizes to its
+          // own content.
+          diffActive ? (
+            <div className="flex min-w-0 max-w-[11rem] shrink">
+              <BranchSelector
+                branches={branches}
+                activeRef={activeRef}
+                isKnownBranch={isKnownBranch}
+                onSelect={selectBranch}
+                flexible
+              />
+            </div>
+          ) : (
+            <BranchSelector
+              branches={branches}
+              activeRef={activeRef}
+              isKnownBranch={isKnownBranch}
+              onSelect={selectBranch}
+            />
+          )
         ) : (
           <div className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-gray-400">
             <GitBranch className="w-3.5 h-3.5" /> …
           </div>
         )}
         {diffActive ? (
-          // Diffing: "base → head", names clipped to fit.
+          // Diffing: "base → head", each capped + clipped so they stay compact.
           <>
             <MoveRight className="w-4 h-4 text-gray-400 dark:text-gray-500 shrink-0" />
-            <BranchSelector
-              branches={branches!}
-              activeRef={compareRef}
-              isKnownBranch={compareKnown}
-              onSelect={onDiffSelect}
-              title="Change or exit branch diff"
-              flexible
-            />
+            <div className="flex min-w-0 max-w-[11rem] shrink">
+              <BranchSelector
+                branches={branches!}
+                activeRef={compareRef}
+                isKnownBranch={compareKnown}
+                onSelect={onDiffSelect}
+                title="Change or exit branch diff"
+                flexible
+              />
+            </div>
           </>
         ) : (
           <>
@@ -1270,11 +1344,13 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
               // copy/raw actions as the normal file view, and the diff settings.
               <>
                 {(() => { const { Icon, className } = getFileIcon(selectedDiffFile.path.split('/').pop() ?? selectedDiffFile.path); return <Icon className={`w-4 h-4 shrink-0 ${className}`} /> })()}
-                <span className="text-sm font-mono text-gray-700 dark:text-gray-300 truncate">
-                  {selectedDiffFile.change_type === 'renamed' && selectedDiffFile.old_path
-                    ? <>{selectedDiffFile.old_path} <span className="text-gray-400 dark:text-gray-500">→</span> {selectedDiffFile.path}</>
-                    : selectedDiffFile.path}
-                </span>
+                {selectedDiffFile.change_type === 'renamed' && selectedDiffFile.old_path ? (
+                  <span className="text-sm font-mono text-gray-700 dark:text-gray-300 truncate">
+                    {selectedDiffFile.old_path} <span className="text-gray-400 dark:text-gray-500">→</span> {selectedDiffFile.path}
+                  </span>
+                ) : (
+                  <FilePathLabel path={selectedDiffFile.path} />
+                )}
                 <ChangeTypeIcon type={selectedDiffFile.change_type} />
                 <div className="flex items-center gap-2 shrink-0 ml-auto">
                   {!selectedDiffFile.binary && (selectedDiffFile.additions > 0 || selectedDiffFile.deletions > 0) && (
@@ -1298,7 +1374,7 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
                 : file?.symlink
                   ? <FileSymlink className={`w-4 h-4 shrink-0 ${settings.showIcons ? 'text-teal-500' : 'text-gray-400'}`} />
                   : (() => { const { Icon, className } = getFileIcon(viewPath.split('/').pop() ?? viewPath); return <Icon className={`w-4 h-4 shrink-0 ${settings.showIcons ? className : 'text-gray-400'}`} /> })()}
-              <span className="text-sm font-mono text-gray-700 dark:text-gray-300 truncate">{viewPath}</span>
+              <FilePathLabel path={viewPath} />
               {file?.symlink && file.symlink_target && (
                 <span className="flex items-center gap-1 text-xs font-mono text-gray-400 dark:text-gray-500 truncate shrink min-w-0" title={`Symlink → ${file.symlink_target}`}>
                   <CornerDownRight className="w-3.5 h-3.5 shrink-0" />

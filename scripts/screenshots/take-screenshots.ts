@@ -540,6 +540,11 @@ try {
       // view captured by repository-mobile below.
       { name: 'repository-mobile-list', path: '/project/sim-project/repository', viewport: { width: 390, height: 844 }, viewportOnly: true },
       { name: 'repository-mobile', path: '/project/sim-project/repository/main/internal/server/server.go', viewport: { width: 390, height: 844 }, viewportOnly: true },
+      // A branch diff drilled into on a phone: enter diff mode from the header
+      // (compare → pick branch), then tap a changed file to open its diff
+      // full-screen, with the back chevron + file path in the header. Documents
+      // the phone drill-down for the compare view.
+      { name: 'repository-mobile-diff', path: '/project/sim-project/repository', viewport: { width: 390, height: 844 }, viewportOnly: true, clicks: ['button:has(svg.lucide-git-compare)', 'button:has-text("hydra/add-line-numbers")', 'button:has-text("lines.go")'] },
       { name: 'repository-mobile-landscape', path: '/project/sim-project/repository/main/internal/server/server.go', viewport: { width: 844, height: 390 }, viewportTag: 'mobile-landscape', viewportOnly: true },
       { name: 'repository-tablet', path: '/project/sim-project/repository/main/internal/server/server.go', viewport: { width: 834, height: 1112 }, viewportTag: 'tablet', viewportOnly: true },
       { name: 'repository-tablet-landscape', path: '/project/sim-project/repository/main/internal/server/server.go', viewport: { width: 1112, height: 834 }, viewportTag: 'tablet-landscape', viewportOnly: true },
