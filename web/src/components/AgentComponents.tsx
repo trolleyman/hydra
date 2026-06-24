@@ -108,6 +108,24 @@ function stableIndex(s: string, n: number): number {
   return Math.abs(h) % n
 }
 
+// isSuggestedNextMessage decides whether a finished/waiting agent's last message
+// reads as a suggested next message — a single terse instruction you could send
+// straight back ("run it", "verify it works by running the app") — rather than a
+// closing summary/report. There's no explicit signal from the agent for this, so
+// it's a heuristic on the message shape: a single short line with no mid-message
+// sentence break. A multi-sentence or long message (e.g. "The spike is built,
+// tested, and committed. Here's what landed…") is treated as a report, not a
+// suggestion.
+function isSuggestedNextMessage(msg: string): boolean {
+  const t = msg.trim()
+  if (!t || t.length > 80) return false
+  if (t.includes('\n')) return false
+  // A sentence break mid-message (". ", "! ", "? ") marks prose/a report rather
+  // than one terse instruction.
+  if (/[.!?]\s/.test(t)) return false
+  return true
+}
+
 // agentStatusDetail returns the richer progress line to show under an active
 // agent: its live activity while running, otherwise its most recent message
 // (e.g. the question it's waiting on, or its closing summary). When neither is
@@ -123,10 +141,16 @@ export function agentStatusDetail(agent: AgentResponse): string {
   if (status.status === 'running' || status.status === 'starting' || status.status === 'pending') {
     return status.activity || `${RUNNING_PLACEHOLDERS[stableIndex(agent.id, RUNNING_PLACEHOLDERS.length)]}…`
   }
-  // The most recent message reads as a suggested next message (e.g. a question
-  // it's waiting on, or a short "run it"), so prefix it with a `❯ ` caret to
-  // mark it as a suggestion and set it apart from the live activity line.
-  if (status.last_message) return `❯ ${status.last_message}`
+  // The most recent message is shown as-is, except when it reads as a *suggested
+  // next message* — something you could send straight back to the agent (e.g.
+  // "run it", "spin up the app so I can see it") — in which case it's marked with
+  // a `❯ ` caret. A longer / multi-sentence message is the agent's closing
+  // summary or report, not a suggestion, so it stays plain.
+  if (status.last_message) {
+    return isSuggestedNextMessage(status.last_message)
+      ? `❯ ${status.last_message}`
+      : status.last_message
+  }
   // No message yet — keep the line meaningful for the active states.
   switch (status.status) {
     case 'building': return 'Building…'
