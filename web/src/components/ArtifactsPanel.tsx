@@ -1,10 +1,14 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
+import { Terminal } from '@xterm/xterm'
+import { FitAddon } from '@xterm/addon-fit'
+import '@xterm/xterm/css/xterm.css'
 import { api } from '../stores/apiClient'
 import type { ArtifactSet, ArtifactFile, ArtifactLogLine } from '../api'
 import { LoaderCircle, Image as ImageIcon, ImageOff, ChevronDown, ChevronRight, TriangleAlert, RefreshCw, ScrollText, RotateCcw, Search, X } from 'lucide-react'
 import { InfoTooltip } from './InfoTooltip'
 import { loadArtifactPrefs, saveArtifactPrefs, loadTagFilter, saveTagFilter, defaultTagFilter, isDefaultTagFilter, ARTIFACT_CHANGE_CATEGORY as CHANGE_CATEGORY, type ArtifactTagFilter } from '../lib/artifactPrefs'
 import { stripAnsi } from '../lib/ansi'
+import { useIsDark } from '../lib/theme'
 import {
   checkerStyle, IMG_CLASS, OVERLAY_CLASS, TAG_CLASS, makeAuxOpen,
   DIFF_COLOR, DIFF_PIXEL_THRESHOLD,
@@ -943,71 +947,129 @@ export function ElapsedTime({ startedAt }: { startedAt: number }) {
   return <>{formatElapsed(Math.max(0, Math.floor(now / 1000 - startedAt)))}</>
 }
 
-// LogView shows the live stdout+stderr log of a generating artifact: scrollable,
-// monospaced, auto-following the tail unless the user scrolls up, with stderr
-// lines in red.
-export function LogView({ log, emptyText = 'Waiting for output…' }: { log: ArtifactLogLine[]; emptyText?: string }) {
-  const ref = useRef<HTMLDivElement>(null)
-  const contentRef = useRef<HTMLDivElement>(null)
-  // Whether to keep pinned to the bottom; flips off only when the user scrolls up.
-  const stick = useRef(true)
-  // Last observed scrollTop, so onScroll can tell a user scroll-up (which should
-  // unstick) from content growth pushing the gap open (which must not).
-  const lastTop = useRef(0)
+// LOG_SCROLLBACK bounds the xterm scrollback for build logs. The live in-memory
+// log is capped at maxLogLines (5000) backend-side; persisted logs can run longer,
+// so we keep a generous buffer — vastly cheaper than the old one-DOM-node-per-line.
+const LOG_SCROLLBACK = 20000
 
-  // Re-pin to the tail whenever the content's height changes — a new line OR an
-  // existing line wrapping/reflowing (e.g. when the vertical scrollbar appears and
-  // narrows the box). Keying off height instead of log.length catches the reflow
-  // cases that don't add a line, so streaming never drifts off the bottom.
+// xterm palettes for the build-log terminal, matching the light/dark log box. The
+// background is transparent so the container's tailwind background (including the
+// dark pane's alpha) shows through; only the foreground + ANSI palette differ.
+// stderr is tinted via SGR red, so `red` must read well on each background.
+const LOG_THEME_DARK = {
+  background: 'rgba(0,0,0,0)',
+  foreground: '#d1d5db', // gray-300
+  black: '#1f2937', red: '#f87171', green: '#4ade80', yellow: '#fbbf24',
+  blue: '#60a5fa', magenta: '#c084fc', cyan: '#22d3ee', white: '#f9fafb',
+  brightBlack: '#6b7280', brightRed: '#fca5a5', brightGreen: '#86efac',
+  brightYellow: '#fde68a', brightBlue: '#93c5fd', brightMagenta: '#d8b4fe',
+  brightCyan: '#67e8f9', brightWhite: '#ffffff',
+}
+const LOG_THEME_LIGHT = {
+  background: 'rgba(0,0,0,0)',
+  foreground: '#4b5563', // gray-600
+  black: '#374151', red: '#dc2626', green: '#16a34a', yellow: '#ca8a04',
+  blue: '#2563eb', magenta: '#9333ea', cyan: '#0891b2', white: '#6b7280',
+  brightBlack: '#6b7280', brightRed: '#ef4444', brightGreen: '#22c55e',
+  brightYellow: '#eab308', brightBlue: '#3b82f6', brightMagenta: '#a855f7',
+  brightCyan: '#06b6d4', brightWhite: '#111827',
+}
+
+// formatLogLine turns one captured line into the bytes written to xterm. The
+// line's own ANSI is preserved (rendered as real colour); a stderr line with no
+// colour of its own is tinted red, with a trailing reset so it can't bleed into
+// the next line.
+function formatLogLine(l: ArtifactLogLine): string {
+  return (l.stream as string) === 'stderr' ? `\x1b[31m${l.text}\x1b[0m\r\n` : `${l.text}\r\n`
+}
+
+// LogView streams a build's stdout+stderr into an xterm.js terminal. It writes
+// only newly-arrived lines to the terminal instead of re-rendering the whole log
+// through React, renders ANSI colour natively, and auto-follows the tail unless
+// the user scrolls up — xterm handles all three, so a very large, fast-updating
+// log stays smooth where the old map-the-whole-array approach lagged badly.
+export function LogView({ log, emptyText = 'Waiting for output…' }: { log: ArtifactLogLine[]; emptyText?: string }) {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const termRef = useRef<Terminal | null>(null)
+  const fitRef = useRef<FitAddon | null>(null)
+  // How many lines we've written to the terminal, plus the identity of the last
+  // one. A live append keeps the same line objects for its prefix, so a matching
+  // tail means "extended — write only the new lines"; any mismatch (the array
+  // shrank, or was swapped wholesale, e.g. the settled log replacing the live one)
+  // means "redraw from scratch".
+  const writtenRef = useRef(0)
+  const lastLineRef = useRef<ArtifactLogLine | null>(null)
+  const isDark = useIsDark()
+
+  // Create the terminal once: read-only (no stdin, hidden cursor), fit to its
+  // container and refit on resize so wrapping tracks the box width.
   useEffect(() => {
-    const content = contentRef.current
-    if (!content) return
-    const ro = new ResizeObserver(() => {
-      const el = ref.current
-      if (el && stick.current) {
-        el.scrollTop = el.scrollHeight
-        lastTop.current = el.scrollTop
-      }
+    const el = containerRef.current
+    if (!el) return
+    const term = new Terminal({
+      disableStdin: true,
+      cursorBlink: false,
+      fontSize: 11,
+      fontFamily: '"Cascadia Code", "Fira Code", "JetBrains Mono", Consolas, "Courier New", monospace',
+      scrollback: LOG_SCROLLBACK,
+      convertEol: true,
+      allowTransparency: true,
+      theme: document.documentElement.classList.contains('dark') ? LOG_THEME_DARK : LOG_THEME_LIGHT,
+      allowProposedApi: true,
     })
-    ro.observe(content)
-    return () => ro.disconnect()
+    const fit = new FitAddon()
+    term.loadAddon(fit)
+    term.open(el)
+    try { fit.fit() } catch { /* not laid out yet; the ResizeObserver refits */ }
+    term.write('\x1b[?25l') // hide the cursor — this is a read-only view
+    termRef.current = term
+    fitRef.current = fit
+
+    const ro = new ResizeObserver(() => { try { fit.fit() } catch { /* mid-layout */ } })
+    ro.observe(el)
+    return () => {
+      ro.disconnect()
+      term.dispose()
+      termRef.current = null
+      fitRef.current = null
+      writtenRef.current = 0
+      lastLineRef.current = null
+    }
   }, [])
 
-  const onScroll = () => {
-    const el = ref.current
-    if (!el) return
-    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 24
-    // Re-stick once the user scrolls back to the bottom. Only an actual upward
-    // scroll unsticks — content growth widens the gap without moving scrollTop, so
-    // a queued scroll event seeing that gap must NOT unclamp, or a fast log (or a
-    // single wrapped line) would unstick itself from the tail.
-    if (atBottom) stick.current = true
-    else if (el.scrollTop < lastTop.current - 1) stick.current = false
-    lastTop.current = el.scrollTop
-  }
+  // Recolour live when the theme flips.
+  useEffect(() => {
+    const term = termRef.current
+    if (term) term.options.theme = isDark ? LOG_THEME_DARK : LOG_THEME_LIGHT
+  }, [isDark])
+
+  // Write newly-arrived lines, or redraw from scratch on a wholesale change.
+  useEffect(() => {
+    const term = termRef.current
+    if (!term) return
+    const written = writtenRef.current
+    const isExtension = written === 0 || (log.length >= written && log[written - 1] === lastLineRef.current)
+    let from = written
+    if (!isExtension) {
+      term.reset()
+      term.write('\x1b[?25l')
+      from = 0
+    }
+    if (log.length > from) {
+      term.write(log.slice(from).map(formatLogLine).join(''))
+    }
+    writtenRef.current = log.length
+    lastLineRef.current = log.length > 0 ? log[log.length - 1] : null
+  }, [log])
 
   return (
-    <div
-      ref={ref}
-      onScroll={onScroll}
-      className="h-64 max-h-64 overflow-auto rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/60 p-2 font-mono text-[11px] leading-relaxed"
-    >
-      <div ref={contentRef}>
-        {log.length === 0 ? (
-          <div className="text-gray-400 dark:text-gray-500">{emptyText}</div>
-        ) : (
-          log.map((l, i) => (
-            <div
-              key={i}
-              className={`whitespace-pre-wrap break-words ${
-                (l.stream as string) === 'stderr' ? 'text-red-600 dark:text-red-400' : 'text-gray-600 dark:text-gray-300'
-              }`}
-            >
-              {stripAnsi(l.text)}
-            </div>
-          ))
-        )}
-      </div>
+    <div className="relative h-64 max-h-64 rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/60 p-2">
+      <div ref={containerRef} className="h-full w-full" />
+      {log.length === 0 && (
+        <div className="pointer-events-none absolute inset-0 flex items-start p-2 font-mono text-[11px] text-gray-400 dark:text-gray-500">
+          {emptyText}
+        </div>
+      )}
     </div>
   )
 }
