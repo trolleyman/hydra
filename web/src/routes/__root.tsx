@@ -1141,55 +1141,51 @@ function RootLayout() {
             )}
           </div>
 
-          {/* Sidebar footer — uptime + Claude usage on top; the dev restart
-              (icon) and Settings (right-aligned icon) below. The theme switcher
-              now lives inside Settings, not here. */}
-          <div className="border-t border-gray-200 dark:border-gray-700 px-2 py-2 flex flex-col gap-2 shrink-0">
-            <div className="px-1 flex items-center justify-between gap-2 min-h-[1rem]">
-              {spawnedAt.current !== null ? (
-                <Tooltip content={`Spawned at ${new Date(spawnedAt.current).toUTCString()}`}>
-                  <span className="text-[11px] text-gray-400 dark:text-gray-500 cursor-default truncate">
-                    {formatUptime(Date.now() - spawnedAt.current)}
-                  </span>
-                </Tooltip>
-              ) : (
-                <span />
-              )}
+          {/* Sidebar footer — a single row: restart (icon) + uptime on the left,
+              Claude usage + Settings (icon) on the right. The theme switcher now
+              lives inside Settings, not here. */}
+          <div className="border-t border-gray-200 dark:border-gray-700 px-2 py-2 flex items-center gap-1.5 shrink-0">
+            {development && (
+              <Tooltip content={restarting ? 'Restarting…' : 'Rebuild and restart the server'}>
+                <button
+                  onClick={handleRestart}
+                  disabled={restarting}
+                  aria-label="Restart server"
+                  className="shrink-0 w-7 h-7 flex items-center justify-center rounded-lg bg-amber-100 dark:bg-amber-900 text-amber-700 dark:text-amber-300 hover:bg-amber-200 dark:hover:bg-amber-800 disabled:opacity-50 transition-colors cursor-pointer"
+                >
+                  <RotateCw className={`w-4 h-4 ${restarting ? 'animate-spin' : ''}`} />
+                </button>
+              </Tooltip>
+            )}
+            {spawnedAt.current !== null && (
+              <Tooltip content={`Spawned at ${new Date(spawnedAt.current).toUTCString()}`}>
+                <span className="text-[11px] text-gray-400 dark:text-gray-500 cursor-default truncate">
+                  {formatUptime(Date.now() - spawnedAt.current)}
+                </span>
+              </Tooltip>
+            )}
+            <div className="ml-auto shrink-0">
               <ClaudeUsageIndicator />
             </div>
-            <div className="flex items-center gap-2">
-              {development && (
-                <Tooltip content={restarting ? 'Restarting…' : 'Rebuild and restart the server'}>
-                  <button
-                    onClick={handleRestart}
-                    disabled={restarting}
-                    aria-label="Restart server"
-                    className="w-8 h-8 flex items-center justify-center rounded-lg bg-amber-100 dark:bg-amber-900 text-amber-700 dark:text-amber-300 hover:bg-amber-200 dark:hover:bg-amber-800 disabled:opacity-50 transition-colors cursor-pointer"
-                  >
-                    <RotateCw className={`w-4 h-4 ${restarting ? 'animate-spin' : ''}`} />
-                  </button>
+            {(() => {
+              const settingsActive = /\/settings(\/|$)/.test(location.pathname)
+              const cls = settingsActive
+                ? 'shrink-0 w-7 h-7 flex items-center justify-center rounded-lg cursor-pointer bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-300'
+                : 'shrink-0 w-7 h-7 flex items-center justify-center rounded-lg cursor-pointer text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors'
+              return (
+                <Tooltip content="Settings">
+                  {currentProjectId ? (
+                    <Link to="/project/$projectId/settings" params={{ projectId: currentProjectId }} aria-label="Settings" className={cls}>
+                      <Settings className="w-5 h-5 shrink-0" />
+                    </Link>
+                  ) : (
+                    <Link to="/settings" aria-label="Settings" className={cls}>
+                      <Settings className="w-5 h-5 shrink-0" />
+                    </Link>
+                  )}
                 </Tooltip>
-              )}
-              {(() => {
-                const settingsActive = /\/settings(\/|$)/.test(location.pathname)
-                const cls = settingsActive
-                  ? 'ml-auto w-8 h-8 flex items-center justify-center rounded-lg cursor-pointer bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-300'
-                  : 'ml-auto w-8 h-8 flex items-center justify-center rounded-lg cursor-pointer text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors'
-                return (
-                  <Tooltip content="Settings">
-                    {currentProjectId ? (
-                      <Link to="/project/$projectId/settings" params={{ projectId: currentProjectId }} aria-label="Settings" className={cls}>
-                        <Settings className="w-5 h-5 shrink-0" />
-                      </Link>
-                    ) : (
-                      <Link to="/settings" aria-label="Settings" className={cls}>
-                        <Settings className="w-5 h-5 shrink-0" />
-                      </Link>
-                    )}
-                  </Tooltip>
-                )
-              })()}
-            </div>
+              )
+            })()}
           </div>
 
           {/* Resize handle (lg+ only — the overlay sidebar has a fixed width) */}

@@ -127,7 +127,7 @@ export function ClaudeUsageIndicator() {
         onClick={() => fetchUsage(true)}
         disabled={loading}
         aria-label="Claude usage"
-        className="flex items-start gap-3 text-xs px-1.5 py-0.5 rounded-md cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors disabled:opacity-60"
+        className="flex items-start gap-2 text-xs px-1 py-0.5 rounded-md cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors disabled:opacity-60"
       >
         {countdown && <UsageStat label="reset" value={countdown} />}
         {session != null && <UsageStat label="4h" value={`${Math.round(session)}%`} valueClass={usedColor(session)} />}
