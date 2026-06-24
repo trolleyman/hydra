@@ -50,6 +50,10 @@ function formatSpawnedAgo(ms: number): string {
   return `Spawned ${days} days ago`
 }
 
+// Modifier glyph for the project-switch shortcut hint (Ctrl/Cmd + `).
+const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/i.test(navigator.platform)
+const SWITCH_PROJECT_HINT = `${isMac ? '⌘' : 'Ctrl'} + \` to switch · ⇧ for previous`
+
 const SIDEBAR_MIN = 160
 const SIDEBAR_MAX = 600
 const SIDEBAR_DEFAULT = 264
@@ -370,6 +374,12 @@ function ProjectDropdown({
               </form>
             )}
           </div>
+
+          {projects.length > 1 && (
+            <div className="px-3 py-1.5 border-t border-gray-100 dark:border-gray-700 text-[10px] text-gray-400 dark:text-gray-500 font-mono">
+              {SWITCH_PROJECT_HINT}
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -508,6 +518,19 @@ function RootLayout() {
     }
     navigateToProjectView(projectId, view)
   }, [navigate, navigateToProjectView])
+
+  // Switch the active project: record the selection and route to its remembered
+  // view (or stay on settings if that's the current page). Shared by the header
+  // dropdown and the Ctrl/Cmd+` keyboard shortcut so both behave identically.
+  const selectProject = useCallback((id: string) => {
+    setSelectedProjectId(id)
+    const isOnSettings = window.location.pathname.endsWith('/settings')
+    if (isOnSettings) {
+      navigate({ to: '/project/$projectId/settings', params: { projectId: id } })
+      return
+    }
+    restoreProjectView(id, loadProjectView(id))
+  }, [setSelectedProjectId, navigate, restoreProjectView])
 
   const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
     const saved = readLocal(StorageKeys.sidebarWidth)
@@ -830,6 +853,29 @@ function RootLayout() {
   // repository, switching project view) so it never lingers over the content.
   useEffect(() => { setMobileSidebarOpen(false) }, [location.pathname])
 
+  // Keyboard "alt-tab" between projects: Ctrl/Cmd+` cycles to the next project,
+  // add Shift to go to the previous one (mirrors the macOS "cycle windows within
+  // an app" idiom — Alt+Tab and Ctrl/Cmd+Tab are owned by the OS/browser). We
+  // match on e.code === 'Backquote' so it's keyboard-layout independent (Shift+`
+  // produces '~' on US layouts). With no project selected, the first press lands
+  // on the first (or last, reversed) project.
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.code !== 'Backquote' || e.altKey) return
+      if (!(e.ctrlKey || e.metaKey)) return
+      if (projects.length < 2) return
+      e.preventDefault()
+      const dir = e.shiftKey ? -1 : 1
+      const idx = projects.findIndex((p) => p.id === currentProjectId)
+      const next = idx === -1
+        ? (dir === 1 ? 0 : projects.length - 1)
+        : (idx + dir + projects.length) % projects.length
+      selectProject(projects[next].id)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [projects, currentProjectId, selectProject])
+
   async function handleRestart() {
     setRestarting(true)
     try {
@@ -988,19 +1034,11 @@ function RootLayout() {
         <ProjectDropdown
           projects={projects}
           selectedId={currentProjectId}
-          onSelect={(id) => {
-            setSelectedProjectId(id)
-            const isOnSettings = window.location.pathname.endsWith('/settings')
-            if (isOnSettings) {
-              navigate({ to: '/project/$projectId/settings', params: { projectId: id } })
-              return
-            }
-            // Restore the view (agent / repository / project) last open in the
-            // project we're switching to, so it comes back rather than the bare
-            // project page — but don't auto-open a remembered agent that has
-            // unread changes (see restoreProjectView).
-            restoreProjectView(id, loadProjectView(id))
-          }}
+          // Restore the view (agent / repository / project) last open in the
+          // project we're switching to, so it comes back rather than the bare
+          // project page — but don't auto-open a remembered agent that has
+          // unread changes (see restoreProjectView).
+          onSelect={selectProject}
           onDeselect={() => {
             setSelectedProjectId(null)
             navigate({ to: '/' })
