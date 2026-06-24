@@ -709,7 +709,11 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onCo
   }, [highlightSource, lang])
   const { highlightedOld, highlightedNew } = syncHighlight ?? deferredHighlight
 
-  const segments = useMemo(() => (fullLines ? buildSegments(fullLines, reveal) : null), [fullLines, reveal])
+  // A file with whole-file content but no additions/deletions (e.g. a pure
+  // rename) has nothing to collapse — render its lines plainly rather than
+  // folding the entire body behind one expander.
+  const noChanges = file.additions === 0 && file.deletions === 0
+  const segments = useMemo(() => (fullLines && !noChanges ? buildSegments(fullLines, reveal) : null), [fullLines, reveal, noChanges])
 
   const setRegion = useCallback((id: string, patch: { top?: number; bot?: number }) => {
     setReveal((prev) => {
@@ -782,6 +786,9 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onCo
                 Load diff
               </button>
             </div>
+          ) : fullLines && noChanges ? (
+            // Whole file, unchanged (e.g. a pure rename): show every line plainly.
+            <div className="overflow-hidden">{renderLines(fullLines, 'full')}</div>
           ) : !file.hunks || file.hunks.length === 0 ? (
             <div className="px-4 py-3 text-xs text-gray-400 dark:text-gray-500 italic">No changes</div>
           ) : segments ? (

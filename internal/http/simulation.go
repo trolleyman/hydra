@@ -1537,12 +1537,29 @@ func (s *SimulationServer) GetRepositoryDiff(w http.ResponseWriter, r *http.Requ
 			},
 		},
 		{
+			// A pure rename (no content change): the whole file is shipped as
+			// all-context lines so the viewer shows it normally rather than a bare
+			// "No changes" — see GetRepositoryDiff's rename synthesis.
 			Path:       "internal/heads/renderer.go",
 			OldPath:    ptr("internal/heads/render.go"),
 			ChangeType: api.DiffFileChangeTypeRenamed,
 			Additions:  0,
 			Deletions:  0,
-			Hunks:      []api.DiffHunk{},
+			Expanded:   ptr(true),
+			Hunks: []api.DiffHunk{
+				{
+					Header:   "@@ -1,5 +1,5 @@",
+					OldStart: 1,
+					NewStart: 1,
+					Lines: []api.DiffLine{
+						{Type: api.Context, Content: "package heads", OldLineNum: ptr(1), NewLineNum: ptr(1)},
+						{Type: api.Context, Content: "", OldLineNum: ptr(2), NewLineNum: ptr(2)},
+						{Type: api.Context, Content: "// Renderer draws heads.", OldLineNum: ptr(3), NewLineNum: ptr(3)},
+						{Type: api.Context, Content: "func Renderer() {}", OldLineNum: ptr(4), NewLineNum: ptr(4)},
+						{Type: api.Context, Content: "", OldLineNum: ptr(5), NewLineNum: ptr(5)},
+					},
+				},
+			},
 		},
 	}
 	if params.Path != nil && *params.Path != "" {

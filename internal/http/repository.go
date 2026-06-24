@@ -3,6 +3,7 @@ package http
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"net/http"
 	"path"
 	"sort"
@@ -187,11 +188,56 @@ func (s *Server) GetRepositoryDiff(_ context.Context, request api.GetRepositoryD
 		return nil, errtrace.Wrap(err)
 	}
 
+	// A pure rename produces no hunks; ship the renamed file's full content as
+	// all-context lines so the viewer shows the file normally rather than a bare
+	// "No changes".
+	for i := range diffFiles {
+		if diffFiles[i].ChangeType == "renamed" && len(diffFiles[i].Hunks) == 0 {
+			fillRenameContext(projectRoot, headRef, &diffFiles[i])
+		}
+	}
+
 	return api.GetRepositoryDiff200JSONResponse(api.DiffResponse{
 		Files:   apiDiffFiles(diffFiles),
 		BaseRef: baseRef,
 		HeadRef: headRef,
 	}), nil
+}
+
+// maxRenameContextLines caps how big a pure-renamed file we expand inline (it
+// matches the client's whole-file render guard); larger files stay "No changes".
+const maxRenameContextLines = 6000
+
+// fillRenameContext loads a pure-renamed file's content at ref and rewrites its
+// (empty) hunks into a single whole-file hunk of context lines, marking it
+// expanded so the viewer renders every line. Binary or oversized files are left
+// untouched.
+func fillRenameContext(projectRoot, ref string, f *git.DiffFile) {
+	data, err := git.ShowFile(projectRoot, ref, f.Path)
+	if err != nil || data == nil {
+		return
+	}
+	if looksBinary(data) {
+		f.Binary = true
+		return
+	}
+	lines := strings.Split(strings.TrimSuffix(string(data), "\n"), "\n")
+	if len(lines) > maxRenameContextLines {
+		return
+	}
+	dlines := make([]git.DiffLine, len(lines))
+	for i, l := range lines {
+		n := i + 1
+		old, nw := n, n
+		dlines[i] = git.DiffLine{Type: git.DiffLineContext, Content: l, OldLineNum: &old, NewLineNum: &nw}
+	}
+	f.Hunks = []git.DiffHunk{{
+		Header:   fmt.Sprintf("@@ -1,%d +1,%d @@", len(lines), len(lines)),
+		OldStart: 1,
+		NewStart: 1,
+		Lines:    dlines,
+	}}
+	f.Expanded = true
 }
 
 // GetRepositoryBranches lists the local branches of the project's repository,
