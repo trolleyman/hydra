@@ -414,7 +414,7 @@ function PathName({ path }: { path: string }) {
 // header and the sidebar file list): green [+] added, red [-] removed, cyan [→]
 // renamed. Modified files (the common case) get no badge. The change type is
 // conveyed by this coloured icon rather than by colouring the filename text.
-function ChangeTypeIcon({ type, className = 'w-3.5 h-3.5' }: { type: string; className?: string }) {
+export function ChangeTypeIcon({ type, className = 'w-3.5 h-3.5' }: { type: string; className?: string }) {
   const cls = `${className} shrink-0`
   switch (type) {
     case 'added':
@@ -623,7 +623,7 @@ function EdgeExpander({ seg, onStep, onAll }: {
   )
 }
 
-export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onComment, isCollapsed, onToggleCollapse, onExpand, isHidden, onShow, currentContext, readOnly }: {
+export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onComment, isCollapsed, onToggleCollapse, onExpand, isHidden, onShow, currentContext, readOnly, headless }: {
   file: DiffFile
   sideBySide: boolean
   fileRef?: (el: HTMLDivElement | null) => void
@@ -637,6 +637,11 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onCo
   // When true, the line-level "add comment" affordances are hidden — used by the
   // repository diff view, which has no agent to send comments to.
   readOnly?: boolean
+  // When true, the per-file card chrome (border + collapsible header) is dropped
+  // and the diff body is rendered bare and always-expanded — used by the
+  // repository diff's one-file-at-a-time view, whose surrounding header already
+  // carries the filename, change type, line counts and copy/raw actions.
+  headless?: boolean
 }) {
   const lang = getLanguage(file.path)
 
@@ -727,7 +732,8 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onCo
   )
 
   return (
-    <div ref={fileRef} className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden mb-4 bg-white dark:bg-gray-900 shadow-sm">
+    <div ref={fileRef} className={headless ? '' : 'border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden mb-4 bg-white dark:bg-gray-900 shadow-sm'}>
+      {!headless && (
       <div
         className="flex items-center gap-2 px-3 py-1.5 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 z-20 cursor-pointer"
         onClick={() => onToggleCollapse(file.path)}
@@ -761,7 +767,8 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onCo
           </div>
         )}
       </div>
-      {!isCollapsed && (
+      )}
+      {(headless || !isCollapsed) && (
         <>
           {file.binary ? (
             <div className="px-4 py-3 text-xs text-gray-400 dark:text-gray-500 italic">Binary file changed</div>

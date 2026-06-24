@@ -17,7 +17,7 @@ import { canCopyImages, copyImageToClipboard } from '../lib/clipboard'
 import { BranchSelector } from './BranchSelector'
 import { RepositoryArtifactsView } from './RepositoryArtifactsView'
 import { Tooltip } from './Tooltip'
-import { FileDiff, FileRow } from '../DiffViewer'
+import { FileDiff, FileRow, ChangeTypeIcon } from '../DiffViewer'
 
 // ── File tree model ────────────────────────────────────────────────────────────
 
@@ -707,6 +707,9 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
   // the sidebar selects it. Defaults to (and is kept valid against) the diff's
   // first file.
   const [selectedDiffPath, setSelectedDiffPath] = useState<string | null>(null)
+  // The selected diff file's blob metadata (content), fetched so the single-file
+  // header can offer the same copy/raw actions as the normal file view.
+  const [diffFileMeta, setDiffFileMeta] = useState<RepositoryFileResponse | null>(null)
   // Per-file revealed context (for the network-expand fallback on huge files),
   // and refs to each rendered diff card so the sidebar list can scroll to one.
   const [fileContexts, setFileContexts] = useState<Map<string, number>>(new Map())
@@ -788,6 +791,14 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
   // drives the compare selector's known-branch vs short-SHA rendering.
   const compareKnown = !!branches?.some((b) => b.name === compareRef)
   const diffActive = !!compareRef && compareRef !== activeRef
+
+  // The single-file view's selected file, plus the ref its blob lives at: the
+  // compare (head) side for added/modified/renamed files, the base side for a
+  // deleted file (which no longer exists at head).
+  const selectedDiffFile = (diffActive && diffSettings.singleFile && selectedDiffPath)
+    ? diff?.files.find((f) => f.path === selectedDiffPath) ?? null
+    : null
+  const selectedDiffFileRef = selectedDiffFile && selectedDiffFile.change_type === 'deleted' ? activeRef : compareRef
 
   // The path to display: the URL path, or the repo's default (README) on the
   // bare /repository URL.
@@ -901,6 +912,20 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
     if (!diff || diff.files.length === 0) { setSelectedDiffPath(null); return }
     setSelectedDiffPath((prev) => (prev && diff.files.some((f) => f.path === prev)) ? prev : diff.files[0].path)
   }, [diff])
+
+  // Fetch the selected file's blob so the single-file header's copy/raw buttons
+  // (reused FileActions) act on its actual content. Binary files still get a
+  // working "Raw" link; the copy button hides itself when there's no content.
+  useEffect(() => {
+    if (!selectedDiffFile) { setDiffFileMeta(null); return }
+    let cancelled = false
+    setDiffFileMeta(null)
+    api.default.getRepositoryFile(projectId, selectedDiffFile.path, selectedDiffFileRef)
+      .then((r) => { if (!cancelled) setDiffFileMeta(r) })
+      .catch(() => { if (!cancelled) setDiffFileMeta(null) })
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, selectedDiffFile?.path, selectedDiffFileRef])
 
   // Selection from the diff branch selector. Picking the base branch (the one
   // being browsed) or the currently-diffed branch again exits diff mode; any
@@ -1060,18 +1085,29 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
       <div className="flex-1 flex flex-col min-w-0">
         <div className="px-4 py-2 border-b border-gray-200 dark:border-gray-700 flex items-center gap-2 shrink-0">
           {diffActive ? (
-            <>
-              <GitCompare className="w-4 h-4 shrink-0 text-blue-500" />
-              <span className="text-sm font-mono text-gray-700 dark:text-gray-300 flex items-center gap-1.5 min-w-0">
-                <span className="truncate">{activeRef}</span>
-                <MoveRight className="w-3.5 h-3.5 shrink-0 text-gray-400" />
-                <span className="truncate">{compareRef}</span>
-              </span>
-              {diffLoading && <LoaderCircle className="w-3.5 h-3.5 shrink-0 animate-spin text-gray-400" />}
-              <div className="ml-auto">
-                <DiffSettingsPopup settings={diffSettings} onChange={setDiffSettings} />
-              </div>
-            </>
+            selectedDiffFile ? (
+              // One-file-at-a-time view: a file-view-style header for the selected
+              // file — icon, path, change-type tag, line counts, then the same
+              // copy/raw actions as the normal file view, and the diff settings.
+              <>
+                {(() => { const { Icon, className } = getFileIcon(selectedDiffFile.path.split('/').pop() ?? selectedDiffFile.path); return <Icon className={`w-4 h-4 shrink-0 ${className}`} /> })()}
+                <span className="text-sm font-mono text-gray-700 dark:text-gray-300 truncate">{selectedDiffFile.path}</span>
+                <ChangeTypeIcon type={selectedDiffFile.change_type} />
+                <div className="flex items-center gap-2 shrink-0 ml-auto">
+                  {!selectedDiffFile.binary && (selectedDiffFile.additions > 0 || selectedDiffFile.deletions > 0) && (
+                    <div className="flex items-center gap-1.5">
+                      {selectedDiffFile.additions > 0 && <span className="text-xs text-green-600 dark:text-green-400 font-medium">+{selectedDiffFile.additions}</span>}
+                      {selectedDiffFile.deletions > 0 && <span className="text-xs text-red-600 dark:text-red-400 font-medium">−{selectedDiffFile.deletions}</span>}
+                    </div>
+                  )}
+                  {diffFileMeta && <FileActions file={diffFileMeta} projectId={projectId} refStr={selectedDiffFileRef} />}
+                  <DiffSettingsPopup settings={diffSettings} onChange={setDiffSettings} />
+                </div>
+              </>
+            ) : (
+              // All-files view (or while loading): just the diff settings popup.
+              <div className="ml-auto"><DiffSettingsPopup settings={diffSettings} onChange={setDiffSettings} /></div>
+            )
           ) : viewPath ? (
             <>
               {artifactScript
@@ -1135,6 +1171,7 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
                     currentContext={fileContexts.get(f.path) ?? 3}
                     fileRef={getDiffFileRef(f.path)}
                     readOnly
+                    headless={diffSettings.singleFile}
                   />
                 ))}
               </div>
