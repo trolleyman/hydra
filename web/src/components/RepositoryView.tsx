@@ -7,8 +7,8 @@ import { ApiError } from '../api'
 import type { RepositoryFileResponse, RepositoryBranch, DiffResponse } from '../api'
 import { StorageKeys, readLocal, writeLocal } from '../lib/storage'
 import {
-  ChevronDown, ChevronRight, File as FileIcon, Folder, FolderOpen, FileText,
-  GitBranch, GitCompare, MoveRight,
+  ChevronDown, ChevronRight, ChevronLeft, File as FileIcon, Folder, FolderOpen, FileText,
+  GitBranch, GitCompare, MoveRight, PanelLeftOpen,
   LoaderCircle, Settings, FileQuestion, FileSymlink, CornerDownRight,
   Images, Camera, Copy, Check, X, ExternalLink,
 } from 'lucide-react'
@@ -17,7 +17,7 @@ import { canCopyImages, copyImageToClipboard } from '../lib/clipboard'
 import { BranchSelector } from './BranchSelector'
 import { RepositoryArtifactsView } from './RepositoryArtifactsView'
 import { Tooltip } from './Tooltip'
-import { PageTopBar } from './PageTopBar'
+import { useSidebarStore } from '../lib/sidebar'
 import {
   FileDiff, FileRow, ChangeTypeIcon, TreeNodeView,
   buildFileTree, compactTree as compactDiffTree, getGroupedFiles, type FileView,
@@ -709,6 +709,12 @@ function parseSplat(splat: string, branches: RepositoryBranch[] | null): { ref: 
 export function RepositoryView({ projectId, splat }: { projectId: string; splat: string }) {
   const navigate = useNavigate()
 
+  // The app's nav sidebar collapse state — the repository header hosts the
+  // "show sidebar" toggle while it's hidden (small screens), matching the agent
+  // page's top bar.
+  const collapsed = useSidebarStore((s) => s.collapsed)
+  const toggleSidebar = useSidebarStore((s) => s.toggle)
+
   const [branches, setBranches] = useState<RepositoryBranch[] | null>(null)
   const [currentBranch, setCurrentBranch] = useState('')
 
@@ -733,6 +739,12 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
   // component state, deliberately kept out of the URL so the existing ref/path
   // splat parser stays untouched.
   const [compareRef, setCompareRef] = useState('')
+  // On small screens the tree/changed-files list and the file/diff content are
+  // shown one at a time as a drill-down (full-screen list → tap a file → full
+  // file, with a back button). For normal browsing the URL path is the source of
+  // truth; in diff mode it's this ephemeral flag, set when a changed file is
+  // tapped and cleared by the back button (and whenever the diff target changes).
+  const [mobileDiffOpen, setMobileDiffOpen] = useState(false)
   const [diff, setDiff] = useState<DiffResponse | null>(null)
   const [diffLoading, setDiffLoading] = useState(false)
   const [diffError, setDiffError] = useState<string | null>(null)
@@ -853,6 +865,15 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
   const compareKnown = !!branches?.some((b) => b.name === compareRef)
   const diffActive = !!compareRef && compareRef !== activeRef
 
+  // Whether the content pane (not the list) is the active view on small screens.
+  // For normal browsing that's an explicitly-selected path (the bare /repository
+  // URL resolves to the README via defaultPath, but on a phone we still want to
+  // land on the file list — so key off parsed.path, not viewPath). In diff mode
+  // it's the drill-down flag. At/above the md breakpoint both panes show side by
+  // side (the tree column fits comfortably from tablet widths up) and this only
+  // decides which one fills the screen below it.
+  const mobileContentOpen = diffActive ? mobileDiffOpen : !!parsed.path
+
   // The single-file view's selected file, plus the ref its blob lives at: the
   // compare (head) side for added/modified/renamed files, the base side for a
   // deleted file (which no longer exists at head).
@@ -967,6 +988,10 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [diffActive, projectId, activeRef, compareRef, diffSettings.ignoreWhitespace])
 
+  // Leaving diff mode or retargeting the comparison drops the mobile drill-down
+  // back to the changed-files list (so it never opens onto a stale selection).
+  useEffect(() => { setMobileDiffOpen(false) }, [diffActive, compareRef])
+
   // Keep the one-file-at-a-time selection pointed at a file that still exists in
   // the current diff, defaulting to the first.
   useEffect(() => {
@@ -1031,9 +1056,13 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
   }
 
   // Clicking a changed file in the sidebar: in one-file mode it selects the file,
-  // otherwise it scrolls the stacked diff to that file's card.
-  const onDiffFileClick = (path: string) =>
-    diffSettings.singleFile ? setSelectedDiffPath(path) : scrollToDiffFile(path)
+  // otherwise it scrolls the stacked diff to that file's card. On small screens
+  // it also drills into the full-screen content view (the back button returns).
+  const onDiffFileClick = (path: string) => {
+    if (diffSettings.singleFile) setSelectedDiffPath(path)
+    else scrollToDiffFile(path)
+    setMobileDiffOpen(true)
+  }
   const activeDiffPath = diffSettings.singleFile ? selectedDiffPath : null
   const toggleDiffFolder = useCallback((path: string) => {
     setCollapsedDiffFolders((prev) => {
@@ -1061,63 +1090,88 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
   const selectFile = (path: string) => goTo(refStr, path)
   const selectBranch = (name: string) => goTo(name, parsed.path)
 
+  // Small-screen "back": pop the full-screen content view back to the list. In
+  // diff mode that's the drill-down flag; when browsing it clears the file path
+  // (to the ref root) so the tree fills the screen again.
+  const backToList = () => {
+    if (diffActive) setMobileDiffOpen(false)
+    else goTo(refStr, null)
+  }
+
   return (
     <div className="flex-1 flex flex-col min-w-0 min-h-0">
-      {/* Hosts the show-sidebar toggle + a "Repository" label while the sidebar
-          is collapsed (renders nothing when it's open). */}
-      <PageTopBar title="Repository" />
+      {/* Top header — the page title plus the branch picker and the compare /
+          diff selector, all hoisted up here (they used to live in the sidebar's
+          own header row). On small screens it's hidden once a file/diff is open:
+          the content pane's own header takes over there, with a back button. */}
+      <div
+        className={`shrink-0 h-12 px-3 sm:px-4 items-center gap-2 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 ${mobileContentOpen ? 'hidden md:flex' : 'flex'}`}
+      >
+        {collapsed && (
+          <Tooltip content="Show sidebar (Ctrl+.)">
+            <button
+              type="button"
+              aria-label="Show sidebar"
+              onClick={toggleSidebar}
+              className="shrink-0 -ml-1 w-9 h-9 flex items-center justify-center rounded-lg text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors cursor-pointer"
+            >
+              <PanelLeftOpen className="w-5 h-5" />
+            </button>
+          </Tooltip>
+        )}
+        <span className="shrink-0 text-sm font-semibold text-gray-800 dark:text-gray-100">Repository</span>
+        {branches !== null ? (
+          <BranchSelector
+            branches={branches}
+            activeRef={activeRef}
+            isKnownBranch={isKnownBranch}
+            onSelect={selectBranch}
+            flexible={diffActive}
+          />
+        ) : (
+          <div className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-gray-400">
+            <GitBranch className="w-3.5 h-3.5" /> …
+          </div>
+        )}
+        {diffActive ? (
+          // Diffing: "base → head", names clipped to fit.
+          <>
+            <MoveRight className="w-4 h-4 text-gray-400 dark:text-gray-500 shrink-0" />
+            <BranchSelector
+              branches={branches!}
+              activeRef={compareRef}
+              isKnownBranch={compareKnown}
+              onSelect={onDiffSelect}
+              title="Change or exit branch diff"
+              flexible
+            />
+          </>
+        ) : (
+          <>
+            {branches !== null && branches.length > 0 && (
+              <BranchSelector
+                branches={branches}
+                activeRef=""
+                isKnownBranch={false}
+                onSelect={onDiffSelect}
+                title="Compare with another branch"
+                triggerIcon={GitCompare}
+              />
+            )}
+            <span className="ml-auto text-xs text-gray-400 dark:text-gray-500 shrink-0">
+              {files.length} {files.length === 1 ? 'file' : 'files'}
+            </span>
+          </>
+        )}
+      </div>
       <div className="flex-1 flex min-w-0 min-h-0 bg-white dark:bg-gray-900">
-      {/* File / folder picker */}
+      {/* File / folder picker. Full-width on phones (the content pane is a
+          separate full-screen view there); a fixed, resizable column at md+. */}
       <div
         ref={sidebarRef}
         style={{ width: sidebarWidth }}
-        className="relative shrink-0 border-r border-gray-200 dark:border-gray-700 flex flex-col bg-gray-50 dark:bg-gray-800/40"
+        className={`relative shrink-0 border-r border-gray-200 dark:border-gray-700 flex-col bg-gray-50 dark:bg-gray-800/40 max-md:!w-full ${mobileContentOpen ? 'hidden md:flex' : 'flex'}`}
       >
-        <div className="px-3 py-2 border-b border-gray-200 dark:border-gray-700 flex items-center gap-2 min-w-0">
-          {branches !== null ? (
-            <BranchSelector
-              branches={branches}
-              activeRef={activeRef}
-              isKnownBranch={isKnownBranch}
-              onSelect={selectBranch}
-              flexible={diffActive}
-            />
-          ) : (
-            <div className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-gray-400">
-              <GitBranch className="w-3.5 h-3.5" /> …
-            </div>
-          )}
-          {diffActive ? (
-            // Diffing: just "base → head", names clipped to fit, no counters.
-            <>
-              <MoveRight className="w-4 h-4 text-gray-400 dark:text-gray-500 shrink-0" />
-              <BranchSelector
-                branches={branches!}
-                activeRef={compareRef}
-                isKnownBranch={compareKnown}
-                onSelect={onDiffSelect}
-                title="Change or exit branch diff"
-                flexible
-              />
-            </>
-          ) : (
-            <>
-              {branches !== null && branches.length > 0 && (
-                <BranchSelector
-                  branches={branches}
-                  activeRef=""
-                  isKnownBranch={false}
-                  onSelect={onDiffSelect}
-                  title="Compare with another branch"
-                  triggerIcon={GitCompare}
-                />
-              )}
-              <span className="ml-auto text-xs text-gray-400 dark:text-gray-500 shrink-0">
-                {files.length} {files.length === 1 ? 'file' : 'files'}
-              </span>
-            </>
-          )}
-        </div>
         <div className="flex-1 overflow-y-auto py-1">
           {diffActive ? (
             diffLoading && !diff ? (
@@ -1187,16 +1241,28 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
           )}
         </div>
 
-        {/* Resize handle (PLAN.md #41i) */}
+        {/* Resize handle (PLAN.md #41i) — md+ only; the sidebar is full-width on
+            phones. */}
         <div
           onMouseDown={startResizing}
-          className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-500/30 transition-colors z-20"
+          className="hidden md:block absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-500/30 transition-colors z-20"
         />
       </div>
 
-      {/* Picked file */}
-      <div className="flex-1 flex flex-col min-w-0">
-        <div className="px-4 py-2 border-b border-gray-200 dark:border-gray-700 flex items-center gap-2 shrink-0">
+      {/* Picked file. A full-screen view on phones (its header doubles as the
+          page header there, with a back button); the right pane at md+. */}
+      <div className={`flex-1 flex-col min-w-0 ${mobileContentOpen ? 'flex' : 'hidden md:flex'}`}>
+        <div className="px-3 sm:px-4 py-2 border-b border-gray-200 dark:border-gray-700 flex items-center gap-2 shrink-0">
+          <Tooltip content="Back to files">
+            <button
+              type="button"
+              aria-label="Back to files"
+              onClick={backToList}
+              className="md:hidden shrink-0 -ml-1 w-8 h-8 flex items-center justify-center rounded-lg text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors cursor-pointer"
+            >
+              <ChevronLeft className="w-5 h-5" />
+            </button>
+          </Tooltip>
           {diffActive ? (
             selectedDiffFile ? (
               // One-file-at-a-time view: a file-view-style header for the selected

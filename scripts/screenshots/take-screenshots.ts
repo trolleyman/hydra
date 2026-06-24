@@ -534,6 +534,11 @@ try {
       // how its tree + content layout reflows. Named repository-* so they tag
       // section::repository; the viewport:: axis is set explicitly for the
       // landscape/tablet sizes (width alone can't tell those apart).
+      // The bare repository URL at phone width: below the lg breakpoint the tree
+      // is a full-screen file list (the "Repository" header carries the branch +
+      // compare pickers), and tapping a file drills into the full-screen file
+      // view captured by repository-mobile below.
+      { name: 'repository-mobile-list', path: '/project/sim-project/repository', viewport: { width: 390, height: 844 }, viewportOnly: true },
       { name: 'repository-mobile', path: '/project/sim-project/repository/main/internal/server/server.go', viewport: { width: 390, height: 844 }, viewportOnly: true },
       { name: 'repository-mobile-landscape', path: '/project/sim-project/repository/main/internal/server/server.go', viewport: { width: 844, height: 390 }, viewportTag: 'mobile-landscape', viewportOnly: true },
       { name: 'repository-tablet', path: '/project/sim-project/repository/main/internal/server/server.go', viewport: { width: 834, height: 1112 }, viewportTag: 'tablet', viewportOnly: true },
