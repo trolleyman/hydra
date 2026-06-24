@@ -41,6 +41,11 @@ export const StorageKeys = {
   // Repository branch-compare diff: show one file at a time (default) vs all
   // files stacked. Absent = the one-file default; 'false' = the multi-file view.
   repoDiffSingleFile: 'hydra-repo-diff-single-file',
+  // Repository branch-compare diff: how the changed-files sidebar is laid out —
+  // 'tree' (default, folders), 'flat', or 'grouped'. Mirrors the agent diff
+  // viewer's own file-view setting, but kept under a separate key so the two
+  // views can be configured independently.
+  repoDiffFileView: 'hydra-repo-diff-file-view',
 
   // IDs of projects the user has reviewed and trusted (JSON array of strings).
   // Trust is a client-only concern: a project's .hydra/config.toml can run code,

@@ -1462,9 +1462,9 @@ function BehindBaseButton({ diff, agent, projectId, onUpdated }: {
 
 // ── File tree helpers ─────────────────────────────────────────────────────────
 
-type FileView = 'tree' | 'flat' | 'grouped'
+export type FileView = 'tree' | 'flat' | 'grouped'
 
-interface TreeNode {
+export interface TreeNode {
   name: string
   path: string
   type: 'file' | 'dir'
@@ -1472,7 +1472,7 @@ interface TreeNode {
   file?: DiffFile
 }
 
-function buildFileTree(files: DiffFile[]): TreeNode[] {
+export function buildFileTree(files: DiffFile[]): TreeNode[] {
   const root: TreeNode[] = []
   for (const file of files) {
     const parts = file.path.split('/')
@@ -1500,7 +1500,7 @@ function buildFileTree(files: DiffFile[]): TreeNode[] {
 // child) stops the chain. The merged node keeps the deepest folder's `path`
 // (stable, unique → safe as a collapse-state / React key) and joins the segment
 // names for display.
-function compactTree(nodes: TreeNode[]): TreeNode[] {
+export function compactTree(nodes: TreeNode[]): TreeNode[] {
   return nodes.map((node) => {
     if (node.type !== 'dir') return node
     let current = node
@@ -1513,7 +1513,7 @@ function compactTree(nodes: TreeNode[]): TreeNode[] {
   })
 }
 
-function getGroupedFiles(files: DiffFile[]): [string, DiffFile[]][] {
+export function getGroupedFiles(files: DiffFile[]): [string, DiffFile[]][] {
   const map = new Map<string, DiffFile[]>()
   for (const file of files) {
     const parts = file.path.split('/')
@@ -1551,7 +1551,7 @@ export function FileRow({ file, isActive, onClick, indent = 0 }: {
   )
 }
 
-function TreeNodeView({ node, depth, collapsedFolders, toggleFolder, onFileClick, activeFilePath }: {
+export function TreeNodeView({ node, depth, collapsedFolders, toggleFolder, onFileClick, activeFilePath }: {
   node: TreeNode; depth: number; collapsedFolders: Set<string>
   toggleFolder: (path: string) => void; onFileClick: (path: string) => void; activeFilePath: string | null
 }) {
