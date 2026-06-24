@@ -1288,11 +1288,13 @@ func simArtifactSets(id string) []api.ArtifactSet {
 					Name:       "overview.png",
 					ChangeType: api.ArtifactFileChangeTypeAdded,
 					RightUrl:   ptr(simSVG("Overview (after)", "#15803d", 360, 220)),
+					Width:      ptr(360), Height: ptr(220),
 				},
 				{
 					Name:       "metrics.png",
 					ChangeType: api.ArtifactFileChangeTypeAdded,
 					RightUrl:   ptr(simSVG("Metrics (after)", "#15803d", 240, 320)),
+					Width:      ptr(240), Height: ptr(320),
 				},
 			},
 		},
@@ -1344,6 +1346,7 @@ func simReadyChangedSet() api.ArtifactSet {
 				Tags:       artTags("theme::light", "viewport::desktop"),
 				LeftUrl:    ptr(simSVGUI("Home", false, "#64748b", "Draft", 360, 220)),
 				RightUrl:   ptr(simSVGUI("Home", false, "#16a34a", "Live", 360, 220)),
+				Width:      ptr(360), Height: ptr(220),
 			},
 			{
 				Name:       "home-dark.png",
@@ -1351,6 +1354,7 @@ func simReadyChangedSet() api.ArtifactSet {
 				Tags:       artTags("theme::dark", "viewport::desktop"),
 				LeftUrl:    ptr(simSVGUI("Home", true, "#64748b", "Draft", 360, 220)),
 				RightUrl:   ptr(simSVGUI("Home", true, "#16a34a", "Live", 360, 220)),
+				Width:      ptr(360), Height: ptr(220),
 			},
 			{
 				Name:       "login-phone.png",
@@ -1358,6 +1362,7 @@ func simReadyChangedSet() api.ArtifactSet {
 				Tags:       artTags("theme::light", "viewport::phone"),
 				LeftUrl:    ptr(simSVGUI("Login", false, "#64748b", "Draft", 240, 480)),
 				RightUrl:   ptr(simSVGUI("Login", false, "#16a34a", "Live", 240, 480)),
+				Width:      ptr(240), Height: ptr(480),
 			},
 			{
 				Name:       "profile-phone-dark.png",
@@ -1365,12 +1370,14 @@ func simReadyChangedSet() api.ArtifactSet {
 				Tags:       artTags("theme::dark", "viewport::phone"),
 				LeftUrl:    ptr(simSVGUI("Profile", true, "#64748b", "Draft", 240, 480)),
 				RightUrl:   ptr(simSVGUI("Profile", true, "#16a34a", "Live", 240, 480)),
+				Width:      ptr(240), Height: ptr(480),
 			},
 			{
 				Name:       "settings-phone.png",
 				ChangeType: api.ArtifactFileChangeTypeAdded,
 				Tags:       artTags("theme::dark", "viewport::phone", "new"),
 				RightUrl:   ptr(simSVG("Settings (new)", "#15803d", 240, 480)),
+				Width:      ptr(240), Height: ptr(480),
 			},
 			// A .webm artifact: the frontend routes it to the video diff viewer
 			// (synchronized before/after playback + per-frame difference) rather
@@ -1381,6 +1388,7 @@ func simReadyChangedSet() api.ArtifactSet {
 				Tags:       artTags("theme::dark", "viewport::desktop"),
 				LeftUrl:    ptr(simWebM(simVideoBefore)),
 				RightUrl:   ptr(simWebM(simVideoAfter)),
+				Width:      ptr(280), Height: ptr(150),
 			},
 			{
 				Name:       "about.png",
@@ -1388,6 +1396,7 @@ func simReadyChangedSet() api.ArtifactSet {
 				Tags:       artTags("theme::light", "viewport::desktop"),
 				LeftUrl:    ptr(simSVG("About", "#334155", 360, 220)),
 				RightUrl:   ptr(simSVG("About", "#334155", 360, 220)),
+				Width:      ptr(360), Height: ptr(220),
 			},
 		},
 	}
@@ -1861,9 +1870,9 @@ func (s *SimulationServer) GetRepositoryArtifact(w http.ResponseWriter, r *http.
 			Status: api.RepositoryArtifactResponseStatusReady,
 			LogUrl: &logURL,
 			Files: []api.RepositoryArtifactFile{
-				{Name: "home.png", Url: ptr(simSVG("home", "#15803d", 360, 220)), Tags: artTags("theme::light", "viewport::desktop")},
-				{Name: "home-dark.png", Url: ptr(simSVG("home dark", "#166534", 360, 220)), Tags: artTags("theme::dark", "viewport::desktop")},
-				{Name: "login-phone.png", Url: ptr(simSVG("login", "#1d4ed8", 150, 300)), Tags: artTags("theme::light", "viewport::phone")},
+				{Name: "home.png", Url: ptr(simSVG("home", "#15803d", 360, 220)), Tags: artTags("theme::light", "viewport::desktop"), Width: ptr(360), Height: ptr(220)},
+				{Name: "home-dark.png", Url: ptr(simSVG("home dark", "#166534", 360, 220)), Tags: artTags("theme::dark", "viewport::desktop"), Width: ptr(360), Height: ptr(220)},
+				{Name: "login-phone.png", Url: ptr(simSVG("login", "#1d4ed8", 150, 300)), Tags: artTags("theme::light", "viewport::phone"), Width: ptr(150), Height: ptr(300)},
 			},
 		})
 	case "components":
