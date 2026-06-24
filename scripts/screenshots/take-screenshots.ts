@@ -345,6 +345,21 @@ try {
       // prev/next arrows, "1 / 2" counter). Also shows the numbered-paste naming
       // (image1.png) on the chips behind. Rendered on the full-page spawn form.
       { name: 'spawn-image-lightbox', path: '/project/sim-project/', attachImages: ['web/public/android-chrome-512x512.png', 'web/public/apple-touch-icon.png'] },
+      // The full-page spawn form's base-branch selector, opened so the capture
+      // documents the dropdown: the current branch (HEAD), agent branches, and
+      // other branches. Verifies the menu renders below the "from" trigger and
+      // escapes the spawn card's `overflow-hidden` clipping (the BranchSelector
+      // portal fix) — the bug where the dropdown didn't show when selected. The
+      // branch list comes from the simulation server. Scoped to .max-w-4xl so it
+      // opens the full-page form's selector, not the compact sidebar box's (both
+      // carry the same title).
+      { name: 'spawn-branch-selector', path: '/project/sim-project/', click: '.max-w-4xl button[title^="Base branch"]' },
+      // The same dropdown opened from the compact spawn box in the top-left
+      // sidebar (the mini form rendered on every project page). Scoped to the
+      // `aside` so the click lands on the sidebar selector rather than the
+      // full-page form's (both carry the same "Base branch" title). Verifies the
+      // portal-rendered menu escapes the narrow sidebar's clipping too.
+      { name: 'spawn-branch-selector-mini', path: '/project/sim-project/', click: 'aside button[title^="Base branch"]' },
       // The inline-markdown rendering (the markdown-pass feature). The spawn box
       // is seeded with a markdown draft so the textarea overlay shows live
       // highlighting — `code`, *italic*, **bold**, and a long inline-code

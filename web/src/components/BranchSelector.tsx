@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, type ComponentType } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type ComponentType } from 'react'
+import { createPortal } from 'react-dom'
 import { Bot, GitBranch, ChevronDown, Check } from 'lucide-react'
 import type { RepositoryBranch } from '../api'
 
@@ -34,11 +35,56 @@ export function BranchSelector({
 }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
+  // The dropdown is rendered in a portal so it escapes ancestors that clip
+  // overflow (notably the spawn box's `overflow-hidden` card, which otherwise
+  // swallows it entirely). We position it manually from the trigger's rect and
+  // flip it above the trigger when there isn't room below.
+  const menuRef = useRef<HTMLDivElement>(null)
+  const [coords, setCoords] = useState<{ left: number; top?: number; bottom?: number } | null>(null)
+
+  const MENU_WIDTH = 256 // w-64
+  const MENU_MAX_HEIGHT = 320 // max-h-80
+  const GAP = 4 // mt-1
+
+  const updateCoords = () => {
+    const el = ref.current
+    if (!el) return
+    const rect = el.getBoundingClientRect()
+    const padding = 8
+    let left = rect.left
+    if (left + MENU_WIDTH > window.innerWidth - padding) {
+      left = Math.max(padding, window.innerWidth - MENU_WIDTH - padding)
+    }
+    const spaceBelow = window.innerHeight - rect.bottom
+    // Flip above when there isn't room below but there is above.
+    if (spaceBelow < MENU_MAX_HEIGHT && rect.top > spaceBelow) {
+      setCoords({ left, bottom: window.innerHeight - rect.top + GAP })
+    } else {
+      setCoords({ left, top: rect.bottom + GAP })
+    }
+  }
+
+  useLayoutEffect(() => {
+    // No reset on close: the menu is only rendered while `open` (see the
+    // `open && coords` guard below), and updateCoords recomputes fresh
+    // coordinates synchronously — before paint — on the next open.
+    if (!open) return
+    updateCoords()
+    window.addEventListener('scroll', updateCoords, true)
+    window.addEventListener('resize', updateCoords)
+    return () => {
+      window.removeEventListener('scroll', updateCoords, true)
+      window.removeEventListener('resize', updateCoords)
+    }
+  }, [open])
 
   useEffect(() => {
     if (!open) return
     function handleClick(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+      const target = e.target as Node
+      if (ref.current?.contains(target)) return
+      if (menuRef.current?.contains(target)) return
+      setOpen(false)
     }
     document.addEventListener('mousedown', handleClick)
     return () => document.removeEventListener('mousedown', handleClick)
@@ -96,8 +142,12 @@ export function BranchSelector({
         </button>
       )}
 
-      {open && (
-        <div className="absolute left-0 top-full mt-1 w-64 max-h-80 overflow-y-auto bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50 py-1">
+      {open && coords && createPortal(
+        <div
+          ref={menuRef}
+          className="fixed w-64 max-h-80 overflow-y-auto bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-[9999] py-1"
+          style={{ left: coords.left, top: coords.top, bottom: coords.bottom }}
+        >
           {!isKnownBranch && activeRef && (
             <div className="px-2.5 py-1.5 text-xs text-gray-500 dark:text-gray-400 border-b border-gray-100 dark:border-gray-700 flex items-center gap-2">
               <Check className="w-3.5 h-3.5 shrink-0 text-blue-500" />
@@ -125,7 +175,8 @@ export function BranchSelector({
               {otherBranches.map((b) => <Row key={b.name} b={b} />)}
             </>
           )}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   )
