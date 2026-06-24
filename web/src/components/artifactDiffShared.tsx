@@ -17,14 +17,15 @@ export const checkerStyle: React.CSSProperties = {
 // overlay to fill the same box so the two align pixel-for-pixel; TAG_CLASS is the
 // small "Before"/"After"/"Highlight" corner label.
 //
-// Sizing is WIDTH-driven: the media fills the width of its masonry column (w-full)
-// and its height follows the natural aspect ratio (h-auto). The column width — set
-// by the column-count slider and the draggable column dividers (see MasonryGrid) —
-// is the single sizing knob, so a short-but-wide screenshot no longer balloons to a
-// large width just because the height was the constraint.
+// Sizing is WIDTH-driven: the media fills the width of its masonry tile (w-full)
+// and its height follows the natural aspect ratio (h-auto). The tile's width — how
+// many columns it spans, chosen automatically from its aspect ratio or overridden by
+// dragging its edge (see MasonryGrid) — is the single sizing knob, so a short-but-
+// wide screenshot no longer balloons to a large width just because the height was
+// the constraint.
 export const IMG_CLASS = 'block w-full h-auto rounded-md border border-gray-200 dark:border-gray-700'
 export const OVERLAY_CLASS = 'absolute inset-0 w-full h-full object-contain rounded-md border border-gray-200 dark:border-gray-700'
-export const TAG_CLASS = 'absolute top-1 z-10 text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-black/55 text-white pointer-events-none'
+export const TAG_CLASS = 'absolute top-1 z-10 text-[10px] font-semibold tracking-wide px-1.5 py-0.5 rounded bg-black/55 text-white pointer-events-none'
 
 // Open media in a new tab. In side-by-side mode the media is a target=_blank link,
 // so left-click already does this; the overlay modes bind left-click to comparison

@@ -247,8 +247,9 @@ try {
       // spinner to appear.
       holdRequest?: string
       // Seeds the diff viewer's image-diff comparison mode ('hydra-diff-image-mode')
-      // before the app boots, so the artifacts panel renders before/after pairs in
-      // the chosen mode. Only meaningful on the artifacts (agent-1) page.
+      // before the app boots, so before/after image pairs render in the chosen
+      // mode. Used by the artifacts (agent-1) page and by the repository
+      // branch-compare diff's in-tree image shots (which read the same setting).
       imageDiffMode?: 'side-by-side' | 'ab' | 'slider' | 'onion'
       // Seeds the repository diff's one-file-at-a-time preference
       // ('hydra-repo-diff-single-file') before boot. Omit for the default
@@ -469,6 +470,25 @@ try {
         path: '/project/sim-project/repository',
         clicks: ['button:has(svg.lucide-git-compare)', 'button:has-text("hydra/add-line-numbers")', 'button:has-text("renderer.go")'],
       },
+      // A modified in-tree image: the diff viewer renders the artifacts panel's
+      // before/after image differ (ImageDiffView) in place of "Binary file
+      // changed", obeying the shared image-diff mode setting. Click the changed
+      // image in the file list; side-by-side mode shows before and after at once
+      // (the sim serves a different picture per ref, so they visibly differ).
+      {
+        name: 'repository-diff-image',
+        path: '/project/sim-project/repository',
+        clicks: ['button:has(svg.lucide-git-compare)', 'button:has-text("hydra/add-line-numbers")', 'button:has-text("diff-banner.png")'],
+        imageDiffMode: 'side-by-side',
+      },
+      // An added in-tree image: only the after side exists, so the differ shows
+      // the new image beside a "No image" before placeholder.
+      {
+        name: 'repository-diff-image-added',
+        path: '/project/sim-project/repository',
+        clicks: ['button:has(svg.lucide-git-compare)', 'button:has-text("hydra/add-line-numbers")', 'button:has-text("diff-added.png")'],
+        imageDiffMode: 'side-by-side',
+      },
       // The diff branch selector reopened while diffing: the dropdown checkmarks
       // the current compare branch, and clicking that branch (or the base) exits
       // diff mode. Enters diff mode first (open dropdown, pick a branch), then
@@ -502,18 +522,6 @@ try {
       // the ref and renders its outputs single-sided. The deep link auto-expands
       // .hydra → artifacts; "screenshots" returns a ready set of mock images.
       { name: 'repository-artifacts', path: '/project/sim-project/repository/main/.hydra/artifacts/screenshots', settleMasonry: true },
-      // The repository artifacts view's settings popup, opened from the gear in its
-      // header (the masonry "Columns" slider) — the repo browser's analogue of the
-      // diff viewer's diff-settings shot. The gear carries aria-label "Artifact
-      // layout settings", distinct from the file browser's own settings gear.
-      // viewportOnly so the focus is the header + popup, not the grid below.
-      {
-        name: 'repository-artifacts-settings',
-        path: '/project/sim-project/repository/main/.hydra/artifacts/screenshots',
-        viewportOnly: true,
-        click: 'button[aria-label="Artifact layout settings"]',
-        settleMasonry: true,
-      },
       // The repository browser (a file open) at the small viewports, to document
       // how its tree + content layout reflows. Named repository-* so they tag
       // section::repository; the viewport:: axis is set explicitly for the
@@ -591,8 +599,8 @@ try {
       { name: 'nested-folders', path: '/project/sim-project/agent/agent-3', scrollTo: 'Changes' },
       // The diff viewer's settings popup, opened from the gear in the sticky
       // "Changes" toolbar: the file-list view modes, the diff options (side-by-
-      // side, ignore whitespace, one-file-at-a-time), the image-diff comparison
-      // modes, and the artifact masonry "Columns" slider. The nav's settings icon
+      // side, ignore whitespace, one-file-at-a-time) and the image-diff comparison
+      // modes. The nav's settings icon
       // is a <Link> (an <a>), so `button:has(svg.lucide-settings)` uniquely hits
       // the diff gear. scrollTo pins the toolbar to the top; viewport capture (the
       // popup is absolutely positioned just below the gear).
@@ -856,10 +864,10 @@ try {
       // button): full-width content + the floating reveal button.
       { name: 'desktop-collapsed', path: '/project/sim-project/agent/agent-1', click: 'button[aria-label="Hide sidebar"]', viewportOnly: true },
       // The artifacts panel at phone width: the masonry clamps to a single column
-      // (no column is allowed below MIN_COL_PX), the per-column dividers drop out,
-      // and the width-driven before/after tiles stack full-width — so the panel
-      // stays usable on a narrow screen. showArtifacts expands the card so the
-      // images (not just the collapsed header) are captured.
+      // (no column is allowed below BASE_MIN_COL_PX), so every tile's aspect-ratio
+      // span collapses and the width-driven before/after tiles stack full-width —
+      // the panel stays usable on a narrow screen. showArtifacts expands the card so
+      // the images (not just the collapsed header) are captured.
       { name: 'mobile-artifacts', path: '/project/sim-project/agent/agent-1', viewport: { width: 390, height: 844 }, scrollTo: 'Changes', imageDiffMode: 'ab', showArtifacts: true },
     ]
     // Capture every page in both themes. Dark mode has its own colours (e.g.
@@ -1107,11 +1115,13 @@ try {
           )
           await settle(page)
         }
-        if (pg.imageDiffMode || pg.expandArtifact) {
+        if ((pg.imageDiffMode || pg.expandArtifact) && pg.path.includes('/agent/')) {
           // The artifacts panel populates from a WebSocket snapshot, which (unlike
           // the HTTP fetches the goto's networkidle waits for) isn't tracked by
           // networkidle. Wait for the always-present "screenshots" card so the
-          // panel is rendered before we capture it.
+          // panel is rendered before we capture it. Only the agent diff page has an
+          // artifacts panel — the repository branch-compare diff also reads
+          // imageDiffMode (for in-tree image diffs) but has no such card to wait on.
           await page.waitForFunction(() =>
             Array.from(document.querySelectorAll('button')).some((b) => b.textContent?.includes('screenshots')),
           )

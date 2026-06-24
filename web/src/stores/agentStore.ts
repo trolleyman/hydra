@@ -14,6 +14,12 @@ const OPTIMISTIC_TTL_MS = 8_000
 // flickering back on the next poll.
 const READ_TTL_MS = 8_000
 
+// Lifetime of an optimistic "marked unread" override. Mirror of READ_TTL_MS: it
+// bridges the gap until a poll confirms the backend has raised the unread flag,
+// so the "mark as unread" command lights the dot instantly without it flickering
+// back off on an intervening poll.
+const UNREAD_TTL_MS = 8_000
+
 interface OptimisticOverride {
   status: AgentStatus
   until: number
@@ -40,6 +46,10 @@ interface AgentState {
   // agent's has_unread_changes is forced false on top of polled data so the
   // unread dot clears instantly on open.
   readUntil: Record<string, number>
+  // Per-agent optimistic "unread" expiries keyed by agent id. While active, the
+  // agent's has_unread_changes is forced true on top of polled data so the
+  // unread dot lights instantly when the user marks the agent unread.
+  unreadUntil: Record<string, number>
   setAgents: (agents: AgentResponse[]) => void
   setLoading: (loading: boolean) => void
   setError: (error: string | null) => void
@@ -67,6 +77,9 @@ interface AgentState {
   // Optimistically clear an agent's unread dot for a short window (paired with a
   // markAgentRead API call by the caller).
   markRead: (id: string) => void
+  // Optimistically light an agent's unread dot for a short window (paired with a
+  // markAgentUnread API call by the caller).
+  markUnread: (id: string) => void
 }
 
 // applyOptimistic overlays the still-active overrides onto a fresh agent list,
@@ -111,6 +124,26 @@ function applyReadOverrides(
   return { agents: merged, readUntil: next }
 }
 
+// applyUnreadOverrides forces has_unread_changes true on agents with an active
+// "marked unread" override, dropping overrides that have expired or that the
+// backend has already caught up to (it already reports the agent as unread).
+function applyUnreadOverrides(
+  agents: AgentResponse[],
+  unreadUntil: Record<string, number>,
+): { agents: AgentResponse[]; unreadUntil: Record<string, number> } {
+  const now = Date.now()
+  const next: Record<string, number> = {}
+  const merged = agents.map((a) => {
+    const until = unreadUntil[a.id]
+    if (!until || until <= now) return a
+    // Backend already raised the flag — the override served its purpose.
+    if (a.has_unread_changes) return a
+    next[a.id] = until
+    return { ...a, has_unread_changes: true }
+  })
+  return { agents: merged, unreadUntil: next }
+}
+
 export const useAgentStore = create<AgentState>((set) => ({
   agents: [],
   loading: true,
@@ -120,10 +153,12 @@ export const useAgentStore = create<AgentState>((set) => ({
   archivedHasMore: true,
   optimistic: {},
   readUntil: {},
+  unreadUntil: {},
   setAgents: (agents) => set((state) => {
     const opt = applyOptimistic(agents, state.optimistic)
     const rd = applyReadOverrides(opt.agents, state.readUntil)
-    return { agents: rd.agents, optimistic: opt.optimistic, readUntil: rd.readUntil, loading: false, error: null }
+    const ur = applyUnreadOverrides(rd.agents, state.unreadUntil)
+    return { agents: ur.agents, optimistic: opt.optimistic, readUntil: rd.readUntil, unreadUntil: ur.unreadUntil, loading: false, error: null }
   }),
   setLoading: (loading) => set({ loading }),
   setError: (error) => set({ error, loading: false }),
@@ -134,6 +169,7 @@ export const useAgentStore = create<AgentState>((set) => ({
     agents: state.agents.filter((a) => a.id !== id),
     optimistic: Object.fromEntries(Object.entries(state.optimistic).filter(([k]) => k !== id)),
     readUntil: Object.fromEntries(Object.entries(state.readUntil).filter(([k]) => k !== id)),
+    unreadUntil: Object.fromEntries(Object.entries(state.unreadUntil).filter(([k]) => k !== id)),
   })),
   updateAgent: (agent) => set((state) => ({
     agents: state.agents.map((a) => a.id === agent.id ? agent : a)
@@ -189,6 +225,14 @@ export const useAgentStore = create<AgentState>((set) => ({
   }),
   markRead: (id: string) => set((state) => ({
     readUntil: { ...state.readUntil, [id]: Date.now() + READ_TTL_MS },
+    // Drop any opposing "unread" override so it can't force the dot back on.
+    unreadUntil: Object.fromEntries(Object.entries(state.unreadUntil).filter(([k]) => k !== id)),
     agents: state.agents.map((a) => (a.id === id ? { ...a, has_unread_changes: false } : a)),
+  })),
+  markUnread: (id: string) => set((state) => ({
+    unreadUntil: { ...state.unreadUntil, [id]: Date.now() + UNREAD_TTL_MS },
+    // Drop any opposing "read" override so it can't force the dot back off.
+    readUntil: Object.fromEntries(Object.entries(state.readUntil).filter(([k]) => k !== id)),
+    agents: state.agents.map((a) => (a.id === id ? { ...a, has_unread_changes: true } : a)),
   })),
 }))

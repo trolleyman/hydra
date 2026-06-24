@@ -1071,6 +1071,9 @@ type ServerInterface interface {
 	// Restart a Hydra agent (kill and respawn with the same prompt)
 	// (POST /api/projects/{project_id}/agents/{id}/restart)
 	RestartAgent(w http.ResponseWriter, r *http.Request, projectId string, id string)
+	// Mark an agent as unread, raising its unread-changes flag
+	// (POST /api/projects/{project_id}/agents/{id}/unread)
+	MarkAgentUnread(w http.ResponseWriter, r *http.Request, projectId string, id string)
 	// Update a Hydra agent's branch from its base branch (merge base into head)
 	// (POST /api/projects/{project_id}/agents/{id}/update-from-base)
 	UpdateAgentFromBase(w http.ResponseWriter, r *http.Request, projectId string, id string)
@@ -1847,6 +1850,40 @@ func (siw *ServerInterfaceWrapper) RestartAgent(w http.ResponseWriter, r *http.R
 	handler.ServeHTTP(w, r)
 }
 
+// MarkAgentUnread operation middleware
+func (siw *ServerInterfaceWrapper) MarkAgentUnread(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.MarkAgentUnread(w, r, projectId, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // UpdateAgentFromBase operation middleware
 func (siw *ServerInterfaceWrapper) UpdateAgentFromBase(w http.ResponseWriter, r *http.Request) {
 
@@ -2530,6 +2567,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("DELETE "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/purge", wrapper.PurgeAgent)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/read", wrapper.MarkAgentRead)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/restart", wrapper.RestartAgent)
+	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/unread", wrapper.MarkAgentUnread)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/update-from-base", wrapper.UpdateAgentFromBase)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/config", wrapper.GetConfig)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/config", wrapper.SaveConfig)
@@ -3299,6 +3337,41 @@ func (response RestartAgent500JSONResponse) VisitRestartAgentResponse(w http.Res
 	return json.NewEncoder(w).Encode(response)
 }
 
+type MarkAgentUnreadRequestObject struct {
+	ProjectId string `json:"project_id"`
+	Id        string `json:"id"`
+}
+
+type MarkAgentUnreadResponseObject interface {
+	VisitMarkAgentUnreadResponse(w http.ResponseWriter) error
+}
+
+type MarkAgentUnread204Response struct {
+}
+
+func (response MarkAgentUnread204Response) VisitMarkAgentUnreadResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type MarkAgentUnread404JSONResponse ErrorResponse
+
+func (response MarkAgentUnread404JSONResponse) VisitMarkAgentUnreadResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type MarkAgentUnread500JSONResponse ErrorResponse
+
+func (response MarkAgentUnread500JSONResponse) VisitMarkAgentUnreadResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 type UpdateAgentFromBaseRequestObject struct {
 	ProjectId string `json:"project_id"`
 	Id        string `json:"id"`
@@ -3848,6 +3921,9 @@ type StrictServerInterface interface {
 	// Restart a Hydra agent (kill and respawn with the same prompt)
 	// (POST /api/projects/{project_id}/agents/{id}/restart)
 	RestartAgent(ctx context.Context, request RestartAgentRequestObject) (RestartAgentResponseObject, error)
+	// Mark an agent as unread, raising its unread-changes flag
+	// (POST /api/projects/{project_id}/agents/{id}/unread)
+	MarkAgentUnread(ctx context.Context, request MarkAgentUnreadRequestObject) (MarkAgentUnreadResponseObject, error)
 	// Update a Hydra agent's branch from its base branch (merge base into head)
 	// (POST /api/projects/{project_id}/agents/{id}/update-from-base)
 	UpdateAgentFromBase(ctx context.Context, request UpdateAgentFromBaseRequestObject) (UpdateAgentFromBaseResponseObject, error)
@@ -4473,6 +4549,33 @@ func (sh *strictHandler) RestartAgent(w http.ResponseWriter, r *http.Request, pr
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(RestartAgentResponseObject); ok {
 		if err := validResponse.VisitRestartAgentResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// MarkAgentUnread operation middleware
+func (sh *strictHandler) MarkAgentUnread(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+	var request MarkAgentUnreadRequestObject
+
+	request.ProjectId = projectId
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.MarkAgentUnread(ctx, request.(MarkAgentUnreadRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "MarkAgentUnread")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(MarkAgentUnreadResponseObject); ok {
+		if err := validResponse.VisitMarkAgentUnreadResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

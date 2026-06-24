@@ -13,7 +13,7 @@ import { uploadBlobUrl } from '../api/uploads'
 import type { Attachment } from '../lib/spawnDrafts'
 import { DiffViewer } from '../DiffViewer'
 import { formatStartedAgo, agentStatusBadge, archivedEndStateBadge, agentDotClass, agentTypePill } from './AgentComponents'
-import { LoaderCircle, Merge, Trash2, Tag, RotateCcw, Pencil, TerminalSquare } from 'lucide-react'
+import { LoaderCircle, Merge, Trash2, Tag, RotateCcw, Pencil, TerminalSquare, Mail } from 'lucide-react'
 import { Tooltip } from './Tooltip'
 import { AgentTypeIcon, type AgentTypeIconName } from './AgentTypeIcon'
 import { renderMarkdown } from '../lib/markdown'
@@ -215,11 +215,16 @@ export function AgentDetail({
   agent,
   projectId,
   onKilled,
+  onUnselect,
   onRefresh,
 }: {
   agent: AgentResponse
   projectId: string | null
   onKilled: (id: string) => void
+  // Deselect the agent (navigate back to the project page) without removing it
+  // from the list. Used by "Mark as unread", which keeps the agent around with
+  // its unread dot lit.
+  onUnselect?: () => void
   // Restart was removed from the agent header (the action no longer surfaces in
   // the UI); the prop is retained so the route can keep wiring it for now.
   onRestarted?: (agent: AgentResponse) => void
@@ -419,6 +424,18 @@ export function AgentDetail({
     })()
   }
 
+  // Mark the agent unread and deselect it: lights the sidebar unread dot and
+  // navigates back to the project page. We deselect because the auto-clear-on-
+  // open effect (__root.tsx) would otherwise immediately mark the still-open
+  // agent read again. Optimistic locally + a fire-and-forget POST.
+  function handleMarkUnread() {
+    useAgentStore.getState().markUnread(agent.id)
+    onUnselect?.()
+    if (projectId) {
+      api.default.markAgentUnread(projectId, agent.id).catch(() => {})
+    }
+  }
+
   function startEditingTitle() {
     setTitleDraft(agent.title || agent.id)
     setEditingTitle(true)
@@ -497,6 +514,7 @@ export function AgentDetail({
         ]}
         actions={[
           { label: 'Rename', icon: <Pencil className="w-4 h-4" />, onClick: startEditingTitle },
+          { label: 'Mark as unread', icon: <Mail className="w-4 h-4" />, onClick: handleMarkUnread },
           { label: 'Kill', icon: <Trash2 className="w-4 h-4" />, onClick: handleKill, danger: true, disabled: merging || killing },
         ]}
       />

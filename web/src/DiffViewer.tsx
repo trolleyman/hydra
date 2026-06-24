@@ -13,8 +13,9 @@ import {
 } from 'lucide-react'
 import { getFileIcon } from './lib/fileIcons'
 import { Tooltip } from './components/Tooltip'
-import { ArtifactsPanel, IMAGE_DIFF_MODES, type ImageDiffMode } from './components/ArtifactsPanel'
-import { useArtifactColumns, MIN_ARTIFACT_COLUMNS, MAX_ARTIFACT_COLUMNS } from './lib/artifactColumns'
+import { ArtifactsPanel, ImageDiffView, IMAGE_DIFF_MODES, type ImageDiffMode } from './components/ArtifactsPanel'
+import { isImagePath, agentBlobUrl } from './lib/imageDiff'
+import { useArtifactSpans } from './lib/artifactColumns'
 import { useDialogStore } from './stores/dialogStore'
 import { StorageKeys, readLocal, writeLocal } from './lib/storage'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from './lib/agentViewPrefs'
@@ -594,7 +595,7 @@ function EdgeExpander({ seg, onStep, onAll }: {
   )
 }
 
-export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onComment, isCollapsed, onToggleCollapse, onExpand, isHidden, onShow, currentContext, readOnly, headless }: {
+export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onComment, isCollapsed, onToggleCollapse, onExpand, isHidden, onShow, currentContext, readOnly, headless, imageDiffMode, imageBefore, imageAfter }: {
   file: DiffFile
   sideBySide: boolean
   fileRef?: (el: HTMLDivElement | null) => void
@@ -605,6 +606,13 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onCo
   isHidden?: boolean
   onShow?: () => void
   currentContext: number
+  // An in-tree image (binary) renders the artifacts panel's before/after image
+  // differ instead of the "Binary file changed" placeholder. imageBefore/After
+  // are the raw-blob URLs for each side (null when the file was added/deleted on
+  // that side); imageDiffMode picks the comparison style (shared with artifacts).
+  imageDiffMode?: ImageDiffMode
+  imageBefore?: string | null
+  imageAfter?: string | null
   // When true, the line-level "add comment" affordances are hidden — used by the
   // repository diff view, which has no agent to send comments to.
   readOnly?: boolean
@@ -748,7 +756,12 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onCo
       )}
       {(headless || !isCollapsed) && (
         <>
-          {file.binary ? (
+          {file.binary && isImagePath(file.path) ? (
+            // In-tree image: reuse the artifacts panel's before/after differ.
+            <div className="p-3">
+              <ImageDiffView left={imageBefore} right={imageAfter} mode={imageDiffMode ?? 'ab'} />
+            </div>
+          ) : file.binary ? (
             <div className="px-4 py-3 text-xs text-gray-400 dark:text-gray-500 italic">Binary file changed</div>
           ) : isHidden ? (
             <div className="px-4 py-8 flex flex-col items-center justify-center text-gray-400 dark:text-gray-500 italic">
@@ -1577,13 +1590,12 @@ function TreeNodeView({ node, depth, collapsedFolders, toggleFolder, onFileClick
 
 function SettingsPopup({ fileView, onFileViewChange, sideBySide, onSideBySideChange,
   ignoreWhitespace, onIgnoreWhitespaceChange, singleFile, onSingleFileChange,
-  imageDiffMode, onImageDiffModeChange, artifactColumnCount, onArtifactColumnCountChange }: {
+  imageDiffMode, onImageDiffModeChange }: {
     fileView: FileView; onFileViewChange: (v: FileView) => void
     sideBySide: boolean; onSideBySideChange: (v: boolean) => void
     ignoreWhitespace: boolean; onIgnoreWhitespaceChange: (v: boolean) => void
     singleFile: boolean; onSingleFileChange: (v: boolean) => void
     imageDiffMode: ImageDiffMode; onImageDiffModeChange: (v: ImageDiffMode) => void
-    artifactColumnCount: number; onArtifactColumnCountChange: (n: number) => void
   }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -1652,21 +1664,11 @@ function SettingsPopup({ fileView, onFileViewChange, sideBySide, onSideBySideCha
               </label>
             ))}
           </div>
-          {/* Masonry column count for the artifact grid. Drag the dividers between
-              columns (in the grid itself) to fine-tune their individual widths. */}
-          <div className="flex items-center gap-2 mt-3">
-            <span className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 tracking-wide shrink-0">Columns</span>
-            <input
-              type="range"
-              min={MIN_ARTIFACT_COLUMNS}
-              max={MAX_ARTIFACT_COLUMNS}
-              step={1}
-              value={artifactColumnCount}
-              onChange={(e) => onArtifactColumnCountChange(Number(e.target.value))}
-              className="flex-1 min-w-0 accent-blue-500 cursor-pointer"
-            />
-            <span className="text-xs tabular-nums text-gray-600 dark:text-gray-300 w-4 text-right shrink-0">{artifactColumnCount}</span>
-          </div>
+          {/* The artifact grid sizes each tile automatically by aspect ratio (a
+              wide desktop shot spans more columns than a tall phone shot); drag a
+              tile (or its edge) to override its width, double-click the edge to
+              auto-size. */}
+          <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-2 leading-snug">Tiles auto-size by shape — drag a tile to resize it.</p>
         </div>
       )}
     </div>
@@ -1702,10 +1704,11 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
     if (stored === 'side-by-side' || stored === 'ab' || stored === 'slider' || stored === 'onion') return stored
     return 'ab'
   })
-  // Artifact masonry layout — column count (slider) + per-column width fractions
-  // (dragging the dividers). One layout shared across the artifacts panel and the
-  // repository artifacts view; persisted (see lib/artifactColumns).
-  const { columns: artifactCols, setColumnCount: setArtifactColumnCount, setColumnWeights: setArtifactColumnWeights } = useArtifactColumns()
+  // Artifact masonry layout — per-tile span overrides (dragging a tile's edge);
+  // tiles without an override auto-span by aspect ratio. One set of overrides shared
+  // across the artifacts panel and the repository artifacts view; persisted (see
+  // lib/artifactColumns).
+  const { spans: artifactSpans, setSpanOverride: setArtifactSpanOverride } = useArtifactSpans()
 
   const [singleFileIdx, setSingleFileIdx] = useState(0)
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set())
@@ -1898,6 +1901,24 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
     () => buildDiffParams(leftSel, rightSel, false, commits),
     [leftSel, rightSel, commits],
   )
+
+  // Before/after raw-blob URLs for an in-tree image file in the diff, so FileDiff
+  // can render the image differ. The before side reads the base ref; the after
+  // side reads the head ref, or — when the right side is the worktree
+  // (head_ref === "", i.e. an uncommitted/untracked change) — the worktree file
+  // itself. Returns nulls for the missing side of an added/deleted file.
+  const imageUrlsFor = (file: DiffFile): { before: string | null; after: string | null } => {
+    if (!diff || !projectId || !file.binary || !isImagePath(file.path)) return { before: null, after: null }
+    const before = file.change_type === 'added'
+      ? null
+      : agentBlobUrl(projectId, agent.id, file.old_path || file.path, { ref: diff.base_ref })
+    const after = file.change_type === 'deleted'
+      ? null
+      : diff.head_ref
+        ? agentBlobUrl(projectId, agent.id, file.path, { ref: diff.head_ref })
+        : agentBlobUrl(projectId, agent.id, file.path, { worktree: true })
+    return { before, after }
+  }
 
   // Keep a ref to expandFileDiff so the silent refresh can call it without stale closures.
   const expandFileDiffRef = useRef(expandFileDiff)
@@ -2260,7 +2281,6 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
             ignoreWhitespace={ignoreWhitespace} onIgnoreWhitespaceChange={setIgnoreWhitespace}
             singleFile={singleFile} onSingleFileChange={handleSingleFileChange}
             imageDiffMode={imageDiffMode} onImageDiffModeChange={setImageDiffMode}
-            artifactColumnCount={artifactCols.count} onArtifactColumnCountChange={setArtifactColumnCount}
           />
         </div>
       </div>
@@ -2290,8 +2310,8 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
           // flash a loading spinner and reset the user's selection).
           refreshKey={refreshKey + (externalArtifactRefresh ?? 0)}
           imageDiffMode={imageDiffMode}
-          artifactColumns={artifactCols}
-          onArtifactWeightsChange={setArtifactColumnWeights}
+          artifactSpans={artifactSpans}
+          onArtifactSpanChange={setArtifactSpanOverride}
         />
       )}
 
@@ -2367,10 +2387,15 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
                   onShow={getShowCallback(diff.files[singleFileIdx].path)}
                   fileRef={getFileRef(diff.files[singleFileIdx].path)}
                   currentContext={fileContexts.get(diff.files[singleFileIdx].path) ?? 3}
+                  imageDiffMode={imageDiffMode}
+                  imageBefore={imageUrlsFor(diff.files[singleFileIdx]).before}
+                  imageAfter={imageUrlsFor(diff.files[singleFileIdx]).after}
                 />
               </>
             ) : (
-              diff.files.map((f) => (
+              diff.files.map((f) => {
+                const img = imageUrlsFor(f)
+                return (
                 <FileDiff key={f.path} file={f} sideBySide={sideBySide}
                   isCollapsed={collapsedFiles.has(f.path)}
                   onToggleCollapse={toggleFileCollapse}
@@ -2380,8 +2405,12 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
                   onShow={getShowCallback(f.path)}
                   fileRef={getFileRef(f.path)}
                   currentContext={fileContexts.get(f.path) ?? 3}
+                  imageDiffMode={imageDiffMode}
+                  imageBefore={img.before}
+                  imageAfter={img.after}
                 />
-              ))
+                )
+              })
             )}
           </div>
         </div>

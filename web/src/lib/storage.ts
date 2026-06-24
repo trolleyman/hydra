@@ -25,10 +25,10 @@ export const StorageKeys = {
   diffFileView: 'hydra-diff-file-view',
   diffSidebarWidth: 'hydra-diff-sidebar-width',
   diffImageMode: 'hydra-diff-image-mode',
-  // Artifact masonry layout: JSON {count, weights} — the column count and the
-  // (optional) per-column width fractions set by dragging the column dividers.
+  // Artifact masonry layout: JSON map of file name → column span override, set by
+  // dragging a tile's edge. Tiles without an entry auto-span by aspect ratio.
   // Shared across every artifact card (one layout for the whole panel).
-  diffArtifactCols: 'hydra-diff-artifact-cols',
+  diffArtifactSpans: 'hydra-diff-artifact-spans',
 
   // Last terminal geometry the client successfully sent (JSON {cols, rows}). Seeds
   // the initial PTY size on the next connection so a fresh/resumed agent renders

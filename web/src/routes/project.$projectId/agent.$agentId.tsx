@@ -79,6 +79,14 @@ function AgentPage() {
     }
   }
 
+  // Deselect the current agent without removing it (e.g. "Mark as unread"), so it
+  // stays in the sidebar with its unread dot lit.
+  function handleUnselect() {
+    if (isMounted.current) {
+      navigate({ to: '/project/$projectId', params: { projectId } })
+    }
+  }
+
   function handleRestarted(newAgent: AgentResponse) {
     updateAgent(newAgent)
     if (isMounted.current && newAgent.id === agentIdRef.current) {
@@ -117,6 +125,7 @@ function AgentPage() {
       agent={agent}
       projectId={projectId}
       onKilled={handleKilled}
+      onUnselect={handleUnselect}
       onRestarted={handleRestarted}
       onRefresh={handleRefresh}
     />

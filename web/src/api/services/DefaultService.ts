@@ -540,6 +540,30 @@ export class DefaultService {
         });
     }
     /**
+     * Mark an agent as unread, raising its unread-changes flag
+     * @param projectId Project ID
+     * @param id
+     * @returns void
+     * @throws ApiError
+     */
+    public markAgentUnread(
+        projectId: string,
+        id: string,
+    ): CancelablePromise<void> {
+        return this.httpRequest.request({
+            method: 'POST',
+            url: '/api/projects/{project_id}/agents/{id}/unread',
+            path: {
+                'project_id': projectId,
+                'id': id,
+            },
+            errors: {
+                404: `Not Found`,
+                500: `Internal Server Error`,
+            },
+        });
+    }
+    /**
      * Get the merged configuration
      * @param projectId Project ID
      * @param scope Load only a specific scope's raw config instead of the merged config
