@@ -19,6 +19,8 @@ import { RepositoryArtifactsView } from './RepositoryArtifactsView'
 import { Tooltip } from './Tooltip'
 import { PageTopBar } from './PageTopBar'
 import { FileDiff, FileRow, ChangeTypeIcon } from '../DiffViewer'
+import { IMAGE_DIFF_MODES, type ImageDiffMode } from './ArtifactsPanel'
+import { repoBlobUrl } from '../lib/imageDiff'
 
 // ── File tree model ────────────────────────────────────────────────────────────
 
@@ -387,7 +389,7 @@ function SettingsPopup({ settings, onChange }: { settings: RepoSettings; onChang
 // A trimmed cousin of SettingsPopup for the diff view's two toggles, mirroring
 // the diff viewer's own options so the two feel consistent.
 
-type DiffSettings = { singleFile: boolean; sideBySide: boolean; ignoreWhitespace: boolean }
+type DiffSettings = { singleFile: boolean; sideBySide: boolean; ignoreWhitespace: boolean; imageDiffMode: ImageDiffMode }
 
 function DiffSettingsPopup({ settings, onChange }: { settings: DiffSettings; onChange: (s: DiffSettings) => void }) {
   const [open, setOpen] = useState(false)
@@ -402,7 +404,8 @@ function DiffSettingsPopup({ settings, onChange }: { settings: DiffSettings; onC
     return () => document.removeEventListener('mousedown', handleClick)
   }, [open])
 
-  const options: { key: keyof DiffSettings; label: string }[] = [
+  type BoolKey = 'singleFile' | 'sideBySide' | 'ignoreWhitespace'
+  const options: { key: BoolKey; label: string }[] = [
     { key: 'singleFile', label: 'One file at a time' },
     { key: 'sideBySide', label: 'Side by side' },
     { key: 'ignoreWhitespace', label: 'Ignore whitespace' },
@@ -434,6 +437,23 @@ function DiffSettingsPopup({ settings, onChange }: { settings: DiffSettings; onC
                   className="w-3 h-3 accent-blue-500"
                 />
                 <span className="text-xs text-gray-700 dark:text-gray-300">{label}</span>
+              </label>
+            ))}
+          </div>
+          {/* Image diff mode — applies to in-tree images in the diff, mirroring
+              the agent diff viewer's settings (shared storage key). */}
+          <p className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mt-3 mb-2">Image diff</p>
+          <div className="flex flex-col gap-0.5">
+            {IMAGE_DIFF_MODES.map((opt) => (
+              <label key={opt.value} className="flex items-center gap-2 py-0.5 cursor-pointer">
+                <input
+                  type="radio"
+                  name="hydra-repo-image-diff-mode"
+                  checked={settings.imageDiffMode === opt.value}
+                  onChange={() => onChange({ ...settings, imageDiffMode: opt.value })}
+                  className="w-3 h-3 accent-blue-500"
+                />
+                <span className="text-xs text-gray-700 dark:text-gray-300">{opt.label}</span>
               </label>
             ))}
           </div>
@@ -696,14 +716,22 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
   const [collapsedDiffFiles, setCollapsedDiffFiles] = useState<Set<string>>(new Set())
   // The diff defaults to one file at a time (the selected file only); absent
   // storage means the default, an explicit 'false' is the all-files view.
-  const [diffSettings, setDiffSettings] = useState<DiffSettings>(() => ({
-    singleFile: readLocal(StorageKeys.repoDiffSingleFile) !== 'false',
-    sideBySide: readLocal(StorageKeys.diffSideBySide) === 'true',
-    ignoreWhitespace: readLocal(StorageKeys.diffIgnoreWhitespace) === 'true',
-  }))
+  const [diffSettings, setDiffSettings] = useState<DiffSettings>(() => {
+    const storedMode = readLocal(StorageKeys.diffImageMode)
+    const imageDiffMode: ImageDiffMode =
+      storedMode === 'side-by-side' || storedMode === 'ab' || storedMode === 'slider' || storedMode === 'onion'
+        ? storedMode : 'ab'
+    return {
+      singleFile: readLocal(StorageKeys.repoDiffSingleFile) !== 'false',
+      sideBySide: readLocal(StorageKeys.diffSideBySide) === 'true',
+      ignoreWhitespace: readLocal(StorageKeys.diffIgnoreWhitespace) === 'true',
+      imageDiffMode,
+    }
+  })
   useEffect(() => { writeLocal(StorageKeys.repoDiffSingleFile, String(diffSettings.singleFile)) }, [diffSettings.singleFile])
   useEffect(() => { writeLocal(StorageKeys.diffSideBySide, String(diffSettings.sideBySide)) }, [diffSettings.sideBySide])
   useEffect(() => { writeLocal(StorageKeys.diffIgnoreWhitespace, String(diffSettings.ignoreWhitespace)) }, [diffSettings.ignoreWhitespace])
+  useEffect(() => { writeLocal(StorageKeys.diffImageMode, diffSettings.imageDiffMode) }, [diffSettings.imageDiffMode])
   // In one-file-at-a-time mode, the file whose diff is shown; clicking a file in
   // the sidebar selects it. Defaults to (and is kept valid against) the diff's
   // first file.
@@ -1183,6 +1211,11 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
                     fileRef={getDiffFileRef(f.path)}
                     readOnly
                     headless={diffSettings.singleFile}
+                    imageDiffMode={diffSettings.imageDiffMode}
+                    // Branch-compare diff: both sides are real refs (base =
+                    // browsed ref, head = compare ref). Missing side → null.
+                    imageBefore={f.change_type === 'added' ? null : repoBlobUrl(projectId, f.old_path || f.path, activeRef)}
+                    imageAfter={f.change_type === 'deleted' ? null : repoBlobUrl(projectId, f.path, compareRef)}
                   />
                 ))}
               </div>

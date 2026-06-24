@@ -125,6 +125,7 @@ func runSimulationServer() error {
 	// Raw repository blob — image bytes and raw text (mirrors the real server's
 	// non-OpenAPI route; backs the image preview and the file viewer's Raw link).
 	mux.HandleFunc("/repository/projects/{project_id}/blob", server.HandleRepositoryBlob)
+	mux.HandleFunc("/repository/projects/{project_id}/agents/{id}/blob", server.HandleAgentBlob)
 
 	registerFrontend(mux)
 

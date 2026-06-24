@@ -1674,6 +1674,14 @@ func (s *SimulationServer) HandleRepositoryBlob(w http.ResponseWriter, r *http.R
 	_, _ = w.Write([]byte(content))
 }
 
+// HandleAgentBlob serves the simulated repo's raw file bytes for an agent diff.
+// The simulation has no real worktree or refs, so it ignores ref/worktree and
+// resolves purely by path — mirroring HandleRepositoryBlob — which is enough to
+// back the diff viewer's image differ in the frontend simulation.
+func (s *SimulationServer) HandleAgentBlob(w http.ResponseWriter, r *http.Request) {
+	s.HandleRepositoryBlob(w, r)
+}
+
 // GetRepositoryArtifacts lists the artifact scripts the simulated repo declares in
 // .hydra/config.toml, so the repository browser shows its dynamic
 // ".hydra/artifacts" folder with these entries.
