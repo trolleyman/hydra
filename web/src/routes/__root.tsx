@@ -766,6 +766,13 @@ function RootLayout() {
   // a fire-and-forget POST.
   useEffect(() => {
     if (!pageActive || !currentProjectId || !selectedAgentId) return
+    // Respect an explicit "mark as unread": that command sets an unread override
+    // and only then navigates away, but the store update lands before the route
+    // changes — so for one render the agent is still selected *and* freshly
+    // unread, and without this guard we'd immediately clear it again (the POST
+    // /unread → POST /read flip-flop). Skip auto-clear while the override holds.
+    const unreadUntil = useAgentStore.getState().unreadUntil[selectedAgentId] ?? 0
+    if (unreadUntil > Date.now()) return
     const sel = agents.find((a) => a.id === selectedAgentId)
     if (sel?.has_unread_changes) {
       markRead(selectedAgentId)

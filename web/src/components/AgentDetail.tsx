@@ -425,9 +425,11 @@ export function AgentDetail({
   }
 
   // Mark the agent unread and deselect it: lights the sidebar unread dot and
-  // navigates back to the project page. We deselect because the auto-clear-on-
-  // open effect (__root.tsx) would otherwise immediately mark the still-open
-  // agent read again. Optimistic locally + a fire-and-forget POST.
+  // navigates back to the project page (viewing an agent is what "reads" it, so
+  // staying open would be contradictory). The unread override set by markUnread
+  // is what stops the auto-clear-on-open effect (__root.tsx) from immediately
+  // re-reading it — navigation alone can't, since the store update lands a render
+  // before the route changes. Optimistic locally + a fire-and-forget POST.
   function handleMarkUnread() {
     useAgentStore.getState().markUnread(agent.id)
     onUnselect?.()
