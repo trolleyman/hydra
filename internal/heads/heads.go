@@ -481,7 +481,7 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 			log.Printf("warn: update session status to running for %s: %v", opts.ID, err)
 		}
 	}
-	if opts.AgentType == sandbox.AgentTypeBash || opts.AgentType == sandbox.AgentTypeCopilot {
+	if opts.AgentType == sandbox.AgentTypeBash || opts.AgentType == sandbox.AgentTypeCopilot || opts.AgentType == sandbox.AgentTypeCodex {
 		setStatus(api.Running)
 	}
 

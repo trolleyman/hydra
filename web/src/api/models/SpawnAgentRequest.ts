@@ -12,7 +12,7 @@ export type SpawnAgentRequest = {
      */
     id: string;
     /**
-     * Agent type: claude, gemini, or bash
+     * Agent type: claude, gemini, copilot, codex, or bash
      */
     agent_type?: string;
     /**

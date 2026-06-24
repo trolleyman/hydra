@@ -1,6 +1,9 @@
 package sandbox
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestExpandPath(t *testing.T) {
 	home := "/home/u"
@@ -15,6 +18,35 @@ func TestExpandPath(t *testing.T) {
 		if got := expandPath(in, home); got != want {
 			t.Errorf("expandPath(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+func TestAgentArgv(t *testing.T) {
+	cases := []struct {
+		agent  AgentType
+		resume bool
+		prompt string
+		want   []string
+	}{
+		// Codex disables its own sandbox/approvals (it runs inside Hydra's
+		// sandbox); the task is a positional argument and resume continues the
+		// most recent session in the cwd.
+		{AgentTypeCodex, false, "do a thing", []string{"codex", "--dangerously-bypass-approvals-and-sandbox", "do a thing"}},
+		{AgentTypeCodex, false, "", []string{"codex", "--dangerously-bypass-approvals-and-sandbox"}},
+		{AgentTypeCodex, true, "ignored on resume", []string{"codex", "--dangerously-bypass-approvals-and-sandbox", "resume", "--last"}},
+	}
+	for _, c := range cases {
+		got, err := AgentArgv(c.agent, c.resume, "system prompt is ignored for codex", c.prompt)
+		if err != nil {
+			t.Fatalf("AgentArgv(%q, resume=%v) error: %v", c.agent, c.resume, err)
+		}
+		if strings.Join(got, "\x00") != strings.Join(c.want, "\x00") {
+			t.Errorf("AgentArgv(%q, resume=%v, prompt=%q) = %v, want %v", c.agent, c.resume, c.prompt, got, c.want)
+		}
+	}
+
+	if _, err := AgentArgv(AgentType("nope"), false, "", ""); err == nil {
+		t.Error("AgentArgv with unknown agent type: expected error, got nil")
 	}
 }
 

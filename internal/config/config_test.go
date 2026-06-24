@@ -614,6 +614,8 @@ func TestCommentedDefaultsForUnsetSettings(t *testing.T) {
 		"# [gemini]",
 		docPrefix + " Copilot-specific overrides",
 		"# [copilot]",
+		docPrefix + " Codex-specific overrides",
+		"# [codex]",
 		// Artifacts documentation + commented example are always present.
 		docPrefix + " [[artifacts]]:",
 		"# [[artifacts]]",

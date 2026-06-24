@@ -793,11 +793,11 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 	if request.Body.AgentType != nil && *request.Body.AgentType != "" {
 		agentType = sandbox.AgentType(*request.Body.AgentType)
 	}
-	if agentType != sandbox.AgentTypeClaude && agentType != sandbox.AgentTypeGemini && agentType != sandbox.AgentTypeBash && agentType != sandbox.AgentTypeCopilot {
+	if agentType != sandbox.AgentTypeClaude && agentType != sandbox.AgentTypeGemini && agentType != sandbox.AgentTypeBash && agentType != sandbox.AgentTypeCopilot && agentType != sandbox.AgentTypeCodex {
 		return api.SpawnAgent400JSONResponse{
 			Code:    400,
 			Error:   api.ErrorResponseErrorBadRequest,
-			Details: "unknown agent_type; supported: claude, gemini, copilot, bash",
+			Details: "unknown agent_type; supported: claude, gemini, copilot, codex, bash",
 		}, nil
 	}
 
