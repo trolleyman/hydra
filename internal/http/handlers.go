@@ -982,6 +982,31 @@ func (s *Server) MarkAgentRead(ctx context.Context, request api.MarkAgentReadReq
 	return api.MarkAgentRead204Response{}, nil
 }
 
+func (s *Server) MarkAgentUnread(ctx context.Context, request api.MarkAgentUnreadRequestObject) (api.MarkAgentUnreadResponseObject, error) {
+	projectRoot, err := s.resolveProjectRoot(request.ProjectId)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	head, err := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, request.Id)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	if head == nil {
+		return api.MarkAgentUnread404JSONResponse{
+			Code:    404,
+			Error:   api.ErrorResponseErrorNotFound,
+			Details: "agent not found",
+		}, nil
+	}
+	if err := s.DB.RaiseUnread(request.Id); err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	// Raising the unread flag changes both this project's list and the
+	// cross-project unread totals.
+	s.notifyAgentsChanged(projectRoot, true)
+	return api.MarkAgentUnread204Response{}, nil
+}
+
 func (s *Server) MergeAgent(ctx context.Context, request api.MergeAgentRequestObject) (api.MergeAgentResponseObject, error) {
 	projectRoot, err := s.resolveProjectRoot(request.ProjectId)
 	if err != nil {
