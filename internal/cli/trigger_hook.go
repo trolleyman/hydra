@@ -11,6 +11,7 @@ import (
 	"braces.dev/errtrace"
 	"github.com/spf13/cobra"
 	"github.com/trolleyman/hydra/internal/api"
+	"github.com/trolleyman/hydra/internal/heads"
 )
 
 // stringField returns input[key] as a string, or "" if absent or not a string.
@@ -195,8 +196,8 @@ func runTriggerHook(agentType string, eventOverride string, logFile *os.File) er
 	// payload carries one (Claude/Gemini include it on turn-end events).
 	lastMessage := stringField(input, "last_assistant_message")
 	// lastMessageIsQuestion marks lastMessage as a question/plan the agent is
-	// presenting to the user via a user-input tool (set below), so the UI doesn't
-	// treat it as a suggested next message.
+	// presenting to the user via a user-input tool (set below). Such a message is
+	// never a suggested next message, even when its shape looks terse.
 	lastMessageIsQuestion := false
 
 	// Only update status.json for events that represent a meaningful status change.
@@ -291,8 +292,8 @@ func runTriggerHook(agentType string, eventOverride string, logFile *os.File) er
 			lastMessage = lastMessage[:300]
 		}
 		info.LastMessage = &lastMessage
-		if lastMessageIsQuestion {
-			info.LastMessageIsQuestion = &lastMessageIsQuestion
+		if suggested := !lastMessageIsQuestion && heads.IsSuggestedNextMessage(lastMessage); suggested {
+			info.LastMessageIsSuggestedNextMessage = &suggested
 		}
 	}
 

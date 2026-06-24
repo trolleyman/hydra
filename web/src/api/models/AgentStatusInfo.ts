@@ -26,8 +26,8 @@ export type AgentStatusInfo = {
      */
     activity?: string;
     /**
-     * True when last_message is a question/plan the agent is presenting to the user via a user-input tool (e.g. AskUserQuestion), rather than a closing message. The UI uses this to avoid marking it as a suggested next message.
+     * True when last_message reads as a suggested next message — a terse instruction you could send straight back to the agent (e.g. 'run it') — rather than a closing summary or a question the agent is asking the user. The UI marks these with a caret.
      */
-    last_message_is_question?: boolean;
+    last_message_is_suggested_next_message?: boolean;
 };
 

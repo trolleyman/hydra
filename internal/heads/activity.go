@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/trolleyman/hydra/internal/api"
 	"github.com/trolleyman/hydra/internal/paths"
@@ -37,11 +39,37 @@ func enrichAgentStatus(projectRoot, id string, info *api.AgentStatusInfo) {
 	}
 	if info.LastMessage == nil && lastMessage != "" {
 		info.LastMessage = &lastMessage
-		if lastMessageIsQuestion {
-			info.LastMessageIsQuestion = &lastMessageIsQuestion
+		if suggested := !lastMessageIsQuestion && IsSuggestedNextMessage(lastMessage); suggested {
+			info.LastMessageIsSuggestedNextMessage = &suggested
 		}
 	}
 }
+
+// IsSuggestedNextMessage decides whether an agent's last message reads as a
+// suggested next message — a single terse instruction you could send straight
+// back ("run it", "verify it works by running the app") — rather than a closing
+// summary/report. There's no explicit signal from the agent for this, so it's a
+// heuristic on the message shape: a single short line with no mid-message
+// sentence break. A multi-sentence or long message (e.g. "The spike is built,
+// tested, and committed. Here's what landed…") is treated as a report, not a
+// suggestion. Callers separately exclude questions the agent is asking the user
+// (from a user-input tool), which aren't suggestions even when terse.
+func IsSuggestedNextMessage(msg string) bool {
+	t := strings.TrimSpace(msg)
+	if t == "" || utf8.RuneCountInString(t) > 80 {
+		return false
+	}
+	if strings.Contains(t, "\n") {
+		return false
+	}
+	// A sentence break mid-message (". ", "! ", "? ") marks prose/a report rather
+	// than one terse instruction.
+	return !sentenceBreakRe.MatchString(t)
+}
+
+// sentenceBreakRe matches a sentence-ending punctuation followed by whitespace,
+// signalling prose rather than a single terse instruction.
+var sentenceBreakRe = regexp.MustCompile(`[.!?]\s`)
 
 // readStatusLogTail parses the tail of the head's status_log.jsonl and returns
 // (activity, lastMessage, lastMessageIsQuestion): activity describes the most

@@ -175,24 +175,16 @@ func TestQuestionText(t *testing.T) {
 	}
 }
 
-// TestTriggerHookQuestionFlag covers a user-input tool's PreToolUse: status flips
-// to waiting, the question becomes last_message, and last_message_is_question is
-// set so the UI doesn't mark the question as a suggested next message.
-func TestTriggerHookQuestionFlag(t *testing.T) {
+// runTriggerHookInfoForTest feeds payload on stdin to runTriggerHook with status
+// files redirected into a temp dir, and returns the parsed status.json (nil if
+// none was written).
+func runTriggerHookInfoForTest(t *testing.T, agentType, event string, payload map[string]interface{}) *api.AgentStatusInfo {
+	t.Helper()
 	dir := t.TempDir()
 	statusPath := filepath.Join(dir, "status.json")
 	t.Setenv("HYDRA_STATUS_PATH", statusPath)
 	t.Setenv("HYDRA_STATUS_LOG_PATH", filepath.Join(dir, "status_log.jsonl"))
 
-	payload := map[string]interface{}{
-		"hook_event_name": "PreToolUse",
-		"tool_name":       "AskUserQuestion",
-		"tool_input": map[string]interface{}{
-			"questions": []interface{}{
-				map[string]interface{}{"question": "Where should the app binary be distributed first?"},
-			},
-		},
-	}
 	raw, err := json.Marshal(payload)
 	if err != nil {
 		t.Fatal(err)
@@ -210,11 +202,14 @@ func TestTriggerHookQuestionFlag(t *testing.T) {
 	os.Stdin = f
 	defer func() { os.Stdin = orig }()
 
-	if err := runTriggerHook("claude", "", nil); err != nil {
+	if err := runTriggerHook(agentType, event, nil); err != nil {
 		t.Fatalf("runTriggerHook: %v", err)
 	}
 
 	data, err := os.ReadFile(statusPath)
+	if os.IsNotExist(err) {
+		return nil
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -222,13 +217,51 @@ func TestTriggerHookQuestionFlag(t *testing.T) {
 	if err := json.Unmarshal(data, &info); err != nil {
 		t.Fatal(err)
 	}
+	return &info
+}
+
+// TestTriggerHookQuestionNotSuggested covers a user-input tool's PreToolUse: the
+// status flips to waiting and the question becomes last_message, but it must NOT
+// be flagged as a suggested next message — it's a question the agent is asking,
+// not an instruction you'd send back, even though its shape looks terse.
+func TestTriggerHookQuestionNotSuggested(t *testing.T) {
+	info := runTriggerHookInfoForTest(t, "claude", "", map[string]interface{}{
+		"hook_event_name": "PreToolUse",
+		"tool_name":       "AskUserQuestion",
+		"tool_input": map[string]interface{}{
+			"questions": []interface{}{
+				map[string]interface{}{"question": "Where should the app binary be distributed first?"},
+			},
+		},
+	})
+	if info == nil {
+		t.Fatal("no status.json written")
+	}
 	if info.Status != api.Waiting {
 		t.Errorf("status = %q, want waiting", info.Status)
 	}
 	if info.LastMessage == nil || *info.LastMessage != "Where should the app binary be distributed first?" {
 		t.Errorf("last_message = %v", info.LastMessage)
 	}
-	if info.LastMessageIsQuestion == nil || !*info.LastMessageIsQuestion {
-		t.Errorf("last_message_is_question = %v, want true", info.LastMessageIsQuestion)
+	if info.LastMessageIsSuggestedNextMessage != nil {
+		t.Errorf("last_message_is_suggested_next_message = %v, want nil for a question", *info.LastMessageIsSuggestedNextMessage)
+	}
+}
+
+// TestTriggerHookSuggestedNextMessage covers a terse closing message on turn end:
+// it's flagged as a suggested next message so the UI marks it with a caret.
+func TestTriggerHookSuggestedNextMessage(t *testing.T) {
+	info := runTriggerHookInfoForTest(t, "claude", "", map[string]interface{}{
+		"hook_event_name":        "Stop",
+		"last_assistant_message": "run it",
+	})
+	if info == nil {
+		t.Fatal("no status.json written")
+	}
+	if info.LastMessage == nil || *info.LastMessage != "run it" {
+		t.Errorf("last_message = %v", info.LastMessage)
+	}
+	if info.LastMessageIsSuggestedNextMessage == nil || !*info.LastMessageIsSuggestedNextMessage {
+		t.Errorf("last_message_is_suggested_next_message = %v, want true", info.LastMessageIsSuggestedNextMessage)
 	}
 }
