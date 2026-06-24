@@ -122,7 +122,8 @@ func runSimulationServer() error {
 	// Mock WebSocket events endpoint (sends the initial refetch nudge, then idles).
 	mux.HandleFunc("/ws/projects/{project_id}/events", server.HandleEventsWS)
 
-	// Raw repository image blob (mirrors the real server's non-OpenAPI route).
+	// Raw repository blob — image bytes and raw text (mirrors the real server's
+	// non-OpenAPI route; backs the image preview and the file viewer's Raw link).
 	mux.HandleFunc("/repository/projects/{project_id}/blob", server.HandleRepositoryBlob)
 
 	registerFrontend(mux)
