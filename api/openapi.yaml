@@ -950,6 +950,101 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /api/projects/{project_id}/repository/diff:
+    get:
+      summary: Diff two refs in the project's repository
+      description: >-
+        Returns the diff between two arbitrary refs (branches or commits) in the
+        project's repository. Used by the repository browser's diff view to
+        compare the branch being viewed against another branch. Uses a two-dot
+        diff (base..head) — the literal difference between the two trees.
+      operationId: getRepositoryDiff
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            type: string
+          description: Project ID
+        - in: query
+          name: base_ref
+          required: true
+          schema:
+            type: string
+          description: Base ref (branch or commit) to diff from
+        - in: query
+          name: head_ref
+          required: true
+          schema:
+            type: string
+          description: Head ref (branch or commit) to diff to
+        - in: query
+          name: ignore_whitespace
+          required: false
+          schema:
+            type: boolean
+          description: Ignore whitespace changes in the diff
+        - in: query
+          name: path
+          required: false
+          schema:
+            type: string
+          description: Only return the diff for this specific file path
+        - in: query
+          name: context
+          required: false
+          schema:
+            type: integer
+            default: 3
+          description: Number of lines of context to show (defaults to 3)
+        - in: query
+          name: full_context
+          required: false
+          schema:
+            type: boolean
+          description: >-
+            Return each file's full content (so the client can expand context
+            without further round-trips), in a single request for all files.
+            Files larger than max_full_lines are returned at the normal context
+            instead. Ignored when a specific path is requested.
+        - in: query
+          name: max_full_changes
+          required: false
+          schema:
+            type: integer
+            default: 1000
+          description: >-
+            Only auto-expand files with at most this many changed lines. Only
+            meaningful with full_context.
+        - in: query
+          name: max_full_lines
+          required: false
+          schema:
+            type: integer
+            default: 6000
+          description: >-
+            Upper bound on the full content shipped per expanded file. Only
+            meaningful with full_context.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DiffResponse'
+        '404':
+          description: Project Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /api/projects/{project_id}/repository/file:
     get:
       summary: Read the contents of a file in the project's repository

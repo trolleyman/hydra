@@ -4,11 +4,11 @@ import hljs from 'highlight.js'
 import { api } from '../stores/apiClient'
 import { formatError } from '../api/format_error'
 import { ApiError } from '../api'
-import type { RepositoryFileResponse, RepositoryBranch } from '../api'
+import type { RepositoryFileResponse, RepositoryBranch, DiffResponse } from '../api'
 import { StorageKeys, readLocal, writeLocal } from '../lib/storage'
 import {
   ChevronDown, ChevronRight, File as FileIcon, Folder, FolderOpen, FileText,
-  GitBranch,
+  GitBranch, GitCompare, MoveRight,
   LoaderCircle, Settings, FileQuestion, FileSymlink, CornerDownRight,
   Images, Camera, Copy, Check, X, ExternalLink,
 } from 'lucide-react'
@@ -17,6 +17,7 @@ import { canCopyImages, copyImageToClipboard } from '../lib/clipboard'
 import { BranchSelector } from './BranchSelector'
 import { RepositoryArtifactsView } from './RepositoryArtifactsView'
 import { Tooltip } from './Tooltip'
+import { FileDiff, FileRow, ChangeTypeIcon } from '../DiffViewer'
 
 // ── File tree model ────────────────────────────────────────────────────────────
 
@@ -381,6 +382,66 @@ function SettingsPopup({ settings, onChange }: { settings: RepoSettings; onChang
   )
 }
 
+// ── Diff settings popup (branch-compare view) ─────────────────────────────────
+// A trimmed cousin of SettingsPopup for the diff view's two toggles, mirroring
+// the diff viewer's own options so the two feel consistent.
+
+type DiffSettings = { singleFile: boolean; sideBySide: boolean; ignoreWhitespace: boolean }
+
+function DiffSettingsPopup({ settings, onChange }: { settings: DiffSettings; onChange: (s: DiffSettings) => void }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    function handleClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [open])
+
+  const options: { key: keyof DiffSettings; label: string }[] = [
+    { key: 'singleFile', label: 'One file at a time' },
+    { key: 'sideBySide', label: 'Side by side' },
+    { key: 'ignoreWhitespace', label: 'Ignore whitespace' },
+  ]
+
+  return (
+    <div ref={ref} className="relative shrink-0">
+      <button
+        title="Diff settings"
+        onClick={() => setOpen((o) => !o)}
+        className={`flex items-center justify-center w-7 h-7 rounded-md border transition-colors cursor-pointer ${open
+          ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800'
+          : 'text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
+          }`}
+      >
+        <Settings className="w-3.5 h-3.5" />
+      </button>
+
+      {open && (
+        <div className="absolute right-0 top-full mt-1 w-48 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50 p-3">
+          <p className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">Diff options</p>
+          <div className="flex flex-col gap-0.5">
+            {options.map(({ key, label }) => (
+              <label key={key} className="flex items-center gap-2 py-0.5 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={settings[key]}
+                  onChange={(e) => onChange({ ...settings, [key]: e.target.checked })}
+                  className="w-3 h-3 accent-blue-500"
+                />
+                <span className="text-xs text-gray-700 dark:text-gray-300">{label}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Tree rendering ──────────────────────────────────────────────────────────────
 
 function TreeRow({
@@ -621,6 +682,40 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
   const [error, setError] = useState<string | null>(null)
   const [notFound, setNotFound] = useState(false)
 
+  // ── Branch-compare diff view ──────────────────────────────────────────────
+  // Picking a compare branch (head) diffs it against the browsed ref (base),
+  // reusing the agent diff viewer's FileDiff/FileRow rendering. The compare ref
+  // is the whole diff state — '' means "not diffing" — and is ephemeral
+  // component state, deliberately kept out of the URL so the existing ref/path
+  // splat parser stays untouched.
+  const [compareRef, setCompareRef] = useState('')
+  const [diff, setDiff] = useState<DiffResponse | null>(null)
+  const [diffLoading, setDiffLoading] = useState(false)
+  const [diffError, setDiffError] = useState<string | null>(null)
+  const [collapsedDiffFiles, setCollapsedDiffFiles] = useState<Set<string>>(new Set())
+  // The diff defaults to one file at a time (the selected file only); absent
+  // storage means the default, an explicit 'false' is the all-files view.
+  const [diffSettings, setDiffSettings] = useState<DiffSettings>(() => ({
+    singleFile: readLocal(StorageKeys.repoDiffSingleFile) !== 'false',
+    sideBySide: readLocal(StorageKeys.diffSideBySide) === 'true',
+    ignoreWhitespace: readLocal(StorageKeys.diffIgnoreWhitespace) === 'true',
+  }))
+  useEffect(() => { writeLocal(StorageKeys.repoDiffSingleFile, String(diffSettings.singleFile)) }, [diffSettings.singleFile])
+  useEffect(() => { writeLocal(StorageKeys.diffSideBySide, String(diffSettings.sideBySide)) }, [diffSettings.sideBySide])
+  useEffect(() => { writeLocal(StorageKeys.diffIgnoreWhitespace, String(diffSettings.ignoreWhitespace)) }, [diffSettings.ignoreWhitespace])
+  // In one-file-at-a-time mode, the file whose diff is shown; clicking a file in
+  // the sidebar selects it. Defaults to (and is kept valid against) the diff's
+  // first file.
+  const [selectedDiffPath, setSelectedDiffPath] = useState<string | null>(null)
+  // The selected diff file's blob metadata (content), fetched so the single-file
+  // header can offer the same copy/raw actions as the normal file view.
+  const [diffFileMeta, setDiffFileMeta] = useState<RepositoryFileResponse | null>(null)
+  // Per-file revealed context (for the network-expand fallback on huge files),
+  // and refs to each rendered diff card so the sidebar list can scroll to one.
+  const [fileContexts, setFileContexts] = useState<Map<string, number>>(new Map())
+  const fileContextsRef = useRef<Map<string, number>>(new Map())
+  const diffFileRefs = useRef<Map<string, HTMLDivElement>>(new Map())
+
   // Settings (PLAN.md #41d wrap-on-by-default, #41e popup, #41l icons).
   const [settings, setSettings] = useState<RepoSettings>(() => ({
     wrap: loadBool(StorageKeys.repoWrap, true),
@@ -691,6 +786,19 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
   // activeRef is what the branch selector shows as selected.
   const activeRef = parsed.ref ?? (currentBranch || 'HEAD')
   const isKnownBranch = !!branches?.some((b) => b.name === activeRef)
+
+  // Diff is "live" only once a distinct compare branch is chosen. compareKnown
+  // drives the compare selector's known-branch vs short-SHA rendering.
+  const compareKnown = !!branches?.some((b) => b.name === compareRef)
+  const diffActive = !!compareRef && compareRef !== activeRef
+
+  // The single-file view's selected file, plus the ref its blob lives at: the
+  // compare (head) side for added/modified/renamed files, the base side for a
+  // deleted file (which no longer exists at head).
+  const selectedDiffFile = (diffActive && diffSettings.singleFile && selectedDiffPath)
+    ? diff?.files.find((f) => f.path === selectedDiffPath) ?? null
+    : null
+  const selectedDiffFileRef = selectedDiffFile && selectedDiffFile.change_type === 'deleted' ? activeRef : compareRef
 
   // The path to display: the URL path, or the repo's default (README) on the
   // bare /repository URL.
@@ -780,6 +888,87 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
     if (contentRef.current) contentRef.current.scrollTop = 0
   }, [viewPath, file])
 
+  // Fetch the branch-compare diff (base = browsed ref, head = compareRef). Uses
+  // full_context so context can be revealed client-side without round-trips.
+  useEffect(() => {
+    if (!diffActive) { setDiff(null); setDiffError(null); return }
+    let cancelled = false
+    setDiffLoading(true)
+    setDiffError(null)
+    fileContextsRef.current = new Map()
+    setFileContexts(new Map())
+    setCollapsedDiffFiles(new Set())
+    api.default.getRepositoryDiff(projectId, activeRef, compareRef, diffSettings.ignoreWhitespace, undefined, 3, true)
+      .then((r) => { if (!cancelled) setDiff(r) })
+      .catch((err) => { if (!cancelled) { setDiff(null); setDiffError(formatError(err)) } })
+      .finally(() => { if (!cancelled) setDiffLoading(false) })
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [diffActive, projectId, activeRef, compareRef, diffSettings.ignoreWhitespace])
+
+  // Keep the one-file-at-a-time selection pointed at a file that still exists in
+  // the current diff, defaulting to the first.
+  useEffect(() => {
+    if (!diff || diff.files.length === 0) { setSelectedDiffPath(null); return }
+    setSelectedDiffPath((prev) => (prev && diff.files.some((f) => f.path === prev)) ? prev : diff.files[0].path)
+  }, [diff])
+
+  // Fetch the selected file's blob so the single-file header's copy/raw buttons
+  // (reused FileActions) act on its actual content. Binary files still get a
+  // working "Raw" link; the copy button hides itself when there's no content.
+  useEffect(() => {
+    if (!selectedDiffFile) { setDiffFileMeta(null); return }
+    let cancelled = false
+    setDiffFileMeta(null)
+    api.default.getRepositoryFile(projectId, selectedDiffFile.path, selectedDiffFileRef)
+      .then((r) => { if (!cancelled) setDiffFileMeta(r) })
+      .catch(() => { if (!cancelled) setDiffFileMeta(null) })
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, selectedDiffFile?.path, selectedDiffFileRef])
+
+  // Selection from the diff branch selector. Picking the base branch (the one
+  // being browsed) or the currently-diffed branch again exits diff mode; any
+  // other branch becomes the new compare target.
+  const onDiffSelect = (name: string) => {
+    if (name === activeRef || name === compareRef) setCompareRef('')
+    else setCompareRef(name)
+  }
+
+  const toggleDiffFileCollapse = useCallback((path: string) => {
+    setCollapsedDiffFiles((prev) => {
+      const next = new Set(prev)
+      if (next.has(path)) next.delete(path)
+      else next.add(path)
+      return next
+    })
+  }, [])
+
+  // Re-fetch one file at a wider context for the huge-file network-expand path
+  // (FileDiff's fallback), patching the new hunks into the existing diff.
+  const expandDiffFile = useCallback(async (path: string, context = 3) => {
+    fileContextsRef.current.set(path, context)
+    setFileContexts(new Map(fileContextsRef.current))
+    try {
+      const fileDiff = await api.default.getRepositoryDiff(projectId, activeRef, compareRef, diffSettings.ignoreWhitespace, path, context)
+      const updated = fileDiff.files.find((x) => x.path === path)
+      setDiff((prev) => prev
+        ? { ...prev, files: prev.files.map((f) => f.path === path ? { ...f, hunks: updated?.hunks ?? [] } : f) }
+        : prev)
+    } catch (e) {
+      console.error('Failed to fetch repository file diff:', e)
+    }
+  }, [projectId, activeRef, compareRef, diffSettings.ignoreWhitespace])
+
+  const noopComment = useCallback(() => {}, [])
+  const getDiffFileRef = (path: string) => (el: HTMLDivElement | null) => {
+    if (el) diffFileRefs.current.set(path, el)
+    else diffFileRefs.current.delete(path)
+  }
+  const scrollToDiffFile = (path: string) => {
+    diffFileRefs.current.get(path)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+
   const toggle = (path: string) => {
     setExpanded((prev) => {
       const next = new Set(prev)
@@ -805,23 +994,72 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
         style={{ width: sidebarWidth }}
         className="relative shrink-0 border-r border-gray-200 dark:border-gray-700 flex flex-col bg-gray-50 dark:bg-gray-800/40"
       >
-        <div className="px-3 py-2 border-b border-gray-200 dark:border-gray-700 flex items-center gap-2">
+        <div className="px-3 py-2 border-b border-gray-200 dark:border-gray-700 flex items-center gap-2 min-w-0">
           {branches !== null ? (
             <BranchSelector
               branches={branches}
               activeRef={activeRef}
               isKnownBranch={isKnownBranch}
               onSelect={selectBranch}
+              flexible={diffActive}
             />
           ) : (
             <div className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-gray-400">
               <GitBranch className="w-3.5 h-3.5" /> …
             </div>
           )}
-          <span className="ml-auto text-xs text-gray-400 dark:text-gray-500">{files.length}</span>
+          {diffActive ? (
+            // Diffing: just "base → head", names clipped to fit, no counters.
+            <>
+              <MoveRight className="w-4 h-4 text-gray-400 dark:text-gray-500 shrink-0" />
+              <BranchSelector
+                branches={branches!}
+                activeRef={compareRef}
+                isKnownBranch={compareKnown}
+                onSelect={onDiffSelect}
+                title="Change or exit branch diff"
+                flexible
+              />
+            </>
+          ) : (
+            <>
+              {branches !== null && branches.length > 0 && (
+                <BranchSelector
+                  branches={branches}
+                  activeRef=""
+                  isKnownBranch={false}
+                  onSelect={onDiffSelect}
+                  title="Compare with another branch"
+                  triggerIcon={GitCompare}
+                />
+              )}
+              <span className="ml-auto text-xs text-gray-400 dark:text-gray-500 shrink-0">
+                {files.length} {files.length === 1 ? 'file' : 'files'}
+              </span>
+            </>
+          )}
         </div>
         <div className="flex-1 overflow-y-auto py-1">
-          {treeLoading ? (
+          {diffActive ? (
+            diffLoading && !diff ? (
+              <div className="flex items-center justify-center py-8 text-gray-400">
+                <LoaderCircle className="w-4 h-4 animate-spin" />
+              </div>
+            ) : diffError ? (
+              <div className="px-3 py-4 text-xs text-red-500 text-center">{diffError}</div>
+            ) : diff && diff.files.length === 0 ? (
+              <div className="px-3 py-4 text-xs text-gray-400 dark:text-gray-500 text-center">No differences</div>
+            ) : diff ? (
+              diff.files.map((f) => (
+                <FileRow
+                  key={f.path}
+                  file={f}
+                  isActive={diffSettings.singleFile && f.path === selectedDiffPath}
+                  onClick={() => diffSettings.singleFile ? setSelectedDiffPath(f.path) : scrollToDiffFile(f.path)}
+                />
+              ))
+            ) : null
+          ) : treeLoading ? (
             <div className="flex items-center justify-center py-8 text-gray-400">
               <LoaderCircle className="w-4 h-4 animate-spin" />
             </div>
@@ -846,7 +1084,35 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
       {/* Picked file */}
       <div className="flex-1 flex flex-col min-w-0">
         <div className="px-4 py-2 border-b border-gray-200 dark:border-gray-700 flex items-center gap-2 shrink-0">
-          {viewPath ? (
+          {diffActive ? (
+            selectedDiffFile ? (
+              // One-file-at-a-time view: a file-view-style header for the selected
+              // file — icon, path, change-type tag, line counts, then the same
+              // copy/raw actions as the normal file view, and the diff settings.
+              <>
+                {(() => { const { Icon, className } = getFileIcon(selectedDiffFile.path.split('/').pop() ?? selectedDiffFile.path); return <Icon className={`w-4 h-4 shrink-0 ${className}`} /> })()}
+                <span className="text-sm font-mono text-gray-700 dark:text-gray-300 truncate">
+                  {selectedDiffFile.change_type === 'renamed' && selectedDiffFile.old_path
+                    ? <>{selectedDiffFile.old_path} <span className="text-gray-400 dark:text-gray-500">→</span> {selectedDiffFile.path}</>
+                    : selectedDiffFile.path}
+                </span>
+                <ChangeTypeIcon type={selectedDiffFile.change_type} />
+                <div className="flex items-center gap-2 shrink-0 ml-auto">
+                  {!selectedDiffFile.binary && (selectedDiffFile.additions > 0 || selectedDiffFile.deletions > 0) && (
+                    <div className="flex items-center gap-1.5">
+                      {selectedDiffFile.additions > 0 && <span className="text-xs text-green-600 dark:text-green-400 font-medium">+{selectedDiffFile.additions}</span>}
+                      {selectedDiffFile.deletions > 0 && <span className="text-xs text-red-600 dark:text-red-400 font-medium">−{selectedDiffFile.deletions}</span>}
+                    </div>
+                  )}
+                  {diffFileMeta && <FileActions file={diffFileMeta} projectId={projectId} refStr={selectedDiffFileRef} />}
+                  <DiffSettingsPopup settings={diffSettings} onChange={setDiffSettings} />
+                </div>
+              </>
+            ) : (
+              // All-files view (or while loading): just the diff settings popup.
+              <div className="ml-auto"><DiffSettingsPopup settings={diffSettings} onChange={setDiffSettings} /></div>
+            )
+          ) : viewPath ? (
             <>
               {artifactScript
                 ? <Camera className={`w-4 h-4 shrink-0 ${settings.showIcons ? 'text-pink-500' : 'text-gray-400'}`} />
@@ -880,7 +1146,43 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
         </div>
 
         <div ref={contentRef} className="flex-1 flex flex-col min-h-0 overflow-auto">
-          {artifactScript ? (
+          {diffActive ? (
+            diffLoading && !diff ? (
+              <div className="flex-1 flex items-center justify-center text-gray-400">
+                <LoaderCircle className="w-5 h-5 animate-spin" />
+              </div>
+            ) : diffError ? (
+              <div className="flex-1 flex items-center justify-center text-sm text-red-500 px-4 text-center">{diffError}</div>
+            ) : diff && diff.files.length === 0 ? (
+              <div className="flex-1 flex flex-col items-center justify-center gap-2 text-gray-400 dark:text-gray-500 px-4 text-center">
+                <GitCompare className="w-8 h-8" />
+                <span className="text-sm">No differences between <span className="font-mono">{activeRef}</span> and <span className="font-mono">{compareRef}</span></span>
+              </div>
+            ) : diff ? (
+              // The one-file-at-a-time view fills the pane like the file viewer
+              // (gutter flush to the edge); the all-files view keeps card padding.
+              <div className={diffSettings.singleFile ? '' : 'p-4'}>
+                {(diffSettings.singleFile
+                  ? diff.files.filter((f) => f.path === selectedDiffPath)
+                  : diff.files
+                ).map((f) => (
+                  <FileDiff
+                    key={f.path}
+                    file={f}
+                    sideBySide={diffSettings.sideBySide}
+                    isCollapsed={collapsedDiffFiles.has(f.path)}
+                    onToggleCollapse={toggleDiffFileCollapse}
+                    onComment={noopComment}
+                    onExpand={expandDiffFile}
+                    currentContext={fileContexts.get(f.path) ?? 3}
+                    fileRef={getDiffFileRef(f.path)}
+                    readOnly
+                    headless={diffSettings.singleFile}
+                  />
+                ))}
+              </div>
+            ) : null
+          ) : artifactScript ? (
             <RepositoryArtifactsView
               key={`${refStr}:${artifactScript}`}
               projectId={projectId}

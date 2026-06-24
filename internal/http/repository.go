@@ -3,6 +3,7 @@ package http
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"net/http"
 	"path"
 	"sort"
@@ -136,6 +137,107 @@ func (s *Server) GetRepositoryTree(_ context.Context, request api.GetRepositoryT
 		resp.DefaultPath = &def
 	}
 	return resp, nil
+}
+
+// GetRepositoryDiff returns the diff between two arbitrary refs in the project's
+// repository, so the repository browser can compare the branch being viewed
+// against another branch. It uses a two-dot diff (base..head) — the literal
+// difference between the two trees — and reuses the same DiffFile shape and
+// expansion machinery as the agent diff.
+func (s *Server) GetRepositoryDiff(_ context.Context, request api.GetRepositoryDiffRequestObject) (api.GetRepositoryDiffResponseObject, error) {
+	projectRoot, err := s.resolveProjectRoot(request.ProjectId)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	baseRef := request.Params.BaseRef
+	headRef := request.Params.HeadRef
+
+	ignoreWhitespace := request.Params.IgnoreWhitespace != nil && *request.Params.IgnoreWhitespace
+
+	filePath := ""
+	if request.Params.Path != nil {
+		filePath = *request.Params.Path
+	}
+
+	contextLines := 3
+	if request.Params.Context != nil {
+		contextLines = *request.Params.Context
+	}
+
+	maxFullChanges := 1000
+	if request.Params.MaxFullChanges != nil {
+		maxFullChanges = *request.Params.MaxFullChanges
+	}
+	maxFullLines := 6000
+	if request.Params.MaxFullLines != nil {
+		maxFullLines = *request.Params.MaxFullLines
+	}
+	fullContext := request.Params.FullContext != nil && *request.Params.FullContext
+
+	// No worktree and no uncommitted changes for a branch-to-branch compare, so
+	// diffRoot is the project root and includeUncommitted is false throughout.
+	// useTripleDot is false: a plain base..head diff is the most predictable
+	// answer to "what differs between these two branches".
+	var diffFiles []git.DiffFile
+	if fullContext && filePath == "" {
+		diffFiles, err = s.getFullContextDiff(projectRoot, projectRoot, baseRef, headRef, ignoreWhitespace, false, contextLines, maxFullChanges, maxFullLines, false)
+	} else {
+		diffFiles, err = s.getDiffCached(projectRoot, projectRoot, baseRef, headRef, ignoreWhitespace, false, filePath, contextLines, false)
+	}
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+
+	// A pure rename produces no hunks; ship the renamed file's full content as
+	// all-context lines so the viewer shows the file normally rather than a bare
+	// "No changes".
+	for i := range diffFiles {
+		if diffFiles[i].ChangeType == "renamed" && len(diffFiles[i].Hunks) == 0 {
+			fillRenameContext(projectRoot, headRef, &diffFiles[i])
+		}
+	}
+
+	return api.GetRepositoryDiff200JSONResponse(api.DiffResponse{
+		Files:   apiDiffFiles(diffFiles),
+		BaseRef: baseRef,
+		HeadRef: headRef,
+	}), nil
+}
+
+// maxRenameContextLines caps how big a pure-renamed file we expand inline (it
+// matches the client's whole-file render guard); larger files stay "No changes".
+const maxRenameContextLines = 6000
+
+// fillRenameContext loads a pure-renamed file's content at ref and rewrites its
+// (empty) hunks into a single whole-file hunk of context lines, marking it
+// expanded so the viewer renders every line. Binary or oversized files are left
+// untouched.
+func fillRenameContext(projectRoot, ref string, f *git.DiffFile) {
+	data, err := git.ShowFile(projectRoot, ref, f.Path)
+	if err != nil || data == nil {
+		return
+	}
+	if looksBinary(data) {
+		f.Binary = true
+		return
+	}
+	lines := strings.Split(strings.TrimSuffix(string(data), "\n"), "\n")
+	if len(lines) > maxRenameContextLines {
+		return
+	}
+	dlines := make([]git.DiffLine, len(lines))
+	for i, l := range lines {
+		n := i + 1
+		old, nw := n, n
+		dlines[i] = git.DiffLine{Type: git.DiffLineContext, Content: l, OldLineNum: &old, NewLineNum: &nw}
+	}
+	f.Hunks = []git.DiffHunk{{
+		Header:   fmt.Sprintf("@@ -1,%d +1,%d @@", len(lines), len(lines)),
+		OldStart: 1,
+		NewStart: 1,
+		Lines:    dlines,
+	}}
+	f.Expanded = true
 }
 
 // GetRepositoryBranches lists the local branches of the project's repository,

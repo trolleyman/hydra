@@ -1443,6 +1443,148 @@ func (s *SimulationServer) GetRepositoryTree(w http.ResponseWriter, r *http.Requ
 	})
 }
 
+// GetRepositoryDiff returns a small mock diff between two refs so the repository
+// browser's branch-compare view renders in simulation mode. Honours a single-file
+// request (FileDiff's network-expand path).
+func (s *SimulationServer) GetRepositoryDiff(w http.ResponseWriter, r *http.Request, projectId string, params api.GetRepositoryDiffParams) {
+	files := []api.DiffFile{
+		{
+			Path:       "README.md",
+			ChangeType: api.DiffFileChangeTypeModified,
+			Additions:  2,
+			Deletions:  1,
+			Hunks: []api.DiffHunk{
+				{
+					Header:   "@@ -1,3 +1,4 @@",
+					OldStart: 1,
+					NewStart: 1,
+					Lines: []api.DiffLine{
+						{Type: api.Context, Content: "# Hydra", OldLineNum: ptr(1), NewLineNum: ptr(1)},
+						{Type: api.Deletion, Content: "Old tagline", OldLineNum: ptr(2)},
+						{Type: api.Addition, Content: "New tagline", NewLineNum: ptr(2)},
+						{Type: api.Addition, Content: "Extra line", NewLineNum: ptr(3)},
+						{Type: api.Context, Content: "", OldLineNum: ptr(3), NewLineNum: ptr(4)},
+					},
+				},
+			},
+		},
+		{
+			// A full-context ("expanded") file so the diff viewer's context model
+			// kicks in: a single change mid-file with the surrounding lines
+			// collapsed behind ⌄/⌃ expanders ("··· N lines ···").
+			Path:       "internal/heads/heads.go",
+			ChangeType: api.DiffFileChangeTypeModified,
+			Additions:  1,
+			Deletions:  1,
+			Expanded:   ptr(true),
+			Hunks: []api.DiffHunk{
+				{
+					Header:   "@@ -1,22 +1,22 @@",
+					OldStart: 1,
+					NewStart: 1,
+					Lines: []api.DiffLine{
+						{Type: api.Context, Content: "package heads", OldLineNum: ptr(1), NewLineNum: ptr(1)},
+						{Type: api.Context, Content: "", OldLineNum: ptr(2), NewLineNum: ptr(2)},
+						{Type: api.Context, Content: "import \"fmt\"", OldLineNum: ptr(3), NewLineNum: ptr(3)},
+						{Type: api.Context, Content: "", OldLineNum: ptr(4), NewLineNum: ptr(4)},
+						{Type: api.Context, Content: "// Head is an agent head.", OldLineNum: ptr(5), NewLineNum: ptr(5)},
+						{Type: api.Context, Content: "type Head struct {", OldLineNum: ptr(6), NewLineNum: ptr(6)},
+						{Type: api.Context, Content: "\tID     string", OldLineNum: ptr(7), NewLineNum: ptr(7)},
+						{Type: api.Context, Content: "\tBranch string", OldLineNum: ptr(8), NewLineNum: ptr(8)},
+						{Type: api.Context, Content: "}", OldLineNum: ptr(9), NewLineNum: ptr(9)},
+						{Type: api.Context, Content: "", OldLineNum: ptr(10), NewLineNum: ptr(10)},
+						{Type: api.Context, Content: "// greeting returns a message.", OldLineNum: ptr(11), NewLineNum: ptr(11)},
+						{Type: api.Context, Content: "func greeting() string {", OldLineNum: ptr(12), NewLineNum: ptr(12)},
+						{Type: api.Deletion, Content: "\treturn \"old\"", OldLineNum: ptr(13)},
+						{Type: api.Addition, Content: "\treturn \"new\"", NewLineNum: ptr(13)},
+						{Type: api.Context, Content: "}", OldLineNum: ptr(14), NewLineNum: ptr(14)},
+						{Type: api.Context, Content: "", OldLineNum: ptr(15), NewLineNum: ptr(15)},
+						{Type: api.Context, Content: "// helper is unchanged.", OldLineNum: ptr(16), NewLineNum: ptr(16)},
+						{Type: api.Context, Content: "func helper() int {", OldLineNum: ptr(17), NewLineNum: ptr(17)},
+						{Type: api.Context, Content: "\treturn 42", OldLineNum: ptr(18), NewLineNum: ptr(18)},
+						{Type: api.Context, Content: "}", OldLineNum: ptr(19), NewLineNum: ptr(19)},
+						{Type: api.Context, Content: "", OldLineNum: ptr(20), NewLineNum: ptr(20)},
+						{Type: api.Context, Content: "// done marks completion.", OldLineNum: ptr(21), NewLineNum: ptr(21)},
+						{Type: api.Context, Content: "var done = true", OldLineNum: ptr(22), NewLineNum: ptr(22)},
+					},
+				},
+			},
+		},
+		{
+			Path:       "internal/heads/lines.go",
+			ChangeType: api.DiffFileChangeTypeAdded,
+			Additions:  2,
+			Deletions:  0,
+			Hunks: []api.DiffHunk{
+				{
+					Header:   "@@ -0,0 +1,2 @@",
+					OldStart: 0,
+					NewStart: 1,
+					Lines: []api.DiffLine{
+						{Type: api.Addition, Content: "package heads", NewLineNum: ptr(1)},
+						{Type: api.Addition, Content: "// line numbering helpers", NewLineNum: ptr(2)},
+					},
+				},
+			},
+		},
+		{
+			Path:       "internal/heads/old_helper.go",
+			ChangeType: api.DiffFileChangeTypeDeleted,
+			Additions:  0,
+			Deletions:  1,
+			Hunks: []api.DiffHunk{
+				{
+					Header:   "@@ -1 +0,0 @@",
+					OldStart: 1,
+					NewStart: 0,
+					Lines: []api.DiffLine{
+						{Type: api.Deletion, Content: "// removed", OldLineNum: ptr(1)},
+					},
+				},
+			},
+		},
+		{
+			// A pure rename (no content change): the whole file is shipped as
+			// all-context lines so the viewer shows it normally rather than a bare
+			// "No changes" — see GetRepositoryDiff's rename synthesis.
+			Path:       "internal/heads/renderer.go",
+			OldPath:    ptr("internal/heads/render.go"),
+			ChangeType: api.DiffFileChangeTypeRenamed,
+			Additions:  0,
+			Deletions:  0,
+			Expanded:   ptr(true),
+			Hunks: []api.DiffHunk{
+				{
+					Header:   "@@ -1,5 +1,5 @@",
+					OldStart: 1,
+					NewStart: 1,
+					Lines: []api.DiffLine{
+						{Type: api.Context, Content: "package heads", OldLineNum: ptr(1), NewLineNum: ptr(1)},
+						{Type: api.Context, Content: "", OldLineNum: ptr(2), NewLineNum: ptr(2)},
+						{Type: api.Context, Content: "// Renderer draws heads.", OldLineNum: ptr(3), NewLineNum: ptr(3)},
+						{Type: api.Context, Content: "func Renderer() {}", OldLineNum: ptr(4), NewLineNum: ptr(4)},
+						{Type: api.Context, Content: "", OldLineNum: ptr(5), NewLineNum: ptr(5)},
+					},
+				},
+			},
+		},
+	}
+	if params.Path != nil && *params.Path != "" {
+		filtered := make([]api.DiffFile, 0, 1)
+		for _, f := range files {
+			if f.Path == *params.Path {
+				filtered = append(filtered, f)
+			}
+		}
+		files = filtered
+	}
+	api.WriteJSON(w, http.StatusOK, api.DiffResponse{
+		BaseRef: params.BaseRef,
+		HeadRef: params.HeadRef,
+		Files:   files,
+	})
+}
+
 func (s *SimulationServer) GetRepositoryBranches(w http.ResponseWriter, r *http.Request, projectId string) {
 	api.WriteJSON(w, http.StatusOK, api.RepositoryBranchesResponse{
 		Current: "main",

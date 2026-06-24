@@ -1469,6 +1469,48 @@ func (s *Server) GetAgentCommits(ctx context.Context, request api.GetAgentCommit
 	return resp, nil
 }
 
+// apiDiffFiles converts a slice of git.DiffFile into the API shape, shared by the
+// agent diff and the repository diff so both serialise diffs identically.
+func apiDiffFiles(diffFiles []git.DiffFile) []api.DiffFile {
+	apiFiles := make([]api.DiffFile, len(diffFiles))
+	for i, f := range diffFiles {
+		apiHunks := make([]api.DiffHunk, len(f.Hunks))
+		for j, h := range f.Hunks {
+			apiLines := make([]api.DiffLine, len(h.Lines))
+			for k, l := range h.Lines {
+				apiLines[k] = api.DiffLine{
+					Type:       api.DiffLineType(l.Type),
+					Content:    l.Content,
+					OldLineNum: l.OldLineNum,
+					NewLineNum: l.NewLineNum,
+				}
+			}
+			apiHunks[j] = api.DiffHunk{
+				Header:   h.Header,
+				OldStart: h.OldStart,
+				NewStart: h.NewStart,
+				Lines:    apiLines,
+			}
+		}
+		var expanded *bool
+		if f.Expanded {
+			t := true
+			expanded = &t
+		}
+		apiFiles[i] = api.DiffFile{
+			Path:       f.Path,
+			OldPath:    f.OldPath,
+			ChangeType: api.DiffFileChangeType(f.ChangeType),
+			Additions:  f.Additions,
+			Deletions:  f.Deletions,
+			Binary:     f.Binary,
+			Expanded:   expanded,
+			Hunks:      apiHunks,
+		}
+	}
+	return apiFiles
+}
+
 func (s *Server) GetAgentDiff(ctx context.Context, request api.GetAgentDiffRequestObject) (api.GetAgentDiffResponseObject, error) {
 	projectRoot, err := s.resolveProjectRoot(request.ProjectId)
 	if err != nil {
@@ -1610,42 +1652,7 @@ func (s *Server) GetAgentDiff(ctx context.Context, request api.GetAgentDiffReque
 	}
 
 	// Convert git.DiffFile slice to api.DiffFile slice.
-	apiFiles := make([]api.DiffFile, len(diffFiles))
-	for i, f := range diffFiles {
-		apiHunks := make([]api.DiffHunk, len(f.Hunks))
-		for j, h := range f.Hunks {
-			apiLines := make([]api.DiffLine, len(h.Lines))
-			for k, l := range h.Lines {
-				apiLines[k] = api.DiffLine{
-					Type:       api.DiffLineType(l.Type),
-					Content:    l.Content,
-					OldLineNum: l.OldLineNum,
-					NewLineNum: l.NewLineNum,
-				}
-			}
-			apiHunks[j] = api.DiffHunk{
-				Header:   h.Header,
-				OldStart: h.OldStart,
-				NewStart: h.NewStart,
-				Lines:    apiLines,
-			}
-		}
-		var expanded *bool
-		if f.Expanded {
-			t := true
-			expanded = &t
-		}
-		apiFiles[i] = api.DiffFile{
-			Path:       f.Path,
-			OldPath:    f.OldPath,
-			ChangeType: api.DiffFileChangeType(f.ChangeType),
-			Additions:  f.Additions,
-			Deletions:  f.Deletions,
-			Binary:     f.Binary,
-			Expanded:   expanded,
-			Hunks:      apiHunks,
-		}
-	}
+	apiFiles := apiDiffFiles(diffFiles)
 
 	mergeConflict := false
 	if head.Branch != nil {
