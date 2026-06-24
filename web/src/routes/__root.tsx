@@ -50,9 +50,11 @@ function formatSpawnedAgo(ms: number): string {
   return `Spawned ${days} days ago`
 }
 
-// Modifier glyph for the project-switch shortcut hint (Ctrl/Cmd + `).
-const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/i.test(navigator.platform)
-const SWITCH_PROJECT_HINT = `${isMac ? '⌘' : 'Ctrl'} + \` to switch · ⇧ for previous`
+// Project-switch shortcut hint. We bind Ctrl (not Cmd) on every platform,
+// including macOS: macOS reserves Cmd+` for its own "cycle windows within an
+// app", so it never reaches the page — Ctrl+` is free there and keeps one
+// binding everywhere.
+const SWITCH_PROJECT_HINT = 'Ctrl + ` to switch · ⇧ for previous'
 
 const SIDEBAR_MIN = 160
 const SIDEBAR_MAX = 600
@@ -853,16 +855,18 @@ function RootLayout() {
   // repository, switching project view) so it never lingers over the content.
   useEffect(() => { setMobileSidebarOpen(false) }, [location.pathname])
 
-  // Keyboard "alt-tab" between projects: Ctrl/Cmd+` cycles to the next project,
-  // add Shift to go to the previous one (mirrors the macOS "cycle windows within
-  // an app" idiom — Alt+Tab and Ctrl/Cmd+Tab are owned by the OS/browser). We
-  // match on e.code === 'Backquote' so it's keyboard-layout independent (Shift+`
-  // produces '~' on US layouts). With no project selected, the first press lands
-  // on the first (or last, reversed) project.
+  // Keyboard "alt-tab" between projects: Ctrl+` cycles to the next project, add
+  // Shift to go to the previous one (Alt+Tab and Ctrl/Cmd+Tab are owned by the
+  // OS/browser). We bind Ctrl on every platform — macOS reserves Cmd+` for its
+  // own "cycle windows within an app", so Cmd never reaches us; Ctrl+` is free
+  // there too, keeping one binding everywhere. We match on e.code === 'Backquote'
+  // so it's keyboard-layout independent (Shift+` produces '~' on US layouts).
+  // With no project selected, the first press lands on the first (or last,
+  // reversed) project.
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
-      if (e.code !== 'Backquote' || e.altKey) return
-      if (!(e.ctrlKey || e.metaKey)) return
+      if (e.code !== 'Backquote' || e.altKey || e.metaKey) return
+      if (!e.ctrlKey) return
       if (projects.length < 2) return
       e.preventDefault()
       const dir = e.shiftKey ? -1 : 1
