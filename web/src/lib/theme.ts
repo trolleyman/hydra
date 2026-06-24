@@ -1,0 +1,76 @@
+// Theme preference, shared between the app shell (which applies the `dark` class
+// and tracks the OS preference) and the Settings page (which renders the
+// Appearance control). Kept in one zustand store so both stay in sync — the
+// control writes the store, the shell's apply-effect reacts.
+//
+// Previously this lived inline in __root.tsx with the toggle in the header. The
+// header was removed (Claude-style layout), so the control moved into Settings
+// and the state had to be hoisted out of the layout component.
+
+import { useEffect } from 'react'
+import { create } from 'zustand'
+import { Sun, Moon, Monitor } from 'lucide-react'
+import { StorageKeys, readLocal, writeLocal } from './storage'
+
+// An explicit light/dark choice, or `system` to follow the OS
+// `prefers-color-scheme` and react to changes while the app is open.
+export type ThemeMode = 'light' | 'dark' | 'system'
+
+// Cycle order (kept for any future quick-toggle affordance).
+export const NEXT_THEME_MODE: Record<ThemeMode, ThemeMode> = {
+  light: 'dark',
+  dark: 'system',
+  system: 'light',
+}
+export const THEME_MODE_ICON: Record<ThemeMode, typeof Sun> = {
+  light: Sun,
+  dark: Moon,
+  system: Monitor,
+}
+export const THEME_MODE_LABEL: Record<ThemeMode, string> = {
+  light: 'Light',
+  dark: 'Dark',
+  system: 'System',
+}
+export const THEME_MODES: ThemeMode[] = ['light', 'dark', 'system']
+
+function loadThemeMode(): ThemeMode {
+  const stored = readLocal(StorageKeys.themeMode)
+  if (stored === 'light' || stored === 'dark' || stored === 'system') return stored
+  // Migrate the legacy boolean preference (`hydra-dark-mode`) if present.
+  const legacy = readLocal(StorageKeys.darkModeLegacy)
+  if (legacy !== null) return legacy === 'true' ? 'dark' : 'light'
+  return 'system'
+}
+
+interface ThemeState {
+  mode: ThemeMode
+  setMode: (mode: ThemeMode) => void
+}
+
+export const useThemeStore = create<ThemeState>((set) => ({
+  mode: loadThemeMode(),
+  setMode: (mode) => {
+    writeLocal(StorageKeys.themeMode, mode)
+    writeLocal(StorageKeys.darkModeLegacy, null) // drop the migrated legacy key
+    set({ mode })
+  },
+}))
+
+// Mount once at the app root: toggles the `dark` class on <html> from the stored
+// mode, and — in `system` mode — keeps tracking the OS preference live.
+export function useApplyTheme() {
+  const mode = useThemeStore((s) => s.mode)
+  useEffect(() => {
+    const mql = window.matchMedia('(prefers-color-scheme: dark)')
+    const apply = () => {
+      const isDark = mode === 'dark' || (mode === 'system' && mql.matches)
+      document.documentElement.classList.toggle('dark', isDark)
+    }
+    apply()
+    if (mode === 'system') {
+      mql.addEventListener('change', apply)
+      return () => mql.removeEventListener('change', apply)
+    }
+  }, [mode])
+}

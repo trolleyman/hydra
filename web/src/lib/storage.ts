@@ -12,6 +12,10 @@ export const StorageKeys = {
   themeMode: 'hydra-theme-mode',
   darkModeLegacy: 'hydra-dark-mode', // migrated away from; only read to migrate
   sidebarWidth: 'hydra-sidebar-width',
+  // '1' when the user has collapsed the sidebar (no top bar layout). Only the
+  // explicit toggle persists this; the small-screen auto-close on navigation is
+  // transient so it doesn't clobber the desktop preference.
+  sidebarCollapsed: 'hydra-sidebar-collapsed',
   defaultAgentType: 'hydra-default-agent-type',
   spawnHeight: 'hydra-sidebar-spawn-height',
 

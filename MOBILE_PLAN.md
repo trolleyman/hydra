@@ -71,23 +71,38 @@ upgrade.
 Goal: every existing screen is usable down to ~360px wide. Ships value immediately
 for all agent types and is independent of the chat work.
 
-> **Status (in progress):** a first pass is implemented. The sidebar is now a
-> hamburger-toggled off-canvas drawer below the `md` breakpoint (`__root.tsx`),
-> the agent-detail header/metadata rows wrap and padding tightens
+> **Status (in progress):** a first pass is implemented, then reworked into a
+> Claude-style shell. The global top bar is **gone**; the sidebar (`__root.tsx`)
+> now carries all the chrome — its header holds the app icon, the project selector
+> and a collapse button; the spawn box / Repository / agents list sit in the
+> middle; and a footer holds the Settings link, Claude usage and the dev restart.
+> The theme switcher moved out of the bar into an **Appearance** card on the
+> Settings page (`SettingsComponents.tsx`), backed by a shared theme store
+> (`lib/theme.ts`). The sidebar is collapsible on **every** size via the header
+> button, a floating reveal button over the content, or **Ctrl/Cmd + .**; the
+> collapse state persists. The overlay breakpoint moved from `md` (768px) to `lg`
+> (1024px), so tablets in portrait and phones in landscape get a full-width
+> content area with an off-canvas overlay sidebar rather than a cramped permanent
+> two-column split. The agent-detail header/metadata rows wrap and padding tightens
 > (`AgentDetail.tsx`), the diff drops its file-list sidebar for a full-width
 > unified diff on mobile (`DiffViewer.tsx`), and the spawn form padding is
-> responsive (`SpawnForm.tsx`). Phone-width screenshots tagged `viewport::mobile`
-> were added to `scripts/screenshots/take-screenshots.ts` so the result is
-> visible in the diff viewer's artifacts panel. Still outstanding: the
-> repository browser's two-column tree+content layout, a shorter default
-> terminal height on mobile, and touch support for the desktop resize handles
-> (currently just hidden on mobile).
+> responsive (`SpawnForm.tsx`). Screenshots now cover phone portrait/landscape,
+> tablet portrait/landscape and the collapsed states — each tagged with its
+> `viewport::` axis (`mobile`, `mobile-landscape`, `tablet`, `tablet-landscape`,
+> `desktop`) in `scripts/screenshots/take-screenshots.ts`. Still outstanding: the
+> repository browser's two-column tree+content layout, a shorter default terminal
+> height on mobile, and touch support for the desktop resize handles (currently
+> just hidden below `lg`).
 
-1. **Collapsible sidebar / app shell.**
-   - Below a breakpoint (`md`, 768px) the sidebar becomes an off-canvas drawer
-     toggled by a hamburger in the header; main content goes full-width.
-   - Persist open/closed; close on navigation. Backdrop tap to dismiss.
-   - Above the breakpoint, keep today's resizable two-column behavior unchanged.
+1. **Collapsible sidebar / app shell.** ✅ *(done — Claude-style)*
+   - No global top bar: the sidebar owns the chrome (selector + collapse button in
+     its header, Settings + usage in its footer).
+   - Collapsible on every size — header button, floating reveal button, or
+     **Ctrl/Cmd + .**; state persists.
+   - Below `lg` (1024px) the sidebar is an off-canvas overlay (so tablets/landscape
+     phones aren't squeezed); at `lg+` it's the resizable in-flow column.
+   - Persist open/closed; small-screen overlay closes on navigation; backdrop tap
+     to dismiss.
 2. **Agent detail single-column stacking** (`AgentDetail.tsx`).
    - On narrow screens stack the panels and switch terminal/diff/artifacts to
      **tabs** instead of a side-by-side split. (Sets up Phase 2's chat tab.)

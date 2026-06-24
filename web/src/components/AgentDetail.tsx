@@ -5,13 +5,15 @@ import { formatError } from '../api/format_error'
 import type { AgentResponse, RepositoryBranch } from '../api'
 import { AgentTerminal } from './AgentTerminal'
 import { BranchSelector } from './BranchSelector'
+import { SeparatedRow } from './SeparatedRow'
+import { AgentTopBar } from './AgentTopBar'
 import { AttachmentChips } from './AttachmentChips'
 import { ImageLightbox } from './ImageLightbox'
 import { uploadBlobUrl } from '../api/uploads'
 import type { Attachment } from '../lib/spawnDrafts'
 import { DiffViewer } from '../DiffViewer'
-import { formatStartedAgo, agentStatusBadge, archivedEndStateBadge } from './AgentComponents'
-import { LoaderCircle, Merge, Trash2, Tag, RotateCcw, FolderSync, Copy, Check, Pencil, Archive, TerminalSquare } from 'lucide-react'
+import { formatStartedAgo, agentStatusBadge, archivedEndStateBadge, agentDotClass } from './AgentComponents'
+import { LoaderCircle, Merge, Trash2, Tag, RotateCcw, Pencil, TerminalSquare } from 'lucide-react'
 import { Tooltip } from './Tooltip'
 import { renderMarkdown } from '../lib/markdown'
 
@@ -98,7 +100,6 @@ function PromptBlock({ prompt, projectId }: { prompt: string; projectId: string 
 // (just a grayed placeholder) and no diff/kill/merge/restart actions. The
 // "Resume" affordance is shown but not yet wired — see PLAN #49.
 function ArchivedAgentDetail({ agent, projectId, onPurged }: { agent: AgentResponse; projectId: string | null; onPurged: (id: string) => void }) {
-  const [copied, setCopied] = useState(false)
   const [purging, setPurging] = useState(false)
   const endBadge = archivedEndStateBadge(agent.end_state)
 
@@ -139,56 +140,42 @@ function ArchivedAgentDetail({ agent, projectId, onPurged }: { agent: AgentRespo
           : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'
 
   return (
-    <div className="flex-1 flex flex-col overflow-auto p-3 sm:p-6 min-w-0 min-h-0" data-main-scroll>
-      <div className="w-full">
+    <div className="flex-1 flex flex-col min-w-0 min-h-0">
+      {/* The agent header is a single header bar (no separate H1): the archived
+          agent's name + a delete action, and a dim status dot. While the sidebar
+          is collapsed it also hosts the show-sidebar toggle. It sits above the
+          scroll area. */}
+      <AgentTopBar
+        title={agent.title || agent.id}
+        statusDot={<span className="block w-2.5 h-2.5 rounded-full bg-gray-300 dark:bg-gray-600" />}
+        actions={[
+          { label: 'Delete permanently', icon: <Trash2 className="w-4 h-4" />, onClick: handlePurge, danger: true, disabled: purging },
+        ]}
+      />
+      <div className="flex-1 flex flex-col overflow-auto p-3 sm:p-6 min-w-0 min-h-0" data-main-scroll>
+        <div className="w-full">
         {/* Header */}
         <div className="mb-6">
-          <div className="flex items-center gap-2 mb-2">
-            <Archive className="w-5 h-5 text-gray-400 dark:text-gray-500 shrink-0" />
-            <h1 className="text-2xl font-bold text-gray-600 dark:text-gray-300 truncate" title={agent.id}>
-              {agent.title || agent.id}
-            </h1>
-            <Tooltip content="Copy ID">
-              <button
-                onClick={() => {
-                  navigator.clipboard.writeText(agent.id)
-                  setCopied(true)
-                  setTimeout(() => setCopied(false), 2000)
-                }}
-                className="w-6 h-6 flex items-center justify-center rounded-md border border-gray-200 text-gray-400 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-500 dark:hover:bg-gray-700 transition-colors cursor-pointer shrink-0"
-              >
-                {copied ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3 h-3" />}
-              </button>
-            </Tooltip>
-          </div>
-
           {/* Metadata row */}
-          <div className="flex items-center gap-3 flex-wrap">
+          <SeparatedRow className="flex items-center gap-3 flex-wrap">
             <span className={`text-xs px-2.5 py-0.5 rounded-full font-medium ${agentTypeClass}`}>
               {agent.agent_type}
             </span>
-            <span className="text-gray-300 dark:text-gray-600">·</span>
             <span className={`text-xs px-2 py-0.5 rounded font-medium ${endBadge.className}`}>
               {endBadge.label}
             </span>
             {agent.branch_name && (
-              <>
-                <span className="text-gray-300 dark:text-gray-600">·</span>
-                <span className="text-xs font-mono text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
-                  <Tag className="w-3.5 h-3.5" />
-                  {agent.branch_name}
-                </span>
-              </>
+              <span className="text-xs font-mono text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
+                <Tag className="w-3.5 h-3.5" />
+                {agent.branch_name}
+              </span>
             )}
             {agent.created_at !== 0 && agent.created_at !== undefined && (
-              <>
-                <span className="text-gray-300 dark:text-gray-600">·</span>
-                <span className="text-xs text-gray-500 dark:text-gray-400">
-                  created {formatStartedAgo(agent.created_at)}
-                </span>
-              </>
+              <span className="text-xs text-gray-500 dark:text-gray-400">
+                created {formatStartedAgo(agent.created_at)}
+              </span>
             )}
-          </div>
+          </SeparatedRow>
         </div>
 
         {/* Prompt */}
@@ -223,6 +210,7 @@ function ArchivedAgentDetail({ agent, projectId, onPurged }: { agent: AgentRespo
             </Tooltip>
           </div>
         </div>
+        </div>
       </div>
     </div>
   )
@@ -232,20 +220,18 @@ export function AgentDetail({
   agent,
   projectId,
   onKilled,
-  onRestarted,
   onRefresh,
 }: {
   agent: AgentResponse
   projectId: string | null
   onKilled: (id: string) => void
-  onRestarted: (agent: AgentResponse) => void
+  // Restart was removed from the agent header (the action no longer surfaces in
+  // the UI); the prop is retained so the route can keep wiring it for now.
+  onRestarted?: (agent: AgentResponse) => void
   onRefresh?: () => void
 }) {
   const [killing, setKilling] = useState(false)
   const [merging, setMerging] = useState(false)
-  const [updating, setUpdating] = useState(false)
-  const [restarting, setRestarting] = useState(false)
-  const [copied, setCopied] = useState(false)
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleDraft, setTitleDraft] = useState('')
   const [savingTitle, setSavingTitle] = useState(false)
@@ -445,61 +431,6 @@ export function AgentDetail({
     })()
   }
 
-  async function handleUpdateFromBase() {
-    useDialogStore.getState().show({
-      title: 'Update from Base',
-      message: `Update "${agent.branch_name}" from "${agent.base_branch}"?\n\nThis will attempt to merge "${agent.base_branch}" into your agent branch.`,
-      type: 'confirm',
-      onConfirm: async () => {
-        setUpdating(true)
-        try {
-          await api.default.updateAgentFromBase(projectId ?? '', agent.id)
-          if (onRefresh) onRefresh()
-        } catch (err: any) {
-          const errorData = (err.body && typeof err.body === 'object') ? err.body : err
-          if (errorData.error === 'merge_conflict') {
-            useDialogStore.getState().show({
-              title: 'Update Conflict',
-              message: `CONFLICT: Update failed due to git conflicts. You may need to resolve them manually in the worktree.`,
-              type: 'warning'
-            })
-          } else {
-            useDialogStore.getState().show({
-              title: 'Update Failed',
-              message: `Failed to update from base: ${formatError(err)}`,
-              type: 'error'
-            })
-          }
-        } finally {
-          setUpdating(false)
-        }
-      }
-    })
-  }
-
-  async function handleRestart() {
-    useDialogStore.getState().show({
-      title: 'Restart Agent',
-      message: `Are you sure you want to restart agent "${agent.id}"?\n\nThis will discard all progress (session, worktree, branch) and restart with the same prompt.`,
-      type: 'confirm',
-      onConfirm: async () => {
-        setRestarting(true)
-        try {
-          const newAgent = await api.default.restartAgent(projectId ?? '', agent.id)
-          onRestarted(newAgent)
-        } catch (err) {
-          useDialogStore.getState().show({
-            title: 'Restart Failed',
-            message: `Failed to restart agent: ${formatError(err)}`,
-            type: 'error'
-          })
-        } finally {
-          setRestarting(false)
-        }
-      }
-    })
-  }
-
   function startEditingTitle() {
     setTitleDraft(agent.title || agent.id)
     setEditingTitle(true)
@@ -550,136 +481,50 @@ export function AgentDetail({
   }
 
   return (
-    <div ref={scrollRef} className="flex-1 flex flex-col overflow-auto p-3 sm:p-6 min-w-0 min-h-0" data-main-scroll>
-      <div className="w-full">
+    <div className="flex-1 flex flex-col min-w-0 min-h-0">
+      {/* The agent header is a single header bar (no separate H1): the name with
+          an actions dropdown (Rename / Merge / Kill — clicking the name also
+          renames it inline) and a status dot. While the sidebar is collapsed it
+          also hosts the show-sidebar toggle. It sits above the scroll area so it
+          never collides with the diff's own sticky "Changes" header. */}
+      <AgentTopBar
+        title={agent.title || agent.id}
+        statusDot={<span className={`block w-2.5 h-2.5 rounded-full ${agentDotClass(agent)}`} />}
+        rename={{
+          editing: editingTitle,
+          draft: titleDraft,
+          saving: savingTitle,
+          onStart: startEditingTitle,
+          onChange: setTitleDraft,
+          onSave: saveTitle,
+          onCancel: () => setEditingTitle(false),
+        }}
+        actions={[
+          { label: 'Rename', icon: <Pencil className="w-4 h-4" />, onClick: startEditingTitle },
+          { label: 'Merge', icon: <Merge className="w-4 h-4" />, onClick: handleMerge, disabled: merging || killing },
+          { label: 'Kill', icon: <Trash2 className="w-4 h-4" />, onClick: handleKill, danger: true, disabled: merging || killing },
+        ]}
+      />
+      <div ref={scrollRef} className="flex-1 flex flex-col overflow-auto p-3 sm:p-6 min-w-0 min-h-0" data-main-scroll>
+        <div className="w-full">
         {/* Header */}
         <div className="mb-6">
-          {/* Title row — wraps the action buttons below the title on narrow screens */}
-          <div className="flex items-center gap-2 mb-2 flex-wrap">
-            {editingTitle ? (
-              <input
-                autoFocus
-                value={titleDraft}
-                disabled={savingTitle}
-                onChange={(e) => setTitleDraft(e.target.value)}
-                onBlur={saveTitle}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault()
-                    void saveTitle()
-                  } else if (e.key === 'Escape') {
-                    e.preventDefault()
-                    setEditingTitle(false)
-                  }
-                }}
-                className="text-2xl font-bold text-gray-900 dark:text-gray-100 bg-transparent border-b border-blue-400 focus:outline-none min-w-0 flex-1 disabled:opacity-50"
-              />
-            ) : (
-              <h1
-                onDoubleClick={startEditingTitle}
-                className="text-2xl font-bold text-gray-900 dark:text-gray-100 truncate"
-                title={agent.id}
-              >
-                {agent.title || agent.id}
-              </h1>
-            )}
-            {!editingTitle && (
-              <Tooltip content="Rename agent">
-                <button
-                  onClick={startEditingTitle}
-                  className="w-6 h-6 flex items-center justify-center rounded-md border border-gray-200 text-gray-400 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-500 dark:hover:bg-gray-700 transition-colors cursor-pointer shrink-0"
-                >
-                  <Pencil className="w-3 h-3" />
-                </button>
-              </Tooltip>
-            )}
-            <Tooltip content="Copy ID">
-              <button
-                onClick={() => {
-                  navigator.clipboard.writeText(agent.id)
-                  setCopied(true)
-                  setTimeout(() => setCopied(false), 2000)
-                }}
-                className="w-6 h-6 flex items-center justify-center rounded-md border border-gray-200 text-gray-400 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-500 dark:hover:bg-gray-700 transition-colors cursor-pointer shrink-0"
-              >
-                {copied ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3 h-3" />}
-              </button>
-            </Tooltip>
-            <Tooltip content="Merge agent">
-              <button
-                onClick={handleMerge}
-                disabled={merging || killing || restarting || updating}
-                className="ml-2 w-6 h-6 flex items-center justify-center rounded-md border border-green-200 text-green-600 hover:bg-green-50 dark:border-green-900/30 dark:text-green-400 dark:hover:bg-green-900/20 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
-              >
-                {merging ? (
-                  <LoaderCircle className="w-3 h-3 animate-spin" />
-                ) : (
-                  <Merge className="w-3.5 h-3.5" />
-                )}
-              </button>
-            </Tooltip>
-            <Tooltip content="Update from base branch">
-              <button
-                onClick={handleUpdateFromBase}
-                disabled={merging || killing || restarting || updating}
-                className="w-6 h-6 flex items-center justify-center rounded-md border border-amber-200 text-amber-600 hover:bg-amber-50 dark:border-amber-900/30 dark:text-amber-400 dark:hover:bg-amber-900/20 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
-              >
-                {updating ? (
-                  <LoaderCircle className="w-3 h-3 animate-spin" />
-                ) : (
-                  <FolderSync className="w-3.5 h-3.5" />
-                )}
-              </button>
-            </Tooltip>
-            <Tooltip content="Restart agent">
-              <button
-                onClick={handleRestart}
-                disabled={merging || killing || restarting || updating}
-                className="w-6 h-6 flex items-center justify-center rounded-md border border-blue-200 text-blue-600 hover:bg-blue-50 dark:border-blue-900/30 dark:text-blue-400 dark:hover:bg-blue-900/20 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
-              >
-                {restarting ? (
-                  <LoaderCircle className="w-3 h-3 animate-spin" />
-                ) : (
-                  <RotateCcw className="w-3.5 h-3.5" />
-                )}
-              </button>
-            </Tooltip>
-            <Tooltip content="Kill agent">
-              <button
-                onClick={handleKill}
-                disabled={merging || killing || restarting}
-                className="w-6 h-6 flex items-center justify-center rounded-md border border-red-200 text-red-600 hover:bg-red-50 dark:border-red-900/30 dark:text-red-400 dark:hover:bg-red-900/20 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
-              >
-                {killing ? (
-                  <LoaderCircle className="w-3 h-3 animate-spin" />
-                ) : (
-                  <Trash2 className="w-3.5 h-3.5" />
-                )}
-              </button>
-            </Tooltip>
-          </div>
-
           {/* Metadata row */}
-          <div className="flex items-center gap-x-3 gap-y-1 flex-wrap">
+          <SeparatedRow className="flex items-center gap-x-3 gap-y-1 flex-wrap">
             <span className={`text-xs px-2.5 py-0.5 rounded-full font-medium ${agentTypeClass}`}>
               {agent.agent_type}
             </span>
             {agent.agent_status && (
-              <>
-                <span className="text-gray-300 dark:text-gray-600">·</span>
-                <span className={`text-xs px-2 py-0.5 rounded font-medium ${agentStatusBadge(agent.agent_status.status).className}`}>
-                  {agentStatusBadge(agent.agent_status.status).label}
-                </span>
-              </>
+              <span className={`text-xs px-2 py-0.5 rounded font-medium ${agentStatusBadge(agent.agent_status.status).className}`}>
+                {agentStatusBadge(agent.agent_status.status).label}
+              </span>
             )}
-            <span className="text-gray-300 dark:text-gray-600">·</span>
             {agent.branch_name && (
               <span className="text-xs font-mono text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
                 <Tag className="w-3.5 h-3.5" />
                 {agent.branch_name}
               </span>
             )}
-            <span className="text-gray-300 dark:text-gray-600">·</span>
             {/* Base branch. Editing it is metadata-only: it changes what
                 update-from-base merges in and what the diff compares against,
                 but does not rebase existing commits. */}
@@ -700,13 +545,12 @@ export function AgentDetail({
                 </span>
               )}
             </span>
-            <span className="text-gray-300 dark:text-gray-600">·</span>
             {agent.created_at !== 0 && agent.created_at !== undefined && (
               <span className="text-xs text-gray-500 dark:text-gray-400">
                 created {formatStartedAgo(agent.created_at)}
               </span>
             )}
-          </div>
+          </SeparatedRow>
 
         </div>
 
@@ -727,6 +571,7 @@ export function AgentDetail({
 
         {/* Diff viewer */}
         <DiffViewer agent={agent} projectId={projectId} externalRefreshTrigger={diffRefreshTrigger} externalArtifactRefresh={artifactRefreshTrigger} />
+        </div>
       </div>
     </div>
   )

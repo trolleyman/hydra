@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { X, ChevronLeft, ChevronRight } from 'lucide-react'
 
 export interface LightboxImage {
@@ -50,7 +51,11 @@ export function ImageLightbox({
   const current = images[index]
   if (!current) return null
 
-  return (
+  // Portal to <body> so the fixed overlay is positioned against the viewport, not
+  // a transformed ancestor — the sidebar's slide animation (translate-x) makes it
+  // a containing block for fixed descendants, which would otherwise clip/shrink
+  // the lightbox when it's opened from the compact (in-sidebar) spawn form.
+  return createPortal(
     <div
       className="fixed inset-0 z-[110] flex items-center justify-center bg-black/70 backdrop-blur-md animate-in fade-in duration-150"
       onClick={onClose}
@@ -125,6 +130,7 @@ export function ImageLightbox({
           <ChevronRight className="w-7 h-7" />
         </button>
       )}
-    </div>
+    </div>,
+    document.body,
   )
 }

@@ -14,7 +14,9 @@ const EVENT_FALLBACK_MS = 30_000
 import type { ProjectInfo, AgentResponse } from '../api'
 import { ApiError, ErrorResponse } from '../api'
 import { formatError } from '../api/format_error'
-import { Sun, Moon, Monitor, ChevronDown, ChevronRight, Folder, FolderGit2, FolderOpen, Plus, Settings, Check, X, LoaderCircle, AlertTriangle, Menu } from 'lucide-react'
+import { ChevronDown, ChevronRight, Folder, FolderGit2, FolderOpen, Plus, Settings, Check, X, LoaderCircle, AlertTriangle, PanelLeftClose, PanelLeftOpen, RotateCw } from 'lucide-react'
+import { useApplyTheme } from '../lib/theme'
+import { useSidebarStore, SIDEBAR_OVERLAY_QUERY } from '../lib/sidebar'
 import { folderPickerAvailable, openFolderPicker } from '../api/folderPicker'
 import { AgentSidebarItem } from '../components/AgentComponents'
 import { SpawnForm } from '../components/SpawnForm'
@@ -37,18 +39,24 @@ import { pruneAgentViewPrefs } from '../lib/agentViewPrefs'
 import { StorageKeys, readLocal, writeLocal, readTrustedProjects, trustProject, archivedCollapsedKey } from '../lib/storage'
 import { loadProjectView, saveProjectView, type ProjectView } from '../lib/projectView'
 
-function formatSpawnedAgo(ms: number): string {
+// Server uptime, rendered as "up 2 hours" (the exact spawn time is in the
+// tooltip). Mirrors a process "uptime" rather than the old "Spawned X ago".
+function formatUptime(ms: number): string {
   const seconds = Math.floor(ms / 1000)
-  if (seconds < 5) return 'Spawned just now'
-  if (seconds < 60) return `Spawned ${seconds} seconds ago`
+  if (seconds < 60) return 'up <1 min'
   const minutes = Math.floor(seconds / 60)
-  if (minutes < 60) return `Spawned ${minutes} ${minutes === 1 ? 'minute' : 'minutes'} ago`
+  if (minutes < 60) return `up ${minutes} ${minutes === 1 ? 'minute' : 'minutes'}`
   const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `Spawned ${hours} ${hours === 1 ? 'hour' : 'hours'} ago`
+  if (hours < 24) return `up ${hours} ${hours === 1 ? 'hour' : 'hours'}`
   const days = Math.floor(hours / 24)
-  if (days === 1) return 'Spawned yesterday'
-  return `Spawned ${days} days ago`
+  return `up ${days} ${days === 1 ? 'day' : 'days'}`
 }
+
+// Project-switch shortcut hint. We bind Ctrl (not Cmd) on every platform,
+// including macOS: macOS reserves Cmd+` for its own "cycle windows within an
+// app", so it never reaches the page — Ctrl+` is free there and keeps one
+// binding everywhere.
+const SWITCH_PROJECT_HINT = 'Hold Ctrl, tap ` to switch · ⇧ for previous'
 
 const SIDEBAR_MIN = 160
 const SIDEBAR_MAX = 600
@@ -370,42 +378,63 @@ function ProjectDropdown({
               </form>
             )}
           </div>
+
+          {projects.length > 1 && (
+            <div className="px-3 py-1.5 border-t border-gray-100 dark:border-gray-700 text-[10px] text-gray-400 dark:text-gray-500 font-mono">
+              {SWITCH_PROJECT_HINT}
+            </div>
+          )}
         </div>
       )}
     </div>
   )
 }
 
+// ── Project Switcher Overlay ─────────────────────────────────────────────────
+// Alt-tab-style overlay shown while the user holds Ctrl and taps `. Purely a
+// keyboard-driven display — it doesn't capture pointer events; the keyboard
+// handling and commit-on-Ctrl-release live in RootLayout.
+
+function ProjectSwitcherOverlay({ projects, index }: { projects: ProjectInfo[]; index: number }) {
+  const activeRef = useRef<HTMLDivElement>(null)
+  // Keep the highlighted row visible when the list overflows.
+  useEffect(() => { activeRef.current?.scrollIntoView({ block: 'nearest' }) }, [index])
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 pointer-events-none">
+      <div className="w-80 max-h-[70vh] overflow-y-auto bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-2xl py-2">
+        <div className="px-4 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
+          Switch project
+        </div>
+        {projects.map((p, i) => {
+          const active = i === index
+          return (
+            <div
+              key={p.id}
+              ref={active ? activeRef : undefined}
+              className={`flex items-center gap-2.5 px-4 py-2 ${active ? 'bg-blue-50 dark:bg-blue-900/30' : ''}`}
+            >
+              <Folder className={`w-3.5 h-3.5 shrink-0 ${active ? 'text-blue-500' : 'text-gray-400'}`} />
+              <div className="min-w-0 flex-1">
+                <div className={`text-sm font-medium truncate ${active ? 'text-blue-700 dark:text-blue-300' : 'text-gray-900 dark:text-gray-100'}`}>
+                  {p.name}
+                </div>
+                <div className="text-xs font-mono text-gray-400 dark:text-gray-500 truncate">{p.path}</div>
+              </div>
+              {(p.unread_count ?? 0) > 0 && (
+                <span className="shrink-0 w-2 h-2 rounded-full bg-sky-500" aria-label={`${p.unread_count} agents with unread changes`} />
+              )}
+            </div>
+          )
+        })}
+        <div className="px-4 pt-2 mt-1 border-t border-gray-100 dark:border-gray-700 text-[10px] text-gray-400 dark:text-gray-500 font-mono">
+          ` next · ⇧` prev · release Ctrl to select
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Root Layout ────────────────────────────────────────────────────────────────
-
-// Theme preference: an explicit light/dark choice, or `system` to follow the OS
-// `prefers-color-scheme` and react to changes while the app is open.
-type ThemeMode = 'light' | 'dark' | 'system'
-// Cycle order used by the header selector button.
-const NEXT_THEME_MODE: Record<ThemeMode, ThemeMode> = {
-  light: 'dark',
-  dark: 'system',
-  system: 'light',
-}
-const THEME_MODE_ICON: Record<ThemeMode, typeof Sun> = {
-  light: Sun,
-  dark: Moon,
-  system: Monitor,
-}
-const THEME_MODE_LABEL: Record<ThemeMode, string> = {
-  light: 'Light',
-  dark: 'Dark',
-  system: 'System',
-}
-
-function loadThemeMode(): ThemeMode {
-  const stored = readLocal(StorageKeys.themeMode)
-  if (stored === 'light' || stored === 'dark' || stored === 'system') return stored
-  // Migrate the legacy boolean preference (`hydra-dark-mode`) if present.
-  const legacy = readLocal(StorageKeys.darkModeLegacy)
-  if (legacy !== null) return legacy === 'true' ? 'dark' : 'light'
-  return 'system'
-}
 
 // Derive the current view from the active route so it can be persisted as the
 // project's last-open view. Agent routes set agentId; the repository browser is
@@ -437,12 +466,17 @@ function RootLayout() {
   const [, setTick] = useState(0)
   const [development, setDevelopment] = useState(false)
   const [restarting, setRestarting] = useState(false)
-  // On small screens the sidebar collapses into an off-canvas drawer toggled by
-  // the header hamburger; on md+ it's the usual persistent column (this state is
-  // ignored there). Closed whenever the route changes so tapping an agent on a
-  // phone slides the drawer away and reveals the detail view.
-  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
-  const [themeMode, setThemeMode] = useState<ThemeMode>(loadThemeMode)
+  // Alt-tab-style project switcher: while Ctrl is held, each Ctrl+` press steps
+  // the highlight through this overlay (Shift reverses); releasing Ctrl commits.
+  // `null` = overlay closed; otherwise the highlighted index into `projects`.
+  const [switcherIndex, setSwitcherIndex] = useState<number | null>(null)
+  // The sidebar can be hidden on any screen size via the collapse button in its
+  // header (revealed again by the floating button / agent top bar over the
+  // content). On wide screens collapsing reclaims the space; below the overlay
+  // breakpoint the sidebar is an off-canvas overlay, so collapsed means "closed".
+  // State lives in a shared store so the agent page's top bar can host the toggle.
+  const sidebarCollapsed = useSidebarStore((s) => s.collapsed)
+  const toggleSidebar = useSidebarStore((s) => s.toggle)
   // Which projects the user has trusted, mirrored from localStorage so the trust
   // prompt re-evaluates reactively when one is accepted (see lib/storage).
   const [trustedProjectIds, setTrustedProjectIds] = useState<Set<string>>(() => readTrustedProjects())
@@ -509,6 +543,19 @@ function RootLayout() {
     navigateToProjectView(projectId, view)
   }, [navigate, navigateToProjectView])
 
+  // Switch the active project: record the selection and route to its remembered
+  // view (or stay on settings if that's the current page). Shared by the header
+  // dropdown and the Ctrl/Cmd+` keyboard shortcut so both behave identically.
+  const selectProject = useCallback((id: string) => {
+    setSelectedProjectId(id)
+    const isOnSettings = window.location.pathname.endsWith('/settings')
+    if (isOnSettings) {
+      navigate({ to: '/project/$projectId/settings', params: { projectId: id } })
+      return
+    }
+    restoreProjectView(id, loadProjectView(id))
+  }, [setSelectedProjectId, navigate, restoreProjectView])
+
   const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
     const saved = readLocal(StorageKeys.sidebarWidth)
     if (saved) return Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, parseInt(saved, 10)))
@@ -562,21 +609,9 @@ function RootLayout() {
     document.addEventListener('mouseup', onUp)
   }, [])
 
-  useEffect(() => {
-    writeLocal(StorageKeys.themeMode, themeMode)
-    writeLocal(StorageKeys.darkModeLegacy, null) // drop the migrated legacy key
-    const mql = window.matchMedia('(prefers-color-scheme: dark)')
-    const apply = () => {
-      const isDark = themeMode === 'dark' || (themeMode === 'system' && mql.matches)
-      document.documentElement.classList.toggle('dark', isDark)
-    }
-    apply()
-    // In `system` mode, track OS preference changes live.
-    if (themeMode === 'system') {
-      mql.addEventListener('change', apply)
-      return () => mql.removeEventListener('change', apply)
-    }
-  }, [themeMode])
+  // Apply the theme (`dark` class on <html>) from the shared theme store; the
+  // control itself now lives on the Settings page.
+  useApplyTheme()
 
   // Agent list for the selected project: refreshed by the events stream (below),
   // with a slow visibility-gated poll as a fallback. refetchAgentsRef lets the
@@ -826,9 +861,86 @@ function RootLayout() {
   // Drop expired per-artifact and per-agent-view UI prefs once on boot.
   useEffect(() => { pruneArtifactPrefs(); pruneAgentViewPrefs() }, [])
 
-  // Close the mobile drawer on any navigation (selecting an agent, opening the
-  // repository, switching project view) so it never lingers over the content.
-  useEffect(() => { setMobileSidebarOpen(false) }, [location.pathname])
+  // On small screens (overlay mode) close the sidebar on any navigation so it
+  // never lingers over the content. This is transient — it does NOT persist, so
+  // it can't clobber the wide-screen collapse preference (only the explicit
+  // toggle writes storage). On wide screens the sidebar stays as the user left it.
+  useEffect(() => {
+    if (!window.matchMedia(SIDEBAR_OVERLAY_QUERY).matches) {
+      useSidebarStore.getState().setCollapsed(true, false)
+    }
+  }, [location.pathname])
+
+  // Ctrl/Cmd + . collapses or expands the sidebar from anywhere (mirrors the
+  // collapse button). Treated as an explicit toggle, so it persists.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key === '.') {
+        e.preventDefault()
+        toggleSidebar()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [toggleSidebar])
+
+  // Alt-tab-style project switcher. Hold Ctrl and tap ` to open an overlay with
+  // the *next* project highlighted; each further ` steps forward, Shift+` steps
+  // back (both wrap). Releasing Ctrl commits the highlight; Escape or losing
+  // focus cancels. We bind Ctrl on every platform — macOS reserves Cmd+` for its
+  // own "cycle windows within an app", so Cmd never reaches us; Ctrl+` is free
+  // there too, keeping one binding everywhere. We match on e.code === 'Backquote'
+  // so it's keyboard-layout independent (Shift+` is '~' on US layouts).
+  //
+  // selectProject is read through a ref so committing on Ctrl-up doesn't force
+  // this listener to re-bind every render; the keydown/keyup handlers are
+  // otherwise stable and use functional state updates.
+  const selectProjectRef = useRef(selectProject)
+  selectProjectRef.current = selectProject
+  const projectsRef = useRef(projects)
+  projectsRef.current = projects
+  const currentProjectIdRef = useRef(currentProjectId)
+  currentProjectIdRef.current = currentProjectId
+  const switcherIndexRef = useRef(switcherIndex)
+  switcherIndexRef.current = switcherIndex
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') {
+        setSwitcherIndex(null) // no-op (React bails) if already closed
+        return
+      }
+      if (e.code !== 'Backquote' || !e.ctrlKey || e.altKey || e.metaKey) return
+      const list = projectsRef.current
+      if (list.length < 2) return
+      e.preventDefault()
+      if (e.repeat) return // one step per physical press, not per auto-repeat
+      const dir = e.shiftKey ? -1 : 1
+      setSwitcherIndex((cur) => {
+        // First press steps off the current project; later presses step off the
+        // current highlight. With nothing selected, land on first/last.
+        const base = cur ?? list.findIndex((p) => p.id === currentProjectIdRef.current)
+        const start = base === -1 ? (dir === 1 ? -1 : 0) : base
+        return (start + dir + list.length) % list.length
+      })
+    }
+    function onKeyUp(e: KeyboardEvent) {
+      if (e.key !== 'Control') return
+      const cur = switcherIndexRef.current
+      if (cur === null) return
+      setSwitcherIndex(null)
+      const proj = projectsRef.current[cur]
+      if (proj && proj.id !== currentProjectIdRef.current) selectProjectRef.current(proj.id)
+    }
+    function onBlur() { setSwitcherIndex(null) }
+    window.addEventListener('keydown', onKeyDown)
+    window.addEventListener('keyup', onKeyUp)
+    window.addEventListener('blur', onBlur)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener('keyup', onKeyUp)
+      window.removeEventListener('blur', onBlur)
+    }
+  }, [])
 
   async function handleRestart() {
     setRestarting(true)
@@ -959,131 +1071,64 @@ function RootLayout() {
   }
 
   return (
-    <div className="h-full bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 flex flex-col">
-      <header className="h-12 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex items-center px-3 sm:px-4 gap-2 sm:gap-3 shrink-0">
-        <button
-          type="button"
-          aria-label="Toggle sidebar"
-          aria-expanded={mobileSidebarOpen}
-          onClick={() => setMobileSidebarOpen((o) => !o)}
-          className="md:hidden -ml-1 w-8 h-8 flex items-center justify-center rounded-md text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors cursor-pointer shrink-0"
-        >
-          <Menu className="w-5 h-5" />
-        </button>
-        <Link
-          to={currentProjectId ? '/project/$projectId' : '/'}
-          params={currentProjectId ? { projectId: currentProjectId } : {}}
-          className="flex items-center gap-2 shrink-0"
-        >
-          <div className="w-6 h-6 flex items-center justify-center overflow-hidden rounded-sm">
-            <img
-              className='w-full h-full object-cover object-center'
-              srcSet="/icon.png, /icon.avif"
-              src="/icon.png"
-              alt="Hydra icon" />
-          </div>
-          <span className="hidden sm:inline text-2xl font-bold font-serif tracking-[-0.05em] dark:text-gray-100">Hydra</span>
-        </Link>
-
-        <ProjectDropdown
-          projects={projects}
-          selectedId={currentProjectId}
-          onSelect={(id) => {
-            setSelectedProjectId(id)
-            const isOnSettings = window.location.pathname.endsWith('/settings')
-            if (isOnSettings) {
-              navigate({ to: '/project/$projectId/settings', params: { projectId: id } })
-              return
-            }
-            // Restore the view (agent / repository / project) last open in the
-            // project we're switching to, so it comes back rather than the bare
-            // project page — but don't auto-open a remembered agent that has
-            // unread changes (see restoreProjectView).
-            restoreProjectView(id, loadProjectView(id))
-          }}
-          onDeselect={() => {
-            setSelectedProjectId(null)
-            navigate({ to: '/' })
-          }}
-          onAddProject={handleAddProject}
-          onRemoveProject={handleRemoveProject}
+    <div className="h-full bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 flex overflow-hidden">
+      {/* Backdrop behind the sidebar overlay (small screens only, when open). */}
+      {!sidebarCollapsed && (
+        <div
+          aria-hidden
+          onClick={toggleSidebar}
+          className="lg:hidden fixed inset-0 z-30 bg-black/40"
         />
-
-        {selectedProject && (
-          <span className="text-xs font-mono text-gray-400 dark:text-gray-500 truncate min-w-0 mt-1 hidden sm:block">
-            {selectedProject.path}
-          </span>
-        )}
-
-        <div className="ml-auto flex items-center gap-3 shrink-0 self-center">
-          <ClaudeUsageIndicator />
-          {spawnedAt.current !== null && (
-            <Tooltip content={`Spawned at ${new Date(spawnedAt.current).toUTCString()}`}>
-              <span className="text-xs text-gray-400 dark:text-gray-500 cursor-default hidden md:block">
-                {formatSpawnedAgo(Date.now() - spawnedAt.current)}
-              </span>
-            </Tooltip>
-          )}
-          {development && (
-            <Tooltip content="Rebuild and restart the server">
-              <button
-                onClick={handleRestart}
-                disabled={restarting}
-                className="text-xs px-2 py-0.5 rounded bg-amber-100 cursor-pointer dark:bg-amber-900 text-amber-700 dark:text-amber-300 hover:bg-amber-200 dark:hover:bg-amber-800 disabled:opacity-50 transition-colors hidden md:block"
-              >
-                {restarting ? 'Restarting…' : 'Restart'}
-              </button>
-            </Tooltip>
-          )}
-          <Tooltip content={`Theme: ${THEME_MODE_LABEL[themeMode]} (switch to ${THEME_MODE_LABEL[NEXT_THEME_MODE[themeMode]]})`}>
+      )}
+      {/* Sidebar: a persistent, resizable column at lg+, an off-canvas overlay
+          below that (so it never squeezes a tablet / landscape phone). With the
+          top bar gone it now holds the whole app chrome: the project selector +
+          collapse button in its header, the spawn box / repository / agents list
+          in the middle, and settings + usage in its footer. Collapsed removes it
+          from the flow (lg+) or slides it off-canvas (overlay); the floating
+          button over the content reveals it again. */}
+      <aside
+        style={{ width: sidebarWidth }}
+        className={`relative max-lg:fixed max-lg:inset-y-0 max-lg:left-0 max-lg:z-40 max-lg:!w-[80vw] max-lg:!max-w-[20rem] max-lg:shadow-2xl bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex-col shrink-0 transition-transform duration-200 ${sidebarCollapsed ? 'hidden max-lg:flex max-lg:-translate-x-full' : 'flex translate-x-0'}`}
+      >
+        {/* Sidebar header — app icon, project selector, and the collapse button
+            to its right. This is what replaced the global top bar. */}
+        <div className="flex items-center gap-1 h-12 px-2 border-b border-gray-200 dark:border-gray-700 shrink-0">
+          <Link
+            to={currentProjectId ? '/project/$projectId' : '/'}
+            params={currentProjectId ? { projectId: currentProjectId } : {}}
+            aria-label="Hydra home"
+            className="shrink-0 w-7 h-7 flex items-center justify-center overflow-hidden rounded-sm"
+          >
+            <img className="w-6 h-6 object-cover object-center" srcSet="/icon.png, /icon.avif" src="/icon.png" alt="Hydra icon" />
+          </Link>
+          <div className="flex-1 min-w-0">
+            <ProjectDropdown
+              projects={projects}
+              selectedId={currentProjectId}
+              // Restore the view (agent / repository / project) last open in the
+              // project we're switching to (see selectProject / restoreProjectView).
+              onSelect={selectProject}
+              onDeselect={() => {
+                setSelectedProjectId(null)
+                navigate({ to: '/' })
+              }}
+              onAddProject={handleAddProject}
+              onRemoveProject={handleRemoveProject}
+            />
+          </div>
+          <Tooltip content="Hide sidebar (Ctrl+.)">
             <button
-              onClick={() => setThemeMode((m) => NEXT_THEME_MODE[m])}
-              className="w-7 h-7 flex items-center justify-center rounded-md cursor-pointer text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+              type="button"
+              aria-label="Hide sidebar"
+              onClick={toggleSidebar}
+              className="shrink-0 w-8 h-8 flex items-center justify-center rounded-md text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors cursor-pointer"
             >
-              {(() => {
-                const Icon = THEME_MODE_ICON[themeMode]
-                return <Icon className="w-5 h-5" />
-              })()}
+              <PanelLeftClose className="w-5 h-5" />
             </button>
           </Tooltip>
-          <Tooltip content="Settings">
-            {currentProjectId ? (
-              <Link
-                to="/project/$projectId/settings"
-                params={{ projectId: currentProjectId }}
-                className="w-7 h-7 flex items-center justify-center rounded-md cursor-pointer text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-              >
-                <Settings className="w-5 h-5" />
-              </Link>
-            ) : (
-              <Link
-                to="/settings"
-                className="w-7 h-7 flex items-center justify-center rounded-md cursor-pointer text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-              >
-                <Settings className="w-5 h-5" />
-              </Link>
-            )}
-          </Tooltip>
         </div>
-      </header>
 
-      <div className="flex flex-1 overflow-hidden">
-        {/* Backdrop behind the mobile drawer (small screens only). */}
-        {mobileSidebarOpen && (
-          <div
-            aria-hidden
-            onClick={() => setMobileSidebarOpen(false)}
-            className="md:hidden fixed inset-0 top-12 z-30 bg-black/40"
-          />
-        )}
-        {/* Sidebar: a persistent column on md+, an off-canvas drawer on mobile.
-            The stored pixel width drives the desktop column; on mobile a fixed
-            viewport-relative width (important-flagged so it wins over the inline
-            style) slides in from the left. */}
-        <aside
-          style={{ width: sidebarWidth }}
-          className={`relative max-md:fixed max-md:top-12 max-md:bottom-0 max-md:left-0 max-md:z-40 max-md:!w-[80vw] max-md:!max-w-[20rem] max-md:shadow-2xl bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex flex-col shrink-0 transition-transform duration-200 md:translate-x-0 ${mobileSidebarOpen ? 'max-md:translate-x-0' : 'max-md:-translate-x-full'}`}
-        >
           <SpawnForm compact projectId={currentProjectId} onSpawned={handleSpawned} disabled={!currentProjectId} />
 
           {/* Repository view — sits between the spawn box and the agents list */}
@@ -1202,20 +1247,88 @@ function RootLayout() {
             )}
           </div>
 
-          {/* Resize handle (desktop only — the mobile drawer has a fixed width) */}
+          {/* Sidebar footer — a single row: restart (icon) + uptime on the left,
+              Claude usage + Settings (icon) on the right. The theme switcher now
+              lives inside Settings, not here. */}
+          <div className="border-t border-gray-200 dark:border-gray-700 px-2 py-2 flex items-center gap-1.5 shrink-0">
+            {development && (
+              <Tooltip content={restarting ? 'Restarting…' : 'Rebuild and restart the server'}>
+                <button
+                  onClick={handleRestart}
+                  disabled={restarting}
+                  aria-label="Restart server"
+                  className="shrink-0 w-7 h-7 flex items-center justify-center rounded-lg bg-amber-100 dark:bg-amber-900 text-amber-700 dark:text-amber-300 hover:bg-amber-200 dark:hover:bg-amber-800 disabled:opacity-50 transition-colors cursor-pointer"
+                >
+                  <RotateCw className={`w-4 h-4 ${restarting ? 'animate-spin' : ''}`} />
+                </button>
+              </Tooltip>
+            )}
+            {spawnedAt.current !== null && (
+              <Tooltip content={`Spawned at ${new Date(spawnedAt.current).toUTCString()}`}>
+                <span className="text-[11px] text-gray-400 dark:text-gray-500 cursor-default truncate">
+                  {formatUptime(Date.now() - spawnedAt.current)}
+                </span>
+              </Tooltip>
+            )}
+            <div className="ml-auto shrink-0">
+              <ClaudeUsageIndicator />
+            </div>
+            {(() => {
+              const settingsActive = /\/settings(\/|$)/.test(location.pathname)
+              const cls = settingsActive
+                ? 'shrink-0 w-7 h-7 flex items-center justify-center rounded-lg cursor-pointer bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-300'
+                : 'shrink-0 w-7 h-7 flex items-center justify-center rounded-lg cursor-pointer text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors'
+              return (
+                <Tooltip content="Settings">
+                  {currentProjectId ? (
+                    <Link to="/project/$projectId/settings" params={{ projectId: currentProjectId }} aria-label="Settings" className={cls}>
+                      <Settings className="w-5 h-5 shrink-0" />
+                    </Link>
+                  ) : (
+                    <Link to="/settings" aria-label="Settings" className={cls}>
+                      <Settings className="w-5 h-5 shrink-0" />
+                    </Link>
+                  )}
+                </Tooltip>
+              )
+            })()}
+          </div>
+
+          {/* Resize handle (lg+ only — the overlay sidebar has a fixed width) */}
           <div
             onMouseDown={handleSidebarResizeStart}
-            className="hidden md:flex absolute right-0 top-0 bottom-0 w-3 -mr-1 cursor-col-resize z-10 group items-stretch justify-center"
+            className="hidden lg:flex absolute right-0 top-0 bottom-0 w-3 -mr-1 cursor-col-resize z-10 group items-stretch justify-center"
           >
             <div className="w-px group-hover:bg-blue-400/60 group-active:bg-blue-500 transition-colors" />
           </div>
         </aside>
 
-        {/* Main content */}
-        <Outlet />
-      </div>
+        {/* Main content. When the sidebar is collapsed a floating button at the
+            top-left brings it back — except on pages that host the toggle in
+            their own header bar (the agent page, the repository browser, and
+            settings). */}
+        {sidebarCollapsed && !selectedAgentId && !/\/(repository|settings)(\/|$)/.test(location.pathname) && (
+          <Tooltip content="Show sidebar (Ctrl+.)">
+            <button
+              type="button"
+              aria-label="Show sidebar"
+              onClick={toggleSidebar}
+              className="fixed top-2 left-2 z-30 w-9 h-9 flex items-center justify-center rounded-lg bg-white/90 dark:bg-gray-800/90 backdrop-blur border border-gray-200 dark:border-gray-700 shadow-sm text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors cursor-pointer"
+            >
+              <PanelLeftOpen className="w-5 h-5" />
+            </button>
+          </Tooltip>
+        )}
+        {/* The floating reveal button (when collapsed) just overlays the top-left
+            corner — no reserved strip, so the content keeps the full width. */}
+        <div className="flex-1 flex min-w-0 overflow-hidden">
+          <Outlet />
+        </div>
       <Dialog />
       <Toaster />
+      {switcherIndex !== null && projects[switcherIndex] && (
+        <ProjectSwitcherOverlay projects={projects} index={switcherIndex} />
+      )}
       {untrustedProject && (
         <TrustProjectModal
           project={untrustedProject}
