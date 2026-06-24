@@ -10,6 +10,7 @@ import (
 
 	"braces.dev/errtrace"
 	"github.com/trolleyman/hydra/internal/artifacts"
+	"github.com/trolleyman/hydra/internal/config"
 	"github.com/trolleyman/hydra/internal/daemon"
 	"github.com/trolleyman/hydra/internal/db"
 	"github.com/trolleyman/hydra/internal/events"
@@ -33,6 +34,7 @@ type daemonRuntime struct {
 	reg         *session.Registry
 	services    *services.Manager
 	projectRoot string
+	deploy      config.DeployConfig
 }
 
 // setupRuntime opens the DB, builds the session registry + HTTP server, starts
@@ -185,14 +187,29 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 		svcMgr.StartProject(root)
 	}
 
-	mux := buildMux(server)
+	// Remote-access auth: loopback (and the unix control socket) are always
+	// trusted; a configured key gates every non-localhost request. The key lives
+	// in the boot project's .hydra/deploy.toml (uncommitted). A single daemon can
+	// serve several projects on one TCP port, so the boot project's key is the
+	// one that applies to the web UI.
+	deployCfg, err := config.LoadDeploy(projectRoot)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	auth := httppkg.NewAuthenticator(deployCfg.AuthKey)
+	if auth.Enabled() {
+		log.Printf("Auth: non-localhost requests require the key in %s", paths.GetDeployConfigPath(projectRoot))
+	}
+
+	mux := buildMux(server, auth)
 	return &daemonRuntime{
 		server:      server,
-		handler:     httppkg.LoggingMiddleware(mux),
+		handler:     httppkg.LoggingMiddleware(auth.Middleware(mux)),
 		store:       store,
 		reg:         reg,
 		services:    svcMgr,
 		projectRoot: projectRoot,
+		deploy:      deployCfg,
 	}, nil
 }
 
@@ -227,9 +244,12 @@ func serveUnixSocket(ctx context.Context, srv *http.Server, projectRoot string) 
 	}, nil
 }
 
-// buildMux wires the API, websocket terminal, and frontend routes.
-func buildMux(server *httppkg.Server) *http.ServeMux {
+// buildMux wires the API, websocket terminal, and frontend routes. The
+// authenticator registers its own /api/auth/* endpoints (login/status/logout),
+// which are exempt from the auth gate so a remote browser can reach them.
+func buildMux(server *httppkg.Server, auth *httppkg.Authenticator) *http.ServeMux {
 	mux := http.NewServeMux()
+	auth.RegisterRoutes(mux)
 	apiHandler := httppkg.RequestBodyLimitMiddleware(10 * 1024 * 1024)(httppkg.NewHandler(server))
 	mux.Handle("/api/", apiHandler)
 	mux.Handle("/health", apiHandler)

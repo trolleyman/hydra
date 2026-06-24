@@ -5,7 +5,6 @@ import (
 	"log"
 	"net"
 	"net/http"
-	"os"
 	"os/signal"
 	"syscall"
 	"time"
@@ -74,12 +73,13 @@ func runDaemon(_ *cobra.Command, _ []string) error {
 	defer cleanup()
 
 	// Serve the web UI on TCP (best-effort; the unix socket is authoritative).
+	// Defaults to localhost; if a non-loopback bind is requested without an auth
+	// key configured, resolveWebAddr refuses it and the web UI is simply left off
+	// rather than exposed without a password.
 	if daemonFlags.web {
-		addr := "localhost:8080"
-		if env := os.Getenv("HYDRA_API_ADDR"); env != "" {
-			addr = env
-		}
-		if tcpLn, err := net.Listen("tcp", addr); err != nil {
+		if addr, err := resolveWebAddr(rt.deploy); err != nil {
+			log.Printf("warn: daemon: web UI disabled: %v", err)
+		} else if tcpLn, err := net.Listen("tcp", addr); err != nil {
 			log.Printf("warn: daemon: web UI listen %s failed: %v", addr, err)
 		} else {
 			log.Printf("daemon: web UI on http://%s", addr)

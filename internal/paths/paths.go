@@ -76,6 +76,15 @@ func GetHydraDirFromProjectRoot(projectRoot string) string {
 	return filepath.Join(projectRoot, ".hydra")
 }
 
+// GetDeployConfigPath returns the path to the project's deploy.toml. It holds
+// the remote-access auth key (and optional listen address) and is NOT committed
+// (it is .gitignored): it contains a secret. It sits at the .hydra top level
+// next to config.toml rather than under .hydra/local, because it is a
+// hand-managed/generated config file, not generated runtime state.
+func GetDeployConfigPath(projectRoot string) string {
+	return filepath.Join(GetHydraDirFromProjectRoot(projectRoot), "deploy.toml")
+}
+
 // GetHydraLocalDirFromProjectRoot returns .hydra/local, the single parent holding
 // every generated, never-committed thing (worktrees, the SQLite DB, caches, COW
 // layers, ...). Only .hydra/config.toml lives at the .hydra top level. Each
