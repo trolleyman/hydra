@@ -18,7 +18,10 @@ import { BranchSelector } from './BranchSelector'
 import { RepositoryArtifactsView } from './RepositoryArtifactsView'
 import { Tooltip } from './Tooltip'
 import { PageTopBar } from './PageTopBar'
-import { FileDiff, FileRow, ChangeTypeIcon } from '../DiffViewer'
+import {
+  FileDiff, FileRow, ChangeTypeIcon, TreeNodeView,
+  buildFileTree, compactTree as compactDiffTree, getGroupedFiles, type FileView,
+} from '../DiffViewer'
 import { IMAGE_DIFF_MODES, type ImageDiffMode } from './ArtifactsPanel'
 import { repoBlobUrl } from '../lib/imageDiff'
 
@@ -389,7 +392,7 @@ function SettingsPopup({ settings, onChange }: { settings: RepoSettings; onChang
 // A trimmed cousin of SettingsPopup for the diff view's two toggles, mirroring
 // the diff viewer's own options so the two feel consistent.
 
-type DiffSettings = { singleFile: boolean; sideBySide: boolean; ignoreWhitespace: boolean; imageDiffMode: ImageDiffMode }
+type DiffSettings = { fileView: FileView; singleFile: boolean; sideBySide: boolean; ignoreWhitespace: boolean; imageDiffMode: ImageDiffMode }
 
 function DiffSettingsPopup({ settings, onChange }: { settings: DiffSettings; onChange: (s: DiffSettings) => void }) {
   const [open, setOpen] = useState(false)
@@ -410,6 +413,11 @@ function DiffSettingsPopup({ settings, onChange }: { settings: DiffSettings; onC
     { key: 'sideBySide', label: 'Side by side' },
     { key: 'ignoreWhitespace', label: 'Ignore whitespace' },
   ]
+  const viewOptions: { value: FileView; label: string }[] = [
+    { value: 'tree', label: 'Tree' },
+    { value: 'flat', label: 'Flat list' },
+    { value: 'grouped', label: 'Grouped by folder' },
+  ]
 
   return (
     <div ref={ref} className="relative shrink-0">
@@ -426,6 +434,21 @@ function DiffSettingsPopup({ settings, onChange }: { settings: DiffSettings; onC
 
       {open && (
         <div className="absolute right-0 top-full mt-1 w-48 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50 p-3">
+          <p className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 mb-2">File list</p>
+          <div className="flex flex-col gap-0.5 mb-3">
+            {viewOptions.map((opt) => (
+              <label key={opt.value} className="flex items-center gap-2 py-0.5 cursor-pointer">
+                <input
+                  type="radio"
+                  name="hydra-repo-diff-file-view"
+                  checked={settings.fileView === opt.value}
+                  onChange={() => onChange({ ...settings, fileView: opt.value })}
+                  className="w-3 h-3 accent-blue-500"
+                />
+                <span className="text-xs text-gray-700 dark:text-gray-300">{opt.label}</span>
+              </label>
+            ))}
+          </div>
           <p className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 mb-2">Diff options</p>
           <div className="flex flex-col gap-0.5">
             {options.map(({ key, label }) => (
@@ -714,6 +737,10 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
   const [diffLoading, setDiffLoading] = useState(false)
   const [diffError, setDiffError] = useState<string | null>(null)
   const [collapsedDiffFiles, setCollapsedDiffFiles] = useState<Set<string>>(new Set())
+  // Folders collapsed in the changed-files sidebar tree (tree view). Empty = all
+  // folders open, matching the agent diff viewer; folders start expanded so every
+  // changed file is visible without clicking.
+  const [collapsedDiffFolders, setCollapsedDiffFolders] = useState<Set<string>>(new Set())
   // The diff defaults to one file at a time (the selected file only); absent
   // storage means the default, an explicit 'false' is the all-files view.
   const [diffSettings, setDiffSettings] = useState<DiffSettings>(() => {
@@ -721,13 +748,18 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
     const imageDiffMode: ImageDiffMode =
       storedMode === 'side-by-side' || storedMode === 'ab' || storedMode === 'slider' || storedMode === 'onion'
         ? storedMode : 'ab'
+    const storedView = readLocal(StorageKeys.repoDiffFileView)
+    const fileView: FileView =
+      storedView === 'flat' || storedView === 'grouped' || storedView === 'tree' ? storedView : 'tree'
     return {
+      fileView,
       singleFile: readLocal(StorageKeys.repoDiffSingleFile) !== 'false',
       sideBySide: readLocal(StorageKeys.diffSideBySide) === 'true',
       ignoreWhitespace: readLocal(StorageKeys.diffIgnoreWhitespace) === 'true',
       imageDiffMode,
     }
   })
+  useEffect(() => { writeLocal(StorageKeys.repoDiffFileView, diffSettings.fileView) }, [diffSettings.fileView])
   useEffect(() => { writeLocal(StorageKeys.repoDiffSingleFile, String(diffSettings.singleFile)) }, [diffSettings.singleFile])
   useEffect(() => { writeLocal(StorageKeys.diffSideBySide, String(diffSettings.sideBySide)) }, [diffSettings.sideBySide])
   useEffect(() => { writeLocal(StorageKeys.diffIgnoreWhitespace, String(diffSettings.ignoreWhitespace)) }, [diffSettings.ignoreWhitespace])
@@ -998,6 +1030,20 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
     diffFileRefs.current.get(path)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
 
+  // Clicking a changed file in the sidebar: in one-file mode it selects the file,
+  // otherwise it scrolls the stacked diff to that file's card.
+  const onDiffFileClick = (path: string) =>
+    diffSettings.singleFile ? setSelectedDiffPath(path) : scrollToDiffFile(path)
+  const activeDiffPath = diffSettings.singleFile ? selectedDiffPath : null
+  const toggleDiffFolder = useCallback((path: string) => {
+    setCollapsedDiffFolders((prev) => {
+      const next = new Set(prev)
+      if (next.has(path)) next.delete(path)
+      else next.add(path)
+      return next
+    })
+  }, [])
+
   const toggle = (path: string) => {
     setExpanded((prev) => {
       const next = new Set(prev)
@@ -1083,14 +1129,48 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
             ) : diff && diff.files.length === 0 ? (
               <div className="px-3 py-4 text-xs text-gray-400 dark:text-gray-500 text-center">No differences</div>
             ) : diff ? (
-              diff.files.map((f) => (
-                <FileRow
-                  key={f.path}
-                  file={f}
-                  isActive={diffSettings.singleFile && f.path === selectedDiffPath}
-                  onClick={() => diffSettings.singleFile ? setSelectedDiffPath(f.path) : scrollToDiffFile(f.path)}
-                />
-              ))
+              diffSettings.fileView === 'tree' ? (
+                compactDiffTree(buildFileTree(diff.files)).map((node) => (
+                  <TreeNodeView
+                    key={node.path}
+                    node={node}
+                    depth={0}
+                    collapsedFolders={collapsedDiffFolders}
+                    toggleFolder={toggleDiffFolder}
+                    onFileClick={onDiffFileClick}
+                    activeFilePath={activeDiffPath}
+                  />
+                ))
+              ) : diffSettings.fileView === 'grouped' ? (
+                getGroupedFiles(diff.files).map(([folder, groupFiles]) => (
+                  <div key={folder || '__root__'}>
+                    {folder && (
+                      <div className="flex items-center gap-1.5 px-2.5 py-1 bg-gray-50 dark:bg-gray-700/50 border-y border-gray-100 dark:border-gray-700/50">
+                        <Folder className="w-3 h-3 text-blue-400 dark:text-blue-500 shrink-0" />
+                        <span className="font-mono text-[9px] text-gray-500 dark:text-gray-400 truncate flex-1 min-w-0">{folder}</span>
+                      </div>
+                    )}
+                    {groupFiles.map((f) => (
+                      <FileRow
+                        key={f.path}
+                        file={f}
+                        isActive={f.path === activeDiffPath}
+                        onClick={() => onDiffFileClick(f.path)}
+                        indent={folder ? 4 : 0}
+                      />
+                    ))}
+                  </div>
+                ))
+              ) : (
+                diff.files.map((f) => (
+                  <FileRow
+                    key={f.path}
+                    file={f}
+                    isActive={f.path === activeDiffPath}
+                    onClick={() => onDiffFileClick(f.path)}
+                  />
+                ))
+              )
             ) : null
           ) : treeLoading ? (
             <div className="flex items-center justify-center py-8 text-gray-400">
