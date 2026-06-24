@@ -228,6 +228,12 @@ try {
       // popover such as the repository branch selector so the screenshot
       // documents it.
       click?: string
+      // CSS selectors clicked in sequence (each followed by a settle), then a
+      // networkidle wait so any fetch a click kicks off has rendered before the
+      // capture. Used by the branch-compare diff shots, where pressing the diff
+      // button enters diff mode (and fetches the diff) and an optional second
+      // click opens the popped-out compare branch selector.
+      clicks?: string[]
       // Glob of a request to hold open (never fulfilled) so the page is captured
       // in its in-flight loading state — e.g. holding the repo file-contents
       // request so the loading spinner shows. With a request pending, networkidle
@@ -363,6 +369,27 @@ try {
         name: 'repository-branches',
         path: '/project/sim-project/repository/main/internal/server/server.go',
         click: 'button[title="Switch branch"]',
+      },
+      // The branch-compare diff view: pressing the diff button (the GitCompare
+      // icon beside the branch selector) enters diff mode — a second branch
+      // selector pops out beneath the first and the main pane shows the diff
+      // between the browsed ref (base) and the compare branch (head), reusing
+      // the agent diff's FileDiff/FileRow rendering. The sidebar's file count
+      // switches to "N changed". Simulation serves a small mock diff (see
+      // GetRepositoryDiff in internal/http/simulation.go).
+      {
+        name: 'repository-diff',
+        path: '/project/sim-project/repository',
+        clicks: ['button:has(svg.lucide-git-compare)'],
+      },
+      // The popped-out compare branch selector, opened: pressing the diff button
+      // reveals a second BranchSelector ("Compare against"), and clicking it
+      // opens the same branch dropdown the browser uses — agent branches first —
+      // so the capture documents picking the branch to diff against.
+      {
+        name: 'repository-diff-branches',
+        path: '/project/sim-project/repository',
+        clicks: ['button:has(svg.lucide-git-compare)', 'button[title="Compare against"]'],
       },
       // A binary image file rendered inline via the raw blob route (PLAN.md #41k).
       { name: 'repository-image', path: '/project/sim-project/repository/main/web/public/logo.png' },
@@ -833,6 +860,17 @@ try {
         if (pg.click) {
           // Open a popover (e.g. the branch selector) so the capture documents it.
           await page.click(pg.click)
+          await settle(page)
+        }
+        if (pg.clicks) {
+          // Drive a short interaction (e.g. press the diff button, then open the
+          // compare branch selector). The final networkidle wait lets the diff
+          // a click fetched render before the capture.
+          for (const sel of pg.clicks) {
+            await page.click(sel)
+            await settle(page)
+          }
+          await page.waitForLoadState('networkidle')
           await settle(page)
         }
         if (pg.disableSettingsEntries) {
