@@ -71,6 +71,18 @@ upgrade.
 Goal: every existing screen is usable down to ~360px wide. Ships value immediately
 for all agent types and is independent of the chat work.
 
+> **Status (in progress):** a first pass is implemented. The sidebar is now a
+> hamburger-toggled off-canvas drawer below the `md` breakpoint (`__root.tsx`),
+> the agent-detail header/metadata rows wrap and padding tightens
+> (`AgentDetail.tsx`), the diff drops its file-list sidebar for a full-width
+> unified diff on mobile (`DiffViewer.tsx`), and the spawn form padding is
+> responsive (`SpawnForm.tsx`). Phone-width screenshots tagged `viewport::mobile`
+> were added to `scripts/screenshots/take-screenshots.ts` so the result is
+> visible in the diff viewer's artifacts panel. Still outstanding: the
+> repository browser's two-column tree+content layout, a shorter default
+> terminal height on mobile, and touch support for the desktop resize handles
+> (currently just hidden on mobile).
+
 1. **Collapsible sidebar / app shell.**
    - Below a breakpoint (`md`, 768px) the sidebar becomes an off-canvas drawer
      toggled by a hamburger in the header; main content goes full-width.
