@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { api } from '../stores/apiClient'
 import type { ArtifactSet, ArtifactFile, ArtifactLogLine } from '../api'
-import { LoaderCircle, Image as ImageIcon, ImageOff, ChevronDown, ChevronRight, TriangleAlert, RefreshCw } from 'lucide-react'
+import { LoaderCircle, Image as ImageIcon, ImageOff, ChevronDown, ChevronRight, TriangleAlert, RefreshCw, ScrollText } from 'lucide-react'
 import { InfoTooltip } from './InfoTooltip'
-import { loadArtifactPrefs, saveArtifactPrefs, loadTagFilter, saveTagFilter, type ArtifactTagFilter } from '../lib/artifactPrefs'
+import { loadArtifactPrefs, saveArtifactPrefs, loadTagFilter, saveTagFilter, ARTIFACT_CHANGE_CATEGORY as CHANGE_CATEGORY, type ArtifactTagFilter } from '../lib/artifactPrefs'
 import { stripAnsi } from '../lib/ansi'
 import {
   checkerStyle, IMG_CLASS, OVERLAY_CLASS, TAG_CLASS, makeAuxOpen,
@@ -376,6 +376,9 @@ function parseScopedTag(tag: string): { cat: string; val: string } | null {
 // (e.g. PNG screenshots alongside a .webm). The name is reserved: a user
 // `type::…` tag is ignored so it can't collide with the built-in.
 const TYPE_CATEGORY = 'type'
+// The order the built-in "changes" filter offers change_type values in (CHANGE_CATEGORY
+// lives in lib/artifactPrefs, which also seeds 'unchanged' hidden by default).
+const CHANGE_TYPE_ORDER = ['added', 'removed', 'modified', 'unchanged']
 
 // fileMediaType classifies a file as 'video' or 'image' for the built-in type
 // filter, matching how FileRow routes it (isVideoArtifact → the video viewer).
@@ -399,7 +402,7 @@ function collectTags(sets: ArtifactSet[]): CollectedTags {
   const add = (t: string) => {
     const p = parseScopedTag(t)
     if (p) {
-      if (p.cat === TYPE_CATEGORY) return // reserved for the built-in type filter
+      if (p.cat === TYPE_CATEGORY || p.cat === CHANGE_CATEGORY) return // reserved for the built-in filters
       if (!scoped.has(p.cat)) scoped.set(p.cat, new Set())
       scoped.get(p.cat)!.add(p.val)
     } else {
@@ -441,6 +444,10 @@ function fileMatchesFilter(file: ArtifactFile, filter: ArtifactTagFilter): boole
     // value for that category is turned off.
     if (cat === TYPE_CATEGORY) {
       if (off.includes(fileMediaType(file))) return false
+    } else if (cat === CHANGE_CATEGORY) {
+      // The built-in change-type scope matches the file's change_type (added/
+      // removed/modified/unchanged) — its intrinsic state, not a tag it carries.
+      if (off.includes(file.change_type as string)) return false
     } else if (off.some((v) => tags.includes(`${cat}::${v}`))) {
       return false
     }
@@ -990,10 +997,11 @@ function LiveLogPanes({ set }: { set: ArtifactSet }) {
   )
 }
 
-// PersistedLogView lets a settled card reopen its build log: a "Show build log"
-// toggle that lazily fetches each side's persisted log (left_log_url /
-// right_log_url) and renders them in the same side-by-side panes as the live log.
-function PersistedLogView({ leftUrl, rightUrl, open, onOpenChange }: { leftUrl?: string | null; rightUrl?: string | null; open: boolean; onOpenChange: (open: boolean) => void }) {
+// PersistedLogView renders a settled card's build log when open: it lazily fetches
+// each side's persisted log (left_log_url / right_log_url) and shows them in the
+// same side-by-side panes as the live log. The open/close toggle lives in the card
+// header (the "build log" button next to refresh), so this is content-only.
+function PersistedLogView({ leftUrl, rightUrl, open }: { leftUrl?: string | null; rightUrl?: string | null; open: boolean }) {
   const [logs, setLogs] = useState<{ left: ArtifactLogLine[] | null; right: ArtifactLogLine[] | null } | null>(null)
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState<string | null>(null)
@@ -1034,26 +1042,16 @@ function PersistedLogView({ leftUrl, rightUrl, open, onOpenChange }: { leftUrl?:
     return () => { cancelled = true }
   }, [open, leftUrl, rightUrl])
 
-  if (!leftUrl && !rightUrl) return null
-
-  const toggle = () => onOpenChange(!open)
+  if (!open || (!leftUrl && !rightUrl)) return null
 
   return (
     <div className="pt-1.5">
-      <button
-        onClick={toggle}
-        className="text-[11px] text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 cursor-pointer"
-      >
-        {open ? 'Hide' : 'Show'} build log
-      </button>
-      {open && (
-        loading ? (
-          <div className="my-2 text-xs text-gray-400 dark:text-gray-500">Loading log…</div>
-        ) : err ? (
-          <div className="my-2 text-xs text-red-500 dark:text-red-400">Failed to load log: {err}</div>
-        ) : (
-          <LogPanes left={logs?.left ?? null} right={logs?.right ?? null} />
-        )
+      {loading ? (
+        <div className="my-2 text-xs text-gray-400 dark:text-gray-500">Loading log…</div>
+      ) : err ? (
+        <div className="my-2 text-xs text-red-500 dark:text-red-400">Failed to load log: {err}</div>
+      ) : (
+        <LogPanes left={logs?.left ?? null} right={logs?.right ?? null} />
       )}
     </div>
   )
@@ -1067,7 +1065,6 @@ function ArtifactSetCard({ set, mode, columns, onWeightsChange, filter, onRefres
   const isFiltered = filterIsActive(filter)
   const visibleFiles = isFiltered ? set.files.filter((f) => fileMatchesFilter(f, filter)) : set.files
   const changedFiles = visibleFiles.filter((f) => f.change_type !== 'unchanged')
-  const unchangedFiles = visibleFiles.filter((f) => f.change_type === 'unchanged')
   const totalChanged = set.files.filter((f) => f.change_type !== 'unchanged').length
   const changedLabel = isFiltered && changedFiles.length !== totalChanged ? `${changedFiles.length}/${totalChanged} changed` : `${totalChanged} changed`
   const noChanges = status === 'ready' && !set.changed
@@ -1093,14 +1090,23 @@ function ArtifactSetCard({ set, mode, columns, onWeightsChange, filter, onRefres
   // at the call site, so switching agents remounts it and re-reads that agent's
   // saved state instead of leaking the previous agent's toggle.
   const [collapsed, setCollapsed] = useState(() => loadPrefs()?.collapsed ?? true)
-  const [showUnchanged, setShowUnchanged] = useState(() => loadPrefs()?.showUnchanged ?? false)
   const [buildLogOpen, setBuildLogOpen] = useState(() => loadPrefs()?.buildLogOpen ?? false)
 
   // Persist the view prefs whenever a toggle changes (and re-key them under the
   // current status, so they only restore while that status holds).
   useEffect(() => {
-    saveArtifactPrefs(projectId, agentId, set.name, status, { collapsed, showUnchanged, buildLogOpen })
-  }, [projectId, agentId, set.name, status, collapsed, showUnchanged, buildLogOpen])
+    saveArtifactPrefs(projectId, agentId, set.name, status, { collapsed, buildLogOpen })
+  }, [projectId, agentId, set.name, status, collapsed, buildLogOpen])
+
+  // The build log lives behind a header toggle (next to refresh) for settled cards
+  // that produced a log. Opening it also expands the card, since the log renders in
+  // the body.
+  const hasBuildLog = (status === 'ready' || status === 'error') && !!(set.left_log_url || set.right_log_url)
+  const toggleBuildLog = () => setBuildLogOpen((o) => {
+    const next = !o
+    if (next) setCollapsed(false)
+    return next
+  })
 
   // Header progress while generating: both sides' latest progress lines joined by
   // a "·" (the two builds run in parallel), e.g. "building frontend · home 7/24".
@@ -1153,6 +1159,22 @@ function ArtifactSetCard({ set, mode, columns, onWeightsChange, filter, onRefres
             </span>
           )}
         </button>
+        {/* Show/hide the build log — sits left of refresh. Opening it expands the
+            card (the log renders in the body). Only for settled cards with a log. */}
+        {hasBuildLog && (
+          <button
+            onClick={toggleBuildLog}
+            title={buildLogOpen ? 'Hide build log' : 'Show build log'}
+            aria-label={buildLogOpen ? 'Hide build log' : 'Show build log'}
+            className={`shrink-0 px-3 flex items-center transition-colors cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700/60 ${
+              buildLogOpen
+                ? 'text-blue-600 dark:text-blue-400'
+                : 'text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300'
+            }`}
+          >
+            <ScrollText className="w-3.5 h-3.5" />
+          </button>
+        )}
         {/* Bust the per-commit cache and regenerate — chiefly to retry a failure,
             whose error is otherwise cached until the ref changes, but always
             available (even with no visual changes) so a render can be re-run. */}
@@ -1176,17 +1198,13 @@ function ArtifactSetCard({ set, mode, columns, onWeightsChange, filter, onRefres
               <div className="my-2 px-3 py-2 rounded-md bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 font-mono text-xs text-red-600 dark:text-red-400 whitespace-pre-wrap break-words">
                 {set.error ? stripAnsi(set.error) : 'Artifact generation failed.'}
               </div>
-              <PersistedLogView leftUrl={set.left_log_url} rightUrl={set.right_log_url} open={buildLogOpen} onOpenChange={setBuildLogOpen} />
+              <PersistedLogView leftUrl={set.left_log_url} rightUrl={set.right_log_url} open={buildLogOpen} />
             </>
           )}
           {status === 'ready' && (
-            // Unified ready layout: the changed files (if any) up front, with the
-            // unchanged ones always behind a "Show N unchanged" toggle — so a card
-            // with no visual changes reads the same as a mixed one (the unchanged
-            // artifacts stay tucked away, not dumped on expand). This avoids the
-            // jarring case where a card expanded to view the log suddenly explodes
-            // all its unchanged artifacts onto the screen once a render settles to
-            // "no visual changes". Only the genuinely empty case gets a placeholder.
+            // The files matching the panel's filters (the change-type filter hides
+            // unchanged by default — see the header "changes" dropdown) laid out in
+            // one masonry. Empty states cover "produced nothing" vs "filtered out".
             <>
               {failedSide && (
                 // One side died; show its error but keep rendering the side that
@@ -1204,28 +1222,11 @@ function ArtifactSetCard({ set, mode, columns, onWeightsChange, filter, onRefres
               {set.files.length === 0 ? (
                 <div className="my-2 text-xs text-gray-400 dark:text-gray-500">No artifacts produced.</div>
               ) : visibleFiles.length === 0 ? (
-                <div className="my-2 text-xs text-gray-400 dark:text-gray-500">No files match the current tag filter.</div>
+                <div className="my-2 text-xs text-gray-400 dark:text-gray-500">No files match the current filters.</div>
               ) : (
-                <>
-                  {/* Skip the grid entirely when nothing changed — an empty
-                      FileGrid still emits a pt-1 spacer row, which (with the
-                      toggles' own top padding) opened a big gap under the header
-                      in the no-visual-changes case. */}
-                  {changedFiles.length > 0 && <FileGrid files={changedFiles} mode={mode} columns={columns} onWeightsChange={onWeightsChange} />}
-                  {unchangedFiles.length > 0 && (
-                    <div className="pt-1.5">
-                      <button
-                        onClick={() => setShowUnchanged((s) => !s)}
-                        className="text-[11px] text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 cursor-pointer"
-                      >
-                        {showUnchanged ? 'Hide' : 'Show'} {unchangedFiles.length} unchanged
-                      </button>
-                      {showUnchanged && <FileGrid files={unchangedFiles} mode={mode} columns={columns} onWeightsChange={onWeightsChange} />}
-                    </div>
-                  )}
-                </>
+                <FileGrid files={visibleFiles} mode={mode} columns={columns} onWeightsChange={onWeightsChange} />
               )}
-              <PersistedLogView leftUrl={set.left_log_url} rightUrl={set.right_log_url} open={buildLogOpen} onOpenChange={setBuildLogOpen} />
+              <PersistedLogView leftUrl={set.left_log_url} rightUrl={set.right_log_url} open={buildLogOpen} />
             </>
           )}
         </div>
@@ -1415,6 +1416,19 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
   // Values turned off (hidden), mirroring the user scopes' inverted model.
   const typeOff = tagFilter.scoped[TYPE_CATEGORY] ?? []
 
+  // The built-in "changes" filter (added / removed / modified / unchanged), derived
+  // from each file's change_type. Replaces the old per-card "show unchanged" toggle:
+  // unchanged is hidden by default (seeded in loadTagFilter), and this dropdown is
+  // how you reveal it or narrow to e.g. only added files. Offered whenever a set has
+  // more than one change type, or any unchanged files (so they can be revealed).
+  const changeTypes = useMemo(() => {
+    const present = new Set<string>()
+    for (const s of sets ?? []) for (const f of s.files) present.add(f.change_type as string)
+    return CHANGE_TYPE_ORDER.filter((c) => present.has(c))
+  }, [sets])
+  const showChangeFilter = changeTypes.length > 1 || changeTypes.includes('unchanged')
+  const changeOff = tagFilter.scoped[CHANGE_CATEGORY] ?? []
+
   if (error) {
     return (
       <div className="mb-4 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-xs text-red-600 dark:text-red-400">
@@ -1450,17 +1464,34 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
           <p>Each one is produced by a project-defined <strong>artifact script</strong>. Hydra checks out both the base ref and the head ref (or your uncommitted working tree), runs the script against each with <code className="text-blue-300">$HYDRA_ARTIFACT_OUTPUT</code>, <code className="text-blue-300">$HYDRA_ARTIFACT_SOURCE</code> and <code className="text-blue-300">$HYDRA_ARTIFACT_REF</code> set, and compares the images it writes. Results are cached per commit, so re-viewing a diff is free.</p>
           <p>Configure them in <code className="text-blue-300">.hydra/config.toml</code> with <code className="text-blue-300">[[artifacts]]</code> blocks (<code className="text-blue-300">name</code>, <code className="text-blue-300">command</code>, optional <code className="text-blue-300">timeout_sec</code>) — for example a script that builds the app and screenshots a page, so visual UI changes show up here in the diff viewer.</p>
           <p><strong>Images &amp; video.</strong> <code className="text-blue-300">.png .jpg .gif</code> are diffed pixel-by-pixel (so cosmetic re-encodes are ignored); <code className="text-blue-300">.webm</code> video is diffed frame-by-frame when <strong>ffmpeg</strong> is installed, falling back to a byte-hash comparison otherwise (shown with a <em>byte-compared</em> badge, since that verdict may be spurious). Other types — <code className="text-blue-300">.webp .avif .svg .bmp .pdf</code> — are byte-hash compared. Encode video as <strong>lossless</strong> <code className="text-blue-300">.webm</code> (e.g. <code className="text-blue-300">ffmpeg … -c:v libvpx-vp9 -lossless 1</code>) so identical frames stay identical.</p>
-          <p>A script with no visual changes — or one still generating — collapses to a single header row; click it to expand. The two sides (base and head) build in parallel, so the expanded card shows their <strong>build logs side by side</strong> (Before / After, stderr in red); once finished, reopen them any time with <strong>Show build log</strong>. The refresh button (top-right of each card) re-runs a script — handy to retry a failure or re-render even when nothing visibly changed.</p>
+          <p>A script with no visual changes — or one still generating — collapses to a single header row; click it to expand. The two sides (base and head) build in parallel, so the expanded card shows their <strong>build logs side by side</strong> (Before / After, stderr in red); once finished, reopen them any time with the <strong>build log</strong> button (the scroll icon next to refresh in the card header). The refresh button beside it re-runs a script — handy to retry a failure or re-render even when nothing visibly changed.</p>
           <p>The header shows each side's latest <code className="text-blue-300">stdout</code> line as live progress. To surface a cleaner message, print a line prefixed with <code className="text-blue-300">::hydra:progress::</code> (e.g. <code className="text-blue-300">echo "::hydra:progress:: capturing home 3/24"</code>) — Hydra strips the prefix, shows the rest as the progress line, and from then on ignores ordinary <code className="text-blue-300">stdout</code> for the header, so a noisy build can't hijack it. The full output still lands in the build log.</p>
-          <p><strong>Tags &amp; filter.</strong> Alongside an image <code className="text-blue-300">home.png</code> the script can write a JSON sidecar <code className="text-blue-300">home.png.meta</code> like <code className="text-blue-300">{'{'}"tags": ["theme::dark", "viewport::phone"]{'}'}</code>. Tags show as labels on each file and as a filter on this bar. A <code className="text-blue-300">category::value</code> tag is a <em>scoped</em> label — only one value per category is kept on a file (the last wins), and each category gets a filter button listing its values. Every value starts <em>on</em>; uncheck one to hide the files carrying it, or use <strong>all</strong> / <strong>clear</strong> (top of the menu) to toggle them in bulk. Shift-click a value to isolate it (hide everything else). Plain tags work the same way under a "tags" button. Handy when a script emits many shots (light/dark, phone/desktop) and you want to see just one slice. A built-in <strong>type</strong> filter (image / video, from each file's extension) appears after your tags whenever a set mixes both.</p>
+          <p><strong>Tags &amp; filter.</strong> Alongside an image <code className="text-blue-300">home.png</code> the script can write a JSON sidecar <code className="text-blue-300">home.png.meta</code> like <code className="text-blue-300">{'{'}"tags": ["theme::dark", "viewport::phone"]{'}'}</code>. Tags show as labels on each file and as a filter on this bar. A <code className="text-blue-300">category::value</code> tag is a <em>scoped</em> label — only one value per category is kept on a file (the last wins), and each category gets a filter button listing its values. Every value starts <em>on</em>; uncheck one to hide the files carrying it, or use <strong>all</strong> / <strong>clear</strong> (top of the menu) to toggle them in bulk. Shift-click a value to isolate it (hide everything else). Plain tags work the same way under a "tags" button. Handy when a script emits many shots (light/dark, phone/desktop) and you want to see just one slice. A built-in <strong>changes</strong> filter (added / removed / modified / unchanged, from each file's diff state) leads the bar — unchanged files are hidden by default, so use it to reveal them or to focus on one kind of change. A built-in <strong>type</strong> filter (image / video, from each file's extension) appears after your tags whenever a set mixes both.</p>
         </InfoTooltip>
         {/* One compact filter button per tag scope on the header bar — a button
             for each scoped category (theme / viewport / …) and one "tags" button
             for free-form tags — so each opens just its own slice instead of one
             combined menu. Shown only once some file (or a settled side, via
             pending_tags) carries tags; ml-auto floats them to the right. */}
-        {(hasTags || showTypeFilter) && (
+        {(hasTags || showTypeFilter || showChangeFilter) && (
           <div className="ml-auto flex flex-wrap items-center gap-1.5">
+            {/* Built-in change-type scope, first — added/removed/modified/unchanged
+                (unchanged hidden by default). Replaces the per-card show-unchanged
+                toggle. */}
+            {showChangeFilter && (
+              <TagScopeFilter
+                label="changes"
+                values={changeTypes}
+                off={changeOff}
+                onToggle={(val) => {
+                  const next = changeOff.includes(val) ? changeOff.filter((x) => x !== val) : [...changeOff, val]
+                  updateTagFilter({ ...tagFilter, scoped: { ...tagFilter.scoped, [CHANGE_CATEGORY]: next } })
+                }}
+                onIsolate={(val) => updateTagFilter({ ...tagFilter, scoped: { ...tagFilter.scoped, [CHANGE_CATEGORY]: changeTypes.filter((x) => x !== val) } })}
+                onAll={() => updateTagFilter({ ...tagFilter, scoped: { ...tagFilter.scoped, [CHANGE_CATEGORY]: [] } })}
+                onClear={() => updateTagFilter({ ...tagFilter, scoped: { ...tagFilter.scoped, [CHANGE_CATEGORY]: [...changeTypes] } })}
+              />
+            )}
             {collectedTags.scoped.map(({ cat, values }) => (
               <TagScopeFilter
                 key={cat}
