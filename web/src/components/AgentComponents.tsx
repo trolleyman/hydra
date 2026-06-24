@@ -108,24 +108,6 @@ function stableIndex(s: string, n: number): number {
   return Math.abs(h) % n
 }
 
-// isSuggestedNextMessage decides whether a finished/waiting agent's last message
-// reads as a suggested next message — a single terse instruction you could send
-// straight back ("run it", "verify it works by running the app") — rather than a
-// closing summary/report. There's no explicit signal from the agent for this, so
-// it's a heuristic on the message shape: a single short line with no mid-message
-// sentence break. A multi-sentence or long message (e.g. "The spike is built,
-// tested, and committed. Here's what landed…") is treated as a report, not a
-// suggestion.
-function isSuggestedNextMessage(msg: string): boolean {
-  const t = msg.trim()
-  if (!t || t.length > 80) return false
-  if (t.includes('\n')) return false
-  // A sentence break mid-message (". ", "! ", "? ") marks prose/a report rather
-  // than one terse instruction.
-  if (/[.!?]\s/.test(t)) return false
-  return true
-}
-
 // agentStatusDetail returns the richer progress line to show under an active
 // agent: its live activity while running, otherwise its most recent message
 // (e.g. the question it's waiting on, or its closing summary). When neither is
@@ -144,10 +126,11 @@ export function agentStatusDetail(agent: AgentResponse): string {
   // The most recent message is shown as-is, except when it reads as a *suggested
   // next message* — something you could send straight back to the agent (e.g.
   // "run it", "spin up the app so I can see it") — in which case it's marked with
-  // a `❯ ` caret. A longer / multi-sentence message is the agent's closing
-  // summary or report, not a suggestion, so it stays plain.
+  // a `❯ ` caret. That decision is made server-side (last_message_is_suggested_next_message):
+  // a longer / multi-sentence message is a closing summary, and a question the
+  // agent is asking the user isn't a suggestion either, so both stay plain.
   if (status.last_message) {
-    return isSuggestedNextMessage(status.last_message)
+    return status.last_message_is_suggested_next_message
       ? `❯ ${status.last_message}`
       : status.last_message
   }
