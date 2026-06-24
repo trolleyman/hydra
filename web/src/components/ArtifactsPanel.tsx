@@ -367,7 +367,7 @@ function DiffCanvas({ left, right }: { left: string; right: string }) {
     <>
       <canvas
         ref={ref}
-        className={`${OVERLAY_CLASS} pointer-events-none border-0 ${state === 'ready' ? '' : 'opacity-0'}`}
+        className={`${OVERLAY_CLASS} pointer-events-none ${state === 'ready' ? '' : 'opacity-0'}`}
       />
       {state !== 'ready' && (
         <span className={`${TAG_CLASS} right-1`}>{state === 'error' ? 'Diff failed' : 'Diffing…'}</span>
