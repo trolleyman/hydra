@@ -12,6 +12,7 @@ import {
   SettingsContent,
   FloatingSaveBar,
 } from '../../components/SettingsComponents'
+import { PageTopBar } from '../../components/PageTopBar'
 
 export const Route = createFileRoute('/project/$projectId/settings')({
   component: ProjectSettingsPage,
@@ -130,7 +131,23 @@ function ProjectSettingsPage() {
     : 'Settings stored in ~/.config/hydra/config.toml for all projects.'
 
   return (
-    <div className="flex-1 overflow-auto bg-gray-50 dark:bg-gray-900 p-8">
+    <div className="flex-1 flex flex-col min-w-0 min-h-0">
+      {/* Hosts the show-sidebar toggle + a "Settings" label (and a Save button
+          when there are unsaved changes) while the sidebar is collapsed. */}
+      <PageTopBar
+        title="Settings"
+        right={hasUnsavedChanges ? (
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 disabled:opacity-50 transition-colors cursor-pointer"
+          >
+            <Save className="w-4 h-4" />
+            {saving ? 'Saving…' : 'Save'}
+          </button>
+        ) : undefined}
+      />
+      <div className="flex-1 overflow-auto bg-gray-50 dark:bg-gray-900 p-8">
       <div className="max-w-4xl mx-auto">
         <div className="flex items-start justify-between mb-8">
           <div className="flex-1">
@@ -184,6 +201,7 @@ function ProjectSettingsPage() {
         />
       </div>
       <FloatingSaveBar visible={hasUnsavedChanges} saving={saving} onSave={handleSave} />
+      </div>
     </div>
   )
 }

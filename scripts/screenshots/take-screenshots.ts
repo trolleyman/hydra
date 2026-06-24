@@ -508,6 +508,18 @@ try {
       // below that — so the viewport must be tall enough to reach the very bottom
       // (simulation seeds one of each there).
       { name: 'settings', path: '/project/sim-project/settings', viewport: { width: 1280, height: 2900 } },
+      // The settings page at the small viewports. Below the lg breakpoint the
+      // sidebar is collapsed, so a "Settings" header bar (with the show-sidebar
+      // toggle) appears above the page; tablet-landscape is wide enough to keep
+      // the in-flow sidebar, so it shows the normal page. viewportOnly to focus
+      // on the header + top of the form.
+      { name: 'settings-mobile', path: '/project/sim-project/settings', viewport: { width: 390, height: 844 }, viewportOnly: true },
+      { name: 'settings-mobile-landscape', path: '/project/sim-project/settings', viewport: { width: 844, height: 390 }, viewportTag: 'mobile-landscape', viewportOnly: true },
+      { name: 'settings-tablet', path: '/project/sim-project/settings', viewport: { width: 834, height: 1112 }, viewportTag: 'tablet', viewportOnly: true },
+      { name: 'settings-tablet-landscape', path: '/project/sim-project/settings', viewport: { width: 1112, height: 834 }, viewportTag: 'tablet-landscape', viewportOnly: true },
+      // Same phone width but with edits pending (an entry toggled off), so the
+      // "Settings" header bar shows its Save button on the right.
+      { name: 'settings-mobile-unsaved', path: '/project/sim-project/settings', viewport: { width: 390, height: 844 }, viewportOnly: true, disableSettingsEntries: true },
       // The same settings page for a project whose emulator-pool service has
       // failed (simulation marks mobile-app's emu-pool failed): the "Services"
       // editor shows a red "Failed" badge + the exit reason, and the project

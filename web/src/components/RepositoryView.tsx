@@ -17,6 +17,7 @@ import { canCopyImages, copyImageToClipboard } from '../lib/clipboard'
 import { BranchSelector } from './BranchSelector'
 import { RepositoryArtifactsView } from './RepositoryArtifactsView'
 import { Tooltip } from './Tooltip'
+import { PageTopBar } from './PageTopBar'
 import { FileDiff, FileRow, ChangeTypeIcon } from '../DiffViewer'
 
 // ── File tree model ────────────────────────────────────────────────────────────
@@ -987,7 +988,11 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
   const selectBranch = (name: string) => goTo(name, parsed.path)
 
   return (
-    <div className="flex-1 flex min-w-0 bg-white dark:bg-gray-900">
+    <div className="flex-1 flex flex-col min-w-0 min-h-0">
+      {/* Hosts the show-sidebar toggle + a "Repository" label while the sidebar
+          is collapsed (renders nothing when it's open). */}
+      <PageTopBar title="Repository" />
+      <div className="flex-1 flex min-w-0 min-h-0 bg-white dark:bg-gray-900">
       {/* File / folder picker */}
       <div
         ref={sidebarRef}
@@ -1209,6 +1214,7 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
       </div>
 
       {isResizing && <div className="fixed inset-0 z-[100] cursor-col-resize" />}
+      </div>
     </div>
   )
 }

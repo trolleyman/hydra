@@ -1183,9 +1183,10 @@ function RootLayout() {
         </aside>
 
         {/* Main content. When the sidebar is collapsed a floating button at the
-            top-left brings it back — except on an agent page, which hosts the
-            toggle in its own sticky top bar (alongside the name + actions). */}
-        {sidebarCollapsed && !selectedAgentId && (
+            top-left brings it back — except on pages that host the toggle in
+            their own header bar (the agent page, the repository browser, and
+            settings). */}
+        {sidebarCollapsed && !selectedAgentId && !/\/(repository|settings)(\/|$)/.test(location.pathname) && (
           <Tooltip content="Show sidebar (Ctrl+.)">
             <button
               type="button"
