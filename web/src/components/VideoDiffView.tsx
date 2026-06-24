@@ -348,7 +348,7 @@ function VideoAB({ controller, left, right }: { controller: Controller; left?: s
 
   return (
     <div className="min-w-0">
-      <div className="flex items-center gap-1 mb-1">
+      <div className="flex flex-wrap items-center gap-1 mb-1">
         <button onClick={() => setView('before')} className={tabBtn(view === 'before')}>Before</button>
         <button onClick={() => setView('after')} className={tabBtn(view === 'after')}>After</button>
         <button

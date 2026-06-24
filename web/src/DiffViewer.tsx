@@ -1653,8 +1653,9 @@ function SettingsPopup({ fileView, onFileViewChange, sideBySide, onSideBySideCha
           </div>
           {/* The artifact grid sizes each tile automatically by aspect ratio (a
               wide desktop shot spans more columns than a tall phone shot); drag a
-              tile's right edge to override its width, double-click to auto-size. */}
-          <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-2 leading-snug">Tiles auto-size by shape — drag a tile's edge to resize it.</p>
+              tile (or its edge) to override its width, double-click the edge to
+              auto-size. */}
+          <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-2 leading-snug">Tiles auto-size by shape — drag a tile to resize it.</p>
         </div>
       )}
     </div>

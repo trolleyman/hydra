@@ -226,7 +226,14 @@ export function RepositoryArtifactsView({
       ) : (
         <div className="space-y-3">
           <MasonryGrid
-            items={data.files.map((f) => ({ key: f.name, node: <MediaCell file={f} />, aspect: aspects[f.name] }))}
+            items={data.files.map((f) => ({
+              key: f.name,
+              node: <MediaCell file={f} />,
+              aspect: aspects[f.name],
+              // Video uses horizontal drag for scrubbing, so it resizes via the edge
+              // handle only; images are draggable anywhere (see MasonryGrid).
+              bodyResizable: !isVideoArtifact(f.name),
+            }))}
             spans={spans}
             onSpanChange={setSpanOverride}
           />

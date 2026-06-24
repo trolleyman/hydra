@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { api } from '../stores/apiClient'
 import type { ArtifactSet, ArtifactFile, ArtifactLogLine } from '../api'
-import { LoaderCircle, Image as ImageIcon, ImageOff, ChevronDown, ChevronRight, TriangleAlert, RefreshCw, ScrollText, RotateCcw } from 'lucide-react'
+import { LoaderCircle, Image as ImageIcon, ImageOff, ChevronDown, ChevronRight, TriangleAlert, RefreshCw, ScrollText, RotateCcw, SquarePlus, SquareMinus, SquareDot } from 'lucide-react'
 import { InfoTooltip } from './InfoTooltip'
 import { loadArtifactPrefs, saveArtifactPrefs, loadTagFilter, saveTagFilter, defaultTagFilter, isDefaultTagFilter, ARTIFACT_CHANGE_CATEGORY as CHANGE_CATEGORY, type ArtifactTagFilter } from '../lib/artifactPrefs'
 import { stripAnsi } from '../lib/ansi'
@@ -19,11 +19,21 @@ const CHANGE_LABEL: Record<string, string> = {
   unchanged: 'unchanged',
 }
 
-const CHANGE_COLOR: Record<string, string> = {
-  added: 'text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-900/20',
-  removed: 'text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20',
-  modified: 'text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20',
-  unchanged: 'text-gray-400 dark:text-gray-500 bg-gray-50 dark:bg-gray-800',
+// ArtifactChangeIcon marks a file's change type next to its name, mirroring the diff
+// viewer's file-list icons: green [+] added, red [-] removed, amber [•] modified.
+// Unchanged files (revealed only via the changes filter) get no icon.
+function ArtifactChangeIcon({ type, className = 'w-3.5 h-3.5' }: { type: string; className?: string }) {
+  const cls = `${className} shrink-0`
+  switch (type) {
+    case 'added':
+      return <SquarePlus className={`${cls} text-green-600 dark:text-green-400`} />
+    case 'removed':
+      return <SquareMinus className={`${cls} text-red-600 dark:text-red-400`} />
+    case 'modified':
+      return <SquareDot className={`${cls} text-amber-600 dark:text-amber-400`} />
+    default:
+      return null
+  }
 }
 
 // The ways to compare a before/after image pair. Persisted in the diff viewer's
@@ -116,7 +126,7 @@ function ABSwitch({ left, right }: { left?: string | null; right?: string | null
     }`
   return (
     <div className="min-w-0">
-      <div className="flex items-center gap-1 mb-1">
+      <div className="flex flex-wrap items-center gap-1 mb-1">
         <button onClick={() => setView('before')} className={btn(view === 'before')}>Before</button>
         <button onClick={() => setView('after')} className={btn(view === 'after')}>After</button>
         <button
@@ -584,7 +594,11 @@ function FileRow({ file, mode }: { file: ArtifactFile; mode: ImageDiffMode }) {
     <div className="p-3 w-full min-w-0 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40">
       <div className="flex flex-wrap items-center gap-1.5 mb-2">
         <span className="text-xs font-medium text-gray-700 dark:text-gray-300 truncate">{file.name}</span>
-        <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${CHANGE_COLOR[ct] ?? ''}`}>{CHANGE_LABEL[ct] ?? ct}</span>
+        {ct !== 'unchanged' && (
+          <span title={CHANGE_LABEL[ct] ?? ct} className="inline-flex shrink-0">
+            <ArtifactChangeIcon type={ct} />
+          </span>
+        )}
         {file.unverified && (
           <span
             className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded font-medium text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20"
@@ -659,7 +673,10 @@ export function useArtifactAspects(sources: { key: string; url: string | null; v
 // (scaled by `spanScale` — 2 for side-by-side, whose before/after pair needs the
 // room), unless the user has dragged its edge to set an explicit span in `spans`.
 export function MasonryGrid({ items, spanScale = 1, spans, onSpanChange }: {
-  items: { key: string; node: React.ReactNode; aspect?: number }[]
+  // bodyResizable defaults to true; set false for tiles whose media owns horizontal
+  // drag (the before/after slider, video scrubbing) — those resize via the edge
+  // handle only, so the two gestures don't fight.
+  items: { key: string; node: React.ReactNode; aspect?: number; bodyResizable?: boolean }[]
   spanScale?: number
   spans: ArtifactSpans
   onSpanChange?: (key: string, span: number | null) => void
@@ -769,22 +786,27 @@ export function MasonryGrid({ items, spanScale = 1, spans, onSpanChange }: {
     return { pos, height: Math.max(0, height) }
   }, [items, heights, layout, spanOf])
 
-  // Per-tile resize: drag the tile's right edge to grow/shrink its span one column
-  // at a time. Records an absolute span via onSpanChange (null clears the override
-  // on double-click, returning the tile to its aspect-ratio default).
-  const startResize = (key: string, startSpan: number) => (e: React.PointerEvent) => {
+  // Set while a body drag (below) is resizing a tile, so the trailing click can be
+  // swallowed before the media reacts to it. Holds the key of the tile being dragged.
+  const draggedKeyRef = useRef<string | null>(null)
+
+  // Resize a tile to `next` columns, clamped to what's available.
+  const applySpan = (key: string, startSpan: number, deltaPx: number) => {
+    const unit = layout.colW + layout.gap
+    if (unit <= 0 || !onSpanChange) return
+    const delta = Math.round(deltaPx / unit)
+    onSpanChange(key, Math.max(1, Math.min(layout.cols, startSpan + delta)))
+  }
+
+  // Edge-handle resize: drag the thin handle in the right gutter to grow/shrink the
+  // span one column at a time. stopPropagation so it doesn't also trigger the body
+  // drag below; double-click clears the override (back to the aspect-ratio default).
+  const startEdgeResize = (key: string, startSpan: number) => (e: React.PointerEvent) => {
     if (e.button !== 0 || !onSpanChange) return
     e.preventDefault()
     e.stopPropagation()
-    const { cols, gap, colW } = layout
-    const unit = colW + gap
-    if (unit <= 0) return
     const startX = e.clientX
-    const onMove = (ev: PointerEvent) => {
-      const delta = Math.round((ev.clientX - startX) / unit)
-      const next = Math.max(1, Math.min(cols, startSpan + delta))
-      onSpanChange(key, next)
-    }
+    const onMove = (ev: PointerEvent) => applySpan(key, startSpan, ev.clientX - startX)
     const onUp = () => {
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
@@ -793,20 +815,69 @@ export function MasonryGrid({ items, spanScale = 1, spans, onSpanChange }: {
     window.addEventListener('pointerup', onUp)
   }
 
+  // Body resize: drag horizontally anywhere on a tile (the image included) to grow or
+  // shrink its span. A plain click/tap falls through to the media's own gesture (flip,
+  // open) — we only take over once the pointer moves decisively horizontally past a
+  // small threshold, then swallow the trailing click so the media doesn't also react.
+  // Touch keeps vertical panning (touch-action: pan-y on the tile) so the page scrolls.
+  const startBodyResize = (key: string, startSpan: number) => (e: React.PointerEvent) => {
+    if (e.button !== 0 || !onSpanChange) return
+    draggedKeyRef.current = null // reset any stale value from a drag that produced no click
+    const startX = e.clientX
+    const startY = e.clientY
+    let active = false
+    const onMove = (ev: PointerEvent) => {
+      const dx = ev.clientX - startX
+      if (!active) {
+        // Require a decisive horizontal move so taps and vertical scrolls pass through.
+        if (Math.abs(dx) < 6 || Math.abs(dx) <= Math.abs(ev.clientY - startY)) return
+        active = true
+        draggedKeyRef.current = key
+      }
+      ev.preventDefault()
+      applySpan(key, startSpan, dx)
+    }
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+    }
+    window.addEventListener('pointermove', onMove, { passive: false })
+    window.addEventListener('pointerup', onUp)
+  }
+
+  // After a body drag, eat the click it would otherwise turn into (capture phase, so
+  // it never reaches the media's own onClick / link navigation).
+  const swallowDragClick = (key: string) => (e: React.MouseEvent) => {
+    if (draggedKeyRef.current !== key) return
+    e.preventDefault()
+    e.stopPropagation()
+    draggedKeyRef.current = null
+  }
+
   const canResize = !!onSpanChange && layout.cols > 1
   return (
     <div ref={containerRef} className="relative w-full" style={{ height: placement.height }}>
       {items.map((it) => {
         const p = placement.pos[it.key] ?? { left: 0, top: 0, width: 0, span: 1 }
+        const bodyResize = canResize && it.bodyResizable !== false
         return (
-          <div key={it.key} ref={observeTile} data-mkey={it.key} className="absolute group/tile" style={{ left: p.left, top: p.top, width: p.width }}>
+          <div
+            key={it.key}
+            ref={observeTile}
+            data-mkey={it.key}
+            className={`absolute group/tile ${bodyResize ? 'touch-pan-y' : ''}`}
+            style={{ left: p.left, top: p.top, width: p.width }}
+            onPointerDown={bodyResize ? startBodyResize(it.key, p.span) : undefined}
+            onClickCapture={bodyResize ? swallowDragClick(it.key) : undefined}
+          >
             {it.node}
             {canResize && (
               // A grab handle on the tile's right edge (sitting in the gutter); the
               // blue rule appears on hover so the resize affordance stays subtle at
-              // rest. Drag to change span column-by-column, double-click to auto-size.
+              // rest. The whole tile is also draggable (startBodyResize); this handle
+              // gives a visible cue and a double-click target to auto-size.
               <div
-                onPointerDown={startResize(it.key, p.span)}
+                onPointerDown={startEdgeResize(it.key, p.span)}
                 onDoubleClick={() => onSpanChange?.(it.key, null)}
                 title="Drag to resize · double-click to auto-size"
                 className="absolute inset-y-0 right-0 z-10 w-3 -mr-1.5 cursor-col-resize flex justify-center items-stretch touch-none opacity-0 group-hover/tile:opacity-100 transition-opacity"
@@ -839,7 +910,14 @@ function FileGrid({ files, mode, spans, onSpanChange }: {
   )
   const aspects = useArtifactAspects(aspectSources)
   const items = useMemo(
-    () => files.map((f) => ({ key: f.name, node: <FileRow file={f} mode={mode} />, aspect: aspects[f.name] })),
+    () => files.map((f) => ({
+      key: f.name,
+      node: <FileRow file={f} mode={mode} />,
+      aspect: aspects[f.name],
+      // The slider mode and video both use horizontal drag on the media, so let
+      // those resize via the edge handle only — see MasonryGrid's bodyResizable.
+      bodyResizable: mode !== 'slider' && !isVideoArtifact(f.name),
+    })),
     [files, mode, aspects],
   )
   // pt-3 so the gap above the first row matches the card body's px-3 left inset.
