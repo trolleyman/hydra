@@ -14,7 +14,7 @@ const EVENT_FALLBACK_MS = 30_000
 import type { ProjectInfo, AgentResponse } from '../api'
 import { ApiError, ErrorResponse } from '../api'
 import { formatError } from '../api/format_error'
-import { ChevronDown, ChevronRight, Folder, FolderGit2, FolderOpen, Plus, Settings, Check, X, LoaderCircle, AlertTriangle, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
+import { ChevronDown, ChevronRight, Folder, FolderGit2, FolderOpen, Plus, Settings, Check, X, LoaderCircle, AlertTriangle, PanelLeftClose, PanelLeftOpen, RotateCw } from 'lucide-react'
 import { useApplyTheme } from '../lib/theme'
 import { folderPickerAvailable, openFolderPicker } from '../api/folderPicker'
 import { AgentSidebarItem } from '../components/AgentComponents'
@@ -38,17 +38,17 @@ import { pruneAgentViewPrefs } from '../lib/agentViewPrefs'
 import { StorageKeys, readLocal, writeLocal, readTrustedProjects, trustProject, archivedCollapsedKey } from '../lib/storage'
 import { loadProjectView, saveProjectView, type ProjectView } from '../lib/projectView'
 
-function formatSpawnedAgo(ms: number): string {
+// Server uptime, rendered as "up 2 hours" (the exact spawn time is in the
+// tooltip). Mirrors a process "uptime" rather than the old "Spawned X ago".
+function formatUptime(ms: number): string {
   const seconds = Math.floor(ms / 1000)
-  if (seconds < 5) return 'Spawned just now'
-  if (seconds < 60) return `Spawned ${seconds} seconds ago`
+  if (seconds < 60) return 'up <1 min'
   const minutes = Math.floor(seconds / 60)
-  if (minutes < 60) return `Spawned ${minutes} ${minutes === 1 ? 'minute' : 'minutes'} ago`
+  if (minutes < 60) return `up ${minutes} ${minutes === 1 ? 'minute' : 'minutes'}`
   const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `Spawned ${hours} ${hours === 1 ? 'hour' : 'hours'} ago`
+  if (hours < 24) return `up ${hours} ${hours === 1 ? 'hour' : 'hours'}`
   const days = Math.floor(hours / 24)
-  if (days === 1) return 'Spawned yesterday'
-  return `Spawned ${days} days ago`
+  return `up ${days} ${days === 1 ? 'day' : 'days'}`
 }
 
 const SIDEBAR_MIN = 160
@@ -1141,45 +1141,55 @@ function RootLayout() {
             )}
           </div>
 
-          {/* Sidebar footer — settings (moved out of the old top bar, theme now
-              lives inside it), Claude usage, and the dev restart button. */}
-          <div className="border-t border-gray-200 dark:border-gray-700 px-2 py-2 flex flex-col gap-1 shrink-0">
-            {spawnedAt.current !== null && (
-              <div className="px-1.5 pb-0.5 flex items-center justify-between gap-2">
+          {/* Sidebar footer — uptime + Claude usage on top; the dev restart
+              (icon) and Settings (right-aligned icon) below. The theme switcher
+              now lives inside Settings, not here. */}
+          <div className="border-t border-gray-200 dark:border-gray-700 px-2 py-2 flex flex-col gap-2 shrink-0">
+            <div className="px-1 flex items-center justify-between gap-2 min-h-[1rem]">
+              {spawnedAt.current !== null ? (
                 <Tooltip content={`Spawned at ${new Date(spawnedAt.current).toUTCString()}`}>
                   <span className="text-[11px] text-gray-400 dark:text-gray-500 cursor-default truncate">
-                    {formatSpawnedAgo(Date.now() - spawnedAt.current)}
+                    {formatUptime(Date.now() - spawnedAt.current)}
                   </span>
                 </Tooltip>
-                <ClaudeUsageIndicator />
-              </div>
-            )}
-            {development && (
-              <button
-                onClick={handleRestart}
-                disabled={restarting}
-                className="w-full flex items-center justify-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-amber-100 dark:bg-amber-900 text-amber-700 dark:text-amber-300 hover:bg-amber-200 dark:hover:bg-amber-800 disabled:opacity-50 transition-colors cursor-pointer"
-              >
-                {restarting ? 'Restarting…' : 'Restart server'}
-              </button>
-            )}
-            {(() => {
-              const settingsActive = /\/settings(\/|$)/.test(location.pathname)
-              const cls = settingsActive
-                ? 'w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-sm font-medium cursor-pointer bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
-                : 'w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-sm font-medium cursor-pointer text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors'
-              return currentProjectId ? (
-                <Link to="/project/$projectId/settings" params={{ projectId: currentProjectId }} className={cls}>
-                  <Settings className="w-4 h-4 shrink-0" />
-                  Settings
-                </Link>
               ) : (
-                <Link to="/settings" className={cls}>
-                  <Settings className="w-4 h-4 shrink-0" />
-                  Settings
-                </Link>
-              )
-            })()}
+                <span />
+              )}
+              <ClaudeUsageIndicator />
+            </div>
+            <div className="flex items-center gap-2">
+              {development && (
+                <Tooltip content={restarting ? 'Restarting…' : 'Rebuild and restart the server'}>
+                  <button
+                    onClick={handleRestart}
+                    disabled={restarting}
+                    aria-label="Restart server"
+                    className="w-8 h-8 flex items-center justify-center rounded-lg bg-amber-100 dark:bg-amber-900 text-amber-700 dark:text-amber-300 hover:bg-amber-200 dark:hover:bg-amber-800 disabled:opacity-50 transition-colors cursor-pointer"
+                  >
+                    <RotateCw className={`w-4 h-4 ${restarting ? 'animate-spin' : ''}`} />
+                  </button>
+                </Tooltip>
+              )}
+              {(() => {
+                const settingsActive = /\/settings(\/|$)/.test(location.pathname)
+                const cls = settingsActive
+                  ? 'ml-auto w-8 h-8 flex items-center justify-center rounded-lg cursor-pointer bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-300'
+                  : 'ml-auto w-8 h-8 flex items-center justify-center rounded-lg cursor-pointer text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors'
+                return (
+                  <Tooltip content="Settings">
+                    {currentProjectId ? (
+                      <Link to="/project/$projectId/settings" params={{ projectId: currentProjectId }} aria-label="Settings" className={cls}>
+                        <Settings className="w-5 h-5 shrink-0" />
+                      </Link>
+                    ) : (
+                      <Link to="/settings" aria-label="Settings" className={cls}>
+                        <Settings className="w-5 h-5 shrink-0" />
+                      </Link>
+                    )}
+                  </Tooltip>
+                )
+              })()}
+            </div>
           </div>
 
           {/* Resize handle (lg+ only — the overlay sidebar has a fixed width) */}

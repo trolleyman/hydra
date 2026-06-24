@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Gauge, Loader2 } from 'lucide-react'
 import { api } from '../stores/apiClient'
 import { startVisibilityPolling } from '../lib/visibilityPolling'
 import { Tooltip } from './Tooltip'
@@ -30,11 +29,23 @@ function usedColor(used: number | null | undefined): string {
   return 'text-gray-600 dark:text-gray-300'
 }
 
-// ClaudeUsageIndicator shows Claude Code subscription usage in the header: time
-// until the next session ("4 hour") reset, the session limit % used, and the
-// weekly limit % used. It polls in the background and re-probes on click. It
-// renders nothing when usage can't be determined (no subscription, CLI missing,
-// non-localhost, etc.), so it stays out of the way when not applicable.
+// One usage column: a small grey label over its value (e.g. "reset" / "2h 15m"),
+// so the three stats line up as a compact mini-table in the sidebar footer.
+function UsageStat({ label, value, valueClass }: { label: string; value: string; valueClass?: string }) {
+  return (
+    <span className="flex flex-col items-start leading-tight">
+      <span className="text-[10px] text-gray-400 dark:text-gray-500">{label}</span>
+      <span className={`tabular-nums ${valueClass ?? 'text-gray-600 dark:text-gray-300'}`}>{value}</span>
+    </span>
+  )
+}
+
+// ClaudeUsageIndicator shows Claude Code subscription usage in the sidebar
+// footer as three stacked columns: time until the next session ("4 hour") reset,
+// the session limit % used, and the weekly limit % used. It polls in the
+// background and re-probes on click. It renders nothing when usage can't be
+// determined (no subscription, CLI missing, non-localhost, etc.), so it stays
+// out of the way when not applicable.
 export function ClaudeUsageIndicator() {
   const [data, setData] = useState<ClaudeUsageResponse | null>(null)
   const [loading, setLoading] = useState(false)
@@ -77,9 +88,13 @@ export function ClaudeUsageIndicator() {
   // Probe ran but yielded no quota (e.g. API-billing account, CLI missing).
   if (!data.available && session == null && weekly == null) return null
 
-  const countdown = !Number.isNaN(resetsAt)
+  const rawReset = !Number.isNaN(resetsAt)
     ? fmtCountdown(resetsAt - Date.now())
     : (data.session_reset_text ?? null)
+  // Strip a leading "Resets in …" so only the duration sits under the "reset"
+  // label (the live countdown path is already bare; this normalizes the text
+  // fallback, e.g. the simulation's "Resets in 2h 15m").
+  const countdown = rawReset ? rawReset.replace(/^resets?\s+in\s+/i, '') : null
 
   const tip = (
     <div className="text-xs leading-relaxed">
@@ -112,20 +127,11 @@ export function ClaudeUsageIndicator() {
         onClick={() => fetchUsage(true)}
         disabled={loading}
         aria-label="Claude usage"
-        className="hidden md:flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-md cursor-pointer text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors disabled:opacity-60"
+        className="flex items-start gap-3 text-xs px-1.5 py-0.5 rounded-md cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors disabled:opacity-60"
       >
-        {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Gauge className="w-3.5 h-3.5" />}
-        {countdown && <span className="tabular-nums">{countdown}</span>}
-        {session != null && (
-          <span className={usedColor(session)}>
-            <span className="text-gray-400 dark:text-gray-500">4h</span> {Math.round(session)}%
-          </span>
-        )}
-        {weekly != null && (
-          <span className={usedColor(weekly)}>
-            <span className="text-gray-400 dark:text-gray-500">wk</span> {Math.round(weekly)}%
-          </span>
-        )}
+        {countdown && <UsageStat label="reset" value={countdown} />}
+        {session != null && <UsageStat label="4h" value={`${Math.round(session)}%`} valueClass={usedColor(session)} />}
+        {weekly != null && <UsageStat label="wk" value={`${Math.round(weekly)}%`} valueClass={usedColor(weekly)} />}
       </button>
     </Tooltip>
   )
