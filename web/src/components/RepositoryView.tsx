@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
+import { useEffect, useMemo, useRef, useState, useCallback, type ReactNode } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import hljs from 'highlight.js'
 import { api } from '../stores/apiClient'
@@ -7,8 +7,8 @@ import { ApiError } from '../api'
 import type { RepositoryFileResponse, RepositoryBranch, DiffResponse } from '../api'
 import { StorageKeys, readLocal, writeLocal } from '../lib/storage'
 import {
-  ChevronDown, ChevronRight, File as FileIcon, Folder, FolderOpen, FileText,
-  GitBranch, GitCompare, MoveRight,
+  ChevronDown, ChevronRight, ChevronLeft, File as FileIcon, Folder, FolderOpen, FileText,
+  GitBranch, GitCompare, MoveRight, PanelLeftOpen, Menu,
   LoaderCircle, Settings, FileQuestion, FileSymlink, CornerDownRight,
   Images, Camera, Copy, Check, X, ExternalLink,
 } from 'lucide-react'
@@ -17,7 +17,7 @@ import { canCopyImages, copyImageToClipboard } from '../lib/clipboard'
 import { BranchSelector } from './BranchSelector'
 import { RepositoryArtifactsView } from './RepositoryArtifactsView'
 import { Tooltip } from './Tooltip'
-import { PageTopBar } from './PageTopBar'
+import { useSidebarStore } from '../lib/sidebar'
 import {
   FileDiff, FileRow, ChangeTypeIcon, TreeNodeView,
   buildFileTree, compactTree as compactDiffTree, getGroupedFiles, type FileView,
@@ -274,6 +274,10 @@ function formatBytes(n: number): string {
 const HEADER_BTN_CLASS =
   'flex items-center justify-center h-7 rounded-md border transition-colors cursor-pointer text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
 
+// Full-width row styling for the small-screen overflow menu (copy / raw rows).
+const MENU_ROW_CLASS =
+  'w-full flex items-center gap-2.5 px-2.5 py-2 text-sm text-left text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer rounded-md'
+
 // useCopyFlash drives the transient Copy → Check/X feedback shared by the copy
 // buttons: call flash(ok) after an attempt and read state/err to pick the icon.
 function useCopyFlash() {
@@ -285,19 +289,19 @@ function useCopyFlash() {
   return { state, flash }
 }
 
-function FileActions({ file, projectId, refStr }: { file: RepositoryFileResponse; projectId: string; refStr: string }) {
+// useFileActions centralises the copy/raw behaviour so the inline header buttons
+// (FileActions) and the small-screen overflow menu (FileActionMenuRows) share one
+// implementation. `available` is false for an unresolved symlink (no blob).
+function useFileActions(file: RepositoryFileResponse, projectId: string, refStr: string) {
   const { state, flash } = useCopyFlash()
-
-  // An unresolved symlink has no underlying blob, so neither action applies.
-  if (file.symlink && !file.target_path) return null
+  const available = !(file.symlink && !file.target_path)
   const contentPath = file.target_path ?? file.path
   const rawUrl = `/repository/projects/${encodeURIComponent(projectId)}/blob?path=${encodeURIComponent(contentPath)}&ref=${encodeURIComponent(refStr)}`
-
   const isImg = isImage(contentPath)
   // Copy applies to text (file.content) or an image the browser can put on the
-  // clipboard; binaries have neither, so the button is hidden for them.
+  // clipboard; binaries have neither, so it's hidden for them.
   const canCopy = file.content != null || (isImg && canCopyImages())
-
+  const copyLabel = state === 'ok' ? 'Copied!' : state === 'err' ? 'Copy failed' : isImg ? 'Copy image' : 'Copy file contents'
   const handleCopy = async () => {
     try {
       if (file.content != null) await navigator.clipboard.writeText(file.content)
@@ -308,15 +312,27 @@ function FileActions({ file, projectId, refStr }: { file: RepositoryFileResponse
       flash(false)
     }
   }
+  return { available, state, canCopy, copyLabel, rawUrl, handleCopy }
+}
 
+// CopyStateIcon picks the copy button's icon from the transient flash state. The
+// idle copy icon takes idleColor (the header button inherits its own colour, the
+// menu row passes a muted grey); the ok/err icons are always green/red.
+function CopyStateIcon({ state, size = 'w-3.5 h-3.5', idleColor = '' }: { state: 'idle' | 'ok' | 'err'; size?: string; idleColor?: string }) {
+  if (state === 'ok') return <Check className={`${size} text-green-500`} />
+  if (state === 'err') return <X className={`${size} text-red-500`} />
+  return <Copy className={`${size} ${idleColor}`} />
+}
+
+function FileActions({ file, projectId, refStr }: { file: RepositoryFileResponse; projectId: string; refStr: string }) {
+  const { available, state, canCopy, copyLabel, rawUrl, handleCopy } = useFileActions(file, projectId, refStr)
+  if (!available) return null
   return (
     <div className="flex items-center gap-1.5 shrink-0">
       {canCopy && (
-        <Tooltip content={state === 'ok' ? 'Copied!' : state === 'err' ? 'Copy failed' : isImg ? 'Copy image' : 'Copy file contents'}>
+        <Tooltip content={copyLabel}>
           <button onClick={handleCopy} className={`${HEADER_BTN_CLASS} w-7`}>
-            {state === 'ok' ? <Check className="w-3.5 h-3.5 text-green-500" />
-              : state === 'err' ? <X className="w-3.5 h-3.5 text-red-500" />
-                : <Copy className="w-3.5 h-3.5" />}
+            <CopyStateIcon state={state} />
           </button>
         </Tooltip>
       )}
@@ -330,10 +346,58 @@ function FileActions({ file, projectId, refStr }: { file: RepositoryFileResponse
   )
 }
 
+// FileActionMenuRows renders the same copy/raw actions as full-width rows for the
+// small-screen overflow menu; onAction closes the menu after a tap.
+function FileActionMenuRows({ file, projectId, refStr, onAction }: { file: RepositoryFileResponse; projectId: string; refStr: string; onAction: () => void }) {
+  const { available, state, canCopy, copyLabel, rawUrl, handleCopy } = useFileActions(file, projectId, refStr)
+  if (!available) return null
+  return (
+    <>
+      {canCopy && (
+        <button onClick={() => { handleCopy(); onAction() }} className={MENU_ROW_CLASS}>
+          <CopyStateIcon state={state} size="w-4 h-4" idleColor="text-gray-400" />
+          {copyLabel}
+        </button>
+      )}
+      <a href={rawUrl} target="_blank" rel="noreferrer" onClick={onAction} className={MENU_ROW_CLASS}>
+        <ExternalLink className="w-4 h-4 text-gray-400" />
+        View raw file
+      </a>
+    </>
+  )
+}
+
 // ── Settings popup (PLAN.md #41e) ─────────────────────────────────────────────
 // Mirrors the diff viewer's settings popup styling so the two feel consistent.
 
 type RepoSettings = { wrap: boolean; showIcons: boolean }
+
+// RepoSettingsFields renders the file-view toggles, shared by the desktop popup
+// (SettingsPopup) and the small-screen overflow menu.
+function RepoSettingsFields({ settings, onChange }: { settings: RepoSettings; onChange: (s: RepoSettings) => void }) {
+  const options: { key: keyof RepoSettings; label: string }[] = [
+    { key: 'wrap', label: 'Wrap lines' },
+    { key: 'showIcons', label: 'Show file icons' },
+  ]
+  return (
+    <>
+      <p className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 mb-2">Options</p>
+      <div className="flex flex-col gap-0.5">
+        {options.map(({ key, label }) => (
+          <label key={key} className="flex items-center gap-2 py-0.5 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={settings[key]}
+              onChange={(e) => onChange({ ...settings, [key]: e.target.checked })}
+              className="w-3 h-3 accent-blue-500"
+            />
+            <span className="text-xs text-gray-700 dark:text-gray-300">{label}</span>
+          </label>
+        ))}
+      </div>
+    </>
+  )
+}
 
 function SettingsPopup({ settings, onChange }: { settings: RepoSettings; onChange: (s: RepoSettings) => void }) {
   const [open, setOpen] = useState(false)
@@ -347,11 +411,6 @@ function SettingsPopup({ settings, onChange }: { settings: RepoSettings; onChang
     document.addEventListener('mousedown', handleClick)
     return () => document.removeEventListener('mousedown', handleClick)
   }, [open])
-
-  const options: { key: keyof RepoSettings; label: string }[] = [
-    { key: 'wrap', label: 'Wrap lines' },
-    { key: 'showIcons', label: 'Show file icons' },
-  ]
 
   return (
     <div ref={ref} className="relative shrink-0">
@@ -368,20 +427,7 @@ function SettingsPopup({ settings, onChange }: { settings: RepoSettings; onChang
 
       {open && (
         <div className="absolute right-0 top-full mt-1 w-48 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50 p-3">
-          <p className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 mb-2">Options</p>
-          <div className="flex flex-col gap-0.5">
-            {options.map(({ key, label }) => (
-              <label key={key} className="flex items-center gap-2 py-0.5 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={settings[key]}
-                  onChange={(e) => onChange({ ...settings, [key]: e.target.checked })}
-                  className="w-3 h-3 accent-blue-500"
-                />
-                <span className="text-xs text-gray-700 dark:text-gray-300">{label}</span>
-              </label>
-            ))}
-          </div>
+          <RepoSettingsFields settings={settings} onChange={onChange} />
         </div>
       )}
     </div>
@@ -393,6 +439,72 @@ function SettingsPopup({ settings, onChange }: { settings: RepoSettings; onChang
 // the diff viewer's own options so the two feel consistent.
 
 type DiffSettings = { fileView: FileView; singleFile: boolean; sideBySide: boolean; ignoreWhitespace: boolean; imageDiffMode: ImageDiffMode }
+
+// DiffSettingsFields renders the branch-compare view's file-list / diff / image
+// options, shared by the desktop popup (DiffSettingsPopup) and the overflow menu.
+function DiffSettingsFields({ settings, onChange }: { settings: DiffSettings; onChange: (s: DiffSettings) => void }) {
+  type BoolKey = 'singleFile' | 'sideBySide' | 'ignoreWhitespace'
+  const options: { key: BoolKey; label: string }[] = [
+    { key: 'singleFile', label: 'One file at a time' },
+    { key: 'sideBySide', label: 'Side by side' },
+    { key: 'ignoreWhitespace', label: 'Ignore whitespace' },
+  ]
+  const viewOptions: { value: FileView; label: string }[] = [
+    { value: 'tree', label: 'Tree' },
+    { value: 'flat', label: 'Flat list' },
+    { value: 'grouped', label: 'Grouped by folder' },
+  ]
+  return (
+    <>
+      <p className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 mb-2">File list</p>
+      <div className="flex flex-col gap-0.5 mb-3">
+        {viewOptions.map((opt) => (
+          <label key={opt.value} className="flex items-center gap-2 py-0.5 cursor-pointer">
+            <input
+              type="radio"
+              name="hydra-repo-diff-file-view"
+              checked={settings.fileView === opt.value}
+              onChange={() => onChange({ ...settings, fileView: opt.value })}
+              className="w-3 h-3 accent-blue-500"
+            />
+            <span className="text-xs text-gray-700 dark:text-gray-300">{opt.label}</span>
+          </label>
+        ))}
+      </div>
+      <p className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 mb-2">Diff options</p>
+      <div className="flex flex-col gap-0.5">
+        {options.map(({ key, label }) => (
+          <label key={key} className="flex items-center gap-2 py-0.5 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={settings[key]}
+              onChange={(e) => onChange({ ...settings, [key]: e.target.checked })}
+              className="w-3 h-3 accent-blue-500"
+            />
+            <span className="text-xs text-gray-700 dark:text-gray-300">{label}</span>
+          </label>
+        ))}
+      </div>
+      {/* Image diff mode — applies to in-tree images in the diff, mirroring the
+          agent diff viewer's settings (shared storage key). */}
+      <p className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 mt-3 mb-2">Image diff</p>
+      <div className="flex flex-col gap-0.5">
+        {IMAGE_DIFF_MODES.map((opt) => (
+          <label key={opt.value} className="flex items-center gap-2 py-0.5 cursor-pointer">
+            <input
+              type="radio"
+              name="hydra-repo-image-diff-mode"
+              checked={settings.imageDiffMode === opt.value}
+              onChange={() => onChange({ ...settings, imageDiffMode: opt.value })}
+              className="w-3 h-3 accent-blue-500"
+            />
+            <span className="text-xs text-gray-700 dark:text-gray-300">{opt.label}</span>
+          </label>
+        ))}
+      </div>
+    </>
+  )
+}
 
 function DiffSettingsPopup({ settings, onChange }: { settings: DiffSettings; onChange: (s: DiffSettings) => void }) {
   const [open, setOpen] = useState(false)
@@ -406,18 +518,6 @@ function DiffSettingsPopup({ settings, onChange }: { settings: DiffSettings; onC
     document.addEventListener('mousedown', handleClick)
     return () => document.removeEventListener('mousedown', handleClick)
   }, [open])
-
-  type BoolKey = 'singleFile' | 'sideBySide' | 'ignoreWhitespace'
-  const options: { key: BoolKey; label: string }[] = [
-    { key: 'singleFile', label: 'One file at a time' },
-    { key: 'sideBySide', label: 'Side by side' },
-    { key: 'ignoreWhitespace', label: 'Ignore whitespace' },
-  ]
-  const viewOptions: { value: FileView; label: string }[] = [
-    { value: 'tree', label: 'Tree' },
-    { value: 'flat', label: 'Flat list' },
-    { value: 'grouped', label: 'Grouped by folder' },
-  ]
 
   return (
     <div ref={ref} className="relative shrink-0">
@@ -434,52 +534,49 @@ function DiffSettingsPopup({ settings, onChange }: { settings: DiffSettings; onC
 
       {open && (
         <div className="absolute right-0 top-full mt-1 w-48 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50 p-3">
-          <p className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 mb-2">File list</p>
-          <div className="flex flex-col gap-0.5 mb-3">
-            {viewOptions.map((opt) => (
-              <label key={opt.value} className="flex items-center gap-2 py-0.5 cursor-pointer">
-                <input
-                  type="radio"
-                  name="hydra-repo-diff-file-view"
-                  checked={settings.fileView === opt.value}
-                  onChange={() => onChange({ ...settings, fileView: opt.value })}
-                  className="w-3 h-3 accent-blue-500"
-                />
-                <span className="text-xs text-gray-700 dark:text-gray-300">{opt.label}</span>
-              </label>
-            ))}
-          </div>
-          <p className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 mb-2">Diff options</p>
-          <div className="flex flex-col gap-0.5">
-            {options.map(({ key, label }) => (
-              <label key={key} className="flex items-center gap-2 py-0.5 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={settings[key]}
-                  onChange={(e) => onChange({ ...settings, [key]: e.target.checked })}
-                  className="w-3 h-3 accent-blue-500"
-                />
-                <span className="text-xs text-gray-700 dark:text-gray-300">{label}</span>
-              </label>
-            ))}
-          </div>
-          {/* Image diff mode — applies to in-tree images in the diff, mirroring
-              the agent diff viewer's settings (shared storage key). */}
-          <p className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 mt-3 mb-2">Image diff</p>
-          <div className="flex flex-col gap-0.5">
-            {IMAGE_DIFF_MODES.map((opt) => (
-              <label key={opt.value} className="flex items-center gap-2 py-0.5 cursor-pointer">
-                <input
-                  type="radio"
-                  name="hydra-repo-image-diff-mode"
-                  checked={settings.imageDiffMode === opt.value}
-                  onChange={() => onChange({ ...settings, imageDiffMode: opt.value })}
-                  className="w-3 h-3 accent-blue-500"
-                />
-                <span className="text-xs text-gray-700 dark:text-gray-300">{opt.label}</span>
-              </label>
-            ))}
-          </div>
+          <DiffSettingsFields settings={settings} onChange={onChange} />
+        </div>
+      )}
+    </div>
+  )
+}
+
+// HeaderOverflowMenu is the small-screen hamburger that gathers the file header's
+// actions (copy / raw) and view settings into one dropdown, keeping the header
+// uncluttered on phones. It's rendered md:hidden — the desktop header shows the
+// same controls inline. Children get a `close` callback (for the action rows;
+// the settings toggles leave the menu open).
+function HeaderOverflowMenu({ className = '', children }: { className?: string; children: (close: () => void) => ReactNode }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    function handleClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [open])
+
+  return (
+    <div ref={ref} className={`relative shrink-0 ${className}`}>
+      <button
+        aria-label="File actions"
+        aria-haspopup="true"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+        className={`flex items-center justify-center w-8 h-8 rounded-lg border transition-colors cursor-pointer ${open
+          ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800'
+          : 'text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
+          }`}
+      >
+        <Menu className="w-4 h-4" />
+      </button>
+
+      {open && (
+        <div className="absolute right-0 top-full mt-1 w-56 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50 p-1.5">
+          {children(() => setOpen(false))}
         </div>
       )}
     </div>
@@ -678,6 +775,63 @@ function FileNotFound({ path, refStr }: { path: string; refStr: string }) {
   )
 }
 
+// ── File path label ───────────────────────────────────────────────────────────
+
+// FilePathLabel renders the selected file's path in the content header, the same
+// way on mobile and desktop: the directory is lowlit and the filename
+// emphasised, and when the path is too wide it's the *leading* directory that's
+// clipped with a "…" — the filename stays visible (".../filename.go"), and only
+// if the filename alone overflows does it clip at its own end. Tapping it expands
+// to the full, wrapped path; tapping again collapses.
+function FilePathLabel({ path }: { path: string }) {
+  const [expanded, setExpanded] = useState(false)
+  // Collapse again whenever the displayed file changes.
+  useEffect(() => { setExpanded(false) }, [path])
+
+  const slash = path.lastIndexOf('/')
+  const dir = slash >= 0 ? path.slice(0, slash + 1) : ''
+  const name = slash >= 0 ? path.slice(slash + 1) : path
+
+  if (expanded) {
+    return (
+      <button
+        type="button"
+        onClick={() => setExpanded(false)}
+        className="min-w-0 text-left text-sm font-mono break-all cursor-pointer"
+      >
+        {dir && <span className="text-gray-400 dark:text-gray-500">{dir}</span>}
+        <span className="text-gray-700 dark:text-gray-300">{name}</span>
+      </button>
+    )
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => setExpanded(true)}
+      title={path}
+      className="flex items-center min-w-0 text-sm font-mono cursor-pointer"
+    >
+      {dir && (
+        // Leading-ellipsis: the rtl block clips + ellipsises at the *start*,
+        // while the inner plaintext span keeps the path reading left-to-right.
+        // It shrinks far more eagerly than the filename (flex-shrink 9999 vs 1),
+        // so the directory clips first and the filename only clips once it alone
+        // can't fit.
+        <span
+          className="overflow-hidden whitespace-nowrap text-gray-400 dark:text-gray-500"
+          style={{ direction: 'rtl', textOverflow: 'ellipsis', flexShrink: 9999, minWidth: 0 }}
+        >
+          <span style={{ unicodeBidi: 'plaintext' }}>{dir}</span>
+        </span>
+      )}
+      <span className="truncate text-gray-700 dark:text-gray-300" style={{ flexShrink: 1, minWidth: 0 }}>
+        {name}
+      </span>
+    </button>
+  )
+}
+
 // ── Settings persistence ──────────────────────────────────────────────────────
 
 function loadBool(key: string, def: boolean): boolean {
@@ -709,6 +863,12 @@ function parseSplat(splat: string, branches: RepositoryBranch[] | null): { ref: 
 export function RepositoryView({ projectId, splat }: { projectId: string; splat: string }) {
   const navigate = useNavigate()
 
+  // The app's nav sidebar collapse state — the repository header hosts the
+  // "show sidebar" toggle while it's hidden (small screens), matching the agent
+  // page's top bar.
+  const collapsed = useSidebarStore((s) => s.collapsed)
+  const toggleSidebar = useSidebarStore((s) => s.toggle)
+
   const [branches, setBranches] = useState<RepositoryBranch[] | null>(null)
   const [currentBranch, setCurrentBranch] = useState('')
 
@@ -733,6 +893,12 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
   // component state, deliberately kept out of the URL so the existing ref/path
   // splat parser stays untouched.
   const [compareRef, setCompareRef] = useState('')
+  // On small screens the tree/changed-files list and the file/diff content are
+  // shown one at a time as a drill-down (full-screen list → tap a file → full
+  // file, with a back button). For normal browsing the URL path is the source of
+  // truth; in diff mode it's this ephemeral flag, set when a changed file is
+  // tapped and cleared by the back button (and whenever the diff target changes).
+  const [mobileDiffOpen, setMobileDiffOpen] = useState(false)
   const [diff, setDiff] = useState<DiffResponse | null>(null)
   const [diffLoading, setDiffLoading] = useState(false)
   const [diffError, setDiffError] = useState<string | null>(null)
@@ -853,6 +1019,15 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
   const compareKnown = !!branches?.some((b) => b.name === compareRef)
   const diffActive = !!compareRef && compareRef !== activeRef
 
+  // Whether the content pane (not the list) is the active view on small screens.
+  // For normal browsing that's an explicitly-selected path (the bare /repository
+  // URL resolves to the README via defaultPath, but on a phone we still want to
+  // land on the file list — so key off parsed.path, not viewPath). In diff mode
+  // it's the drill-down flag. At/above the md breakpoint both panes show side by
+  // side (the tree column fits comfortably from tablet widths up) and this only
+  // decides which one fills the screen below it.
+  const mobileContentOpen = diffActive ? mobileDiffOpen : !!parsed.path
+
   // The single-file view's selected file, plus the ref its blob lives at: the
   // compare (head) side for added/modified/renamed files, the base side for a
   // deleted file (which no longer exists at head).
@@ -967,6 +1142,10 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [diffActive, projectId, activeRef, compareRef, diffSettings.ignoreWhitespace])
 
+  // Leaving diff mode or retargeting the comparison drops the mobile drill-down
+  // back to the changed-files list (so it never opens onto a stale selection).
+  useEffect(() => { setMobileDiffOpen(false) }, [diffActive, compareRef])
+
   // Keep the one-file-at-a-time selection pointed at a file that still exists in
   // the current diff, defaulting to the first.
   useEffect(() => {
@@ -1031,9 +1210,13 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
   }
 
   // Clicking a changed file in the sidebar: in one-file mode it selects the file,
-  // otherwise it scrolls the stacked diff to that file's card.
-  const onDiffFileClick = (path: string) =>
-    diffSettings.singleFile ? setSelectedDiffPath(path) : scrollToDiffFile(path)
+  // otherwise it scrolls the stacked diff to that file's card. On small screens
+  // it also drills into the full-screen content view (the back button returns).
+  const onDiffFileClick = (path: string) => {
+    if (diffSettings.singleFile) setSelectedDiffPath(path)
+    else scrollToDiffFile(path)
+    setMobileDiffOpen(true)
+  }
   const activeDiffPath = diffSettings.singleFile ? selectedDiffPath : null
   const toggleDiffFolder = useCallback((path: string) => {
     setCollapsedDiffFolders((prev) => {
@@ -1061,36 +1244,57 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
   const selectFile = (path: string) => goTo(refStr, path)
   const selectBranch = (name: string) => goTo(name, parsed.path)
 
+  // Small-screen "back": pop the full-screen content view back to the list. In
+  // diff mode that's the drill-down flag; when browsing it clears the file path
+  // (to the ref root) so the tree fills the screen again.
+  const backToList = () => {
+    if (diffActive) setMobileDiffOpen(false)
+    else goTo(refStr, null)
+  }
+
   return (
     <div className="flex-1 flex flex-col min-w-0 min-h-0">
-      {/* Hosts the show-sidebar toggle + a "Repository" label while the sidebar
-          is collapsed (renders nothing when it's open). */}
-      <PageTopBar title="Repository" />
-      <div className="flex-1 flex min-w-0 min-h-0 bg-white dark:bg-gray-900">
-      {/* File / folder picker */}
+      {/* Top header — the page title plus the branch picker and the compare /
+          diff selector, all hoisted up here (they used to live in the sidebar's
+          own header row). On small screens it's hidden once a file/diff is open:
+          the content pane's own header takes over there, with a back button. */}
       <div
-        ref={sidebarRef}
-        style={{ width: sidebarWidth }}
-        className="relative shrink-0 border-r border-gray-200 dark:border-gray-700 flex flex-col bg-gray-50 dark:bg-gray-800/40"
+        className={`shrink-0 h-12 px-3 sm:px-4 items-center gap-2 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 ${mobileContentOpen ? 'hidden md:flex' : 'flex'}`}
       >
-        <div className="px-3 py-2 border-b border-gray-200 dark:border-gray-700 flex items-center gap-2 min-w-0">
-          {branches !== null ? (
-            <BranchSelector
-              branches={branches}
-              activeRef={activeRef}
-              isKnownBranch={isKnownBranch}
-              onSelect={selectBranch}
-              flexible={diffActive}
-            />
-          ) : (
-            <div className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-gray-400">
-              <GitBranch className="w-3.5 h-3.5" /> …
-            </div>
-          )}
-          {diffActive ? (
-            // Diffing: just "base → head", names clipped to fit, no counters.
-            <>
-              <MoveRight className="w-4 h-4 text-gray-400 dark:text-gray-500 shrink-0" />
+        {collapsed && (
+          <Tooltip content="Show sidebar (Ctrl+.)">
+            <button
+              type="button"
+              aria-label="Show sidebar"
+              onClick={toggleSidebar}
+              className="shrink-0 -ml-1 w-9 h-9 flex items-center justify-center rounded-lg text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors cursor-pointer"
+            >
+              <PanelLeftOpen className="w-5 h-5" />
+            </button>
+          </Tooltip>
+        )}
+        <span className="shrink-0 text-sm font-semibold text-gray-800 dark:text-gray-100">Repository</span>
+        {branches !== null ? (
+          // The base picker always sizes to its own content (it stays
+          // shrink-0 + truncates at its own max width). Keeping it un-shrinkable
+          // means a short base like "main" can't collapse to a bare icon when the
+          // long head selector is fighting for room beside it on a narrow header.
+          <BranchSelector
+            branches={branches}
+            activeRef={activeRef}
+            isKnownBranch={isKnownBranch}
+            onSelect={selectBranch}
+          />
+        ) : (
+          <div className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-gray-400">
+            <GitBranch className="w-3.5 h-3.5" /> …
+          </div>
+        )}
+        {diffActive ? (
+          // Diffing: "base → head", each capped + clipped so they stay compact.
+          <>
+            <MoveRight className="w-4 h-4 text-gray-400 dark:text-gray-500 shrink-0" />
+            <div className="flex min-w-0 max-w-[11rem] shrink">
               <BranchSelector
                 branches={branches!}
                 activeRef={compareRef}
@@ -1099,25 +1303,34 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
                 title="Change or exit branch diff"
                 flexible
               />
-            </>
-          ) : (
-            <>
-              {branches !== null && branches.length > 0 && (
-                <BranchSelector
-                  branches={branches}
-                  activeRef=""
-                  isKnownBranch={false}
-                  onSelect={onDiffSelect}
-                  title="Compare with another branch"
-                  triggerIcon={GitCompare}
-                />
-              )}
-              <span className="ml-auto text-xs text-gray-400 dark:text-gray-500 shrink-0">
-                {files.length} {files.length === 1 ? 'file' : 'files'}
-              </span>
-            </>
-          )}
-        </div>
+            </div>
+          </>
+        ) : (
+          <>
+            {branches !== null && branches.length > 0 && (
+              <BranchSelector
+                branches={branches}
+                activeRef=""
+                isKnownBranch={false}
+                onSelect={onDiffSelect}
+                title="Compare with another branch"
+                triggerIcon={GitCompare}
+              />
+            )}
+            <span className="ml-auto text-xs text-gray-400 dark:text-gray-500 shrink-0">
+              {files.length} {files.length === 1 ? 'file' : 'files'}
+            </span>
+          </>
+        )}
+      </div>
+      <div className="flex-1 flex min-w-0 min-h-0 bg-white dark:bg-gray-900">
+      {/* File / folder picker. Full-width on phones (the content pane is a
+          separate full-screen view there); a fixed, resizable column at md+. */}
+      <div
+        ref={sidebarRef}
+        style={{ width: sidebarWidth }}
+        className={`relative shrink-0 border-r border-gray-200 dark:border-gray-700 flex-col bg-gray-50 dark:bg-gray-800/40 max-md:!w-full ${mobileContentOpen ? 'hidden md:flex' : 'flex'}`}
+      >
         <div className="flex-1 overflow-y-auto py-1">
           {diffActive ? (
             diffLoading && !diff ? (
@@ -1187,16 +1400,28 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
           )}
         </div>
 
-        {/* Resize handle (PLAN.md #41i) */}
+        {/* Resize handle (PLAN.md #41i) — md+ only; the sidebar is full-width on
+            phones. */}
         <div
           onMouseDown={startResizing}
-          className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-500/30 transition-colors z-20"
+          className="hidden md:block absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-500/30 transition-colors z-20"
         />
       </div>
 
-      {/* Picked file */}
-      <div className="flex-1 flex flex-col min-w-0">
-        <div className="px-4 py-2 border-b border-gray-200 dark:border-gray-700 flex items-center gap-2 shrink-0">
+      {/* Picked file. A full-screen view on phones (its header doubles as the
+          page header there, with a back button); the right pane at md+. */}
+      <div className={`flex-1 flex-col min-w-0 ${mobileContentOpen ? 'flex' : 'hidden md:flex'}`}>
+        <div className="px-3 sm:px-4 py-2 border-b border-gray-200 dark:border-gray-700 flex items-center gap-2 shrink-0">
+          <Tooltip content="Back to files">
+            <button
+              type="button"
+              aria-label="Back to files"
+              onClick={backToList}
+              className="md:hidden shrink-0 -ml-1 w-8 h-8 flex items-center justify-center rounded-lg text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors cursor-pointer"
+            >
+              <ChevronLeft className="w-5 h-5" />
+            </button>
+          </Tooltip>
           {diffActive ? (
             selectedDiffFile ? (
               // One-file-at-a-time view: a file-view-style header for the selected
@@ -1204,11 +1429,13 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
               // copy/raw actions as the normal file view, and the diff settings.
               <>
                 {(() => { const { Icon, className } = getFileIcon(selectedDiffFile.path.split('/').pop() ?? selectedDiffFile.path); return <Icon className={`w-4 h-4 shrink-0 ${className}`} /> })()}
-                <span className="text-sm font-mono text-gray-700 dark:text-gray-300 truncate">
-                  {selectedDiffFile.change_type === 'renamed' && selectedDiffFile.old_path
-                    ? <>{selectedDiffFile.old_path} <span className="text-gray-400 dark:text-gray-500">→</span> {selectedDiffFile.path}</>
-                    : selectedDiffFile.path}
-                </span>
+                {selectedDiffFile.change_type === 'renamed' && selectedDiffFile.old_path ? (
+                  <span className="text-sm font-mono text-gray-700 dark:text-gray-300 truncate">
+                    {selectedDiffFile.old_path} <span className="text-gray-400 dark:text-gray-500">→</span> {selectedDiffFile.path}
+                  </span>
+                ) : (
+                  <FilePathLabel path={selectedDiffFile.path} />
+                )}
                 <ChangeTypeIcon type={selectedDiffFile.change_type} />
                 <div className="flex items-center gap-2 shrink-0 ml-auto">
                   {!selectedDiffFile.binary && (selectedDiffFile.additions > 0 || selectedDiffFile.deletions > 0) && (
@@ -1217,13 +1444,35 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
                       {selectedDiffFile.deletions > 0 && <span className="text-xs text-red-600 dark:text-red-400 font-medium">−{selectedDiffFile.deletions}</span>}
                     </div>
                   )}
-                  {diffFileMeta && <FileActions file={diffFileMeta} projectId={projectId} refStr={selectedDiffFileRef} />}
-                  <DiffSettingsPopup settings={diffSettings} onChange={setDiffSettings} />
+                  {/* Inline on desktop; folded into the hamburger on phones. */}
+                  <div className="hidden md:flex items-center gap-2">
+                    {diffFileMeta && <FileActions file={diffFileMeta} projectId={projectId} refStr={selectedDiffFileRef} />}
+                    <DiffSettingsPopup settings={diffSettings} onChange={setDiffSettings} />
+                  </div>
+                  <HeaderOverflowMenu className="md:hidden">
+                    {(close) => (
+                      <>
+                        {diffFileMeta && (
+                          <>
+                            <FileActionMenuRows file={diffFileMeta} projectId={projectId} refStr={selectedDiffFileRef} onAction={close} />
+                            <div className="my-1 border-t border-gray-100 dark:border-gray-700" />
+                          </>
+                        )}
+                        <div className="px-1.5 py-1"><DiffSettingsFields settings={diffSettings} onChange={setDiffSettings} /></div>
+                      </>
+                    )}
+                  </HeaderOverflowMenu>
                 </div>
               </>
             ) : (
-              // All-files view (or while loading): just the diff settings popup.
-              <div className="ml-auto"><DiffSettingsPopup settings={diffSettings} onChange={setDiffSettings} /></div>
+              // All-files view (or while loading): the diff settings — a popup on
+              // desktop, the hamburger on phones.
+              <div className="ml-auto flex items-center">
+                <div className="hidden md:block"><DiffSettingsPopup settings={diffSettings} onChange={setDiffSettings} /></div>
+                <HeaderOverflowMenu className="md:hidden">
+                  {() => <div className="px-1.5 py-1"><DiffSettingsFields settings={diffSettings} onChange={setDiffSettings} /></div>}
+                </HeaderOverflowMenu>
+              </div>
             )
           ) : viewPath ? (
             <>
@@ -1232,7 +1481,7 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
                 : file?.symlink
                   ? <FileSymlink className={`w-4 h-4 shrink-0 ${settings.showIcons ? 'text-teal-500' : 'text-gray-400'}`} />
                   : (() => { const { Icon, className } = getFileIcon(viewPath.split('/').pop() ?? viewPath); return <Icon className={`w-4 h-4 shrink-0 ${settings.showIcons ? className : 'text-gray-400'}`} /> })()}
-              <span className="text-sm font-mono text-gray-700 dark:text-gray-300 truncate">{viewPath}</span>
+              <FilePathLabel path={viewPath} />
               {file?.symlink && file.symlink_target && (
                 <span className="flex items-center gap-1 text-xs font-mono text-gray-400 dark:text-gray-500 truncate shrink min-w-0" title={`Symlink → ${file.symlink_target}`}>
                   <CornerDownRight className="w-3.5 h-3.5 shrink-0" />
@@ -1240,14 +1489,27 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
                 </span>
               )}
               {fileLoading && <LoaderCircle className="w-3.5 h-3.5 shrink-0 animate-spin text-gray-400" />}
-              {file && (
-                <span className="ml-auto text-xs text-gray-400 dark:text-gray-500 shrink-0">{formatBytes(file.size)}</span>
-              )}
-              {file && !artifactScript && (
-                <FileActions file={file} projectId={projectId} refStr={refStr} />
-              )}
-              <div className={file ? '' : 'ml-auto'}>
-                <SettingsPopup settings={settings} onChange={setSettings} />
+              <div className="ml-auto flex items-center gap-1.5 shrink-0">
+                {file && <span className="text-xs text-gray-400 dark:text-gray-500">{formatBytes(file.size)}</span>}
+                {/* Copy / raw / settings sit inline on desktop and fold into the
+                    hamburger on phones. */}
+                <div className="hidden md:flex items-center gap-1.5">
+                  {file && !artifactScript && <FileActions file={file} projectId={projectId} refStr={refStr} />}
+                  <SettingsPopup settings={settings} onChange={setSettings} />
+                </div>
+                <HeaderOverflowMenu className="md:hidden">
+                  {(close) => (
+                    <>
+                      {file && !artifactScript && (
+                        <>
+                          <FileActionMenuRows file={file} projectId={projectId} refStr={refStr} onAction={close} />
+                          <div className="my-1 border-t border-gray-100 dark:border-gray-700" />
+                        </>
+                      )}
+                      <div className="px-1.5 py-1"><RepoSettingsFields settings={settings} onChange={setSettings} /></div>
+                    </>
+                  )}
+                </HeaderOverflowMenu>
               </div>
             </>
           ) : (
