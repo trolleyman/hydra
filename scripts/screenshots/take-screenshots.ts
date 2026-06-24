@@ -354,6 +354,12 @@ try {
       // opens the full-page form's selector, not the compact sidebar box's (both
       // carry the same title).
       { name: 'spawn-branch-selector', path: '/project/sim-project/', click: '.max-w-4xl button[title^="Base branch"]' },
+      // The same dropdown opened from the compact spawn box in the top-left
+      // sidebar (the mini form rendered on every project page). Scoped to the
+      // `aside` so the click lands on the sidebar selector rather than the
+      // full-page form's (both carry the same "Base branch" title). Verifies the
+      // portal-rendered menu escapes the narrow sidebar's clipping too.
+      { name: 'spawn-branch-selector-mini', path: '/project/sim-project/', click: 'aside button[title^="Base branch"]' },
       // The inline-markdown rendering (the markdown-pass feature). The spawn box
       // is seeded with a markdown draft so the textarea overlay shows live
       // highlighting — `code`, *italic*, **bold**, and a long inline-code
