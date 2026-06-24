@@ -164,6 +164,7 @@ func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, pr
 
 	running := api.Running
 	waiting := api.Waiting
+	finished := api.Finished
 	unread := true
 
 	resp := api.ListAgents200JSONResponse{
@@ -187,6 +188,10 @@ func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, pr
 			},
 		},
 		{
+			// Finished its turn with a terse closing instruction. "run it" is a
+			// suggested next message — short, single-clause — so the sidebar marks
+			// it with a `❯ ` caret (see isSuggestedNextMessage in AgentComponents),
+			// in contrast to agent-2's multi-sentence report, which stays plain.
 			Id:            "agent-1",
 			Title:         ptr("Add renameable agent titles"),
 			AgentType:     "claude",
@@ -197,8 +202,9 @@ func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, pr
 			CreatedAt:     &createdAt1,
 			Prompt:        simAgent1Prompt,
 			AgentStatus: &api.AgentStatusInfo{
-				Status:    running,
-				Timestamp: simNow().Format(time.RFC3339),
+				Status:      finished,
+				Timestamp:   simNow().Format(time.RFC3339),
+				LastMessage: ptr("run it"),
 			},
 		},
 		{
@@ -317,8 +323,9 @@ func (s *SimulationServer) GetAgent(w http.ResponseWriter, r *http.Request, proj
 			CreatedAt:     &createdAt,
 			Prompt:        simAgent1Prompt,
 			AgentStatus: &api.AgentStatusInfo{
-				Status:    api.Running,
-				Timestamp: simNow().Format(time.RFC3339),
+				Status:      api.Finished,
+				Timestamp:   simNow().Format(time.RFC3339),
+				LastMessage: ptr("run it"),
 			},
 		})
 		return
