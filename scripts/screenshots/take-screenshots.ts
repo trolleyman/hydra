@@ -454,9 +454,9 @@ try {
       // The diff viewer offers four image-diff comparison modes (a setting in the
       // diff viewer; see web/src/components/ArtifactsPanel.tsx ImageDiffView). We
       // capture the artifacts panel once per mode so each option is documented:
+      //   side-by-side — before and after shown next to each other ('artifacts')
       //   ab           — before/after stacked, click to flip; a "Highlight" tab
-      //                  paints the changed pixels magenta (default)
-      //   side-by-side — before and after shown next to each other
+      //                  paints the changed pixels magenta (the app's default mode)
       //   slider       — draggable divider with a hard cut between before/after
       //   onion        — before/after blended via an opacity slider
       // Each sets showArtifacts so the "screenshots" card is expanded and its
@@ -467,7 +467,7 @@ try {
         path: '/project/sim-project/agent/agent-1',
         scrollTo: 'Changes',
         viewport: { width: 1280, height: 1280 },
-        imageDiffMode: 'ab',
+        imageDiffMode: 'side-by-side',
         showArtifacts: true,
       },
       // The collapsed artifacts panel: each set is a single header row ("N changed",
@@ -478,14 +478,14 @@ try {
         path: '/project/sim-project/agent/agent-1',
         scrollTo: 'Changes',
         viewport: { width: 1280, height: 1280 },
-        imageDiffMode: 'ab',
+        imageDiffMode: 'side-by-side',
       },
       {
-        name: 'artifacts-side-by-side',
+        name: 'artifacts-ab',
         path: '/project/sim-project/agent/agent-1',
         scrollTo: 'Changes',
         viewport: { width: 1280, height: 1280 },
-        imageDiffMode: 'side-by-side',
+        imageDiffMode: 'ab',
         showArtifacts: true,
       },
       {
