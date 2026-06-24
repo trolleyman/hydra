@@ -33,11 +33,15 @@ export function AgentTopBar({
   title,
   statusDot,
   actions,
+  inlineActions,
   rename,
 }: {
   title: string
   statusDot?: ReactNode
   actions: AgentTopBarAction[]
+  // Actions surfaced as buttons inline right after the title (e.g. Merge),
+  // rather than tucked inside the chevron dropdown.
+  inlineActions?: AgentTopBarAction[]
   rename?: AgentTopBarRename
 }) {
   const collapsed = useSidebarStore((s) => s.collapsed)
@@ -108,6 +112,23 @@ export function AgentTopBar({
             >
               {title}
             </button>
+            {inlineActions?.map((a) => (
+              <button
+                key={a.label}
+                type="button"
+                disabled={a.disabled}
+                onClick={a.onClick}
+                title={a.label}
+                aria-label={a.label}
+                className={`shrink-0 w-7 h-7 flex items-center justify-center rounded-md transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer ${
+                  a.danger
+                    ? 'text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20'
+                    : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
+                }`}
+              >
+                {a.icon}
+              </button>
+            ))}
             {hasMenu && (
               <button
                 type="button"

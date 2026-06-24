@@ -20,7 +20,7 @@ var spawnFlags struct {
 }
 
 func init() {
-	spawnCmd.Flags().StringVar(&spawnFlags.agentType, "agent", string(sandbox.AgentTypeClaude), "Agent type (claude, gemini, copilot)")
+	spawnCmd.Flags().StringVar(&spawnFlags.agentType, "agent", string(sandbox.AgentTypeClaude), "Agent type (claude, gemini, copilot, codex)")
 	spawnCmd.Flags().StringVar(&spawnFlags.baseBranch, "base-branch", "", "Base branch (default: current branch)")
 	spawnCmd.Flags().BoolVarP(&spawnFlags.force, "force", "f", false, "Force replace an existing head with the same ID")
 	spawnCmd.Flags().BoolVarP(&spawnFlags.detach, "detach", "d", false, "Start the agent and exit instead of attaching")
@@ -40,9 +40,9 @@ var spawnCmd = &cobra.Command{
 
 		agentType := sandbox.AgentType(spawnFlags.agentType)
 		switch agentType {
-		case sandbox.AgentTypeClaude, sandbox.AgentTypeGemini, sandbox.AgentTypeCopilot:
+		case sandbox.AgentTypeClaude, sandbox.AgentTypeGemini, sandbox.AgentTypeCopilot, sandbox.AgentTypeCodex:
 		default:
-			return errtrace.Wrap(fmt.Errorf("unknown agent type %q; supported: claude, gemini, copilot", agentType))
+			return errtrace.Wrap(fmt.Errorf("unknown agent type %q; supported: claude, gemini, copilot, codex", agentType))
 		}
 
 		projectRoot, err := paths.GetProjectRootFromCwd()

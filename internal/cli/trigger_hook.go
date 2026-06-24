@@ -135,7 +135,7 @@ func appendJSONLine(w io.Writer, object any) {
 //
 //	hydra trigger-hook <agentType> [eventName]
 //
-// The agentType argument (e.g. "claude", "gemini", "copilot") is accepted for future use.
+// The agentType argument (e.g. "claude", "gemini", "copilot", "codex") is accepted for future use.
 // The optional eventName argument overrides reading the event from the JSON payload; this is
 // required for Copilot CLI hooks which do not include the event name in the payload.
 var triggerHookCmd = &cobra.Command{

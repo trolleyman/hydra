@@ -50,6 +50,13 @@ const DefaultPrePrompt = "You are a head (AI agent) of Hydra, an AI orchestratio
 	"- Try not to bother the user with requests unless necessary.\n" +
 	"- If there are any design decisions made without user input, document them in each commit."
 
+// DefaultResumePrompt is the message Hydra types into an agent that was
+// actively working when the daemon restarted, so it resumes its task rather
+// than idling after its conversation is restored. Agents that were waiting on
+// the user (e.g. an unanswered question) are never nudged. Override or disable
+// via the top-level `resume_prompt` config key.
+const DefaultResumePrompt = "Continue"
+
 // NetworkConfig is the per-agent network policy.
 type NetworkConfig struct {
 	// Enabled toggles outbound network access. nil = inherit/default (enabled).
@@ -196,6 +203,20 @@ type Config struct {
 	Artifacts []ArtifactScript `toml:"artifacts"`
 	// Services are per-project long-running commands the daemon supervises.
 	Services []ServiceScript `toml:"services"`
+	// ResumePrompt is the message typed into an agent that was actively working
+	// when the daemon was restarted, so it picks up where it left off instead of
+	// sitting idle after its conversation is restored (see DefaultResumePrompt).
+	// nil = use DefaultResumePrompt; "" = disable the auto-continue nudge.
+	ResumePrompt *string `toml:"resume_prompt"`
+}
+
+// ResumeContinueMessage returns the message to auto-send to a resumed,
+// previously-working agent. An empty string disables the nudge.
+func (c Config) ResumeContinueMessage() string {
+	if c.ResumePrompt == nil {
+		return DefaultResumePrompt
+	}
+	return *c.ResumePrompt
 }
 
 // rawConfig is the intermediate decode target. It accepts BOTH the legacy
@@ -212,18 +233,20 @@ type rawConfig struct {
 	PrePrompt *string        `toml:"pre_prompt"`
 	Sandbox   *SandboxConfig `toml:"sandbox"`
 	// Shared.
-	Artifacts []ArtifactScript `toml:"artifacts"`
-	Services  []ServiceScript  `toml:"services"`
+	Artifacts    []ArtifactScript `toml:"artifacts"`
+	Services     []ServiceScript  `toml:"services"`
+	ResumePrompt *string          `toml:"resume_prompt"`
 }
 
 // reservedTopLevel are the top-level TOML names that are NOT agent tables. Any
 // other top-level table is treated as an agent override, so new agent types
 // need no code change. Consequently an agent literally named one of these is
 // unrepresentable in the flattened layout — fine for real agent types
-// (claude/gemini/bash/copilot).
+// (claude/gemini/bash/copilot/codex).
 var reservedTopLevel = map[string]bool{
 	"defaults": true, "agents": true,
 	"pre_prompt": true, "sandbox": true, "artifacts": true, "services": true,
+	"resume_prompt": true,
 }
 
 // GetUserConfigPath returns the path to the global user configuration file.
@@ -306,6 +329,7 @@ func decodeConfig(data []byte) (Config, error) {
 
 	cfg.Artifacts = raw.Artifacts
 	cfg.Services = raw.Services
+	cfg.ResumePrompt = raw.ResumePrompt
 
 	// Defaults: legacy [defaults] first, then the new top-level fields win.
 	if raw.Defaults != nil {
@@ -727,6 +751,10 @@ func managedKeySet() map[string]bool {
 	for _, e := range defaultsSpec() {
 		m[e.key] = true
 	}
+	// resume_prompt is rendered outside the spec (it is Config-level, not
+	// per-agent), but is still managed: a regenerated "# resume_prompt = ..."
+	// line must be recognised and dropped rather than kept as a user comment.
+	m["resume_prompt"] = true
 	return m
 }
 
@@ -1181,6 +1209,17 @@ func renderConfig(existing []byte, cfg Config) string {
 	serviceBlocks := prior.serviceBlocks
 	serviceMeta := prior.serviceMeta // name -> preserved comments
 
+	// resume_prompt is not part of the structured save payload (the Settings UI
+	// doesn't send it), so a save that doesn't carry it must preserve whatever the
+	// file already had rather than silently dropping a hand-edited value. An
+	// explicit cfg.ResumePrompt still wins.
+	resumePrompt := cfg.ResumePrompt
+	if resumePrompt == nil {
+		if prev, err := decodeConfig(existing); err == nil {
+			resumePrompt = prev.ResumePrompt
+		}
+	}
+
 	var out []string
 	spec := defaultsSpec()
 
@@ -1189,6 +1228,7 @@ func renderConfig(existing []byte, cfg Config) string {
 		out = append(out, tc...)
 	}
 	emitSpecTable(&out, spec, "", "", cfg.Defaults, keyComments, tableComments)
+	emitResumePrompt(&out, resumePrompt, keyComments)
 	emitSpecTable(&out, spec, "sandbox", "[sandbox]", cfg.Defaults, keyComments, tableComments)
 	emitSpecTable(&out, spec, "sandbox.network", "[sandbox.network]", cfg.Defaults, keyComments, tableComments)
 
@@ -1299,10 +1339,26 @@ func emitSpecTable(out *[]string, spec []specEntry, table, header string, def Ag
 	}
 }
 
+// emitResumePrompt renders the top-level resume_prompt key (a Config-level
+// setting, so it is emitted here rather than via the per-agent spec). It mirrors
+// emitSpecTable's format: preserved user comment, Hydra doc line, then the value
+// (commented-out showing the default when unset).
+func emitResumePrompt(out *[]string, resumePrompt *string, keyComments map[string][]string) {
+	if uc := keyComments["\x00resume_prompt"]; len(uc) > 0 {
+		*out = append(*out, uc...)
+	}
+	*out = append(*out, docPrefix+` message typed into an agent that was working when the daemon restarted, so it resumes its task instead of idling (default "`+DefaultResumePrompt+`"; "" disables).`)
+	if resumePrompt != nil {
+		*out = append(*out, "resume_prompt = "+tomlStringValue(*resumePrompt))
+	} else {
+		*out = append(*out, "# resume_prompt = "+tomlStringValue(DefaultResumePrompt))
+	}
+}
+
 // docAgents are the agent types that always get a documented mention in the
 // rendered config (a commented-out [name] header when they have no overrides).
 // Order matches the Settings UI tabs.
-var docAgents = []string{"claude", "gemini", "copilot"}
+var docAgents = []string{"claude", "gemini", "copilot", "codex"}
 
 // agentLabel returns a human-friendly capitalised name for an agent type.
 func agentLabel(name string) string {
@@ -1313,6 +1369,8 @@ func agentLabel(name string) string {
 		return "Gemini"
 	case "copilot":
 		return "Copilot"
+	case "codex":
+		return "Codex"
 	default:
 		if name == "" {
 			return name

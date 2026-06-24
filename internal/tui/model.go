@@ -72,7 +72,7 @@ type spawnForm struct {
 	promptInput textinput.Model
 }
 
-var agentTypes = []sandbox.AgentType{sandbox.AgentTypeClaude, sandbox.AgentTypeGemini, sandbox.AgentTypeCopilot}
+var agentTypes = []sandbox.AgentType{sandbox.AgentTypeClaude, sandbox.AgentTypeGemini, sandbox.AgentTypeCopilot, sandbox.AgentTypeCodex}
 
 func newSpawnForm() spawnForm {
 	id := textinput.New()

@@ -15,6 +15,7 @@ import { DiffViewer } from '../DiffViewer'
 import { formatStartedAgo, agentStatusBadge, archivedEndStateBadge, agentDotClass } from './AgentComponents'
 import { LoaderCircle, Merge, Trash2, Tag, RotateCcw, Pencil, TerminalSquare } from 'lucide-react'
 import { Tooltip } from './Tooltip'
+import { AgentTypeIcon, type AgentTypeIconName } from './AgentTypeIcon'
 import { renderMarkdown } from '../lib/markdown'
 
 import { useDialogStore } from '../stores/dialogStore'
@@ -137,7 +138,9 @@ function ArchivedAgentDetail({ agent, projectId, onPurged }: { agent: AgentRespo
         ? 'bg-teal-100 text-teal-800 dark:bg-teal-900/40 dark:text-teal-300'
         : agent.agent_type === 'copilot'
           ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300'
-          : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'
+          : agent.agent_type === 'codex'
+            ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300'
+            : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'
 
   return (
     <div className="flex-1 flex flex-col min-w-0 min-h-0">
@@ -158,7 +161,8 @@ function ArchivedAgentDetail({ agent, projectId, onPurged }: { agent: AgentRespo
         <div className="mb-6">
           {/* Metadata row */}
           <SeparatedRow className="flex items-center gap-3 flex-wrap">
-            <span className={`text-xs px-2.5 py-0.5 rounded-full font-medium ${agentTypeClass}`}>
+            <span className={`inline-flex items-center gap-1 text-xs px-2.5 py-0.5 rounded-full font-medium ${agentTypeClass}`}>
+              <AgentTypeIcon name={agent.agent_type as AgentTypeIconName} className="w-3 h-3 shrink-0" />
               {agent.agent_type}
             </span>
             <span className={`text-xs px-2 py-0.5 rounded font-medium ${endBadge.className}`}>
@@ -320,7 +324,9 @@ export function AgentDetail({
         ? 'bg-teal-100 text-teal-800 dark:bg-teal-900/40 dark:text-teal-300'
         : agent.agent_type === 'copilot'
           ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300'
-          : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'
+          : agent.agent_type === 'codex'
+            ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300'
+            : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'
 
   async function handleKill() {
     useDialogStore.getState().show({
@@ -499,19 +505,29 @@ export function AgentDetail({
           onSave: saveTitle,
           onCancel: () => setEditingTitle(false),
         }}
+        inlineActions={[
+          {
+            label: 'Merge',
+            icon: merging ? <LoaderCircle className="w-4 h-4 animate-spin" /> : <Merge className="w-4 h-4" />,
+            onClick: handleMerge,
+            disabled: merging || killing,
+          },
+        ]}
         actions={[
           { label: 'Rename', icon: <Pencil className="w-4 h-4" />, onClick: startEditingTitle },
-          { label: 'Merge', icon: <Merge className="w-4 h-4" />, onClick: handleMerge, disabled: merging || killing },
           { label: 'Kill', icon: <Trash2 className="w-4 h-4" />, onClick: handleKill, danger: true, disabled: merging || killing },
         ]}
       />
-      <div ref={scrollRef} className="flex-1 flex flex-col overflow-auto p-3 sm:p-6 min-w-0 min-h-0" data-main-scroll>
+      {/* pt-4 (16px) above the metadata row matches the effective gap below it
+          (its mb-6 minus the prompt block's -mt-2), so it sits evenly spaced. */}
+      <div ref={scrollRef} className="flex-1 flex flex-col overflow-auto px-3 sm:px-6 pb-3 sm:pb-6 pt-4 min-w-0 min-h-0" data-main-scroll>
         <div className="w-full">
         {/* Header */}
         <div className="mb-6">
           {/* Metadata row */}
           <SeparatedRow className="flex items-center gap-x-3 gap-y-1 flex-wrap">
-            <span className={`text-xs px-2.5 py-0.5 rounded-full font-medium ${agentTypeClass}`}>
+            <span className={`inline-flex items-center gap-1 text-xs px-2.5 py-0.5 rounded-full font-medium ${agentTypeClass}`}>
+              <AgentTypeIcon name={agent.agent_type as AgentTypeIconName} className="w-3 h-3 shrink-0" />
               {agent.agent_type}
             </span>
             {agent.agent_status && (

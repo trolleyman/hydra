@@ -178,8 +178,8 @@ func BuildCopilotHooks(hydraBin string) ([]byte, error) {
 //
 // systemPrompt holds the standing Hydra instructions, delivered as a system
 // prompt, never as part of the user's task: Claude takes them via
-// --append-system-prompt (applied on resume too). Gemini and Copilot have no
-// such flag, so for them the instructions are seeded as context files (see
+// --append-system-prompt (applied on resume too). Gemini, Copilot and Codex have
+// no such flag, so for them the instructions are seeded as context files (see
 // seedHead, which also runs on resume) and systemPrompt is ignored here.
 func AgentArgv(agentType AgentType, resume bool, systemPrompt, prompt string) ([]string, error) {
 	switch agentType {
@@ -215,6 +215,24 @@ func AgentArgv(agentType AgentType, resume bool, systemPrompt, prompt string) ([
 		}
 		if prompt != "" {
 			argv = append(argv, "--autopilot", "-p", prompt)
+		}
+		return argv, nil
+	case AgentTypeCodex:
+		// Codex already provides its own OS sandbox + approval prompts; since we
+		// run it inside Hydra's sandbox we disable both with the explicit
+		// "externally sandboxed" escape hatch (the analog of
+		// --dangerously-skip-permissions). Codex has no --append-system-prompt
+		// flag, so the pre-prompt is seeded as ~/.codex/AGENTS.md (see seedHead)
+		// and systemPrompt is ignored here.
+		argv := []string{"codex", "--dangerously-bypass-approvals-and-sandbox"}
+		if resume {
+			// `resume --last` continues the most recent recorded session in this
+			// cwd without the interactive session picker.
+			return append(argv, "resume", "--last"), nil
+		}
+		if prompt != "" {
+			// The task is Codex's positional [PROMPT] argument.
+			argv = append(argv, prompt)
 		}
 		return argv, nil
 	case AgentTypeBash:
