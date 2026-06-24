@@ -837,7 +837,7 @@ export function useMediaDims(
 // is too narrow). Each tile's span comes from its `aspect` via defaultSpanForAspect
 // (scaled by `spanScale` — 2 for side-by-side, whose before/after pair needs the
 // room), unless the user has dragged its edge to set an explicit span in `spans`.
-export function MasonryGrid({ items, spanScale = 1, spans, onSpanChange }: {
+export function MasonryGrid({ items, spanScale = 1, spans, onSpanChange, scope }: {
   // bodyResizable defaults to true; set false for tiles whose media owns horizontal
   // drag (the before/after slider, video scrubbing) — those resize via the edge
   // handle only, so the two gestures don't fight.
@@ -845,7 +845,18 @@ export function MasonryGrid({ items, spanScale = 1, spans, onSpanChange }: {
   spanScale?: number
   spans: ArtifactSpans
   onSpanChange?: (key: string, span: number | null) => void
+  // Namespace for persisted span overrides: an item's identity key (its file name,
+  // used for React/layout identity) is unique only within this grid, but the spans
+  // map is shared across every agent/set/view, so it's prefixed with `scope` before
+  // lookup/write. Omitted → the bare file name is the persistence key (legacy/global).
+  // See spanKey; callers pass e.g. `${agentId}/${setName}` so a resize stays local.
+  scope?: string
 }) {
+  // Persisted-override key for a tile: prefix its file name with `scope`, joined by
+  // a NUL — which can't appear in a file name, agent id or set name, so the
+  // composite never collides with a different (scope, name) pair even when either
+  // contains slashes or spaces. No scope → the bare file name (legacy global key).
+  const spanKey = useCallback((itemKey: string) => (scope ? `${scope} ${itemKey}` : itemKey), [scope])
   const containerRef = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(0)
   // Measured tile heights, keyed by item key. Updated by the ResizeObserver below.
@@ -927,7 +938,7 @@ export function MasonryGrid({ items, spanScale = 1, spans, onSpanChange }: {
   // before+after pair so each image only gets ~half of it, hence the spanScale budget.
   // Explicit drag overrides bypass the cap: enlarging past native is then deliberate.
   const spanOf = useCallback((it: { key: string; aspect?: number; pxWidth?: number; minWidthPx?: number }): number => {
-    let req = spans[it.key]
+    let req = spans[spanKey(it.key)]
     if (req == null) {
       req = defaultSpanForAspect(it.aspect) * spanScale
       const unit = layout.colW + layout.gap
@@ -949,7 +960,7 @@ export function MasonryGrid({ items, spanScale = 1, spans, onSpanChange }: {
       }
     }
     return Math.max(1, Math.min(Math.round(req), layout.cols))
-  }, [spans, spanScale, layout.cols, layout.colW, layout.gap])
+  }, [spans, spanScale, layout.cols, layout.colW, layout.gap, spanKey])
 
   // Place each tile into the run of `span` columns whose tallest column is currently
   // shortest (ties resolve leftmost, preserving reading order). Each tile fills its
@@ -984,12 +995,13 @@ export function MasonryGrid({ items, spanScale = 1, spans, onSpanChange }: {
   // swallowed before the media reacts to it. Holds the key of the tile being dragged.
   const draggedKeyRef = useRef<string | null>(null)
 
-  // Resize a tile to `next` columns, clamped to what's available.
+  // Resize a tile to `next` columns, clamped to what's available. `key` is the tile's
+  // file name; the override is persisted under its scoped key (see spanKey).
   const applySpan = (key: string, startSpan: number, deltaPx: number) => {
     const unit = layout.colW + layout.gap
     if (unit <= 0 || !onSpanChange) return
     const delta = Math.round(deltaPx / unit)
-    onSpanChange(key, Math.max(1, Math.min(layout.cols, startSpan + delta)))
+    onSpanChange(spanKey(key), Math.max(1, Math.min(layout.cols, startSpan + delta)))
   }
 
   // Edge-handle resize: drag the thin handle in the right gutter to grow/shrink the
@@ -1072,7 +1084,7 @@ export function MasonryGrid({ items, spanScale = 1, spans, onSpanChange }: {
               // gives a visible cue and a double-click target to auto-size.
               <div
                 onPointerDown={startEdgeResize(it.key, p.span)}
-                onDoubleClick={() => onSpanChange?.(it.key, null)}
+                onDoubleClick={() => onSpanChange?.(spanKey(it.key), null)}
                 title="Drag to resize · double-click to auto-size"
                 className="absolute inset-y-0 right-0 z-10 w-3 -mr-1.5 cursor-col-resize flex justify-center items-stretch touch-none opacity-0 group-hover/tile:opacity-100 transition-opacity"
               >
@@ -1091,11 +1103,12 @@ export function MasonryGrid({ items, spanScale = 1, spans, onSpanChange }: {
 // right. Each tile auto-spans by aspect ratio (a wide desktop shot takes more
 // columns than a tall phone shot); side-by-side doubles the span so the before/after
 // pair has room. Drag a tile's edge to override its span.
-function FileGrid({ files, mode, spans, onSpanChange }: {
+function FileGrid({ files, mode, spans, onSpanChange, scope }: {
   files: ArtifactFile[]
   mode: ImageDiffMode
   spans: ArtifactSpans
   onSpanChange?: (key: string, span: number | null) => void
+  scope?: string
 }) {
   const spanScale = mode === 'side-by-side' ? 2 : 1
   const sources = useMemo(
@@ -1127,7 +1140,7 @@ function FileGrid({ files, mode, spans, onSpanChange }: {
   // pt-3 so the gap above the first row matches the card body's px-3 left inset.
   return (
     <div className="pt-3">
-      <MasonryGrid items={items} spanScale={spanScale} spans={spans} onSpanChange={onSpanChange} />
+      <MasonryGrid items={items} spanScale={spanScale} spans={spans} onSpanChange={onSpanChange} scope={scope} />
     </div>
   )
 }
@@ -1612,7 +1625,7 @@ function ArtifactSetCard({ set, mode, spans, onSpanChange, filter, search, onRef
               ) : visibleFiles.length === 0 ? (
                 <div className="my-2 text-xs text-gray-400 dark:text-gray-500">No files match {searching ? 'your search' : 'the current filters'}.</div>
               ) : (
-                <FileGrid files={visibleFiles} mode={mode} spans={spans} onSpanChange={onSpanChange} />
+                <FileGrid files={visibleFiles} mode={mode} spans={spans} onSpanChange={onSpanChange} scope={`${agentId}/${set.name}`} />
               )}
             </>
           )}

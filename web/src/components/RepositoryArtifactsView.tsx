@@ -244,6 +244,7 @@ export function RepositoryArtifactsView({
             }))}
             spans={spans}
             onSpanChange={setSpanOverride}
+            scope={`${projectId}/repo/${scriptName}`}
           />
           {data.log_url && <PersistedLog url={data.log_url} />}
         </div>
