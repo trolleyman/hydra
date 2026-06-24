@@ -502,6 +502,57 @@ func TestManagerComparePixelEqual(t *testing.T) {
 	}
 }
 
+// TestScanOutputsPixelSize checks that scanOutputs records each image's natural
+// pixel dimensions (from the PNG header) and leaves them zero for a file it cannot
+// decode (an .svg), so the dimensions stay optional/best-effort.
+func TestScanOutputsPixelSize(t *testing.T) {
+	m := NewManager(t.TempDir())
+	const script = "shot"
+
+	img := image.NewRGBA(image.Rect(0, 0, 24, 13)) // deliberately non-square
+	writeArtifact(t, m, script, "commit/x", "shot.png", encodePNG(t, img, png.DefaultCompression))
+	writeArtifact(t, m, script, "commit/x", "vector.svg", []byte("<svg></svg>"))
+
+	files, _, err := scanOutputs(m.entryDir(script, "commit/x"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	byName := map[string]FileMeta{}
+	for _, f := range files {
+		byName[f.Name] = f
+	}
+	if got := byName["shot.png"]; got.Width != 24 || got.Height != 13 {
+		t.Errorf("shot.png: got %dx%d, want 24x13", got.Width, got.Height)
+	}
+	if got := byName["vector.svg"]; got.Width != 0 || got.Height != 0 {
+		t.Errorf("vector.svg: got %dx%d, want 0x0 (undecodable → no dimensions)", got.Width, got.Height)
+	}
+}
+
+// TestScanOutputsVideoPixelSize checks that scanOutputs reads a video's frame size
+// via ffprobe. Guarded on ffmpeg (to encode the fixture) and ffprobe (to measure);
+// when ffprobe is absent the dimensions just stay zero, which the client falls back
+// to measuring, so this only asserts the happy path.
+func TestScanOutputsVideoPixelSize(t *testing.T) {
+	if _, err := exec.LookPath("ffmpeg"); err != nil {
+		t.Skip("ffmpeg not installed")
+	}
+	if _, err := exec.LookPath("ffprobe"); err != nil {
+		t.Skip("ffprobe not installed")
+	}
+	m := NewManager(t.TempDir())
+	const script = "rec"
+	writeArtifact(t, m, script, "commit/x", "clip.webm", encodeTestWebM(t, "testsrc", "one")) // 128x96
+
+	files, _, err := scanOutputs(m.entryDir(script, "commit/x"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 1 || files[0].Width != 128 || files[0].Height != 96 {
+		t.Fatalf("got %+v, want one file 128x96", files)
+	}
+}
+
 // encodeTestWebM renders a 1s lossless VP9 .webm from an ffmpeg lavfi source
 // (e.g. "testsrc", "testsrc2"). The title metadata is muxed into the container
 // only — it changes the file bytes without touching the decoded frames, so two

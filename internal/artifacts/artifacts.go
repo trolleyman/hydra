@@ -51,6 +51,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -160,6 +161,14 @@ type FileMeta struct {
 	// video exposes no frame rate, so the viewer's frame-step buttons use this to
 	// size a single-frame step. Zero when the sidecar omits it (or for images).
 	Fps float64 `json:"fps,omitempty"`
+	// Width and Height are the media's natural pixel dimensions, measured at scan
+	// time (image header via image.DecodeConfig, or ffprobe for video) and so
+	// cached in this entry's meta.json. They let the web grid size tiles without
+	// downloading every file to measure it. Best-effort: both zero when the size
+	// could not be determined (unsupported/corrupt file, ffprobe absent), in which
+	// case the client falls back to measuring the bytes itself.
+	Width  int `json:"width,omitempty"`
+	Height int `json:"height,omitempty"`
 }
 
 // Meta is the persisted (and returned) description of one cache entry.
@@ -216,6 +225,12 @@ type FileDelta struct {
 	// side preferred over the base when both declare one. Zero when neither side
 	// declares it (or for images). The viewer uses it to size a frame step.
 	Fps float64
+	// Width and Height are the media's natural pixel dimensions, with the head
+	// (right) side preferred over the base when present (so an added/removed file
+	// carries its one extant side's size). Both zero when undetermined on both
+	// sides — see FileMeta.Width.
+	Width  int
+	Height int
 }
 
 // Compare matches files by name across two versions' file lists and classifies
@@ -253,6 +268,13 @@ func Compare(left, right []FileMeta) []FileDelta {
 			d.Fps = rf.Fps
 		} else {
 			d.Fps = lf.Fps
+		}
+		// Pixel size: same head-preferred-then-base rule as fps. A removed file
+		// (right side empty) thus reports its base size, an added file its head one.
+		if rf.Width > 0 && rf.Height > 0 {
+			d.Width, d.Height = rf.Width, rf.Height
+		} else {
+			d.Width, d.Height = lf.Width, lf.Height
 		}
 		switch {
 		case inLeft && !inRight:
@@ -431,6 +453,58 @@ func decodeImage(path string) (image.Image, error) {
 	defer f.Close()
 	img, _, err := image.Decode(f)
 	return img, errtrace.Wrap(err)
+}
+
+// mediaPixelSize returns the natural pixel dimensions of an artifact file,
+// best-effort. Images are measured from their header only (image.DecodeConfig —
+// no full pixel decode); video is measured with ffprobe when it is on PATH. Either
+// branch returns (0, 0) when the size can't be determined (unsupported/corrupt
+// file, ffprobe missing/errored): the dimensions are optional cache metadata, so a
+// zero result is simply omitted and the client measures the bytes itself instead.
+func mediaPixelSize(path, name string) (width, height int) {
+	if isVideoFile(name) {
+		return videoPixelSize(path)
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return 0, 0
+	}
+	defer f.Close()
+	cfg, _, err := image.DecodeConfig(f)
+	if err != nil {
+		return 0, 0
+	}
+	return cfg.Width, cfg.Height
+}
+
+// videoPixelSize reads a video's coded frame size with `ffprobe`, best-effort.
+// Returns (0, 0) when ffprobe is unavailable, times out, or yields no parseable
+// "WxH" for the first video stream.
+func videoPixelSize(path string) (width, height int) {
+	bin, err := exec.LookPath("ffprobe")
+	if err != nil {
+		return 0, 0
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	// -select_streams v:0 picks the first video stream; csv=s=x:p=0 prints just
+	// the two values joined by 'x', e.g. "1280x720".
+	cmd := exec.CommandContext(ctx, bin, "-v", "error", "-select_streams", "v:0",
+		"-show_entries", "stream=width,height", "-of", "csv=s=x:p=0", path)
+	out, err := cmd.Output()
+	if err != nil {
+		return 0, 0
+	}
+	wStr, hStr, ok := strings.Cut(strings.TrimSpace(string(out)), "x")
+	if !ok {
+		return 0, 0
+	}
+	w, errW := strconv.Atoi(strings.TrimSpace(wStr))
+	h, errH := strconv.Atoi(strings.TrimSpace(hStr))
+	if errW != nil || errH != nil || w <= 0 || h <= 0 {
+		return 0, 0
+	}
+	return w, h
 }
 
 // equalRawPix is a fast path that reports true only when two images share the
@@ -1225,7 +1299,8 @@ func scanOutputs(dir string) ([]FileMeta, []string, error) {
 		for _, w := range warns {
 			warnings = append(warnings, name+": "+w)
 		}
-		out = append(out, FileMeta{Name: name, Size: size, Hash: hash, Tags: tags, Fps: fps})
+		width, height := mediaPixelSize(p, name)
+		out = append(out, FileMeta{Name: name, Size: size, Hash: hash, Tags: tags, Fps: fps, Width: width, Height: height})
 		return nil
 	})
 	if err != nil {

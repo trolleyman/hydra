@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { LoaderCircle, RefreshCw, ImageOff, TriangleAlert, Camera } from 'lucide-react'
 import { api } from '../stores/apiClient'
 import { ApiError } from '../api'
@@ -7,7 +7,7 @@ import { RepositoryArtifactResponse } from '../api'
 import { formatError } from '../api/format_error'
 import { IMG_CLASS, checkerStyle } from './artifactDiffShared'
 import { isVideoArtifact } from './VideoDiffView'
-import { TagBadge, LogView, ElapsedTime, MasonryGrid, useArtifactDims } from './ArtifactsPanel'
+import { TagBadge, LogView, ElapsedTime, MasonryGrid, useMediaDims } from './ArtifactsPanel'
 import { useArtifactSpans } from '../lib/artifactColumns'
 
 // RepositoryArtifactsView renders one [[artifacts]] script's output for a single
@@ -127,11 +127,15 @@ export function RepositoryArtifactsView({
   // Per-tile span overrides, shared (and persisted) with the diff viewer's
   // artifacts panel. Tiles without an override auto-span by aspect ratio.
   const { spans, setSpanOverride } = useArtifactSpans()
-  // Measure each file's aspect ratio + natural width so the masonry can auto-span by
-  // shape and cap the span to avoid upscaling a low-res shot (see MasonryGrid spanOf).
-  const dims = useArtifactDims(
-    (data?.files ?? []).map((f) => ({ key: f.name, url: f.url ?? null, video: isVideoArtifact(f.name) })),
+  // Each file's aspect ratio + natural width, so the masonry can auto-span by shape
+  // and cap the span to avoid upscaling a low-res shot (see MasonryGrid spanOf). The
+  // server supplies width/height when it could measure them; useMediaDims only
+  // downloads the rest to measure client-side.
+  const dimSources = useMemo(
+    () => (data?.files ?? []).map((f) => ({ key: f.name, url: f.url ?? null, video: isVideoArtifact(f.name), width: f.width, height: f.height })),
+    [data?.files],
   )
+  const dims = useMediaDims(dimSources)
 
   useEffect(() => {
     let cancelled = false

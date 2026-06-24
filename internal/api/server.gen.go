@@ -245,6 +245,9 @@ type ArtifactFile struct {
 	// Fps Frame rate of a video file, read from its sibling JSON sidecar (<file>.meta, {"fps": 60}). HTML5 video exposes no frame rate, so the viewer's frame-step buttons use it to size a single-frame step. Null/absent when the sidecar omits it, in which case the viewer assumes a sensible default. Only meaningful for video files.
 	Fps *float64 `json:"fps"`
 
+	// Height Natural pixel height of the media; see width. Null/absent when undetermined.
+	Height *int `json:"height"`
+
 	// LeftUrl URL of the file for the left version (null if absent on the left)
 	LeftUrl *string `json:"left_url"`
 
@@ -259,6 +262,9 @@ type ArtifactFile struct {
 
 	// Unverified True only for a video file reported as "modified" whose verdict is a raw byte-hash comparison because ffmpeg was unavailable to verify it frame-by-frame — so the change may be spurious (e.g. only container metadata differs). Absent/false for images and for frame-verified video. The UI shows a caveat badge when set.
 	Unverified *bool `json:"unverified"`
+
+	// Width Natural pixel width of the media, measured server-side at generation time (image header, or ffprobe for video) and cached in the entry's meta.json. Lets the grid lay out tiles without downloading every file to measure it, and avoids upscaling a low-resolution shot. Best-effort: null/absent when it could not be determined.
+	Width *int `json:"width"`
 }
 
 // ArtifactFileChangeType defines model for ArtifactFile.ChangeType.
@@ -567,6 +573,9 @@ type RepositoryArtifactFile struct {
 	// Fps Frame rate of a video file, read from its sidecar; sizes the video viewer's frame-step.
 	Fps *float64 `json:"fps"`
 
+	// Height Natural pixel height of the media; see width. Null/absent when undetermined.
+	Height *int `json:"height"`
+
 	// Name Output file's relative path (forward-slashed)
 	Name string `json:"name"`
 
@@ -575,6 +584,9 @@ type RepositoryArtifactFile struct {
 
 	// Url URL to fetch the file's bytes (an artifacts blob URL); null while still generating
 	Url *string `json:"url"`
+
+	// Width Natural pixel width of the media, measured server-side at generation time (image header, or ffprobe for video) and cached in the entry's meta.json. Lets the grid lay out tiles without downloading every file to measure it, and avoids upscaling a low-resolution shot. Best-effort: null/absent when it could not be determined.
+	Width *int `json:"width"`
 }
 
 // RepositoryArtifactResponse defines model for RepositoryArtifactResponse.

@@ -28,6 +28,14 @@ export type ArtifactFile = {
      * Frame rate of a video file, read from its sibling JSON sidecar (<file>.meta, {"fps": 60}). HTML5 video exposes no frame rate, so the viewer's frame-step buttons use it to size a single-frame step. Null/absent when the sidecar omits it, in which case the viewer assumes a sensible default. Only meaningful for video files.
      */
     fps?: number | null;
+    /**
+     * Natural pixel width of the media, measured server-side at generation time (image header, or ffprobe for video) and cached in the entry's meta.json. Lets the grid lay out tiles without downloading every file to measure it, and avoids upscaling a low-resolution shot. Best-effort: null/absent when it could not be determined.
+     */
+    width?: number | null;
+    /**
+     * Natural pixel height of the media; see width. Null/absent when undetermined.
+     */
+    height?: number | null;
 };
 export namespace ArtifactFile {
     export enum change_type {

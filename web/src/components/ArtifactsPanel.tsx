@@ -802,6 +802,29 @@ export function useArtifactDims(sources: { key: string; url: string | null; vide
   return dims
 }
 
+// useMediaDims resolves each artifact's dimensions, preferring the server-provided
+// width/height (already carried in the artifact response — measured once at
+// generation time and cached in meta.json, so no download) and falling back to
+// measuring the bytes for any file the server didn't size: videos when ffprobe
+// wasn't available, or entries cached before the server learned to record sizes.
+// Files that already have server dims are excluded from the off-screen measurement,
+// so for those the visible <img>'s loading="lazy" survives — a large diff no longer
+// eagerly fetches every image up front just to lay out the grid.
+export function useMediaDims(
+  sources: { key: string; url: string | null; video: boolean; width?: number | null; height?: number | null }[],
+): Record<string, ArtifactDim> {
+  const serverDims = useMemo(() => {
+    const m: Record<string, ArtifactDim> = {}
+    for (const s of sources) {
+      if (s.width && s.height) m[s.key] = { aspect: s.width / s.height, pxWidth: s.width }
+    }
+    return m
+  }, [sources])
+  const measureSources = useMemo(() => sources.filter((s) => !serverDims[s.key]), [sources, serverDims])
+  const measured = useArtifactDims(measureSources)
+  return useMemo(() => ({ ...measured, ...serverDims }), [measured, serverDims])
+}
+
 // Balanced (shortest-column) masonry. Each tile is absolutely positioned: we
 // measure every tile's rendered height with a ResizeObserver, then place tiles one
 // by one into whichever run of columns is currently shortest — so they pack tightly
@@ -1065,11 +1088,17 @@ function FileGrid({ files, mode, spans, onSpanChange }: {
   onSpanChange?: (key: string, span: number | null) => void
 }) {
   const spanScale = mode === 'side-by-side' ? 2 : 1
-  const aspectSources = useMemo(
-    () => files.map((f) => ({ key: f.name, url: f.right_url ?? f.left_url ?? null, video: isVideoArtifact(f.name) })),
+  const sources = useMemo(
+    () => files.map((f) => ({
+      key: f.name,
+      url: f.right_url ?? f.left_url ?? null,
+      video: isVideoArtifact(f.name),
+      width: f.width,
+      height: f.height,
+    })),
     [files],
   )
-  const dims = useArtifactDims(aspectSources)
+  const dims = useMediaDims(sources)
   const items = useMemo(
     () => files.map((f) => ({
       key: f.name,

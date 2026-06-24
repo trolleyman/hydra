@@ -19,5 +19,13 @@ export type RepositoryArtifactFile = {
      * Frame rate of a video file, read from its sidecar; sizes the video viewer's frame-step.
      */
     fps?: number | null;
+    /**
+     * Natural pixel width of the media, measured server-side at generation time (image header, or ffprobe for video) and cached in the entry's meta.json. Lets the grid lay out tiles without downloading every file to measure it, and avoids upscaling a low-resolution shot. Best-effort: null/absent when it could not be determined.
+     */
+    width?: number | null;
+    /**
+     * Natural pixel height of the media; see width. Null/absent when undetermined.
+     */
+    height?: number | null;
 };
 

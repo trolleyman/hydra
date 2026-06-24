@@ -376,6 +376,10 @@ func (s *Server) buildArtifactSet(projectID, name string, leftSpec, rightSpec *c
 		if d.Fps > 0 {
 			f.Fps = ptr(d.Fps)
 		}
+		if d.Width > 0 && d.Height > 0 {
+			f.Width = ptr(d.Width)
+			f.Height = ptr(d.Height)
+		}
 		set.Files = append(set.Files, f)
 	}
 	return set

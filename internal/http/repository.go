@@ -806,6 +806,10 @@ func (s *Server) buildRepositoryArtifact(projectID, name string, mgr *artifacts.
 			fps := f.Fps
 			af.Fps = &fps
 		}
+		if f.Width > 0 && f.Height > 0 {
+			af.Width = ptr(f.Width)
+			af.Height = ptr(f.Height)
+		}
 		resp.Files = append(resp.Files, af)
 	}
 	return resp
