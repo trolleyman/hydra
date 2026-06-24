@@ -9,6 +9,7 @@ import {
   checkerStyle, IMG_CLASS, OVERLAY_CLASS, TAG_CLASS, makeAuxOpen,
   DIFF_COLOR, DIFF_PIXEL_THRESHOLD,
 } from './artifactDiffShared'
+import { type ArtifactColumns, MIN_ARTIFACT_COLUMNS, MAX_ARTIFACT_COLUMNS } from '../lib/artifactColumns'
 import { VideoDiffView, isVideoArtifact } from './VideoDiffView'
 
 const CHANGE_LABEL: Record<string, string> = {
@@ -37,17 +38,10 @@ export const IMAGE_DIFF_MODES: { value: ImageDiffMode; label: string }[] = [
   { value: 'onion', label: 'Onion skin' },
 ]
 
-// Masonry column layout, shared across every artifact card (one layout for the
-// whole panel). `count` is the requested number of columns (the slider); `weights`
-// are the per-column width fractions set by dragging the dividers — used only when
-// its length matches the rendered column count, otherwise columns are equal width.
-export type ArtifactColumns = { count: number; weights: number[] }
-
-export const DEFAULT_ARTIFACT_COLUMNS: ArtifactColumns = { count: 3, weights: [] }
-// Bounds for the column-count slider, and the narrowest a column may get before the
-// masonry clamps the rendered count down to fit (and before a divider drag stops).
-export const MIN_ARTIFACT_COLUMNS = 1
-export const MAX_ARTIFACT_COLUMNS = 6
+// Masonry column layout (ArtifactColumns / count bounds) is shared with the
+// repository artifacts view, so it lives in lib/artifactColumns. MIN_COL_PX is the
+// narrowest a column may get before the masonry clamps the rendered count down to
+// fit (and before a divider drag stops); MASONRY_GAP is the inter-column gutter.
 const MIN_COL_PX = 200
 const MASONRY_GAP = 12
 

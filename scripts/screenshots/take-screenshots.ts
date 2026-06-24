@@ -87,7 +87,7 @@ function sectionFor(name: string): string {
   if (name.startsWith('agent-')) return 'agent'
   if (name.startsWith('spawn')) return 'spawn'
   if (name.startsWith('settings') || name === 'services-warning') return 'settings'
-  if (name === 'nested-folders') return 'diff'
+  if (name.startsWith('diff') || name === 'nested-folders') return 'diff'
   return 'overview'
 }
 
@@ -448,6 +448,20 @@ try {
       // never resolves in simulation); stubUpload serves the thumbnails.
       { name: 'agent-prompt-attachments', path: '/project/sim-project/agent/agent-2', viewportOnly: true, stubUpload: 'web/public/android-chrome-512x512.png' },
       { name: 'nested-folders', path: '/project/sim-project/agent/agent-3', scrollTo: 'Changes' },
+      // The diff viewer's settings popup, opened from the gear in the sticky
+      // "Changes" toolbar: the file-list view modes, the diff options (side-by-
+      // side, ignore whitespace, one-file-at-a-time), the image-diff comparison
+      // modes, and the artifact masonry "Columns" slider. The nav's settings icon
+      // is a <Link> (an <a>), so `button:has(svg.lucide-settings)` uniquely hits
+      // the diff gear. scrollTo pins the toolbar to the top; viewport capture (the
+      // popup is absolutely positioned just below the gear).
+      {
+        name: 'diff-settings',
+        path: '/project/sim-project/agent/agent-1',
+        scrollTo: 'Changes',
+        viewport: { width: 1280, height: 1000 },
+        click: 'button:has(svg.lucide-settings)',
+      },
       // A read-only archived (killed/merged) agent page: no live terminal/diff,
       // just the prompt and a (not-yet-wired) Resume affordance. The grayed
       // "Archived" sidebar section itself is already visible in the `home` shot.

@@ -7,7 +7,8 @@ import { RepositoryArtifactResponse } from '../api'
 import { formatError } from '../api/format_error'
 import { IMG_CLASS, checkerStyle } from './artifactDiffShared'
 import { isVideoArtifact } from './VideoDiffView'
-import { TagBadge, LogView, ElapsedTime, MasonryGrid, DEFAULT_ARTIFACT_COLUMNS } from './ArtifactsPanel'
+import { TagBadge, LogView, ElapsedTime, MasonryGrid } from './ArtifactsPanel'
+import { useArtifactColumns, MIN_ARTIFACT_COLUMNS, MAX_ARTIFACT_COLUMNS } from '../lib/artifactColumns'
 
 // RepositoryArtifactsView renders one [[artifacts]] script's output for a single
 // ref, single-sided (the repository browser shows one ref at a time, so there is
@@ -122,6 +123,8 @@ export function RepositoryArtifactsView({
   // Bumped by the refresh button to force a regenerate (passes refresh=true once).
   const [reloadNonce, setReloadNonce] = useState(0)
   const wantRefresh = useRef(false)
+  // Masonry layout, shared (and persisted) with the diff viewer's artifacts panel.
+  const { columns, setColumnCount, setColumnWeights } = useArtifactColumns()
 
   useEffect(() => {
     let cancelled = false
@@ -172,14 +175,35 @@ export function RepositoryArtifactsView({
         {status === RepositoryArtifactResponse.status.READY && data && data.files.length === 0 && (
           <span className="text-xs text-gray-400 dark:text-gray-500">No files produced</span>
         )}
-        <button
-          onClick={onRefresh}
-          disabled={loading || generating}
-          title="Regenerate"
-          className="ml-auto flex items-center justify-center w-7 h-7 rounded-md border text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-default"
-        >
-          <RefreshCw className={`w-3.5 h-3.5 ${generating ? 'animate-spin' : ''}`} />
-        </button>
+        <div className="ml-auto flex items-center gap-2">
+          {/* Masonry column count — the same layout knob as the diff viewer's
+              artifacts panel (and the dividers in the grid below). Shown once
+              there are rendered files to lay out. */}
+          {status === RepositoryArtifactResponse.status.READY && data && data.files.length > 1 && (
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide">Columns</span>
+              <input
+                type="range"
+                min={MIN_ARTIFACT_COLUMNS}
+                max={MAX_ARTIFACT_COLUMNS}
+                step={1}
+                value={columns.count}
+                onChange={(e) => setColumnCount(Number(e.target.value))}
+                className="w-24 accent-blue-500 cursor-pointer"
+                title="Artifact columns"
+              />
+              <span className="text-xs tabular-nums text-gray-600 dark:text-gray-300 w-3 text-right">{columns.count}</span>
+            </div>
+          )}
+          <button
+            onClick={onRefresh}
+            disabled={loading || generating}
+            title="Regenerate"
+            className="flex items-center justify-center w-7 h-7 rounded-md border text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-default"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${generating ? 'animate-spin' : ''}`} />
+          </button>
+        </div>
       </div>
 
       {/* Body */}
@@ -217,7 +241,8 @@ export function RepositoryArtifactsView({
           <MasonryGrid
             items={data.files.map((f) => ({ key: f.name, node: <MediaCell file={f} /> }))}
             span={1}
-            columns={DEFAULT_ARTIFACT_COLUMNS}
+            columns={columns}
+            onWeightsChange={setColumnWeights}
           />
           {data.log_url && <PersistedLog url={data.log_url} />}
         </div>

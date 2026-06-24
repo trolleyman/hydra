@@ -12,7 +12,8 @@ import {
 } from 'lucide-react'
 import { getFileIcon } from './lib/fileIcons'
 import { Tooltip } from './components/Tooltip'
-import { ArtifactsPanel, IMAGE_DIFF_MODES, DEFAULT_ARTIFACT_COLUMNS, MIN_ARTIFACT_COLUMNS, MAX_ARTIFACT_COLUMNS, type ImageDiffMode, type ArtifactColumns } from './components/ArtifactsPanel'
+import { ArtifactsPanel, IMAGE_DIFF_MODES, type ImageDiffMode } from './components/ArtifactsPanel'
+import { useArtifactColumns, MIN_ARTIFACT_COLUMNS, MAX_ARTIFACT_COLUMNS } from './lib/artifactColumns'
 import { useDialogStore } from './stores/dialogStore'
 import { StorageKeys, readLocal, writeLocal } from './lib/storage'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from './lib/agentViewPrefs'
@@ -1706,19 +1707,9 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
     return 'ab'
   })
   // Artifact masonry layout — column count (slider) + per-column width fractions
-  // (dragging the dividers). One layout for the whole artifacts panel; persisted.
-  const [artifactCols, setArtifactCols] = useState<ArtifactColumns>(() => {
-    const raw = readLocal(StorageKeys.diffArtifactCols)
-    if (raw) {
-      try {
-        const p = JSON.parse(raw) as Partial<ArtifactColumns>
-        const count = typeof p.count === 'number' ? Math.max(MIN_ARTIFACT_COLUMNS, Math.min(MAX_ARTIFACT_COLUMNS, Math.round(p.count))) : DEFAULT_ARTIFACT_COLUMNS.count
-        const weights = Array.isArray(p.weights) ? p.weights.filter((x): x is number => typeof x === 'number' && x > 0) : []
-        return { count, weights }
-      } catch { /* fall through to default */ }
-    }
-    return DEFAULT_ARTIFACT_COLUMNS
-  })
+  // (dragging the dividers). One layout shared across the artifacts panel and the
+  // repository artifacts view; persisted (see lib/artifactColumns).
+  const { columns: artifactCols, setColumnCount: setArtifactColumnCount, setColumnWeights: setArtifactColumnWeights } = useArtifactColumns()
 
   const [singleFileIdx, setSingleFileIdx] = useState(0)
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set())
@@ -1743,16 +1734,6 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
   useEffect(() => { writeLocal(StorageKeys.diffFileView, fileView) }, [fileView])
   useEffect(() => { writeLocal(StorageKeys.diffSidebarWidth, String(sidebarWidth)) }, [sidebarWidth])
   useEffect(() => { writeLocal(StorageKeys.diffImageMode, imageDiffMode) }, [imageDiffMode])
-  useEffect(() => { writeLocal(StorageKeys.diffArtifactCols, JSON.stringify(artifactCols)) }, [artifactCols])
-  // Changing the column count resets any custom per-column widths — the saved
-  // weights no longer match the new count, so the masonry falls back to equal
-  // columns until the dividers are dragged again.
-  const setArtifactColumnCount = useCallback((count: number) => {
-    setArtifactCols({ count: Math.max(MIN_ARTIFACT_COLUMNS, Math.min(MAX_ARTIFACT_COLUMNS, count)), weights: [] })
-  }, [])
-  const setArtifactColumnWeights = useCallback((weights: number[]) => {
-    setArtifactCols((c) => ({ ...c, weights }))
-  }, [])
 
   // DiffViewer is reused (not remounted) when switching agents, so reload the
   // collapsed-file set when the agent changes. Reset during render (per React's
