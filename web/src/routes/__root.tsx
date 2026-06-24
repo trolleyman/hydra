@@ -1215,7 +1215,7 @@ function RootLayout() {
                           ? 'Detached HEAD — nothing to push'
                           : 'Nothing to push — up to date with remote'
                 return (
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex items-center gap-1">
                     <button
                       type="button"
                       onClick={() => {
@@ -1236,6 +1236,7 @@ function RootLayout() {
                       <FolderGit2 className="w-4 h-4 shrink-0" />
                       Repository
                     </button>
+                    <span className="shrink-0 text-gray-300 dark:text-gray-600 select-none">·</span>
                     {behind > 0 && (
                       <Tooltip
                         content={`${behind} commit${behind === 1 ? '' : 's'} behind ${pushStatus?.remote ?? 'remote'} — pull to update`}
@@ -1269,11 +1270,12 @@ function RootLayout() {
                 )
               })()
             ) : (
-              <div className="flex items-center gap-1.5">
+              <div className="flex items-center gap-1">
                 <span className="flex-1 min-w-0 flex items-center gap-2 px-2.5 py-2 rounded-lg text-sm font-medium text-gray-400 dark:text-gray-600 cursor-not-allowed">
                   <FolderGit2 className="w-4 h-4 shrink-0" />
                   Repository
                 </span>
+                <span className="shrink-0 text-gray-300 dark:text-gray-600 select-none">·</span>
                 <span className="flex items-center px-2.5 py-2 rounded-lg text-gray-300 dark:text-gray-700 cursor-not-allowed">
                   <ArrowUp className="w-4 h-4 shrink-0" />
                 </span>
