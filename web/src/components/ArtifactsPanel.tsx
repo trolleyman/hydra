@@ -61,7 +61,7 @@ function ImageCell({ url, label }: { url?: string | null; label: string }) {
     // flex-1 min-w-0 so the two cells split their row evenly and the width-driven
     // images (w-full) each fill their half.
     <div className="flex-1 min-w-0">
-      <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-1">{label}</div>
+      <div className="text-[10px] font-semibold tracking-wide text-gray-400 dark:text-gray-500 mb-1">{label}</div>
       {url ? (
         // A plain click opens the image in a new tab via the <a>. The image fills the
         // cell width (w-full) and its height follows the aspect ratio.
@@ -106,6 +106,35 @@ function LayerNode({ url, style }: { url?: string | null; style?: React.CSSPrope
   )
 }
 
+// SegmentedToggle is the small grouped "pill" selector (e.g. Before / After) — the
+// compact twin of the settings page's theme/agent segmented controls: a padded track
+// with the active option raised as a white pill. Shared with VideoDiffView.
+export function SegmentedToggle<T extends string>({ value, onChange, options }: {
+  value: T
+  onChange: (v: T) => void
+  options: { value: T; label: string }[]
+}) {
+  return (
+    <div className="inline-flex rounded-md border border-gray-200 dark:border-gray-700 p-0.5 bg-gray-50 dark:bg-gray-900/40">
+      {options.map((o) => (
+        <button
+          key={o.value}
+          type="button"
+          onClick={() => onChange(o.value)}
+          aria-pressed={value === o.value}
+          className={`px-2 py-0.5 rounded text-[10px] font-medium tracking-wide transition-colors cursor-pointer ${
+            value === o.value
+              ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm'
+              : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
+          }`}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 // A/B switch: Before / After, with a Highlight checkbox. Before & After stay
 // mounted and stacked, so the toggle flips which is shown for an instant,
 // flicker-free hard switch. Clicking the image (or the buttons) flips Before↔After.
@@ -123,19 +152,17 @@ function ABSwitch({ left, right }: { left?: string | null; right?: string | null
   // At least one side is present (ImageDiffView only routes here otherwise); the
   // present image is the invisible sizer that gives the stacked box its size.
   const sizer = (right ?? left) as string
-  const btn = (active: boolean) =>
-    `text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded transition-colors cursor-pointer ${
-      active ? 'bg-blue-500 text-white'
-        : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600'
-    }`
   return (
     <div className="min-w-0">
       <div className="flex flex-wrap items-center gap-1 mb-1">
-        <button onClick={() => setView('before')} className={btn(view === 'before')}>Before</button>
-        <button onClick={() => setView('after')} className={btn(view === 'after')}>After</button>
+        <SegmentedToggle
+          value={view}
+          onChange={setView}
+          options={[{ value: 'before', label: 'Before' }, { value: 'after', label: 'After' }]}
+        />
         <label
           title={canDiff ? 'Highlight changed pixels in magenta' : 'Needs both a before and after image'}
-          className={`ml-auto flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide select-none ${
+          className={`ml-auto flex items-center gap-1 text-[10px] font-medium tracking-wide select-none ${
             canDiff ? 'cursor-pointer text-gray-500 dark:text-gray-400' : 'opacity-40 cursor-not-allowed text-gray-400 dark:text-gray-500'
           }`}
         >
@@ -242,13 +269,13 @@ function OnionCompare({ left, right }: { left?: string | null; right?: string | 
         <LayerNode url={right} style={{ opacity: opacity / 100 }} />
       </div>
       <div className="flex items-center gap-2 mt-1">
-        <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">Before</span>
+        <span className="text-[10px] font-semibold tracking-wide text-gray-400 dark:text-gray-500">Before</span>
         <input
           type="range" min={0} max={100} value={opacity}
           onChange={(e) => setOpacity(Number(e.target.value))}
           className="flex-1 accent-blue-500 cursor-pointer"
         />
-        <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">After</span>
+        <span className="text-[10px] font-semibold tracking-wide text-gray-400 dark:text-gray-500">After</span>
       </div>
     </div>
   )
@@ -628,8 +655,10 @@ function FileRow({ file, mode }: { file: ArtifactFile; mode: ImageDiffMode }) {
   return (
     // w-full: the masonry wrapper sets the tile's (column) width; the card fills it.
     <div className="p-3 w-full min-w-0 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40">
-      <div className="flex flex-wrap items-center gap-1.5 mb-2">
-        <span className="text-xs font-medium text-gray-700 dark:text-gray-300 truncate">{file.name}</span>
+      {/* nowrap so the change icon stays on the filename's line: the name truncates
+          with an ellipsis when space is tight rather than bumping the icon down. */}
+      <div className="flex items-center gap-1.5 mb-2 min-w-0">
+        <span className="text-xs font-medium text-gray-700 dark:text-gray-300 truncate min-w-0">{file.name}</span>
         {ct !== 'unchanged' && (
           <span title={CHANGE_LABEL[ct] ?? ct} className="inline-flex shrink-0">
             <ArtifactChangeIcon type={ct} />
@@ -669,7 +698,7 @@ export function useArtifactAspects(sources: { key: string; url: string | null; v
   const [aspects, setAspects] = useState<Record<string, number>>({})
   // A stable signature of the (key,url) set so the effect only re-runs when the
   // media actually changes, not on every render's fresh array.
-  const sig = sources.map((s) => `${s.key} ${s.url ?? ''}`).join('')
+  const sig = sources.map((s) => `${s.key} ${s.url ?? ''}`).join('|')
   const ref = useRef(sources)
   ref.current = sources
   useEffect(() => {
@@ -1059,7 +1088,7 @@ export function LogView({ log, emptyText = 'Waiting for output…' }: { log: Art
 function LogColumnFrame({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="flex-1 min-w-0">
-      <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-1">{label}</div>
+      <div className="text-[10px] font-semibold tracking-wide text-gray-400 dark:text-gray-500 mb-1">{label}</div>
       {children}
     </div>
   )

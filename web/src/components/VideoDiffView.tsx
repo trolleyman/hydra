@@ -21,7 +21,7 @@ import {
   checkerStyle, IMG_CLASS, OVERLAY_CLASS, TAG_CLASS, makeAuxOpen,
   DIFF_COLOR, DIFF_PIXEL_THRESHOLD,
 } from './artifactDiffShared'
-import type { ImageDiffMode } from './ArtifactsPanel'
+import { SegmentedToggle, type ImageDiffMode } from './ArtifactsPanel'
 
 // Extensions routed to the video viewer instead of the image one.
 export function isVideoArtifact(name: string): boolean {
@@ -250,7 +250,7 @@ function VideoCell({ url, attach, label }: {
 }) {
   return (
     <div className="flex-1 min-w-0">
-      <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-1">{label}</div>
+      <div className="text-[10px] font-semibold tracking-wide text-gray-400 dark:text-gray-500 mb-1">{label}</div>
       {url ? (
         // A plain click opens the .webm in a new tab via the <a>; the frame fills
         // the cell width and its height follows the aspect ratio.
@@ -273,12 +273,6 @@ function VideoSideBySide({ controller, left, right }: { controller: Controller; 
   )
 }
 
-const tabBtn = (active: boolean, disabled = false) =>
-  `text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded transition-colors ${
-    disabled ? 'opacity-40 cursor-not-allowed bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500'
-      : active ? 'bg-blue-500 text-white cursor-pointer'
-        : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600 cursor-pointer'
-  }`
 
 // Before/After switch with a Highlight checkbox (twin of the image ABSwitch). Both
 // videos stay mounted and in sync; Before/After flip which is visible, by button or
@@ -351,11 +345,14 @@ function VideoAB({ controller, left, right }: { controller: Controller; left?: s
   return (
     <div className="min-w-0">
       <div className="flex flex-wrap items-center gap-1 mb-1">
-        <button onClick={() => setView('before')} className={tabBtn(view === 'before')}>Before</button>
-        <button onClick={() => setView('after')} className={tabBtn(view === 'after')}>After</button>
+        <SegmentedToggle
+          value={view}
+          onChange={setView}
+          options={[{ value: 'before', label: 'Before' }, { value: 'after', label: 'After' }]}
+        />
         <label
           title={canDiff ? 'Highlight changed pixels in magenta' : 'Needs both a before and after video'}
-          className={`ml-auto flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide select-none ${
+          className={`ml-auto flex items-center gap-1 text-[10px] font-medium tracking-wide select-none ${
             canDiff ? 'cursor-pointer text-gray-500 dark:text-gray-400' : 'opacity-40 cursor-not-allowed text-gray-400 dark:text-gray-500'
           }`}
         >
@@ -456,9 +453,9 @@ function VideoOnion({ controller, left, right }: { controller: Controller; left?
         <VideoLayer url={right} attach={controller.attachRight} style={{ opacity: opacity / 100 }} />
       </div>
       <div className="flex items-center gap-2 mt-1">
-        <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">Before</span>
+        <span className="text-[10px] font-semibold tracking-wide text-gray-400 dark:text-gray-500">Before</span>
         <input type="range" min={0} max={100} value={opacity} onChange={(e) => setOpacity(Number(e.target.value))} className="flex-1 accent-blue-500 cursor-pointer" />
-        <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">After</span>
+        <span className="text-[10px] font-semibold tracking-wide text-gray-400 dark:text-gray-500">After</span>
       </div>
     </div>
   )
