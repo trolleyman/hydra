@@ -308,6 +308,13 @@ try {
       // boot. The app's real default box/sidebar sizes are unchanged. Pairs with
       // seedPrompt.
       tallSpawn?: boolean
+      // Focuses the full-page spawn textarea and selects ALL of its text after the
+      // page settles, so the capture overlays the browser's selection band (which
+      // marks the REAL, selectable text positions) on top of the highlight backdrop
+      // — making any drift between the two layers obvious. Used to prove the fenced
+      // code block highlighting stays glyph-aligned with the textarea. Pairs with
+      // seedPrompt + tallSpawn.
+      selectSpawnText?: boolean
       // Seeds the artifact tag filter (localStorage key built from project+agent)
       // before the app boots, so the artifacts panel renders with a filter applied.
       // Each array lists a scope's HIDDEN values (e.g. { theme: ['dark'] } drops
@@ -379,6 +386,14 @@ try {
       // tallSpawn enlarges both spawn boxes (capture-only) so the whole seeded
       // draft, fenced code block included, is visible without scrolling.
       { name: 'spawn-markdown', path: '/project/sim-project/', seedPrompt: MARKDOWN_DEMO_PROMPT, tallSpawn: true },
+      // The same seeded markdown draft with the whole spawn box selected. The
+      // browser's selection band marks where the REAL (selectable) textarea text
+      // sits, painted over the highlight backdrop — so the two layers can be
+      // checked for drift at a glance. The acid test is the fenced ```code``` block
+      // (and the blank line that hugs it): the selection rows must land exactly on
+      // the highlighted rows, proving the inline-block code block stays glyph-aligned
+      // with the textarea. tallSpawn shows the whole draft (block included) unscrolled.
+      { name: 'spawn-markdown-selected', path: '/project/sim-project/', seedPrompt: MARKDOWN_DEMO_PROMPT, tallSpawn: true, selectSpawnText: true },
       // The agent-detail prompt block rendering the same markdown: code/bold/
       // italic, an inline-code span that wraps, the tightened gap under the
       // metadata row, and the soft bottom fade as the tall prompt scrolls out of
@@ -1097,6 +1112,21 @@ try {
               card.style.minHeight = `${h}px`
             })
           }, { compactH: 500, fullH: 500 })
+          await settle(page)
+        }
+        if (pg.selectSpawnText) {
+          // Focus the full-page spawn textarea and select all of it, so the capture
+          // shows the browser's selection band (the real text positions) over the
+          // highlight backdrop. Focus is required for the vivid active-selection
+          // colour (an unfocused textarea greys its selection out). Scoped to the
+          // .max-w-4xl form so it hits the full-page box, not the sidebar's compact one.
+          await page.evaluate(() => {
+            const ta = document.querySelector('.max-w-4xl textarea') as HTMLTextAreaElement | null
+            if (ta) {
+              ta.focus()
+              ta.setSelectionRange(0, ta.value.length)
+            }
+          })
           await settle(page)
         }
         if (pg.attachImages) {
