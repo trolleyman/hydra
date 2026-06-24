@@ -499,13 +499,22 @@ export function AgentDetail({
           onSave: saveTitle,
           onCancel: () => setEditingTitle(false),
         }}
+        inlineActions={[
+          {
+            label: 'Merge',
+            icon: merging ? <LoaderCircle className="w-4 h-4 animate-spin" /> : <Merge className="w-4 h-4" />,
+            onClick: handleMerge,
+            disabled: merging || killing,
+          },
+        ]}
         actions={[
           { label: 'Rename', icon: <Pencil className="w-4 h-4" />, onClick: startEditingTitle },
-          { label: 'Merge', icon: <Merge className="w-4 h-4" />, onClick: handleMerge, disabled: merging || killing },
           { label: 'Kill', icon: <Trash2 className="w-4 h-4" />, onClick: handleKill, danger: true, disabled: merging || killing },
         ]}
       />
-      <div ref={scrollRef} className="flex-1 flex flex-col overflow-auto p-3 sm:p-6 min-w-0 min-h-0" data-main-scroll>
+      {/* pt-4 (16px) above the metadata row matches the effective gap below it
+          (its mb-6 minus the prompt block's -mt-2), so it sits evenly spaced. */}
+      <div ref={scrollRef} className="flex-1 flex flex-col overflow-auto px-3 sm:px-6 pb-3 sm:pb-6 pt-4 min-w-0 min-h-0" data-main-scroll>
         <div className="w-full">
         {/* Header */}
         <div className="mb-6">
