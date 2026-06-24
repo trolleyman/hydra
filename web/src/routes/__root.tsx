@@ -586,7 +586,11 @@ function RootLayout() {
     }
   }, [currentProjectId, archivedCollapsed, selectedAgentId, archived, navigate])
 
-  const handleSidebarResizeStart = useCallback((e: React.MouseEvent) => {
+  // Pointer events (not mouse) so the drag works with touch + pen too — e.g. a
+  // large phone in landscape where the sidebar is a persistent column rather
+  // than the floating overlay. `touch-none` on the handle keeps the browser
+  // from hijacking the gesture for scrolling.
+  const handleSidebarResizeStart = useCallback((e: React.PointerEvent) => {
     e.preventDefault()
     const startX = e.clientX
     const startWidth = sidebarWidthRef.current
@@ -594,7 +598,7 @@ function RootLayout() {
     document.body.style.cursor = 'col-resize'
     document.body.style.userSelect = 'none'
 
-    function onMove(ev: MouseEvent) {
+    function onMove(ev: PointerEvent) {
       const newWidth = Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, startWidth + ev.clientX - startX))
       sidebarWidthRef.current = newWidth
       setSidebarWidth(newWidth)
@@ -603,11 +607,11 @@ function RootLayout() {
       document.body.style.cursor = ''
       document.body.style.userSelect = ''
       writeLocal(StorageKeys.sidebarWidth, String(sidebarWidthRef.current))
-      document.removeEventListener('mousemove', onMove)
-      document.removeEventListener('mouseup', onUp)
+      document.removeEventListener('pointermove', onMove)
+      document.removeEventListener('pointerup', onUp)
     }
-    document.addEventListener('mousemove', onMove)
-    document.addEventListener('mouseup', onUp)
+    document.addEventListener('pointermove', onMove)
+    document.addEventListener('pointerup', onUp)
   }, [])
 
   // Apply the theme (`dark` class on <html>) from the shared theme store; the
@@ -1438,8 +1442,8 @@ function RootLayout() {
 
           {/* Resize handle (lg+ only — the overlay sidebar has a fixed width) */}
           <div
-            onMouseDown={handleSidebarResizeStart}
-            className="hidden lg:flex absolute right-0 top-0 bottom-0 w-3 -mr-1 cursor-col-resize z-10 group items-stretch justify-center"
+            onPointerDown={handleSidebarResizeStart}
+            className="hidden lg:flex absolute right-0 top-0 bottom-0 w-3 -mr-1 cursor-col-resize z-10 group items-stretch justify-center touch-none"
           >
             <div className="w-px group-hover:bg-blue-400/60 group-active:bg-blue-500 transition-colors" />
           </div>
