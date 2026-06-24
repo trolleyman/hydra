@@ -16,6 +16,10 @@ export type RepositoryPushStatus = {
      */
     ahead: number;
     /**
+     * Number of commits the remote-tracking branch has that the local branch does not. Reflects the last fetch (the server fetches in the background); 0 when the branch isn't on the remote yet.
+     */
+    behind: number;
+    /**
      * True if the repository has a remote to push to
      */
     has_remote: boolean;

@@ -14,7 +14,7 @@ const EVENT_FALLBACK_MS = 30_000
 import type { ProjectInfo, AgentResponse, RepositoryPushStatus } from '../api'
 import { ApiError, ErrorResponse } from '../api'
 import { formatError } from '../api/format_error'
-import { ChevronDown, ChevronRight, Folder, FolderGit2, FolderOpen, Plus, Settings, Check, X, LoaderCircle, AlertTriangle, PanelLeftClose, PanelLeftOpen, RotateCw, ArrowUpFromLine } from 'lucide-react'
+import { ChevronDown, ChevronRight, Folder, FolderGit2, FolderOpen, Plus, Settings, Check, X, LoaderCircle, AlertTriangle, PanelLeftClose, PanelLeftOpen, RotateCw, ArrowUp, ArrowDown } from 'lucide-react'
 import { useApplyTheme } from '../lib/theme'
 import { useSidebarStore, SIDEBAR_OVERLAY_QUERY } from '../lib/sidebar'
 import { folderPickerAvailable, openFolderPicker } from '../api/folderPicker'
@@ -862,6 +862,8 @@ function RootLayout() {
       refetchPushStatusRef.current()
     },
     onProjectsChanged: () => refetchStatusRef.current(),
+    // A background fetch found the branch's ahead/behind changed.
+    onPushStatusChanged: () => refetchPushStatusRef.current(),
   })
 
   // When the app lands on the bare root path ("/") but a project is already
@@ -1199,6 +1201,7 @@ function RootLayout() {
               (() => {
                 const repositoryActive = /\/repository(\/|$)/.test(location.pathname)
                 const ahead = pushStatus?.ahead ?? 0
+                const behind = pushStatus?.behind ?? 0
                 const canPush = !!pushStatus?.can_push && !pushing
                 const pushTooltip = pushing
                   ? 'Pushing…'
@@ -1233,6 +1236,17 @@ function RootLayout() {
                       <FolderGit2 className="w-4 h-4 shrink-0" />
                       Repository
                     </button>
+                    {behind > 0 && (
+                      <Tooltip
+                        content={`${behind} commit${behind === 1 ? '' : 's'} behind ${pushStatus?.remote ?? 'remote'} — pull to update`}
+                        className="shrink-0"
+                      >
+                        <span className="flex items-center gap-1 px-2 py-2 rounded-lg text-sm font-medium text-amber-600 dark:text-amber-400">
+                          <ArrowDown className="w-4 h-4 shrink-0" />
+                          <span className="text-xs tabular-nums">{behind}</span>
+                        </span>
+                      </Tooltip>
+                    )}
                     <Tooltip content={pushTooltip} className="shrink-0">
                       <button
                         type="button"
@@ -1247,7 +1261,7 @@ function RootLayout() {
                       >
                         {pushing
                           ? <LoaderCircle className="w-4 h-4 shrink-0 animate-spin" />
-                          : <ArrowUpFromLine className="w-4 h-4 shrink-0" />}
+                          : <ArrowUp className="w-4 h-4 shrink-0" />}
                         {ahead > 0 && <span className="text-xs tabular-nums">{ahead}</span>}
                       </button>
                     </Tooltip>
@@ -1261,7 +1275,7 @@ function RootLayout() {
                   Repository
                 </span>
                 <span className="flex items-center px-2.5 py-2 rounded-lg text-gray-300 dark:text-gray-700 cursor-not-allowed">
-                  <ArrowUpFromLine className="w-4 h-4 shrink-0" />
+                  <ArrowUp className="w-4 h-4 shrink-0" />
                 </span>
               </div>
             )}

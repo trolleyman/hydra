@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"braces.dev/errtrace"
 	"github.com/trolleyman/hydra/internal/api"
@@ -291,6 +292,7 @@ func (s *Server) GetRepositoryBranches(_ context.Context, request api.GetReposit
 func pushStatusResponse(st git.RemoteStatus) api.RepositoryPushStatus {
 	resp := api.RepositoryPushStatus{
 		Ahead:     st.Ahead,
+		Behind:    st.Behind,
 		HasRemote: st.HasRemote,
 		CanPush:   st.CanPush(),
 	}
@@ -304,7 +306,10 @@ func pushStatusResponse(st git.RemoteStatus) api.RepositoryPushStatus {
 }
 
 // GetRepositoryPushStatus reports whether the project root's current branch has
-// commits to push, so the sidebar can enable or grey out the Push button.
+// commits to push (and how far behind the remote it is), so the sidebar can
+// enable or grey out the Push button and show a behind indicator. It returns the
+// cached state immediately and kicks off a throttled background fetch so the
+// behind count is kept fresh without blocking the response.
 func (s *Server) GetRepositoryPushStatus(_ context.Context, request api.GetRepositoryPushStatusRequestObject) (api.GetRepositoryPushStatusResponseObject, error) {
 	projectRoot, err := s.resolveProjectRoot(request.ProjectId)
 	if err != nil {
@@ -314,7 +319,58 @@ func (s *Server) GetRepositoryPushStatus(_ context.Context, request api.GetRepos
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
+	if st.HasRemote {
+		go s.maybeFetchRemote(projectRoot, st.Remote)
+	}
 	return api.GetRepositoryPushStatus200JSONResponse(pushStatusResponse(st)), nil
+}
+
+// maybeFetchRemote runs `git fetch <remote>` for projectRoot in the background,
+// at most once per remoteFetchInterval and never concurrently, so the behind
+// count stays current without a fetch on every poll. If the fetch reveals a
+// changed ahead/behind it publishes a push_status_changed event, prompting
+// clients to refetch; otherwise it stays silent so an unchanged remote doesn't
+// turn this into a poll. Best-effort: a failed/slow fetch just leaves the cached
+// (possibly stale) counts in place.
+func (s *Server) maybeFetchRemote(projectRoot, remote string) {
+	s.fetchMu.Lock()
+	if s.fetchActive == nil {
+		s.fetchActive = map[string]bool{}
+		s.fetchLast = map[string]time.Time{}
+	}
+	if s.fetchActive[projectRoot] || time.Since(s.fetchLast[projectRoot]) < remoteFetchInterval {
+		s.fetchMu.Unlock()
+		return
+	}
+	s.fetchActive[projectRoot] = true
+	s.fetchLast[projectRoot] = time.Now()
+	s.fetchMu.Unlock()
+
+	defer func() {
+		s.fetchMu.Lock()
+		s.fetchActive[projectRoot] = false
+		s.fetchMu.Unlock()
+	}()
+
+	before, _ := git.GetRemoteStatus(projectRoot)
+
+	ctx := s.BackgroundCtx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	if err := git.Fetch(ctx, projectRoot, remote); err != nil {
+		return // best-effort; keep the cached counts
+	}
+
+	after, err := git.GetRemoteStatus(projectRoot)
+	if err != nil {
+		return
+	}
+	if after.Ahead != before.Ahead || after.Behind != before.Behind {
+		s.Events.PushStatusChanged(projectRoot)
+	}
 }
 
 // PushRepository pushes the project root's current branch to its remote and

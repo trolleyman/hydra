@@ -1651,6 +1651,7 @@ func (s *SimulationServer) GetRepositoryPushStatus(w http.ResponseWriter, r *htt
 		Branch:    &branch,
 		Remote:    &remote,
 		Ahead:     2,
+		Behind:    1,
 		HasRemote: true,
 		CanPush:   true,
 	})
@@ -1662,6 +1663,7 @@ func (s *SimulationServer) PushRepository(w http.ResponseWriter, r *http.Request
 		Branch:    &branch,
 		Remote:    &remote,
 		Ahead:     0,
+		Behind:    0,
 		HasRemote: true,
 		CanPush:   false,
 	})

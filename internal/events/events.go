@@ -20,6 +20,9 @@ const (
 	ProjectsChanged Type = "projects_changed"
 	// ServicesChanged: a supervised service's state changed. Project-scoped.
 	ServicesChanged Type = "services_changed"
+	// PushStatusChanged: the project branch's ahead/behind relative to its remote
+	// changed (e.g. a background fetch saw new upstream commits). Project-scoped.
+	PushStatusChanged Type = "push_status_changed"
 )
 
 // Event is one change signal. ProjectRoot scopes a project-specific event to
@@ -68,6 +71,11 @@ func (h *Hub) ServicesChanged(projectRoot string) {
 // ProjectsChanged publishes a broadcast projects event.
 func (h *Hub) ProjectsChanged() {
 	h.Publish(Event{Type: ProjectsChanged})
+}
+
+// PushStatusChanged publishes a project-scoped push-status event.
+func (h *Hub) PushStatusChanged(projectRoot string) {
+	h.Publish(Event{Type: PushStatusChanged, ProjectRoot: projectRoot})
 }
 
 // Subscribe registers a subscriber scoped to projectRoot. It receives project

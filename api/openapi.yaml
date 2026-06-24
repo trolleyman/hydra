@@ -1856,7 +1856,7 @@ components:
 
     RepositoryPushStatus:
       type: object
-      required: [can_push, ahead, has_remote]
+      required: [can_push, ahead, behind, has_remote]
       properties:
         branch:
           type: string
@@ -1869,6 +1869,12 @@ components:
         ahead:
           type: integer
           description: Number of commits on the current branch not yet on the remote
+        behind:
+          type: integer
+          description: >-
+            Number of commits the remote-tracking branch has that the local
+            branch does not. Reflects the last fetch (the server fetches in the
+            background); 0 when the branch isn't on the remote yet.
         has_remote:
           type: boolean
           description: True if the repository has a remote to push to

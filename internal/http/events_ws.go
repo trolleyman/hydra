@@ -63,7 +63,7 @@ func (s *Server) HandleEventsWS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Initial nudge: refetch everything once on (re)connect.
-	for _, t := range []events.Type{events.AgentsChanged, events.ProjectsChanged, events.ServicesChanged} {
+	for _, t := range []events.Type{events.AgentsChanged, events.ProjectsChanged, events.ServicesChanged, events.PushStatusChanged} {
 		if err := writeType(t); err != nil {
 			return
 		}

@@ -1,6 +1,7 @@
 package git
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -100,5 +101,54 @@ func TestGetRemoteStatusAndPush(t *testing.T) {
 	}
 	if st.Ahead != 0 || st.CanPush() {
 		t.Errorf("expected Ahead=0 after second push, got %+v", st)
+	}
+	if st.Behind != 0 {
+		t.Errorf("expected Behind=0 while in sync, got %+v", st)
+	}
+
+	// Advance the remote from a second clone, then Fetch: the original repo should
+	// now report it's behind (without that commit landing locally).
+	clone := t.TempDir()
+	if out, err := exec.Command("git", "clone", "-q", remote, clone).CombinedOutput(); err != nil {
+		t.Fatalf("git clone: %v\n%s", err, out)
+	}
+	cloneRun := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", clone}, args...)...)
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@e",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@e")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(clone, "c.txt"), []byte("c\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cloneRun("add", ".")
+	cloneRun("commit", "-qm", "remote work")
+	cloneRun("push", "-q", "origin", "main")
+
+	// Before fetching, the original repo still thinks it's in sync.
+	st, err = GetRemoteStatus(dir)
+	if err != nil {
+		t.Fatalf("GetRemoteStatus (pre-fetch): %v", err)
+	}
+	if st.Behind != 0 {
+		t.Errorf("expected Behind=0 before fetch (stale refs), got %+v", st)
+	}
+
+	if err := Fetch(context.Background(), dir, "origin"); err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	st, err = GetRemoteStatus(dir)
+	if err != nil {
+		t.Fatalf("GetRemoteStatus (post-fetch): %v", err)
+	}
+	if st.Behind != 1 {
+		t.Errorf("expected Behind=1 after fetch, got %+v", st)
+	}
+	if st.Ahead != 0 || st.CanPush() {
+		t.Errorf("expected Ahead=0 CanPush=false (behind only), got %+v", st)
 	}
 }
