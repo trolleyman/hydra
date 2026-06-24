@@ -630,6 +630,12 @@ try {
       // diff takes the full width and wraps long lines. agent-3's nested-folder
       // diff scrolled to the Changes section.
       { name: 'mobile-diff', path: '/project/sim-project/agent/agent-3', viewport: { width: 390, height: 844 }, scrollTo: 'Changes' },
+      // The artifacts panel at phone width: the masonry clamps to a single column
+      // (no column is allowed below MIN_COL_PX), the per-column dividers drop out,
+      // and the width-driven before/after tiles stack full-width — so the panel
+      // stays usable on a narrow screen. showArtifacts expands the card so the
+      // images (not just the collapsed header) are captured.
+      { name: 'mobile-artifacts', path: '/project/sim-project/agent/agent-1', viewport: { width: 390, height: 844 }, scrollTo: 'Changes', imageDiffMode: 'ab', showArtifacts: true },
     ]
     // Capture every page in both themes. Dark mode has its own colours (e.g.
     // diff add/remove backgrounds), so a light-only render would miss visual
