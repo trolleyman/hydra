@@ -119,14 +119,14 @@ export function AgentTopBar({
                 disabled={a.disabled}
                 onClick={a.onClick}
                 title={a.label}
-                className={`shrink-0 flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer ${
+                aria-label={a.label}
+                className={`shrink-0 w-7 h-7 flex items-center justify-center rounded-md transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer ${
                   a.danger
                     ? 'text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20'
-                    : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+                    : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
                 }`}
               >
-                <span className="shrink-0">{a.icon}</span>
-                {a.label}
+                {a.icon}
               </button>
             ))}
             {hasMenu && (
