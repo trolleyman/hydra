@@ -103,6 +103,7 @@ const (
 const (
 	TerminalDataEventTypeData        TerminalDataEventType = "data"
 	TerminalDataEventTypeDiffRefresh TerminalDataEventType = "diff_refresh"
+	TerminalDataEventTypeSize        TerminalDataEventType = "size"
 	TerminalDataEventTypeStatus      TerminalDataEventType = "status"
 )
 
@@ -110,6 +111,7 @@ const (
 const (
 	TerminalDiffRefreshEventTypeData        TerminalDiffRefreshEventType = "data"
 	TerminalDiffRefreshEventTypeDiffRefresh TerminalDiffRefreshEventType = "diff_refresh"
+	TerminalDiffRefreshEventTypeSize        TerminalDiffRefreshEventType = "size"
 	TerminalDiffRefreshEventTypeStatus      TerminalDiffRefreshEventType = "status"
 )
 
@@ -117,14 +119,24 @@ const (
 const (
 	TerminalEventTypeData        TerminalEventType = "data"
 	TerminalEventTypeDiffRefresh TerminalEventType = "diff_refresh"
+	TerminalEventTypeSize        TerminalEventType = "size"
 	TerminalEventTypeStatus      TerminalEventType = "status"
+)
+
+// Defines values for TerminalSizeEventType.
+const (
+	TerminalSizeEventTypeData        TerminalSizeEventType = "data"
+	TerminalSizeEventTypeDiffRefresh TerminalSizeEventType = "diff_refresh"
+	TerminalSizeEventTypeSize        TerminalSizeEventType = "size"
+	TerminalSizeEventTypeStatus      TerminalSizeEventType = "status"
 )
 
 // Defines values for TerminalStatusEventType.
 const (
-	TerminalStatusEventTypeData        TerminalStatusEventType = "data"
-	TerminalStatusEventTypeDiffRefresh TerminalStatusEventType = "diff_refresh"
-	TerminalStatusEventTypeStatus      TerminalStatusEventType = "status"
+	Data        TerminalStatusEventType = "data"
+	DiffRefresh TerminalStatusEventType = "diff_refresh"
+	Size        TerminalStatusEventType = "size"
+	Status      TerminalStatusEventType = "status"
 )
 
 // Defines values for GetConfigParamsScope.
@@ -796,6 +808,16 @@ type TerminalEvent struct {
 
 // TerminalEventType defines model for TerminalEvent.Type.
 type TerminalEventType string
+
+// TerminalSizeEvent defines model for TerminalSizeEvent.
+type TerminalSizeEvent struct {
+	Cols *int                  `json:"cols,omitempty"`
+	Rows *int                  `json:"rows,omitempty"`
+	Type TerminalSizeEventType `json:"type"`
+}
+
+// TerminalSizeEventType defines model for TerminalSizeEvent.Type.
+type TerminalSizeEventType string
 
 // TerminalStatusEvent defines model for TerminalStatusEvent.
 type TerminalStatusEvent struct {

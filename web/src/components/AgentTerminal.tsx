@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
-import { TerminalEvent, type TerminalStatusEvent, type TerminalDataEvent, type TerminalDiffRefreshEvent, AgentStatus } from '../api'
+import { TerminalEvent, type TerminalStatusEvent, type TerminalDataEvent, type TerminalDiffRefreshEvent, type TerminalSizeEvent, AgentStatus } from '../api'
 import { RefreshCw, Plus, X, ChevronDown, Shield, ShieldOff } from 'lucide-react'
 import { Tooltip } from './Tooltip'
 import { uploadFile, extractFiles } from '../api/uploads'
@@ -83,6 +83,14 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
   // half-settled layout, so fitAndSend suppresses their sends and lets the
   // stabilizer emit the one authoritative size once the width stops changing.
   const settlingRef = useRef(false)
+  // True between receiving the backend's "size" event (the PTY's current width)
+  // and writing the scrollback replay that follows it. The replay's cursor moves
+  // and wrapping were computed for that width, so we size the xterm to it and
+  // suppress any fit/resize that would change the width mid-replay — which would
+  // land the replayed bytes in the wrong cells and corrupt the history. Once the
+  // replay is in we clear this and refit to our own layout (a clean reflow).
+  const replaySizingRef = useRef(false)
+  const replayFallbackRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [showCopiedAt, setShowCopiedAt] = useState(0)
   const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
@@ -107,6 +115,10 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
     const term = termRef.current
     const ws = wsRef.current
     if (!fitAddon || !term) return
+    // While we're applying the PTY's width for a scrollback replay, don't refit:
+    // a fit here would resize the xterm away from the replay's authored width and
+    // garble the history. We refit once the replay is written (see onmessage).
+    if (replaySizingRef.current) return
     fitAddon.fit()
     const { cols, rows } = term
     // Report geometry + measured cell height to the parent so it can snap the
@@ -205,6 +217,11 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
 
     isRefreshing.current = false
     lastSentSize.current = { cols: 0, rows: 0 }
+    // Start each connection with a clean sizing state — these refs persist across
+    // effect runs (agent switches / reconnects) and a stale value would suppress
+    // the new connection's resize.
+    settlingRef.current = false
+    replaySizingRef.current = false
     const el = containerRef.current
     if (!el) return
 
@@ -261,9 +278,25 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
       stabilizeThenSend.current()
     }
 
+    // Clear the replay-sizing window and refit to our own layout. Called once the
+    // replayed scrollback has been written (or, via the fallback timer, when no
+    // replay arrives at all — e.g. a fresh session with empty scrollback).
+    const finishReplaySizing = () => {
+      if (replayFallbackRef.current) {
+        clearTimeout(replayFallbackRef.current)
+        replayFallbackRef.current = null
+      }
+      if (!replaySizingRef.current) return
+      replaySizingRef.current = false
+      stabilizeThenSend.current()
+    }
+
     ws.onmessage = (e: MessageEvent) => {
       if (e.data instanceof ArrayBuffer) {
         term.write(new Uint8Array(e.data))
+        // The first chunk after a size event is the scrollback replay; now that
+        // it's rendered at the PTY's width, refit to our layout (a clean reflow).
+        if (replaySizingRef.current) finishReplaySizing()
       } else if (typeof e.data === 'string') {
         try {
           const msg = JSON.parse(e.data) as TerminalEvent
@@ -285,6 +318,21 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
               const dataEvent = msg as TerminalDataEvent
               if (dataEvent.data) {
                 term.write(dataEvent.data)
+              }
+              return
+            }
+            case TerminalEvent.type.SIZE: {
+              // The backend reports the PTY's current width right before replaying
+              // its scrollback. Size the xterm to match so the replay's cursor
+              // moves land correctly, and suppress fits until the replay is in.
+              const sizeEvent = msg as TerminalSizeEvent
+              if (sizeEvent.cols && sizeEvent.rows) {
+                replaySizingRef.current = true
+                term.resize(sizeEvent.cols, sizeEvent.rows)
+                // Fallback: if no replay chunk follows (empty scrollback), don't
+                // stay pinned to the PTY size — refit to our layout shortly.
+                if (replayFallbackRef.current) clearTimeout(replayFallbackRef.current)
+                replayFallbackRef.current = setTimeout(finishReplaySizing, 200)
               }
               return
             }
@@ -419,6 +467,7 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
       cancelled = true
       observer.disconnect()
       if (stabilizeRafRef.current != null) cancelAnimationFrame(stabilizeRafRef.current)
+      if (replayFallbackRef.current) clearTimeout(replayFallbackRef.current)
       inputDisposable.dispose()
       textarea?.removeEventListener('paste', onPaste, true)
       ws.close()
