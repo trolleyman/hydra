@@ -1,13 +1,15 @@
 import { useEffect, useRef, useState } from 'react'
-import { LoaderCircle, RefreshCw, ImageOff, TriangleAlert, Camera } from 'lucide-react'
+import { LoaderCircle, RefreshCw, ImageOff, TriangleAlert, Camera, Copy, Check, X, ExternalLink } from 'lucide-react'
 import { api } from '../stores/apiClient'
 import { ApiError } from '../api'
 import type { ArtifactLogLine, RepositoryArtifactFile } from '../api'
 import { RepositoryArtifactResponse } from '../api'
 import { formatError } from '../api/format_error'
+import { canCopyImages, copyImageToClipboard } from '../lib/clipboard'
 import { IMG_CLASS, checkerStyle, useMediaResize, ResizeGrip } from './artifactDiffShared'
 import { isVideoArtifact } from './VideoDiffView'
 import { TagBadge, LogView, ElapsedTime } from './ArtifactsPanel'
+import { Tooltip } from './Tooltip'
 
 // RepositoryArtifactsView renders one [[artifacts]] script's output for a single
 // ref, single-sided (the repository browser shows one ref at a time, so there is
@@ -17,6 +19,51 @@ import { TagBadge, LogView, ElapsedTime } from './ArtifactsPanel'
 // tag and log primitives so the two viewers stay visually consistent.
 
 const POLL_MS = 2500
+
+// MediaActions is the hover overlay (top-right of a media thumbnail) offering a
+// "copy image" and a "raw" (open in new tab) control, the same pair the
+// repository file viewer shows in its header. It stops pointer-down propagation
+// so clicking a button never starts the surrounding resize drag. Copy is offered
+// only for images the browser can place on the clipboard (videos can't be).
+function MediaActions({ url, canCopy }: { url: string; canCopy: boolean }) {
+  const [state, setState] = useState<'idle' | 'ok' | 'err'>('idle')
+  const onCopy = async (e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    try {
+      await copyImageToClipboard(url)
+      setState('ok')
+    } catch {
+      setState('err')
+    }
+    setTimeout(() => setState('idle'), 1500)
+  }
+
+  const btn =
+    'flex items-center justify-center w-6 h-6 rounded-md border border-gray-200 dark:border-gray-600 bg-white/90 dark:bg-gray-800/90 text-gray-600 dark:text-gray-300 hover:bg-white dark:hover:bg-gray-700 shadow-sm backdrop-blur-sm cursor-pointer transition-colors'
+
+  return (
+    <div
+      className="absolute top-1.5 right-1.5 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity"
+      onPointerDown={(e) => e.stopPropagation()}
+    >
+      {canCopy && (
+        <Tooltip content={state === 'ok' ? 'Copied!' : state === 'err' ? 'Copy failed' : 'Copy image'}>
+          <button onClick={onCopy} className={btn}>
+            {state === 'ok' ? <Check className="w-3.5 h-3.5 text-green-500" />
+              : state === 'err' ? <X className="w-3.5 h-3.5 text-red-500" />
+                : <Copy className="w-3.5 h-3.5" />}
+          </button>
+        </Tooltip>
+      )}
+      <Tooltip content="View raw">
+        <a href={url} target="_blank" rel="noreferrer" className={btn} onClick={(e) => e.stopPropagation()}>
+          <ExternalLink className="w-3.5 h-3.5" />
+        </a>
+      </Tooltip>
+    </div>
+  )
+}
 
 // MediaCell shows one generated file: its name, tags, and the image (resizable,
 // click-to-open) or video. Mirrors the diff viewer's FileRow, minus the
@@ -40,15 +87,18 @@ function MediaCell({ file }: { file: RepositoryArtifactFile }) {
           <span className="text-[11px] font-medium">No file</span>
         </div>
       ) : isVideoArtifact(file.name) ? (
-        <video
-          src={url}
-          controls
-          muted
-          playsInline
-          preload="metadata"
-          className={`${IMG_CLASS} block`}
-          style={{ ...checkerStyle, maxHeight: `${maxHeight}px` }}
-        />
+        <div className="group relative inline-block">
+          <video
+            src={url}
+            controls
+            muted
+            playsInline
+            preload="metadata"
+            className={`${IMG_CLASS} block`}
+            style={{ ...checkerStyle, maxHeight: `${maxHeight}px` }}
+          />
+          <MediaActions url={url} canCopy={false} />
+        </div>
       ) : (
         // A press-and-drag resizes (onPointerDown); a plain click opens the image in
         // a new tab, but consumeDrag() cancels that when the press became a drag.
@@ -69,6 +119,7 @@ function MediaCell({ file }: { file: RepositoryArtifactFile }) {
             />
           </a>
           <ResizeGrip onPointerDown={onResizeStart} />
+          <MediaActions url={url} canCopy={canCopyImages()} />
         </div>
       )}
     </div>
