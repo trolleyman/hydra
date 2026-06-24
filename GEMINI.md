@@ -31,3 +31,33 @@ Run tests using standard Go tools:
 ```bash
 go test ./...
 ```
+
+## Visual Artifacts & Screenshots
+
+The diff viewer can run per-project "artifact" commands against both sides of a
+comparison and surface the rendered images/videos that differ. Hydra's own UI is
+exercised this way: a `[[artifacts]]` entry named `screenshots` in
+`.hydra/config.toml` runs `scripts/screenshots/take-screenshots.ts`, which builds
+the frontend, boots `hydra server --simulation` (mock data, no daemon needed) and
+screenshots a list of pages with headless Chromium.
+
+**If a user asks to "add a screenshot" or "add an artifact", they mean add an
+entry here — not attach an image file.** Concretely:
+
+- **A new screenshot of the existing UI** → add an entry to the `pages` array in
+  `scripts/screenshots/take-screenshots.ts`. Each entry is a `{ name, path, … }`
+  object with optional knobs (viewport, `scrollTo`, `click`/`clicks`,
+  `imageDiffMode`, `showArtifacts`, etc. — all documented inline on the page
+  type). Every page is captured in both light and dark themes and written as
+  `<name>-<theme>.png` (+ a `.png.meta` tag sidecar). Mock data the shots rely on
+  lives in `internal/http/simulation.go`. No config change is needed — the script
+  auto-surfaces every file it writes.
+- **A whole new artifact command** (e.g. a different generator/script) → add a new
+  `[[artifacts]]` section to `.hydra/config.toml`. See the documented fields there
+  (`name`, `command`, `timeout_sec`, `unsafe_host`) and the `HYDRA_ARTIFACT_*`
+  env contract the command is given.
+
+Run the screenshot generator locally with: `cd scripts/screenshots && bun install
+&& bun take-screenshots.ts` (it needs `HYDRA_ARTIFACT_OUTPUT` set to a directory
+to write into). Renders must be byte-reproducible — see the nondeterminism notes
+in the script header (pinned clock, frozen timers/animation) before adding a shot.

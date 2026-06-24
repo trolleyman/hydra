@@ -264,6 +264,12 @@ try {
       // otherwise leaves these shots showing only the header row). Only meaningful on
       // the artifacts (agent-1) page; pair with imageDiffMode.
       showArtifacts?: boolean
+      // Ticks the "Highlight" checkbox on every before/after image tile (after
+      // showArtifacts has expanded the card), so the magenta pixel-diff overlay
+      // (DiffCanvas) is captured painted over each changed image. Only meaningful
+      // with imageDiffMode 'ab' + showArtifacts — the AB switch and its Highlight
+      // toggle only render in that mode, once the masonry tiles exist.
+      highlightArtifacts?: boolean
       // Eager-loads every masonry tile image and waits for the layout to settle
       // before capturing — for the repository artifacts view, whose masonry is shown
       // without an expand step. Keeps the width-driven layout byte-reproducible
@@ -657,6 +663,21 @@ try {
         viewport: { width: 1280, height: 1280 },
         imageDiffMode: 'ab',
         showArtifacts: true,
+      },
+      // The AB mode with the "Highlight" overlay ticked on every changed-image
+      // tile: each tile's pixel-diff (DiffCanvas) paints the differing pixels
+      // magenta on top of the shown side, so the exact changed regions are
+      // marked while flipping Before↔After. Like artifacts-ab but with Highlight
+      // enabled — documents the overlay (and its pixel-for-pixel alignment with
+      // the base image).
+      {
+        name: 'artifacts-highlight',
+        path: '/project/sim-project/agent/agent-1',
+        scrollTo: 'Changes',
+        viewport: { width: 1280, height: 1280 },
+        imageDiffMode: 'ab',
+        showArtifacts: true,
+        highlightArtifacts: true,
       },
       {
         name: 'artifacts-slider',
@@ -1314,6 +1335,28 @@ try {
               const offset = card.getBoundingClientRect().top - cont.getBoundingClientRect().top + cont.scrollTop
               cont.scrollTop = offset - 96
             }
+          })
+          await settle(page)
+        }
+        if (pg.highlightArtifacts) {
+          // Tick the "Highlight" checkbox on every before/after image tile so the
+          // magenta pixel-diff overlay (DiffCanvas) is painted over each changed
+          // image. Each AB tile owns its own Highlight checkbox (local state) and
+          // it's the only checkbox the tile renders, so click every enabled one
+          // (single-sided added/removed tiles have nothing to diff → disabled).
+          await page.evaluate(() => {
+            document.querySelectorAll<HTMLInputElement>('[data-mkey] input[type=checkbox]').forEach((c) => {
+              if (!c.disabled && !c.checked) c.click()
+            })
+          })
+          // Each ticked tile mounts a DiffCanvas that loads both images and paints
+          // its overlay asynchronously, clearing the canvas's opacity-0 once ready.
+          // Wait for every overlay canvas to finish so the magenta diff is fully
+          // drawn before the capture (the diff is a pure pixel compare, so once
+          // painted it's identical every render → byte-stable).
+          await page.waitForFunction(() => {
+            const canvases = Array.from(document.querySelectorAll<HTMLCanvasElement>('[data-mkey] canvas'))
+            return canvases.length > 0 && canvases.every((c) => !c.classList.contains('opacity-0'))
           })
           await settle(page)
         }
