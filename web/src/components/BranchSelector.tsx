@@ -152,7 +152,7 @@ export function BranchSelector({
             <div className="px-2.5 py-1.5 text-xs text-gray-500 dark:text-gray-400 border-b border-gray-100 dark:border-gray-700 flex items-center gap-2">
               <Check className="w-3.5 h-3.5 shrink-0 text-blue-500" />
               <span className="truncate font-mono">{shortSha(activeRef)}</span>
-              <span className="ml-auto text-[9px] uppercase tracking-wide">commit</span>
+              <span className="ml-auto text-[10px]">Commit</span>
             </div>
           )}
           {current && (

@@ -68,7 +68,7 @@ export function NotFound({
         </div>
 
         <div className="mt-12 pt-8 border-t border-gray-200 dark:border-gray-800">
-          <p className="text-xs font-mono text-gray-400 dark:text-gray-500 uppercase tracking-widest">
+          <p className="text-xs font-mono text-gray-400 dark:text-gray-500">
             Error Code: {errorCode}
           </p>
         </div>
