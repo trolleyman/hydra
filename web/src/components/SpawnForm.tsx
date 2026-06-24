@@ -252,7 +252,10 @@ export function SpawnForm({
   // grip, which looked awkward poking out of the card's rounded gradient corner.
   // Dragging sets the card height directly; the ResizeObserver above persists it
   // for the compact box.
-  function handleCardResizeStart(e: React.MouseEvent) {
+  // Pointer events (not mouse) so the drag works with touch + pen too, e.g. on
+  // mobile. `touch-none` on the handle keeps the browser from hijacking the
+  // gesture for scrolling.
+  function handleCardResizeStart(e: React.PointerEvent) {
     e.preventDefault()
     const card = cardRef.current
     if (!card) return
@@ -261,25 +264,25 @@ export function SpawnForm({
     const min = compact ? 128 : 180
     document.body.style.cursor = 'ns-resize'
     document.body.style.userSelect = 'none'
-    const onMove = (ev: MouseEvent) => {
+    const onMove = (ev: PointerEvent) => {
       card.style.height = `${Math.max(min, startHeight + ev.clientY - startY)}px`
     }
     const onUp = () => {
       document.body.style.cursor = ''
       document.body.style.userSelect = ''
-      document.removeEventListener('mousemove', onMove)
-      document.removeEventListener('mouseup', onUp)
+      document.removeEventListener('pointermove', onMove)
+      document.removeEventListener('pointerup', onUp)
     }
-    document.addEventListener('mousemove', onMove)
-    document.addEventListener('mouseup', onUp)
+    document.addEventListener('pointermove', onMove)
+    document.addEventListener('pointerup', onUp)
   }
 
   // The grab bar rendered at the bottom of each spawn card.
   function renderResizeHandle() {
     return (
       <div
-        onMouseDown={handleCardResizeStart}
-        className="group shrink-0 h-2 -mt-1.5 flex items-center justify-center cursor-ns-resize"
+        onPointerDown={handleCardResizeStart}
+        className="group shrink-0 h-2 -mt-1.5 flex items-center justify-center cursor-ns-resize touch-none"
         title="Drag to resize"
       >
         <div className="h-0.5 w-10 rounded-full bg-gray-200 dark:bg-gray-600 group-hover:bg-blue-400/70 group-active:bg-blue-500 transition-colors" />
