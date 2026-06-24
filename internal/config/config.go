@@ -220,7 +220,7 @@ type rawConfig struct {
 // other top-level table is treated as an agent override, so new agent types
 // need no code change. Consequently an agent literally named one of these is
 // unrepresentable in the flattened layout — fine for real agent types
-// (claude/gemini/bash/copilot).
+// (claude/gemini/bash/copilot/codex).
 var reservedTopLevel = map[string]bool{
 	"defaults": true, "agents": true,
 	"pre_prompt": true, "sandbox": true, "artifacts": true, "services": true,
@@ -1302,7 +1302,7 @@ func emitSpecTable(out *[]string, spec []specEntry, table, header string, def Ag
 // docAgents are the agent types that always get a documented mention in the
 // rendered config (a commented-out [name] header when they have no overrides).
 // Order matches the Settings UI tabs.
-var docAgents = []string{"claude", "gemini", "copilot"}
+var docAgents = []string{"claude", "gemini", "copilot", "codex"}
 
 // agentLabel returns a human-friendly capitalised name for an agent type.
 func agentLabel(name string) string {
@@ -1313,6 +1313,8 @@ func agentLabel(name string) string {
 		return "Gemini"
 	case "copilot":
 		return "Copilot"
+	case "codex":
+		return "Codex"
 	default:
 		if name == "" {
 			return name

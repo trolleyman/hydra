@@ -12,7 +12,7 @@ import { StorageKeys, promptDraftKey, promptScrollKey, imageCounterKey, readLoca
 import { HighlightedTextarea } from '../lib/markdown'
 import { type Attachment, spawnDraftKey, loadAttachments, saveAttachments, nextAttachmentId } from '../lib/spawnDrafts'
 
-type AgentTypeOption = 'claude' | 'gemini' | 'copilot'
+type AgentTypeOption = 'claude' | 'gemini' | 'copilot' | 'codex'
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/i.test(navigator.platform)
 
@@ -57,7 +57,7 @@ export function SpawnForm({
   const [idManuallyEdited, setIdManuallyEdited] = useState(false)
   const [agentType, setAgentType] = useState<AgentTypeOption>(() => {
     const saved = readLocal(StorageKeys.defaultAgentType)
-    if (saved && (saved === 'claude' || saved === 'gemini' || saved === 'copilot')) {
+    if (saved && (saved === 'claude' || saved === 'gemini' || saved === 'copilot' || saved === 'codex')) {
       return saved as AgentTypeOption
     }
     return 'claude'
@@ -477,7 +477,7 @@ export function SpawnForm({
                   value={agentType}
                   onChange={(e) => setAgentType(e.target.value as AgentTypeOption)}
                   className="text-[10px] bg-transparent text-gray-500 dark:text-gray-400 focus:outline-none cursor-pointer shrink-0"
-                >{(['claude', 'gemini', 'copilot'] as AgentTypeOption[]).map((t) => (
+                >{(['claude', 'gemini', 'copilot', 'codex'] as AgentTypeOption[]).map((t) => (
                     <option key={t} value={t}>{t}</option>
                   ))}</select>
                 <input
@@ -567,7 +567,7 @@ export function SpawnForm({
                   </Tooltip>
                   {/* Agent type pills */}
                   <div className="flex gap-1.5 shrink-0">
-                    {(['claude', 'gemini', 'copilot'] as AgentTypeOption[]).map((t) => (
+                    {(['claude', 'gemini', 'copilot', 'codex'] as AgentTypeOption[]).map((t) => (
                       <button
                         key={t}
                         type="button"
@@ -578,6 +578,8 @@ export function SpawnForm({
                               ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300 shadow-sm'
                               : t === 'gemini'
                               ? 'bg-teal-100 text-teal-700 dark:bg-teal-900/40 dark:text-teal-300 shadow-sm'
+                              : t === 'codex'
+                              ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300 shadow-sm'
                               : 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300 shadow-sm'
                             : 'text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
                         }`}

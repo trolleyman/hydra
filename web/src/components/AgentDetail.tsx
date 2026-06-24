@@ -137,7 +137,9 @@ function ArchivedAgentDetail({ agent, projectId, onPurged }: { agent: AgentRespo
         ? 'bg-teal-100 text-teal-800 dark:bg-teal-900/40 dark:text-teal-300'
         : agent.agent_type === 'copilot'
           ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300'
-          : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'
+          : agent.agent_type === 'codex'
+            ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300'
+            : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'
 
   return (
     <div className="flex-1 flex flex-col min-w-0 min-h-0">
@@ -320,7 +322,9 @@ export function AgentDetail({
         ? 'bg-teal-100 text-teal-800 dark:bg-teal-900/40 dark:text-teal-300'
         : agent.agent_type === 'copilot'
           ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300'
-          : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'
+          : agent.agent_type === 'codex'
+            ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300'
+            : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'
 
   async function handleKill() {
     useDialogStore.getState().show({

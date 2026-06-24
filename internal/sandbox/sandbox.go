@@ -25,6 +25,7 @@ const (
 	AgentTypeGemini  AgentType = "gemini"
 	AgentTypeBash    AgentType = "bash"
 	AgentTypeCopilot AgentType = "copilot"
+	AgentTypeCodex   AgentType = "codex"
 )
 
 // NetworkPolicy controls the sandbox's network access.

@@ -46,9 +46,10 @@ type seedResult struct {
 //
 // prePrompt holds the standing Hydra instructions delivered as a system prompt.
 // Claude receives them via --append-system-prompt (see sandbox.AgentArgv), but
-// Gemini and Copilot have no such flag, so for them the instructions are seeded
-// here as context files (~/.gemini/GEMINI.md, ~/.copilot/copilot-instructions.md),
-// merged on top of any the host user already has.
+// Gemini, Copilot and Codex have no such flag, so for them the instructions are
+// seeded here as context files (~/.gemini/GEMINI.md,
+// ~/.copilot/copilot-instructions.md, ~/.codex/AGENTS.md), merged on top of any
+// the host user already has.
 func seedHead(projectRoot, id string, agentType sandbox.AgentType, worktreePath, home, prePrompt string) (*seedResult, error) {
 	cacheDir := paths.GetCacheDirFromProjectRoot(projectRoot)
 	if err := paths.CreateGitignoreAllInDir(cacheDir); err != nil {
@@ -154,6 +155,20 @@ func seedHead(projectRoot, id string, agentType sandbox.AgentType, worktreePath,
 				return nil, errtrace.Wrap(err)
 			}
 			res.Binds = append(res.Binds, sandbox.Bind{Source: instrHost, Target: path.Join(home, ".copilot", "copilot-instructions.md")})
+		}
+
+	case sandbox.AgentTypeCodex:
+		// Codex has no --append-system-prompt and no hook system we wire up; it
+		// reads standing guidance from AGENTS.md files. Deliver the pre-prompt as
+		// the global ~/.codex/AGENTS.md (merged over the host's), which applies to
+		// every Codex session regardless of the repo's own AGENTS.md.
+		if prePrompt != "" {
+			agentsHost := filepath.Join(cacheDir, "codex-AGENTS.md")
+			content := combineInstructions(prePrompt, readHostFile(filepath.Join(home, ".codex", "AGENTS.md")))
+			if err := os.WriteFile(agentsHost, content, 0644); err != nil {
+				return nil, errtrace.Wrap(err)
+			}
+			res.Binds = append(res.Binds, sandbox.Bind{Source: agentsHost, Target: path.Join(home, ".codex", "AGENTS.md")})
 		}
 	}
 

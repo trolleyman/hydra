@@ -32,6 +32,7 @@ func Defaults() DefaultConfig {
 			"~/.claude.json",            // claude top-level config
 			"~/.gemini",                 // gemini config + creds
 			"~/.copilot",                // copilot config + creds
+			"~/.codex",                  // codex config + creds + session history
 			"/tmp",                      // temp scratch
 		},
 		// Masked: credential + secret directories/files hidden entirely.

@@ -57,6 +57,8 @@ export function agentTypeColor(agentType: string): string {
     ? 'text-teal-600 dark:text-teal-400'
     : agentType === 'copilot'
     ? 'text-blue-600 dark:text-blue-400'
+    : agentType === 'codex'
+    ? 'text-emerald-600 dark:text-emerald-400'
     : 'text-gray-500 dark:text-gray-400'
 }
 

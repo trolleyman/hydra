@@ -18,7 +18,7 @@ type Agent struct {
 	BaseBranch string
 
 	// Identity
-	AgentType string `gorm:"not null"` // "claude" | "gemini"
+	AgentType string `gorm:"not null"` // "claude" | "gemini" | "copilot" | "codex" | "bash"
 	PrePrompt string
 	Prompt    string
 	// Title is the mutable, user-facing display name. The ID stays the stable

@@ -60,12 +60,12 @@ function ThemeSection() {
 
 // The agent-type selector (replaces the old tab bar) — brand icon + label per
 // agent. 'all' edits the shared defaults; the rest edit that agent's overrides.
-// Add codex here once the agent type exists (its icon already exists).
 const AGENT_OPTIONS: { id: SettingsSection; label: string; icon: AgentTypeIconName; color: string }[] = [
   { id: 'all', label: 'All agents', icon: 'all', color: 'text-blue-600 dark:text-blue-400' },
   { id: 'claude', label: 'Claude', icon: 'claude', color: 'text-orange-600 dark:text-orange-400' },
   { id: 'gemini', label: 'Gemini', icon: 'gemini', color: 'text-sky-600 dark:text-sky-400' },
   { id: 'copilot', label: 'Copilot', icon: 'copilot', color: 'text-slate-700 dark:text-slate-300' },
+  { id: 'codex', label: 'Codex', icon: 'codex', color: 'text-emerald-600 dark:text-emerald-400' },
 ]
 
 function AgentSelector({ value, onChange }: { value: SettingsSection; onChange: (s: SettingsSection) => void }) {
@@ -94,7 +94,7 @@ function AgentSelector({ value, onChange }: { value: SettingsSection; onChange: 
   )
 }
 
-export type SettingsSection = 'all' | 'claude' | 'gemini' | 'copilot' | 'defaults'
+export type SettingsSection = 'all' | 'claude' | 'gemini' | 'copilot' | 'codex' | 'defaults'
 
 // ── EnabledToggle ─────────────────────────────────────────────────────────────
 // A small on/off switch used to enable or disable a single artifact or service
@@ -395,7 +395,7 @@ export function ConfigForm({
               <p className="mt-1.5">These environment variables describe the head and are available to the script:</p>
               <ul className="mt-1 space-y-0.5 list-none">
                 <li><code className="text-blue-300">HYDRA_HEAD_ID</code> — the head's ID</li>
-                <li><code className="text-blue-300">HYDRA_AGENT_TYPE</code> — <code className="text-blue-300">claude</code>, <code className="text-blue-300">gemini</code>, <code className="text-blue-300">copilot</code> or <code className="text-blue-300">bash</code></li>
+                <li><code className="text-blue-300">HYDRA_AGENT_TYPE</code> — <code className="text-blue-300">claude</code>, <code className="text-blue-300">gemini</code>, <code className="text-blue-300">copilot</code>, <code className="text-blue-300">codex</code> or <code className="text-blue-300">bash</code></li>
                 <li><code className="text-blue-300">HYDRA_WORKTREE</code> — worktree path (the working directory)</li>
                 <li><code className="text-blue-300">HYDRA_PROJECT_ROOT</code> — the main repository root</li>
                 <li><code className="text-blue-300">HYDRA_BRANCH</code> — the head's git branch</li>
@@ -932,6 +932,9 @@ export function SettingsContent({
         )}
         {activeSection === 'copilot' && (
           <ConfigForm value={config.agents['copilot'] || {}} onChange={(val) => setConfig({ ...config, agents: { ...config.agents, copilot: val } })} inherited={config.defaults} agentType="copilot" selectedProject={selectedProject} allAgentsPrePrompt={config.defaults.pre_prompt ?? null} />
+        )}
+        {activeSection === 'codex' && (
+          <ConfigForm value={config.agents['codex'] || {}} onChange={(val) => setConfig({ ...config, agents: { ...config.agents, codex: val } })} inherited={config.defaults} agentType="codex" selectedProject={selectedProject} allAgentsPrePrompt={config.defaults.pre_prompt ?? null} />
         )}
       </div>
 
