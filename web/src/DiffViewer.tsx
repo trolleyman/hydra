@@ -1761,11 +1761,15 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
   // DiffViewer is reused (not remounted) when switching agents, so reload the
   // collapsed-file set when the agent changes. Reset during render (per React's
   // "adjust state when a prop changes" guidance) so the persist effect below
-  // sees the new agent's set, not the old one.
+  // sees the new agent's set, not the old one. The commit selectors also reset
+  // to base → latest, since a commit picked for one agent is meaningless for
+  // another (different branch/history).
   const collapsedAgentRef = useRef(agent.id)
   if (collapsedAgentRef.current !== agent.id) {
     collapsedAgentRef.current = agent.id
     setCollapsedFiles(new Set(loadAgentViewPrefs(projectId, agent.id).collapsedFiles ?? []))
+    setLeftSel({ type: 'base' })
+    setRightSel({ type: 'latest' })
   }
   useEffect(() => {
     patchAgentViewPrefs(projectId, agent.id, { collapsedFiles: [...collapsedFiles] })
