@@ -12,7 +12,7 @@ import { ImageLightbox } from './ImageLightbox'
 import { uploadBlobUrl } from '../api/uploads'
 import type { Attachment } from '../lib/spawnDrafts'
 import { DiffViewer } from '../DiffViewer'
-import { formatStartedAgo, agentStatusBadge, archivedEndStateBadge, agentDotClass } from './AgentComponents'
+import { formatStartedAgo, agentStatusBadge, archivedEndStateBadge, agentDotClass, agentTypePill } from './AgentComponents'
 import { LoaderCircle, Merge, Trash2, Tag, RotateCcw, Pencil, TerminalSquare, Mail } from 'lucide-react'
 import { Tooltip } from './Tooltip'
 import { AgentTypeIcon, type AgentTypeIconName } from './AgentTypeIcon'
@@ -131,16 +131,7 @@ function ArchivedAgentDetail({ agent, projectId, onPurged }: { agent: AgentRespo
       },
     })
   }
-  const agentTypeClass =
-    agent.agent_type === 'claude'
-      ? 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300'
-      : agent.agent_type === 'gemini'
-        ? 'bg-teal-100 text-teal-800 dark:bg-teal-900/40 dark:text-teal-300'
-        : agent.agent_type === 'copilot'
-          ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300'
-          : agent.agent_type === 'codex'
-            ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300'
-            : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'
+  const agentTypeClass = agentTypePill(agent.agent_type)
 
   return (
     <div className="flex-1 flex flex-col min-w-0 min-h-0">
@@ -322,16 +313,7 @@ export function AgentDetail({
     }
   }, [agent.id, projectId])
 
-  const agentTypeClass =
-    agent.agent_type === 'claude'
-      ? 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300'
-      : agent.agent_type === 'gemini'
-        ? 'bg-teal-100 text-teal-800 dark:bg-teal-900/40 dark:text-teal-300'
-        : agent.agent_type === 'copilot'
-          ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300'
-          : agent.agent_type === 'codex'
-            ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300'
-            : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'
+  const agentTypeClass = agentTypePill(agent.agent_type)
 
   async function handleKill() {
     useDialogStore.getState().show({

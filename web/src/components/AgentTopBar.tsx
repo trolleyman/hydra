@@ -112,23 +112,6 @@ export function AgentTopBar({
             >
               {title}
             </button>
-            {inlineActions?.map((a) => (
-              <button
-                key={a.label}
-                type="button"
-                disabled={a.disabled}
-                onClick={a.onClick}
-                title={a.label}
-                aria-label={a.label}
-                className={`shrink-0 w-7 h-7 flex items-center justify-center rounded-md transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer ${
-                  a.danger
-                    ? 'text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20'
-                    : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
-                }`}
-              >
-                {a.icon}
-              </button>
-            ))}
             {hasMenu && (
               <button
                 type="button"
@@ -141,12 +124,33 @@ export function AgentTopBar({
                 <ChevronDown className="w-4 h-4" />
               </button>
             )}
+            {inlineActions?.map((a) => (
+              <button
+                key={a.label}
+                type="button"
+                disabled={a.disabled}
+                onClick={a.onClick}
+                title={a.label}
+                aria-label={a.label}
+                className={`shrink-0 w-7 h-7 flex items-center justify-center rounded-lg border transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer ${
+                  a.danger
+                    ? 'border-red-300 dark:border-red-700 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20'
+                    : 'border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-600'
+                }`}
+              >
+                {a.icon}
+              </button>
+            ))}
           </>
         )}
 
         {open && hasMenu && (
-          // Right-aligned to the dropdown trigger (Claude-style).
-          <div className="absolute right-0 top-full mt-1 min-w-44 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50 py-1">
+          // Right-aligned to the chevron trigger (Claude-style); offset past any
+          // inline actions (each w-7 + gap-0.5 = 1.875rem) sitting to its right.
+          <div
+            style={{ right: `calc(${inlineActions?.length ?? 0} * 1.875rem)` }}
+            className="absolute top-full mt-1 w-max bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50 py-1"
+          >
             {actions.map((a) => (
               <button
                 key={a.label}
