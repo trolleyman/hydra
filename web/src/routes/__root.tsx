@@ -1212,6 +1212,10 @@ function RootLayout() {
                 const behind = pushStatus?.behind ?? 0
                 const canSync = (ahead > 0 || behind > 0) && !!pushStatus?.has_remote && !!pushStatus?.branch && !syncing
                 const remote = pushStatus?.remote ?? 'remote'
+                const statusTooltip = [
+                  behind > 0 ? `${behind} behind` : null,
+                  ahead > 0 ? `${ahead} ahead` : null,
+                ].filter(Boolean).join(', ') + ` ${remote}`
                 const syncTooltip = syncing
                   ? 'Syncing…'
                   : !pushStatus
@@ -1228,7 +1232,7 @@ function RootLayout() {
                               ? `Push ${ahead} commit${ahead === 1 ? '' : 's'} to ${remote}`
                               : `Up to date with ${remote}`
                 return (
-                  <div className="flex items-center gap-1">
+                  <div className="flex items-center gap-1.5">
                     <button
                       type="button"
                       onClick={() => {
@@ -1249,6 +1253,24 @@ function RootLayout() {
                       <FolderGit2 className="w-4 h-4 shrink-0" />
                       Repository
                     </button>
+                    {/* Ahead/behind status indicator (read-only) */}
+                    {(behind > 0 || ahead > 0) && (
+                      <Tooltip content={statusTooltip} className="shrink-0">
+                        <span className="flex items-center gap-1 text-xs font-medium tabular-nums text-gray-500 dark:text-gray-400 select-none">
+                          {behind > 0 && (
+                            <span className="flex items-center text-amber-600 dark:text-amber-400">
+                              <ArrowDown className="w-3.5 h-3.5 shrink-0" />{behind}
+                            </span>
+                          )}
+                          {ahead > 0 && (
+                            <span className="flex items-center">
+                              <ArrowUp className="w-3.5 h-3.5 shrink-0" />{ahead}
+                            </span>
+                          )}
+                        </span>
+                      </Tooltip>
+                    )}
+                    {/* Sync button (pull then push) */}
                     <Tooltip content={syncTooltip} className="shrink-0">
                       <button
                         type="button"
@@ -1257,37 +1279,23 @@ function RootLayout() {
                         aria-label={syncTooltip}
                         className={
                           canSync
-                            ? 'flex items-center gap-1 px-2.5 py-2 rounded-lg text-sm font-medium cursor-pointer text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors'
-                            : 'flex items-center gap-1 px-2.5 py-2 rounded-lg text-sm font-medium text-gray-400 dark:text-gray-600 cursor-not-allowed'
+                            ? 'inline-flex items-center px-2.5 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer'
+                            : 'inline-flex items-center px-2.5 py-2 rounded-lg border border-gray-200 dark:border-gray-700 text-gray-300 dark:text-gray-600 cursor-not-allowed'
                         }
                       >
                         <RefreshCw className={`w-4 h-4 shrink-0 ${syncing ? 'animate-spin' : ''}`} />
-                        {(behind > 0 || ahead > 0) && (
-                          <span className="flex items-center gap-0.5 text-xs tabular-nums">
-                            {behind > 0 && (
-                              <span className="flex items-center text-amber-600 dark:text-amber-400">
-                                <ArrowDown className="w-3 h-3 shrink-0" />{behind}
-                              </span>
-                            )}
-                            {ahead > 0 && (
-                              <span className="flex items-center">
-                                <ArrowUp className="w-3 h-3 shrink-0" />{ahead}
-                              </span>
-                            )}
-                          </span>
-                        )}
                       </button>
                     </Tooltip>
                   </div>
                 )
               })()
             ) : (
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-1.5">
                 <span className="flex-1 min-w-0 flex items-center gap-2 px-2.5 py-2 rounded-lg text-sm font-medium text-gray-400 dark:text-gray-600 cursor-not-allowed">
                   <FolderGit2 className="w-4 h-4 shrink-0" />
                   Repository
                 </span>
-                <span className="flex items-center px-2.5 py-2 rounded-lg text-gray-300 dark:text-gray-700 cursor-not-allowed">
+                <span className="inline-flex items-center px-2.5 py-2 rounded-lg border border-gray-200 dark:border-gray-700 text-gray-300 dark:text-gray-600 cursor-not-allowed">
                   <RefreshCw className="w-4 h-4 shrink-0" />
                 </span>
               </div>
