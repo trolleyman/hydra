@@ -1894,17 +1894,38 @@ func (s *Server) SendAgentInput(ctx context.Context, request api.SendAgentInputR
 	}
 
 	text := request.Body.Text
-	if head.AgentType == sandbox.AgentTypeGemini {
-		// Use bracketed paste mode to prevent gemini-cli from interpreting ! as a shell command
+	if head.AgentType != sandbox.AgentTypeBash {
+		// Deliver the message as a bracketed paste so multi-line input lands in
+		// the prompt verbatim. Without the explicit markers the agent TUIs detect
+		// the multi-line burst as a paste and fold a trailing carriage return into
+		// the message instead of submitting it, leaving the text typed-but-not-sent
+		// (e.g. diff comments). It also stops gemini-cli treating a leading ! as a
+		// shell command.
 		text = "\x1b[200~" + text + "\x1b[201~"
 	}
-	text += "\r"
 
 	if err := s.Sessions.Write(head.ID, []byte(text)); err != nil {
 		return api.SendAgentInput500JSONResponse{
 			Code:    500,
 			Error:   api.ErrorResponseErrorInternalError,
 			Details: "failed to write to agent stdin: " + err.Error(),
+		}, nil
+	}
+
+	// Submit with a separate Enter keystroke once the paste has settled. Sent in
+	// the same write as the message it gets absorbed as paste content rather than
+	// registering as a submit, which is exactly the bug above — this mirrors a
+	// real user pasting text and then pressing Enter.
+	select {
+	case <-time.After(100 * time.Millisecond):
+	case <-ctx.Done():
+		return nil, errtrace.Wrap(ctx.Err())
+	}
+	if err := s.Sessions.Write(head.ID, []byte("\r")); err != nil {
+		return api.SendAgentInput500JSONResponse{
+			Code:    500,
+			Error:   api.ErrorResponseErrorInternalError,
+			Details: "failed to submit agent input: " + err.Error(),
 		}, nil
 	}
 
