@@ -1495,20 +1495,34 @@ func (s *SimulationServer) GetRepositoryFile(w http.ResponseWriter, r *http.Requ
 	})
 }
 
-// HandleRepositoryBlob serves the simulated repo's binary image as raw PNG bytes.
+// HandleRepositoryBlob serves the simulated repo's raw file bytes: the binary
+// image as image/png, and any text file as text/plain. This backs both the
+// repository browser's image preview and the file viewer's "Raw" link (which
+// opens the unrendered blob in a new tab). Symlinks resolve to their target and
+// unknown paths 404, mirroring the real handler.
 func (s *SimulationServer) HandleRepositoryBlob(w http.ResponseWriter, r *http.Request) {
-	if strings.TrimPrefix(path.Clean(r.URL.Query().Get("path")), "/") != simRepoImage {
+	reqPath := strings.TrimPrefix(path.Clean(r.URL.Query().Get("path")), "/")
+	w.Header().Set("Cache-Control", "public, max-age=300")
+	if reqPath == simRepoImage {
+		png, err := base64.StdEncoding.DecodeString(simLogoPNGBase64)
+		if err != nil {
+			http.Error(w, "decode error", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "image/png")
+		_, _ = w.Write(png)
+		return
+	}
+	if target, ok := simRepoSymlinks[reqPath]; ok {
+		reqPath = target
+	}
+	content, ok := simRepoFiles[reqPath]
+	if !ok {
 		http.NotFound(w, r)
 		return
 	}
-	png, err := base64.StdEncoding.DecodeString(simLogoPNGBase64)
-	if err != nil {
-		http.Error(w, "decode error", http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "image/png")
-	w.Header().Set("Cache-Control", "public, max-age=300")
-	_, _ = w.Write(png)
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	_, _ = w.Write([]byte(content))
 }
 
 // GetRepositoryArtifacts lists the artifact scripts the simulated repo declares in

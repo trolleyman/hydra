@@ -350,6 +350,13 @@ try {
       // tree auto-expanded down to it (folders are otherwise collapsed). Demos
       // PLAN.md #41a (line numbers) + #41d (wrapping) + #41f (URL routing).
       { name: 'repository-code', path: '/project/sim-project/repository/main/internal/server/server.go' },
+      // The "raw" file view: the file header's Raw button (and the image
+      // preview's copy/raw controls) open the unrendered blob in a new tab,
+      // served by the /repository/.../blob endpoint and rendered by the browser
+      // as plain text — GitHub's "raw" page. We navigate straight to that blob
+      // URL to document where the Raw button lands. Theme doesn't affect the
+      // browser's plain-text rendering, so the light/dark shots match.
+      { name: 'repository-raw', path: '/repository/projects/sim-project/blob?path=internal/server/server.go&ref=main' },
       // The branch selector opened over the source-file view: Hydra agent
       // branches (hydra/*) are listed first (PLAN.md #41b).
       {

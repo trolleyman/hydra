@@ -10,11 +10,13 @@ import {
   ChevronDown, ChevronRight, File as FileIcon, Folder, FolderOpen, FileText,
   GitBranch,
   LoaderCircle, Settings, FileQuestion, FileSymlink, CornerDownRight,
-  Images, Camera,
+  Images, Camera, Copy, Check, X, ExternalLink,
 } from 'lucide-react'
 import { getFileIcon } from '../lib/fileIcons'
+import { canCopyImages, copyImageToClipboard } from '../lib/clipboard'
 import { BranchSelector } from './BranchSelector'
 import { RepositoryArtifactsView } from './RepositoryArtifactsView'
+import { Tooltip } from './Tooltip'
 
 // ── File tree model ────────────────────────────────────────────────────────────
 
@@ -252,6 +254,74 @@ function formatBytes(n: number): string {
 
 // File icons (PLAN.md #41l) now live in ../lib/fileIcons (getFileIcon), shared
 // with the diff viewer so both render files identically.
+
+// ── File header actions (copy contents + raw) ─────────────────────────────────
+// Mirrors GitHub's per-file "copy" and "raw" controls. Copy writes the file's
+// text to the clipboard, or — for an image — the decoded image itself (when the
+// browser's Clipboard API supports it). It's hidden for binaries, where there's
+// nothing useful to copy. Raw opens the unrendered blob in a new tab via the
+// same endpoint the image preview uses, so it works for any real file — text,
+// image, or binary. Both buttons share the header button styling with
+// SettingsPopup.
+
+const HEADER_BTN_CLASS =
+  'flex items-center justify-center h-7 rounded-md border transition-colors cursor-pointer text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
+
+// useCopyFlash drives the transient Copy → Check/X feedback shared by the copy
+// buttons: call flash(ok) after an attempt and read state/err to pick the icon.
+function useCopyFlash() {
+  const [state, setState] = useState<'idle' | 'ok' | 'err'>('idle')
+  const flash = (ok: boolean) => {
+    setState(ok ? 'ok' : 'err')
+    setTimeout(() => setState('idle'), 1500)
+  }
+  return { state, flash }
+}
+
+function FileActions({ file, projectId, refStr }: { file: RepositoryFileResponse; projectId: string; refStr: string }) {
+  const { state, flash } = useCopyFlash()
+
+  // An unresolved symlink has no underlying blob, so neither action applies.
+  if (file.symlink && !file.target_path) return null
+  const contentPath = file.target_path ?? file.path
+  const rawUrl = `/repository/projects/${encodeURIComponent(projectId)}/blob?path=${encodeURIComponent(contentPath)}&ref=${encodeURIComponent(refStr)}`
+
+  const isImg = isImage(contentPath)
+  // Copy applies to text (file.content) or an image the browser can put on the
+  // clipboard; binaries have neither, so the button is hidden for them.
+  const canCopy = file.content != null || (isImg && canCopyImages())
+
+  const handleCopy = async () => {
+    try {
+      if (file.content != null) await navigator.clipboard.writeText(file.content)
+      else if (isImg) await copyImageToClipboard(rawUrl)
+      else return
+      flash(true)
+    } catch {
+      flash(false)
+    }
+  }
+
+  return (
+    <div className="flex items-center gap-1.5 shrink-0">
+      {canCopy && (
+        <Tooltip content={state === 'ok' ? 'Copied!' : state === 'err' ? 'Copy failed' : isImg ? 'Copy image' : 'Copy file contents'}>
+          <button onClick={handleCopy} className={`${HEADER_BTN_CLASS} w-7`}>
+            {state === 'ok' ? <Check className="w-3.5 h-3.5 text-green-500" />
+              : state === 'err' ? <X className="w-3.5 h-3.5 text-red-500" />
+                : <Copy className="w-3.5 h-3.5" />}
+          </button>
+        </Tooltip>
+      )}
+      <Tooltip content="View raw file">
+        <a href={rawUrl} target="_blank" rel="noreferrer" className={`${HEADER_BTN_CLASS} gap-1 px-2 text-xs font-medium`}>
+          Raw
+          <ExternalLink className="w-3 h-3" />
+        </a>
+      </Tooltip>
+    </div>
+  )
+}
 
 // ── Settings popup (PLAN.md #41e) ─────────────────────────────────────────────
 // Mirrors the diff viewer's settings popup styling so the two feel consistent.
@@ -793,6 +863,9 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
               {fileLoading && <LoaderCircle className="w-3.5 h-3.5 shrink-0 animate-spin text-gray-400" />}
               {file && (
                 <span className="ml-auto text-xs text-gray-400 dark:text-gray-500 shrink-0">{formatBytes(file.size)}</span>
+              )}
+              {file && !artifactScript && (
+                <FileActions file={file} projectId={projectId} refStr={refStr} />
               )}
               <div className={file ? '' : 'ml-auto'}>
                 <SettingsPopup settings={settings} onChange={setSettings} />
