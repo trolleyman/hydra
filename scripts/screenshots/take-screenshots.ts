@@ -389,6 +389,14 @@ try {
       // the ref and renders its outputs single-sided. The deep link auto-expands
       // .hydra → artifacts; "screenshots" returns a ready set of mock images.
       { name: 'repository-artifacts', path: '/project/sim-project/repository/main/.hydra/artifacts/screenshots' },
+      // The repository browser (a file open) at the small viewports, to document
+      // how its tree + content layout reflows. Named repository-* so they tag
+      // section::repository; the viewport:: axis is set explicitly for the
+      // landscape/tablet sizes (width alone can't tell those apart).
+      { name: 'repository-mobile', path: '/project/sim-project/repository/main/internal/server/server.go', viewport: { width: 390, height: 844 }, viewportOnly: true },
+      { name: 'repository-mobile-landscape', path: '/project/sim-project/repository/main/internal/server/server.go', viewport: { width: 844, height: 390 }, viewportTag: 'mobile-landscape', viewportOnly: true },
+      { name: 'repository-tablet', path: '/project/sim-project/repository/main/internal/server/server.go', viewport: { width: 834, height: 1112 }, viewportTag: 'tablet', viewportOnly: true },
+      { name: 'repository-tablet-landscape', path: '/project/sim-project/repository/main/internal/server/server.go', viewport: { width: 1112, height: 834 }, viewportTag: 'tablet-landscape', viewportOnly: true },
       // The project settings page, landing on the "All Agents" / Global Defaults
       // tab. Simulation seeds a multi-line pre-spawn script (GetConfig in
       // internal/http/simulation.go), so the capture documents the sandbox
@@ -432,7 +440,7 @@ try {
       // signal it's editable) swaps it for an input seeded with the current title
       // (Enter saves via PATCH, Esc cancels). The title button is tagged
       // title="Rename", so the selector targets it unambiguously.
-      { name: 'agent-rename', path: '/project/sim-project/agent/agent-1', viewportOnly: true, click: '.sticky button[title="Rename"]' },
+      { name: 'agent-rename', path: '/project/sim-project/agent/agent-1', viewportOnly: true, click: 'button[title="Rename"]' },
       // The agent-detail prompt block rendering the upload paths a prompt carries
       // as attachment chips instead of raw links: three image thumbnails (served a
       // fixed stub PNG) and one non-image file shown with a generic icon, the
@@ -615,7 +623,7 @@ try {
         path: '/project/sim-project/agent/agent-1',
         viewport: { width: 390, height: 844 },
         viewportOnly: true,
-        click: '.sticky button:has(svg.lucide-chevron-down)',
+        click: 'button[aria-label="Agent actions"]',
       },
 
       // ── Mobile landscape (844×390) ──────────────────────────────────────────

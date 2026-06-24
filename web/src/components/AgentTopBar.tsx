@@ -58,23 +58,26 @@ export function AgentTopBar({
   const editing = rename?.editing ?? false
 
   return (
-    // Bleed past the page padding (p-3 / sm:p-6) so the bar spans edge-to-edge and
-    // sticks to the top of the scroll container.
-    <div className="sticky top-0 z-20 -mx-3 sm:-mx-6 -mt-3 sm:-mt-6 mb-4 px-1.5 h-12 flex items-center gap-1 bg-white/95 dark:bg-gray-900/95 backdrop-blur border-b border-gray-200 dark:border-gray-700">
+    // A real header above the scrolling content (not sticky inside it), so it
+    // aligns with the sidebar header and never collides with the diff's own
+    // sticky "Changes" header.
+    <div className="shrink-0 h-12 px-3 sm:px-4 flex items-center gap-1 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
       {collapsed && (
         <Tooltip content="Show sidebar (Ctrl+.)">
           <button
             type="button"
             aria-label="Show sidebar"
             onClick={toggle}
-            className="shrink-0 w-9 h-9 flex items-center justify-center rounded-lg text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors cursor-pointer"
+            className="shrink-0 -ml-1 w-9 h-9 flex items-center justify-center rounded-lg text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors cursor-pointer"
           >
             <PanelLeftOpen className="w-5 h-5" />
           </button>
         </Tooltip>
       )}
 
-      <div ref={menuRef} className="relative flex-1 min-w-0 flex items-center gap-0.5">
+      {/* Title + chevron, sized to content so the chevron sits right after the
+          name; the menu right-aligns to this group. */}
+      <div ref={menuRef} className="relative flex items-center gap-0.5 min-w-0">
         {editing && rename ? (
           <input
             autoFocus
@@ -91,7 +94,7 @@ export function AgentTopBar({
                 rename.onCancel()
               }
             }}
-            className="flex-1 min-w-0 text-sm font-semibold bg-transparent border-b border-blue-400 focus:outline-none text-gray-800 dark:text-gray-100 disabled:opacity-50"
+            className="min-w-0 w-64 max-w-full text-sm font-semibold bg-transparent border-b border-blue-400 focus:outline-none text-gray-800 dark:text-gray-100 disabled:opacity-50"
           />
         ) : (
           <>
@@ -99,7 +102,7 @@ export function AgentTopBar({
               type="button"
               onClick={() => rename?.onStart()}
               title={rename ? 'Rename' : title}
-              className={`flex-1 min-w-0 truncate text-left text-sm font-semibold text-gray-800 dark:text-gray-100 px-1 py-1 rounded transition-colors ${
+              className={`min-w-0 truncate text-left text-sm font-semibold text-gray-800 dark:text-gray-100 px-1 py-1 rounded transition-colors ${
                 rename ? 'cursor-text hover:bg-gray-100 dark:hover:bg-gray-700' : 'cursor-default'
               }`}
             >
@@ -146,7 +149,9 @@ export function AgentTopBar({
         )}
       </div>
 
-      {statusDot && <div className="shrink-0 pl-1">{statusDot}</div>}
+      {/* Status dot pushed to the right, inset from the edge to match the bar's
+          vertical centering. */}
+      {statusDot && <div className="ml-auto pl-3">{statusDot}</div>}
     </div>
   )
 }

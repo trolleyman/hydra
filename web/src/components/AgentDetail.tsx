@@ -140,18 +140,20 @@ function ArchivedAgentDetail({ agent, projectId, onPurged }: { agent: AgentRespo
           : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'
 
   return (
-    <div className="flex-1 flex flex-col overflow-auto p-3 sm:p-6 min-w-0 min-h-0" data-main-scroll>
-      <div className="w-full">
-        {/* The agent header is a single sticky top bar (no separate H1): the
-            archived agent's name + a delete action, and a dim status dot. While
-            the sidebar is collapsed it also hosts the show-sidebar toggle. */}
-        <AgentTopBar
-          title={agent.title || agent.id}
-          statusDot={<span className="block w-2.5 h-2.5 rounded-full bg-gray-300 dark:bg-gray-600" />}
-          actions={[
-            { label: 'Delete permanently', icon: <Trash2 className="w-4 h-4" />, onClick: handlePurge, danger: true, disabled: purging },
-          ]}
-        />
+    <div className="flex-1 flex flex-col min-w-0 min-h-0">
+      {/* The agent header is a single header bar (no separate H1): the archived
+          agent's name + a delete action, and a dim status dot. While the sidebar
+          is collapsed it also hosts the show-sidebar toggle. It sits above the
+          scroll area. */}
+      <AgentTopBar
+        title={agent.title || agent.id}
+        statusDot={<span className="block w-2.5 h-2.5 rounded-full bg-gray-300 dark:bg-gray-600" />}
+        actions={[
+          { label: 'Delete permanently', icon: <Trash2 className="w-4 h-4" />, onClick: handlePurge, danger: true, disabled: purging },
+        ]}
+      />
+      <div className="flex-1 flex flex-col overflow-auto p-3 sm:p-6 min-w-0 min-h-0" data-main-scroll>
+        <div className="w-full">
         {/* Header */}
         <div className="mb-6">
           {/* Metadata row */}
@@ -207,6 +209,7 @@ function ArchivedAgentDetail({ agent, projectId, onPurged }: { agent: AgentRespo
               </button>
             </Tooltip>
           </div>
+        </div>
         </div>
       </div>
     </div>
@@ -469,30 +472,32 @@ export function AgentDetail({
   }
 
   return (
-    <div ref={scrollRef} className="flex-1 flex flex-col overflow-auto p-3 sm:p-6 min-w-0 min-h-0" data-main-scroll>
-      <div className="w-full">
-        {/* The agent header is a single sticky top bar (no separate H1): the name
-            with an actions dropdown (Rename / Merge / Kill — clicking the name
-            also renames it inline) and a status dot. While the sidebar is
-            collapsed it also hosts the show-sidebar toggle. */}
-        <AgentTopBar
-          title={agent.title || agent.id}
-          statusDot={<span className={`block w-2.5 h-2.5 rounded-full ${agentDotClass(agent)}`} />}
-          rename={{
-            editing: editingTitle,
-            draft: titleDraft,
-            saving: savingTitle,
-            onStart: startEditingTitle,
-            onChange: setTitleDraft,
-            onSave: saveTitle,
-            onCancel: () => setEditingTitle(false),
-          }}
-          actions={[
-            { label: 'Rename', icon: <Pencil className="w-4 h-4" />, onClick: startEditingTitle },
-            { label: 'Merge', icon: <Merge className="w-4 h-4" />, onClick: handleMerge, disabled: merging || killing },
-            { label: 'Kill', icon: <Trash2 className="w-4 h-4" />, onClick: handleKill, danger: true, disabled: merging || killing },
-          ]}
-        />
+    <div className="flex-1 flex flex-col min-w-0 min-h-0">
+      {/* The agent header is a single header bar (no separate H1): the name with
+          an actions dropdown (Rename / Merge / Kill — clicking the name also
+          renames it inline) and a status dot. While the sidebar is collapsed it
+          also hosts the show-sidebar toggle. It sits above the scroll area so it
+          never collides with the diff's own sticky "Changes" header. */}
+      <AgentTopBar
+        title={agent.title || agent.id}
+        statusDot={<span className={`block w-2.5 h-2.5 rounded-full ${agentDotClass(agent)}`} />}
+        rename={{
+          editing: editingTitle,
+          draft: titleDraft,
+          saving: savingTitle,
+          onStart: startEditingTitle,
+          onChange: setTitleDraft,
+          onSave: saveTitle,
+          onCancel: () => setEditingTitle(false),
+        }}
+        actions={[
+          { label: 'Rename', icon: <Pencil className="w-4 h-4" />, onClick: startEditingTitle },
+          { label: 'Merge', icon: <Merge className="w-4 h-4" />, onClick: handleMerge, disabled: merging || killing },
+          { label: 'Kill', icon: <Trash2 className="w-4 h-4" />, onClick: handleKill, danger: true, disabled: merging || killing },
+        ]}
+      />
+      <div ref={scrollRef} className="flex-1 flex flex-col overflow-auto p-3 sm:p-6 min-w-0 min-h-0" data-main-scroll>
+        <div className="w-full">
         {/* Header */}
         <div className="mb-6">
           {/* Metadata row */}
@@ -557,6 +562,7 @@ export function AgentDetail({
 
         {/* Diff viewer */}
         <DiffViewer agent={agent} projectId={projectId} externalRefreshTrigger={diffRefreshTrigger} externalArtifactRefresh={artifactRefreshTrigger} />
+        </div>
       </div>
     </div>
   )
