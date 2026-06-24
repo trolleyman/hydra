@@ -1174,29 +1174,36 @@ func simSVG(label, color string, w, h int) string {
 }
 
 // simSVGUI renders a minimal, abstract UI mock — a header title, a body panel,
-// and a small status badge in the top-right corner. The before/after sides of a
-// changed image pass the same title/theme but a different badge colour + label,
-// so ONLY that small badge region differs between them. This keeps the pixel-diff
-// "Highlight" overlay meaningful: it marks just the changed badge rather than
-// painting over the whole frame (which a wholesale colour/label swap would do).
-func simSVGUI(title string, dark bool, badgeColor, badgeText string, w, h int) string {
+// a small centred tile, and a status badge in the top-right corner. The
+// before/after sides of a changed image pass the same title/theme but a
+// different accent colour + badge label, so only the centred tile and the
+// top-right badge differ between them — everything else is identical. Two small,
+// separated changed regions keep the demos honest without painting over the
+// whole frame: the pixel-diff "Highlight" overlay marks just those two spots,
+// and the centred tile gives the before/after slider (a horizontal mid-frame
+// wipe) something to reveal as it sweeps through the centre.
+func simSVGUI(title string, dark bool, accent, badgeText string, w, h int) string {
 	bg, body, fg := "#e2e8f0", "#cbd5e1", "#0f172a"
 	if dark {
 		bg, body, fg = "#0f172a", "#1e293b", "#f1f5f9"
 	}
-	bw, bh := 56, 22      // badge box
-	bx, by := w-bw-12, 12 // top-right, 12px inset
+	bw, bh := 56, 22      // badge box, top-right
+	bx, by := w-bw-12, 12 // 12px inset
+	cw, ch := 96, 26      // centred tile (gives the slider a mid-frame change)
+	cx, cy := (w-cw)/2, (h-ch)/2
 	doc := fmt.Sprintf(`<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%d">`+
 		`<rect width="%d" height="%d" fill="%s"/>`+
 		`<text x="16" y="30" font-family="sans-serif" font-size="16" fill="%s">%s</text>`+
 		`<rect x="12" y="48" width="%d" height="%d" rx="8" fill="%s"/>`+
+		`<rect x="%d" y="%d" width="%d" height="%d" rx="6" fill="%s"/>`+
 		`<rect x="%d" y="%d" width="%d" height="%d" rx="6" fill="%s"/>`+
 		`<text x="%d" y="%d" font-family="sans-serif" font-size="11" fill="white" text-anchor="middle">%s</text>`+
 		`</svg>`,
 		w, h, w, h, bg,
 		fg, title,
 		w-24, h-60, body,
-		bx, by, bw, bh, badgeColor,
+		cx, cy, cw, ch, accent,
+		bx, by, bw, bh, accent,
 		bx+bw/2, by+15, badgeText)
 	return "data:image/svg+xml;base64," + base64.StdEncoding.EncodeToString([]byte(doc))
 }
@@ -1326,9 +1333,11 @@ func simReadyChangedSet() api.ArtifactSet {
 		Status:  api.ArtifactSetStatusReady,
 		Changed: true,
 		Files: []api.ArtifactFile{
-			// Each modified pair shares everything except a small top-right status
-			// badge (grey "Draft" → green "Live"), so the pixel-diff Highlight marks
-			// only that region rather than the whole frame — see simSVGUI.
+			// Each modified pair shares everything except a small centred tile and a
+			// top-right status badge (grey "Draft" → green "Live"), so the pixel-diff
+			// Highlight marks only those two spots rather than the whole frame, and
+			// the centred change gives the before/after slider something to reveal as
+			// it wipes through the middle — see simSVGUI.
 			{
 				Name:       "home.png",
 				ChangeType: api.ArtifactFileChangeTypeModified,
