@@ -221,14 +221,43 @@ function splitFence(raw: string): { open: string; body: string; close: string } 
 // character (markers included) so it stays perfectly aligned with the textarea
 // underneath, but tints code spans and dims emphasis markers so the structure
 // reads as highlighted source rather than rendered output.
+// ZWSP is a zero-width space: it has no horizontal extent (so it never drifts
+// the caret) but still forms a line box, so we can hold a blank line that would
+// otherwise be swallowed when a code block sits at the very start of the value.
+const ZWSP = '​'
+
+// trimAroundBlocksForSource adjusts the boundary newlines around code blocks for
+// the textarea overlay, where each block is rendered as a full-width display:block
+// element. A block supplies its own line break before and after itself, so the
+// single source newline joining it to neighbouring text is dropped — otherwise
+// the literal newline AND the block's break would both fire and push everything
+// after the block down a line. The one exception is a newline that forms the
+// document's very first line: a block as the first child adds no leading break,
+// so dropping that newline would lose the blank line entirely; we keep it as a
+// zero-width space (one line box, no width). Symmetric to trimAroundBlocks, but
+// that one filters emptied segments away — which is exactly what loses the
+// leading blank line, hence this variant.
+function trimAroundBlocksForSource(segs: Seg[]): Seg[] {
+  const out = segs.map((s) => ({ ...s }))
+  out.forEach((s, i) => {
+    if (s.kind !== 'codeblock') return
+    const prev = out[i - 1]
+    if (prev && prev.kind === 'text' && prev.value.endsWith('\n')) {
+      prev.value = prev.value.slice(0, -1)
+      // Block is the first thing rendered but the value opened with a newline:
+      // keep that blank first line, the block won't manufacture it.
+      if (prev.value === '' && i - 1 === 0) prev.value = ZWSP
+    }
+    const next = out[i + 1]
+    if (next && next.kind === 'text' && next.value.startsWith('\n')) {
+      next.value = next.value.slice(1)
+    }
+  })
+  return out.filter((s) => !(s.kind === 'text' && s.value === ''))
+}
+
 function renderMarkdownSource(text: string): ReactNode {
-  // Unlike the read-only render, the overlay must stay char-for-char with the
-  // textarea, so we do NOT trim the newlines hugging fenced blocks and we render
-  // the block INLINE (see the codeblock branch below). parseInline guarantees
-  // the concatenated source of every segment equals `text` exactly, and in the
-  // `whitespace-pre-wrap` backdrop the literal newlines reproduce the textarea's
-  // line breaks one-for-one — so the highlight can never drift from the caret.
-  const segs = parseInline(text)
+  const segs = trimAroundBlocksForSource(parseInline(text))
   return segs.map((s, i) => {
     if (s.kind === 'text') return <span key={i}>{s.value}</span>
     if (s.kind === 'code') {
@@ -247,29 +276,25 @@ function renderMarkdownSource(text: string): ReactNode {
       )
     }
     if (s.kind === 'codeblock') {
-      // Rendered INLINE (not display:block) so the source stays char-for-char
-      // with the textarea: the block's whole source (`open` + `body` + `close`
-      // === raw) flows in the backdrop with its literal newlines intact, and the
-      // `whitespace-pre-wrap` parent turns those into exactly the textarea's line
-      // breaks. (A display:block element instead manufactures its OWN line breaks
-      // and forced us to trim the hugging source newlines to compensate — which
-      // dropped a line whenever a block sat at the start/end of the value or hard
-      // up against a blank line, drifting the highlight off the caret.) It must
-      // carry NO padding/margin and stay in the inherited proportional font, or
-      // glyph advances shift and the caret drifts. Syntax COLOURS come from the
-      // same highlight.js path as the read-only block — colour alone doesn't
-      // affect layout, and `.md-src-code` strips the theme's bold/italic, which
-      // WOULD change glyph advances. The highlighted HTML's text is exactly the
-      // inner code, so we re-add the two fence newlines around it to stay
-      // char-for-char (`open` + "\n" + value + "\n" + `close` === raw). The
-      // rounded background follows the text per wrapped line via
-      // `box-decoration-clone`. Fence lines are dimmed like emphasis markers.
+      // Rendered as ONE full-width display:block element so the whole block sits
+      // inside a single rounded background (not a chip hugging each line). The
+      // block supplies its own line break before/after, and trimAroundBlocksForSource
+      // has already dropped the matching source newlines, so the lines line up
+      // with the textarea one-for-one. It must carry NO padding/margin (which
+      // would shift glyphs and drift the caret) and stay in the inherited
+      // proportional font (a font swap would change glyph widths). Syntax COLOURS
+      // come from the same highlight.js path as the read-only block — colour alone
+      // doesn't affect layout, and `.md-src-code` strips the theme's bold/italic,
+      // which WOULD change glyph advances. The highlighted HTML's text is exactly
+      // the inner code, so we re-add the two fence newlines around it to stay
+      // char-for-char (`open` + "\n" + value + "\n" + `close` === raw). Fence
+      // lines are dimmed like emphasis markers.
       const { open, body, close } = splitFence(s.raw)
       const html = highlightCode(s.value, s.lang)
       return (
         <span
           key={i}
-          className="md-src-code rounded box-decoration-clone bg-gray-200/80 dark:bg-gray-700/70"
+          className="md-src-code block rounded bg-gray-200/80 dark:bg-gray-700/70 break-words"
         >
           <span className="opacity-50">{open}</span>
           {html != null ? (
