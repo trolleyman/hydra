@@ -682,11 +682,11 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
   const [notFound, setNotFound] = useState(false)
 
   // ── Branch-compare diff view ──────────────────────────────────────────────
-  // Toggling diff mode compares the browsed ref (base) against another branch
-  // (head), reusing the agent diff viewer's FileDiff/FileRow rendering. Diff
-  // mode is ephemeral component state, deliberately kept out of the URL so the
-  // existing ref/path splat parser stays untouched.
-  const [diffMode, setDiffMode] = useState(false)
+  // Picking a compare branch (head) diffs it against the browsed ref (base),
+  // reusing the agent diff viewer's FileDiff/FileRow rendering. The compare ref
+  // is the whole diff state — '' means "not diffing" — and is ephemeral
+  // component state, deliberately kept out of the URL so the existing ref/path
+  // splat parser stays untouched.
   const [compareRef, setCompareRef] = useState('')
   const [diff, setDiff] = useState<DiffResponse | null>(null)
   const [diffLoading, setDiffLoading] = useState(false)
@@ -775,13 +775,10 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
   const activeRef = parsed.ref ?? (currentBranch || 'HEAD')
   const isKnownBranch = !!branches?.some((b) => b.name === activeRef)
 
-  // Diff is "live" only once a distinct compare branch is chosen; until then the
-  // diff pane shows a hint to pick one. compareKnown drives the compare
-  // selector's known-branch vs short-SHA rendering.
+  // Diff is "live" only once a distinct compare branch is chosen. compareKnown
+  // drives the compare selector's known-branch vs short-SHA rendering.
   const compareKnown = !!branches?.some((b) => b.name === compareRef)
-  const diffActive = diffMode && !!compareRef && compareRef !== activeRef
-  const diffAdds = diff?.files.reduce((s, f) => s + f.additions, 0) ?? 0
-  const diffDels = diff?.files.reduce((s, f) => s + f.deletions, 0) ?? 0
+  const diffActive = !!compareRef && compareRef !== activeRef
 
   // The path to display: the URL path, or the repo's default (README) on the
   // bare /repository URL.
@@ -889,16 +886,12 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [diffActive, projectId, activeRef, compareRef, diffSettings.ignoreWhitespace])
 
-  // Default compare target when first enabling diff mode: the checked-out branch
-  // if it differs from the one being browsed, else the first other branch.
-  const defaultCompareRef = (): string => {
-    if (currentBranch && currentBranch !== activeRef) return currentBranch
-    return branches?.find((b) => b.name !== activeRef)?.name ?? ''
-  }
-  const toggleDiffMode = () => {
-    if (diffMode) { setDiffMode(false); return }
-    if (!compareRef || compareRef === activeRef) setCompareRef(defaultCompareRef())
-    setDiffMode(true)
+  // Selection from the diff branch selector. Picking the base branch (the one
+  // being browsed) or the currently-diffed branch again exits diff mode; any
+  // other branch becomes the new compare target.
+  const onDiffSelect = (name: string) => {
+    if (name === activeRef || name === compareRef) setCompareRef('')
+    else setCompareRef(name)
   }
 
   const toggleDiffFileCollapse = useCallback((path: string) => {
@@ -960,57 +953,54 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
         style={{ width: sidebarWidth }}
         className="relative shrink-0 border-r border-gray-200 dark:border-gray-700 flex flex-col bg-gray-50 dark:bg-gray-800/40"
       >
-        <div className="px-3 py-2 border-b border-gray-200 dark:border-gray-700 flex flex-col gap-2">
-          <div className="flex items-center gap-2">
-            {branches !== null ? (
-              <BranchSelector
-                branches={branches}
-                activeRef={activeRef}
-                isKnownBranch={isKnownBranch}
-                onSelect={selectBranch}
-              />
-            ) : (
-              <div className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-gray-400">
-                <GitBranch className="w-3.5 h-3.5" /> …
-              </div>
-            )}
-            {branches !== null && branches.length > 0 && (
-              <Tooltip content={diffMode ? 'Hide branch diff' : 'Compare with another branch'}>
-                <button
-                  onClick={toggleDiffMode}
-                  className={`flex items-center justify-center w-7 h-7 rounded-md border transition-colors cursor-pointer shrink-0 ${diffMode
-                    ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800'
-                    : 'text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
-                    }`}
-                >
-                  <GitCompare className="w-3.5 h-3.5" />
-                </button>
-              </Tooltip>
-            )}
-            <span className="ml-auto text-xs text-gray-400 dark:text-gray-500 shrink-0">
-              {diffActive
-                ? (diff ? `${diff.files.length} changed` : '…')
-                : `${files.length} ${files.length === 1 ? 'file' : 'files'}`}
-            </span>
-          </div>
-          {diffMode && branches !== null && (
-            <div className="flex items-center gap-1.5">
+        <div className="px-3 py-2 border-b border-gray-200 dark:border-gray-700 flex items-center gap-2 min-w-0">
+          {branches !== null ? (
+            <BranchSelector
+              branches={branches}
+              activeRef={activeRef}
+              isKnownBranch={isKnownBranch}
+              onSelect={selectBranch}
+              flexible={diffActive}
+            />
+          ) : (
+            <div className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-gray-400">
+              <GitBranch className="w-3.5 h-3.5" /> …
+            </div>
+          )}
+          {diffActive ? (
+            // Diffing: just "base → head", names clipped to fit, no counters.
+            <>
               <MoveRight className="w-4 h-4 text-gray-400 dark:text-gray-500 shrink-0" />
               <BranchSelector
-                branches={branches}
-                activeRef={compareRef || 'Pick a branch'}
+                branches={branches!}
+                activeRef={compareRef}
                 isKnownBranch={compareKnown}
-                onSelect={setCompareRef}
-                title="Compare against"
+                onSelect={onDiffSelect}
+                title="Change or exit branch diff"
+                flexible
               />
-            </div>
+            </>
+          ) : (
+            <>
+              {branches !== null && branches.length > 0 && (
+                <BranchSelector
+                  branches={branches}
+                  activeRef=""
+                  isKnownBranch={false}
+                  onSelect={onDiffSelect}
+                  title="Compare with another branch"
+                  triggerIcon={GitCompare}
+                />
+              )}
+              <span className="ml-auto text-xs text-gray-400 dark:text-gray-500 shrink-0">
+                {files.length} {files.length === 1 ? 'file' : 'files'}
+              </span>
+            </>
           )}
         </div>
         <div className="flex-1 overflow-y-auto py-1">
-          {diffMode ? (
-            !diffActive ? (
-              <div className="px-3 py-4 text-xs text-gray-400 dark:text-gray-500 text-center">Pick a branch to compare against.</div>
-            ) : diffLoading && !diff ? (
+          {diffActive ? (
+            diffLoading && !diff ? (
               <div className="flex items-center justify-center py-8 text-gray-400">
                 <LoaderCircle className="w-4 h-4 animate-spin" />
               </div>
@@ -1048,20 +1038,14 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
       {/* Picked file */}
       <div className="flex-1 flex flex-col min-w-0">
         <div className="px-4 py-2 border-b border-gray-200 dark:border-gray-700 flex items-center gap-2 shrink-0">
-          {diffMode ? (
+          {diffActive ? (
             <>
               <GitCompare className="w-4 h-4 shrink-0 text-blue-500" />
-              <span className="text-sm font-mono text-gray-700 dark:text-gray-300 truncate flex items-center gap-1.5 min-w-0">
+              <span className="text-sm font-mono text-gray-700 dark:text-gray-300 flex items-center gap-1.5 min-w-0">
                 <span className="truncate">{activeRef}</span>
                 <MoveRight className="w-3.5 h-3.5 shrink-0 text-gray-400" />
-                <span className="truncate">{compareRef || '…'}</span>
+                <span className="truncate">{compareRef}</span>
               </span>
-              {diffActive && diff && (
-                <span className="flex items-center gap-1.5 shrink-0">
-                  <span className="text-xs text-green-600 dark:text-green-400 font-medium">+{diffAdds}</span>
-                  <span className="text-xs text-red-600 dark:text-red-400 font-medium">−{diffDels}</span>
-                </span>
-              )}
               {diffLoading && <LoaderCircle className="w-3.5 h-3.5 shrink-0 animate-spin text-gray-400" />}
               <div className="ml-auto">
                 <DiffSettingsPopup settings={diffSettings} onChange={setDiffSettings} />
@@ -1101,13 +1085,8 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
         </div>
 
         <div ref={contentRef} className="flex-1 flex flex-col min-h-0 overflow-auto">
-          {diffMode ? (
-            !diffActive ? (
-              <div className="flex-1 flex flex-col items-center justify-center gap-2 text-gray-400 dark:text-gray-500">
-                <GitCompare className="w-8 h-8" />
-                <span className="text-sm">Pick a branch to compare against</span>
-              </div>
-            ) : diffLoading && !diff ? (
+          {diffActive ? (
+            diffLoading && !diff ? (
               <div className="flex-1 flex items-center justify-center text-gray-400">
                 <LoaderCircle className="w-5 h-5 animate-spin" />
               </div>

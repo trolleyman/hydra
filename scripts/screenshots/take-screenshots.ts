@@ -370,26 +370,30 @@ try {
         path: '/project/sim-project/repository/main/internal/server/server.go',
         click: 'button[title="Switch branch"]',
       },
-      // The branch-compare diff view: pressing the diff button (the GitCompare
-      // icon beside the branch selector) enters diff mode — a second branch
-      // selector pops out beneath the first and the main pane shows the diff
-      // between the browsed ref (base) and the compare branch (head), reusing
-      // the agent diff's FileDiff/FileRow rendering. The sidebar's file count
-      // switches to "N changed". Simulation serves a small mock diff (see
+      // The branch-compare diff view: the diff button (the GitCompare icon beside
+      // the branch selector) opens the branch dropdown; picking a branch diffs it
+      // against the browsed ref. The sidebar header becomes "base → head" and the
+      // main pane shows the diff (reusing the agent diff's FileDiff/FileRow), with
+      // per-file line counts and added/removed/renamed change-type tags.
+      // Simulation serves a small mock diff with one of each change type (see
       // GetRepositoryDiff in internal/http/simulation.go).
       {
         name: 'repository-diff',
         path: '/project/sim-project/repository',
-        clicks: ['button:has(svg.lucide-git-compare)'],
+        clicks: ['button:has(svg.lucide-git-compare)', 'button:has-text("hydra/add-line-numbers")'],
       },
-      // The popped-out compare branch selector, opened: pressing the diff button
-      // reveals a second BranchSelector ("Compare against"), and clicking it
-      // opens the same branch dropdown the browser uses — agent branches first —
-      // so the capture documents picking the branch to diff against.
+      // The diff branch selector reopened while diffing: the dropdown checkmarks
+      // the current compare branch, and clicking that branch (or the base) exits
+      // diff mode. Enters diff mode first (open dropdown, pick a branch), then
+      // reopens the now-labelled compare selector to document the checkmark.
       {
         name: 'repository-diff-branches',
         path: '/project/sim-project/repository',
-        clicks: ['button:has(svg.lucide-git-compare)', 'button[title="Compare against"]'],
+        clicks: [
+          'button:has(svg.lucide-git-compare)',
+          'button:has-text("hydra/add-line-numbers")',
+          'button[title="Change or exit branch diff"]',
+        ],
       },
       // A binary image file rendered inline via the raw blob route (PLAN.md #41k).
       { name: 'repository-image', path: '/project/sim-project/repository/main/web/public/logo.png' },

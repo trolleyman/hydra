@@ -1480,6 +1480,47 @@ func (s *SimulationServer) GetRepositoryDiff(w http.ResponseWriter, r *http.Requ
 				},
 			},
 		},
+		{
+			Path:       "internal/heads/lines.go",
+			ChangeType: api.DiffFileChangeTypeAdded,
+			Additions:  2,
+			Deletions:  0,
+			Hunks: []api.DiffHunk{
+				{
+					Header:   "@@ -0,0 +1,2 @@",
+					OldStart: 0,
+					NewStart: 1,
+					Lines: []api.DiffLine{
+						{Type: api.Addition, Content: "package heads", NewLineNum: ptr(1)},
+						{Type: api.Addition, Content: "// line numbering helpers", NewLineNum: ptr(2)},
+					},
+				},
+			},
+		},
+		{
+			Path:       "internal/heads/old_helper.go",
+			ChangeType: api.DiffFileChangeTypeDeleted,
+			Additions:  0,
+			Deletions:  1,
+			Hunks: []api.DiffHunk{
+				{
+					Header:   "@@ -1 +0,0 @@",
+					OldStart: 1,
+					NewStart: 0,
+					Lines: []api.DiffLine{
+						{Type: api.Deletion, Content: "// removed", OldLineNum: ptr(1)},
+					},
+				},
+			},
+		},
+		{
+			Path:       "internal/heads/renderer.go",
+			OldPath:    ptr("internal/heads/render.go"),
+			ChangeType: api.DiffFileChangeTypeRenamed,
+			Additions:  0,
+			Deletions:  0,
+			Hunks:      []api.DiffHunk{},
+		},
 	}
 	if params.Path != nil && *params.Path != "" {
 		filtered := make([]api.DiffFile, 0, 1)

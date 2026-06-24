@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ComponentType } from 'react'
 import { Bot, GitBranch, ChevronDown, Check } from 'lucide-react'
 import type { RepositoryBranch } from '../api'
 
@@ -15,12 +15,22 @@ export function shortSha(ref: string): string {
 // (so a bare commit SHA renders as a short SHA rather than a missing branch).
 export function BranchSelector({
   branches, activeRef, isKnownBranch, onSelect, title = 'Switch branch',
+  triggerIcon: TriggerIcon, triggerActive = false, flexible = false,
 }: {
   branches: RepositoryBranch[]
   activeRef: string
   isKnownBranch: boolean
   onSelect: (name: string) => void
   title?: string
+  // When set, the trigger renders as a single icon button (no branch label),
+  // used by the repository diff view to start a comparison. `triggerActive`
+  // paints it in the active/selected state even while closed.
+  triggerIcon?: ComponentType<{ className?: string }>
+  triggerActive?: boolean
+  // When true the control may shrink to share a row and clips its branch name
+  // (instead of sizing to its content) — used for the diff view's base → head
+  // selector pair in the narrow repository sidebar.
+  flexible?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -50,19 +60,32 @@ export function BranchSelector({
   )
 
   return (
-    <div ref={ref} className="relative shrink-0">
-      <button
-        title={title}
-        onClick={() => setOpen((o) => !o)}
-        className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border text-xs font-medium transition-colors cursor-pointer max-w-[14rem] ${open
-          ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800'
-          : 'text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
-          }`}
-      >
-        <GitBranch className="w-3.5 h-3.5 shrink-0" />
-        <span className="truncate font-mono">{isKnownBranch ? activeRef : shortSha(activeRef)}</span>
-        <ChevronDown className="w-3.5 h-3.5 shrink-0 opacity-60" />
-      </button>
+    <div ref={ref} className={`relative ${flexible ? 'min-w-0 flex-1' : 'shrink-0'}`}>
+      {TriggerIcon ? (
+        <button
+          title={title}
+          onClick={() => setOpen((o) => !o)}
+          className={`flex items-center justify-center w-7 h-7 rounded-md border transition-colors cursor-pointer shrink-0 ${open || triggerActive
+            ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800'
+            : 'text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
+            }`}
+        >
+          <TriggerIcon className="w-3.5 h-3.5" />
+        </button>
+      ) : (
+        <button
+          title={title}
+          onClick={() => setOpen((o) => !o)}
+          className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border text-xs font-medium transition-colors cursor-pointer ${flexible ? 'w-full min-w-0' : 'max-w-[14rem]'} ${open
+            ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800'
+            : 'text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
+            }`}
+        >
+          <GitBranch className="w-3.5 h-3.5 shrink-0" />
+          <span className="truncate font-mono">{isKnownBranch ? activeRef : shortSha(activeRef)}</span>
+          <ChevronDown className="w-3.5 h-3.5 shrink-0 opacity-60" />
+        </button>
+      )}
 
       {open && (
         <div className="absolute left-0 top-full mt-1 w-64 max-h-80 overflow-y-auto bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50 py-1">
