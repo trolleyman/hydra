@@ -2118,8 +2118,10 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
         const ctxLines = hunk.lines.slice(start, end)
         msg += `\n\`\`\`diff\n# ${path}\n${hunk.header}\n`
         msg += ctxLines.map((l, i) => {
-          if (start + i === targetIdx) return ' >' + l.content
           const typeChar = l.type === 'addition' ? '+' : l.type === 'deletion' ? '-' : ' '
+          // The commented line keeps its +/-/space marker but uses '>' instead of
+          // '|' so the agent can see both the line's kind and which line we mean.
+          if (start + i === targetIdx) return typeChar + '>' + l.content
           return typeChar + '|' + l.content
         }).join('\n')
         msg += `\n\`\`\`\n`
