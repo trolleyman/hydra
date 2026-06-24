@@ -193,7 +193,10 @@ export function AgentSidebarItem({
         // Reserve a fixed-height line for the live activity / last message so the
         // row keeps a constant height as the text appears, disappears, or changes
         // between status transitions — otherwise the whole sidebar jumps around.
-        <div className="mt-0.5 ml-4 min-h-[1rem] text-[11px] text-gray-400 dark:text-gray-500 truncate">
+        // `leading-4` pins the line box to the same 1rem as the min-height so a
+        // monospace `code` chip (shell-command activity) doesn't size the line
+        // box from its taller font metrics and nudge the row up vs. plain status.
+        <div className="mt-0.5 ml-4 min-h-[1rem] leading-4 text-[11px] text-gray-400 dark:text-gray-500 truncate">
           {renderMarkdown(agentStatusDetail(agent), { dollarCommand: true })}
         </div>
       )}
