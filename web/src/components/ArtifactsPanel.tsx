@@ -14,7 +14,7 @@ import {
   DIFF_COLOR, DIFF_PIXEL_THRESHOLD,
 } from './artifactDiffShared'
 import { type ArtifactSpans, BASE_ARTIFACT_COLUMNS, defaultSpanForAspect } from '../lib/artifactColumns'
-import { VideoDiffView, isVideoArtifact } from './VideoDiffView'
+import { VideoDiffView, isVideoArtifact, VIDEO_MIN_TILE_PX } from './VideoDiffView'
 
 const CHANGE_LABEL: Record<string, string> = {
   added: 'added',
@@ -841,7 +841,7 @@ export function MasonryGrid({ items, spanScale = 1, spans, onSpanChange }: {
   // bodyResizable defaults to true; set false for tiles whose media owns horizontal
   // drag (the before/after slider, video scrubbing) — those resize via the edge
   // handle only, so the two gestures don't fight.
-  items: { key: string; node: React.ReactNode; aspect?: number; pxWidth?: number; bodyResizable?: boolean }[]
+  items: { key: string; node: React.ReactNode; aspect?: number; pxWidth?: number; minWidthPx?: number; bodyResizable?: boolean }[]
   spanScale?: number
   spans: ArtifactSpans
   onSpanChange?: (key: string, span: number | null) => void
@@ -926,16 +926,26 @@ export function MasonryGrid({ items, spanScale = 1, spans, onSpanChange }: {
   // most columns it can cover at ≤1:1 device pixels. In side-by-side the run holds the
   // before+after pair so each image only gets ~half of it, hence the spanScale budget.
   // Explicit drag overrides bypass the cap: enlarging past native is then deliberate.
-  const spanOf = useCallback((it: { key: string; aspect?: number; pxWidth?: number }): number => {
+  const spanOf = useCallback((it: { key: string; aspect?: number; pxWidth?: number; minWidthPx?: number }): number => {
     let req = spans[it.key]
     if (req == null) {
       req = defaultSpanForAspect(it.aspect) * spanScale
+      const unit = layout.colW + layout.gap
       if (it.pxWidth && layout.colW > 0) {
         const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1
         const budgetCss = (it.pxWidth / dpr) * spanScale
         // tileW(s) = s*colW + (s-1)*gap ≤ budgetCss  ⇒  s ≤ (budgetCss + gap)/(colW + gap)
-        const maxSpan = Math.max(1, Math.floor((budgetCss + layout.gap) / (layout.colW + layout.gap)))
+        const maxSpan = Math.max(1, Math.floor((budgetCss + layout.gap) / unit))
         req = Math.min(req, maxSpan)
+      }
+      // Floor for media whose chrome needs a minimum width — a video's transport
+      // controls. The resolution cap above can shrink a small clip below its control
+      // bar, so ensure the tile spans enough columns to fit minWidthPx; this wins
+      // over the cap (a slightly-upscaled clip beats unusable controls).
+      if (it.minWidthPx && layout.colW > 0) {
+        // tileW(s) ≥ minWidthPx  ⇒  s ≥ (minWidthPx + gap)/(colW + gap)
+        const minSpan = Math.ceil((it.minWidthPx + layout.gap) / unit)
+        req = Math.max(req, minSpan)
       }
     }
     return Math.max(1, Math.min(Math.round(req), layout.cols))
@@ -1105,6 +1115,9 @@ function FileGrid({ files, mode, spans, onSpanChange }: {
       node: <FileRow file={f} mode={mode} />,
       aspect: dims[f.name]?.aspect,
       pxWidth: dims[f.name]?.pxWidth,
+      // Videos need a minimum tile width for their transport controls (see
+      // VIDEO_MIN_TILE_PX); images have no such chrome.
+      minWidthPx: isVideoArtifact(f.name) ? VIDEO_MIN_TILE_PX : undefined,
       // The slider mode and video both use horizontal drag on the media, so let
       // those resize via the edge handle only — see MasonryGrid's bodyResizable.
       bodyResizable: mode !== 'slider' && !isVideoArtifact(f.name),

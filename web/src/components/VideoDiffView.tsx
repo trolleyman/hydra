@@ -28,6 +28,14 @@ export function isVideoArtifact(name: string): boolean {
   return /\.webm$/i.test(name)
 }
 
+// Minimum tile width (CSS px) a video needs so VideoTransport's fixed-size controls
+// — three step/play buttons, two time labels, the seek slider's 80px floor, the
+// loop toggle and the speed select, plus gaps — fit on one row without overflowing.
+// The masonry floors a video tile's span to cover this, overriding the resolution
+// cap that would otherwise shrink a small clip below its own control bar (see
+// MasonryGrid spanOf). Images have no such chrome, so this is video-only.
+export const VIDEO_MIN_TILE_PX = 360
+
 // Max drift (seconds) between the two videos before the sync loop nudges the
 // follower onto the master's clock. ~1.5 frames at 60fps — tight enough that the
 // pair reads as one animation, loose enough not to thrash on normal jitter.

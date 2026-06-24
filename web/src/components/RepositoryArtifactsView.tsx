@@ -6,7 +6,7 @@ import type { ArtifactLogLine, RepositoryArtifactFile } from '../api'
 import { RepositoryArtifactResponse } from '../api'
 import { formatError } from '../api/format_error'
 import { IMG_CLASS, checkerStyle } from './artifactDiffShared'
-import { isVideoArtifact } from './VideoDiffView'
+import { isVideoArtifact, VIDEO_MIN_TILE_PX } from './VideoDiffView'
 import { TagBadge, LogView, ElapsedTime, MasonryGrid, useMediaDims } from './ArtifactsPanel'
 import { useArtifactSpans } from '../lib/artifactColumns'
 
@@ -236,6 +236,8 @@ export function RepositoryArtifactsView({
               node: <MediaCell file={f} />,
               aspect: dims[f.name]?.aspect,
               pxWidth: dims[f.name]?.pxWidth,
+              // Videos need a minimum tile width for their transport controls.
+              minWidthPx: isVideoArtifact(f.name) ? VIDEO_MIN_TILE_PX : undefined,
               // Video uses horizontal drag for scrubbing, so it resizes via the edge
               // handle only; images are draggable anywhere (see MasonryGrid).
               bodyResizable: !isVideoArtifact(f.name),
