@@ -280,24 +280,22 @@ const tabBtn = (active: boolean, disabled = false) =>
         : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600 cursor-pointer'
   }`
 
-// Before/After/Highlight switch (twin of the image ABSwitch). Both videos stay
-// mounted and in sync; Before/After flip which is visible. Highlight overlays the
-// magenta pixel-diff, recomputed continuously as the synced pair plays/scrubs (the
-// source videos stay mounted, hidden, under the canvas so they keep decoding).
-// Highlight is disabled when only one side exists (an added/removed file — nothing
-// to diff). Clicking the frame flips Before↔After (not while Highlight is shown).
+// Before/After switch with a Highlight checkbox (twin of the image ABSwitch). Both
+// videos stay mounted and in sync; Before/After flip which is visible, by button or
+// by clicking the frame. Ticking Highlight overlays the magenta pixel-diff,
+// recomputed continuously as the synced pair plays/scrubs, on top of whichever side
+// is shown — so the changes stay marked as you flip Before↔After. Highlight is
+// disabled when only one side exists (an added/removed file — nothing to diff).
 function VideoAB({ controller, left, right }: { controller: Controller; left?: string | null; right?: string | null }) {
   const canDiff = !!left && !!right
-  const [view, setView] = useState<'before' | 'after' | 'highlight'>('after')
+  const [view, setView] = useState<'before' | 'after'>('after')
+  const [highlight, setHighlight] = useState(false)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const sizer = (right ?? left) as string
-  const diffActive = view === 'highlight' && canDiff
-  // In Highlight (or a one-sided file) show the after frame under the canvas; else
-  // the chosen side.
-  const showRight = view === 'after' || view === 'highlight'
+  const showHighlight = highlight && canDiff
 
   useEffect(() => {
-    if (!diffActive) return
+    if (!showHighlight) return
     let raf = 0
     let cancelled = false
     let lastTs = 0
@@ -315,24 +313,28 @@ function VideoAB({ controller, left, right }: { controller: Controller; left?: s
       if (canvas.height !== h) canvas.height = h
       const ctx = canvas.getContext('2d', { willReadFrequently: true })
       if (!ctx) return
-      // After is the base; before goes to a scratch canvas so we can read both and
-      // overwrite only the differing pixels with magenta (same scheme as images).
-      ctx.clearRect(0, 0, w, h)
-      try { ctx.drawImage(r, 0, 0) } catch { return }
-      const after = ctx.getImageData(0, 0, w, h)
+      // Read both frames off a scratch canvas, then paint a transparent overlay
+      // where only the differing pixels are magenta, so the live frame shown under
+      // the canvas (Before or After) stays visible (same scheme as images).
       scratch.width = w; scratch.height = h
       const sctx = scratch.getContext('2d', { willReadFrequently: true })
       if (!sctx) return
-      sctx.clearRect(0, 0, w, h)
-      try { sctx.drawImage(l, 0, 0) } catch { return }
-      const before = sctx.getImageData(0, 0, w, h).data
-      const out = after.data
+      let before: Uint8ClampedArray, after: Uint8ClampedArray
+      try {
+        sctx.drawImage(l, 0, 0)
+        before = sctx.getImageData(0, 0, w, h).data
+        sctx.clearRect(0, 0, w, h)
+        sctx.drawImage(r, 0, 0)
+        after = sctx.getImageData(0, 0, w, h).data
+      } catch { return }
+      const overlay = ctx.createImageData(w, h)
+      const out = overlay.data
       for (let i = 0; i < out.length; i += 4) {
         const d =
-          Math.abs(out[i] - before[i]) +
-          Math.abs(out[i + 1] - before[i + 1]) +
-          Math.abs(out[i + 2] - before[i + 2]) +
-          Math.abs(out[i + 3] - before[i + 3])
+          Math.abs(after[i] - before[i]) +
+          Math.abs(after[i + 1] - before[i + 1]) +
+          Math.abs(after[i + 2] - before[i + 2]) +
+          Math.abs(after[i + 3] - before[i + 3])
         if (d > DIFF_PIXEL_THRESHOLD) {
           out[i] = DIFF_COLOR[0]
           out[i + 1] = DIFF_COLOR[1]
@@ -340,36 +342,42 @@ function VideoAB({ controller, left, right }: { controller: Controller; left?: s
           out[i + 3] = 255
         }
       }
-      ctx.putImageData(after, 0, 0)
+      ctx.putImageData(overlay, 0, 0)
     }
     raf = requestAnimationFrame(draw)
     return () => { cancelled = true; cancelAnimationFrame(raf) }
-  }, [diffActive, controller])
+  }, [showHighlight, controller])
 
   return (
     <div className="min-w-0">
       <div className="flex items-center gap-1 mb-1">
         <button onClick={() => setView('before')} className={tabBtn(view === 'before')}>Before</button>
         <button onClick={() => setView('after')} className={tabBtn(view === 'after')}>After</button>
-        <button
-          onClick={() => { if (canDiff) setView('highlight') }}
-          disabled={!canDiff}
+        <label
           title={canDiff ? 'Highlight changed pixels in magenta' : 'Needs both a before and after video'}
-          className={tabBtn(view === 'highlight', !canDiff)}
+          className={`ml-auto flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide select-none ${
+            canDiff ? 'cursor-pointer text-gray-500 dark:text-gray-400' : 'opacity-40 cursor-not-allowed text-gray-400 dark:text-gray-500'
+          }`}
         >
+          <input
+            type="checkbox"
+            checked={showHighlight}
+            disabled={!canDiff}
+            onChange={(e) => setHighlight(e.target.checked)}
+            className="accent-blue-500 cursor-pointer disabled:cursor-not-allowed"
+          />
           Highlight
-        </button>
+        </label>
       </div>
       <div
         className="relative w-full cursor-pointer select-none"
-        onClick={() => { if (!diffActive) setView((v) => (v === 'before' ? 'after' : 'before')) }}
+        onClick={() => setView((v) => (v === 'before' ? 'after' : 'before'))}
         onAuxClick={makeAuxOpen(() => (view === 'before' ? left : right) || sizer)}
       >
-        {diffActive && <span className={`${TAG_CLASS} left-1`}>Highlight</span>}
         <VideoSizer url={sizer} />
-        <VideoLayer url={right} attach={controller.attachRight} style={{ visibility: showRight ? 'visible' : 'hidden' }} />
-        <VideoLayer url={left} attach={controller.attachLeft} style={{ visibility: showRight ? 'hidden' : 'visible' }} />
-        {diffActive && <canvas ref={canvasRef} style={checkerStyle} className={OVERLAY_CLASS} />}
+        <VideoLayer url={right} attach={controller.attachRight} style={{ visibility: view === 'before' ? 'hidden' : 'visible' }} />
+        <VideoLayer url={left} attach={controller.attachLeft} style={{ visibility: view === 'before' ? 'visible' : 'hidden' }} />
+        {showHighlight && <canvas ref={canvasRef} className={`${OVERLAY_CLASS} pointer-events-none border-0`} />}
       </div>
     </div>
   )

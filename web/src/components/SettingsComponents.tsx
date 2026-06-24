@@ -8,7 +8,7 @@ import { InfoTooltip } from './InfoTooltip'
 import { AgentTerminal } from './AgentTerminal'
 import { ShellEditor } from './ShellEditor'
 import { useThemeStore, THEME_MODES, THEME_MODE_ICON, THEME_MODE_LABEL } from '../lib/theme'
-import { AgentTypeIcon, type AgentTypeIconName } from './AgentTypeIcon'
+import { AgentTypeIcon, AGENT_ACCENT, type AgentTypeIconName } from './AgentTypeIcon'
 
 // A labelled block at the top of settings: a Title-Case heading, an optional
 // one-line description, then the control(s). Used for Theme / Scope / Agent.
@@ -61,11 +61,11 @@ function ThemeSection() {
 // The agent-type selector (replaces the old tab bar) — brand icon + label per
 // agent. 'all' edits the shared defaults; the rest edit that agent's overrides.
 const AGENT_OPTIONS: { id: SettingsSection; label: string; icon: AgentTypeIconName; color: string }[] = [
-  { id: 'all', label: 'All agents', icon: 'all', color: 'text-blue-600 dark:text-blue-400' },
-  { id: 'claude', label: 'Claude', icon: 'claude', color: 'text-orange-600 dark:text-orange-400' },
-  { id: 'gemini', label: 'Gemini', icon: 'gemini', color: 'text-sky-600 dark:text-sky-400' },
-  { id: 'copilot', label: 'Copilot', icon: 'copilot', color: 'text-slate-700 dark:text-slate-300' },
-  { id: 'codex', label: 'Codex', icon: 'codex', color: 'text-emerald-600 dark:text-emerald-400' },
+  { id: 'all', label: 'All agents', icon: 'all', color: AGENT_ACCENT.all },
+  { id: 'claude', label: 'Claude', icon: 'claude', color: AGENT_ACCENT.claude },
+  { id: 'gemini', label: 'Gemini', icon: 'gemini', color: AGENT_ACCENT.gemini },
+  { id: 'copilot', label: 'Copilot', icon: 'copilot', color: AGENT_ACCENT.copilot },
+  { id: 'codex', label: 'Codex', icon: 'codex', color: AGENT_ACCENT.codex },
 ]
 
 function AgentSelector({ value, onChange }: { value: SettingsSection; onChange: (s: SettingsSection) => void }) {

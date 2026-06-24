@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { api } from '../stores/apiClient'
 import type { ArtifactSet, ArtifactFile, ArtifactLogLine } from '../api'
-import { LoaderCircle, Image as ImageIcon, ImageOff, ChevronDown, ChevronRight, TriangleAlert, RefreshCw, ScrollText, RotateCcw } from 'lucide-react'
+import { LoaderCircle, Image as ImageIcon, ImageOff, ChevronDown, ChevronRight, TriangleAlert, RefreshCw, ScrollText, RotateCcw, Search, X } from 'lucide-react'
 import { InfoTooltip } from './InfoTooltip'
 import { loadArtifactPrefs, saveArtifactPrefs, loadTagFilter, saveTagFilter, defaultTagFilter, isDefaultTagFilter, ARTIFACT_CHANGE_CATEGORY as CHANGE_CATEGORY, type ArtifactTagFilter } from '../lib/artifactPrefs'
 import { stripAnsi } from '../lib/ansi'
@@ -28,7 +28,8 @@ const CHANGE_COLOR: Record<string, string> = {
 
 // The ways to compare a before/after image pair. Persisted in the diff viewer's
 // settings; see DiffViewer's SettingsPopup. (The magenta pixel-diff isn't a mode of
-// its own any more — it lives as a "Highlight" tab inside the Before/After mode.)
+// its own any more — it's a "Highlight" checkbox that overlays the changes on the
+// Before/After view.)
 export type ImageDiffMode = 'side-by-side' | 'ab' | 'slider' | 'onion'
 
 export const IMAGE_DIFF_MODES: { value: ImageDiffMode; label: string }[] = [
@@ -95,54 +96,61 @@ function LayerNode({ url, style }: { url?: string | null; style?: React.CSSPrope
   )
 }
 
-// A/B switch: Before / After / Highlight. Before & After stay mounted and stacked,
-// so the toggle flips which is shown for an instant, flicker-free hard switch.
-// Highlight shows the after image with every changed pixel painted magenta (the
-// pixel-diff, see DiffCanvas); it's disabled when only one side exists (an
-// added/removed file — there's nothing to diff). Clicking the image flips
-// Before↔After (not while Highlight is shown). A missing side shows the "No image"
-// placeholder; middle-click opens the currently-shown image in a new tab.
+// A/B switch: Before / After, with a Highlight checkbox. Before & After stay
+// mounted and stacked, so the toggle flips which is shown for an instant,
+// flicker-free hard switch. Clicking the image (or the buttons) flips Before↔After.
+// Ticking Highlight overlays the pixel-diff (every changed pixel painted magenta,
+// see DiffCanvas) on top of whichever side is shown, so the changes stay marked as
+// you flip between Before and After. Highlight is disabled when only one side
+// exists (an added/removed file — there's nothing to diff). A missing side shows
+// the "No image" placeholder; middle-click opens the currently-shown image in a
+// new tab.
 function ABSwitch({ left, right }: { left?: string | null; right?: string | null }) {
   const canDiff = !!left && !!right
-  const [view, setView] = useState<'before' | 'after' | 'highlight'>('after')
+  const [view, setView] = useState<'before' | 'after'>('after')
+  const [highlight, setHighlight] = useState(false)
+  const showHighlight = highlight && canDiff
   // At least one side is present (ImageDiffView only routes here otherwise); the
   // present image is the invisible sizer that gives the stacked box its size.
   const sizer = (right ?? left) as string
-  const btn = (active: boolean, disabled = false) =>
-    `text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded transition-colors ${
-      disabled ? 'opacity-40 cursor-not-allowed bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500'
-        : active ? 'bg-blue-500 text-white cursor-pointer'
-          : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600 cursor-pointer'
+  const btn = (active: boolean) =>
+    `text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded transition-colors cursor-pointer ${
+      active ? 'bg-blue-500 text-white'
+        : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600'
     }`
   return (
     <div className="min-w-0">
       <div className="flex items-center gap-1 mb-1">
         <button onClick={() => setView('before')} className={btn(view === 'before')}>Before</button>
         <button onClick={() => setView('after')} className={btn(view === 'after')}>After</button>
-        <button
-          onClick={() => { if (canDiff) setView('highlight') }}
-          disabled={!canDiff}
+        <label
           title={canDiff ? 'Highlight changed pixels in magenta' : 'Needs both a before and after image'}
-          className={btn(view === 'highlight', !canDiff)}
+          className={`ml-auto flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide select-none ${
+            canDiff ? 'cursor-pointer text-gray-500 dark:text-gray-400' : 'opacity-40 cursor-not-allowed text-gray-400 dark:text-gray-500'
+          }`}
         >
+          <input
+            type="checkbox"
+            checked={showHighlight}
+            disabled={!canDiff}
+            onChange={(e) => setHighlight(e.target.checked)}
+            className="accent-blue-500 cursor-pointer disabled:cursor-not-allowed"
+          />
           Highlight
-        </button>
+        </label>
       </div>
-      {view === 'highlight' && canDiff ? (
-        <DiffCanvas left={left as string} right={right as string} />
-      ) : (
-        // select-none: flipping is a rapid click target, so without this a quick
-        // double-click would highlight the "No image" placeholder text.
-        <div
-          className="relative w-full cursor-pointer select-none"
-          onClick={() => setView((v) => (v === 'before' ? 'after' : 'before'))}
-          onAuxClick={makeAuxOpen(() => (view === 'before' ? left : right) || sizer)}
-        >
-          <img src={sizer} style={{ visibility: 'hidden' }} className={`${IMG_CLASS} block`} draggable={false} />
-          <LayerNode url={right} style={{ visibility: view === 'before' ? 'hidden' : 'visible' }} />
-          <LayerNode url={left} style={{ visibility: view === 'before' ? 'visible' : 'hidden' }} />
-        </div>
-      )}
+      {/* select-none: flipping is a rapid click target, so without this a quick
+          double-click would highlight the "No image" placeholder text. */}
+      <div
+        className="relative w-full cursor-pointer select-none"
+        onClick={() => setView((v) => (v === 'before' ? 'after' : 'before'))}
+        onAuxClick={makeAuxOpen(() => (view === 'before' ? left : right) || sizer)}
+      >
+        <img src={sizer} style={{ visibility: 'hidden' }} className={`${IMG_CLASS} block`} draggable={false} />
+        <LayerNode url={right} style={{ visibility: view === 'before' ? 'hidden' : 'visible' }} />
+        <LayerNode url={left} style={{ visibility: view === 'before' ? 'visible' : 'hidden' }} />
+        {showHighlight && <DiffCanvas left={left as string} right={right as string} />}
+      </div>
     </div>
   )
 }
@@ -247,12 +255,16 @@ function loadImage(url: string): Promise<HTMLImageElement> {
   })
 }
 
-// DiffCanvas renders the "after" image with every pixel that differs from the
-// "before" image painted bright magenta. The two are aligned at the top-left and
-// compared over the union of their bounds, so a size change (or pixels present on
-// only one side) reads as a difference too. It only runs with both sides present;
-// the caller handles the single-side case. Same-origin artifact URLs keep the
-// canvas untainted so getImageData works.
+// DiffCanvas paints a transparent overlay in which every pixel that differs
+// between the before/after images is bright magenta and unchanged pixels are left
+// clear, so it can sit on top of whichever side (Before or After) is currently
+// shown and mark the changes without hiding the underlying image. The two are
+// aligned at the top-left and compared over the union of their bounds, so a size
+// change (or pixels present on only one side) reads as a difference too. It only
+// runs with both sides present; the caller handles the single-side case.
+// Same-origin artifact URLs keep the scratch canvases untainted so getImageData
+// works. The overlay is pointer-events-none so the click-to-flip gesture on the
+// wrapper still works through it.
 function DiffCanvas({ left, right }: { left: string; right: string }) {
   const ref = useRef<HTMLCanvasElement>(null)
   const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading')
@@ -273,28 +285,29 @@ function DiffCanvas({ left, right }: { left: string; right: string }) {
         const ctx = canvas.getContext('2d', { willReadFrequently: true })
         if (!ctx) { setState('error'); return }
 
-        // The visible canvas starts as the "after" image (the base); a scratch
-        // canvas holds "before" so we can read both pixel buffers and overwrite
-        // only the differing pixels with magenta.
-        ctx.clearRect(0, 0, w, h)
-        ctx.drawImage(ra, 0, 0)
-        const after = ctx.getImageData(0, 0, w, h)
+        // Read each image's pixels off its own scratch canvas, then build a
+        // transparent overlay where only the differing pixels are painted magenta.
+        const read = (img: HTMLImageElement): Uint8ClampedArray | null => {
+          const s = document.createElement('canvas')
+          s.width = w
+          s.height = h
+          const sctx = s.getContext('2d', { willReadFrequently: true })
+          if (!sctx) return null
+          sctx.drawImage(img, 0, 0)
+          return sctx.getImageData(0, 0, w, h).data
+        }
+        const before = read(la)
+        const after = read(ra)
+        if (!before || !after) { setState('error'); return }
 
-        const scratch = document.createElement('canvas')
-        scratch.width = w
-        scratch.height = h
-        const sctx = scratch.getContext('2d', { willReadFrequently: true })
-        if (!sctx) { setState('error'); return }
-        sctx.drawImage(la, 0, 0)
-        const before = sctx.getImageData(0, 0, w, h).data
-
-        const out = after.data
+        const overlay = ctx.createImageData(w, h)
+        const out = overlay.data
         for (let i = 0; i < out.length; i += 4) {
           const d =
-            Math.abs(out[i] - before[i]) +
-            Math.abs(out[i + 1] - before[i + 1]) +
-            Math.abs(out[i + 2] - before[i + 2]) +
-            Math.abs(out[i + 3] - before[i + 3])
+            Math.abs(after[i] - before[i]) +
+            Math.abs(after[i + 1] - before[i + 1]) +
+            Math.abs(after[i + 2] - before[i + 2]) +
+            Math.abs(after[i + 3] - before[i + 3])
           if (d > DIFF_PIXEL_THRESHOLD) {
             out[i] = DIFF_COLOR[0]
             out[i + 1] = DIFF_COLOR[1]
@@ -302,7 +315,7 @@ function DiffCanvas({ left, right }: { left: string; right: string }) {
             out[i + 3] = 255
           }
         }
-        ctx.putImageData(after, 0, 0)
+        ctx.putImageData(overlay, 0, 0)
         setState('ready')
       })
       .catch(() => { if (!cancelled) setState('error') })
@@ -310,19 +323,15 @@ function DiffCanvas({ left, right }: { left: string; right: string }) {
   }, [left, right])
 
   return (
-    <div className="relative w-full" onAuxClick={makeAuxOpen(() => right)}>
-      <span className={`${TAG_CLASS} left-1`}>Highlight</span>
+    <>
       <canvas
         ref={ref}
-        style={checkerStyle}
-        className={`${IMG_CLASS} block ${state === 'ready' ? '' : 'opacity-0'}`}
+        className={`${OVERLAY_CLASS} pointer-events-none border-0 ${state === 'ready' ? '' : 'opacity-0'}`}
       />
       {state !== 'ready' && (
-        <div className="absolute inset-0 flex items-center justify-center text-[11px] text-gray-400 dark:text-gray-500">
-          {state === 'error' ? 'Could not compute diff' : 'Computing diff…'}
-        </div>
+        <span className={`${TAG_CLASS} right-1`}>{state === 'error' ? 'Diff failed' : 'Diffing…'}</span>
       )}
-    </div>
+    </>
   )
 }
 
@@ -457,6 +466,73 @@ function fileMatchesFilter(file: ArtifactFile, filter: ArtifactTagFilter): boole
     if (freeTags.length > 0 && freeTags.every((t) => filter.free.includes(t))) return false
   }
   return true
+}
+
+// fuzzyScore does a subsequence fuzzy match of `needle` within `haystack` (both
+// already lowercased by the caller). It returns a positive score — higher means a
+// closer match, with bonuses for characters that land at a word boundary, in a
+// consecutive run, or as a whole substring — or null when `needle` isn't a
+// subsequence of `haystack` at all.
+function fuzzyScore(needle: string, haystack: string): number | null {
+  if (!needle) return 0
+  let score = 0
+  let from = 0
+  let prev = -2
+  for (const ch of needle) {
+    const idx = haystack.indexOf(ch, from)
+    if (idx === -1) return null
+    let pts = 1
+    if (idx === prev + 1) pts += 2 // part of a consecutive run
+    if (idx === 0 || /[^a-z0-9]/.test(haystack[idx - 1])) pts += 3 // start of a word
+    score += pts
+    prev = idx
+    from = idx + 1
+  }
+  if (haystack.includes(needle)) score += 4 // reward a clean substring hit
+  return score
+}
+
+// searchScore ranks a file against a free-text search query. The query is split on
+// whitespace into words, and every word must fuzzy-match the filename or one of the
+// file's tags — if any word matches nothing, the file is excluded (null). The score
+// sums each word's best field match, so files that hit more or closer fields rank
+// higher. An empty query scores 0 (matches everything).
+function searchScore(file: ArtifactFile, query: string): number | null {
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean)
+  if (words.length === 0) return 0
+  const fields = [file.name, ...(file.tags ?? [])].map((s) => s.toLowerCase())
+  let total = 0
+  for (const w of words) {
+    let best: number | null = null
+    for (const f of fields) {
+      const s = fuzzyScore(w, f)
+      if (s !== null && (best === null || s > best)) best = s
+    }
+    if (best === null) return null
+    total += best
+  }
+  return total
+}
+
+// searchFiles drops files that don't match the query and sorts the rest by
+// descending score (ties keep input order — Array.sort is stable). An empty query
+// returns the list unchanged.
+function searchFiles(files: ArtifactFile[], query: string): ArtifactFile[] {
+  if (!query.trim()) return files
+  return files
+    .map((f, i) => ({ f, i, score: searchScore(f, query) }))
+    .filter((x): x is { f: ArtifactFile; i: number; score: number } => x.score !== null)
+    .sort((a, b) => b.score - a.score || a.i - b.i)
+    .map((x) => x.f)
+}
+
+// computeVisibleFiles is the single source of truth for which of a set's files are
+// shown, and in what order: first the tag/type/change filter hides files, then the
+// search query (when present) narrows + ranks them. Used by both the card (to
+// render) and the panel (to decide whether a card has any match while searching).
+function computeVisibleFiles(files: ArtifactFile[], filter: ArtifactTagFilter, search: string): ArtifactFile[] {
+  const filtered = filterIsActive(filter) ? files.filter((f) => fileMatchesFilter(f, filter)) : files
+  return search.trim() ? searchFiles(filtered, search) : filtered
 }
 
 // computeScopeCounts walks the files once, tallying per value how many items carry
@@ -1087,16 +1163,19 @@ function PersistedLogView({ leftUrl, rightUrl, open }: { leftUrl?: string | null
   )
 }
 
-function ArtifactSetCard({ set, mode, columns, onWeightsChange, filter, onRefresh, projectId, agentId }: { set: ArtifactSet; mode: ImageDiffMode; columns: ArtifactColumns; onWeightsChange: (weights: number[]) => void; filter: ArtifactTagFilter; onRefresh: (name: string) => void; projectId: string | null; agentId: string }) {
+function ArtifactSetCard({ set, mode, columns, onWeightsChange, filter, search, onRefresh, projectId, agentId }: { set: ArtifactSet; mode: ImageDiffMode; columns: ArtifactColumns; onWeightsChange: (weights: number[]) => void; filter: ArtifactTagFilter; search: string; onRefresh: (name: string) => void; projectId: string | null; agentId: string }) {
   const status = set.status as string
-  // Apply the (shared) tag filter to this card's files. The grid shows only
-  // matches; the header still reports the true diff size so "x/y changed" makes
-  // it obvious the filter is hiding some.
+  // Apply the (shared) tag filter and the search query to this card's files. The
+  // grid shows only matches — ranked by search score when searching; the header
+  // still reports the true diff size so "x/y changed" makes it obvious some are
+  // hidden.
   const isFiltered = filterIsActive(filter)
-  const visibleFiles = isFiltered ? set.files.filter((f) => fileMatchesFilter(f, filter)) : set.files
+  const searching = search.trim().length > 0
+  const narrowed = isFiltered || searching
+  const visibleFiles = computeVisibleFiles(set.files, filter, search)
   const changedFiles = visibleFiles.filter((f) => f.change_type !== 'unchanged')
   const totalChanged = set.files.filter((f) => f.change_type !== 'unchanged').length
-  const changedLabel = isFiltered && changedFiles.length !== totalChanged ? `${changedFiles.length}/${totalChanged} changed` : `${totalChanged} changed`
+  const changedLabel = narrowed && changedFiles.length !== totalChanged ? `${changedFiles.length}/${totalChanged} changed` : `${totalChanged} changed`
   const noChanges = status === 'ready' && !set.changed
   // One side failed while the other rendered (status stays "ready"): surface a
   // warning but still show the surviving side's images. Both-sides-failed is the
@@ -1142,6 +1221,12 @@ function ArtifactSetCard({ set, mode, columns, onWeightsChange, filter, onRefres
   // a "·" (the two builds run in parallel), e.g. "building frontend · home 7/24".
   const progressText = [set.left_progress, set.right_progress].filter(Boolean).join(' · ')
 
+  // While a search is active, force the card open so its ranked matches are
+  // actually visible (the panel only renders cards that have a match, so an
+  // expanded card always has something to show). The saved collapsed state is left
+  // untouched, so clearing the search restores it.
+  const effectiveCollapsed = searching ? false : collapsed
+
   return (
     <div className="border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 overflow-hidden">
       {/* Give the header a resting tint that's distinct from the card body
@@ -1152,7 +1237,7 @@ function ArtifactSetCard({ set, mode, columns, onWeightsChange, filter, onRefres
           onClick={() => setCollapsed((c) => !c)}
           className="flex-1 min-w-0 flex items-center gap-2 px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors cursor-pointer text-left"
         >
-          {collapsed ? <ChevronRight className="w-3.5 h-3.5 text-gray-400 shrink-0" /> : <ChevronDown className="w-3.5 h-3.5 text-gray-400 shrink-0" />}
+          {effectiveCollapsed ? <ChevronRight className="w-3.5 h-3.5 text-gray-400 shrink-0" /> : <ChevronDown className="w-3.5 h-3.5 text-gray-400 shrink-0" />}
           <ImageIcon className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400 shrink-0" />
           <span className="text-sm font-medium text-gray-700 dark:text-gray-300 truncate shrink-0">{set.name}</span>
           {status === 'generating' && (
@@ -1218,7 +1303,7 @@ function ArtifactSetCard({ set, mode, columns, onWeightsChange, filter, onRefres
         </button>
       </div>
 
-      {!collapsed && (
+      {!effectiveCollapsed && (
         <div className="px-3 pb-2">
           {/* While generating, stream both builds' live logs side by side; a side
               that finishes first shows its final log instead of "waiting". */}
@@ -1252,7 +1337,7 @@ function ArtifactSetCard({ set, mode, columns, onWeightsChange, filter, onRefres
               {set.files.length === 0 ? (
                 <div className="my-2 text-xs text-gray-400 dark:text-gray-500">No artifacts produced.</div>
               ) : visibleFiles.length === 0 ? (
-                <div className="my-2 text-xs text-gray-400 dark:text-gray-500">No files match the current filters.</div>
+                <div className="my-2 text-xs text-gray-400 dark:text-gray-500">No files match {searching ? 'your search' : 'the current filters'}.</div>
               ) : (
                 <FileGrid files={visibleFiles} mode={mode} columns={columns} onWeightsChange={onWeightsChange} />
               )}
@@ -1315,6 +1400,13 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
   // effect would race the reload and clobber the new key with the old value).
   const [tagFilter, setTagFilter] = useState<ArtifactTagFilter>(() => loadTagFilter(projectId, agentId))
   useEffect(() => { setTagFilter(loadTagFilter(projectId, agentId)) }, [projectId, agentId])
+
+  // Free-text search over filenames + tags (split-word fuzzy match + rank). Kept
+  // ephemeral — it narrows/ranks the view without persisting — and cleared when the
+  // project/agent changes since this panel is reused across agents.
+  const [search, setSearch] = useState('')
+  useEffect(() => { setSearch('') }, [projectId, agentId])
+  const searching = search.trim().length > 0
   const updateTagFilter = useCallback((f: ArtifactTagFilter) => {
     setTagFilter(f)
     saveTagFilter(projectId, agentId, f)
@@ -1528,6 +1620,31 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
             pending_tags) carries tags; ml-auto floats them to the right. */}
         {(hasTags || showTypeFilter || showChangeFilter) && (
           <div className="ml-auto flex flex-wrap items-center gap-1.5">
+            {/* Search box, leftmost in the filter group: a split-word fuzzy match +
+                rank over each file's name and tags (see searchScore). Narrows the
+                grid live and reorders the best matches first; non-matching cards
+                drop out entirely. */}
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-gray-400 dark:text-gray-500" />
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="search"
+                aria-label="Search artifacts by name or tag"
+                className="h-7 w-36 pl-7 pr-6 rounded-md border text-[11px] bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 border-gray-200 dark:border-gray-600 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+              />
+              {search && (
+                <button
+                  onClick={() => setSearch('')}
+                  title="Clear search"
+                  aria-label="Clear search"
+                  className="absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 cursor-pointer"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              )}
+            </div>
             {/* Reset to defaults — shown only when the filter has moved off its
                 default (any tag/value hidden, or the changes filter no longer hides
                 only 'unchanged'). Restores every scope to "show all" + the change
@@ -1617,7 +1734,11 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
             cards keep the previous agent's expand/collapse state (and its save
             effect would then clobber the new agent's saved prefs). Re-keying per
             agent remounts each card so it re-reads that agent's saved state. */}
-        {sets.map((s) => <ArtifactSetCard key={`${projectId ?? '_'}-${agentId}-${s.name}`} set={s} mode={imageDiffMode} columns={artifactColumns} onWeightsChange={onArtifactWeightsChange} filter={tagFilter} onRefresh={requestRefresh} projectId={projectId} agentId={agentId} />)}
+        {sets
+          // While searching, drop cards with no matching file so results stay
+          // clean — the surviving cards auto-expand to show their ranked matches.
+          .filter((s) => !searching || computeVisibleFiles(s.files, tagFilter, search).length > 0)
+          .map((s) => <ArtifactSetCard key={`${projectId ?? '_'}-${agentId}-${s.name}`} set={s} mode={imageDiffMode} columns={artifactColumns} onWeightsChange={onArtifactWeightsChange} filter={tagFilter} search={search} onRefresh={requestRefresh} projectId={projectId} agentId={agentId} />)}
       </div>
     </div>
   )
