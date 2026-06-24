@@ -1645,6 +1645,28 @@ func (s *SimulationServer) GetRepositoryBranches(w http.ResponseWriter, r *http.
 	})
 }
 
+func (s *SimulationServer) GetRepositoryPushStatus(w http.ResponseWriter, r *http.Request, projectId string) {
+	branch, remote := "main", "origin"
+	api.WriteJSON(w, http.StatusOK, api.RepositoryPushStatus{
+		Branch:    &branch,
+		Remote:    &remote,
+		Ahead:     2,
+		HasRemote: true,
+		CanPush:   true,
+	})
+}
+
+func (s *SimulationServer) PushRepository(w http.ResponseWriter, r *http.Request, projectId string) {
+	branch, remote := "main", "origin"
+	api.WriteJSON(w, http.StatusOK, api.RepositoryPushStatus{
+		Branch:    &branch,
+		Remote:    &remote,
+		Ahead:     0,
+		HasRemote: true,
+		CanPush:   false,
+	})
+}
+
 func (s *SimulationServer) GetRepositoryFile(w http.ResponseWriter, r *http.Request, projectId string, params api.GetRepositoryFileParams) {
 	ref := "HEAD"
 	if params.Ref != nil && *params.Ref != "" {

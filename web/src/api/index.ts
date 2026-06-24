@@ -40,6 +40,7 @@ export type { RepositoryArtifactsResponse } from './models/RepositoryArtifactsRe
 export type { RepositoryBranch } from './models/RepositoryBranch';
 export type { RepositoryBranchesResponse } from './models/RepositoryBranchesResponse';
 export type { RepositoryFileResponse } from './models/RepositoryFileResponse';
+export type { RepositoryPushStatus } from './models/RepositoryPushStatus';
 export type { RepositoryTreeResponse } from './models/RepositoryTreeResponse';
 export type { SandboxConfig } from './models/SandboxConfig';
 export type { ServiceScript } from './models/ServiceScript';

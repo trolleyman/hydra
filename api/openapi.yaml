@@ -1151,6 +1151,85 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /api/projects/{project_id}/repository/push-status:
+    get:
+      summary: Report whether the repository's current branch has commits to push
+      description: >-
+        Inspects the project root's currently checked-out branch and reports how
+        far it is ahead of the remote it would be pushed to. Uses the last-known
+        remote-tracking refs and does NOT contact the network, mirroring how
+        `git status` reports ahead/behind. The sidebar uses this to enable or
+        disable the Push button.
+      operationId: getRepositoryPushStatus
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            type: string
+          description: Project ID
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RepositoryPushStatus'
+        '404':
+          description: Project Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/projects/{project_id}/repository/push:
+    post:
+      summary: Push the repository's current branch to its remote
+      description: >-
+        Pushes the project root's currently checked-out branch to the remote it
+        tracks (or origin), setting upstream tracking if not already configured.
+        Requires network access; runs in the daemon, outside any agent sandbox.
+        Returns the refreshed push status, with ahead normally back to zero.
+      operationId: pushRepository
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            type: string
+          description: Project ID
+      responses:
+        '200':
+          description: OK (branch pushed)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RepositoryPushStatus'
+        '400':
+          description: Bad Request (nothing to push, detached HEAD, or no remote)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Project Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error (e.g. push rejected or auth failure)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /api/projects/{project_id}/repository/artifacts:
     get:
       summary: List the artifact scripts configured at a ref
@@ -1774,6 +1853,28 @@ components:
           items:
             $ref: '#/components/schemas/RepositoryBranch'
           description: Branches ordered with Hydra agent branches first, then the rest
+
+    RepositoryPushStatus:
+      type: object
+      required: [can_push, ahead, has_remote]
+      properties:
+        branch:
+          type: string
+          nullable: true
+          description: The repository's current branch, or null when HEAD is detached
+        remote:
+          type: string
+          nullable: true
+          description: The remote a push would target (e.g. "origin"), or null if none
+        ahead:
+          type: integer
+          description: Number of commits on the current branch not yet on the remote
+        has_remote:
+          type: boolean
+          description: True if the repository has a remote to push to
+        can_push:
+          type: boolean
+          description: True if there is a branch, a remote, and at least one commit to push
 
     RepositoryArtifactScript:
       type: object

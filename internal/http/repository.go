@@ -3,6 +3,7 @@ package http
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -284,6 +285,71 @@ func (s *Server) GetRepositoryBranches(_ context.Context, request api.GetReposit
 		Current:  current,
 		Branches: branches,
 	}, nil
+}
+
+// pushStatusResponse adapts a git.RemoteStatus into the API shape.
+func pushStatusResponse(st git.RemoteStatus) api.RepositoryPushStatus {
+	resp := api.RepositoryPushStatus{
+		Ahead:     st.Ahead,
+		HasRemote: st.HasRemote,
+		CanPush:   st.CanPush(),
+	}
+	if st.Branch != "" {
+		resp.Branch = &st.Branch
+	}
+	if st.Remote != "" {
+		resp.Remote = &st.Remote
+	}
+	return resp
+}
+
+// GetRepositoryPushStatus reports whether the project root's current branch has
+// commits to push, so the sidebar can enable or grey out the Push button.
+func (s *Server) GetRepositoryPushStatus(_ context.Context, request api.GetRepositoryPushStatusRequestObject) (api.GetRepositoryPushStatusResponseObject, error) {
+	projectRoot, err := s.resolveProjectRoot(request.ProjectId)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	st, err := git.GetRemoteStatus(projectRoot)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	return api.GetRepositoryPushStatus200JSONResponse(pushStatusResponse(st)), nil
+}
+
+// PushRepository pushes the project root's current branch to its remote and
+// returns the refreshed push status.
+func (s *Server) PushRepository(_ context.Context, request api.PushRepositoryRequestObject) (api.PushRepositoryResponseObject, error) {
+	projectRoot, err := s.resolveProjectRoot(request.ProjectId)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+
+	st, err := git.GetRemoteStatus(projectRoot)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	if !st.CanPush() {
+		detail := "nothing to push"
+		switch {
+		case st.Branch == "":
+			detail = "cannot push: HEAD is detached"
+		case !st.HasRemote:
+			detail = "cannot push: repository has no remote configured"
+		}
+		return nil, &apiError{Code: 400, Type: api.ErrorResponseErrorBadRequest, Err: errors.New(detail)} //errtrace:skip
+	}
+
+	if _, err := git.Push(projectRoot); err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+
+	// Re-read so the client sees the post-push state (ahead normally back to 0).
+	after, err := git.GetRemoteStatus(projectRoot)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	return api.PushRepository200JSONResponse(pushStatusResponse(after)), nil
 }
 
 // GetRepositoryFile returns the contents of a single repo-relative file at the
