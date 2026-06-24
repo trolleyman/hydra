@@ -1211,9 +1211,9 @@ function RootLayout() {
             </button>
           </Tooltip>
         )}
-        {/* Reserve a left strip for the floating reveal button when collapsed so
-            it never overlaps page content. */}
-        <div className={`flex-1 flex min-w-0 overflow-hidden ${sidebarCollapsed ? 'pl-12' : ''}`}>
+        {/* The floating reveal button (when collapsed) just overlays the top-left
+            corner — no reserved strip, so the content keeps the full width. */}
+        <div className="flex-1 flex min-w-0 overflow-hidden">
           <Outlet />
         </div>
       <Dialog />
