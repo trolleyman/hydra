@@ -12,7 +12,7 @@ import {
 } from 'lucide-react'
 import { getFileIcon } from './lib/fileIcons'
 import { Tooltip } from './components/Tooltip'
-import { ArtifactsPanel, IMAGE_DIFF_MODES, type ImageDiffMode } from './components/ArtifactsPanel'
+import { ArtifactsPanel, IMAGE_DIFF_MODES, DEFAULT_ARTIFACT_COLUMNS, MIN_ARTIFACT_COLUMNS, MAX_ARTIFACT_COLUMNS, type ImageDiffMode, type ArtifactColumns } from './components/ArtifactsPanel'
 import { useDialogStore } from './stores/dialogStore'
 import { StorageKeys, readLocal, writeLocal } from './lib/storage'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from './lib/agentViewPrefs'
@@ -1580,12 +1580,13 @@ function TreeNodeView({ node, depth, collapsedFolders, toggleFolder, onFileClick
 
 function SettingsPopup({ fileView, onFileViewChange, sideBySide, onSideBySideChange,
   ignoreWhitespace, onIgnoreWhitespaceChange, singleFile, onSingleFileChange,
-  imageDiffMode, onImageDiffModeChange }: {
+  imageDiffMode, onImageDiffModeChange, artifactColumnCount, onArtifactColumnCountChange }: {
     fileView: FileView; onFileViewChange: (v: FileView) => void
     sideBySide: boolean; onSideBySideChange: (v: boolean) => void
     ignoreWhitespace: boolean; onIgnoreWhitespaceChange: (v: boolean) => void
     singleFile: boolean; onSingleFileChange: (v: boolean) => void
     imageDiffMode: ImageDiffMode; onImageDiffModeChange: (v: ImageDiffMode) => void
+    artifactColumnCount: number; onArtifactColumnCountChange: (n: number) => void
   }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -1654,6 +1655,21 @@ function SettingsPopup({ fileView, onFileViewChange, sideBySide, onSideBySideCha
               </label>
             ))}
           </div>
+          {/* Masonry column count for the artifact grid. Drag the dividers between
+              columns (in the grid itself) to fine-tune their individual widths. */}
+          <div className="flex items-center gap-2 mt-3">
+            <span className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Columns</span>
+            <input
+              type="range"
+              min={MIN_ARTIFACT_COLUMNS}
+              max={MAX_ARTIFACT_COLUMNS}
+              step={1}
+              value={artifactColumnCount}
+              onChange={(e) => onArtifactColumnCountChange(Number(e.target.value))}
+              className="flex-1 accent-blue-500 cursor-pointer"
+            />
+            <span className="text-xs tabular-nums text-gray-600 dark:text-gray-300 w-4 text-right">{artifactColumnCount}</span>
+          </div>
         </div>
       )}
     </div>
@@ -1686,8 +1702,22 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
   })
   const [imageDiffMode, setImageDiffMode] = useState<ImageDiffMode>(() => {
     const stored = readLocal(StorageKeys.diffImageMode)
-    if (stored === 'side-by-side' || stored === 'ab' || stored === 'difference' || stored === 'slider' || stored === 'onion') return stored
-    return 'side-by-side'
+    if (stored === 'side-by-side' || stored === 'ab' || stored === 'slider' || stored === 'onion') return stored
+    return 'ab'
+  })
+  // Artifact masonry layout — column count (slider) + per-column width fractions
+  // (dragging the dividers). One layout for the whole artifacts panel; persisted.
+  const [artifactCols, setArtifactCols] = useState<ArtifactColumns>(() => {
+    const raw = readLocal(StorageKeys.diffArtifactCols)
+    if (raw) {
+      try {
+        const p = JSON.parse(raw) as Partial<ArtifactColumns>
+        const count = typeof p.count === 'number' ? Math.max(MIN_ARTIFACT_COLUMNS, Math.min(MAX_ARTIFACT_COLUMNS, Math.round(p.count))) : DEFAULT_ARTIFACT_COLUMNS.count
+        const weights = Array.isArray(p.weights) ? p.weights.filter((x): x is number => typeof x === 'number' && x > 0) : []
+        return { count, weights }
+      } catch { /* fall through to default */ }
+    }
+    return DEFAULT_ARTIFACT_COLUMNS
   })
 
   const [singleFileIdx, setSingleFileIdx] = useState(0)
@@ -1713,6 +1743,16 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
   useEffect(() => { writeLocal(StorageKeys.diffFileView, fileView) }, [fileView])
   useEffect(() => { writeLocal(StorageKeys.diffSidebarWidth, String(sidebarWidth)) }, [sidebarWidth])
   useEffect(() => { writeLocal(StorageKeys.diffImageMode, imageDiffMode) }, [imageDiffMode])
+  useEffect(() => { writeLocal(StorageKeys.diffArtifactCols, JSON.stringify(artifactCols)) }, [artifactCols])
+  // Changing the column count resets any custom per-column widths — the saved
+  // weights no longer match the new count, so the masonry falls back to equal
+  // columns until the dividers are dragged again.
+  const setArtifactColumnCount = useCallback((count: number) => {
+    setArtifactCols({ count: Math.max(MIN_ARTIFACT_COLUMNS, Math.min(MAX_ARTIFACT_COLUMNS, count)), weights: [] })
+  }, [])
+  const setArtifactColumnWeights = useCallback((weights: number[]) => {
+    setArtifactCols((c) => ({ ...c, weights }))
+  }, [])
 
   // DiffViewer is reused (not remounted) when switching agents, so reload the
   // collapsed-file set when the agent changes. Reset during render (per React's
@@ -2237,6 +2277,7 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
             ignoreWhitespace={ignoreWhitespace} onIgnoreWhitespaceChange={setIgnoreWhitespace}
             singleFile={singleFile} onSingleFileChange={handleSingleFileChange}
             imageDiffMode={imageDiffMode} onImageDiffModeChange={setImageDiffMode}
+            artifactColumnCount={artifactCols.count} onArtifactColumnCountChange={setArtifactColumnCount}
           />
         </div>
       </div>
@@ -2266,6 +2307,8 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
           // flash a loading spinner and reset the user's selection).
           refreshKey={refreshKey + (externalArtifactRefresh ?? 0)}
           imageDiffMode={imageDiffMode}
+          artifactColumns={artifactCols}
+          onArtifactWeightsChange={setArtifactColumnWeights}
         />
       )}
 

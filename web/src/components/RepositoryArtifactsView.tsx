@@ -5,9 +5,9 @@ import { ApiError } from '../api'
 import type { ArtifactLogLine, RepositoryArtifactFile } from '../api'
 import { RepositoryArtifactResponse } from '../api'
 import { formatError } from '../api/format_error'
-import { IMG_CLASS, checkerStyle, useMediaResize, ResizeGrip } from './artifactDiffShared'
+import { IMG_CLASS, checkerStyle } from './artifactDiffShared'
 import { isVideoArtifact } from './VideoDiffView'
-import { TagBadge, LogView, ElapsedTime } from './ArtifactsPanel'
+import { TagBadge, LogView, ElapsedTime, MasonryGrid, DEFAULT_ARTIFACT_COLUMNS } from './ArtifactsPanel'
 
 // RepositoryArtifactsView renders one [[artifacts]] script's output for a single
 // ref, single-sided (the repository browser shows one ref at a time, so there is
@@ -18,14 +18,13 @@ import { TagBadge, LogView, ElapsedTime } from './ArtifactsPanel'
 
 const POLL_MS = 2500
 
-// MediaCell shows one generated file: its name, tags, and the image (resizable,
-// click-to-open) or video. Mirrors the diff viewer's FileRow, minus the
-// before/after comparison machinery.
+// MediaCell shows one generated file: its name, tags, and the image (click-to-open)
+// or video. Mirrors the diff viewer's FileRow, minus the before/after comparison
+// machinery; width-driven (w-full) so it fills its masonry column.
 function MediaCell({ file }: { file: RepositoryArtifactFile }) {
-  const { maxHeight, onResizeStart, consumeDrag } = useMediaResize()
   const url = file.url ?? undefined
   return (
-    <div className="p-3 min-w-0 max-w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40">
+    <div className="p-3 w-full min-w-0 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40">
       <div className="flex flex-wrap items-center gap-1.5 mb-2">
         <span className="text-xs font-medium text-gray-700 dark:text-gray-300 truncate">{file.name}</span>
       </div>
@@ -35,7 +34,7 @@ function MediaCell({ file }: { file: RepositoryArtifactFile }) {
         </div>
       )}
       {!url ? (
-        <div className="select-none flex flex-col items-center justify-center gap-1 w-44 h-32 rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 text-gray-400 dark:text-gray-500">
+        <div className="select-none flex flex-col items-center justify-center gap-1 w-full h-32 rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 text-gray-400 dark:text-gray-500">
           <ImageOff className="w-5 h-5" />
           <span className="text-[11px] font-medium">No file</span>
         </div>
@@ -47,29 +46,19 @@ function MediaCell({ file }: { file: RepositoryArtifactFile }) {
           playsInline
           preload="metadata"
           className={`${IMG_CLASS} block`}
-          style={{ ...checkerStyle, maxHeight: `${maxHeight}px` }}
+          style={checkerStyle}
         />
       ) : (
-        // A press-and-drag resizes (onPointerDown); a plain click opens the image in
-        // a new tab, but consumeDrag() cancels that when the press became a drag.
-        <div className="group relative inline-block select-none" onPointerDown={onResizeStart}>
-          <a
-            href={url}
-            target="_blank"
-            rel="noreferrer"
-            className="block"
-            onClick={(e) => { if (consumeDrag()) e.preventDefault() }}
-          >
-            <img
-              src={url}
-              loading="lazy"
-              draggable={false}
-              style={{ ...checkerStyle, maxHeight: `${maxHeight}px` }}
-              className={IMG_CLASS}
-            />
-          </a>
-          <ResizeGrip onPointerDown={onResizeStart} />
-        </div>
+        // A plain click opens the image in a new tab; it fills the column width.
+        <a href={url} target="_blank" rel="noreferrer" className="block">
+          <img
+            src={url}
+            loading="lazy"
+            draggable={false}
+            style={checkerStyle}
+            className={IMG_CLASS}
+          />
+        </a>
       )}
     </div>
   )
@@ -225,9 +214,11 @@ export function RepositoryArtifactsView({
         </div>
       ) : (
         <div className="space-y-3">
-          <div className="flex flex-wrap items-start gap-3">
-            {data.files.map((f) => <MediaCell key={f.name} file={f} />)}
-          </div>
+          <MasonryGrid
+            items={data.files.map((f) => ({ key: f.name, node: <MediaCell file={f} /> }))}
+            span={1}
+            columns={DEFAULT_ARTIFACT_COLUMNS}
+          />
           {data.log_url && <PersistedLog url={data.log_url} />}
         </div>
       )}
