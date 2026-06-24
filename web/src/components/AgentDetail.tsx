@@ -139,7 +139,7 @@ function ArchivedAgentDetail({ agent, projectId, onPurged }: { agent: AgentRespo
           : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'
 
   return (
-    <div className="flex-1 flex flex-col overflow-auto p-6 min-w-0 min-h-0" data-main-scroll>
+    <div className="flex-1 flex flex-col overflow-auto p-3 sm:p-6 min-w-0 min-h-0" data-main-scroll>
       <div className="w-full">
         {/* Header */}
         <div className="mb-6">
@@ -541,12 +541,12 @@ export function AgentDetail({
   }
 
   return (
-    <div ref={scrollRef} className="flex-1 flex flex-col overflow-auto p-6 min-w-0 min-h-0" data-main-scroll>
+    <div ref={scrollRef} className="flex-1 flex flex-col overflow-auto p-3 sm:p-6 min-w-0 min-h-0" data-main-scroll>
       <div className="w-full">
         {/* Header */}
         <div className="mb-6">
-          {/* Title row */}
-          <div className="flex items-center gap-2 mb-2">
+          {/* Title row — wraps the action buttons below the title on narrow screens */}
+          <div className="flex items-center gap-2 mb-2 flex-wrap">
             {editingTitle ? (
               <input
                 autoFocus
@@ -651,7 +651,7 @@ export function AgentDetail({
           </div>
 
           {/* Metadata row */}
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-x-3 gap-y-1 flex-wrap">
             <span className={`text-xs px-2.5 py-0.5 rounded-full font-medium ${agentTypeClass}`}>
               {agent.agent_type}
             </span>

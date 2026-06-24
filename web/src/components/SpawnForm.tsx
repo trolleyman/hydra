@@ -457,8 +457,8 @@ export function SpawnForm({
   // Full-page (empty state) variant
   return (
     <>
-    <div className="flex-1 flex flex-col items-center justify-center p-8">
-      <div className="w-full max-w-4xl">
+    <div className="flex-1 min-w-0 flex flex-col items-center justify-center p-4 sm:p-8">
+      <div className="w-full max-w-4xl min-w-0">
         <div className="text-center mb-8">
           <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-gradient-to-br from-blue-500 to-purple-600 shadow-lg shadow-blue-500/30 mb-4">
             <Zap className="w-6 h-6 text-white" />
@@ -494,9 +494,10 @@ export function SpawnForm({
 
               {renderAttachments('md')}
 
-              {/* Footer bar */}
-              <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100 dark:border-gray-700 gap-4 shrink-0">
-                <div className="flex items-center gap-2 min-w-0 flex-1">
+              {/* Footer bar — stacks the controls above the Spawn button on
+                  narrow screens instead of overflowing the card */}
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between px-4 py-3 border-t border-gray-100 dark:border-gray-700 gap-3 shrink-0">
+                <div className="flex items-center gap-2 min-w-0 flex-wrap sm:flex-1">
                   {/* Attach files */}
                   <Tooltip content="Attach files" side="top">
                     <button
@@ -544,8 +545,8 @@ export function SpawnForm({
                     />
                   </div>
                 </div>
-                <div className="flex items-center gap-3 shrink-0">
-                  <span className="text-xs text-gray-400 dark:text-gray-500">{submitHint}</span>
+                <div className="flex items-center gap-3 shrink-0 self-end sm:self-auto">
+                  <span className="hidden sm:inline text-xs text-gray-400 dark:text-gray-500">{submitHint}</span>
                   <button
                     type="submit"
                     disabled={!canSubmit || loading}

@@ -14,7 +14,7 @@ const EVENT_FALLBACK_MS = 30_000
 import type { ProjectInfo, AgentResponse } from '../api'
 import { ApiError, ErrorResponse } from '../api'
 import { formatError } from '../api/format_error'
-import { Sun, Moon, Monitor, ChevronDown, ChevronRight, Folder, FolderGit2, FolderOpen, Plus, Settings, Check, X, LoaderCircle, AlertTriangle } from 'lucide-react'
+import { Sun, Moon, Monitor, ChevronDown, ChevronRight, Folder, FolderGit2, FolderOpen, Plus, Settings, Check, X, LoaderCircle, AlertTriangle, Menu } from 'lucide-react'
 import { folderPickerAvailable, openFolderPicker } from '../api/folderPicker'
 import { AgentSidebarItem } from '../components/AgentComponents'
 import { SpawnForm } from '../components/SpawnForm'
@@ -437,6 +437,11 @@ function RootLayout() {
   const [, setTick] = useState(0)
   const [development, setDevelopment] = useState(false)
   const [restarting, setRestarting] = useState(false)
+  // On small screens the sidebar collapses into an off-canvas drawer toggled by
+  // the header hamburger; on md+ it's the usual persistent column (this state is
+  // ignored there). Closed whenever the route changes so tapping an agent on a
+  // phone slides the drawer away and reveals the detail view.
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
   const [themeMode, setThemeMode] = useState<ThemeMode>(loadThemeMode)
   // Which projects the user has trusted, mirrored from localStorage so the trust
   // prompt re-evaluates reactively when one is accepted (see lib/storage).
@@ -821,6 +826,10 @@ function RootLayout() {
   // Drop expired per-artifact and per-agent-view UI prefs once on boot.
   useEffect(() => { pruneArtifactPrefs(); pruneAgentViewPrefs() }, [])
 
+  // Close the mobile drawer on any navigation (selecting an agent, opening the
+  // repository, switching project view) so it never lingers over the content.
+  useEffect(() => { setMobileSidebarOpen(false) }, [location.pathname])
+
   async function handleRestart() {
     setRestarting(true)
     try {
@@ -951,7 +960,16 @@ function RootLayout() {
 
   return (
     <div className="h-full bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 flex flex-col">
-      <header className="h-12 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex items-center px-4 gap-3 shrink-0">
+      <header className="h-12 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex items-center px-3 sm:px-4 gap-2 sm:gap-3 shrink-0">
+        <button
+          type="button"
+          aria-label="Toggle sidebar"
+          aria-expanded={mobileSidebarOpen}
+          onClick={() => setMobileSidebarOpen((o) => !o)}
+          className="md:hidden -ml-1 w-8 h-8 flex items-center justify-center rounded-md text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors cursor-pointer shrink-0"
+        >
+          <Menu className="w-5 h-5" />
+        </button>
         <Link
           to={currentProjectId ? '/project/$projectId' : '/'}
           params={currentProjectId ? { projectId: currentProjectId } : {}}
@@ -964,7 +982,7 @@ function RootLayout() {
               src="/icon.png"
               alt="Hydra icon" />
           </div>
-          <span className="text-2xl font-bold font-serif tracking-[-0.05em] dark:text-gray-100">Hydra</span>
+          <span className="hidden sm:inline text-2xl font-bold font-serif tracking-[-0.05em] dark:text-gray-100">Hydra</span>
         </Link>
 
         <ProjectDropdown
@@ -1050,10 +1068,21 @@ function RootLayout() {
       </header>
 
       <div className="flex flex-1 overflow-hidden">
-        {/* Persistent sidebar */}
+        {/* Backdrop behind the mobile drawer (small screens only). */}
+        {mobileSidebarOpen && (
+          <div
+            aria-hidden
+            onClick={() => setMobileSidebarOpen(false)}
+            className="md:hidden fixed inset-0 top-12 z-30 bg-black/40"
+          />
+        )}
+        {/* Sidebar: a persistent column on md+, an off-canvas drawer on mobile.
+            The stored pixel width drives the desktop column; on mobile a fixed
+            viewport-relative width (important-flagged so it wins over the inline
+            style) slides in from the left. */}
         <aside
           style={{ width: sidebarWidth }}
-          className="relative bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex flex-col shrink-0"
+          className={`relative max-md:fixed max-md:top-12 max-md:bottom-0 max-md:left-0 max-md:z-40 max-md:!w-[80vw] max-md:!max-w-[20rem] max-md:shadow-2xl bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex flex-col shrink-0 transition-transform duration-200 md:translate-x-0 ${mobileSidebarOpen ? 'max-md:translate-x-0' : 'max-md:-translate-x-full'}`}
         >
           <SpawnForm compact projectId={currentProjectId} onSpawned={handleSpawned} disabled={!currentProjectId} />
 
@@ -1173,10 +1202,10 @@ function RootLayout() {
             )}
           </div>
 
-          {/* Resize handle */}
+          {/* Resize handle (desktop only — the mobile drawer has a fixed width) */}
           <div
             onMouseDown={handleSidebarResizeStart}
-            className="absolute right-0 top-0 bottom-0 w-3 -mr-1 cursor-col-resize z-10 group flex items-stretch justify-center"
+            className="hidden md:flex absolute right-0 top-0 bottom-0 w-3 -mr-1 cursor-col-resize z-10 group items-stretch justify-center"
           >
             <div className="w-px group-hover:bg-blue-400/60 group-active:bg-blue-500 transition-colors" />
           </div>
