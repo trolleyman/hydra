@@ -224,6 +224,11 @@ try {
       path: string
       scrollTo?: string
       viewport?: { width: number; height: number }
+      // Explicit viewport:: tag override. The axis is otherwise derived from the
+      // capture width alone (narrow → mobile), which can't tell a landscape phone
+      // (wide but short) from a tablet, so landscape/tablet shots set it directly.
+      // One of mobile | mobile-landscape | tablet | tablet-landscape | desktop.
+      viewportTag?: 'mobile' | 'mobile-landscape' | 'tablet' | 'tablet-landscape' | 'desktop'
       // CSS selector clicked once (after load, before capture) — used to open a
       // popover such as the repository branch selector so the screenshot
       // documents it.
@@ -580,18 +585,19 @@ try {
       // so a reviewer can filter the panel down to just the small-screen shots.
       //
       // The project home at phone width: the full-page spawn form fills the
-      // screen and the header shows the hamburger toggle (the sidebar is off-
-      // canvas / closed by default on mobile).
+      // screen, the top bar is gone, and the sidebar is collapsed by default —
+      // so only the small floating "show sidebar" button sits top-left.
       { name: 'mobile-home', path: '/project/sim-project/', viewport: { width: 390, height: 844 } },
-      // The drawer opened: clicking the header hamburger slides the sidebar
-      // (compact spawn box, Repository button, agents list) in over a dimmed
-      // backdrop. Viewport capture since the drawer is a fixed overlay.
+      // The sidebar opened: clicking the floating reveal button slides the
+      // sidebar in over a dimmed backdrop. It now carries the whole app chrome —
+      // its header has the project selector + collapse button, and its footer the
+      // Settings link + usage. Viewport capture since the drawer is a fixed overlay.
       {
         name: 'mobile-menu',
         path: '/project/sim-project/',
         viewport: { width: 390, height: 844 },
         viewportOnly: true,
-        click: 'button[aria-label="Toggle sidebar"]',
+        click: 'button[aria-label="Show sidebar"]',
       },
       // An agent detail page at phone width: the title + action buttons wrap, the
       // metadata row wraps, and the prompt/terminal stack full-width. Viewport-
@@ -601,6 +607,64 @@ try {
       // diff takes the full width and wraps long lines. agent-3's nested-folder
       // diff scrolled to the Changes section.
       { name: 'mobile-diff', path: '/project/sim-project/agent/agent-3', viewport: { width: 390, height: 844 }, scrollTo: 'Changes' },
+
+      // ── Mobile landscape (844×390) ──────────────────────────────────────────
+      // A phone held sideways: very short, so vertical space is precious. With
+      // the top bar gone and the sidebar collapsed by default, the content gets
+      // the whole height; the floating reveal button is the only chrome.
+      { name: 'mobile-landscape-home', path: '/project/sim-project/agent/agent-1', viewport: { width: 844, height: 390 }, viewportTag: 'mobile-landscape', viewportOnly: true },
+      // The sidebar opened as an overlay (still below the lg breakpoint) so it
+      // doesn't squeeze the short content underneath — header, list, and footer
+      // all visible at once.
+      {
+        name: 'mobile-landscape-menu',
+        path: '/project/sim-project/agent/agent-1',
+        viewport: { width: 844, height: 390 },
+        viewportTag: 'mobile-landscape',
+        viewportOnly: true,
+        click: 'button[aria-label="Show sidebar"]',
+      },
+
+      // ── Tablet portrait (834×1112) ──────────────────────────────────────────
+      // A tablet upright: below the lg breakpoint, so the sidebar is an overlay
+      // (collapsed by default) and the content spans the full width — no more
+      // cramped permanent two-column split.
+      { name: 'tablet-home', path: '/project/sim-project/agent/agent-1', viewport: { width: 834, height: 1112 }, viewportTag: 'tablet', viewportOnly: true },
+      // The sidebar opened over the content (overlay + backdrop).
+      {
+        name: 'tablet-menu',
+        path: '/project/sim-project/agent/agent-1',
+        viewport: { width: 834, height: 1112 },
+        viewportTag: 'tablet',
+        viewportOnly: true,
+        click: 'button[aria-label="Show sidebar"]',
+      },
+
+      // ── Tablet landscape (1112×834) ─────────────────────────────────────────
+      // A tablet on its side: at/above the lg breakpoint, so the sidebar is the
+      // usual persistent in-flow column — this is the clearest look at the new
+      // chrome (selector + collapse button in the sidebar header, Settings +
+      // usage in its footer, no top bar).
+      { name: 'tablet-landscape-home', path: '/project/sim-project/agent/agent-1', viewport: { width: 1112, height: 834 }, viewportTag: 'tablet-landscape', viewportOnly: true },
+      // The same width with the sidebar collapsed via its header button: the
+      // column is gone, the content reclaims the full width, and the floating
+      // reveal button sits top-left.
+      {
+        name: 'tablet-landscape-collapsed',
+        path: '/project/sim-project/agent/agent-1',
+        viewport: { width: 1112, height: 834 },
+        viewportTag: 'tablet-landscape',
+        viewportOnly: true,
+        click: 'button[aria-label="Hide sidebar"]',
+      },
+
+      // ── Desktop: the moved chrome ───────────────────────────────────────────
+      // The Settings page now hosts the Appearance (light/dark/system) control
+      // that used to live in the top bar; capture its header region to document it.
+      { name: 'settings-appearance', path: '/project/sim-project/settings', viewport: { width: 1280, height: 900 }, viewportOnly: true },
+      // The desktop layout with the sidebar collapsed (Ctrl+. / the header
+      // button): full-width content + the floating reveal button.
+      { name: 'desktop-collapsed', path: '/project/sim-project/agent/agent-1', click: 'button[aria-label="Hide sidebar"]', viewportOnly: true },
     ]
     // Capture every page in both themes. Dark mode has its own colours (e.g.
     // diff add/remove backgrounds), so a light-only render would miss visual
@@ -1025,9 +1089,11 @@ try {
         // section are scoped "category::value" labels — the viewer keeps one
         // value per category and offers each as a single-select filter — so a
         // reviewer can, e.g., show only the dark-mode repository shots. The
-        // viewport axis is derived from the capture width: a narrow (phone-width)
-        // shot tags itself viewport::mobile, everything wider viewport::desktop.
-        const viewport = (pg.viewport?.width ?? 1280) < 700 ? 'mobile' : 'desktop'
+        // viewport axis is the page's explicit viewportTag when set (needed for
+        // landscape/tablet sizes, which width alone can't classify), otherwise
+        // derived from the capture width: narrow → mobile, everything wider →
+        // desktop.
+        const viewport = pg.viewportTag ?? ((pg.viewport?.width ?? 1280) < 700 ? 'mobile' : 'desktop')
         const tags = [`theme::${theme}`, `viewport::${viewport}`, `section::${sectionFor(pg.name)}`]
         writeFileSync(`${out}.meta`, JSON.stringify({ tags }))
         console.log(`wrote ${out}`)

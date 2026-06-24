@@ -7,6 +7,45 @@ import type { ServiceScript, ServiceStatus } from '../api'
 import { InfoTooltip } from './InfoTooltip'
 import { AgentTerminal } from './AgentTerminal'
 import { ShellEditor } from './ShellEditor'
+import { useThemeStore, THEME_MODES, THEME_MODE_ICON, THEME_MODE_LABEL } from '../lib/theme'
+
+// Appearance card: the light/dark/system theme selector, moved here from the old
+// top bar. Theme is a client-only preference (localStorage), so it lives in the
+// shared theme store rather than the server-backed config object on this page.
+function ThemeControl() {
+  const mode = useThemeStore((s) => s.mode)
+  const setMode = useThemeStore((s) => s.setMode)
+  return (
+    <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6 mb-6">
+      <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100 mb-1">Appearance</h2>
+      <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">
+        Choose the theme. “System” follows your operating system’s light/dark setting.
+      </p>
+      <div className="inline-flex rounded-lg border border-gray-200 dark:border-gray-700 p-1 bg-gray-50 dark:bg-gray-900/40">
+        {THEME_MODES.map((m) => {
+          const Icon = THEME_MODE_ICON[m]
+          const active = mode === m
+          return (
+            <button
+              key={m}
+              type="button"
+              onClick={() => setMode(m)}
+              aria-pressed={active}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors cursor-pointer ${
+                active
+                  ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm'
+                  : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
+              }`}
+            >
+              <Icon className="w-4 h-4" />
+              {THEME_MODE_LABEL[m]}
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
 
 export type SettingsSection = 'all' | 'claude' | 'gemini' | 'copilot' | 'defaults'
 
@@ -816,6 +855,7 @@ export function SettingsContent({
 
   return (
     <>
+      <ThemeControl />
       <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden flex flex-col">
         <div className="flex border-b border-gray-100 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-800/50 px-4">
           {tabs.map(tab => (
