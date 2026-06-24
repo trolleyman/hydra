@@ -607,6 +607,17 @@ try {
       // diff takes the full width and wraps long lines. agent-3's nested-folder
       // diff scrolled to the Changes section.
       { name: 'mobile-diff', path: '/project/sim-project/agent/agent-3', viewport: { width: 390, height: 844 }, scrollTo: 'Changes' },
+      // The agent page's sticky top bar (shown while the sidebar is collapsed):
+      // the show-sidebar toggle, the agent name + its actions dropdown (opened
+      // here — Rename / Merge / Kill), and a status dot. Clicking the name's
+      // chevron opens the menu.
+      {
+        name: 'mobile-agent-menu',
+        path: '/project/sim-project/agent/agent-1',
+        viewport: { width: 390, height: 844 },
+        viewportOnly: true,
+        click: '.sticky button:has(svg.lucide-chevron-down)',
+      },
 
       // ── Mobile landscape (844×390) ──────────────────────────────────────────
       // A phone held sideways: very short, so vertical space is precious. With

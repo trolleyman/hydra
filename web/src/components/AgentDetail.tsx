@@ -5,12 +5,14 @@ import { formatError } from '../api/format_error'
 import type { AgentResponse, RepositoryBranch } from '../api'
 import { AgentTerminal } from './AgentTerminal'
 import { BranchSelector } from './BranchSelector'
+import { SeparatedRow } from './SeparatedRow'
+import { AgentTopBar } from './AgentTopBar'
 import { AttachmentChips } from './AttachmentChips'
 import { ImageLightbox } from './ImageLightbox'
 import { uploadBlobUrl } from '../api/uploads'
 import type { Attachment } from '../lib/spawnDrafts'
 import { DiffViewer } from '../DiffViewer'
-import { formatStartedAgo, agentStatusBadge, archivedEndStateBadge } from './AgentComponents'
+import { formatStartedAgo, agentStatusBadge, archivedEndStateBadge, agentDotClass } from './AgentComponents'
 import { LoaderCircle, Merge, Trash2, Tag, RotateCcw, FolderSync, Copy, Check, Pencil, Archive, TerminalSquare } from 'lucide-react'
 import { Tooltip } from './Tooltip'
 import { renderMarkdown } from '../lib/markdown'
@@ -141,6 +143,15 @@ function ArchivedAgentDetail({ agent, projectId, onPurged }: { agent: AgentRespo
   return (
     <div className="flex-1 flex flex-col overflow-auto p-3 sm:p-6 min-w-0 min-h-0" data-main-scroll>
       <div className="w-full">
+        {/* Sticky top bar (only while the sidebar is collapsed): show-sidebar
+            toggle, the agent name + delete action, and a (dim) status dot. */}
+        <AgentTopBar
+          title={agent.title || agent.id}
+          statusDot={<span className="block w-2.5 h-2.5 rounded-full bg-gray-300 dark:bg-gray-600" />}
+          actions={[
+            { label: 'Delete permanently', icon: <Trash2 className="w-4 h-4" />, onClick: handlePurge, danger: true, disabled: purging },
+          ]}
+        />
         {/* Header */}
         <div className="mb-6">
           <div className="flex items-center gap-2 mb-2">
@@ -163,32 +174,25 @@ function ArchivedAgentDetail({ agent, projectId, onPurged }: { agent: AgentRespo
           </div>
 
           {/* Metadata row */}
-          <div className="flex items-center gap-3 flex-wrap">
+          <SeparatedRow className="flex items-center gap-3 flex-wrap">
             <span className={`text-xs px-2.5 py-0.5 rounded-full font-medium ${agentTypeClass}`}>
               {agent.agent_type}
             </span>
-            <span className="text-gray-300 dark:text-gray-600">·</span>
             <span className={`text-xs px-2 py-0.5 rounded font-medium ${endBadge.className}`}>
               {endBadge.label}
             </span>
             {agent.branch_name && (
-              <>
-                <span className="text-gray-300 dark:text-gray-600">·</span>
-                <span className="text-xs font-mono text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
-                  <Tag className="w-3.5 h-3.5" />
-                  {agent.branch_name}
-                </span>
-              </>
+              <span className="text-xs font-mono text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
+                <Tag className="w-3.5 h-3.5" />
+                {agent.branch_name}
+              </span>
             )}
             {agent.created_at !== 0 && agent.created_at !== undefined && (
-              <>
-                <span className="text-gray-300 dark:text-gray-600">·</span>
-                <span className="text-xs text-gray-500 dark:text-gray-400">
-                  created {formatStartedAgo(agent.created_at)}
-                </span>
-              </>
+              <span className="text-xs text-gray-500 dark:text-gray-400">
+                created {formatStartedAgo(agent.created_at)}
+              </span>
             )}
-          </div>
+          </SeparatedRow>
         </div>
 
         {/* Prompt */}
@@ -543,6 +547,17 @@ export function AgentDetail({
   return (
     <div ref={scrollRef} className="flex-1 flex flex-col overflow-auto p-3 sm:p-6 min-w-0 min-h-0" data-main-scroll>
       <div className="w-full">
+        {/* Sticky top bar (only while the sidebar is collapsed): the show-sidebar
+            toggle, the agent name + quick actions, and a status dot. */}
+        <AgentTopBar
+          title={agent.title || agent.id}
+          statusDot={<span className={`block w-2.5 h-2.5 rounded-full ${agentDotClass(agent)}`} />}
+          actions={[
+            { label: 'Rename', icon: <Pencil className="w-4 h-4" />, onClick: startEditingTitle },
+            { label: 'Merge', icon: <Merge className="w-4 h-4" />, onClick: handleMerge, disabled: merging || killing || restarting || updating },
+            { label: 'Kill', icon: <Trash2 className="w-4 h-4" />, onClick: handleKill, danger: true, disabled: merging || killing || restarting },
+          ]}
+        />
         {/* Header */}
         <div className="mb-6">
           {/* Title row — wraps the action buttons below the title on narrow screens */}
@@ -651,26 +666,21 @@ export function AgentDetail({
           </div>
 
           {/* Metadata row */}
-          <div className="flex items-center gap-x-3 gap-y-1 flex-wrap">
+          <SeparatedRow className="flex items-center gap-x-3 gap-y-1 flex-wrap">
             <span className={`text-xs px-2.5 py-0.5 rounded-full font-medium ${agentTypeClass}`}>
               {agent.agent_type}
             </span>
             {agent.agent_status && (
-              <>
-                <span className="text-gray-300 dark:text-gray-600">·</span>
-                <span className={`text-xs px-2 py-0.5 rounded font-medium ${agentStatusBadge(agent.agent_status.status).className}`}>
-                  {agentStatusBadge(agent.agent_status.status).label}
-                </span>
-              </>
+              <span className={`text-xs px-2 py-0.5 rounded font-medium ${agentStatusBadge(agent.agent_status.status).className}`}>
+                {agentStatusBadge(agent.agent_status.status).label}
+              </span>
             )}
-            <span className="text-gray-300 dark:text-gray-600">·</span>
             {agent.branch_name && (
               <span className="text-xs font-mono text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
                 <Tag className="w-3.5 h-3.5" />
                 {agent.branch_name}
               </span>
             )}
-            <span className="text-gray-300 dark:text-gray-600">·</span>
             {/* Base branch. Editing it is metadata-only: it changes what
                 update-from-base merges in and what the diff compares against,
                 but does not rebase existing commits. */}
@@ -691,13 +701,12 @@ export function AgentDetail({
                 </span>
               )}
             </span>
-            <span className="text-gray-300 dark:text-gray-600">·</span>
             {agent.created_at !== 0 && agent.created_at !== undefined && (
               <span className="text-xs text-gray-500 dark:text-gray-400">
                 created {formatStartedAgo(agent.created_at)}
               </span>
             )}
-          </div>
+          </SeparatedRow>
 
         </div>
 

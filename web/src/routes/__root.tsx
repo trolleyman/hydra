@@ -16,6 +16,7 @@ import { ApiError, ErrorResponse } from '../api'
 import { formatError } from '../api/format_error'
 import { ChevronDown, ChevronRight, Folder, FolderGit2, FolderOpen, Plus, Settings, Check, X, LoaderCircle, AlertTriangle, PanelLeftClose, PanelLeftOpen, RotateCw } from 'lucide-react'
 import { useApplyTheme } from '../lib/theme'
+import { useSidebarStore, SIDEBAR_OVERLAY_QUERY } from '../lib/sidebar'
 import { folderPickerAvailable, openFolderPicker } from '../api/folderPicker'
 import { AgentSidebarItem } from '../components/AgentComponents'
 import { SpawnForm } from '../components/SpawnForm'
@@ -379,11 +380,6 @@ function ProjectDropdown({
 
 // ── Root Layout ────────────────────────────────────────────────────────────────
 
-// Below this width the sidebar is an off-canvas overlay (so it never squeezes the
-// main content on tablets / phones in landscape); at or above it the sidebar is a
-// persistent, resizable in-flow column. Matches Tailwind's `lg` breakpoint.
-const SIDEBAR_OVERLAY_QUERY = '(min-width: 1024px)'
-
 // Derive the current view from the active route so it can be persisted as the
 // project's last-open view. Agent routes set agentId; the repository browser is
 // recognised by its path (and its splat preserved so a deep file path restores);
@@ -415,25 +411,12 @@ function RootLayout() {
   const [development, setDevelopment] = useState(false)
   const [restarting, setRestarting] = useState(false)
   // The sidebar can be hidden on any screen size via the collapse button in its
-  // header (revealed again by the floating button over the content). On wide
-  // screens collapsing reclaims the space; below the overlay breakpoint the
-  // sidebar is an off-canvas overlay, so collapsed simply means "closed". The
-  // initial state is the persisted preference, falling back to collapsed on
-  // small screens (where an open overlay over the content is a poor default).
-  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
-    const saved = readLocal(StorageKeys.sidebarCollapsed)
-    if (saved === '1') return true
-    if (saved === '0') return false
-    return typeof window !== 'undefined' && !window.matchMedia(SIDEBAR_OVERLAY_QUERY).matches
-  })
-  // Explicit user toggle — persists so the choice sticks across reloads.
-  const toggleSidebar = useCallback(() => {
-    setSidebarCollapsed((c) => {
-      const next = !c
-      writeLocal(StorageKeys.sidebarCollapsed, next ? '1' : '0')
-      return next
-    })
-  }, [])
+  // header (revealed again by the floating button / agent top bar over the
+  // content). On wide screens collapsing reclaims the space; below the overlay
+  // breakpoint the sidebar is an off-canvas overlay, so collapsed means "closed".
+  // State lives in a shared store so the agent page's top bar can host the toggle.
+  const sidebarCollapsed = useSidebarStore((s) => s.collapsed)
+  const toggleSidebar = useSidebarStore((s) => s.toggle)
   // Which projects the user has trusted, mirrored from localStorage so the trust
   // prompt re-evaluates reactively when one is accepted (see lib/storage).
   const [trustedProjectIds, setTrustedProjectIds] = useState<Set<string>>(() => readTrustedProjects())
@@ -810,7 +793,9 @@ function RootLayout() {
   // it can't clobber the wide-screen collapse preference (only the explicit
   // toggle writes storage). On wide screens the sidebar stays as the user left it.
   useEffect(() => {
-    if (!window.matchMedia(SIDEBAR_OVERLAY_QUERY).matches) setSidebarCollapsed(true)
+    if (!window.matchMedia(SIDEBAR_OVERLAY_QUERY).matches) {
+      useSidebarStore.getState().setCollapsed(true, false)
+    }
   }, [location.pathname])
 
   // Ctrl/Cmd + . collapses or expands the sidebar from anywhere (mirrors the
@@ -1198,8 +1183,9 @@ function RootLayout() {
         </aside>
 
         {/* Main content. When the sidebar is collapsed a floating button at the
-            top-left brings it back (there's no top bar to hold a toggle). */}
-        {sidebarCollapsed && (
+            top-left brings it back — except on an agent page, which hosts the
+            toggle in its own sticky top bar (alongside the name + actions). */}
+        {sidebarCollapsed && !selectedAgentId && (
           <Tooltip content="Show sidebar (Ctrl+.)">
             <button
               type="button"
