@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { LoaderCircle, RefreshCw, ImageOff, TriangleAlert, Camera } from 'lucide-react'
+import { LoaderCircle, RefreshCw, ImageOff, TriangleAlert, Camera, Settings } from 'lucide-react'
 import { api } from '../stores/apiClient'
 import { ApiError } from '../api'
 import type { ArtifactLogLine, RepositoryArtifactFile } from '../api'
@@ -109,6 +109,58 @@ function PersistedLog({ url }: { url: string }) {
   )
 }
 
+// A small settings popup (gear) for the artifact masonry layout — the repository
+// browser's analogue of the diff viewer's settings popup. Holds the shared
+// "Columns" slider (the dividers in the grid fine-tune individual widths). The gear
+// is a <button> with a distinct aria-label so it's unambiguous next to the file
+// browser's own settings gear.
+function ColumnsSettingsPopup({ count, onCountChange }: { count: number; onCountChange: (n: number) => void }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false) }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey) }
+  }, [open])
+  return (
+    <div ref={ref} className="relative">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        title="Artifact layout settings"
+        aria-label="Artifact layout settings"
+        className={`flex items-center justify-center w-7 h-7 rounded-md border transition-colors cursor-pointer ${
+          open
+            ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800'
+            : 'text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
+        }`}
+      >
+        <Settings className="w-3.5 h-3.5" />
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full mt-1 w-52 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50 p-3">
+          <p className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 lowercase tracking-wide mb-2">Artifact layout</p>
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 lowercase tracking-wide shrink-0">Columns</span>
+            <input
+              type="range"
+              min={MIN_ARTIFACT_COLUMNS}
+              max={MAX_ARTIFACT_COLUMNS}
+              step={1}
+              value={count}
+              onChange={(e) => onCountChange(Number(e.target.value))}
+              className="flex-1 min-w-0 accent-blue-500 cursor-pointer"
+            />
+            <span className="text-xs tabular-nums text-gray-600 dark:text-gray-300 w-4 text-right shrink-0">{count}</span>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function RepositoryArtifactsView({
   projectId, refQuery, scriptName,
 }: {
@@ -176,24 +228,11 @@ export function RepositoryArtifactsView({
           <span className="text-xs text-gray-400 dark:text-gray-500">No files produced</span>
         )}
         <div className="ml-auto flex items-center gap-2">
-          {/* Masonry column count — the same layout knob as the diff viewer's
-              artifacts panel (and the dividers in the grid below). Shown once
-              there are rendered files to lay out. */}
+          {/* Artifact layout settings (gear) — the masonry "Columns" slider, the
+              same shared knob as the diff viewer's artifacts panel (the grid's
+              dividers fine-tune individual widths). Shown once there are files. */}
           {status === RepositoryArtifactResponse.status.READY && data && data.files.length > 1 && (
-            <div className="flex items-center gap-1.5">
-              <span className="text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide">Columns</span>
-              <input
-                type="range"
-                min={MIN_ARTIFACT_COLUMNS}
-                max={MAX_ARTIFACT_COLUMNS}
-                step={1}
-                value={columns.count}
-                onChange={(e) => setColumnCount(Number(e.target.value))}
-                className="w-24 accent-blue-500 cursor-pointer"
-                title="Artifact columns"
-              />
-              <span className="text-xs tabular-nums text-gray-600 dark:text-gray-300 w-3 text-right">{columns.count}</span>
-            </div>
+            <ColumnsSettingsPopup count={columns.count} onCountChange={setColumnCount} />
           )}
           <button
             onClick={onRefresh}

@@ -247,6 +247,12 @@ try {
       // otherwise leaves these shots showing only the header row). Only meaningful on
       // the artifacts (agent-1) page; pair with imageDiffMode.
       showArtifacts?: boolean
+      // Eager-loads every masonry tile image and waits for the layout to settle
+      // before capturing — for the repository artifacts view, whose masonry is shown
+      // without an expand step. Keeps the width-driven layout byte-reproducible
+      // (lazy/off-screen tiles would otherwise load inconsistently). No-op when the
+      // page has no masonry tiles.
+      settleMasonry?: boolean
       // Attaches the given checkout-relative images to the spawn form's hidden
       // file input (each fed in named "image.png", so the form renumbers them
       // image1.png, image2.png …) and then opens the lightbox by clicking the
@@ -391,7 +397,19 @@ try {
       // [[artifacts]] script as a "file"; deep-linking one lazily generates it for
       // the ref and renders its outputs single-sided. The deep link auto-expands
       // .hydra → artifacts; "screenshots" returns a ready set of mock images.
-      { name: 'repository-artifacts', path: '/project/sim-project/repository/main/.hydra/artifacts/screenshots' },
+      { name: 'repository-artifacts', path: '/project/sim-project/repository/main/.hydra/artifacts/screenshots', settleMasonry: true },
+      // The repository artifacts view's settings popup, opened from the gear in its
+      // header (the masonry "Columns" slider) — the repo browser's analogue of the
+      // diff viewer's diff-settings shot. The gear carries aria-label "Artifact
+      // layout settings", distinct from the file browser's own settings gear.
+      // viewportOnly so the focus is the header + popup, not the grid below.
+      {
+        name: 'repository-artifacts-settings',
+        path: '/project/sim-project/repository/main/.hydra/artifacts/screenshots',
+        viewportOnly: true,
+        click: 'button[aria-label="Artifact layout settings"]',
+        settleMasonry: true,
+      },
       // The project settings page, landing on the "All Agents" / Global Defaults
       // tab. Simulation seeds a multi-line pre-spawn script (GetConfig in
       // internal/http/simulation.go), so the capture documents the sandbox
@@ -1117,6 +1135,24 @@ try {
             btn?.click()
           }, pg.openFilter)
           await settle(page)
+        }
+        if (pg.settleMasonry) {
+          // Eager-load every masonry tile image (the layout sizes columns from the
+          // images' natural dimensions) and wait for them to decode, then let the
+          // ResizeObserver-driven layout settle — so the width-driven grid is
+          // byte-reproducible. No-op when the page has no masonry tiles.
+          const hasTiles = await page.evaluate(() => document.querySelectorAll('[data-mkey] img').length > 0)
+          if (hasTiles) {
+            await page.evaluate(() => {
+              document.querySelectorAll<HTMLImageElement>('[data-mkey] img').forEach((i) => { i.loading = 'eager' })
+            })
+            await page.waitForFunction(() => {
+              const imgs = Array.from(document.querySelectorAll<HTMLImageElement>('[data-mkey] img'))
+              return imgs.length > 0 && imgs.every((i) => i.complete && i.naturalHeight > 0)
+            }).catch(() => { /* tolerate a stray never-loading image */ })
+            await page.waitForTimeout(500)
+            await settle(page)
+          }
         }
         const out = join(OUT, `${pg.name}${suffix}.png`)
         // Scrolled pages, the lightbox (a fixed, viewport-filling overlay),

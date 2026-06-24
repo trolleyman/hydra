@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { api } from '../stores/apiClient'
 import type { ArtifactSet, ArtifactFile, ArtifactLogLine } from '../api'
-import { LoaderCircle, Image as ImageIcon, ImageOff, ChevronDown, ChevronRight, TriangleAlert, RefreshCw, ScrollText } from 'lucide-react'
+import { LoaderCircle, Image as ImageIcon, ImageOff, ChevronDown, ChevronRight, TriangleAlert, RefreshCw, ScrollText, RotateCcw } from 'lucide-react'
 import { InfoTooltip } from './InfoTooltip'
-import { loadArtifactPrefs, saveArtifactPrefs, loadTagFilter, saveTagFilter, ARTIFACT_CHANGE_CATEGORY as CHANGE_CATEGORY, type ArtifactTagFilter } from '../lib/artifactPrefs'
+import { loadArtifactPrefs, saveArtifactPrefs, loadTagFilter, saveTagFilter, defaultTagFilter, isDefaultTagFilter, ARTIFACT_CHANGE_CATEGORY as CHANGE_CATEGORY, type ArtifactTagFilter } from '../lib/artifactPrefs'
 import { stripAnsi } from '../lib/ansi'
 import {
   checkerStyle, IMG_CLASS, OVERLAY_CLASS, TAG_CLASS, makeAuxOpen,
@@ -32,9 +32,9 @@ const CHANGE_COLOR: Record<string, string> = {
 export type ImageDiffMode = 'side-by-side' | 'ab' | 'slider' | 'onion'
 
 export const IMAGE_DIFF_MODES: { value: ImageDiffMode; label: string }[] = [
-  { value: 'ab', label: 'Before/After' },
+  { value: 'ab', label: 'Before · After' },
+  { value: 'slider', label: 'Before · After (slider)' },
   { value: 'side-by-side', label: 'Side by side' },
-  { value: 'slider', label: 'Before/after slider' },
   { value: 'onion', label: 'Onion skin' },
 ]
 
@@ -1475,22 +1475,19 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
             pending_tags) carries tags; ml-auto floats them to the right. */}
         {(hasTags || showTypeFilter || showChangeFilter) && (
           <div className="ml-auto flex flex-wrap items-center gap-1.5">
-            {/* Built-in change-type scope, first — added/removed/modified/unchanged
-                (unchanged hidden by default). Replaces the per-card show-unchanged
-                toggle. */}
-            {showChangeFilter && (
-              <TagScopeFilter
-                label="changes"
-                values={changeTypes}
-                off={changeOff}
-                onToggle={(val) => {
-                  const next = changeOff.includes(val) ? changeOff.filter((x) => x !== val) : [...changeOff, val]
-                  updateTagFilter({ ...tagFilter, scoped: { ...tagFilter.scoped, [CHANGE_CATEGORY]: next } })
-                }}
-                onIsolate={(val) => updateTagFilter({ ...tagFilter, scoped: { ...tagFilter.scoped, [CHANGE_CATEGORY]: changeTypes.filter((x) => x !== val) } })}
-                onAll={() => updateTagFilter({ ...tagFilter, scoped: { ...tagFilter.scoped, [CHANGE_CATEGORY]: [] } })}
-                onClear={() => updateTagFilter({ ...tagFilter, scoped: { ...tagFilter.scoped, [CHANGE_CATEGORY]: [...changeTypes] } })}
-              />
+            {/* Reset to defaults — shown only when the filter has moved off its
+                default (any tag/value hidden, or the changes filter no longer hides
+                only 'unchanged'). Restores every scope to "show all" + the change
+                default. Leftmost, ahead of the scope buttons. */}
+            {!isDefaultTagFilter(tagFilter) && (
+              <button
+                onClick={() => updateTagFilter(defaultTagFilter())}
+                title="Reset filters"
+                className="flex items-center gap-1 h-7 px-2.5 rounded-md border text-[11px] font-medium cursor-pointer transition-colors bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600"
+              >
+                <RotateCcw className="w-3 h-3" />
+                <span className="lowercase">reset</span>
+              </button>
             )}
             {collectedTags.scoped.map(({ cat, values }) => (
               <TagScopeFilter
@@ -1521,7 +1518,7 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
                 onClear={() => updateTagFilter({ ...tagFilter, free: [...collectedTags.free] })}
               />
             )}
-            {/* Built-in type scope, last — image vs video, derived from the file
+            {/* Built-in type scope — image vs video, derived from the file
                 extensions rather than a tag. */}
             {showTypeFilter && (
               <TagScopeFilter
@@ -1535,6 +1532,23 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
                 onIsolate={(val) => updateTagFilter({ ...tagFilter, scoped: { ...tagFilter.scoped, [TYPE_CATEGORY]: fileTypes.filter((x) => x !== val) } })}
                 onAll={() => updateTagFilter({ ...tagFilter, scoped: { ...tagFilter.scoped, [TYPE_CATEGORY]: [] } })}
                 onClear={() => updateTagFilter({ ...tagFilter, scoped: { ...tagFilter.scoped, [TYPE_CATEGORY]: [...fileTypes] } })}
+              />
+            )}
+            {/* Built-in change-type scope, last (rightmost) — added/removed/
+                modified/unchanged, with unchanged hidden by default. Replaces the
+                old per-card show-unchanged toggle. */}
+            {showChangeFilter && (
+              <TagScopeFilter
+                label="changes"
+                values={changeTypes}
+                off={changeOff}
+                onToggle={(val) => {
+                  const next = changeOff.includes(val) ? changeOff.filter((x) => x !== val) : [...changeOff, val]
+                  updateTagFilter({ ...tagFilter, scoped: { ...tagFilter.scoped, [CHANGE_CATEGORY]: next } })
+                }}
+                onIsolate={(val) => updateTagFilter({ ...tagFilter, scoped: { ...tagFilter.scoped, [CHANGE_CATEGORY]: changeTypes.filter((x) => x !== val) } })}
+                onAll={() => updateTagFilter({ ...tagFilter, scoped: { ...tagFilter.scoped, [CHANGE_CATEGORY]: [] } })}
+                onClear={() => updateTagFilter({ ...tagFilter, scoped: { ...tagFilter.scoped, [CHANGE_CATEGORY]: [...changeTypes] } })}
               />
             )}
           </div>

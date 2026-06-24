@@ -82,8 +82,24 @@ export type ArtifactTagFilter = {
 export const ARTIFACT_CHANGE_CATEGORY = 'change'
 const DEFAULT_HIDDEN_CHANGE_TYPES = ['unchanged']
 
-function defaultTagFilter(): ArtifactTagFilter {
+// The default filter: nothing hidden, except the change-type scope hides
+// 'unchanged'. Exported so the "reset filters" affordance can restore it.
+export function defaultTagFilter(): ArtifactTagFilter {
   return { scoped: { [ARTIFACT_CHANGE_CATEGORY]: [...DEFAULT_HIDDEN_CHANGE_TYPES] }, free: [] }
+}
+
+// isDefaultTagFilter reports whether a filter is at its default — every category
+// empty (nothing hidden) except 'change', which must be exactly its default hidden
+// set. Drives whether the "reset filters" button shows.
+export function isDefaultTagFilter(filter: ArtifactTagFilter): boolean {
+  if (filter.free.length > 0) return false
+  const cats = new Set([...Object.keys(filter.scoped), ARTIFACT_CHANGE_CATEGORY])
+  for (const cat of cats) {
+    const off = filter.scoped[cat] ?? []
+    const expected = cat === ARTIFACT_CHANGE_CATEGORY ? DEFAULT_HIDDEN_CHANGE_TYPES : []
+    if (off.length !== expected.length || off.some((v) => !expected.includes(v))) return false
+  }
+  return true
 }
 
 export function loadTagFilter(projectId: string | null, agentId: string): ArtifactTagFilter {
