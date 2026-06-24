@@ -237,10 +237,16 @@ try {
       // Seeds the diff viewer's image-diff comparison mode ('hydra-diff-image-mode')
       // before the app boots, so the artifacts panel renders before/after pairs in
       // the chosen mode. Only meaningful on the artifacts (agent-1) page.
-      imageDiffMode?: 'side-by-side' | 'ab' | 'difference' | 'slider' | 'onion'
+      imageDiffMode?: 'side-by-side' | 'ab' | 'slider' | 'onion'
       // Expands the named artifact card (clicks its header) after load — used to
       // document the in-flight card's live, scrollable generation log.
       expandArtifact?: string
+      // Expands the ready "screenshots" card and pins it to the top, then eager-loads
+      // every tile image and waits for the masonry to settle — so the capture shows
+      // the actual before/after artifacts (the card defaults to collapsed, which
+      // otherwise leaves these shots showing only the header row). Only meaningful on
+      // the artifacts (agent-1) page; pair with imageDiffMode.
+      showArtifacts?: boolean
       // Attaches the given checkout-relative images to the spawn form's hidden
       // file input (each fed in named "image.png", so the form renumbers them
       // image1.png, image2.png …) and then opens the lightbox by clicking the
@@ -293,7 +299,9 @@ try {
       // mid-clip frame so the before/after progress bars differ; the page's
       // play() no-op keeps the pair paused so the frame is byte-stable. Only
       // meaningful on the artifacts (agent-1) page, paired with imageDiffMode.
-      videoDiff?: { seek: number }
+      // `highlight` clicks the video's "Highlight" tab (the magenta per-frame
+      // pixel-diff, which now lives inside Before/After) — pair with imageDiffMode 'ab'.
+      videoDiff?: { seek: number; highlight?: boolean }
       // Settings only: turn OFF the "Enabled" switch on the seeded [[artifacts]]
       // and [[services]] entries (the EnabledToggle in web/.../SettingsComponents).
       // Flipping each to disabled both mutes/labels its card "Disabled" AND marks
@@ -446,23 +454,39 @@ try {
       // The diff viewer offers four image-diff comparison modes (a setting in the
       // diff viewer; see web/src/components/ArtifactsPanel.tsx ImageDiffView). We
       // capture the artifacts panel once per mode so each option is documented:
-      //   side-by-side — before and after shown next to each other (default)
-      //   ab           — both stacked; click to flip between them (hard switch)
+      //   ab           — before/after stacked, click to flip; a "Highlight" tab
+      //                  paints the changed pixels magenta (default)
+      //   side-by-side — before and after shown next to each other
       //   slider       — draggable divider with a hard cut between before/after
       //   onion        — before/after blended via an opacity slider
+      // Each sets showArtifacts so the "screenshots" card is expanded and its
+      // before/after masonry is actually visible (the card defaults to collapsed).
+      // The collapsed panel itself is documented by 'artifacts-collapsed' below.
       {
         name: 'artifacts',
         path: '/project/sim-project/agent/agent-1',
         scrollTo: 'Changes',
         viewport: { width: 1280, height: 1280 },
-        imageDiffMode: 'side-by-side',
+        imageDiffMode: 'ab',
+        showArtifacts: true,
       },
+      // The collapsed artifacts panel: each set is a single header row ("N changed",
+      // a spinner while generating, etc.) until clicked open — the default, opt-in
+      // state. Documents the at-a-glance overview before any card is expanded.
       {
-        name: 'artifacts-ab',
+        name: 'artifacts-collapsed',
         path: '/project/sim-project/agent/agent-1',
         scrollTo: 'Changes',
         viewport: { width: 1280, height: 1280 },
         imageDiffMode: 'ab',
+      },
+      {
+        name: 'artifacts-side-by-side',
+        path: '/project/sim-project/agent/agent-1',
+        scrollTo: 'Changes',
+        viewport: { width: 1280, height: 1280 },
+        imageDiffMode: 'side-by-side',
+        showArtifacts: true,
       },
       {
         name: 'artifacts-slider',
@@ -470,6 +494,7 @@ try {
         scrollTo: 'Changes',
         viewport: { width: 1280, height: 1280 },
         imageDiffMode: 'slider',
+        showArtifacts: true,
       },
       {
         name: 'artifacts-onion',
@@ -477,6 +502,7 @@ try {
         scrollTo: 'Changes',
         viewport: { width: 1280, height: 1280 },
         imageDiffMode: 'onion',
+        showArtifacts: true,
       },
       // The artifacts tag filter in use. agent-1's "screenshots" set tags each
       // shot by theme + viewport (scoped labels) plus a free-form "new" (see
@@ -491,6 +517,7 @@ try {
         viewport: { width: 1280, height: 1280 },
         imageDiffMode: 'side-by-side',
         tagFilter: { scoped: { theme: ['dark'] } },
+        showArtifacts: true,
       },
       // The tag-filter dropdown opened, documenting the menu itself: the fixed
       // "all" (left) / "clear" (right) header, the value checkboxes (all on by
@@ -503,6 +530,7 @@ try {
         viewport: { width: 1280, height: 1280 },
         imageDiffMode: 'side-by-side',
         openFilter: 'theme',
+        showArtifacts: true,
       },
       // The artifacts panel's info (i) tooltip, opened — documents what artifacts
       // are, the script contract, the progress marker, and the tags/filter rules
@@ -548,8 +576,9 @@ try {
       // expand it and pin the .webm row to the top. The before/after pair is
       // seeked to a mid-clip frame (paused) so the progress bars differ. Two
       // shots document the two most distinct video modes:
-      //   side-by-side — the Before / After clips next to each other + transport
-      //   difference   — the per-frame pixel diff (changed pixels painted magenta)
+      //   side-by-side   — the Before / After clips next to each other + transport
+      //   ab + Highlight — the per-frame pixel diff (changed pixels painted magenta),
+      //                    now a "Highlight" tab inside the Before/After mode
       {
         name: 'artifact-video',
         path: '/project/sim-project/agent/agent-1',
@@ -561,8 +590,8 @@ try {
         name: 'artifact-video-diff',
         path: '/project/sim-project/agent/agent-1',
         viewport: { width: 1280, height: 1000 },
-        imageDiffMode: 'difference',
-        videoDiff: { seek: 1.2 },
+        imageDiffMode: 'ab',
+        videoDiff: { seek: 1.2, highlight: true },
       },
     ]
     // Capture every page in both themes. Dark mode has its own colours (e.g.
@@ -894,7 +923,7 @@ try {
             btn?.click()
           })
           // The video viewer mounts <video> elements once the card expands. Wait
-          // for them to be attached, not visible: the difference mode keeps its
+          // for them to be attached, not visible: the Highlight view keeps its
           // videos hidden (only the diff canvas shows), so a visibility wait would
           // time out there.
           await page.waitForSelector('video', { state: 'attached' })
@@ -926,12 +955,66 @@ try {
               cont.scrollTop = offset - 96
             }
           })
-          // The difference mode redraws its pixel-diff canvas on a throttled rAF
+          if (pg.videoDiff.highlight) {
+            // Switch the video to its Highlight tab (the magenta per-frame pixel
+            // diff, which now lives inside the Before/After mode). The button sits
+            // in the .webm row's tab strip; find it within that file's card.
+            await page.evaluate(() => {
+              const span = Array.from(document.querySelectorAll('span')).find((s) => s.textContent?.trim() === 'loader-animation.webm')
+              const row = span?.closest('div.rounded-lg') as HTMLElement | null | undefined
+              const btn = row && Array.from(row.querySelectorAll('button')).find((b) => b.textContent?.trim() === 'Highlight')
+              ;(btn as HTMLButtonElement | undefined)?.click()
+            })
+            await settle(page)
+          }
+          // The Highlight view redraws its pixel-diff canvas on a throttled rAF
           // loop; give it real time (playwright timers, not the page's frozen
           // setTimeout) to draw the seeked frame at least once. Once drawn the
           // pixels are identical every iteration (the pair is paused), so the
           // shot stays byte-stable.
           await page.waitForTimeout(400)
+          await settle(page)
+        }
+        if (pg.showArtifacts) {
+          // Expand the ready "screenshots" card so its before/after masonry is
+          // visible (cards default to collapsed). The card only exists once the
+          // artifacts WS snapshot has populated it, so wait for its header first.
+          await page.waitForFunction(() =>
+            Array.from(document.querySelectorAll('button')).some((b) => b.textContent?.includes('screenshots')),
+          )
+          await page.evaluate(() => {
+            const btn = Array.from(document.querySelectorAll('button')).find((b) => b.textContent?.includes('screenshots'))
+            btn?.click()
+          })
+          await settle(page)
+          // Eager-load every tile image: the masonry sizes each column from the
+          // images' natural dimensions, so they must be fully decoded before it
+          // lays out — and lazy images below the fold would otherwise never load
+          // (and a half-loaded layout wouldn't be byte-reproducible). The tiles
+          // carry data-mkey (the masonry's per-tile key); scope to their <img>s.
+          await page.evaluate(() => {
+            document.querySelectorAll<HTMLImageElement>('[data-mkey] img').forEach((i) => { i.loading = 'eager' })
+          })
+          await page.waitForFunction(() => {
+            const imgs = Array.from(document.querySelectorAll<HTMLImageElement>('[data-mkey] img'))
+            return imgs.length > 0 && imgs.every((i) => i.complete && i.naturalHeight > 0)
+          })
+          // Let the masonry's ResizeObserver-driven layout settle on the now-final
+          // image heights (real timer, not the page's frozen setTimeout). The final
+          // layout is deterministic, so a fixed wait past it stays byte-stable.
+          await page.waitForTimeout(500)
+          await settle(page)
+          // Pin the "screenshots" card to the top of the scroll container so its
+          // expanded grid is the focus (same sticky-aware offset as expandArtifact).
+          await page.evaluate(() => {
+            const btn = Array.from(document.querySelectorAll('button')).find((b) => b.textContent?.includes('screenshots'))
+            const card = btn?.closest('div.rounded-lg') as HTMLElement | null | undefined
+            const cont = card?.closest('.overflow-auto') as HTMLElement | null | undefined
+            if (card && cont) {
+              const offset = card.getBoundingClientRect().top - cont.getBoundingClientRect().top + cont.scrollTop
+              cont.scrollTop = offset - 96
+            }
+          })
           await settle(page)
         }
         if (pg.artifactInfo) {
