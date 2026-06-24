@@ -1230,6 +1230,55 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /api/projects/{project_id}/repository/sync:
+    post:
+      summary: Synchronise the repository's current branch with its remote
+      description: >-
+        Fetches, integrates the remote's commits into the local branch (a pull:
+        fast-forward or merge), then pushes any local commits. The one-click
+        "sync" the sidebar button performs. Requires network access; runs in the
+        daemon, outside any agent sandbox. Returns the refreshed push status,
+        normally with both ahead and behind back to zero.
+      operationId: syncRepository
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            type: string
+          description: Project ID
+      responses:
+        '200':
+          description: OK (branch synced)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RepositoryPushStatus'
+        '400':
+          description: Bad Request (detached HEAD or no remote)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Project Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Conflict (the pull could not be merged cleanly)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MergeConflictError'
+        '500':
+          description: Internal Server Error (e.g. fetch/push rejected or auth failure)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /api/projects/{project_id}/repository/artifacts:
     get:
       summary: List the artifact scripts configured at a ref

@@ -67,7 +67,7 @@ func GetRemoteStatus(projectRoot string) (RemoteStatus, error) {
 	// Commits the remote-tracking branch has that HEAD doesn't (how far behind we
 	// are). Only meaningful for a branch that exists on the remote; for a branch
 	// not yet pushed there is no tracking ref and Behind stays 0.
-	if track := trackingRef(projectRoot, st.Remote, st.Branch); track != "" {
+	if track := TrackingRef(projectRoot, st.Remote, st.Branch); track != "" {
 		behind, err := revListCount(projectRoot, "HEAD.."+track)
 		if err != nil {
 			return st, errtrace.Wrap(err)
@@ -90,10 +90,10 @@ func revListCount(projectRoot string, args ...string) (int, error) {
 	return n, nil
 }
 
-// trackingRef returns the remote-tracking ref a push/pull compares against: the
+// TrackingRef returns the remote-tracking ref a push/pull compares against: the
 // configured upstream if any, else "<remote>/<branch>" when that ref exists,
 // else "" (the branch isn't on the remote yet).
-func trackingRef(projectRoot, remote, branch string) string {
+func TrackingRef(projectRoot, remote, branch string) string {
 	if up, err := gitOutput(projectRoot, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"); err == nil && up != "" {
 		return up
 	}
@@ -172,4 +172,90 @@ func Push(projectRoot string) (string, error) {
 		return string(out), errtrace.Wrap(fmt.Errorf("git push: %w: %s", err, strings.TrimSpace(string(out))))
 	}
 	return string(out), nil
+}
+
+// ConflictError reports that an integration (pull/merge) could not complete
+// because the changes conflict. Files lists the conflicting paths.
+type ConflictError struct{ Files []string }
+
+func (e *ConflictError) Error() string {
+	return fmt.Sprintf("merge conflict in files: %v", e.Files)
+}
+
+// Pull brings the current branch up to date with its remote (fetch + integrate
+// the tracking ref), the equivalent of `git pull`. It is a no-op when the branch
+// has no remote/tracking ref or is already current. Unlike Merge it never uses
+// `reset --hard` for fast-forwards (which would discard uncommitted work in the
+// user's real checkout): it uses `merge --ff-only`, which git refuses if local
+// changes would be overwritten. A divergent integration that would conflict
+// returns a *ConflictError without touching the working tree.
+func Pull(ctx context.Context, projectRoot, authorName, authorEmail string) error {
+	st, err := GetRemoteStatus(projectRoot)
+	if err != nil {
+		return errtrace.Wrap(err)
+	}
+	if st.Branch == "" || st.Remote == "" {
+		return nil
+	}
+	if err := Fetch(ctx, projectRoot, st.Remote); err != nil {
+		return errtrace.Wrap(err)
+	}
+	track := TrackingRef(projectRoot, st.Remote, st.Branch)
+	if track == "" {
+		return nil // branch isn't on the remote yet — nothing to integrate
+	}
+
+	// Already up to date: the tracking ref is reachable from HEAD.
+	if upToDate, err := gitIsAncestor(projectRoot, track, "HEAD"); err != nil {
+		return errtrace.Wrap(err)
+	} else if upToDate {
+		return nil
+	}
+
+	// Fast-forward when HEAD is an ancestor of the tracking ref. --ff-only is
+	// non-destructive: git aborts rather than clobber uncommitted changes.
+	if canFF, err := gitIsAncestor(projectRoot, "HEAD", track); err != nil {
+		return errtrace.Wrap(err)
+	} else if canFF {
+		if out, err := runMerge(projectRoot, authorName, authorEmail, "--ff-only", track); err != nil {
+			return errtrace.Wrap(fmt.Errorf("git merge --ff-only %s: %w: %s", track, err, out))
+		}
+		return nil
+	}
+
+	// Diverged: refuse up front if the merge would conflict, so we never leave
+	// the working tree mid-merge.
+	conflicts, err := GetConflictingFiles(projectRoot, "HEAD", track)
+	if err != nil {
+		return errtrace.Wrap(err)
+	}
+	if len(conflicts) > 0 {
+		return errtrace.Wrap(&ConflictError{Files: conflicts})
+	}
+	if out, err := runMerge(projectRoot, authorName, authorEmail, "--no-edit", track); err != nil {
+		// Leave a clean tree if git still couldn't merge for some other reason.
+		_ = exec.Command("git", "-C", projectRoot, "merge", "--abort").Run()
+		return errtrace.Wrap(fmt.Errorf("git merge %s: %w: %s", track, err, out))
+	}
+	return nil
+}
+
+// runMerge runs `git merge <args...>` with the given author/committer identity
+// (defaults applied like Merge) and returns trimmed combined output on failure.
+func runMerge(projectRoot, authorName, authorEmail string, args ...string) (string, error) {
+	if authorName == "" {
+		authorName = "Hydra Agent"
+	}
+	if authorEmail == "" {
+		authorEmail = "hydra@trolleyman.org"
+	}
+	cmd := exec.Command("git", append([]string{"-C", projectRoot, "merge"}, args...)...)
+	cmd.Env = append(os.Environ(),
+		"GIT_AUTHOR_NAME="+authorName,
+		"GIT_AUTHOR_EMAIL="+authorEmail,
+		"GIT_COMMITTER_NAME="+authorName,
+		"GIT_COMMITTER_EMAIL="+authorEmail,
+	)
+	out, err := cmd.CombinedOutput()
+	return strings.TrimSpace(string(out)), errtrace.Wrap(err)
 }

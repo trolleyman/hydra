@@ -830,6 +830,30 @@ export class DefaultService {
         });
     }
     /**
+     * Synchronise the repository's current branch with its remote
+     * Fetches, integrates the remote's commits into the local branch (a pull: fast-forward or merge), then pushes any local commits. The one-click "sync" the sidebar button performs. Requires network access; runs in the daemon, outside any agent sandbox. Returns the refreshed push status, normally with both ahead and behind back to zero.
+     * @param projectId Project ID
+     * @returns RepositoryPushStatus OK (branch synced)
+     * @throws ApiError
+     */
+    public syncRepository(
+        projectId: string,
+    ): CancelablePromise<RepositoryPushStatus> {
+        return this.httpRequest.request({
+            method: 'POST',
+            url: '/api/projects/{project_id}/repository/sync',
+            path: {
+                'project_id': projectId,
+            },
+            errors: {
+                400: `Bad Request (detached HEAD or no remote)`,
+                404: `Project Not Found`,
+                409: `Conflict (the pull could not be merged cleanly)`,
+                500: `Internal Server Error (e.g. fetch/push rejected or auth failure)`,
+            },
+        });
+    }
+    /**
      * List the artifact scripts configured at a ref
      * Lists the names of the enabled [[artifacts]] scripts defined in the ref's .hydra/config.toml. This is cheap — it only reads config and does NOT generate anything. The repository browser uses it to decide whether to show the dynamic ".hydra/artifacts" folder and what to list inside it.
      * @param projectId Project ID

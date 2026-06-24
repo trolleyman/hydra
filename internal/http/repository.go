@@ -408,6 +408,65 @@ func (s *Server) PushRepository(_ context.Context, request api.PushRepositoryReq
 	return api.PushRepository200JSONResponse(pushStatusResponse(after)), nil
 }
 
+// SyncRepository fetches, integrates the remote's commits into the local branch
+// (a pull), then pushes any local commits — the one-click sync the sidebar
+// button performs. A pull that can't merge cleanly returns 409 without touching
+// the working tree.
+func (s *Server) SyncRepository(_ context.Context, request api.SyncRepositoryRequestObject) (api.SyncRepositoryResponseObject, error) {
+	projectRoot, err := s.resolveProjectRoot(request.ProjectId)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+
+	st, err := git.GetRemoteStatus(projectRoot)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	if st.Branch == "" || !st.HasRemote {
+		detail := "cannot sync: repository has no remote configured"
+		if st.Branch == "" {
+			detail = "cannot sync: HEAD is detached"
+		}
+		return nil, &apiError{Code: 400, Type: api.ErrorResponseErrorBadRequest, Err: errors.New(detail)} //errtrace:skip
+	}
+
+	authorName, authorEmail := gitConfigVal(projectRoot, "user.name"), gitConfigVal(projectRoot, "user.email")
+
+	ctx := s.BackgroundCtx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+
+	// Pull first so a push can't be rejected for being behind.
+	if err := git.Pull(ctx, projectRoot, authorName, authorEmail); err != nil {
+		var conflict *git.ConflictError
+		if errors.As(err, &conflict) {
+			return api.SyncRepository409JSONResponse(api.MergeConflictError{
+				Error:   api.MergeConflictErrorErrorMergeConflict,
+				Code:    409,
+				Details: fmt.Sprintf("pull failed: %v", conflict),
+			}), nil
+		}
+		return nil, errtrace.Wrap(err)
+	}
+
+	// Push anything local that the pull left ahead.
+	if after, err := git.GetRemoteStatus(projectRoot); err == nil && after.CanPush() {
+		if _, err := git.Push(projectRoot); err != nil {
+			return nil, errtrace.Wrap(err)
+		}
+	}
+
+	final, err := git.GetRemoteStatus(projectRoot)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	s.Events.PushStatusChanged(projectRoot)
+	return api.SyncRepository200JSONResponse(pushStatusResponse(final)), nil
+}
+
 // GetRepositoryFile returns the contents of a single repo-relative file at the
 // requested ref. Binary files report binary=true with no content; oversized
 // files are truncated with truncated=true.

@@ -14,7 +14,7 @@ const EVENT_FALLBACK_MS = 30_000
 import type { ProjectInfo, AgentResponse, RepositoryPushStatus } from '../api'
 import { ApiError, ErrorResponse } from '../api'
 import { formatError } from '../api/format_error'
-import { ChevronDown, ChevronRight, Folder, FolderGit2, FolderOpen, Plus, Settings, Check, X, LoaderCircle, AlertTriangle, PanelLeftClose, PanelLeftOpen, RotateCw, ArrowUp, ArrowDown } from 'lucide-react'
+import { ChevronDown, ChevronRight, Folder, FolderGit2, FolderOpen, Plus, Settings, Check, X, LoaderCircle, AlertTriangle, PanelLeftClose, PanelLeftOpen, RotateCw, ArrowUp, ArrowDown, RefreshCw } from 'lucide-react'
 import { useApplyTheme } from '../lib/theme'
 import { useSidebarStore, SIDEBAR_OVERLAY_QUERY } from '../lib/sidebar'
 import { folderPickerAvailable, openFolderPicker } from '../api/folderPicker'
@@ -650,13 +650,13 @@ function RootLayout() {
     if (!currentProjectId) setAgents([])
   }, [currentProjectId, setAgents])
 
-  // Push status for the project's current branch: drives the sidebar Push button
-  // (enabled when there are commits to push, greyed out otherwise). Refreshed on
-  // the same slow poll as the agent list, plus on demand after a push or when the
-  // events stream reports a change. refetchPushStatusRef lets those triggers fire
-  // a fetch without restarting the effect.
+  // Push/pull status for the project's current branch: drives the sidebar Sync
+  // button, which shows how far ahead/behind the remote the branch is and, when
+  // clicked, pulls then pushes. Refreshed on the same slow poll as the agent
+  // list, plus on demand after a sync or when the events stream reports a change.
+  // refetchPushStatusRef lets those triggers fire a fetch without restarting it.
   const [pushStatus, setPushStatus] = useState<RepositoryPushStatus | null>(null)
-  const [pushing, setPushing] = useState(false)
+  const [syncing, setSyncing] = useState(false)
   const refetchPushStatusRef = useRef<() => void>(() => {})
   useEffect(() => {
     if (!currentProjectId) {
@@ -686,26 +686,34 @@ function RootLayout() {
     }
   }, [currentProjectId])
 
-  const handlePush = useCallback(async () => {
-    if (!currentProjectId || pushing) return
+  const handleSync = useCallback(async () => {
+    if (!currentProjectId || syncing) return
     const projectId = currentProjectId
     const toast = useToastStore.getState()
-    setPushing(true)
-    const toastId = toast.show({ message: 'Pushing to remote…', type: 'info', duration: 0 })
+    setSyncing(true)
+    const toastId = toast.show({ message: 'Syncing with remote…', type: 'info', duration: 0 })
     try {
-      const result = await api.default.pushRepository(projectId)
+      const result = await api.default.syncRepository(projectId)
       setPushStatus(result)
       toast.dismiss(toastId)
-      const where = result.remote && result.branch ? ` ${result.remote}/${result.branch}` : ''
-      toast.show({ message: `Pushed${where}`, type: 'success' })
+      const where = result.remote && result.branch ? ` with ${result.remote}/${result.branch}` : ''
+      toast.show({ message: `Synced${where}`, type: 'success' })
     } catch (err) {
       toast.dismiss(toastId)
-      toast.show({ message: `Push failed: ${formatError(err)}`, type: 'error', duration: 6000 })
+      // A 409 means the pull couldn't merge cleanly; surface it distinctly.
+      const conflict = err instanceof ApiError && err.status === 409
+      toast.show({
+        message: conflict
+          ? `Sync failed: pull conflicts — resolve in the repository, then retry`
+          : `Sync failed: ${formatError(err)}`,
+        type: 'error',
+        duration: 6000,
+      })
     } finally {
-      setPushing(false)
+      setSyncing(false)
       refetchPushStatusRef.current()
     }
-  }, [currentProjectId, pushing])
+  }, [currentProjectId, syncing])
 
   // Archived (killed/merged) history list. Loaded lazily and paginated for
   // infinite scroll — it is historical, so unlike the live list it is not
@@ -1195,25 +1203,30 @@ function RootLayout() {
 
           <SpawnForm compact projectId={currentProjectId} onSpawned={handleSpawned} disabled={!currentProjectId} />
 
-          {/* Repository view + Push — sit between the spawn box and the agents list */}
+          {/* Repository view + Sync — sit between the spawn box and the agents list */}
           <div className="px-2 pt-2 pb-1 border-b border-gray-100 dark:border-gray-700">
             {currentProjectId ? (
               (() => {
                 const repositoryActive = /\/repository(\/|$)/.test(location.pathname)
                 const ahead = pushStatus?.ahead ?? 0
                 const behind = pushStatus?.behind ?? 0
-                const canPush = !!pushStatus?.can_push && !pushing
-                const pushTooltip = pushing
-                  ? 'Pushing…'
+                const canSync = (ahead > 0 || behind > 0) && !!pushStatus?.has_remote && !!pushStatus?.branch && !syncing
+                const remote = pushStatus?.remote ?? 'remote'
+                const syncTooltip = syncing
+                  ? 'Syncing…'
                   : !pushStatus
-                    ? 'Push to remote'
-                    : pushStatus.can_push
-                      ? `Push ${ahead} commit${ahead === 1 ? '' : 's'} to ${pushStatus.remote ?? 'remote'}`
-                      : !pushStatus.has_remote
-                        ? 'No remote to push to'
-                        : !pushStatus.branch
-                          ? 'Detached HEAD — nothing to push'
-                          : 'Nothing to push — up to date with remote'
+                    ? 'Sync with remote'
+                    : !pushStatus.has_remote
+                      ? 'No remote to sync with'
+                      : !pushStatus.branch
+                        ? 'Detached HEAD — cannot sync'
+                        : behind > 0 && ahead > 0
+                          ? `Sync: pull ${behind}, push ${ahead}`
+                          : behind > 0
+                            ? `Pull ${behind} commit${behind === 1 ? '' : 's'} from ${remote}`
+                            : ahead > 0
+                              ? `Push ${ahead} commit${ahead === 1 ? '' : 's'} to ${remote}`
+                              : `Up to date with ${remote}`
                 return (
                   <div className="flex items-center gap-1">
                     <button
@@ -1236,34 +1249,33 @@ function RootLayout() {
                       <FolderGit2 className="w-4 h-4 shrink-0" />
                       Repository
                     </button>
-                    <span className="shrink-0 text-gray-300 dark:text-gray-600 select-none">·</span>
-                    {behind > 0 && (
-                      <Tooltip
-                        content={`${behind} commit${behind === 1 ? '' : 's'} behind ${pushStatus?.remote ?? 'remote'} — pull to update`}
-                        className="shrink-0"
-                      >
-                        <span className="flex items-center gap-1 px-2 py-2 rounded-lg text-sm font-medium text-amber-600 dark:text-amber-400">
-                          <ArrowDown className="w-4 h-4 shrink-0" />
-                          <span className="text-xs tabular-nums">{behind}</span>
-                        </span>
-                      </Tooltip>
-                    )}
-                    <Tooltip content={pushTooltip} className="shrink-0">
+                    <Tooltip content={syncTooltip} className="shrink-0">
                       <button
                         type="button"
-                        onClick={handlePush}
-                        disabled={!canPush}
-                        aria-label={pushTooltip}
+                        onClick={handleSync}
+                        disabled={!canSync}
+                        aria-label={syncTooltip}
                         className={
-                          canPush
+                          canSync
                             ? 'flex items-center gap-1 px-2.5 py-2 rounded-lg text-sm font-medium cursor-pointer text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors'
                             : 'flex items-center gap-1 px-2.5 py-2 rounded-lg text-sm font-medium text-gray-400 dark:text-gray-600 cursor-not-allowed'
                         }
                       >
-                        {pushing
-                          ? <LoaderCircle className="w-4 h-4 shrink-0 animate-spin" />
-                          : <ArrowUp className="w-4 h-4 shrink-0" />}
-                        {ahead > 0 && <span className="text-xs tabular-nums">{ahead}</span>}
+                        <RefreshCw className={`w-4 h-4 shrink-0 ${syncing ? 'animate-spin' : ''}`} />
+                        {(behind > 0 || ahead > 0) && (
+                          <span className="flex items-center gap-0.5 text-xs tabular-nums">
+                            {behind > 0 && (
+                              <span className="flex items-center text-amber-600 dark:text-amber-400">
+                                <ArrowDown className="w-3 h-3 shrink-0" />{behind}
+                              </span>
+                            )}
+                            {ahead > 0 && (
+                              <span className="flex items-center">
+                                <ArrowUp className="w-3 h-3 shrink-0" />{ahead}
+                              </span>
+                            )}
+                          </span>
+                        )}
                       </button>
                     </Tooltip>
                   </div>
@@ -1275,9 +1287,8 @@ function RootLayout() {
                   <FolderGit2 className="w-4 h-4 shrink-0" />
                   Repository
                 </span>
-                <span className="shrink-0 text-gray-300 dark:text-gray-600 select-none">·</span>
                 <span className="flex items-center px-2.5 py-2 rounded-lg text-gray-300 dark:text-gray-700 cursor-not-allowed">
-                  <ArrowUp className="w-4 h-4 shrink-0" />
+                  <RefreshCw className="w-4 h-4 shrink-0" />
                 </span>
               </div>
             )}

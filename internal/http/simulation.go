@@ -1663,6 +1663,18 @@ func (s *SimulationServer) PushRepository(w http.ResponseWriter, r *http.Request
 		Branch:    &branch,
 		Remote:    &remote,
 		Ahead:     0,
+		Behind:    1,
+		HasRemote: true,
+		CanPush:   false,
+	})
+}
+
+func (s *SimulationServer) SyncRepository(w http.ResponseWriter, r *http.Request, projectId string) {
+	branch, remote := "main", "origin"
+	api.WriteJSON(w, http.StatusOK, api.RepositoryPushStatus{
+		Branch:    &branch,
+		Remote:    &remote,
+		Ahead:     0,
 		Behind:    0,
 		HasRemote: true,
 		CanPush:   false,

@@ -151,4 +151,89 @@ func TestGetRemoteStatusAndPush(t *testing.T) {
 	if st.Ahead != 0 || st.CanPush() {
 		t.Errorf("expected Ahead=0 CanPush=false (behind only), got %+v", st)
 	}
+
+	// Pull fast-forwards onto the fetched remote commit, leaving us in sync.
+	if err := Pull(context.Background(), dir, "t", "t@e"); err != nil {
+		t.Fatalf("Pull (fast-forward): %v", err)
+	}
+	st, err = GetRemoteStatus(dir)
+	if err != nil {
+		t.Fatalf("GetRemoteStatus (after pull): %v", err)
+	}
+	if st.Ahead != 0 || st.Behind != 0 {
+		t.Errorf("expected Ahead=0 Behind=0 after pull, got %+v", st)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "c.txt")); err != nil {
+		t.Errorf("expected pulled file c.txt to exist: %v", err)
+	}
+}
+
+// TestPullMergesDivergedBranches covers the non-fast-forward path: both sides
+// have unique, non-conflicting commits, so Pull creates a merge commit and we
+// end up ahead (the merge) without losing the remote's work.
+func TestPullMergesDivergedBranches(t *testing.T) {
+	remote := t.TempDir()
+	if out, err := exec.Command("git", "-C", remote, "init", "-q", "--bare").CombinedOutput(); err != nil {
+		t.Fatalf("git init --bare: %v\n%s", err, out)
+	}
+
+	dir := gitInit(t)
+	run := func(d string, args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", d}, args...)...)
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@e",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@e")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	write := func(d, name, content string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(d, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	run(dir, "checkout", "-q", "-b", "main")
+	write(dir, "a.txt", "a\n")
+	run(dir, "add", ".")
+	run(dir, "commit", "-qm", "base")
+	run(dir, "remote", "add", "origin", remote)
+	if _, err := Push(dir); err != nil {
+		t.Fatalf("Push: %v", err)
+	}
+
+	// Remote gains a commit on a different file (no conflict).
+	clone := t.TempDir()
+	if out, err := exec.Command("git", "clone", "-q", remote, clone).CombinedOutput(); err != nil {
+		t.Fatalf("git clone: %v\n%s", err, out)
+	}
+	write(clone, "remote.txt", "r\n")
+	run(clone, "add", ".")
+	run(clone, "commit", "-qm", "remote work")
+	run(clone, "push", "-q", "origin", "main")
+
+	// Local gains its own commit, so the branches diverge.
+	write(dir, "local.txt", "l\n")
+	run(dir, "add", ".")
+	run(dir, "commit", "-qm", "local work")
+
+	if err := Pull(context.Background(), dir, "t", "t@e"); err != nil {
+		t.Fatalf("Pull (merge): %v", err)
+	}
+	st, err := GetRemoteStatus(dir)
+	if err != nil {
+		t.Fatalf("GetRemoteStatus: %v", err)
+	}
+	// Behind cleared; ahead is the local commit + the merge commit, still unpushed.
+	if st.Behind != 0 {
+		t.Errorf("expected Behind=0 after merge pull, got %+v", st)
+	}
+	if st.Ahead == 0 || !st.CanPush() {
+		t.Errorf("expected Ahead>0 CanPush=true after merge pull, got %+v", st)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "remote.txt")); err != nil {
+		t.Errorf("expected merged remote.txt to exist: %v", err)
+	}
 }
