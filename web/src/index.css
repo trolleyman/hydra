@@ -86,6 +86,37 @@ code.hljs.hljs-line { padding: 0 0 0 0.75rem; }
 .dark .hljs-strong { color: inherit; font-weight: bold; }
 .dark .hljs-link { text-decoration: underline; }
 
+/* xterm.js renders its scrolling viewport (the build log's LogView and the agent
+   terminal) with the OS-native scrollbar. On Linux that scrollbar carries
+   increment/decrement arrow buttons, and inside the short build-log box those
+   stepper buttons overlap the thumb — which looks broken. Replace it everywhere
+   xterm is used with a thin, button-less overlay scrollbar that fits the UI. */
+.xterm-viewport {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(107, 114, 128, 0.5) transparent; /* gray-500 thumb */
+}
+.xterm-viewport::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+.xterm-viewport::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+}
+.xterm-viewport::-webkit-scrollbar-track {
+  background: transparent;
+}
+.xterm-viewport::-webkit-scrollbar-thumb {
+  background-color: rgba(107, 114, 128, 0.5); /* gray-500 */
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+.xterm-viewport::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(107, 114, 128, 0.8);
+}
+
 /* The prompt editor's highlight backdrop syntax-colours code blocks too, but it
    uses the proportional UI font and must stay glyph-aligned with the (invisible)
    textarea caret underneath. Token COLOUR is free — it doesn't affect layout —
