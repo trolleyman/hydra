@@ -12,10 +12,13 @@ import { AgentTypeIcon, type AgentTypeIconName } from './AgentTypeIcon'
 
 // A labelled block at the top of settings: a Title-Case heading, an optional
 // one-line description, then the control(s). Used for Theme / Scope / Agent.
-export function SettingSection({ title, description, children }: { title: string; description?: string; children: ReactNode }) {
+export function SettingSection({ title, description, action, children }: { title: string; description?: string; action?: ReactNode; children: ReactNode }) {
   return (
     <div className="mb-5">
-      <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">{title}</h2>
+      <div className="flex items-center justify-between gap-2">
+        <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">{title}</h2>
+        {action}
+      </div>
       {description && <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{description}</p>}
       <div className="mt-2">{children}</div>
     </div>
@@ -902,21 +905,22 @@ export function SettingsContent({
       <SettingSection
         title="Agent"
         description="Which agent these settings apply to. “All agents” is the shared default; pick a specific agent to override it just for that one."
+        action={
+          <button
+            onClick={() => onTest(activeSection === 'all' ? 'bash' : activeSection)}
+            disabled={testing}
+            title="Spawn a throwaway agent to try this configuration"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 text-xs font-medium hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors disabled:opacity-50 cursor-pointer shrink-0"
+          >
+            <Terminal className="w-3.5 h-3.5" />
+            {testing ? 'Spawning…' : 'Test'}
+          </button>
+        }
       >
         <AgentSelector value={activeSection} onChange={setActiveSection} />
       </SettingSection>
 
       <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-4 sm:p-6">
-        <div className="flex justify-end mb-3">
-          <button
-            onClick={() => onTest(activeSection === 'all' ? 'bash' : activeSection)}
-            disabled={testing}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 text-xs font-medium hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors disabled:opacity-50 cursor-pointer"
-          >
-            <Terminal className="w-3.5 h-3.5" />
-            {testing ? 'Spawning…' : 'Test'}
-          </button>
-        </div>
         {activeSection === 'all' && (
           <ConfigForm value={config.defaults} onChange={(defaults) => setConfig({ ...config, defaults })} inherited={inheritedConfig?.defaults ?? null} agentType="default" selectedProject={selectedProject} defaultPrePrompt={config.default_pre_prompt} />
         )}
