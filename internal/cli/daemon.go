@@ -76,6 +76,9 @@ func runDaemon(_ *cobra.Command, _ []string) error {
 	// Serve the web UI on TCP (best-effort; the unix socket is authoritative).
 	if daemonFlags.web {
 		addr := "localhost:8080"
+		if rt.deploy.ListenAddr != "" {
+			addr = rt.deploy.ListenAddr
+		}
 		if env := os.Getenv("HYDRA_API_ADDR"); env != "" {
 			addr = env
 		}

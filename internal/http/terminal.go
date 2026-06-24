@@ -20,8 +20,14 @@ import (
 	"github.com/trolleyman/hydra/internal/paths"
 )
 
-// checkOrigin allows WebSocket connections only from localhost origins.
-// Requests with no Origin header (e.g. native clients) are also allowed.
+// checkOrigin guards WebSocket upgrades against cross-origin (CSRF) connections.
+// It allows same-origin sockets — the Origin's host:port matches the Host the
+// request was sent to — so the UI works when Hydra is reached by LAN IP or
+// hostname (e.g. from a phone), not just on localhost. Loopback origins are also
+// trusted (covers dev setups where the page and API sit on different localhost
+// ports), as are requests with no Origin header (native/CLI clients). Remote
+// access is separately gated by the auth key (see auth.go); this only stops a
+// different site from driving a socket against a Hydra the browser can reach.
 func checkOrigin(r *http.Request) bool {
 	origin := r.Header.Get("Origin")
 	if origin == "" {
@@ -30,6 +36,9 @@ func checkOrigin(r *http.Request) bool {
 	u, err := url.Parse(origin)
 	if err != nil {
 		return false
+	}
+	if u.Host == r.Host && r.Host != "" {
+		return true // same origin
 	}
 	host := u.Hostname()
 	return host == "localhost" || host == "127.0.0.1" || host == "::1"

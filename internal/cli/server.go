@@ -49,6 +49,9 @@ func runServer(_ *cobra.Command, _ []string) error {
 	}
 
 	addr := "localhost:8080"
+	if rt.deploy.ListenAddr != "" {
+		addr = rt.deploy.ListenAddr
+	}
 	if envAddr := os.Getenv("HYDRA_API_ADDR"); envAddr != "" {
 		addr = envAddr
 	}
