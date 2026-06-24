@@ -78,7 +78,7 @@ export function TrustProjectModal({
           </p>
 
           <div className="mt-4">
-            <div className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1.5">
+            <div className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1.5">
               .hydra/config.toml
             </div>
             {loading ? (

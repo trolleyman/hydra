@@ -402,7 +402,7 @@ function ProjectSwitcherOverlay({ projects, index }: { projects: ProjectInfo[]; 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 pointer-events-none">
       <div className="w-80 max-h-[70vh] overflow-y-auto bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-2xl py-2">
-        <div className="px-4 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
+        <div className="px-4 py-1.5 text-[11px] font-semibold text-gray-400 dark:text-gray-500">
           Switch project
         </div>
         {projects.map((p, i) => {

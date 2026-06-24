@@ -1080,8 +1080,8 @@ function LeftSelector({ commits, selected, onChange, baseBranch, rightSel }: {
           {/* Commits in the middle */}
           {commits.length > 0 && (
             <div className="max-h-64 overflow-y-auto py-1">
-              <p className="px-3 py-1 text-[10px] text-gray-400 dark:text-gray-500 uppercase tracking-wide font-medium">
-                Commits ({commits.length})
+              <p className="px-3 py-1 text-[11px] text-gray-400 dark:text-gray-500 font-medium">
+                Commits · {commits.length}
               </p>
               {commits.map((c, cIdx) => {
                 // Commit is valid if right is not a specific commit, or right commit is newer (lower idx)
@@ -1196,8 +1196,8 @@ function RightSelector({ commits, selected, onChange, left, hasUncommitted }: {
           </div>
           {validCommits.length > 0 && (
             <div className="max-h-64 overflow-y-auto py-1">
-              <p className="px-3 py-1 text-[10px] text-gray-400 dark:text-gray-500 uppercase tracking-wide font-medium">
-                Commits ({validCommits.length})
+              <p className="px-3 py-1 text-[11px] text-gray-400 dark:text-gray-500 font-medium">
+                Commits · {validCommits.length}
               </p>
               {validCommits.map((c) => (
                 <CustomTooltip key={c.sha} side="right" content={<CommitTooltipContent commit={c} />}>

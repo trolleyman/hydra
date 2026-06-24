@@ -368,7 +368,7 @@ function SettingsPopup({ settings, onChange }: { settings: RepoSettings; onChang
 
       {open && (
         <div className="absolute right-0 top-full mt-1 w-48 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50 p-3">
-          <p className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">Options</p>
+          <p className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 mb-2">Options</p>
           <div className="flex flex-col gap-0.5">
             {options.map(({ key, label }) => (
               <label key={key} className="flex items-center gap-2 py-0.5 cursor-pointer">
@@ -434,7 +434,7 @@ function DiffSettingsPopup({ settings, onChange }: { settings: DiffSettings; onC
 
       {open && (
         <div className="absolute right-0 top-full mt-1 w-48 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50 p-3">
-          <p className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">File list</p>
+          <p className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 mb-2">File list</p>
           <div className="flex flex-col gap-0.5 mb-3">
             {viewOptions.map((opt) => (
               <label key={opt.value} className="flex items-center gap-2 py-0.5 cursor-pointer">
@@ -449,7 +449,7 @@ function DiffSettingsPopup({ settings, onChange }: { settings: DiffSettings; onC
               </label>
             ))}
           </div>
-          <p className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">Diff options</p>
+          <p className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 mb-2">Diff options</p>
           <div className="flex flex-col gap-0.5">
             {options.map(({ key, label }) => (
               <label key={key} className="flex items-center gap-2 py-0.5 cursor-pointer">
@@ -465,7 +465,7 @@ function DiffSettingsPopup({ settings, onChange }: { settings: DiffSettings; onC
           </div>
           {/* Image diff mode — applies to in-tree images in the diff, mirroring
               the agent diff viewer's settings (shared storage key). */}
-          <p className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mt-3 mb-2">Image diff</p>
+          <p className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 mt-3 mb-2">Image diff</p>
           <div className="flex flex-col gap-0.5">
             {IMAGE_DIFF_MODES.map((opt) => (
               <label key={opt.value} className="flex items-center gap-2 py-0.5 cursor-pointer">
