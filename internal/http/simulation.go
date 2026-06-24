@@ -1288,13 +1288,13 @@ func simArtifactSets(id string) []api.ArtifactSet {
 					Name:       "overview.png",
 					ChangeType: api.ArtifactFileChangeTypeAdded,
 					RightUrl:   ptr(simSVG("Overview (after)", "#15803d", 360, 220)),
-					Width:      ptr(360), Height: ptr(220),
+					Width:      ptr(1440), Height: ptr(880),
 				},
 				{
 					Name:       "metrics.png",
 					ChangeType: api.ArtifactFileChangeTypeAdded,
 					RightUrl:   ptr(simSVG("Metrics (after)", "#15803d", 240, 320)),
-					Width:      ptr(240), Height: ptr(320),
+					Width:      ptr(960), Height: ptr(1280),
 				},
 			},
 		},
@@ -1310,6 +1310,7 @@ func simArtifactSets(id string) []api.ArtifactSet {
 					ChangeType: api.ArtifactFileChangeTypeUnchanged,
 					LeftUrl:    ptr(simSVG("Welcome", "#334155", 360, 220)),
 					RightUrl:   ptr(simSVG("Welcome", "#334155", 360, 220)),
+					Width:      ptr(1440), Height: ptr(880),
 				},
 			},
 		},
@@ -1329,6 +1330,13 @@ func artTags(tags ...string) *[]string {
 // added file with no "before", to document the missing-image placeholder). Its
 // files carry scoped (theme/viewport) and free-form tags so the panel documents
 // its tag badges and the tag filter.
+//
+// Each file's Width/Height is the resolution a real capture at that viewport would
+// have (≈1440×880 desktop, 960×1920 phone), NOT the small size the placeholder SVG
+// is drawn at — the SVG is vector and scales to fill its tile, so it stands in for a
+// full-resolution screenshot. Sizing them realistically keeps the masonry's
+// resolution-aware span (which would otherwise treat a 360px SVG as a tiny image and
+// shrink its tile on a high-DPI screen) laying the demo out like real artifacts.
 func simReadyChangedSet() api.ArtifactSet {
 	return api.ArtifactSet{
 		Name:    "screenshots",
@@ -1346,7 +1354,7 @@ func simReadyChangedSet() api.ArtifactSet {
 				Tags:       artTags("theme::light", "viewport::desktop"),
 				LeftUrl:    ptr(simSVGUI("Home", false, "#64748b", "Draft", 360, 220)),
 				RightUrl:   ptr(simSVGUI("Home", false, "#16a34a", "Live", 360, 220)),
-				Width:      ptr(360), Height: ptr(220),
+				Width:      ptr(1440), Height: ptr(880),
 			},
 			{
 				Name:       "home-dark.png",
@@ -1354,7 +1362,7 @@ func simReadyChangedSet() api.ArtifactSet {
 				Tags:       artTags("theme::dark", "viewport::desktop"),
 				LeftUrl:    ptr(simSVGUI("Home", true, "#64748b", "Draft", 360, 220)),
 				RightUrl:   ptr(simSVGUI("Home", true, "#16a34a", "Live", 360, 220)),
-				Width:      ptr(360), Height: ptr(220),
+				Width:      ptr(1440), Height: ptr(880),
 			},
 			{
 				Name:       "login-phone.png",
@@ -1362,7 +1370,7 @@ func simReadyChangedSet() api.ArtifactSet {
 				Tags:       artTags("theme::light", "viewport::phone"),
 				LeftUrl:    ptr(simSVGUI("Login", false, "#64748b", "Draft", 240, 480)),
 				RightUrl:   ptr(simSVGUI("Login", false, "#16a34a", "Live", 240, 480)),
-				Width:      ptr(240), Height: ptr(480),
+				Width:      ptr(960), Height: ptr(1920),
 			},
 			{
 				Name:       "profile-phone-dark.png",
@@ -1370,14 +1378,14 @@ func simReadyChangedSet() api.ArtifactSet {
 				Tags:       artTags("theme::dark", "viewport::phone"),
 				LeftUrl:    ptr(simSVGUI("Profile", true, "#64748b", "Draft", 240, 480)),
 				RightUrl:   ptr(simSVGUI("Profile", true, "#16a34a", "Live", 240, 480)),
-				Width:      ptr(240), Height: ptr(480),
+				Width:      ptr(960), Height: ptr(1920),
 			},
 			{
 				Name:       "settings-phone.png",
 				ChangeType: api.ArtifactFileChangeTypeAdded,
 				Tags:       artTags("theme::dark", "viewport::phone", "new"),
 				RightUrl:   ptr(simSVG("Settings (new)", "#15803d", 240, 480)),
-				Width:      ptr(240), Height: ptr(480),
+				Width:      ptr(960), Height: ptr(1920),
 			},
 			// A .webm artifact: the frontend routes it to the video diff viewer
 			// (synchronized before/after playback + per-frame difference) rather
@@ -1396,7 +1404,7 @@ func simReadyChangedSet() api.ArtifactSet {
 				Tags:       artTags("theme::light", "viewport::desktop"),
 				LeftUrl:    ptr(simSVG("About", "#334155", 360, 220)),
 				RightUrl:   ptr(simSVG("About", "#334155", 360, 220)),
-				Width:      ptr(360), Height: ptr(220),
+				Width:      ptr(1440), Height: ptr(880),
 			},
 		},
 	}
@@ -1870,9 +1878,9 @@ func (s *SimulationServer) GetRepositoryArtifact(w http.ResponseWriter, r *http.
 			Status: api.RepositoryArtifactResponseStatusReady,
 			LogUrl: &logURL,
 			Files: []api.RepositoryArtifactFile{
-				{Name: "home.png", Url: ptr(simSVG("home", "#15803d", 360, 220)), Tags: artTags("theme::light", "viewport::desktop"), Width: ptr(360), Height: ptr(220)},
-				{Name: "home-dark.png", Url: ptr(simSVG("home dark", "#166534", 360, 220)), Tags: artTags("theme::dark", "viewport::desktop"), Width: ptr(360), Height: ptr(220)},
-				{Name: "login-phone.png", Url: ptr(simSVG("login", "#1d4ed8", 150, 300)), Tags: artTags("theme::light", "viewport::phone"), Width: ptr(150), Height: ptr(300)},
+				{Name: "home.png", Url: ptr(simSVG("home", "#15803d", 360, 220)), Tags: artTags("theme::light", "viewport::desktop"), Width: ptr(1440), Height: ptr(880)},
+				{Name: "home-dark.png", Url: ptr(simSVG("home dark", "#166534", 360, 220)), Tags: artTags("theme::dark", "viewport::desktop"), Width: ptr(1440), Height: ptr(880)},
+				{Name: "login-phone.png", Url: ptr(simSVG("login", "#1d4ed8", 150, 300)), Tags: artTags("theme::light", "viewport::phone"), Width: ptr(600), Height: ptr(1200)},
 			},
 		})
 	case "components":
