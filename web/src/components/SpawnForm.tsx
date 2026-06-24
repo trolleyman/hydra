@@ -1,10 +1,11 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import { api } from '../stores/apiClient'
 import type { AgentResponse, SpawnAgentRequest, RepositoryBranch } from '../api'
 import { BranchSelector } from './BranchSelector'
 import { formatError } from '../api/format_error'
 import { uploadFile, extractFiles, isImageFile } from '../api/uploads'
-import { Zap, LoaderCircle, Paperclip } from 'lucide-react'
+import { Zap, LoaderCircle, Paperclip, Check } from 'lucide-react'
+import { AgentTypeIcon } from './AgentTypeIcon'
 import { Tooltip } from './Tooltip'
 import { ImageLightbox } from './ImageLightbox'
 import { AttachmentChips } from './AttachmentChips'
@@ -39,6 +40,101 @@ function slugify(text: string, maxLength = 40, allowTrailingHyphen = false): str
 function generateId(prompt: string): string {
   const words = prompt.trim().split(/\s+/).slice(0, 8).join(' ')
   return slugify(words)
+}
+
+// Selectable agent types with their display label and accent colour. The
+// AgentTypeOption ids line up with AgentTypeIcon's names, so the icon can be
+// rendered directly from the id.
+const AGENT_TYPES: { id: AgentTypeOption; label: string; color: string }[] = [
+  { id: 'claude', label: 'Claude', color: 'text-purple-600 dark:text-purple-400' },
+  { id: 'gemini', label: 'Gemini', color: 'text-teal-600 dark:text-teal-400' },
+  { id: 'copilot', label: 'Copilot', color: 'text-blue-600 dark:text-blue-400' },
+  { id: 'codex', label: 'Codex', color: 'text-emerald-600 dark:text-emerald-400' },
+]
+
+// AgentTypePicker is an icon-only trigger that opens a dropdown listing each
+// agent type as its icon + name. Used in both SpawnForm layouts so the agent
+// selector stays compact (just the brand mark) while still being discoverable.
+function AgentTypePicker({
+  value,
+  onChange,
+  size = 'md',
+}: {
+  value: AgentTypeOption
+  onChange: (t: AgentTypeOption) => void
+  size?: 'sm' | 'md'
+}) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  const btnRef = useRef<HTMLButtonElement>(null)
+  // Menu coordinates. The spawn cards clip their content (overflow-hidden for
+  // the rounded gradient border), so the menu is positioned with `fixed` and
+  // anchored to the trigger's rect to escape that clipping.
+  const [coords, setCoords] = useState<{ left: number; top: number } | null>(null)
+
+  const place = useCallback(() => {
+    const r = btnRef.current?.getBoundingClientRect()
+    if (r) setCoords({ left: r.left, top: r.bottom + 4 })
+  }, [])
+
+  useEffect(() => {
+    if (!open) return
+    place()
+    function handleClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handleClick)
+    // Keep the menu pinned to the trigger if the page scrolls or resizes.
+    window.addEventListener('scroll', place, true)
+    window.addEventListener('resize', place)
+    return () => {
+      document.removeEventListener('mousedown', handleClick)
+      window.removeEventListener('scroll', place, true)
+      window.removeEventListener('resize', place)
+    }
+  }, [open, place])
+
+  const active = AGENT_TYPES.find((a) => a.id === value) ?? AGENT_TYPES[0]
+  const trigger = size === 'sm' ? 'w-6 h-6' : 'w-7 h-7'
+  const iconCls = size === 'sm' ? 'w-3.5 h-3.5' : 'w-4 h-4'
+
+  return (
+    <div ref={ref} className="relative shrink-0">
+      <button
+        ref={btnRef}
+        type="button"
+        title={`Agent: ${active.label}`}
+        aria-label={`Agent type: ${active.label}`}
+        onClick={() => setOpen((o) => !o)}
+        className={`flex items-center justify-center rounded-full border transition-colors cursor-pointer ${trigger} ${active.color} ${
+          open
+            ? 'bg-gray-100 dark:bg-gray-700 border-gray-300 dark:border-gray-600'
+            : 'border-transparent hover:bg-gray-100 dark:hover:bg-gray-700'
+        }`}
+      >
+        <AgentTypeIcon name={active.id} className={iconCls} />
+      </button>
+      {open && coords && (
+        <div
+          style={{ position: 'fixed', left: coords.left, top: coords.top }}
+          className="w-36 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50 py-1"
+        >
+          {AGENT_TYPES.map((a) => (
+            <button
+              key={a.id}
+              type="button"
+              onClick={() => { onChange(a.id); setOpen(false) }}
+              className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-xs text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors cursor-pointer"
+            >
+              <AgentTypeIcon name={a.id} className={`w-4 h-4 shrink-0 ${a.color}`} />
+              <span>{a.label}</span>
+              {a.id === value && <Check className="w-3.5 h-3.5 ml-auto shrink-0 text-blue-500" />}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
 }
 
 export function SpawnForm({
@@ -473,13 +569,7 @@ export function SpawnForm({
                     <Paperclip className="w-3 h-3" />
                   </button>
                 </Tooltip>
-                <select
-                  value={agentType}
-                  onChange={(e) => setAgentType(e.target.value as AgentTypeOption)}
-                  className="text-[10px] bg-transparent text-gray-500 dark:text-gray-400 focus:outline-none cursor-pointer shrink-0"
-                >{(['claude', 'gemini', 'copilot', 'codex'] as AgentTypeOption[]).map((t) => (
-                    <option key={t} value={t}>{t}</option>
-                  ))}</select>
+                <AgentTypePicker value={agentType} onChange={setAgentType} size="sm" />
                 <input
                   type="text"
                   value={idManuallyEdited ? agentId : ''}
@@ -565,29 +655,8 @@ export function SpawnForm({
                       <Paperclip className="w-4 h-4" />
                     </button>
                   </Tooltip>
-                  {/* Agent type pills */}
-                  <div className="flex gap-1.5 shrink-0">
-                    {(['claude', 'gemini', 'copilot', 'codex'] as AgentTypeOption[]).map((t) => (
-                      <button
-                        key={t}
-                        type="button"
-                        onClick={() => setAgentType(t)}
-                        className={`text-xs px-3 py-1 rounded-full font-medium transition-all cursor-pointer ${
-                          agentType === t
-                            ? t === 'claude'
-                              ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300 shadow-sm'
-                              : t === 'gemini'
-                              ? 'bg-teal-100 text-teal-700 dark:bg-teal-900/40 dark:text-teal-300 shadow-sm'
-                              : t === 'codex'
-                              ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300 shadow-sm'
-                              : 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300 shadow-sm'
-                            : 'text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
-                        }`}
-                      >
-                        {t}
-                      </button>
-                    ))}
-                  </div>
+                  {/* Agent type picker (icon trigger + named dropdown) */}
+                  <AgentTypePicker value={agentType} onChange={setAgentType} />
                   {/* Divider */}
                   <span className="text-gray-200 dark:text-gray-600 text-sm shrink-0">|</span>
                   {/* ID field */}

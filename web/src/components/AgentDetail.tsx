@@ -15,6 +15,7 @@ import { DiffViewer } from '../DiffViewer'
 import { formatStartedAgo, agentStatusBadge, archivedEndStateBadge, agentDotClass } from './AgentComponents'
 import { LoaderCircle, Merge, Trash2, Tag, RotateCcw, Pencil, TerminalSquare } from 'lucide-react'
 import { Tooltip } from './Tooltip'
+import { AgentTypeIcon, type AgentTypeIconName } from './AgentTypeIcon'
 import { renderMarkdown } from '../lib/markdown'
 
 import { useDialogStore } from '../stores/dialogStore'
@@ -160,7 +161,8 @@ function ArchivedAgentDetail({ agent, projectId, onPurged }: { agent: AgentRespo
         <div className="mb-6">
           {/* Metadata row */}
           <SeparatedRow className="flex items-center gap-3 flex-wrap">
-            <span className={`text-xs px-2.5 py-0.5 rounded-full font-medium ${agentTypeClass}`}>
+            <span className={`inline-flex items-center gap-1 text-xs px-2.5 py-0.5 rounded-full font-medium ${agentTypeClass}`}>
+              <AgentTypeIcon name={agent.agent_type as AgentTypeIconName} className="w-3 h-3 shrink-0" />
               {agent.agent_type}
             </span>
             <span className={`text-xs px-2 py-0.5 rounded font-medium ${endBadge.className}`}>
@@ -515,7 +517,8 @@ export function AgentDetail({
         <div className="mb-6">
           {/* Metadata row */}
           <SeparatedRow className="flex items-center gap-x-3 gap-y-1 flex-wrap">
-            <span className={`text-xs px-2.5 py-0.5 rounded-full font-medium ${agentTypeClass}`}>
+            <span className={`inline-flex items-center gap-1 text-xs px-2.5 py-0.5 rounded-full font-medium ${agentTypeClass}`}>
+              <AgentTypeIcon name={agent.agent_type as AgentTypeIconName} className="w-3 h-3 shrink-0" />
               {agent.agent_type}
             </span>
             {agent.agent_status && (

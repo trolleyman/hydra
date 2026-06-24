@@ -1,5 +1,6 @@
 import type { AgentResponse } from '../api'
 import { renderMarkdown } from '../lib/markdown'
+import { AgentTypeIcon, type AgentTypeIconName } from './AgentTypeIcon'
 
 export function normalizeContainerState(status: string): string {
   const s = status.toLowerCase()
@@ -168,7 +169,8 @@ export function AgentSidebarItem({
         )}
       </div>
       <div className="flex items-center gap-1.5 mt-0.5 ml-4">
-        <span className={`text-xs ${agentTypeColor(agent.agent_type)}`}>
+        <span className={`flex items-center gap-1 text-xs ${agentTypeColor(agent.agent_type)}`}>
+          <AgentTypeIcon name={agent.agent_type as AgentTypeIconName} className="w-3 h-3 shrink-0" />
           {agent.agent_type || 'unknown'}
         </span>
         {archived ? (
