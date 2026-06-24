@@ -31,24 +31,29 @@ func enrichAgentStatus(projectRoot, id string, info *api.AgentStatusInfo) {
 		return
 	}
 
-	activity, lastMessage := readStatusLogTail(projectRoot, id)
+	activity, lastMessage, lastMessageIsQuestion := readStatusLogTail(projectRoot, id)
 	if info.Status == api.Running && activity != "" {
 		info.Activity = &activity
 	}
 	if info.LastMessage == nil && lastMessage != "" {
 		info.LastMessage = &lastMessage
+		if lastMessageIsQuestion {
+			info.LastMessageIsQuestion = &lastMessageIsQuestion
+		}
 	}
 }
 
 // readStatusLogTail parses the tail of the head's status_log.jsonl and returns
-// (activity, lastMessage): activity describes the most recent tool action when
-// the agent is mid-tool (empty once the turn ends), and lastMessage is the most
-// recent assistant message. Either may be "".
-func readStatusLogTail(projectRoot, id string) (activity, lastMessage string) {
+// (activity, lastMessage, lastMessageIsQuestion): activity describes the most
+// recent tool action when the agent is mid-tool (empty once the turn ends),
+// lastMessage is the most recent assistant message (or the question/plan a
+// user-input tool is waiting on), and lastMessageIsQuestion is true when
+// lastMessage is such a question/plan. Either string may be "".
+func readStatusLogTail(projectRoot, id string) (activity, lastMessage string, lastMessageIsQuestion bool) {
 	path := paths.GetStatusLogFromProjectRoot(projectRoot, id)
 	data, err := tailFile(path, maxStatusLogTail)
 	if err != nil {
-		return "", ""
+		return "", "", false
 	}
 
 	lines := bytes.Split(data, []byte("\n"))
@@ -81,8 +86,9 @@ func readStatusLogTail(projectRoot, id string) (activity, lastMessage string) {
 		}
 
 		if lastMessage == "" {
-			if msg := messageFromPayload(payload); msg != "" {
+			if msg, isQuestion := messageFromPayload(payload); msg != "" {
 				lastMessage = truncate(strings.TrimSpace(msg), 300)
+				lastMessageIsQuestion = isQuestion
 			}
 		}
 
@@ -90,37 +96,39 @@ func readStatusLogTail(projectRoot, id string) (activity, lastMessage string) {
 			break
 		}
 	}
-	return activity, lastMessage
+	return activity, lastMessage, lastMessageIsQuestion
 }
 
 // messageFromPayload extracts the agent's most recent user-facing message from a
 // hook payload: its last assistant message, or — for a tool that asks the user
-// something (e.g. AskUserQuestion) — the question/plan text it's waiting on.
-func messageFromPayload(p map[string]interface{}) string {
-	if msg, _ := p["last_assistant_message"].(string); msg != "" {
-		return msg
+// something (e.g. AskUserQuestion) — the question/plan text it's waiting on. The
+// second return is true in that latter case, so callers can avoid treating the
+// question as a suggested next message.
+func messageFromPayload(p map[string]interface{}) (msg string, isQuestion bool) {
+	if m, _ := p["last_assistant_message"].(string); m != "" {
+		return m, false
 	}
 	tool, _ := p["tool_name"].(string)
 	if !isUserInputTool(tool) {
-		return ""
+		return "", false
 	}
 	ti, _ := p["tool_input"].(map[string]interface{})
 	if ti == nil {
-		return ""
+		return "", false
 	}
 	if qs, ok := ti["questions"].([]interface{}); ok {
 		for _, q := range qs {
 			if qm, ok := q.(map[string]interface{}); ok {
 				if s, _ := qm["question"].(string); s != "" {
-					return s
+					return s, true
 				}
 			}
 		}
 	}
 	if s, _ := ti["plan"].(string); s != "" {
-		return s
+		return s, true
 	}
-	return ""
+	return "", false
 }
 
 // isUserInputTool reports whether a tool blocks waiting for the user. Keep in

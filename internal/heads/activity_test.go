@@ -33,7 +33,7 @@ func TestReadStatusLogTailActivity(t *testing.T) {
 		`{"hook":{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"go test ./...\nsecond line"}}}`,
 	)
 
-	activity, _ := readStatusLogTail(root, id)
+	activity, _, _ := readStatusLogTail(root, id)
 	if activity != "$ go test ./..." {
 		t.Fatalf("activity = %q, want %q", activity, "$ go test ./...")
 	}
@@ -47,7 +47,7 @@ func TestReadStatusLogTailNoActivityAfterStop(t *testing.T) {
 		`{"hook":{"hook_event_name":"Stop","last_assistant_message":"All done."}}`,
 	)
 
-	activity, lastMessage := readStatusLogTail(root, id)
+	activity, lastMessage, _ := readStatusLogTail(root, id)
 	if activity != "" {
 		t.Fatalf("activity = %q, want empty (turn ended after last tool)", activity)
 	}
@@ -95,6 +95,11 @@ func TestReadStatusLogTailQuestion(t *testing.T) {
 	enrichAgentStatus(root, id, info)
 	if info.LastMessage == nil || *info.LastMessage != "Which DB?" {
 		t.Fatalf("lastMessage = %v, want %q", info.LastMessage, "Which DB?")
+	}
+	// The message is a question the agent is asking the user, so it's flagged as
+	// such — the UI uses this to skip the suggested-next-message caret.
+	if info.LastMessageIsQuestion == nil || !*info.LastMessageIsQuestion {
+		t.Fatalf("lastMessageIsQuestion = %v, want true", info.LastMessageIsQuestion)
 	}
 	// A question tool isn't "activity" — the agent is blocked, not working.
 	if info.Activity != nil {

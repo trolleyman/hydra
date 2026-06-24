@@ -25,5 +25,9 @@ export type AgentStatusInfo = {
      * Short human-readable description of the agent's current action, derived from status_log.jsonl (present while running)
      */
     activity?: string;
+    /**
+     * True when last_message is a question/plan the agent is presenting to the user via a user-input tool (e.g. AskUserQuestion), rather than a closing message. The UI uses this to avoid marking it as a suggested next message.
+     */
+    last_message_is_question?: boolean;
 };
 

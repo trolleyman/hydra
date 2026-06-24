@@ -145,9 +145,12 @@ export function agentStatusDetail(agent: AgentResponse): string {
   // next message* — something you could send straight back to the agent (e.g.
   // "run it", "spin up the app so I can see it") — in which case it's marked with
   // a `❯ ` caret. A longer / multi-sentence message is the agent's closing
-  // summary or report, not a suggestion, so it stays plain.
+  // summary or report, not a suggestion, so it stays plain. A question the agent
+  // is *asking* the user (from a user-input tool like AskUserQuestion) is the
+  // opposite of a suggestion you'd send back, so it never gets the caret even
+  // when its shape looks terse — the backend flags it as last_message_is_question.
   if (status.last_message) {
-    return isSuggestedNextMessage(status.last_message)
+    return !status.last_message_is_question && isSuggestedNextMessage(status.last_message)
       ? `❯ ${status.last_message}`
       : status.last_message
   }

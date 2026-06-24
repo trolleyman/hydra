@@ -228,6 +228,9 @@ type AgentStatusInfo struct {
 	// LastMessage Last assistant message (present on turn-end and notification events)
 	LastMessage *string `json:"last_message,omitempty"`
 
+	// LastMessageIsQuestion True when last_message is a question/plan the agent is presenting to the user via a user-input tool (e.g. AskUserQuestion), rather than a closing message. The UI uses this to avoid marking it as a suggested next message.
+	LastMessageIsQuestion *bool `json:"last_message_is_question,omitempty"`
+
 	// Reason Session end reason (only present on SessionEnd events)
 	Reason *string `json:"reason,omitempty"`
 

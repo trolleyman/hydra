@@ -174,3 +174,61 @@ func TestQuestionText(t *testing.T) {
 		t.Errorf("questionText(empty) = %q, want empty", got)
 	}
 }
+
+// TestTriggerHookQuestionFlag covers a user-input tool's PreToolUse: status flips
+// to waiting, the question becomes last_message, and last_message_is_question is
+// set so the UI doesn't mark the question as a suggested next message.
+func TestTriggerHookQuestionFlag(t *testing.T) {
+	dir := t.TempDir()
+	statusPath := filepath.Join(dir, "status.json")
+	t.Setenv("HYDRA_STATUS_PATH", statusPath)
+	t.Setenv("HYDRA_STATUS_LOG_PATH", filepath.Join(dir, "status_log.jsonl"))
+
+	payload := map[string]interface{}{
+		"hook_event_name": "PreToolUse",
+		"tool_name":       "AskUserQuestion",
+		"tool_input": map[string]interface{}{
+			"questions": []interface{}{
+				map[string]interface{}{"question": "Where should the app binary be distributed first?"},
+			},
+		},
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := filepath.Join(dir, "stdin.json")
+	if err := os.WriteFile(in, raw, 0644); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.Open(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	orig := os.Stdin
+	os.Stdin = f
+	defer func() { os.Stdin = orig }()
+
+	if err := runTriggerHook("claude", "", nil); err != nil {
+		t.Fatalf("runTriggerHook: %v", err)
+	}
+
+	data, err := os.ReadFile(statusPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var info api.AgentStatusInfo
+	if err := json.Unmarshal(data, &info); err != nil {
+		t.Fatal(err)
+	}
+	if info.Status != api.Waiting {
+		t.Errorf("status = %q, want waiting", info.Status)
+	}
+	if info.LastMessage == nil || *info.LastMessage != "Where should the app binary be distributed first?" {
+		t.Errorf("last_message = %v", info.LastMessage)
+	}
+	if info.LastMessageIsQuestion == nil || !*info.LastMessageIsQuestion {
+		t.Errorf("last_message_is_question = %v, want true", info.LastMessageIsQuestion)
+	}
+}
