@@ -50,6 +50,7 @@ export type { StatusResponse } from './models/StatusResponse';
 export type { TerminalDataEvent } from './models/TerminalDataEvent';
 export type { TerminalDiffRefreshEvent } from './models/TerminalDiffRefreshEvent';
 export { TerminalEvent } from './models/TerminalEvent';
+export type { TerminalSizeEvent } from './models/TerminalSizeEvent';
 export type { TerminalStatusEvent } from './models/TerminalStatusEvent';
 export type { UncommittedSummary } from './models/UncommittedSummary';
 export type { UpdateAgentRequest } from './models/UpdateAgentRequest';
