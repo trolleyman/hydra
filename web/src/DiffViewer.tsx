@@ -786,9 +786,13 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onCo
                 Load diff
               </button>
             </div>
-          ) : fullLines && noChanges ? (
-            // Whole file, unchanged (e.g. a pure rename): show every line plainly.
-            <div className="overflow-hidden">{renderLines(fullLines, 'full')}</div>
+          ) : noChanges ? (
+            // A whole, unchanged file (e.g. a pure rename). The one-by-one view
+            // (headless) shows it in full like the file viewer; the stacked view
+            // collapses it to a label so a rename doesn't dump the file inline.
+            headless && fullLines
+              ? <div className="overflow-hidden">{renderLines(fullLines, 'full')}</div>
+              : <div className="px-4 py-3 text-xs text-gray-400 dark:text-gray-500 italic">No changes</div>
           ) : !file.hunks || file.hunks.length === 0 ? (
             <div className="px-4 py-3 text-xs text-gray-400 dark:text-gray-500 italic">No changes</div>
           ) : segments ? (
