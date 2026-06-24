@@ -459,6 +459,42 @@ function fileMatchesFilter(file: ArtifactFile, filter: ArtifactTagFilter): boole
   return true
 }
 
+// The per-value count shown right-aligned beside each filter checkbox, as
+// `shown/total`. `shown` is how many items carry this value under the current
+// filters with this scope itself ignored (so a value's own toggle never changes
+// its row); `total` is the baseline it's measured against. For a non-change scope
+// the baseline applies the change-type scope at its CURRENT setting, so revealing
+// 'unchanged' lifts the totals to match — it reads as "N of the M items currently
+// in scope". For the change scope itself the baseline ignores change filtering
+// entirely, so e.g. 'unchanged' reads 5/5 rather than 5/0.
+type ScopeCount = { shown: number; total: number }
+
+// computeScopeCounts walks the files once, tallying shown/total per value. A file
+// counts toward a value's tally when it carries that value (hasValue) and passes
+// the relevant filter (the current filter sans this scope for shown; the baseline
+// for total).
+function computeScopeCounts(
+  files: ArtifactFile[],
+  values: string[],
+  hasValue: (f: ArtifactFile, v: string) => boolean,
+  shownFilter: ArtifactTagFilter,
+  totalFilter: ArtifactTagFilter,
+): Record<string, ScopeCount> {
+  const out: Record<string, ScopeCount> = {}
+  for (const v of values) out[v] = { shown: 0, total: 0 }
+  for (const f of files) {
+    const passShown = fileMatchesFilter(f, shownFilter)
+    const passTotal = fileMatchesFilter(f, totalFilter)
+    if (!passShown && !passTotal) continue
+    for (const v of values) {
+      if (!hasValue(f, v)) continue
+      if (passShown) out[v].shown++
+      if (passTotal) out[v].total++
+    }
+  }
+  return out
+}
+
 // TagBadge renders one of a file's tags: a scoped label as a two-tone
 // category/value pill, a free-form tag as a single solid pill.
 export function TagBadge({ tag }: { tag: string }) {
@@ -488,6 +524,7 @@ function TagScopeFilter({
   label,
   values,
   off,
+  counts,
   onToggle,
   onIsolate,
   onAll,
@@ -496,6 +533,9 @@ function TagScopeFilter({
   label: string
   values: string[]
   off: string[]
+  // Per-value `shown/total` tallies (see computeScopeCounts); right-aligned and
+  // dimmed in each row. Optional so a caller can omit them.
+  counts?: Record<string, ScopeCount>
   onToggle: (val: string) => void
   onIsolate: (val: string) => void
   onAll: () => void
@@ -566,7 +606,12 @@ function TagScopeFilter({
                 onClick={(e) => { e.preventDefault(); if (e.shiftKey) onIsolate(v); else onToggle(v) }}
               >
                 <input type="checkbox" readOnly checked={!off.includes(v)} className="w-3.5 h-3.5 accent-blue-500 cursor-pointer shrink-0" />
-                <span className="text-gray-700 dark:text-gray-300 truncate">{v}</span>
+                <span className="text-gray-700 dark:text-gray-300 truncate min-w-0">{v}</span>
+                {counts?.[v] && (
+                  // shown/total for this value: how many items it covers under the
+                  // current filters (this scope ignored) over the in-scope baseline.
+                  <span className="ml-auto shrink-0 tabular-nums text-[10px] text-gray-400 dark:text-gray-500">{counts[v].shown}/{counts[v].total}</span>
+                )}
               </label>
             ))}
           </div>
@@ -1407,30 +1452,60 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
   const hasTags = collectedTags.scoped.length > 0 || collectedTags.free.length > 0
 
   // The built-in "type" filter (image / video), derived from the files' own
-  // extensions rather than their tags. Offered whenever a set spans more than one
-  // type, so a reviewer can isolate the videos (or the stills); shown after the
-  // user-defined tag scopes.
+  // extensions rather than their tags. Always offered (so the bar's built-ins are
+  // a stable fixture, not something that appears only when a set happens to mix
+  // both); listed after the user-defined tag scopes. Values are the media types
+  // actually present.
   const fileTypes = useMemo(() => {
     const types = new Set<string>()
     for (const s of sets ?? []) for (const f of s.files) types.add(fileMediaType(f))
     return [...types].sort()
   }, [sets])
-  const showTypeFilter = fileTypes.length > 1
+  const showTypeFilter = fileTypes.length > 0
   // Values turned off (hidden), mirroring the user scopes' inverted model.
   const typeOff = tagFilter.scoped[TYPE_CATEGORY] ?? []
 
   // The built-in "changes" filter (added / removed / modified / unchanged), derived
   // from each file's change_type. Replaces the old per-card "show unchanged" toggle:
   // unchanged is hidden by default (seeded in loadTagFilter), and this dropdown is
-  // how you reveal it or narrow to e.g. only added files. Offered whenever a set has
-  // more than one change type, or any unchanged files (so they can be revealed).
-  const changeTypes = useMemo(() => {
-    const present = new Set<string>()
-    for (const s of sets ?? []) for (const f of s.files) present.add(f.change_type as string)
-    return CHANGE_TYPE_ORDER.filter((c) => present.has(c))
-  }, [sets])
-  const showChangeFilter = changeTypes.length > 1 || changeTypes.includes('unchanged')
+  // how you reveal it or narrow to e.g. only added files. Always offered, and always
+  // lists all four change types (even ones no file currently has) so added/removed
+  // are a constant, predictable option — their per-value counts read 0/0 when absent.
+  const changeTypes = CHANGE_TYPE_ORDER
+  const showChangeFilter = true
   const changeOff = tagFilter.scoped[CHANGE_CATEGORY] ?? []
+
+  // Per-value `shown/total` counts for each filter dropdown (see computeScopeCounts).
+  // Flatten the files once, then build the two filters each scope is measured
+  // against: `shownFilter` is the current filter with this scope cleared; the
+  // baseline is the change-type scope at its current setting (so revealing
+  // 'unchanged' lifts non-change totals), or — for the change scope itself — no
+  // change filtering at all.
+  const allFiles = useMemo(() => (sets ?? []).flatMap((s) => s.files), [sets])
+  const changeBaseline = useMemo<ArtifactTagFilter>(
+    () => ({ scoped: { [CHANGE_CATEGORY]: tagFilter.scoped[CHANGE_CATEGORY] ?? [] }, free: [] }),
+    [tagFilter],
+  )
+  const scopeCounts = useCallback(
+    (cat: string, values: string[]): Record<string, ScopeCount> => {
+      const hasValue = (f: ArtifactFile, v: string) =>
+        cat === TYPE_CATEGORY ? fileMediaType(f) === v
+          : cat === CHANGE_CATEGORY ? (f.change_type as string) === v
+            : (f.tags ?? []).includes(`${cat}::${v}`)
+      const shownFilter: ArtifactTagFilter = { ...tagFilter, scoped: { ...tagFilter.scoped, [cat]: [] } }
+      const totalFilter: ArtifactTagFilter = cat === CHANGE_CATEGORY ? { scoped: {}, free: [] } : changeBaseline
+      return computeScopeCounts(allFiles, values, hasValue, shownFilter, totalFilter)
+    },
+    [allFiles, tagFilter, changeBaseline],
+  )
+  const freeCounts = useCallback(
+    (values: string[]): Record<string, ScopeCount> => {
+      const hasValue = (f: ArtifactFile, v: string) => (f.tags ?? []).includes(v)
+      const shownFilter: ArtifactTagFilter = { ...tagFilter, free: [] }
+      return computeScopeCounts(allFiles, values, hasValue, shownFilter, changeBaseline)
+    },
+    [allFiles, tagFilter, changeBaseline],
+  )
 
   if (error) {
     return (
@@ -1469,7 +1544,7 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
           <p><strong>Images &amp; video.</strong> <code className="text-blue-300">.png .jpg .gif</code> are diffed pixel-by-pixel (so cosmetic re-encodes are ignored); <code className="text-blue-300">.webm</code> video is diffed frame-by-frame when <strong>ffmpeg</strong> is installed, falling back to a byte-hash comparison otherwise (shown with a <em>byte-compared</em> badge, since that verdict may be spurious). Other types — <code className="text-blue-300">.webp .avif .svg .bmp .pdf</code> — are byte-hash compared. Encode video as <strong>lossless</strong> <code className="text-blue-300">.webm</code> (e.g. <code className="text-blue-300">ffmpeg … -c:v libvpx-vp9 -lossless 1</code>) so identical frames stay identical.</p>
           <p>A script with no visual changes — or one still generating — collapses to a single header row; click it to expand. The two sides (base and head) build in parallel, so the expanded card shows their <strong>build logs side by side</strong> (Before / After, stderr in red); once finished, reopen them any time with the <strong>build log</strong> button (the scroll icon next to refresh in the card header). The refresh button beside it re-runs a script — handy to retry a failure or re-render even when nothing visibly changed.</p>
           <p>The header shows each side's latest <code className="text-blue-300">stdout</code> line as live progress. To surface a cleaner message, print a line prefixed with <code className="text-blue-300">::hydra:progress::</code> (e.g. <code className="text-blue-300">echo "::hydra:progress:: capturing home 3/24"</code>) — Hydra strips the prefix, shows the rest as the progress line, and from then on ignores ordinary <code className="text-blue-300">stdout</code> for the header, so a noisy build can't hijack it. The full output still lands in the build log.</p>
-          <p><strong>Tags &amp; filter.</strong> Alongside an image <code className="text-blue-300">home.png</code> the script can write a JSON sidecar <code className="text-blue-300">home.png.meta</code> like <code className="text-blue-300">{'{'}"tags": ["theme::dark", "viewport::phone"]{'}'}</code>. Tags show as labels on each file and as a filter on this bar. A <code className="text-blue-300">category::value</code> tag is a <em>scoped</em> label — only one value per category is kept on a file (the last wins), and each category gets a filter button listing its values. Every value starts <em>on</em>; uncheck one to hide the files carrying it, or use <strong>all</strong> / <strong>clear</strong> (top of the menu) to toggle them in bulk. Shift-click a value to isolate it (hide everything else). Plain tags work the same way under a "tags" button. Handy when a script emits many shots (light/dark, phone/desktop) and you want to see just one slice. A built-in <strong>changes</strong> filter (added / removed / modified / unchanged, from each file's diff state) leads the bar — unchanged files are hidden by default, so use it to reveal them or to focus on one kind of change. A built-in <strong>type</strong> filter (image / video, from each file's extension) appears after your tags whenever a set mixes both.</p>
+          <p><strong>Tags &amp; filter.</strong> Alongside an image <code className="text-blue-300">home.png</code> the script can write a JSON sidecar <code className="text-blue-300">home.png.meta</code> like <code className="text-blue-300">{'{'}"tags": ["theme::dark", "viewport::phone"]{'}'}</code>. Tags show as labels on each file and as a filter on this bar. A <code className="text-blue-300">category::value</code> tag is a <em>scoped</em> label — only one value per category is kept on a file (the last wins), and each category gets a filter button listing its values. Every value starts <em>on</em>; uncheck one to hide the files carrying it, or use <strong>all</strong> / <strong>clear</strong> (top of the menu) to toggle them in bulk. Shift-click a value to isolate it (hide everything else). Each value also shows a dimmed <code className="text-blue-300">shown/total</code> count on the right — how many items carry it under your current filters (ignoring this scope) over the in-scope baseline. Plain tags work the same way under a "tags" button. Handy when a script emits many shots (light/dark, phone/desktop) and you want to see just one slice. Two built-in filters are always present: a <strong>type</strong> filter (image / video, from each file's extension) and a <strong>changes</strong> filter (added / removed / modified / unchanged, from each file's diff state) — the latter always offers all four kinds even when none are present, and hides unchanged files by default, so use it to reveal them or to focus on one kind of change.</p>
         </InfoTooltip>
         {/* One compact filter button per tag scope on the header bar — a button
             for each scoped category (theme / viewport / …) and one "tags" button
@@ -1498,6 +1573,7 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
                 label={cat}
                 values={values}
                 off={tagFilter.scoped[cat] ?? []}
+                counts={scopeCounts(cat, values)}
                 onToggle={(val) => {
                   const cur = tagFilter.scoped[cat] ?? []
                   const next = cur.includes(val) ? cur.filter((x) => x !== val) : [...cur, val]
@@ -1513,6 +1589,7 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
                 label="tags"
                 values={collectedTags.free}
                 off={tagFilter.free}
+                counts={freeCounts(collectedTags.free)}
                 onToggle={(t) =>
                   updateTagFilter({ ...tagFilter, free: tagFilter.free.includes(t) ? tagFilter.free.filter((x) => x !== t) : [...tagFilter.free, t] })
                 }
@@ -1528,6 +1605,7 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
                 label={TYPE_CATEGORY}
                 values={fileTypes}
                 off={typeOff}
+                counts={scopeCounts(TYPE_CATEGORY, fileTypes)}
                 onToggle={(val) => {
                   const next = typeOff.includes(val) ? typeOff.filter((x) => x !== val) : [...typeOff, val]
                   updateTagFilter({ ...tagFilter, scoped: { ...tagFilter.scoped, [TYPE_CATEGORY]: next } })
@@ -1545,6 +1623,7 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
                 label="changes"
                 values={changeTypes}
                 off={changeOff}
+                counts={scopeCounts(CHANGE_CATEGORY, changeTypes)}
                 onToggle={(val) => {
                   const next = changeOff.includes(val) ? changeOff.filter((x) => x !== val) : [...changeOff, val]
                   updateTagFilter({ ...tagFilter, scoped: { ...tagFilter.scoped, [CHANGE_CATEGORY]: next } })
