@@ -1279,8 +1279,8 @@ function RootLayout() {
                         aria-label={syncTooltip}
                         className={
                           canSync
-                            ? 'inline-flex items-center px-2.5 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer'
-                            : 'inline-flex items-center px-2.5 py-2 rounded-lg border border-gray-200 dark:border-gray-700 text-gray-300 dark:text-gray-600 cursor-not-allowed'
+                            ? 'inline-flex items-center p-1.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer'
+                            : 'inline-flex items-center p-1.5 rounded-lg border border-gray-200 dark:border-gray-700 text-gray-300 dark:text-gray-600 cursor-not-allowed'
                         }
                       >
                         <RefreshCw className={`w-4 h-4 shrink-0 ${syncing ? 'animate-spin' : ''}`} />
@@ -1295,7 +1295,7 @@ function RootLayout() {
                   <FolderGit2 className="w-4 h-4 shrink-0" />
                   Repository
                 </span>
-                <span className="inline-flex items-center px-2.5 py-2 rounded-lg border border-gray-200 dark:border-gray-700 text-gray-300 dark:text-gray-600 cursor-not-allowed">
+                <span className="inline-flex items-center p-1.5 rounded-lg border border-gray-200 dark:border-gray-700 text-gray-300 dark:text-gray-600 cursor-not-allowed">
                   <RefreshCw className="w-4 h-4 shrink-0" />
                 </span>
               </div>
