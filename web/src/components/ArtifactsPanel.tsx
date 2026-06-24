@@ -9,7 +9,7 @@ import {
   checkerStyle, IMG_CLASS, OVERLAY_CLASS, TAG_CLASS, makeAuxOpen,
   DIFF_COLOR, DIFF_PIXEL_THRESHOLD,
 } from './artifactDiffShared'
-import { type ArtifactColumns, MIN_ARTIFACT_COLUMNS, MAX_ARTIFACT_COLUMNS } from '../lib/artifactColumns'
+import { type ArtifactSpans, BASE_ARTIFACT_COLUMNS, defaultSpanForAspect } from '../lib/artifactColumns'
 import { VideoDiffView, isVideoArtifact } from './VideoDiffView'
 
 const CHANGE_LABEL: Record<string, string> = {
@@ -38,11 +38,11 @@ export const IMAGE_DIFF_MODES: { value: ImageDiffMode; label: string }[] = [
   { value: 'onion', label: 'Onion skin' },
 ]
 
-// Masonry column layout (ArtifactColumns / count bounds) is shared with the
-// repository artifacts view, so it lives in lib/artifactColumns. MIN_COL_PX is the
-// narrowest a column may get before the masonry clamps the rendered count down to
-// fit (and before a divider drag stops); MASONRY_GAP is the inter-column gutter.
-const MIN_COL_PX = 200
+// Masonry layout constants. The grid always works in BASE_ARTIFACT_COLUMNS columns
+// (shared with the repository artifacts view, see lib/artifactColumns), but renders
+// fewer when the container is too narrow to keep each base column at least
+// BASE_MIN_COL_PX wide. MASONRY_GAP is the inter-column gutter.
+const BASE_MIN_COL_PX = 140
 const MASONRY_GAP = 12
 
 function ImageCell({ url, label }: { url?: string | null; label: string }) {
@@ -609,23 +609,60 @@ function FileRow({ file, mode }: { file: ArtifactFile; mode: ImageDiffMode }) {
   )
 }
 
+// useArtifactAspects measures each artifact's intrinsic aspect ratio (width /
+// height) by loading the media off-screen, so the masonry can pick a sensible
+// default span (wide → more columns, tall → one) without the backend reporting
+// dimensions. Images read naturalWidth/Height; videos read videoWidth/Height off a
+// metadata preload. The browser caches the fetch, so the visible <img>/<video>
+// doesn't load it twice. Returns a key→aspect map that fills in as media loads.
+export function useArtifactAspects(sources: { key: string; url: string | null; video: boolean }[]): Record<string, number> {
+  const [aspects, setAspects] = useState<Record<string, number>>({})
+  // A stable signature of the (key,url) set so the effect only re-runs when the
+  // media actually changes, not on every render's fresh array.
+  const sig = sources.map((s) => `${s.key} ${s.url ?? ''}`).join('')
+  const ref = useRef(sources)
+  ref.current = sources
+  useEffect(() => {
+    let cancelled = false
+    const set = (key: string, w: number, h: number) => {
+      if (cancelled || !w || !h) return
+      setAspects((a) => (a[key] != null ? a : { ...a, [key]: w / h }))
+    }
+    for (const s of ref.current) {
+      if (!s.url) continue
+      if (s.video) {
+        const v = document.createElement('video')
+        v.preload = 'metadata'
+        v.onloadedmetadata = () => set(s.key, v.videoWidth, v.videoHeight)
+        v.src = s.url
+      } else {
+        const img = new Image()
+        img.onload = () => set(s.key, img.naturalWidth, img.naturalHeight)
+        img.src = s.url
+      }
+    }
+    return () => { cancelled = true }
+  }, [sig])
+  return aspects
+}
+
 // Balanced (shortest-column) masonry. Each tile is absolutely positioned: we
 // measure every tile's rendered height with a ResizeObserver, then place tiles one
-// by one into whichever column is currently shortest — so they pack tightly with
-// minimal trailing gap while keeping a rough left-to-right, top-to-bottom reading
-// order (unlike CSS columns, which fill one column top-to-bottom before the next).
+// by one into whichever run of columns is currently shortest — so they pack tightly
+// with minimal trailing gap while keeping a rough left-to-right, top-to-bottom
+// reading order (unlike CSS columns, which fill one column top-to-bottom first).
 //
-// Everything is WIDTH-driven: a tile's width is its column width, and the media
-// inside fills that width with its height following the aspect ratio. `span` is how
-// many columns a tile occupies — 1 for the single-tile modes, 2 for side-by-side
-// (its before/after pair needs the room). The column COUNT is the slider; per-column
-// WIDTHS come from `weights` (set by dragging the dividers) when they match the
-// rendered column count, else columns are equal width.
-export function MasonryGrid({ items, span, columns, onWeightsChange }: {
-  items: { key: string; node: React.ReactNode }[]
-  span: 1 | 2
-  columns: ArtifactColumns
-  onWeightsChange?: (weights: number[]) => void
+// Everything is WIDTH-driven: a tile's width is its (equal-width) column run, and
+// the media inside fills that width with its height following the aspect ratio. The
+// grid always works in BASE_ARTIFACT_COLUMNS columns (fewer only when the container
+// is too narrow). Each tile's span comes from its `aspect` via defaultSpanForAspect
+// (scaled by `spanScale` — 2 for side-by-side, whose before/after pair needs the
+// room), unless the user has dragged its edge to set an explicit span in `spans`.
+export function MasonryGrid({ items, spanScale = 1, spans, onSpanChange }: {
+  items: { key: string; node: React.ReactNode; aspect?: number }[]
+  spanScale?: number
+  spans: ArtifactSpans
+  onSpanChange?: (key: string, span: number | null) => void
 }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(0)
@@ -683,82 +720,70 @@ export function MasonryGrid({ items, span, columns, onWeightsChange }: {
     return () => ro?.unobserve(el)
   }, [])
 
-  // Resolve the rendered column count and each column's left edge + width. The
-  // requested count is clamped down so no column is narrower than MIN_COL_PX.
+  // Resolve the rendered column count and the (equal) width of one base column. We
+  // render BASE_ARTIFACT_COLUMNS columns, dropping to fewer only when the container
+  // is too narrow to keep each base column at least BASE_MIN_COL_PX wide.
   const layout = useMemo(() => {
     const gap = MASONRY_GAP
     const w = width || 0
-    const reqCount = Math.max(MIN_ARTIFACT_COLUMNS, Math.min(MAX_ARTIFACT_COLUMNS, columns.count))
-    const fit = w > 0 ? Math.max(1, Math.floor((w + gap) / (MIN_COL_PX + gap))) : reqCount
-    const cols = Math.max(1, Math.min(reqCount, fit))
-    const clamped = cols !== reqCount
-    // Custom per-column widths only when the saved weights line up with the rendered
-    // count and the count wasn't width-clamped; otherwise equal columns.
-    let fracs: number[]
-    if (!clamped && columns.weights.length === cols && cols > 0) {
-      const sum = columns.weights.reduce((a, b) => a + b, 0)
-      fracs = sum > 0 ? columns.weights.map((x) => x / sum) : new Array(cols).fill(1 / cols)
-    } else {
-      fracs = new Array(cols).fill(1 / cols)
-    }
+    const fit = w > 0 ? Math.max(1, Math.floor((w + gap) / (BASE_MIN_COL_PX + gap))) : BASE_ARTIFACT_COLUMNS
+    const cols = Math.max(1, Math.min(BASE_ARTIFACT_COLUMNS, fit))
     const contentW = Math.max(0, w - gap * (cols - 1))
-    const widths = fracs.map((f) => f * contentW)
-    const lefts: number[] = []
-    let acc = 0
-    for (let i = 0; i < cols; i++) { lefts.push(acc); acc += widths[i] + gap }
-    return { cols, clamped, widths, lefts, gap, contentW }
-  }, [width, columns.count, columns.weights])
+    const colW = cols > 0 ? contentW / cols : 0
+    return { cols, gap, colW }
+  }, [width])
 
-  // Place each tile into the shortest column (or shortest adjacent pair for span 2).
+  // Resolve a tile's span: an explicit override (from dragging) wins, otherwise the
+  // aspect-ratio default scaled for side-by-side. Clamped to the rendered columns.
+  const spanOf = useCallback((it: { key: string; aspect?: number }): number => {
+    const req = spans[it.key] ?? defaultSpanForAspect(it.aspect) * spanScale
+    return Math.max(1, Math.min(Math.round(req), layout.cols))
+  }, [spans, spanScale, layout.cols])
+
+  // Place each tile into the run of `span` columns whose tallest column is currently
+  // shortest (ties resolve leftmost, preserving reading order). Each tile fills its
+  // run's combined width; its height comes from the measured content.
   const placement = useMemo(() => {
-    const { cols, widths, lefts, gap } = layout
-    const sp = Math.min(span, cols)
+    const { cols, gap, colW } = layout
     const FALLBACK_H = 240 // assumed height before a tile is first measured
     const bottoms = new Array(cols).fill(0)
-    const pos: Record<string, { left: number; top: number; width: number }> = {}
+    const pos: Record<string, { left: number; top: number; width: number; span: number }> = {}
     for (const it of items) {
       const h = heights[it.key] ?? FALLBACK_H
-      if (sp < 2 || cols < 2) {
-        let c = 0
-        for (let i = 1; i < cols; i++) if (bottoms[i] < bottoms[c]) c = i
-        pos[it.key] = { left: lefts[c], top: bottoms[c], width: widths[c] }
-        bottoms[c] = bottoms[c] + h + gap
-      } else {
-        let c = 0
-        let best = Infinity
-        for (let i = 0; i <= cols - 2; i++) {
-          const top = Math.max(bottoms[i], bottoms[i + 1])
-          if (top < best) { best = top; c = i }
-        }
-        const top = Math.max(bottoms[c], bottoms[c + 1])
-        pos[it.key] = { left: lefts[c], top, width: widths[c] + gap + widths[c + 1] }
-        bottoms[c] = bottoms[c + 1] = top + h + gap
+      const s = spanOf(it)
+      // Best start column: minimise the tallest of the columns this tile would cover.
+      let bestC = 0
+      let bestTop = Infinity
+      for (let c = 0; c + s <= cols; c++) {
+        let top = 0
+        for (let k = c; k < c + s; k++) top = Math.max(top, bottoms[k])
+        if (top < bestTop) { bestTop = top; bestC = c }
       }
+      if (!Number.isFinite(bestTop)) bestTop = 0
+      const left = bestC * (colW + gap)
+      const tileW = s * colW + (s - 1) * gap
+      pos[it.key] = { left, top: bestTop, width: tileW, span: s }
+      for (let k = bestC; k < bestC + s; k++) bottoms[k] = bestTop + h + gap
     }
     const height = bottoms.length ? Math.max(...bottoms) - gap : 0
     return { pos, height: Math.max(0, height) }
-  }, [items, heights, layout, span])
+  }, [items, heights, layout, spanOf])
 
-  // Divider drag: transfer width between two adjacent columns, clamped so neither
-  // drops below MIN_COL_PX. Persists via onWeightsChange (fractions, length = cols).
-  const startDrag = (i: number) => (e: React.PointerEvent) => {
-    if (e.button !== 0 || !onWeightsChange) return
+  // Per-tile resize: drag the tile's right edge to grow/shrink its span one column
+  // at a time. Records an absolute span via onSpanChange (null clears the override
+  // on double-click, returning the tile to its aspect-ratio default).
+  const startResize = (key: string, startSpan: number) => (e: React.PointerEvent) => {
+    if (e.button !== 0 || !onSpanChange) return
     e.preventDefault()
-    const { cols, widths, contentW } = layout
-    if (contentW <= 0) return
-    const startWidths = widths.slice()
+    e.stopPropagation()
+    const { cols, gap, colW } = layout
+    const unit = colW + gap
+    if (unit <= 0) return
     const startX = e.clientX
-    const minFrac = MIN_COL_PX / contentW
     const onMove = (ev: PointerEvent) => {
-      const dFrac = (ev.clientX - startX) / contentW
-      let a = startWidths[i] / contentW + dFrac
-      let b = startWidths[i + 1] / contentW - dFrac
-      if (a < minFrac) { b -= minFrac - a; a = minFrac }
-      if (b < minFrac) { a -= minFrac - b; b = minFrac }
-      const next = startWidths.map((wv) => wv / contentW)
-      next[i] = a
-      next[i + 1] = b
-      onWeightsChange(next.slice(0, cols))
+      const delta = Math.round((ev.clientX - startX) / unit)
+      const next = Math.max(1, Math.min(cols, startSpan + delta))
+      onSpanChange(key, next)
     }
     const onUp = () => {
       window.removeEventListener('pointermove', onMove)
@@ -768,53 +793,59 @@ export function MasonryGrid({ items, span, columns, onWeightsChange }: {
     window.addEventListener('pointerup', onUp)
   }
 
-  const showDividers = !!onWeightsChange && !layout.clamped && layout.cols > 1
+  const canResize = !!onSpanChange && layout.cols > 1
   return (
     <div ref={containerRef} className="relative w-full" style={{ height: placement.height }}>
       {items.map((it) => {
-        const p = placement.pos[it.key] ?? { left: 0, top: 0, width: 0 }
+        const p = placement.pos[it.key] ?? { left: 0, top: 0, width: 0, span: 1 }
         return (
-          <div key={it.key} ref={observeTile} data-mkey={it.key} className="absolute" style={{ left: p.left, top: p.top, width: p.width }}>
+          <div key={it.key} ref={observeTile} data-mkey={it.key} className="absolute group/tile" style={{ left: p.left, top: p.top, width: p.width }}>
             {it.node}
+            {canResize && (
+              // A grab handle on the tile's right edge (sitting in the gutter); the
+              // blue rule appears on hover so the resize affordance stays subtle at
+              // rest. Drag to change span column-by-column, double-click to auto-size.
+              <div
+                onPointerDown={startResize(it.key, p.span)}
+                onDoubleClick={() => onSpanChange?.(it.key, null)}
+                title="Drag to resize · double-click to auto-size"
+                className="absolute inset-y-0 right-0 z-10 w-3 -mr-1.5 cursor-col-resize flex justify-center items-stretch touch-none opacity-0 group-hover/tile:opacity-100 transition-opacity"
+              >
+                <div className="w-px self-stretch bg-blue-400/60" />
+              </div>
+            )}
           </div>
         )
       })}
-      {showDividers && layout.lefts.slice(1).map((leftEdge, idx) => (
-        // A thin grab handle centred in the gap between column idx and idx+1; the
-        // blue rule appears on hover so the resize affordance stays subtle at rest.
-        <div
-          key={`div-${idx}`}
-          onPointerDown={startDrag(idx)}
-          title="Drag to resize columns"
-          className="absolute top-0 z-10 w-3 -ml-1.5 cursor-col-resize group flex justify-center touch-none"
-          style={{ left: leftEdge - layout.gap / 2, height: placement.height }}
-        >
-          <div className="w-px h-full bg-transparent group-hover:bg-blue-400/60 transition-colors" />
-        </div>
-      ))}
     </div>
   )
 }
 
 // Lay the per-file before/after blocks out as a balanced masonry so a tall, narrow
 // artifact (e.g. a phone screenshot) packs in next to others with no big gap to the
-// right, while the column count/widths stay under the user's control. Side-by-side
-// cards span two columns so the before/after pair has room.
-function FileGrid({ files, mode, columns, onWeightsChange }: {
+// right. Each tile auto-spans by aspect ratio (a wide desktop shot takes more
+// columns than a tall phone shot); side-by-side doubles the span so the before/after
+// pair has room. Drag a tile's edge to override its span.
+function FileGrid({ files, mode, spans, onSpanChange }: {
   files: ArtifactFile[]
   mode: ImageDiffMode
-  columns: ArtifactColumns
-  onWeightsChange?: (weights: number[]) => void
+  spans: ArtifactSpans
+  onSpanChange?: (key: string, span: number | null) => void
 }) {
-  const span: 1 | 2 = mode === 'side-by-side' ? 2 : 1
+  const spanScale = mode === 'side-by-side' ? 2 : 1
+  const aspectSources = useMemo(
+    () => files.map((f) => ({ key: f.name, url: f.right_url ?? f.left_url ?? null, video: isVideoArtifact(f.name) })),
+    [files],
+  )
+  const aspects = useArtifactAspects(aspectSources)
   const items = useMemo(
-    () => files.map((f) => ({ key: f.name, node: <FileRow file={f} mode={mode} /> })),
-    [files, mode],
+    () => files.map((f) => ({ key: f.name, node: <FileRow file={f} mode={mode} />, aspect: aspects[f.name] })),
+    [files, mode, aspects],
   )
   // pt-3 so the gap above the first row matches the card body's px-3 left inset.
   return (
     <div className="pt-3">
-      <MasonryGrid items={items} span={span} columns={columns} onWeightsChange={onWeightsChange} />
+      <MasonryGrid items={items} spanScale={spanScale} spans={spans} onSpanChange={onSpanChange} />
     </div>
   )
 }
@@ -1060,7 +1091,7 @@ function PersistedLogView({ leftUrl, rightUrl, open }: { leftUrl?: string | null
   )
 }
 
-function ArtifactSetCard({ set, mode, columns, onWeightsChange, filter, onRefresh, projectId, agentId }: { set: ArtifactSet; mode: ImageDiffMode; columns: ArtifactColumns; onWeightsChange: (weights: number[]) => void; filter: ArtifactTagFilter; onRefresh: (name: string) => void; projectId: string | null; agentId: string }) {
+function ArtifactSetCard({ set, mode, spans, onSpanChange, filter, onRefresh, projectId, agentId }: { set: ArtifactSet; mode: ImageDiffMode; spans: ArtifactSpans; onSpanChange: (key: string, span: number | null) => void; filter: ArtifactTagFilter; onRefresh: (name: string) => void; projectId: string | null; agentId: string }) {
   const status = set.status as string
   // Apply the (shared) tag filter to this card's files. The grid shows only
   // matches; the header still reports the true diff size so "x/y changed" makes
@@ -1227,7 +1258,7 @@ function ArtifactSetCard({ set, mode, columns, onWeightsChange, filter, onRefres
               ) : visibleFiles.length === 0 ? (
                 <div className="my-2 text-xs text-gray-400 dark:text-gray-500">No files match the current filters.</div>
               ) : (
-                <FileGrid files={visibleFiles} mode={mode} columns={columns} onWeightsChange={onWeightsChange} />
+                <FileGrid files={visibleFiles} mode={mode} spans={spans} onSpanChange={onSpanChange} />
               )}
               <PersistedLogView leftUrl={set.left_log_url} rightUrl={set.right_log_url} open={buildLogOpen} />
             </>
@@ -1261,7 +1292,7 @@ function artifactsWsUrl(projectId: string | null, agentId: string, baseRef?: str
   return `${protocol}//${host}/ws/projects/${pid}/agents/${encodeURIComponent(agentId)}/artifacts${qs}`
 }
 
-export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUncommitted, refreshKey, imageDiffMode, artifactColumns, onArtifactWeightsChange }: {
+export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUncommitted, refreshKey, imageDiffMode, artifactSpans, onArtifactSpanChange }: {
   projectId: string | null
   agentId: string
   baseRef?: string
@@ -1269,8 +1300,8 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
   includeUncommitted?: boolean
   refreshKey: number
   imageDiffMode: ImageDiffMode
-  artifactColumns: ArtifactColumns
-  onArtifactWeightsChange: (weights: number[]) => void
+  artifactSpans: ArtifactSpans
+  onArtifactSpanChange: (key: string, span: number | null) => void
 }) {
   const [sets, setSets] = useState<ArtifactSet[] | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -1563,7 +1594,7 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
             cards keep the previous agent's expand/collapse state (and its save
             effect would then clobber the new agent's saved prefs). Re-keying per
             agent remounts each card so it re-reads that agent's saved state. */}
-        {sets.map((s) => <ArtifactSetCard key={`${projectId ?? '_'}-${agentId}-${s.name}`} set={s} mode={imageDiffMode} columns={artifactColumns} onWeightsChange={onArtifactWeightsChange} filter={tagFilter} onRefresh={requestRefresh} projectId={projectId} agentId={agentId} />)}
+        {sets.map((s) => <ArtifactSetCard key={`${projectId ?? '_'}-${agentId}-${s.name}`} set={s} mode={imageDiffMode} spans={artifactSpans} onSpanChange={onArtifactSpanChange} filter={tagFilter} onRefresh={requestRefresh} projectId={projectId} agentId={agentId} />)}
       </div>
     </div>
   )

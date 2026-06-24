@@ -14,7 +14,7 @@ import {
 import { getFileIcon } from './lib/fileIcons'
 import { Tooltip } from './components/Tooltip'
 import { ArtifactsPanel, IMAGE_DIFF_MODES, type ImageDiffMode } from './components/ArtifactsPanel'
-import { useArtifactColumns, MIN_ARTIFACT_COLUMNS, MAX_ARTIFACT_COLUMNS } from './lib/artifactColumns'
+import { useArtifactSpans } from './lib/artifactColumns'
 import { useDialogStore } from './stores/dialogStore'
 import { StorageKeys, readLocal, writeLocal } from './lib/storage'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from './lib/agentViewPrefs'
@@ -1577,13 +1577,12 @@ function TreeNodeView({ node, depth, collapsedFolders, toggleFolder, onFileClick
 
 function SettingsPopup({ fileView, onFileViewChange, sideBySide, onSideBySideChange,
   ignoreWhitespace, onIgnoreWhitespaceChange, singleFile, onSingleFileChange,
-  imageDiffMode, onImageDiffModeChange, artifactColumnCount, onArtifactColumnCountChange }: {
+  imageDiffMode, onImageDiffModeChange }: {
     fileView: FileView; onFileViewChange: (v: FileView) => void
     sideBySide: boolean; onSideBySideChange: (v: boolean) => void
     ignoreWhitespace: boolean; onIgnoreWhitespaceChange: (v: boolean) => void
     singleFile: boolean; onSingleFileChange: (v: boolean) => void
     imageDiffMode: ImageDiffMode; onImageDiffModeChange: (v: ImageDiffMode) => void
-    artifactColumnCount: number; onArtifactColumnCountChange: (n: number) => void
   }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -1652,21 +1651,10 @@ function SettingsPopup({ fileView, onFileViewChange, sideBySide, onSideBySideCha
               </label>
             ))}
           </div>
-          {/* Masonry column count for the artifact grid. Drag the dividers between
-              columns (in the grid itself) to fine-tune their individual widths. */}
-          <div className="flex items-center gap-2 mt-3">
-            <span className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 tracking-wide shrink-0">Columns</span>
-            <input
-              type="range"
-              min={MIN_ARTIFACT_COLUMNS}
-              max={MAX_ARTIFACT_COLUMNS}
-              step={1}
-              value={artifactColumnCount}
-              onChange={(e) => onArtifactColumnCountChange(Number(e.target.value))}
-              className="flex-1 min-w-0 accent-blue-500 cursor-pointer"
-            />
-            <span className="text-xs tabular-nums text-gray-600 dark:text-gray-300 w-4 text-right shrink-0">{artifactColumnCount}</span>
-          </div>
+          {/* The artifact grid sizes each tile automatically by aspect ratio (a
+              wide desktop shot spans more columns than a tall phone shot); drag a
+              tile's right edge to override its width, double-click to auto-size. */}
+          <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-2 leading-snug">Tiles auto-size by shape — drag a tile's edge to resize it.</p>
         </div>
       )}
     </div>
@@ -1702,10 +1690,11 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
     if (stored === 'side-by-side' || stored === 'ab' || stored === 'slider' || stored === 'onion') return stored
     return 'ab'
   })
-  // Artifact masonry layout — column count (slider) + per-column width fractions
-  // (dragging the dividers). One layout shared across the artifacts panel and the
-  // repository artifacts view; persisted (see lib/artifactColumns).
-  const { columns: artifactCols, setColumnCount: setArtifactColumnCount, setColumnWeights: setArtifactColumnWeights } = useArtifactColumns()
+  // Artifact masonry layout — per-tile span overrides (dragging a tile's edge);
+  // tiles without an override auto-span by aspect ratio. One set of overrides shared
+  // across the artifacts panel and the repository artifacts view; persisted (see
+  // lib/artifactColumns).
+  const { spans: artifactSpans, setSpanOverride: setArtifactSpanOverride } = useArtifactSpans()
 
   const [singleFileIdx, setSingleFileIdx] = useState(0)
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set())
@@ -2260,7 +2249,6 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
             ignoreWhitespace={ignoreWhitespace} onIgnoreWhitespaceChange={setIgnoreWhitespace}
             singleFile={singleFile} onSingleFileChange={handleSingleFileChange}
             imageDiffMode={imageDiffMode} onImageDiffModeChange={setImageDiffMode}
-            artifactColumnCount={artifactCols.count} onArtifactColumnCountChange={setArtifactColumnCount}
           />
         </div>
       </div>
@@ -2290,8 +2278,8 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
           // flash a loading spinner and reset the user's selection).
           refreshKey={refreshKey + (externalArtifactRefresh ?? 0)}
           imageDiffMode={imageDiffMode}
-          artifactColumns={artifactCols}
-          onArtifactWeightsChange={setArtifactColumnWeights}
+          artifactSpans={artifactSpans}
+          onArtifactSpanChange={setArtifactSpanOverride}
         />
       )}
 

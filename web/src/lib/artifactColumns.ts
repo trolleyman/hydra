@@ -1,49 +1,72 @@
-// Shared masonry-column layout for the artifact grids — used by BOTH the diff
-// viewer's ArtifactsPanel and the repository browser's RepositoryArtifactsView, so
-// the two surfaces share one persisted layout preference (the column count slider +
-// the per-column widths set by dragging the dividers). See MasonryGrid in
+// Shared masonry layout for the artifact grids — used by BOTH the diff viewer's
+// ArtifactsPanel and the repository browser's RepositoryArtifactsView, so the two
+// surfaces share one persisted preference. See MasonryGrid in
 // components/ArtifactsPanel.tsx for how these drive the layout.
+//
+// The grid is a fixed BASE_ARTIFACT_COLUMNS masonry. Each tile auto-spans 1..N of
+// those columns by its media's aspect ratio — a wide desktop screenshot takes
+// several columns, a tall phone screenshot just one — so you don't have to pick a
+// column count yourself. Dragging a tile's right edge overrides that tile's span
+// column-by-column; those overrides are what we persist here (keyed by file name).
 
 import { useCallback, useEffect, useState } from 'react'
 import { StorageKeys, readLocal, writeLocal } from './storage'
 
-// One layout for the whole panel. `count` is the requested number of columns (the
-// slider); `weights` are the per-column width fractions set by dragging the
-// dividers — applied only when their length matches the rendered column count,
-// otherwise columns are equal width.
-export type ArtifactColumns = { count: number; weights: number[] }
+// Total columns in the masonry grid — the unit each tile's span is measured in.
+// Six gives a desktop shot ~half width and a phone shot a sixth, the spread the
+// aspect buckets below target. The rendered count is reduced on narrow containers
+// (see MasonryGrid) so a single column never gets too thin.
+export const BASE_ARTIFACT_COLUMNS = 6
 
-export const DEFAULT_ARTIFACT_COLUMNS: ArtifactColumns = { count: 3, weights: [] }
-export const MIN_ARTIFACT_COLUMNS = 1
-export const MAX_ARTIFACT_COLUMNS = 6
+// Per-tile span overrides set by dragging a tile's edge: file name → column span.
+// A key being absent means the tile uses its aspect-ratio-derived default span.
+export type ArtifactSpans = Record<string, number>
 
-const clampCount = (n: number) =>
-  Math.max(MIN_ARTIFACT_COLUMNS, Math.min(MAX_ARTIFACT_COLUMNS, Math.round(n)))
-
-function loadColumns(): ArtifactColumns {
-  const raw = readLocal(StorageKeys.diffArtifactCols)
+function loadSpans(): ArtifactSpans {
+  const raw = readLocal(StorageKeys.diffArtifactSpans)
   if (raw) {
     try {
-      const p = JSON.parse(raw) as Partial<ArtifactColumns>
-      const count = typeof p.count === 'number' ? clampCount(p.count) : DEFAULT_ARTIFACT_COLUMNS.count
-      const weights = Array.isArray(p.weights) ? p.weights.filter((x): x is number => typeof x === 'number' && x > 0) : []
-      return { count, weights }
-    } catch { /* fall through to default */ }
+      const p = JSON.parse(raw) as Record<string, unknown>
+      const out: ArtifactSpans = {}
+      for (const [k, v] of Object.entries(p)) {
+        if (typeof v === 'number' && v >= 1) out[k] = Math.round(v)
+      }
+      return out
+    } catch { /* fall through to empty */ }
   }
-  return DEFAULT_ARTIFACT_COLUMNS
+  return {}
 }
 
-// useArtifactColumns owns the persisted artifact-grid layout. Returns the current
-// columns plus setters for the count (the slider — resets custom widths, since the
-// saved weights no longer match the new count) and the weights (the dividers).
-export function useArtifactColumns() {
-  const [columns, setColumns] = useState<ArtifactColumns>(loadColumns)
-  useEffect(() => { writeLocal(StorageKeys.diffArtifactCols, JSON.stringify(columns)) }, [columns])
-  const setColumnCount = useCallback((count: number) => {
-    setColumns({ count: clampCount(count), weights: [] })
+// useArtifactSpans owns the persisted per-tile span overrides. Returns the current
+// overrides plus a setter that records one tile's override (or, when span is null,
+// clears it so the tile falls back to its aspect-ratio default).
+export function useArtifactSpans() {
+  const [spans, setSpans] = useState<ArtifactSpans>(loadSpans)
+  useEffect(() => { writeLocal(StorageKeys.diffArtifactSpans, JSON.stringify(spans)) }, [spans])
+  const setSpanOverride = useCallback((key: string, span: number | null) => {
+    setSpans((s) => {
+      if (span == null) {
+        if (!(key in s)) return s
+        const next = { ...s }
+        delete next[key]
+        return next
+      }
+      if (s[key] === span) return s
+      return { ...s, [key]: span }
+    })
   }, [])
-  const setColumnWeights = useCallback((weights: number[]) => {
-    setColumns((c) => ({ ...c, weights }))
-  }, [])
-  return { columns, setColumnCount, setColumnWeights }
+  return { spans, setSpanOverride }
+}
+
+// defaultSpanForAspect picks how many columns a tile spans from its media aspect
+// ratio (width / height): wide landscape (desktop) spans several columns, tall
+// portrait (phone) just one. Returns the raw bucket (1..4); the grid scales it for
+// side-by-side and clamps it to the rendered column count. `aspect` is undefined
+// until the media is measured, when we assume a middling 2-column tile.
+export function defaultSpanForAspect(aspect: number | undefined): number {
+  if (aspect == null) return 2
+  if (aspect < 0.8) return 1   // portrait / phone
+  if (aspect < 1.3) return 2   // square-ish / tablet
+  if (aspect < 2.2) return 3   // landscape / desktop
+  return 4                     // ultra-wide
 }
