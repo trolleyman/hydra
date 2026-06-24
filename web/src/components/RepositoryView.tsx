@@ -386,7 +386,7 @@ function SettingsPopup({ settings, onChange }: { settings: RepoSettings; onChang
 // A trimmed cousin of SettingsPopup for the diff view's two toggles, mirroring
 // the diff viewer's own options so the two feel consistent.
 
-type DiffSettings = { sideBySide: boolean; ignoreWhitespace: boolean }
+type DiffSettings = { singleFile: boolean; sideBySide: boolean; ignoreWhitespace: boolean }
 
 function DiffSettingsPopup({ settings, onChange }: { settings: DiffSettings; onChange: (s: DiffSettings) => void }) {
   const [open, setOpen] = useState(false)
@@ -402,6 +402,7 @@ function DiffSettingsPopup({ settings, onChange }: { settings: DiffSettings; onC
   }, [open])
 
   const options: { key: keyof DiffSettings; label: string }[] = [
+    { key: 'singleFile', label: 'One file at a time' },
     { key: 'sideBySide', label: 'Side by side' },
     { key: 'ignoreWhitespace', label: 'Ignore whitespace' },
   ]
@@ -692,12 +693,20 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
   const [diffLoading, setDiffLoading] = useState(false)
   const [diffError, setDiffError] = useState<string | null>(null)
   const [collapsedDiffFiles, setCollapsedDiffFiles] = useState<Set<string>>(new Set())
+  // The diff defaults to one file at a time (the selected file only); absent
+  // storage means the default, an explicit 'false' is the all-files view.
   const [diffSettings, setDiffSettings] = useState<DiffSettings>(() => ({
+    singleFile: readLocal(StorageKeys.repoDiffSingleFile) !== 'false',
     sideBySide: readLocal(StorageKeys.diffSideBySide) === 'true',
     ignoreWhitespace: readLocal(StorageKeys.diffIgnoreWhitespace) === 'true',
   }))
+  useEffect(() => { writeLocal(StorageKeys.repoDiffSingleFile, String(diffSettings.singleFile)) }, [diffSettings.singleFile])
   useEffect(() => { writeLocal(StorageKeys.diffSideBySide, String(diffSettings.sideBySide)) }, [diffSettings.sideBySide])
   useEffect(() => { writeLocal(StorageKeys.diffIgnoreWhitespace, String(diffSettings.ignoreWhitespace)) }, [diffSettings.ignoreWhitespace])
+  // In one-file-at-a-time mode, the file whose diff is shown; clicking a file in
+  // the sidebar selects it. Defaults to (and is kept valid against) the diff's
+  // first file.
+  const [selectedDiffPath, setSelectedDiffPath] = useState<string | null>(null)
   // Per-file revealed context (for the network-expand fallback on huge files),
   // and refs to each rendered diff card so the sidebar list can scroll to one.
   const [fileContexts, setFileContexts] = useState<Map<string, number>>(new Map())
@@ -886,6 +895,13 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [diffActive, projectId, activeRef, compareRef, diffSettings.ignoreWhitespace])
 
+  // Keep the one-file-at-a-time selection pointed at a file that still exists in
+  // the current diff, defaulting to the first.
+  useEffect(() => {
+    if (!diff || diff.files.length === 0) { setSelectedDiffPath(null); return }
+    setSelectedDiffPath((prev) => (prev && diff.files.some((f) => f.path === prev)) ? prev : diff.files[0].path)
+  }, [diff])
+
   // Selection from the diff branch selector. Picking the base branch (the one
   // being browsed) or the currently-diffed branch again exits diff mode; any
   // other branch becomes the new compare target.
@@ -1010,7 +1026,12 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
               <div className="px-3 py-4 text-xs text-gray-400 dark:text-gray-500 text-center">No differences</div>
             ) : diff ? (
               diff.files.map((f) => (
-                <FileRow key={f.path} file={f} isActive={false} onClick={() => scrollToDiffFile(f.path)} />
+                <FileRow
+                  key={f.path}
+                  file={f}
+                  isActive={diffSettings.singleFile && f.path === selectedDiffPath}
+                  onClick={() => diffSettings.singleFile ? setSelectedDiffPath(f.path) : scrollToDiffFile(f.path)}
+                />
               ))
             ) : null
           ) : treeLoading ? (
@@ -1099,7 +1120,10 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
               </div>
             ) : diff ? (
               <div className="p-4">
-                {diff.files.map((f) => (
+                {(diffSettings.singleFile
+                  ? diff.files.filter((f) => f.path === selectedDiffPath)
+                  : diff.files
+                ).map((f) => (
                   <FileDiff
                     key={f.path}
                     file={f}

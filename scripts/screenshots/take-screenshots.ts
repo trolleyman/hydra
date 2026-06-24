@@ -81,6 +81,7 @@ function progress(msg: string) {
 // (repository browser, artifacts panel, …). Grouping by name prefix keeps the
 // page list (the source of truth) the only place a new shot must be declared.
 function sectionFor(name: string): string {
+  if (name.startsWith('repository-diff')) return 'repository-diff'
   if (name.startsWith('repository')) return 'repository'
   if (name.startsWith('artifact')) return 'artifacts'
   if (name.startsWith('archived')) return 'archived'
@@ -244,6 +245,10 @@ try {
       // before the app boots, so the artifacts panel renders before/after pairs in
       // the chosen mode. Only meaningful on the artifacts (agent-1) page.
       imageDiffMode?: 'side-by-side' | 'ab' | 'difference' | 'slider' | 'onion'
+      // Seeds the repository diff's one-file-at-a-time preference
+      // ('hydra-repo-diff-single-file') before boot. Omit for the default
+      // (one file at a time); set false to capture the all-files-stacked view.
+      repoDiffSingleFile?: boolean
       // Expands the named artifact card (clicks its header) after load — used to
       // document the in-flight card's live, scrollable generation log.
       expandArtifact?: string
@@ -376,11 +381,21 @@ try {
       // main pane shows the diff (reusing the agent diff's FileDiff/FileRow), with
       // per-file line counts and added/removed/renamed change-type tags.
       // Simulation serves a small mock diff with one of each change type (see
-      // GetRepositoryDiff in internal/http/simulation.go).
+      // GetRepositoryDiff in internal/http/simulation.go). The default is one file
+      // at a time — the main pane shows only the file selected in the left list.
       {
         name: 'repository-diff',
         path: '/project/sim-project/repository',
         clicks: ['button:has(svg.lucide-git-compare)', 'button:has-text("hydra/add-line-numbers")'],
+      },
+      // The same diff with the all-files-stacked view (a stored preference,
+      // toggled in the diff settings popup): every changed file's diff is shown
+      // at once rather than one at a time.
+      {
+        name: 'repository-diff-all',
+        path: '/project/sim-project/repository',
+        clicks: ['button:has(svg.lucide-git-compare)', 'button:has-text("hydra/add-line-numbers")'],
+        repoDiffSingleFile: false,
       },
       // The diff branch selector reopened while diffing: the dropdown checkmarks
       // the current compare branch, and clicking that branch (or the base) exits
@@ -661,6 +676,17 @@ try {
               // ignore storage failures
             }
           }, pg.imageDiffMode)
+        }
+        // Seed the repository diff's one-file-at-a-time preference so the
+        // all-files-stacked view can be captured (the default is one file).
+        if (pg.repoDiffSingleFile !== undefined) {
+          await ctx.addInitScript((single) => {
+            try {
+              localStorage.setItem('hydra-repo-diff-single-file', String(single))
+            } catch {
+              // ignore storage failures
+            }
+          }, pg.repoDiffSingleFile)
         }
         // Seed the artifact tag filter so the panel renders with a filter applied.
         // The key must match web/src/lib/storage.ts artifactTagFilterKey(projectId,

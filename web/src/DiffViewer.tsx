@@ -2297,8 +2297,8 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
             style={{ width: sidebarWidth }}
           >
             <div className="px-2.5 py-2 border-b border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 flex items-center justify-between">
-              <span className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide truncate">
-                Files ({diff.files.length})
+              <span className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 truncate">
+                Files · {diff.files.length}
               </span>
             </div>
             <div className="overflow-y-auto max-h-[calc(100vh-140px)]">{renderSidebar(diff.files)}</div>
