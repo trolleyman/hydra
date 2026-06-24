@@ -2,17 +2,20 @@ package cli
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"braces.dev/errtrace"
 	"github.com/spf13/cobra"
 	"github.com/trolleyman/hydra/internal/api"
+	"github.com/trolleyman/hydra/internal/config"
 	httppkg "github.com/trolleyman/hydra/internal/http"
 	"github.com/trolleyman/hydra/internal/paths"
 )
@@ -48,9 +51,9 @@ func runServer(_ *cobra.Command, _ []string) error {
 		return errtrace.Wrap(err)
 	}
 
-	addr := "localhost:8080"
-	if envAddr := os.Getenv("HYDRA_API_ADDR"); envAddr != "" {
-		addr = envAddr
+	addr, err := resolveWebAddr(rt.deploy)
+	if err != nil {
+		return errtrace.Wrap(err)
 	}
 	srv := &http.Server{
 		Addr:           addr,
@@ -99,6 +102,44 @@ func runServer(_ *cobra.Command, _ []string) error {
 		}
 		return errtrace.Wrap(err)
 	}
+}
+
+// resolveWebAddr returns the web UI's bind address and refuses an unsafe one.
+// The default is localhost:8080 (reachable only from this machine); a normal
+// `hydra server` or the CLI-auto-started daemon never exposes the port. Exposing
+// it is a deliberate, separate action: `mage prod` / `mage devExpose` set
+// HYDRA_API_ADDR=0.0.0.0:<port>, which this honours. Binding any non-loopback
+// address with no auth key configured is refused outright, so the port can never
+// be opened to the network without a password.
+func resolveWebAddr(deploy config.DeployConfig) (string, error) {
+	addr := "localhost:8080"
+	if env := os.Getenv("HYDRA_API_ADDR"); env != "" {
+		addr = env
+	}
+	if !isLoopbackBind(addr) && deploy.AuthKey == "" {
+		return "", errtrace.Wrap(fmt.Errorf(
+			"refusing to bind %s: that exposes Hydra to the network with no password. "+
+				"Run `mage deploy:setup` to generate an auth key first", addr))
+	}
+	return addr, nil
+}
+
+// isLoopbackBind reports whether addr binds only the local loopback interface.
+// An empty host (e.g. ":8080") or 0.0.0.0/:: binds every interface, so it is not
+// loopback.
+func isLoopbackBind(addr string) bool {
+	host := addr
+	if h, _, err := net.SplitHostPort(addr); err == nil {
+		host = h
+	}
+	if host == "" {
+		return false
+	}
+	host = strings.TrimPrefix(strings.TrimSuffix(host, "]"), "[")
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return host == "localhost"
 }
 
 func runSimulationServer() error {

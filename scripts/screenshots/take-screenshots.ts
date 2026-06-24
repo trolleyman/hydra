@@ -549,7 +549,25 @@ try {
       // how its tree + content layout reflows. Named repository-* so they tag
       // section::repository; the viewport:: axis is set explicitly for the
       // landscape/tablet sizes (width alone can't tell those apart).
+      // The bare repository URL at phone width: below the lg breakpoint the tree
+      // is a full-screen file list (the "Repository" header carries the branch +
+      // compare pickers), and tapping a file drills into the full-screen file
+      // view captured by repository-mobile below.
+      { name: 'repository-mobile-list', path: '/project/sim-project/repository', viewport: { width: 390, height: 844 }, viewportOnly: true },
       { name: 'repository-mobile', path: '/project/sim-project/repository/main/internal/server/server.go', viewport: { width: 390, height: 844 }, viewportOnly: true },
+      // The phone file view's overflow ("hamburger") menu opened: copy contents,
+      // view raw, and the view settings — the controls shown inline in the
+      // desktop header — collapsed into one top-right menu.
+      { name: 'repository-mobile-menu', path: '/project/sim-project/repository/main/internal/server/server.go', viewport: { width: 390, height: 844 }, viewportOnly: true, click: 'button[aria-label="File actions"]' },
+      // A branch diff drilled into on a phone: enter diff mode from the header
+      // (compare → pick branch), then tap a changed file to open its diff
+      // full-screen, with the back chevron + file path in the header. Documents
+      // the phone drill-down for the compare view.
+      { name: 'repository-mobile-diff', path: '/project/sim-project/repository', viewport: { width: 390, height: 844 }, viewportOnly: true, clicks: ['button:has(svg.lucide-git-compare)', 'button:has-text("hydra/add-line-numbers")', 'button:has-text("lines.go")'] },
+      // Diff mode on a phone *before* picking a file: the changed-files list with
+      // the base → head selectors in the header — documenting that the compact
+      // selectors fit the narrow header without overflowing.
+      { name: 'repository-mobile-diff-list', path: '/project/sim-project/repository', viewport: { width: 390, height: 844 }, viewportOnly: true, clicks: ['button:has(svg.lucide-git-compare)', 'button:has-text("hydra/add-line-numbers")'] },
       { name: 'repository-mobile-landscape', path: '/project/sim-project/repository/main/internal/server/server.go', viewport: { width: 844, height: 390 }, viewportTag: 'mobile-landscape', viewportOnly: true },
       { name: 'repository-tablet', path: '/project/sim-project/repository/main/internal/server/server.go', viewport: { width: 834, height: 1112 }, viewportTag: 'tablet', viewportOnly: true },
       { name: 'repository-tablet-landscape', path: '/project/sim-project/repository/main/internal/server/server.go', viewport: { width: 1112, height: 834 }, viewportTag: 'tablet-landscape', viewportOnly: true },

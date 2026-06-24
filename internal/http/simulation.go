@@ -202,9 +202,10 @@ func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, pr
 			CreatedAt:     &createdAt1,
 			Prompt:        simAgent1Prompt,
 			AgentStatus: &api.AgentStatusInfo{
-				Status:      finished,
-				Timestamp:   simNow().Format(time.RFC3339),
-				LastMessage: ptr("run it"),
+				Status:                            finished,
+				Timestamp:                         simNow().Format(time.RFC3339),
+				LastMessage:                       ptr("run it"),
+				LastMessageIsSuggestedNextMessage: ptr(true),
 			},
 		},
 		{
@@ -323,9 +324,10 @@ func (s *SimulationServer) GetAgent(w http.ResponseWriter, r *http.Request, proj
 			CreatedAt:     &createdAt,
 			Prompt:        simAgent1Prompt,
 			AgentStatus: &api.AgentStatusInfo{
-				Status:      api.Finished,
-				Timestamp:   simNow().Format(time.RFC3339),
-				LastMessage: ptr("run it"),
+				Status:                            api.Finished,
+				Timestamp:                         simNow().Format(time.RFC3339),
+				LastMessage:                       ptr("run it"),
+				LastMessageIsSuggestedNextMessage: ptr(true),
 			},
 		})
 		return

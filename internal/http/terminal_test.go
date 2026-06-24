@@ -42,3 +42,30 @@ func TestCheckOrigin(t *testing.T) {
 		})
 	}
 }
+
+// TestCheckOriginSameHost covers the same-origin path: a LAN/remote browser
+// reaching Hydra by IP or hostname must be allowed (so the phone use-case works)
+// while a different site pointed at the same host is still rejected.
+func TestCheckOriginSameHost(t *testing.T) {
+	tests := []struct {
+		name   string
+		host   string
+		origin string
+		allow  bool
+	}{
+		{name: "LAN IP same origin", host: "192.168.1.5:8080", origin: "http://192.168.1.5:8080", allow: true},
+		{name: "hostname same origin", host: "my-laptop:8080", origin: "http://my-laptop:8080", allow: true},
+		{name: "LAN IP cross origin", host: "192.168.1.5:8080", origin: "http://evil.com", allow: false},
+		{name: "LAN IP port mismatch", host: "192.168.1.5:8080", origin: "http://192.168.1.5:9999", allow: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r, _ := http.NewRequest(http.MethodGet, "/ws", nil)
+			r.Host = tt.host
+			r.Header.Set("Origin", tt.origin)
+			if got := checkOrigin(r); got != tt.allow {
+				t.Errorf("checkOrigin(host=%q, origin=%q) = %v, want %v", tt.host, tt.origin, got, tt.allow)
+			}
+		})
+	}
+}
