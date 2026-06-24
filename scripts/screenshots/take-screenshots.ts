@@ -358,6 +358,13 @@ try {
       // tree auto-expanded down to it (folders are otherwise collapsed). Demos
       // PLAN.md #41a (line numbers) + #41d (wrapping) + #41f (URL routing).
       { name: 'repository-code', path: '/project/sim-project/repository/main/internal/server/server.go' },
+      // The "raw" file view: the file header's Raw button (and the image
+      // preview's copy/raw controls) open the unrendered blob in a new tab,
+      // served by the /repository/.../blob endpoint and rendered by the browser
+      // as plain text — GitHub's "raw" page. We navigate straight to that blob
+      // URL to document where the Raw button lands. Theme doesn't affect the
+      // browser's plain-text rendering, so the light/dark shots match.
+      { name: 'repository-raw', path: '/repository/projects/sim-project/blob?path=internal/server/server.go&ref=main' },
       // The branch selector opened over the source-file view: Hydra agent
       // branches (hydra/*) are listed first (PLAN.md #41b).
       {
@@ -593,6 +600,36 @@ try {
         imageDiffMode: 'ab',
         videoDiff: { seek: 1.2, highlight: true },
       },
+      // ── Mobile / small-screen layout (MOBILE_PLAN.md Phase 1) ───────────────
+      // The same UI captured at phone width (390×844) to document the responsive
+      // work: the sidebar collapses into a hamburger-toggled off-canvas drawer,
+      // the header/metadata rows wrap, padding tightens, and the diff drops its
+      // file-list sidebar for a full-width unified diff. The width (<700) makes
+      // each of these tag itself viewport::mobile (see the sidecar block below),
+      // so a reviewer can filter the panel down to just the small-screen shots.
+      //
+      // The project home at phone width: the full-page spawn form fills the
+      // screen and the header shows the hamburger toggle (the sidebar is off-
+      // canvas / closed by default on mobile).
+      { name: 'mobile-home', path: '/project/sim-project/', viewport: { width: 390, height: 844 } },
+      // The drawer opened: clicking the header hamburger slides the sidebar
+      // (compact spawn box, Repository button, agents list) in over a dimmed
+      // backdrop. Viewport capture since the drawer is a fixed overlay.
+      {
+        name: 'mobile-menu',
+        path: '/project/sim-project/',
+        viewport: { width: 390, height: 844 },
+        viewportOnly: true,
+        click: 'button[aria-label="Toggle sidebar"]',
+      },
+      // An agent detail page at phone width: the title + action buttons wrap, the
+      // metadata row wraps, and the prompt/terminal stack full-width. Viewport-
+      // only to focus on the header region rather than the long page below.
+      { name: 'mobile-agent', path: '/project/sim-project/agent/agent-1', viewport: { width: 390, height: 844 }, viewportOnly: true },
+      // A diff at phone width: the file-list sidebar is hidden so the unified
+      // diff takes the full width and wraps long lines. agent-3's nested-folder
+      // diff scrolled to the Changes section.
+      { name: 'mobile-diff', path: '/project/sim-project/agent/agent-3', viewport: { width: 390, height: 844 }, scrollTo: 'Changes' },
     ]
     // Capture every page in both themes. Dark mode has its own colours (e.g.
     // diff add/remove backgrounds), so a light-only render would miss visual
@@ -1071,9 +1108,9 @@ try {
         // section are scoped "category::value" labels — the viewer keeps one
         // value per category and offers each as a single-select filter — so a
         // reviewer can, e.g., show only the dark-mode repository shots. The
-        // viewport axis is derived from the capture width (everything here is
-        // desktop-width today, but a phone-width shot would tag itself).
-        const viewport = (pg.viewport?.width ?? 1280) < 700 ? 'phone' : 'desktop'
+        // viewport axis is derived from the capture width: a narrow (phone-width)
+        // shot tags itself viewport::mobile, everything wider viewport::desktop.
+        const viewport = (pg.viewport?.width ?? 1280) < 700 ? 'mobile' : 'desktop'
         const tags = [`theme::${theme}`, `viewport::${viewport}`, `section::${sectionFor(pg.name)}`]
         writeFileSync(`${out}.meta`, JSON.stringify({ tags }))
         console.log(`wrote ${out}`)

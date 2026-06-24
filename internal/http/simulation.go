@@ -921,11 +921,18 @@ func (s *SimulationServer) GetAgentDiff(w http.ResponseWriter, r *http.Request, 
 			BaseRef: "main",
 			HeadRef: "hydra/feat-3",
 			Files: []api.DiffFile{
-				simFile("README.md", api.DiffFileChangeTypeModified, 1, 0,
-					"@@ -1,2 +1,3 @@", 1, 1,
+				simFile("README.md", api.DiffFileChangeTypeModified, 3, 0,
+					"@@ -1,2 +1,5 @@", 1, 1,
 					api.DiffLine{Type: api.Context, Content: "# Hydra", OldLineNum: ptr(1), NewLineNum: ptr(1)},
 					api.DiffLine{Type: api.Addition, Content: "Now with deeply nested auth providers.", NewLineNum: ptr(2)},
-					api.DiffLine{Type: api.Context, Content: "", OldLineNum: ptr(2), NewLineNum: ptr(3)},
+					// A deliberately long line to exercise the unified diff's soft
+					// wrapping (whitespace-pre-wrap) on narrow / mobile viewports —
+					// it should reflow across several rows rather than overflow.
+					api.DiffLine{Type: api.Addition, Content: "This intentionally very long line verifies that the diff viewer wraps prose gracefully on small screens instead of forcing a horizontal scrollbar: lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.", NewLineNum: ptr(3)},
+					// A long unbroken token to exercise break-words (a URL/path with
+					// no spaces must still hard-break rather than overflow).
+					api.DiffLine{Type: api.Addition, Content: "See https://example.com/internal/app/services/auth/providers/oauth/google/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/client.go", NewLineNum: ptr(4)},
+					api.DiffLine{Type: api.Context, Content: "", OldLineNum: ptr(2), NewLineNum: ptr(5)},
 				),
 				simFile("docs/architecture/diagrams/overview.md", api.DiffFileChangeTypeAdded, 2, 0,
 					"@@ -0,0 +1,2 @@", 0, 1,
@@ -1495,20 +1502,34 @@ func (s *SimulationServer) GetRepositoryFile(w http.ResponseWriter, r *http.Requ
 	})
 }
 
-// HandleRepositoryBlob serves the simulated repo's binary image as raw PNG bytes.
+// HandleRepositoryBlob serves the simulated repo's raw file bytes: the binary
+// image as image/png, and any text file as text/plain. This backs both the
+// repository browser's image preview and the file viewer's "Raw" link (which
+// opens the unrendered blob in a new tab). Symlinks resolve to their target and
+// unknown paths 404, mirroring the real handler.
 func (s *SimulationServer) HandleRepositoryBlob(w http.ResponseWriter, r *http.Request) {
-	if strings.TrimPrefix(path.Clean(r.URL.Query().Get("path")), "/") != simRepoImage {
+	reqPath := strings.TrimPrefix(path.Clean(r.URL.Query().Get("path")), "/")
+	w.Header().Set("Cache-Control", "public, max-age=300")
+	if reqPath == simRepoImage {
+		png, err := base64.StdEncoding.DecodeString(simLogoPNGBase64)
+		if err != nil {
+			http.Error(w, "decode error", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "image/png")
+		_, _ = w.Write(png)
+		return
+	}
+	if target, ok := simRepoSymlinks[reqPath]; ok {
+		reqPath = target
+	}
+	content, ok := simRepoFiles[reqPath]
+	if !ok {
 		http.NotFound(w, r)
 		return
 	}
-	png, err := base64.StdEncoding.DecodeString(simLogoPNGBase64)
-	if err != nil {
-		http.Error(w, "decode error", http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "image/png")
-	w.Header().Set("Cache-Control", "public, max-age=300")
-	_, _ = w.Write(png)
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	_, _ = w.Write([]byte(content))
 }
 
 // GetRepositoryArtifacts lists the artifact scripts the simulated repo declares in
