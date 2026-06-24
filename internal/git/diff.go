@@ -423,7 +423,39 @@ func parseDiff(rawDiff string) ([]DiffFile, error) {
 		}
 	}
 	finishFile()
-	return files, nil
+	return coalesceTypeChanges(files), nil
+}
+
+// coalesceTypeChanges merges the split entries git emits for a "type change" —
+// when a path flips between a symlink and a regular file (e.g. CLAUDE.md being
+// converted from a `CLAUDE.md -> GEMINI.md` symlink into a real file). git can't
+// represent that as a single hunk, so it emits a deletion of the old object
+// followed by an addition of the new one: two `diff --git a/PATH b/PATH` stanzas
+// for the SAME path. Left as-is these parse into two DiffFiles sharing a path,
+// which surface as duplicate rows — and duplicate React keys — in the file tree.
+// Collapse each run of consecutive same-path entries into a single "modified"
+// entry whose additions/deletions/hunks are the union of the parts.
+func coalesceTypeChanges(files []DiffFile) []DiffFile {
+	if len(files) < 2 {
+		return files
+	}
+	merged := make([]DiffFile, 0, len(files))
+	for _, f := range files {
+		if n := len(merged); n > 0 && f.Path != "" && merged[n-1].Path == f.Path {
+			prev := &merged[n-1]
+			prev.ChangeType = "modified"
+			prev.Additions += f.Additions
+			prev.Deletions += f.Deletions
+			prev.Binary = prev.Binary || f.Binary
+			prev.Hunks = append(prev.Hunks, f.Hunks...)
+			if prev.OldPath == nil {
+				prev.OldPath = f.OldPath
+			}
+			continue
+		}
+		merged = append(merged, f)
+	}
+	return merged
 }
 
 func parseHunkHeader(header string) (oldStart, newStart int) {
