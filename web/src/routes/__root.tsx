@@ -50,6 +50,12 @@ function formatSpawnedAgo(ms: number): string {
   return `Spawned ${days} days ago`
 }
 
+// Project-switch shortcut hint. We bind Ctrl (not Cmd) on every platform,
+// including macOS: macOS reserves Cmd+` for its own "cycle windows within an
+// app", so it never reaches the page — Ctrl+` is free there and keeps one
+// binding everywhere.
+const SWITCH_PROJECT_HINT = 'Hold Ctrl, tap ` to switch · ⇧ for previous'
+
 const SIDEBAR_MIN = 160
 const SIDEBAR_MAX = 600
 const SIDEBAR_DEFAULT = 264
@@ -370,8 +376,58 @@ function ProjectDropdown({
               </form>
             )}
           </div>
+
+          {projects.length > 1 && (
+            <div className="px-3 py-1.5 border-t border-gray-100 dark:border-gray-700 text-[10px] text-gray-400 dark:text-gray-500 font-mono">
+              {SWITCH_PROJECT_HINT}
+            </div>
+          )}
         </div>
       )}
+    </div>
+  )
+}
+
+// ── Project Switcher Overlay ─────────────────────────────────────────────────
+// Alt-tab-style overlay shown while the user holds Ctrl and taps `. Purely a
+// keyboard-driven display — it doesn't capture pointer events; the keyboard
+// handling and commit-on-Ctrl-release live in RootLayout.
+
+function ProjectSwitcherOverlay({ projects, index }: { projects: ProjectInfo[]; index: number }) {
+  const activeRef = useRef<HTMLDivElement>(null)
+  // Keep the highlighted row visible when the list overflows.
+  useEffect(() => { activeRef.current?.scrollIntoView({ block: 'nearest' }) }, [index])
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 pointer-events-none">
+      <div className="w-80 max-h-[70vh] overflow-y-auto bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-2xl py-2">
+        <div className="px-4 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
+          Switch project
+        </div>
+        {projects.map((p, i) => {
+          const active = i === index
+          return (
+            <div
+              key={p.id}
+              ref={active ? activeRef : undefined}
+              className={`flex items-center gap-2.5 px-4 py-2 ${active ? 'bg-blue-50 dark:bg-blue-900/30' : ''}`}
+            >
+              <Folder className={`w-3.5 h-3.5 shrink-0 ${active ? 'text-blue-500' : 'text-gray-400'}`} />
+              <div className="min-w-0 flex-1">
+                <div className={`text-sm font-medium truncate ${active ? 'text-blue-700 dark:text-blue-300' : 'text-gray-900 dark:text-gray-100'}`}>
+                  {p.name}
+                </div>
+                <div className="text-xs font-mono text-gray-400 dark:text-gray-500 truncate">{p.path}</div>
+              </div>
+              {(p.unread_count ?? 0) > 0 && (
+                <span className="shrink-0 w-2 h-2 rounded-full bg-sky-500" aria-label={`${p.unread_count} agents with unread changes`} />
+              )}
+            </div>
+          )
+        })}
+        <div className="px-4 pt-2 mt-1 border-t border-gray-100 dark:border-gray-700 text-[10px] text-gray-400 dark:text-gray-500 font-mono">
+          ` next · ⇧` prev · release Ctrl to select
+        </div>
+      </div>
     </div>
   )
 }
@@ -437,6 +493,10 @@ function RootLayout() {
   const [, setTick] = useState(0)
   const [development, setDevelopment] = useState(false)
   const [restarting, setRestarting] = useState(false)
+  // Alt-tab-style project switcher: while Ctrl is held, each Ctrl+` press steps
+  // the highlight through this overlay (Shift reverses); releasing Ctrl commits.
+  // `null` = overlay closed; otherwise the highlighted index into `projects`.
+  const [switcherIndex, setSwitcherIndex] = useState<number | null>(null)
   // On small screens the sidebar collapses into an off-canvas drawer toggled by
   // the header hamburger; on md+ it's the usual persistent column (this state is
   // ignored there). Closed whenever the route changes so tapping an agent on a
@@ -508,6 +568,19 @@ function RootLayout() {
     }
     navigateToProjectView(projectId, view)
   }, [navigate, navigateToProjectView])
+
+  // Switch the active project: record the selection and route to its remembered
+  // view (or stay on settings if that's the current page). Shared by the header
+  // dropdown and the Ctrl/Cmd+` keyboard shortcut so both behave identically.
+  const selectProject = useCallback((id: string) => {
+    setSelectedProjectId(id)
+    const isOnSettings = window.location.pathname.endsWith('/settings')
+    if (isOnSettings) {
+      navigate({ to: '/project/$projectId/settings', params: { projectId: id } })
+      return
+    }
+    restoreProjectView(id, loadProjectView(id))
+  }, [setSelectedProjectId, navigate, restoreProjectView])
 
   const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
     const saved = readLocal(StorageKeys.sidebarWidth)
@@ -830,6 +903,64 @@ function RootLayout() {
   // repository, switching project view) so it never lingers over the content.
   useEffect(() => { setMobileSidebarOpen(false) }, [location.pathname])
 
+  // Alt-tab-style project switcher. Hold Ctrl and tap ` to open an overlay with
+  // the *next* project highlighted; each further ` steps forward, Shift+` steps
+  // back (both wrap). Releasing Ctrl commits the highlight; Escape or losing
+  // focus cancels. We bind Ctrl on every platform — macOS reserves Cmd+` for its
+  // own "cycle windows within an app", so Cmd never reaches us; Ctrl+` is free
+  // there too, keeping one binding everywhere. We match on e.code === 'Backquote'
+  // so it's keyboard-layout independent (Shift+` is '~' on US layouts).
+  //
+  // selectProject is read through a ref so committing on Ctrl-up doesn't force
+  // this listener to re-bind every render; the keydown/keyup handlers are
+  // otherwise stable and use functional state updates.
+  const selectProjectRef = useRef(selectProject)
+  selectProjectRef.current = selectProject
+  const projectsRef = useRef(projects)
+  projectsRef.current = projects
+  const currentProjectIdRef = useRef(currentProjectId)
+  currentProjectIdRef.current = currentProjectId
+  const switcherIndexRef = useRef(switcherIndex)
+  switcherIndexRef.current = switcherIndex
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') {
+        setSwitcherIndex(null) // no-op (React bails) if already closed
+        return
+      }
+      if (e.code !== 'Backquote' || !e.ctrlKey || e.altKey || e.metaKey) return
+      const list = projectsRef.current
+      if (list.length < 2) return
+      e.preventDefault()
+      if (e.repeat) return // one step per physical press, not per auto-repeat
+      const dir = e.shiftKey ? -1 : 1
+      setSwitcherIndex((cur) => {
+        // First press steps off the current project; later presses step off the
+        // current highlight. With nothing selected, land on first/last.
+        const base = cur ?? list.findIndex((p) => p.id === currentProjectIdRef.current)
+        const start = base === -1 ? (dir === 1 ? -1 : 0) : base
+        return (start + dir + list.length) % list.length
+      })
+    }
+    function onKeyUp(e: KeyboardEvent) {
+      if (e.key !== 'Control') return
+      const cur = switcherIndexRef.current
+      if (cur === null) return
+      setSwitcherIndex(null)
+      const proj = projectsRef.current[cur]
+      if (proj && proj.id !== currentProjectIdRef.current) selectProjectRef.current(proj.id)
+    }
+    function onBlur() { setSwitcherIndex(null) }
+    window.addEventListener('keydown', onKeyDown)
+    window.addEventListener('keyup', onKeyUp)
+    window.addEventListener('blur', onBlur)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener('keyup', onKeyUp)
+      window.removeEventListener('blur', onBlur)
+    }
+  }, [])
+
   async function handleRestart() {
     setRestarting(true)
     try {
@@ -988,19 +1119,11 @@ function RootLayout() {
         <ProjectDropdown
           projects={projects}
           selectedId={currentProjectId}
-          onSelect={(id) => {
-            setSelectedProjectId(id)
-            const isOnSettings = window.location.pathname.endsWith('/settings')
-            if (isOnSettings) {
-              navigate({ to: '/project/$projectId/settings', params: { projectId: id } })
-              return
-            }
-            // Restore the view (agent / repository / project) last open in the
-            // project we're switching to, so it comes back rather than the bare
-            // project page — but don't auto-open a remembered agent that has
-            // unread changes (see restoreProjectView).
-            restoreProjectView(id, loadProjectView(id))
-          }}
+          // Restore the view (agent / repository / project) last open in the
+          // project we're switching to, so it comes back rather than the bare
+          // project page — but don't auto-open a remembered agent that has
+          // unread changes (see restoreProjectView).
+          onSelect={selectProject}
           onDeselect={() => {
             setSelectedProjectId(null)
             navigate({ to: '/' })
@@ -1216,6 +1339,9 @@ function RootLayout() {
       </div>
       <Dialog />
       <Toaster />
+      {switcherIndex !== null && projects[switcherIndex] && (
+        <ProjectSwitcherOverlay projects={projects} index={switcherIndex} />
+      )}
       {untrustedProject && (
         <TrustProjectModal
           project={untrustedProject}
