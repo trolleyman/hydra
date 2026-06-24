@@ -44,8 +44,11 @@ export function BranchSelector({
     return () => document.removeEventListener('mousedown', handleClick)
   }, [open])
 
-  const agentBranches = branches.filter((b) => b.is_agent)
-  const otherBranches = branches.filter((b) => !b.is_agent)
+  // The current (HEAD) branch is surfaced in its own unnamed section at the top,
+  // so it's excluded from the agent/other lists below (and their counts).
+  const current = branches.find((b) => b.is_current)
+  const agentBranches = branches.filter((b) => b.is_agent && !b.is_current)
+  const otherBranches = branches.filter((b) => !b.is_agent && !b.is_current)
 
   const Row = ({ b }: { b: RepositoryBranch }) => (
     <button
@@ -96,15 +99,23 @@ export function BranchSelector({
               <span className="ml-auto text-[9px] uppercase tracking-wide">commit</span>
             </div>
           )}
+          {current && (
+            <>
+              <Row b={current} />
+              {(agentBranches.length > 0 || otherBranches.length > 0) && (
+                <div className="my-1 border-t border-gray-100 dark:border-gray-700" />
+              )}
+            </>
+          )}
           {agentBranches.length > 0 && (
             <>
-              <p className="px-2.5 pt-1.5 pb-1 text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide">Agent branches</p>
+              <p className="px-2.5 pt-1.5 pb-1 text-[10px] font-semibold text-gray-400 dark:text-gray-500">Agent branches · {agentBranches.length}</p>
               {agentBranches.map((b) => <Row key={b.name} b={b} />)}
             </>
           )}
           {otherBranches.length > 0 && (
             <>
-              <p className="px-2.5 pt-2 pb-1 text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide">Branches</p>
+              <p className="px-2.5 pt-2 pb-1 text-[10px] font-semibold text-gray-400 dark:text-gray-500">Other branches · {otherBranches.length}</p>
               {otherBranches.map((b) => <Row key={b.name} b={b} />)}
             </>
           )}
