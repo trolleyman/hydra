@@ -28,7 +28,8 @@ const CHANGE_COLOR: Record<string, string> = {
 
 // The ways to compare a before/after image pair. Persisted in the diff viewer's
 // settings; see DiffViewer's SettingsPopup. (The magenta pixel-diff isn't a mode of
-// its own any more — it lives as a "Highlight" tab inside the Before/After mode.)
+// its own any more — it's a "Highlight" checkbox that overlays the changes on the
+// Before/After view.)
 export type ImageDiffMode = 'side-by-side' | 'ab' | 'slider' | 'onion'
 
 export const IMAGE_DIFF_MODES: { value: ImageDiffMode; label: string }[] = [
@@ -95,54 +96,61 @@ function LayerNode({ url, style }: { url?: string | null; style?: React.CSSPrope
   )
 }
 
-// A/B switch: Before / After / Highlight. Before & After stay mounted and stacked,
-// so the toggle flips which is shown for an instant, flicker-free hard switch.
-// Highlight shows the after image with every changed pixel painted magenta (the
-// pixel-diff, see DiffCanvas); it's disabled when only one side exists (an
-// added/removed file — there's nothing to diff). Clicking the image flips
-// Before↔After (not while Highlight is shown). A missing side shows the "No image"
-// placeholder; middle-click opens the currently-shown image in a new tab.
+// A/B switch: Before / After, with a Highlight checkbox. Before & After stay
+// mounted and stacked, so the toggle flips which is shown for an instant,
+// flicker-free hard switch. Clicking the image (or the buttons) flips Before↔After.
+// Ticking Highlight overlays the pixel-diff (every changed pixel painted magenta,
+// see DiffCanvas) on top of whichever side is shown, so the changes stay marked as
+// you flip between Before and After. Highlight is disabled when only one side
+// exists (an added/removed file — there's nothing to diff). A missing side shows
+// the "No image" placeholder; middle-click opens the currently-shown image in a
+// new tab.
 function ABSwitch({ left, right }: { left?: string | null; right?: string | null }) {
   const canDiff = !!left && !!right
-  const [view, setView] = useState<'before' | 'after' | 'highlight'>('after')
+  const [view, setView] = useState<'before' | 'after'>('after')
+  const [highlight, setHighlight] = useState(false)
+  const showHighlight = highlight && canDiff
   // At least one side is present (ImageDiffView only routes here otherwise); the
   // present image is the invisible sizer that gives the stacked box its size.
   const sizer = (right ?? left) as string
-  const btn = (active: boolean, disabled = false) =>
-    `text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded transition-colors ${
-      disabled ? 'opacity-40 cursor-not-allowed bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500'
-        : active ? 'bg-blue-500 text-white cursor-pointer'
-          : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600 cursor-pointer'
+  const btn = (active: boolean) =>
+    `text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded transition-colors cursor-pointer ${
+      active ? 'bg-blue-500 text-white'
+        : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600'
     }`
   return (
     <div className="min-w-0">
       <div className="flex items-center gap-1 mb-1">
         <button onClick={() => setView('before')} className={btn(view === 'before')}>Before</button>
         <button onClick={() => setView('after')} className={btn(view === 'after')}>After</button>
-        <button
-          onClick={() => { if (canDiff) setView('highlight') }}
-          disabled={!canDiff}
+        <label
           title={canDiff ? 'Highlight changed pixels in magenta' : 'Needs both a before and after image'}
-          className={btn(view === 'highlight', !canDiff)}
+          className={`ml-auto flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide select-none ${
+            canDiff ? 'cursor-pointer text-gray-500 dark:text-gray-400' : 'opacity-40 cursor-not-allowed text-gray-400 dark:text-gray-500'
+          }`}
         >
+          <input
+            type="checkbox"
+            checked={showHighlight}
+            disabled={!canDiff}
+            onChange={(e) => setHighlight(e.target.checked)}
+            className="accent-blue-500 cursor-pointer disabled:cursor-not-allowed"
+          />
           Highlight
-        </button>
+        </label>
       </div>
-      {view === 'highlight' && canDiff ? (
-        <DiffCanvas left={left as string} right={right as string} />
-      ) : (
-        // select-none: flipping is a rapid click target, so without this a quick
-        // double-click would highlight the "No image" placeholder text.
-        <div
-          className="relative w-full cursor-pointer select-none"
-          onClick={() => setView((v) => (v === 'before' ? 'after' : 'before'))}
-          onAuxClick={makeAuxOpen(() => (view === 'before' ? left : right) || sizer)}
-        >
-          <img src={sizer} style={{ visibility: 'hidden' }} className={`${IMG_CLASS} block`} draggable={false} />
-          <LayerNode url={right} style={{ visibility: view === 'before' ? 'hidden' : 'visible' }} />
-          <LayerNode url={left} style={{ visibility: view === 'before' ? 'visible' : 'hidden' }} />
-        </div>
-      )}
+      {/* select-none: flipping is a rapid click target, so without this a quick
+          double-click would highlight the "No image" placeholder text. */}
+      <div
+        className="relative w-full cursor-pointer select-none"
+        onClick={() => setView((v) => (v === 'before' ? 'after' : 'before'))}
+        onAuxClick={makeAuxOpen(() => (view === 'before' ? left : right) || sizer)}
+      >
+        <img src={sizer} style={{ visibility: 'hidden' }} className={`${IMG_CLASS} block`} draggable={false} />
+        <LayerNode url={right} style={{ visibility: view === 'before' ? 'hidden' : 'visible' }} />
+        <LayerNode url={left} style={{ visibility: view === 'before' ? 'visible' : 'hidden' }} />
+        {showHighlight && <DiffCanvas left={left as string} right={right as string} />}
+      </div>
     </div>
   )
 }
@@ -247,12 +255,16 @@ function loadImage(url: string): Promise<HTMLImageElement> {
   })
 }
 
-// DiffCanvas renders the "after" image with every pixel that differs from the
-// "before" image painted bright magenta. The two are aligned at the top-left and
-// compared over the union of their bounds, so a size change (or pixels present on
-// only one side) reads as a difference too. It only runs with both sides present;
-// the caller handles the single-side case. Same-origin artifact URLs keep the
-// canvas untainted so getImageData works.
+// DiffCanvas paints a transparent overlay in which every pixel that differs
+// between the before/after images is bright magenta and unchanged pixels are left
+// clear, so it can sit on top of whichever side (Before or After) is currently
+// shown and mark the changes without hiding the underlying image. The two are
+// aligned at the top-left and compared over the union of their bounds, so a size
+// change (or pixels present on only one side) reads as a difference too. It only
+// runs with both sides present; the caller handles the single-side case.
+// Same-origin artifact URLs keep the scratch canvases untainted so getImageData
+// works. The overlay is pointer-events-none so the click-to-flip gesture on the
+// wrapper still works through it.
 function DiffCanvas({ left, right }: { left: string; right: string }) {
   const ref = useRef<HTMLCanvasElement>(null)
   const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading')
@@ -273,28 +285,29 @@ function DiffCanvas({ left, right }: { left: string; right: string }) {
         const ctx = canvas.getContext('2d', { willReadFrequently: true })
         if (!ctx) { setState('error'); return }
 
-        // The visible canvas starts as the "after" image (the base); a scratch
-        // canvas holds "before" so we can read both pixel buffers and overwrite
-        // only the differing pixels with magenta.
-        ctx.clearRect(0, 0, w, h)
-        ctx.drawImage(ra, 0, 0)
-        const after = ctx.getImageData(0, 0, w, h)
+        // Read each image's pixels off its own scratch canvas, then build a
+        // transparent overlay where only the differing pixels are painted magenta.
+        const read = (img: HTMLImageElement): Uint8ClampedArray | null => {
+          const s = document.createElement('canvas')
+          s.width = w
+          s.height = h
+          const sctx = s.getContext('2d', { willReadFrequently: true })
+          if (!sctx) return null
+          sctx.drawImage(img, 0, 0)
+          return sctx.getImageData(0, 0, w, h).data
+        }
+        const before = read(la)
+        const after = read(ra)
+        if (!before || !after) { setState('error'); return }
 
-        const scratch = document.createElement('canvas')
-        scratch.width = w
-        scratch.height = h
-        const sctx = scratch.getContext('2d', { willReadFrequently: true })
-        if (!sctx) { setState('error'); return }
-        sctx.drawImage(la, 0, 0)
-        const before = sctx.getImageData(0, 0, w, h).data
-
-        const out = after.data
+        const overlay = ctx.createImageData(w, h)
+        const out = overlay.data
         for (let i = 0; i < out.length; i += 4) {
           const d =
-            Math.abs(out[i] - before[i]) +
-            Math.abs(out[i + 1] - before[i + 1]) +
-            Math.abs(out[i + 2] - before[i + 2]) +
-            Math.abs(out[i + 3] - before[i + 3])
+            Math.abs(after[i] - before[i]) +
+            Math.abs(after[i + 1] - before[i + 1]) +
+            Math.abs(after[i + 2] - before[i + 2]) +
+            Math.abs(after[i + 3] - before[i + 3])
           if (d > DIFF_PIXEL_THRESHOLD) {
             out[i] = DIFF_COLOR[0]
             out[i + 1] = DIFF_COLOR[1]
@@ -302,7 +315,7 @@ function DiffCanvas({ left, right }: { left: string; right: string }) {
             out[i + 3] = 255
           }
         }
-        ctx.putImageData(after, 0, 0)
+        ctx.putImageData(overlay, 0, 0)
         setState('ready')
       })
       .catch(() => { if (!cancelled) setState('error') })
@@ -310,19 +323,15 @@ function DiffCanvas({ left, right }: { left: string; right: string }) {
   }, [left, right])
 
   return (
-    <div className="relative w-full" onAuxClick={makeAuxOpen(() => right)}>
-      <span className={`${TAG_CLASS} left-1`}>Highlight</span>
+    <>
       <canvas
         ref={ref}
-        style={checkerStyle}
-        className={`${IMG_CLASS} block ${state === 'ready' ? '' : 'opacity-0'}`}
+        className={`${OVERLAY_CLASS} pointer-events-none border-0 ${state === 'ready' ? '' : 'opacity-0'}`}
       />
       {state !== 'ready' && (
-        <div className="absolute inset-0 flex items-center justify-center text-[11px] text-gray-400 dark:text-gray-500">
-          {state === 'error' ? 'Could not compute diff' : 'Computing diff…'}
-        </div>
+        <span className={`${TAG_CLASS} right-1`}>{state === 'error' ? 'Diff failed' : 'Diffing…'}</span>
       )}
-    </div>
+    </>
   )
 }
 
