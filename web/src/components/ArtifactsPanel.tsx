@@ -519,7 +519,10 @@ function TagScopeFilter({
   const hiddenCount = values.filter((v) => off.includes(v)).length
   const allOn = hiddenCount === 0
   const allOff = hiddenCount === values.length && values.length > 0
-  const rowClass = 'flex items-center gap-2 px-3 py-1.5 text-xs cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors'
+  // select-none: shift-click isolates a value, but the browser's shift-click
+  // range-selects text (which starts on mousedown, so the onClick preventDefault
+  // can't stop it) — making the row unselectable avoids the stray highlight.
+  const rowClass = 'flex items-center gap-2 px-3 py-1.5 text-xs cursor-pointer select-none hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors'
 
   return (
     <div ref={ref} className="relative">

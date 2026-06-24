@@ -81,6 +81,7 @@ function progress(msg: string) {
 // (repository browser, artifacts panel, …). Grouping by name prefix keeps the
 // page list (the source of truth) the only place a new shot must be declared.
 function sectionFor(name: string): string {
+  if (name.startsWith('repository-diff')) return 'repository-diff'
   if (name.startsWith('repository')) return 'repository'
   if (name.startsWith('artifact')) return 'artifacts'
   if (name.startsWith('archived')) return 'archived'
@@ -228,6 +229,12 @@ try {
       // popover such as the repository branch selector so the screenshot
       // documents it.
       click?: string
+      // CSS selectors clicked in sequence (each followed by a settle), then a
+      // networkidle wait so any fetch a click kicks off has rendered before the
+      // capture. Used by the branch-compare diff shots, where pressing the diff
+      // button enters diff mode (and fetches the diff) and an optional second
+      // click opens the popped-out compare branch selector.
+      clicks?: string[]
       // Glob of a request to hold open (never fulfilled) so the page is captured
       // in its in-flight loading state — e.g. holding the repo file-contents
       // request so the loading spinner shows. With a request pending, networkidle
@@ -238,6 +245,10 @@ try {
       // before the app boots, so the artifacts panel renders before/after pairs in
       // the chosen mode. Only meaningful on the artifacts (agent-1) page.
       imageDiffMode?: 'side-by-side' | 'ab' | 'slider' | 'onion'
+      // Seeds the repository diff's one-file-at-a-time preference
+      // ('hydra-repo-diff-single-file') before boot. Omit for the default
+      // (one file at a time); set false to capture the all-files-stacked view.
+      repoDiffSingleFile?: boolean
       // Expands the named artifact card (clicks its header) after load — used to
       // document the in-flight card's live, scrollable generation log.
       expandArtifact?: string
@@ -377,6 +388,68 @@ try {
         name: 'repository-branches',
         path: '/project/sim-project/repository/main/internal/server/server.go',
         click: 'button[title="Switch branch"]',
+      },
+      // The branch-compare diff view: the diff button (the GitCompare icon beside
+      // the branch selector) opens the branch dropdown; picking a branch diffs it
+      // against the browsed ref. The sidebar header becomes "base → head" and the
+      // main pane shows the diff (reusing the agent diff's FileDiff/FileRow), with
+      // per-file line counts and added/removed/renamed change-type tags.
+      // Simulation serves a small mock diff with one of each change type (see
+      // GetRepositoryDiff in internal/http/simulation.go). The default is one file
+      // at a time — the main pane shows only the file selected in the left list.
+      {
+        name: 'repository-diff',
+        path: '/project/sim-project/repository',
+        clicks: ['button:has(svg.lucide-git-compare)', 'button:has-text("hydra/add-line-numbers")'],
+      },
+      // The same diff with the all-files-stacked view (a stored preference,
+      // toggled in the diff settings popup): every changed file's diff is shown
+      // at once rather than one at a time.
+      {
+        name: 'repository-diff-all',
+        path: '/project/sim-project/repository',
+        clicks: ['button:has(svg.lucide-git-compare)', 'button:has-text("hydra/add-line-numbers")'],
+        repoDiffSingleFile: false,
+      },
+      // One file at a time, selecting each change type from the left list (the
+      // third click). heads.go is a full-context ("expanded") file, so its diff
+      // shows surrounding context collapsed behind ⌄/⌃ "··· N lines ···"
+      // expanders — documenting how context is handled.
+      {
+        name: 'repository-diff-context',
+        path: '/project/sim-project/repository',
+        clicks: ['button:has(svg.lucide-git-compare)', 'button:has-text("hydra/add-line-numbers")', 'button:has-text("heads.go")'],
+      },
+      // A removed file: the whole file shows as deletions, with the red removed tag.
+      {
+        name: 'repository-diff-removed',
+        path: '/project/sim-project/repository',
+        clicks: ['button:has(svg.lucide-git-compare)', 'button:has-text("hydra/add-line-numbers")', 'button:has-text("old_helper.go")'],
+      },
+      // An added file: the whole file shows as additions, with the green added tag.
+      {
+        name: 'repository-diff-added',
+        path: '/project/sim-project/repository',
+        clicks: ['button:has(svg.lucide-git-compare)', 'button:has-text("hydra/add-line-numbers")', 'button:has-text("lines.go")'],
+      },
+      // A renamed file: the header shows "old → new" path with the renamed tag.
+      {
+        name: 'repository-diff-renamed',
+        path: '/project/sim-project/repository',
+        clicks: ['button:has(svg.lucide-git-compare)', 'button:has-text("hydra/add-line-numbers")', 'button:has-text("renderer.go")'],
+      },
+      // The diff branch selector reopened while diffing: the dropdown checkmarks
+      // the current compare branch, and clicking that branch (or the base) exits
+      // diff mode. Enters diff mode first (open dropdown, pick a branch), then
+      // reopens the now-labelled compare selector to document the checkmark.
+      {
+        name: 'repository-diff-branches',
+        path: '/project/sim-project/repository',
+        clicks: [
+          'button:has(svg.lucide-git-compare)',
+          'button:has-text("hydra/add-line-numbers")',
+          'button[title="Change or exit branch diff"]',
+        ],
       },
       // A binary image file rendered inline via the raw blob route (PLAN.md #41k).
       { name: 'repository-image', path: '/project/sim-project/repository/main/web/public/logo.png' },
@@ -728,6 +801,17 @@ try {
             }
           }, pg.imageDiffMode)
         }
+        // Seed the repository diff's one-file-at-a-time preference so the
+        // all-files-stacked view can be captured (the default is one file).
+        if (pg.repoDiffSingleFile !== undefined) {
+          await ctx.addInitScript((single) => {
+            try {
+              localStorage.setItem('hydra-repo-diff-single-file', String(single))
+            } catch {
+              // ignore storage failures
+            }
+          }, pg.repoDiffSingleFile)
+        }
         // Seed the artifact tag filter so the panel renders with a filter applied.
         // The key must match web/src/lib/storage.ts artifactTagFilterKey(projectId,
         // agentId); these pages are all the sim project's agent-1.
@@ -930,6 +1014,17 @@ try {
         if (pg.click) {
           // Open a popover (e.g. the branch selector) so the capture documents it.
           await page.click(pg.click)
+          await settle(page)
+        }
+        if (pg.clicks) {
+          // Drive a short interaction (e.g. press the diff button, then open the
+          // compare branch selector). The final networkidle wait lets the diff
+          // a click fetched render before the capture.
+          for (const sel of pg.clicks) {
+            await page.click(sel)
+            await settle(page)
+          }
+          await page.waitForLoadState('networkidle')
           await settle(page)
         }
         if (pg.disableSettingsEntries) {

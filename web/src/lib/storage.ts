@@ -34,6 +34,9 @@ export const StorageKeys = {
   repoWrap: 'hydra-repo-wrap',
   repoIcons: 'hydra-repo-icons',
   repoSidebarWidth: 'hydra-repo-sidebar-width',
+  // Repository branch-compare diff: show one file at a time (default) vs all
+  // files stacked. Absent = the one-file default; 'false' = the multi-file view.
+  repoDiffSingleFile: 'hydra-repo-diff-single-file',
 
   // IDs of projects the user has reviewed and trusted (JSON array of strings).
   // Trust is a client-only concern: a project's .hydra/config.toml can run code,
