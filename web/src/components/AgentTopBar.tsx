@@ -165,7 +165,9 @@ function AdaptiveActions({
       ))}
 
       {overflow && (
-        <div ref={menuWrapRef} className="relative">
+        // flex (not the default block) so the button doesn't pick up a line-box
+        // descender gap that would ride it a couple px above its sibling buttons.
+        <div ref={menuWrapRef} className="relative flex items-center">
           <button
             type="button"
             aria-label="More actions"
