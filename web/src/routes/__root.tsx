@@ -30,6 +30,7 @@ import { TrustProjectModal } from '../components/TrustProjectModal'
 import { KeyboardShortcutsModal } from '../components/KeyboardShortcutsModal'
 import { useShortcutsStore } from '../stores/shortcutsStore'
 import { isTypingTarget } from '../lib/shortcuts'
+import { useFinePointer } from '../lib/useFinePointer'
 
 export const Route = createRootRoute({
   component: RootLayout,
@@ -167,6 +168,8 @@ function ProjectDropdown({
   const dropdownRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const activeRowRef = useRef<HTMLDivElement>(null)
+  // The Ctrl+` switch hint is keyboard-only — hide it on touch devices.
+  const finePointer = useFinePointer()
 
   // The Ctrl+` switcher forces the dropdown open and highlights a row; otherwise
   // it's the usual click-to-open menu.
@@ -403,7 +406,7 @@ function ProjectDropdown({
             )}
           </div>
 
-          {projects.length > 1 && (
+          {projects.length > 1 && finePointer && (
             <div className="px-3 py-1.5 border-t border-gray-100 dark:border-gray-700 text-[10px] text-gray-400 dark:text-gray-500 font-mono">
               {SWITCH_PROJECT_HINT}
             </div>

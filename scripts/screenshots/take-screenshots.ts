@@ -629,8 +629,9 @@ try {
         scrollTo: 'Diff Artifacts',
       },
       // The agent detail header bar showing the user-facing title (e.g. "Add
-      // renameable agent titles") in place of the stable ID, with its actions
-      // chevron and a status dot. Viewport-only so the shot focuses on the bar
+      // renameable agent titles") in place of the stable ID, the adaptive action
+      // toolbar (Merge / Mark as unread / Rename / Kill — shown with labels at this
+      // width), and a status dot. Viewport-only so the shot focuses on the bar
       // rather than the terminal/diff below.
       { name: 'agent-title', path: '/project/sim-project/agent/agent-1', viewportOnly: true },
       // The inline rename in progress: clicking the title (it carries an I-beam to
@@ -861,16 +862,16 @@ try {
       // diff takes the full width and wraps long lines. agent-3's nested-folder
       // diff scrolled to the Changes section.
       { name: 'mobile-diff', path: '/project/sim-project/agent/agent-3', viewport: { width: 390, height: 844 }, scrollTo: 'Changes' },
-      // The agent page's top bar (shown while the sidebar is collapsed):
-      // the show-sidebar toggle, the agent name + its actions dropdown (opened
-      // here — Rename / Merge / Kill), and a status dot. Clicking the name's
-      // chevron opens the menu.
+      // The agent page's top bar (shown while the sidebar is collapsed): the
+      // show-sidebar toggle, the agent name, and the adaptive action toolbar — at
+      // phone width the four actions show as an icon-only row (they still fit; the
+      // labels drop and only a much narrower split would fold any into the overflow
+      // "⋯" menu). This documents the icon-only step of the responsive toolbar.
       {
-        name: 'mobile-agent-menu',
+        name: 'mobile-agent-actions',
         path: '/project/sim-project/agent/agent-1',
         viewport: { width: 390, height: 844 },
         viewportOnly: true,
-        click: 'button[aria-label="Agent actions"]',
       },
 
       // ── Mobile landscape (844×390) ──────────────────────────────────────────

@@ -57,10 +57,15 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
   {
     title: 'Agent',
     shortcuts: [
-      { keys: [modLabel, 'J'], label: 'Next agent' },
-      { keys: [modLabel, 'K'], label: 'Previous agent' },
+      // Agent navigation uses Alt+arrows, not Ctrl+letters: Ctrl+K is Kill, and
+      // arrows read naturally as "move through the list" without colliding with
+      // the Ctrl action bindings or browser/OS Ctrl+letter reservations.
+      { keys: ['Alt', '↑'], label: 'Previous agent' },
+      { keys: ['Alt', '↓'], label: 'Next agent' },
       { keys: [modLabel, 'M'], label: 'Merge agent' },
       { keys: [modLabel, 'U'], label: 'Mark as unread' },
+      { keys: ['F2'], label: 'Rename agent' },
+      { keys: [modLabel, 'K'], label: 'Kill agent' },
     ],
   },
 ]
@@ -68,3 +73,5 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
 // Compact display strings for the lowlit hints shown next to menu items.
 export const SHORTCUT_MERGE = `${modLabel}+M`
 export const SHORTCUT_MARK_UNREAD = `${modLabel}+U`
+export const SHORTCUT_KILL = `${modLabel}+K`
+export const SHORTCUT_RENAME = 'F2'
