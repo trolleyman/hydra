@@ -242,6 +242,11 @@ try {
       // button enters diff mode (and fetches the diff) and an optional second
       // click opens the popped-out compare branch selector.
       clicks?: string[]
+      // A Playwright key chord pressed after load (e.g. 'Shift+Slash' for "?"),
+      // with the focused element blurred first so it reaches the window-level
+      // shortcut handler rather than being typed into a field. Used to open the
+      // keyboard-shortcuts overlay the way a user does — by pressing `?`.
+      pressKey?: string
       // Glob of a request to hold open (never fulfilled) so the page is captured
       // in its in-flight loading state — e.g. holding the repo file-contents
       // request so the loading spinner shows. With a request pending, networkidle
@@ -289,6 +294,13 @@ try {
       // focuses on a page's header region — e.g. the agent detail title bar —
       // rather than the long content (terminal, diff) below it.
       viewportOnly?: boolean
+      // Forces a coarse (touch) pointer: makes the `(hover: hover) and (pointer:
+      // fine)` media query report false, so keyboard-only affordances (shortcut
+      // hints) hide exactly as they do on a real phone. The harness otherwise only
+      // sets a small viewport — Chromium still reports a fine mouse pointer — so a
+      // mobile shot of a menu would wrongly show desktop shortcut hints. Set this on
+      // the small-screen shots whose chrome is keyboard-gated.
+      coarsePointer?: boolean
       // Stubs the upload-serving endpoint (GET /uploads/.../blob) with this
       // checkout-relative PNG, so a prompt block that references upload images
       // renders its attachment-chip thumbnails (and lightbox) from a fixed,
@@ -356,6 +368,12 @@ try {
       // when other projects have updates waiting (see simulation.go ListProjects /
       // ListAgents and AgentSidebarItem).
       { name: 'unread-indicator', path: '/', click: 'button[aria-label="Select project"]' },
+      // The keyboard-shortcuts help overlay, opened the way a user does — by
+      // pressing `?` (no on-screen button; the overlay is the discovery surface).
+      // It lists every shortcut (General + Agent) from the central registry
+      // (web/src/lib/shortcuts.ts). Captured over the project home; viewportOnly
+      // since the overlay is a fixed, centered modal.
+      { name: 'keyboard-shortcuts', path: '/project/sim-project/', pressKey: 'Shift+Slash', viewportOnly: true },
       // The spawn form's image lightbox: two images attached to the prompt, the
       // first opened in the Slack-style fullscreen viewer (blurred backdrop,
       // prev/next arrows, "1 / 2" counter). Also shows the numbered-paste naming
@@ -618,8 +636,9 @@ try {
         scrollTo: 'Diff Artifacts',
       },
       // The agent detail header bar showing the user-facing title (e.g. "Add
-      // renameable agent titles") in place of the stable ID, with its actions
-      // chevron and a status dot. Viewport-only so the shot focuses on the bar
+      // renameable agent titles") in place of the stable ID, the adaptive action
+      // toolbar (Merge / Mark as unread / Rename / Kill — shown with labels at this
+      // width), and a status dot. Viewport-only so the shot focuses on the bar
       // rather than the terminal/diff below.
       { name: 'agent-title', path: '/project/sim-project/agent/agent-1', viewportOnly: true },
       // The inline rename in progress: clicking the title (it carries an I-beam to
@@ -850,16 +869,19 @@ try {
       // diff takes the full width and wraps long lines. agent-3's nested-folder
       // diff scrolled to the Changes section.
       { name: 'mobile-diff', path: '/project/sim-project/agent/agent-3', viewport: { width: 390, height: 844 }, scrollTo: 'Changes' },
-      // The agent page's top bar (shown while the sidebar is collapsed):
-      // the show-sidebar toggle, the agent name + its actions dropdown (opened
-      // here — Rename / Merge / Kill), and a status dot. Clicking the name's
-      // chevron opens the menu.
+      // The agent page's top bar (shown while the sidebar is collapsed): the
+      // show-sidebar toggle, the agent name, and the adaptive action toolbar. At
+      // phone width the title takes priority, so the actions fold into the overflow
+      // "⋯" menu rather than truncating the name — opened here to show the remaining
+      // actions (Mark as unread / Rename / Kill). Shortcut hints are hidden on the
+      // touch viewport (no keyboard).
       {
         name: 'mobile-agent-menu',
         path: '/project/sim-project/agent/agent-1',
         viewport: { width: 390, height: 844 },
         viewportOnly: true,
-        click: 'button[aria-label="Agent actions"]',
+        coarsePointer: true,
+        click: 'button[aria-label="More actions"]',
       },
 
       // ── Mobile landscape (844×390) ──────────────────────────────────────────
@@ -974,6 +996,28 @@ try {
             // ignore storage failures
           }
         }, theme)
+        // Emulate a touch device's coarse pointer by forcing the fine-pointer
+        // media query false, so keyboard-only chrome (shortcut hints) hides like it
+        // does on a real phone. Delegates every other query to the real matchMedia
+        // so theme + breakpoint detection is unaffected.
+        if (pg.coarsePointer) {
+          await ctx.addInitScript(() => {
+            const orig = window.matchMedia.bind(window)
+            window.matchMedia = ((q: string) =>
+              typeof q === 'string' && q.includes('pointer: fine')
+                ? {
+                    matches: false,
+                    media: q,
+                    onchange: null,
+                    addEventListener() {},
+                    removeEventListener() {},
+                    addListener() {},
+                    removeListener() {},
+                    dispatchEvent() { return false },
+                  }
+                : orig(q)) as typeof window.matchMedia
+          })
+        }
         // Seed the diff viewer's image-diff mode so the artifacts panel renders
         // before/after pairs in the requested comparison style.
         if (pg.imageDiffMode) {
@@ -1215,6 +1259,14 @@ try {
         if (pg.click) {
           // Open a popover (e.g. the branch selector) so the capture documents it.
           await page.click(pg.click)
+          await settle(page)
+        }
+        if (pg.pressKey) {
+          // Blur the autofocused field (e.g. the spawn textarea) so the chord hits
+          // the window-level shortcut handler instead of being typed into it, then
+          // press it — used to open the keyboard-shortcuts overlay via `?`.
+          await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
+          await page.keyboard.press(pg.pressKey)
           await settle(page)
         }
         if (pg.clicks) {

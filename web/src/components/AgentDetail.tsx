@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
+import { useNavigate } from '@tanstack/react-router'
 import { api } from '../stores/apiClient'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from '../lib/agentViewPrefs'
 import { formatError } from '../api/format_error'
@@ -21,6 +22,8 @@ import { renderMarkdown } from '../lib/markdown'
 import { useDialogStore } from '../stores/dialogStore'
 import { useToastStore } from '../stores/toastStore'
 import { useAgentStore } from '../stores/agentStore'
+import { useShortcutsStore } from '../stores/shortcutsStore'
+import { hasMod, isTypingTarget, SHORTCUT_MERGE, SHORTCUT_MARK_UNREAD, SHORTCUT_KILL, SHORTCUT_RENAME } from '../lib/shortcuts'
 
 // Matches an upload path the spawn form embeds in a prompt: any token containing
 // the uploads dir followed by the on-disk filename (sanitized to [A-Za-z0-9._-]
@@ -238,6 +241,7 @@ export function AgentDetail({
   const [savingBase, setSavingBase] = useState(false)
   const [branches, setBranches] = useState<RepositoryBranch[] | null>(null)
   const updateAgentInStore = useAgentStore((s) => s.updateAgent)
+  const navigate = useNavigate()
   const [, setTick] = useState(0)
   const [diffRefreshTrigger, setDiffRefreshTrigger] = useState(0)
   // Bumped only when the refresh was a new commit (HEAD moved), so the diff
@@ -438,6 +442,74 @@ export function AgentDetail({
     }
   }
 
+  // Keyboard shortcuts for the open agent: merge (Ctrl+M), mark unread (Ctrl+U),
+  // kill (Ctrl+K), rename (F2), and switch to the next/previous agent (Alt+↓ /
+  // Alt+↑). Ctrl is the action modifier on every platform (see lib/shortcuts
+  // hasMod); navigation uses Alt+arrows so it doesn't collide with Ctrl+K. The
+  // listener binds once and reads the latest handlers/agent through a ref so it
+  // never goes stale. It stays inert while typing (the terminal, a form field) or
+  // while a dialog / help overlay is open, so it never steals a keystroke (Ctrl+M
+  // is Enter in a terminal) or acts behind a modal.
+  const shortcutRef = useRef<{ merge: () => void; markUnread: () => void; kill: () => void; rename: () => void; agentId: string; projectId: string | null; busy: boolean; archived: boolean }>(null!)
+  shortcutRef.current = {
+    merge: handleMerge,
+    markUnread: handleMarkUnread,
+    kill: handleKill,
+    rename: startEditingTitle,
+    agentId: agent.id,
+    projectId,
+    busy: merging || killing,
+    archived: !!agent.archived,
+  }
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (isTypingTarget(e.target)) return
+      if (useDialogStore.getState().isOpen || useShortcutsStore.getState().open) return
+      const ctx = shortcutRef.current
+      // Rename — F2, no modifier (Windows convention).
+      if (e.key === 'F2' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
+        if (ctx.archived) return
+        e.preventDefault()
+        ctx.rename()
+        return
+      }
+      // Switch agent — Alt+↑/↓ steps through the live agents list (wrapping).
+      if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+        const list = useAgentStore.getState().agents
+        if (list.length < 2 || !ctx.projectId) return
+        e.preventDefault()
+        const idx = list.findIndex((a) => a.id === ctx.agentId)
+        const dir = e.key === 'ArrowDown' ? 1 : -1
+        // First step moves off the current agent; with the current agent not in
+        // the live list (e.g. an archived one) land on the first/last.
+        const start = idx === -1 ? (dir === 1 ? -1 : 0) : idx
+        const next = list[(start + dir + list.length) % list.length]
+        if (next && next.id !== ctx.agentId) {
+          navigate({ to: '/project/$projectId/agent/$agentId', params: { projectId: ctx.projectId, agentId: next.id } })
+        }
+        return
+      }
+      // Action shortcuts — Ctrl+letter (Ctrl is hasMod on every platform).
+      if (!hasMod(e) || e.altKey || e.shiftKey) return
+      const key = e.key.toLowerCase()
+      if (key === 'm') {
+        if (ctx.archived || ctx.busy) return
+        e.preventDefault()
+        ctx.merge()
+      } else if (key === 'u') {
+        if (ctx.archived) return
+        e.preventDefault()
+        ctx.markUnread()
+      } else if (key === 'k') {
+        if (ctx.archived || ctx.busy) return
+        e.preventDefault()
+        ctx.kill()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [navigate])
+
   function startEditingTitle() {
     setTitleDraft(agent.title || agent.id)
     setEditingTitle(true)
@@ -506,18 +578,17 @@ export function AgentDetail({
           onSave: saveTitle,
           onCancel: () => setEditingTitle(false),
         }}
-        inlineActions={[
+        actions={[
           {
             label: 'Merge',
             icon: merging ? <LoaderCircle className="w-4 h-4 animate-spin" /> : <Merge className="w-4 h-4" />,
             onClick: handleMerge,
             disabled: merging || killing,
+            shortcut: SHORTCUT_MERGE,
           },
-        ]}
-        actions={[
-          { label: 'Rename', icon: <Pencil className="w-4 h-4" />, onClick: startEditingTitle },
-          { label: 'Mark as unread', icon: <Mail className="w-4 h-4" />, onClick: handleMarkUnread },
-          { label: 'Kill', icon: <Trash2 className="w-4 h-4" />, onClick: handleKill, danger: true, disabled: merging || killing },
+          { label: 'Mark as unread', icon: <Mail className="w-4 h-4" />, onClick: handleMarkUnread, shortcut: SHORTCUT_MARK_UNREAD },
+          { label: 'Rename', icon: <Pencil className="w-4 h-4" />, onClick: startEditingTitle, shortcut: SHORTCUT_RENAME },
+          { label: 'Kill', icon: <Trash2 className="w-4 h-4" />, onClick: handleKill, danger: true, disabled: merging || killing, shortcut: SHORTCUT_KILL },
         ]}
       />
       {/* pt-4 (16px) above the metadata row matches the effective gap below it
