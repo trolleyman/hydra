@@ -294,6 +294,13 @@ try {
       // focuses on a page's header region — e.g. the agent detail title bar —
       // rather than the long content (terminal, diff) below it.
       viewportOnly?: boolean
+      // Forces a coarse (touch) pointer: makes the `(hover: hover) and (pointer:
+      // fine)` media query report false, so keyboard-only affordances (shortcut
+      // hints) hide exactly as they do on a real phone. The harness otherwise only
+      // sets a small viewport — Chromium still reports a fine mouse pointer — so a
+      // mobile shot of a menu would wrongly show desktop shortcut hints. Set this on
+      // the small-screen shots whose chrome is keyboard-gated.
+      coarsePointer?: boolean
       // Stubs the upload-serving endpoint (GET /uploads/.../blob) with this
       // checkout-relative PNG, so a prompt block that references upload images
       // renders its attachment-chip thumbnails (and lightbox) from a fixed,
@@ -863,15 +870,18 @@ try {
       // diff scrolled to the Changes section.
       { name: 'mobile-diff', path: '/project/sim-project/agent/agent-3', viewport: { width: 390, height: 844 }, scrollTo: 'Changes' },
       // The agent page's top bar (shown while the sidebar is collapsed): the
-      // show-sidebar toggle, the agent name, and the adaptive action toolbar — at
-      // phone width the four actions show as an icon-only row (they still fit; the
-      // labels drop and only a much narrower split would fold any into the overflow
-      // "⋯" menu). This documents the icon-only step of the responsive toolbar.
+      // show-sidebar toggle, the agent name, and the adaptive action toolbar. At
+      // phone width the title takes priority, so the actions fold into the overflow
+      // "⋯" menu rather than truncating the name — opened here to show the remaining
+      // actions (Mark as unread / Rename / Kill). Shortcut hints are hidden on the
+      // touch viewport (no keyboard).
       {
-        name: 'mobile-agent-actions',
+        name: 'mobile-agent-menu',
         path: '/project/sim-project/agent/agent-1',
         viewport: { width: 390, height: 844 },
         viewportOnly: true,
+        coarsePointer: true,
+        click: 'button[aria-label="More actions"]',
       },
 
       // ── Mobile landscape (844×390) ──────────────────────────────────────────
@@ -986,6 +996,28 @@ try {
             // ignore storage failures
           }
         }, theme)
+        // Emulate a touch device's coarse pointer by forcing the fine-pointer
+        // media query false, so keyboard-only chrome (shortcut hints) hides like it
+        // does on a real phone. Delegates every other query to the real matchMedia
+        // so theme + breakpoint detection is unaffected.
+        if (pg.coarsePointer) {
+          await ctx.addInitScript(() => {
+            const orig = window.matchMedia.bind(window)
+            window.matchMedia = ((q: string) =>
+              typeof q === 'string' && q.includes('pointer: fine')
+                ? {
+                    matches: false,
+                    media: q,
+                    onchange: null,
+                    addEventListener() {},
+                    removeEventListener() {},
+                    addListener() {},
+                    removeListener() {},
+                    dispatchEvent() { return false },
+                  }
+                : orig(q)) as typeof window.matchMedia
+          })
+        }
         // Seed the diff viewer's image-diff mode so the artifacts panel renders
         // before/after pairs in the requested comparison style.
         if (pg.imageDiffMode) {

@@ -30,10 +30,6 @@ export interface AgentTopBarRename {
 
 // gap-1 between toolbar buttons, in px — used by the fit calculation below.
 const GAP = 4
-// Width reserved for the (truncating) title so the toolbar never squashes it to
-// nothing while it still has buttons it could instead fold into the overflow menu.
-const MIN_TITLE = 64
-
 function actionBtnClass(mode: 'labels' | 'icons', danger?: boolean): string {
   const base =
     'shrink-0 h-7 inline-flex items-center justify-center rounded-md border text-sm transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer'
@@ -54,21 +50,26 @@ function actionTitle(a: AgentTopBarAction, showShortcut: boolean): string {
 // An action toolbar that adapts to the space the header gives it: show every
 // action as an icon+label button when it all fits, fall back to icon-only when
 // it doesn't, and once even the icons won't fit, fold the lowest-priority ones
-// (from the right) into an overflow "⋯" menu that sits after the buttons. The fit
-// is computed from natural widths measured off-screen, so it's exact rather than
-// breakpoint-guessed and never leaves a half-clipped button. `containerRef` is the
-// title+toolbar row, whose width (minus the title reservation) is the budget.
+// (from the right) into an overflow "⋯" menu that sits after the buttons. The
+// title has priority over the buttons: we reserve its full (untruncated) width
+// first, so the buttons collapse into the menu before the title ever truncates —
+// only a title long enough to fill the bar (leaving just room for the "⋯" button)
+// starts to truncate. All widths are measured off-screen, so the fit is exact
+// rather than breakpoint-guessed and never leaves a half-clipped button.
 function AdaptiveActions({
   actions,
+  title,
   showShortcut,
 }: {
   actions: AgentTopBarAction[]
+  title: string
   showShortcut: boolean
 }) {
   const rootRef = useRef<HTMLDivElement>(null)
   const labeledRefs = useRef<(HTMLButtonElement | null)[]>([])
   const iconRefs = useRef<(HTMLButtonElement | null)[]>([])
   const moreRef = useRef<HTMLButtonElement | null>(null)
+  const titleMeasureRef = useRef<HTMLButtonElement | null>(null)
   const menuWrapRef = useRef<HTMLDivElement>(null)
   const [vis, setVis] = useState<{ mode: 'labels' | 'icons'; count: number }>({ mode: 'icons', count: actions.length })
   const [menuOpen, setMenuOpen] = useState(false)
@@ -83,9 +84,14 @@ function AdaptiveActions({
     const labeled = labeledRefs.current.slice(0, n).map((b) => b?.offsetWidth ?? 0)
     const icons = iconRefs.current.slice(0, n).map((b) => b?.offsetWidth ?? 0)
     const more = moreRef.current?.offsetWidth ?? 28
+    // +1 guards against sub-pixel rounding triggering an unwanted ellipsis.
+    const titleNatural = (titleMeasureRef.current?.offsetWidth ?? 0) + 1
     // Bail until the off-screen measurer has laid out (avoids a 0-width pass).
     if (labeled.length < n || labeled.some((w) => w === 0)) return
-    const budget = Math.max(0, cont.clientWidth - MIN_TITLE - GAP)
+    // Reserve the title's full width first — but never more than leaves room for
+    // the "⋯" button, so a pathologically long title still yields the menu.
+    const titleReserve = Math.min(titleNatural, Math.max(0, cont.clientWidth - more - GAP))
+    const budget = Math.max(0, cont.clientWidth - titleReserve - GAP)
     const span = (arr: number[], k: number) => arr.slice(0, k).reduce((a, b) => a + b, 0) + Math.max(0, k - 1) * GAP
     let next: { mode: 'labels' | 'icons'; count: number }
     if (span(labeled, n) <= budget) {
@@ -107,7 +113,7 @@ function AdaptiveActions({
       next = { mode: 'icons', count: k }
     }
     setVis((prev) => (prev.mode === next.mode && prev.count === next.count ? prev : next))
-  }, [actions.length])
+  }, [actions.length, title])
 
   // Measure + recompute before paint, and on every container resize.
   useLayoutEffect(() => {
@@ -218,6 +224,11 @@ function AdaptiveActions({
         <button ref={moreRef} className={moreBtnClass} tabIndex={-1}>
           <MoreHorizontal className="w-4 h-4" />
         </button>
+        {/* Natural (untruncated) title width — mirrors the real title button's font
+            + padding but sizes to content, so recompute() can reserve its space. */}
+        <button ref={titleMeasureRef} className="text-sm font-semibold px-1 py-1 whitespace-nowrap" tabIndex={-1}>
+          {title}
+        </button>
       </div>
     </div>
   )
@@ -299,7 +310,7 @@ export function AgentTopBar({
         )}
 
         {!editing && actions.length > 0 && (
-          <AdaptiveActions actions={actions} showShortcut={showShortcut} />
+          <AdaptiveActions actions={actions} title={title} showShortcut={showShortcut} />
         )}
       </div>
 
