@@ -14,7 +14,7 @@ const EVENT_FALLBACK_MS = 30_000
 import type { ProjectInfo, AgentResponse, RepositoryPushStatus } from '../api'
 import { ApiError, ErrorResponse } from '../api'
 import { formatError } from '../api/format_error'
-import { ChevronDown, ChevronRight, Folder, FolderGit2, FolderOpen, Plus, Settings, Check, X, LoaderCircle, AlertTriangle, PanelLeftClose, PanelLeftOpen, RotateCw, ArrowUp, ArrowDown, RefreshCw } from 'lucide-react'
+import { ChevronDown, ChevronRight, Folder, FolderGit2, FolderOpen, Plus, Settings, Check, X, LoaderCircle, AlertTriangle, PanelLeftClose, PanelLeftOpen, RotateCw, ArrowUp, ArrowDown, RefreshCw, Keyboard } from 'lucide-react'
 import { useApplyTheme } from '../lib/theme'
 import { useSidebarStore, SIDEBAR_OVERLAY_QUERY } from '../lib/sidebar'
 import { folderPickerAvailable, openFolderPicker } from '../api/folderPicker'
@@ -27,6 +27,9 @@ import { NotFound } from '../components/NotFound'
 import { Tooltip } from '../components/Tooltip'
 import { ClaudeUsageIndicator } from '../components/ClaudeUsageIndicator'
 import { TrustProjectModal } from '../components/TrustProjectModal'
+import { KeyboardShortcutsModal } from '../components/KeyboardShortcutsModal'
+import { useShortcutsStore } from '../stores/shortcutsStore'
+import { isTypingTarget } from '../lib/shortcuts'
 
 export const Route = createRootRoute({
   component: RootLayout,
@@ -137,6 +140,7 @@ function ProjectDropdown({
   onDeselect,
   onAddProject,
   onRemoveProject,
+  keyboardIndex,
 }: {
   projects: ProjectInfo[]
   selectedId: string | null
@@ -144,6 +148,10 @@ function ProjectDropdown({
   onDeselect: () => void
   onAddProject: (path: string) => Promise<void>
   onRemoveProject: (id: string) => Promise<void>
+  // Drives the Ctrl+` alt-tab switcher: when non-null the dropdown is forced open
+  // and the row at this index is highlighted (committed on Ctrl release by the
+  // handler in RootLayout). null = normal click-driven dropdown.
+  keyboardIndex: number | null
 }) {
   const [open, setOpen] = useState(false)
   const [showAddInput, setShowAddInput] = useState(false)
@@ -158,6 +166,18 @@ function ProjectDropdown({
   const [hoveredId, setHoveredId] = useState<string | null>(null)
   const dropdownRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+  const activeRowRef = useRef<HTMLDivElement>(null)
+
+  // The Ctrl+` switcher forces the dropdown open and highlights a row; otherwise
+  // it's the usual click-to-open menu.
+  const keyboardActive = keyboardIndex !== null
+  const isOpen = open || keyboardActive
+
+  // Keep the keyboard-highlighted row in view as the user steps through a long
+  // project list.
+  useEffect(() => {
+    if (keyboardActive) activeRowRef.current?.scrollIntoView({ block: 'nearest' })
+  }, [keyboardIndex, keyboardActive])
 
   const selected = projects.find((p) => p.id === selectedId)
   // Unread agents sitting in projects other than the one you're looking at —
@@ -273,15 +293,18 @@ function ProjectDropdown({
         <ChevronDown className="w-3 h-3" />
       </button>
 
-      {open && (
-        <div className="absolute left-0 top-full mt-1 w-72 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50 overflow-hidden">
+      {isOpen && (
+        <div className="absolute left-0 top-full mt-1 w-72 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50 max-h-[70vh] overflow-y-auto">
           {projects.length > 0 && (
             <div className="py-1 border-b border-gray-100 dark:border-gray-700">
-              {projects.map((p) => (
+              {projects.map((p, i) => (
                 <div
                   key={p.id}
+                  ref={keyboardActive && i === keyboardIndex ? activeRowRef : undefined}
                   className={`relative flex items-start gap-2.5 px-3 py-2 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors ${
-                    p.id === selectedId ? 'bg-blue-50 dark:bg-blue-900/20' : ''
+                    keyboardActive && i === keyboardIndex
+                      ? 'bg-blue-100 dark:bg-blue-900/40'
+                      : p.id === selectedId ? 'bg-blue-50 dark:bg-blue-900/20' : ''
                   }`}
                   onMouseEnter={() => setHoveredId(p.id)}
                   onMouseLeave={() => setHoveredId(null)}
@@ -387,50 +410,6 @@ function ProjectDropdown({
           )}
         </div>
       )}
-    </div>
-  )
-}
-
-// ── Project Switcher Overlay ─────────────────────────────────────────────────
-// Alt-tab-style overlay shown while the user holds Ctrl and taps `. Purely a
-// keyboard-driven display — it doesn't capture pointer events; the keyboard
-// handling and commit-on-Ctrl-release live in RootLayout.
-
-function ProjectSwitcherOverlay({ projects, index }: { projects: ProjectInfo[]; index: number }) {
-  const activeRef = useRef<HTMLDivElement>(null)
-  // Keep the highlighted row visible when the list overflows.
-  useEffect(() => { activeRef.current?.scrollIntoView({ block: 'nearest' }) }, [index])
-  return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 pointer-events-none">
-      <div className="w-80 max-h-[70vh] overflow-y-auto bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-2xl py-2">
-        <div className="px-4 py-1.5 text-[11px] font-semibold text-gray-400 dark:text-gray-500">
-          Switch project
-        </div>
-        {projects.map((p, i) => {
-          const active = i === index
-          return (
-            <div
-              key={p.id}
-              ref={active ? activeRef : undefined}
-              className={`flex items-center gap-2.5 px-4 py-2 ${active ? 'bg-blue-50 dark:bg-blue-900/30' : ''}`}
-            >
-              <Folder className={`w-3.5 h-3.5 shrink-0 ${active ? 'text-blue-500' : 'text-gray-400'}`} />
-              <div className="min-w-0 flex-1">
-                <div className={`text-sm font-medium truncate ${active ? 'text-blue-700 dark:text-blue-300' : 'text-gray-900 dark:text-gray-100'}`}>
-                  {p.name}
-                </div>
-                <div className="text-xs font-mono text-gray-400 dark:text-gray-500 truncate">{p.path}</div>
-              </div>
-              {(p.unread_count ?? 0) > 0 && (
-                <span className="shrink-0 w-2 h-2 rounded-full bg-sky-500" aria-label={`${p.unread_count} agents with unread changes`} />
-              )}
-            </div>
-          )
-        })}
-        <div className="px-4 pt-2 mt-1 border-t border-gray-100 dark:border-gray-700 text-[10px] text-gray-400 dark:text-gray-500 font-mono">
-          ` next · ⇧` prev · release Ctrl to select
-        </div>
-      </div>
     </div>
   )
 }
@@ -967,13 +946,32 @@ function RootLayout() {
     return () => window.removeEventListener('keydown', onKey)
   }, [toggleSidebar])
 
-  // Alt-tab-style project switcher. Hold Ctrl and tap ` to open an overlay with
-  // the *next* project highlighted; each further ` steps forward, Shift+` steps
-  // back (both wrap). Releasing Ctrl commits the highlight; Escape or losing
-  // focus cancels. We bind Ctrl on every platform — macOS reserves Cmd+` for its
-  // own "cycle windows within an app", so Cmd never reaches us; Ctrl+` is free
-  // there too, keeping one binding everywhere. We match on e.code === 'Backquote'
-  // so it's keyboard-layout independent (Shift+` is '~' on US layouts).
+  // `?` toggles the keyboard-shortcuts help overlay from anywhere — except while
+  // typing (a terminal, a form field), where `?` is just a character. No modifier
+  // so it's as quick to reach as a real cheat-sheet key.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== '?' || e.ctrlKey || e.metaKey || e.altKey) return
+      if (isTypingTarget(e.target)) return
+      e.preventDefault()
+      useShortcutsStore.getState().toggle()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  // Alt-tab-style project switcher. Hold Ctrl and tap ` to open the project
+  // dropdown (the same selector in the sidebar header) with the *next* project
+  // highlighted; each further ` steps forward, Shift+` steps back (both wrap).
+  // Releasing Ctrl commits the highlight; Escape or losing focus cancels. The
+  // highlight index is fed to ProjectDropdown via its keyboardIndex prop, which
+  // forces the dropdown open and styles the active row — so the switcher reuses
+  // the real selector UI rather than a separate overlay. We reveal the sidebar
+  // first (transient, non-persisted) so the dropdown is on screen when collapsed.
+  // We bind Ctrl on every platform — macOS reserves Cmd+` for its own "cycle
+  // windows within an app", so Cmd never reaches us; Ctrl+` is free there too,
+  // keeping one binding everywhere. We match on e.code === 'Backquote' so it's
+  // keyboard-layout independent (Shift+` is '~' on US layouts).
   //
   // selectProject is read through a ref so committing on Ctrl-up doesn't force
   // this listener to re-bind every render; the keydown/keyup handlers are
@@ -997,6 +995,9 @@ function RootLayout() {
       if (list.length < 2) return
       e.preventDefault()
       if (e.repeat) return // one step per physical press, not per auto-repeat
+      // Reveal the sidebar (transient, non-persisted) so the dropdown the switcher
+      // drives is actually on screen when the sidebar is collapsed.
+      if (switcherIndexRef.current === null) useSidebarStore.getState().setCollapsed(false, false)
       const dir = e.shiftKey ? -1 : 1
       setSwitcherIndex((cur) => {
         // First press steps off the current project; later presses step off the
@@ -1198,6 +1199,7 @@ function RootLayout() {
               }}
               onAddProject={handleAddProject}
               onRemoveProject={handleRemoveProject}
+              keyboardIndex={switcherIndex}
             />
           </div>
           <Tooltip content="Hide sidebar (Ctrl+.)">
@@ -1419,6 +1421,16 @@ function RootLayout() {
             <div className="ml-auto shrink-0">
               <ClaudeUsageIndicator />
             </div>
+            <Tooltip content="Keyboard shortcuts (?)">
+              <button
+                type="button"
+                aria-label="Keyboard shortcuts"
+                onClick={() => useShortcutsStore.getState().setOpen(true)}
+                className="shrink-0 w-7 h-7 flex items-center justify-center rounded-lg cursor-pointer text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+              >
+                <Keyboard className="w-5 h-5 shrink-0" />
+              </button>
+            </Tooltip>
             {(() => {
               const settingsActive = /\/settings(\/|$)/.test(location.pathname)
               const cls = settingsActive
@@ -1472,9 +1484,7 @@ function RootLayout() {
         </div>
       <Dialog />
       <Toaster />
-      {switcherIndex !== null && projects[switcherIndex] && (
-        <ProjectSwitcherOverlay projects={projects} index={switcherIndex} />
-      )}
+      <KeyboardShortcutsModal />
       {untrustedProject && (
         <TrustProjectModal
           project={untrustedProject}

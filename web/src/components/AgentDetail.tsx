@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
+import { useNavigate } from '@tanstack/react-router'
 import { api } from '../stores/apiClient'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from '../lib/agentViewPrefs'
 import { formatError } from '../api/format_error'
@@ -21,6 +22,8 @@ import { renderMarkdown } from '../lib/markdown'
 import { useDialogStore } from '../stores/dialogStore'
 import { useToastStore } from '../stores/toastStore'
 import { useAgentStore } from '../stores/agentStore'
+import { useShortcutsStore } from '../stores/shortcutsStore'
+import { hasMod, isTypingTarget, SHORTCUT_MERGE, SHORTCUT_MARK_UNREAD } from '../lib/shortcuts'
 
 // Matches an upload path the spawn form embeds in a prompt: any token containing
 // the uploads dir followed by the on-disk filename (sanitized to [A-Za-z0-9._-]
@@ -238,6 +241,7 @@ export function AgentDetail({
   const [savingBase, setSavingBase] = useState(false)
   const [branches, setBranches] = useState<RepositoryBranch[] | null>(null)
   const updateAgentInStore = useAgentStore((s) => s.updateAgent)
+  const navigate = useNavigate()
   const [, setTick] = useState(0)
   const [diffRefreshTrigger, setDiffRefreshTrigger] = useState(0)
   // Bumped only when the refresh was a new commit (HEAD moved), so the diff
@@ -438,6 +442,55 @@ export function AgentDetail({
     }
   }
 
+  // Keyboard shortcuts for the open agent: merge (mod+M), mark unread (mod+U), and
+  // switch to the next/previous agent (mod+J / mod+K) — "mod" being ⌘ on macOS and
+  // Ctrl elsewhere. The listener binds once and reads the latest handlers/agent
+  // through a ref so it never goes stale. It stays inert while typing (the
+  // terminal, a form field) or while a dialog / help overlay is open, so it never
+  // steals a keystroke (Ctrl+M is Enter in a terminal) or acts behind a modal.
+  const shortcutRef = useRef<{ merge: () => void; markUnread: () => void; agentId: string; projectId: string | null; busy: boolean; archived: boolean }>(null!)
+  shortcutRef.current = {
+    merge: handleMerge,
+    markUnread: handleMarkUnread,
+    agentId: agent.id,
+    projectId,
+    busy: merging || killing,
+    archived: !!agent.archived,
+  }
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!hasMod(e) || e.altKey || e.shiftKey) return
+      if (isTypingTarget(e.target)) return
+      if (useDialogStore.getState().isOpen || useShortcutsStore.getState().open) return
+      const ctx = shortcutRef.current
+      const key = e.key.toLowerCase()
+      if (key === 'm') {
+        if (ctx.archived || ctx.busy) return
+        e.preventDefault()
+        ctx.merge()
+      } else if (key === 'u') {
+        if (ctx.archived) return
+        e.preventDefault()
+        ctx.markUnread()
+      } else if (key === 'j' || key === 'k') {
+        const list = useAgentStore.getState().agents
+        if (list.length < 2 || !ctx.projectId) return
+        e.preventDefault()
+        const idx = list.findIndex((a) => a.id === ctx.agentId)
+        const dir = key === 'j' ? 1 : -1
+        // First step moves off the current agent; with the current agent not in
+        // the live list (e.g. an archived one) land on the first/last.
+        const start = idx === -1 ? (dir === 1 ? -1 : 0) : idx
+        const next = list[(start + dir + list.length) % list.length]
+        if (next && next.id !== ctx.agentId) {
+          navigate({ to: '/project/$projectId/agent/$agentId', params: { projectId: ctx.projectId, agentId: next.id } })
+        }
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [navigate])
+
   function startEditingTitle() {
     setTitleDraft(agent.title || agent.id)
     setEditingTitle(true)
@@ -512,11 +565,12 @@ export function AgentDetail({
             icon: merging ? <LoaderCircle className="w-4 h-4 animate-spin" /> : <Merge className="w-4 h-4" />,
             onClick: handleMerge,
             disabled: merging || killing,
+            shortcut: SHORTCUT_MERGE,
           },
         ]}
         actions={[
           { label: 'Rename', icon: <Pencil className="w-4 h-4" />, onClick: startEditingTitle },
-          { label: 'Mark as unread', icon: <Mail className="w-4 h-4" />, onClick: handleMarkUnread },
+          { label: 'Mark as unread', icon: <Mail className="w-4 h-4" />, onClick: handleMarkUnread, shortcut: SHORTCUT_MARK_UNREAD },
           { label: 'Kill', icon: <Trash2 className="w-4 h-4" />, onClick: handleKill, danger: true, disabled: merging || killing },
         ]}
       />

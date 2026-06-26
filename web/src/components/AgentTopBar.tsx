@@ -9,6 +9,9 @@ export interface AgentTopBarAction {
   onClick: () => void
   danger?: boolean
   disabled?: boolean
+  // Lowlit keyboard-shortcut hint (e.g. "⌘M"), shown right-aligned in the menu
+  // and folded into the inline button's tooltip.
+  shortcut?: string
 }
 
 // Inline-rename wiring for the title. When provided, clicking the title text (or
@@ -130,7 +133,7 @@ export function AgentTopBar({
                 type="button"
                 disabled={a.disabled}
                 onClick={a.onClick}
-                title={a.label}
+                title={a.shortcut ? `${a.label} (${a.shortcut})` : a.label}
                 aria-label={a.label}
                 className={`shrink-0 w-7 h-7 flex items-center justify-center rounded-lg border transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer ${
                   a.danger
@@ -168,6 +171,11 @@ export function AgentTopBar({
               >
                 <span className="shrink-0">{a.icon}</span>
                 {a.label}
+                {a.shortcut && (
+                  <span className="ml-auto pl-6 text-[11px] font-medium text-gray-400 dark:text-gray-500">
+                    {a.shortcut}
+                  </span>
+                )}
               </button>
             ))}
           </div>
