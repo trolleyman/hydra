@@ -442,12 +442,13 @@ export function AgentDetail({
     }
   }
 
-  // Keyboard shortcuts for the open agent: merge (mod+M), mark unread (mod+U), and
-  // switch to the next/previous agent (mod+J / mod+K) — "mod" being ⌘ on macOS and
-  // Ctrl elsewhere. The listener binds once and reads the latest handlers/agent
-  // through a ref so it never goes stale. It stays inert while typing (the
-  // terminal, a form field) or while a dialog / help overlay is open, so it never
-  // steals a keystroke (Ctrl+M is Enter in a terminal) or acts behind a modal.
+  // Keyboard shortcuts for the open agent: merge (Ctrl+M), mark unread (Ctrl+U),
+  // and switch to the next/previous agent (Ctrl+J / Ctrl+K). Ctrl is the modifier
+  // on every platform (see lib/shortcuts hasMod). The listener binds once and reads
+  // the latest handlers/agent through a ref so it never goes stale. It stays inert
+  // while typing (the terminal, a form field) or while a dialog / help overlay is
+  // open, so it never steals a keystroke (Ctrl+M is Enter in a terminal) or acts
+  // behind a modal.
   const shortcutRef = useRef<{ merge: () => void; markUnread: () => void; agentId: string; projectId: string | null; busy: boolean; archived: boolean }>(null!)
   shortcutRef.current = {
     merge: handleMerge,

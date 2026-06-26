@@ -242,6 +242,11 @@ try {
       // button enters diff mode (and fetches the diff) and an optional second
       // click opens the popped-out compare branch selector.
       clicks?: string[]
+      // A Playwright key chord pressed after load (e.g. 'Shift+Slash' for "?"),
+      // with the focused element blurred first so it reaches the window-level
+      // shortcut handler rather than being typed into a field. Used to open the
+      // keyboard-shortcuts overlay the way a user does — by pressing `?`.
+      pressKey?: string
       // Glob of a request to hold open (never fulfilled) so the page is captured
       // in its in-flight loading state — e.g. holding the repo file-contents
       // request so the loading spinner shows. With a request pending, networkidle
@@ -356,6 +361,12 @@ try {
       // when other projects have updates waiting (see simulation.go ListProjects /
       // ListAgents and AgentSidebarItem).
       { name: 'unread-indicator', path: '/', click: 'button[aria-label="Select project"]' },
+      // The keyboard-shortcuts help overlay, opened the way a user does — by
+      // pressing `?` (no on-screen button; the overlay is the discovery surface).
+      // It lists every shortcut (General + Agent) from the central registry
+      // (web/src/lib/shortcuts.ts). Captured over the project home; viewportOnly
+      // since the overlay is a fixed, centered modal.
+      { name: 'keyboard-shortcuts', path: '/project/sim-project/', pressKey: 'Shift+Slash', viewportOnly: true },
       // The spawn form's image lightbox: two images attached to the prompt, the
       // first opened in the Slack-style fullscreen viewer (blurred backdrop,
       // prev/next arrows, "1 / 2" counter). Also shows the numbered-paste naming
@@ -1215,6 +1226,14 @@ try {
         if (pg.click) {
           // Open a popover (e.g. the branch selector) so the capture documents it.
           await page.click(pg.click)
+          await settle(page)
+        }
+        if (pg.pressKey) {
+          // Blur the autofocused field (e.g. the spawn textarea) so the chord hits
+          // the window-level shortcut handler instead of being typed into it, then
+          // press it — used to open the keyboard-shortcuts overlay via `?`.
+          await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
+          await page.keyboard.press(pg.pressKey)
           await settle(page)
         }
         if (pg.clicks) {

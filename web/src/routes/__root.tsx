@@ -14,7 +14,7 @@ const EVENT_FALLBACK_MS = 30_000
 import type { ProjectInfo, AgentResponse, RepositoryPushStatus } from '../api'
 import { ApiError, ErrorResponse } from '../api'
 import { formatError } from '../api/format_error'
-import { ChevronDown, ChevronRight, Folder, FolderGit2, FolderOpen, Plus, Settings, Check, X, LoaderCircle, AlertTriangle, PanelLeftClose, PanelLeftOpen, RotateCw, ArrowUp, ArrowDown, RefreshCw, Keyboard } from 'lucide-react'
+import { ChevronDown, ChevronRight, Folder, FolderGit2, FolderOpen, Plus, Settings, Check, X, LoaderCircle, AlertTriangle, PanelLeftClose, PanelLeftOpen, RotateCw, ArrowUp, ArrowDown, RefreshCw } from 'lucide-react'
 import { useApplyTheme } from '../lib/theme'
 import { useSidebarStore, SIDEBAR_OVERLAY_QUERY } from '../lib/sidebar'
 import { folderPickerAvailable, openFolderPicker } from '../api/folderPicker'
@@ -1421,16 +1421,6 @@ function RootLayout() {
             <div className="ml-auto shrink-0">
               <ClaudeUsageIndicator />
             </div>
-            <Tooltip content="Keyboard shortcuts (?)">
-              <button
-                type="button"
-                aria-label="Keyboard shortcuts"
-                onClick={() => useShortcutsStore.getState().setOpen(true)}
-                className="shrink-0 w-7 h-7 flex items-center justify-center rounded-lg cursor-pointer text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-              >
-                <Keyboard className="w-5 h-5 shrink-0" />
-              </button>
-            </Tooltip>
             {(() => {
               const settingsActive = /\/settings(\/|$)/.test(location.pathname)
               const cls = settingsActive

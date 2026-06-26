@@ -4,20 +4,16 @@
 // lives with each feature (project switch + `?` in __root.tsx, agent actions in
 // AgentDetail.tsx) since that's where the relevant state and callbacks are.
 
-// macOS uses ⌘ as the primary action modifier; everywhere else it's Ctrl. We
-// detect once at module load. navigator.platform is the reliable signal; the UA
-// is a fallback for browsers that have started hiding platform.
-export const isMac =
-  typeof navigator !== 'undefined' &&
-  /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent || '')
+// We bind Ctrl as the action modifier on every platform — including macOS. The
+// obvious Mac choice would be ⌘, but ⌘M (minimize), ⌘U (view source) etc. are
+// reserved by the browser/OS and can't be reliably intercepted, so Ctrl is the
+// one combination that's free everywhere and behaves the same on every machine.
+export const modLabel = 'Ctrl'
 
-// Display label for the primary modifier (⌘ on macOS, Ctrl elsewhere).
-export const modLabel = isMac ? '⌘' : 'Ctrl'
-
-// True when the event's primary modifier is held: ⌘ on macOS, Ctrl elsewhere.
-// Lets a binding be ⌘M on a Mac and Ctrl+M on Linux/Windows from one check.
+// True when the action modifier (Ctrl) is held on its own — used so a binding
+// like Ctrl+M fires the same way on macOS as on Linux/Windows.
 export function hasMod(e: KeyboardEvent): boolean {
-  return isMac ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey
+  return e.ctrlKey && !e.metaKey
 }
 
 // Whether a keystroke is being typed into an editable surface — a form field, a
@@ -70,5 +66,5 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
 ]
 
 // Compact display strings for the lowlit hints shown next to menu items.
-export const SHORTCUT_MERGE = `${modLabel}M`
-export const SHORTCUT_MARK_UNREAD = `${modLabel}U`
+export const SHORTCUT_MERGE = `${modLabel}+M`
+export const SHORTCUT_MARK_UNREAD = `${modLabel}+U`
