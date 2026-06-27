@@ -143,11 +143,11 @@ type AgentConfig struct {
 	// PrePrompt is prepended to every agent prompt.
 	PrePrompt *string `toml:"pre_prompt"`
 	// Fullscreen enables Claude Code's fullscreen (alternate-screen) rendering.
-	// Only Claude reads it; nil/false means disabled, in which case Hydra forces
-	// the classic renderer (see ResolveFullscreen / claudeRenderingEnv). It lives
-	// on AgentConfig — rather than being Claude-only in the type system — so it can
-	// be set at the defaults level or overridden under [claude], exactly like
-	// pre_prompt.
+	// nil/false means disabled, in which case Hydra forces the classic renderer
+	// (see ResolveFullscreen / claudeRenderingEnv). It is a Claude-only setting:
+	// although it lives on the shared AgentConfig type, it is accepted, rendered
+	// and resolved ONLY under [claude] — a value at the defaults level or under any
+	// other agent is ignored and dropped on save.
 	Fullscreen *bool `toml:"fullscreen"`
 }
 
@@ -573,14 +573,19 @@ func (c Config) ResolveSandboxOptions(agentType string) (writable, masked, resto
 }
 
 // ResolveFullscreen reports whether Claude Code's fullscreen (alternate-screen)
-// rendering should be enabled for an agent type (the per-agent override, else the
-// defaults). It defaults to false: with fullscreen off Hydra forces the classic
-// renderer, which keeps the web terminal's native scrollbar and select-to-copy
-// working and avoids the one-time opt-in prompt that collides with the resume
-// "Continue" nudge. Only meaningful for Claude.
+// rendering should be enabled for an agent type. It defaults to false: with
+// fullscreen off Hydra forces the classic renderer, which keeps the web
+// terminal's native scrollbar and select-to-copy working and avoids the one-time
+// opt-in prompt that collides with the resume "Continue" nudge. The setting is
+// accepted ONLY under [claude] — not at the defaults level or under any other
+// agent — so it is read straight from the claude table rather than the resolved
+// (defaults-merged) config.
 func (c Config) ResolveFullscreen(agentType string) bool {
-	resolved := c.GetResolvedConfig(agentType)
-	return resolved.Fullscreen != nil && *resolved.Fullscreen
+	if agentType != string(sandbox.AgentTypeClaude) {
+		return false
+	}
+	a, ok := c.Agents[string(sandbox.AgentTypeClaude)]
+	return ok && a.Fullscreen != nil && *a.Fullscreen
 }
 
 // ResolvePreExitScript returns the sandboxed pre-exit teardown script for an
@@ -694,17 +699,6 @@ func defaultsSpec() []specEntry {
 			},
 		},
 		{
-			table: "", key: "fullscreen",
-			doc: "enable Claude Code's fullscreen (alternate-screen) rendering. Claude only; off by default so the web terminal keeps native scrollbar + select-to-copy and skips the opt-in prompt. Set under [claude] to try it.",
-			def: func() string { return "false" },
-			get: func(a AgentConfig) (string, bool) {
-				if a.Fullscreen != nil {
-					return fmt.Sprintf("%t", *a.Fullscreen), true
-				}
-				return "", false
-			},
-		},
-		{
 			table: "sandbox", key: "writable_paths",
 			doc: "extra paths made writable in the sandbox (added to the built-in defaults).",
 			def: func() string { return tomlStringArray(sandbox.Defaults().WritablePaths) },
@@ -787,6 +781,10 @@ func managedKeySet() map[string]bool {
 	// per-agent), but is still managed: a regenerated "# resume_prompt = ..."
 	// line must be recognised and dropped rather than kept as a user comment.
 	m["resume_prompt"] = true
+	// fullscreen is rendered specially under [claude] (emitClaudeAgent), not via
+	// the spec, but is likewise managed so its regenerated "# fullscreen = false"
+	// default line is recognised and replaced rather than kept as a user comment.
+	m["fullscreen"] = true
 	return m
 }
 
@@ -1270,7 +1268,13 @@ func renderConfig(existing []byte, cfg Config) string {
 	emitted := map[string]bool{}
 	for _, name := range docAgents {
 		emitted[name] = true
-		if a, ok := cfg.Agents[name]; ok && agentHasContent(a) {
+		a := cfg.Agents[name] // zero value when unconfigured
+		if name == "claude" {
+			// Claude always documents its fullscreen toggle, set or not.
+			emitClaudeAgent(&out, a, keyComments, tableComments)
+			continue
+		}
+		if agentHasContent(a) {
 			emitAgent(&out, name, a, keyComments, tableComments)
 		} else {
 			emitAgentDoc(&out, name, tableComments)
@@ -1446,6 +1450,8 @@ func emitAgentDoc(out *[]string, name string, tableComments map[string][]string)
 }
 
 // emitAgent appends a per-agent table, emitting only the settings that are set.
+// Used for every well-known agent except Claude, which has its own emitter
+// (emitClaudeAgent) so it can always document the Claude-only fullscreen toggle.
 func emitAgent(out *[]string, name string, a AgentConfig, keyComments, tableComments map[string][]string) {
 	if !agentHasContent(a) {
 		return
@@ -1458,13 +1464,47 @@ func emitAgent(out *[]string, name string, a AgentConfig, keyComments, tableComm
 		}
 		*out = append(*out, "pre_prompt = "+tomlStringValue(*a.PrePrompt))
 	}
-	if a.Fullscreen != nil {
-		if uc := keyComments[name+"\x00fullscreen"]; len(uc) > 0 {
+	emitAgentSandbox(out, name, a.Sandbox, keyComments, tableComments)
+}
+
+// emitClaudeAgent renders the [claude] table. Claude is the only agent that reads
+// the `fullscreen` toggle (it is accepted nowhere else; see ResolveFullscreen), so
+// — unlike the other agents — this always documents that setting, even when no
+// Claude overrides are configured. The table is active when any Claude override is
+// set; otherwise it stays a commented-out placeholder, with the fullscreen doc and
+// default commented alongside it (a key cannot live under a commented table).
+func emitClaudeAgent(out *[]string, a AgentConfig, keyComments, tableComments map[string][]string) {
+	const name = "claude"
+	active := agentHasContent(a)
+	emitAgentDoc(out, name, tableComments)
+	if active {
+		*out = append(*out, "["+name+"]")
+	} else {
+		*out = append(*out, "# ["+name+"]")
+	}
+	if active && a.PrePrompt != nil {
+		if uc := keyComments[name+"\x00pre_prompt"]; len(uc) > 0 {
 			*out = append(*out, uc...)
 		}
-		*out = append(*out, fmt.Sprintf("fullscreen = %t", *a.Fullscreen))
+		*out = append(*out, "pre_prompt = "+tomlStringValue(*a.PrePrompt))
 	}
-	sb := a.Sandbox
+	if uc := keyComments[name+"\x00fullscreen"]; len(uc) > 0 {
+		*out = append(*out, uc...)
+	}
+	*out = append(*out, docPrefix+" enable Claude Code's fullscreen (alternate-screen) rendering — flicker-free, but it takes over the terminal and captures the mouse; off (the default) keeps this terminal's native scrollbar and select-to-copy.")
+	if active && a.Fullscreen != nil {
+		*out = append(*out, fmt.Sprintf("fullscreen = %t", *a.Fullscreen))
+	} else {
+		*out = append(*out, "# fullscreen = false")
+	}
+	if active {
+		emitAgentSandbox(out, name, a.Sandbox, keyComments, tableComments)
+	}
+}
+
+// emitAgentSandbox appends the [name.sandbox] (+ network) subtable for the
+// settings that are set. No-op when the agent has no sandbox overrides.
+func emitAgentSandbox(out *[]string, name string, sb *SandboxConfig, keyComments, tableComments map[string][]string) {
 	if sb == nil || !sandboxHasContent(sb) {
 		return
 	}
