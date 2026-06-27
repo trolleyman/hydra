@@ -452,6 +452,7 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 	env := append(agentEnv(home, username, gitAuthorName, gitAuthorEmail), seed.Env...)
 	env = append(env, sandbox.MiseTrustEnv(projectRoot, worktreePath)...)
 	env = append(env, headContextEnv(opts.ID, opts.AgentType, projectRoot, worktreePath, branchName, baseBranch)...)
+	env = append(env, claudeRenderingEnv(opts.AgentType, cfg.ResolveFullscreen(string(opts.AgentType)))...)
 
 	sess, err := startAgentSession(reg, projectRoot, opts.ID, opts.AgentType, worktreePath, opts.Rows, opts.Cols, sandbox.Options{
 		AgentType:      opts.AgentType,
@@ -748,6 +749,7 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 	env := append(agentEnv(home, currentUser.Username, readGitConfigVal(projectRoot, "user.name"), readGitConfigVal(projectRoot, "user.email")), seed.Env...)
 	env = append(env, sandbox.MiseTrustEnv(projectRoot, worktreePath)...)
 	env = append(env, headContextEnv(head.ID, head.AgentType, projectRoot, worktreePath, derefStr(head.Branch), head.BaseBranch)...)
+	env = append(env, claudeRenderingEnv(head.AgentType, cfg.ResolveFullscreen(string(head.AgentType)))...)
 
 	sess, err := startAgentSession(reg, projectRoot, head.ID, head.AgentType, worktreePath, rows, cols, sandbox.Options{
 		AgentType:      head.AgentType,

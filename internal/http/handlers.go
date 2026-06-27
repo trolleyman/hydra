@@ -655,7 +655,8 @@ func fromAPIServiceScript(svc api.ServiceScript) config.ServiceScript {
 // toAPIAgentConfig converts an internal AgentConfig to the API representation.
 func toAPIAgentConfig(c config.AgentConfig) api.AgentConfig {
 	out := api.AgentConfig{
-		PrePrompt: c.PrePrompt,
+		PrePrompt:  c.PrePrompt,
+		Fullscreen: c.Fullscreen,
 	}
 	if c.Sandbox != nil {
 		out.Sandbox = &api.SandboxConfig{
@@ -678,7 +679,7 @@ func toAPIAgentConfig(c config.AgentConfig) api.AgentConfig {
 
 // fromAPIAgentConfig converts an API AgentConfig to the internal representation.
 func fromAPIAgentConfig(a api.AgentConfig) config.AgentConfig {
-	out := config.AgentConfig{PrePrompt: a.PrePrompt}
+	out := config.AgentConfig{PrePrompt: a.PrePrompt, Fullscreen: a.Fullscreen}
 	if a.Sandbox != nil {
 		sb := &config.SandboxConfig{}
 		if a.Sandbox.WritablePaths != nil {

@@ -323,6 +323,25 @@ func headContextEnv(id string, agentType sandbox.AgentType, projectRoot, worktre
 	}
 }
 
+// claudeRenderingEnv pins Claude Code's renderer for an agent launch (spawn and
+// resume alike). Claude's fullscreen rendering draws on the terminal's alternate
+// screen buffer and captures the mouse — which, in Hydra's web (xterm.js)
+// terminal, breaks the native scrollbar and select-to-copy and pops a one-time
+// "try it?" opt-in prompt that the resume "Continue" nudge accidentally answers.
+// So by default (fullscreen=false) we force the classic renderer; when the user
+// opts in via config we enable fullscreen explicitly. Setting the env either way
+// makes Hydra authoritative over any saved `tui` setting in the seeded config.
+// Non-Claude agents have no such mode and get nothing.
+func claudeRenderingEnv(agentType sandbox.AgentType, fullscreen bool) []string {
+	if agentType != sandbox.AgentTypeClaude {
+		return nil
+	}
+	if fullscreen {
+		return []string{"CLAUDE_CODE_NO_FLICKER=1"}
+	}
+	return []string{"CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1"}
+}
+
 // agentEnv builds the environment for the sandboxed agent process.
 func agentEnv(home, username string, gitAuthorName, gitAuthorEmail string) []string {
 	env := make([]string, 0, len(os.Environ()))

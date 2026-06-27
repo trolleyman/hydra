@@ -9,6 +9,71 @@ import (
 
 func ptr(s string) *string { return &s }
 
+func TestResolveFullscreen(t *testing.T) {
+	// Unset → disabled (the safe default that forces the classic renderer).
+	if (Config{}).ResolveFullscreen("claude") {
+		t.Error("fullscreen should default to false")
+	}
+	// Accepted only under [claude].
+	on := Config{Agents: map[string]AgentConfig{"claude": {Fullscreen: boolPtr(true)}}}
+	if !on.ResolveFullscreen("claude") {
+		t.Error("[claude] fullscreen=true should resolve true")
+	}
+	off := Config{Agents: map[string]AgentConfig{"claude": {Fullscreen: boolPtr(false)}}}
+	if off.ResolveFullscreen("claude") {
+		t.Error("[claude] fullscreen=false should resolve false")
+	}
+	// A value at the defaults level is ignored — fullscreen is Claude-table-only.
+	def := Config{Defaults: AgentConfig{Fullscreen: boolPtr(true)}}
+	if def.ResolveFullscreen("claude") {
+		t.Error("defaults fullscreen should NOT apply (only [claude] is accepted)")
+	}
+	// Non-Claude agents never get fullscreen, even if set under their table.
+	gem := Config{Agents: map[string]AgentConfig{"gemini": {Fullscreen: boolPtr(true)}}}
+	if gem.ResolveFullscreen("gemini") {
+		t.Error("fullscreen is Claude-only; gemini must resolve false")
+	}
+}
+
+func TestFullscreenRenderRoundTrip(t *testing.T) {
+	// The empty template documents fullscreen as a commented-out default, and it
+	// lives under the [claude] section — never at the root.
+	tmpl := renderConfig(nil, Config{})
+	if !strings.Contains(tmpl, docPrefix+" enable Claude Code's fullscreen") {
+		t.Errorf("template missing fullscreen doc line:\n%s", tmpl)
+	}
+	if !strings.Contains(tmpl, "# fullscreen = false") {
+		t.Errorf("template missing commented fullscreen default:\n%s", tmpl)
+	}
+	// The fullscreen line must come after the [claude] header, not in the root
+	// defaults block (before [sandbox]).
+	if fsIdx, claudeIdx := strings.Index(tmpl, "fullscreen ="), strings.Index(tmpl, "[claude]"); fsIdx < claudeIdx {
+		t.Errorf("fullscreen rendered outside the [claude] section:\n%s", tmpl)
+	}
+
+	// An explicit [claude] override renders active under [claude] and survives a
+	// decode→render round-trip (i.e. it is not dropped on save).
+	cfg := Config{Agents: map[string]AgentConfig{"claude": {Fullscreen: boolPtr(true)}}}
+	out := renderConfig(nil, cfg)
+	if !strings.Contains(out, "[claude]") || !strings.Contains(out, "fullscreen = true") {
+		t.Errorf("claude fullscreen override not rendered:\n%s", out)
+	}
+	decoded, err := decodeConfig([]byte(out))
+	if err != nil {
+		t.Fatalf("decode rendered config: %v", err)
+	}
+	if c := decoded.Agents["claude"]; c.Fullscreen == nil || !*c.Fullscreen {
+		t.Errorf("claude fullscreen lost on round-trip: %+v", decoded.Agents["claude"])
+	}
+
+	// A defaults-level fullscreen is Claude-only and must be dropped on render —
+	// it never appears outside [claude].
+	dropped := renderConfig(nil, Config{Defaults: AgentConfig{Fullscreen: boolPtr(true)}})
+	if strings.Contains(dropped, "fullscreen = true") {
+		t.Errorf("defaults-level fullscreen should not be emitted:\n%s", dropped)
+	}
+}
+
 func TestMarshalConfig_MultiLineStrings(t *testing.T) {
 	prePrompt := "You are an agent.\n- Do stuff\n- More stuff\n"
 

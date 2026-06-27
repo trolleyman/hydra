@@ -2245,6 +2245,10 @@ components:
         pre_prompt:
           type: string
           nullable: true
+        fullscreen:
+          type: boolean
+          nullable: true
+          description: Enable Claude Code's fullscreen (alternate-screen) rendering. Claude only; off by default so the web terminal keeps its native scrollbar and select-to-copy.
 
     ArtifactScript:
       type: object

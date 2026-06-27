@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 import type { AgentConfig, AgentResponse, ArtifactScript, ConfigResponse, NetworkConfig, ProjectInfo, SandboxConfig } from '../api'
 import { useEffect, useState } from 'react'
-import { X, Plus, Globe, FolderOpen, EyeOff, Eye, Layers, Terminal, Image, AlertTriangle, Server, RotateCw, CheckCircle2, Loader2, Save, AlertCircle } from 'lucide-react'
+import { X, Plus, Globe, FolderOpen, EyeOff, Eye, Layers, Terminal, Image, AlertTriangle, Server, RotateCw, CheckCircle2, Loader2, Save, AlertCircle, Maximize2 } from 'lucide-react'
 import { api } from '../stores/apiClient'
 import type { ServiceScript, ServiceStatus } from '../api'
 import { InfoTooltip } from './InfoTooltip'
@@ -245,6 +245,7 @@ export function ConfigForm({
   value,
   onChange,
   inherited,
+  agentType,
   defaultPrePrompt,
   allAgentsPrePrompt,
 }: {
@@ -318,6 +319,34 @@ export function ConfigForm({
           className="w-full text-sm px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-100 placeholder-gray-300 dark:placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 leading-relaxed shadow-inner resize-y"
         />
       </div>
+
+      {/* Fullscreen rendering — Claude only. Off by default so the web terminal keeps
+          its native scrollbar + select-to-copy and Claude skips the alt-screen opt-in. */}
+      {agentType === 'claude' && (
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-1.5">
+            <Maximize2 className="w-3.5 h-3.5 text-gray-400 dark:text-gray-500" />
+            <label className="text-xs font-semibold text-gray-400 dark:text-gray-500">
+              Fullscreen Rendering
+            </label>
+            <InfoTooltip title="Fullscreen Rendering">
+              <p>Claude Code's fullscreen renderer is flicker-free with flat memory in long conversations, but it draws on the terminal's <strong>alternate screen buffer</strong> and captures the mouse.</p>
+              <p className="mt-1.5">Off (the default), Hydra forces the classic renderer so this web terminal keeps its <strong>native scrollbar and select-to-copy</strong>, and Claude won't show the one-time opt-in prompt that can collide with the resume nudge.</p>
+              <p className="mt-1.5">On, Hydra enables fullscreen explicitly (it overrides any saved <code className="text-blue-300">tui</code> setting). Mouse/scroll/copy then run inside Claude.</p>
+              <p className="mt-1.5 text-gray-400 italic">Only applies to Claude.</p>
+            </InfoTooltip>
+          </div>
+          <label className="relative inline-flex items-center cursor-pointer">
+            <input
+              type="checkbox"
+              className="sr-only peer"
+              checked={value.fullscreen === true}
+              onChange={(e) => onChange({ ...value, fullscreen: e.target.checked ? true : null })}
+            />
+            <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
+          </label>
+        </div>
+      )}
 
       <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50/40 dark:bg-gray-800/20 p-4 space-y-5">
         <div className="flex items-center gap-2">
