@@ -145,6 +145,33 @@ async function settle(page: import('playwright').Page) {
   })
 }
 
+// captureWithRetry takes a screenshot, retrying a handful of times on the
+// transient Chromium protocol errors that surface under load. With up to ~32
+// headless contexts capturing in parallel (see the worker pool), a fullPage
+// grab can intermittently fail with "Unable to capture screenshot" when several
+// large captures coincide and momentarily exhaust the renderer — even though the
+// page itself is fine. Without a retry, one such blip rejects the whole run, so
+// the diffed side renders nothing (the symptom: "after side failed to render").
+// Backing off lets sibling captures finish and free memory; the pixels are
+// per-context deterministic, so a retry produces the identical image (the
+// diff-hash stays reproducible). A non-transient error is rethrown immediately.
+async function captureWithRetry(page: import('playwright').Page, opts: Parameters<import('playwright').Page['screenshot']>[0]) {
+  const transient = /capture screenshot|Unable to capture|Target (page|frame)?.*closed|Protocol error/i
+  const attempts = 4
+  for (let i = 1; i <= attempts; i++) {
+    try {
+      await page.screenshot(opts)
+      return
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      if (i === attempts || !transient.test(msg)) throw err
+      console.log(`  capture retry ${i}/${attempts - 1} after transient error: ${msg.split('\n')[0]}`)
+      await page.waitForTimeout(400 * i) // linear backoff: let sibling captures drain
+      await settle(page).catch(() => { /* page still settling; the retry will catch a real failure */ })
+    }
+  }
+}
+
 console.log(`Rendering Hydra UI for ref ${REF} from ${SRC}`)
 
 // 1. Build the frontend. The Go binary embeds web/dist (web/embed.go), so this
@@ -1578,7 +1605,7 @@ try {
         // Scrolled pages, the lightbox (a fixed, viewport-filling overlay),
         // header-focused shots and the hovered info tooltip (a fixed portal)
         // capture the viewport; others capture the full page.
-        await page.screenshot({ path: out, fullPage: !pg.scrollTo && !pg.attachImages && !pg.viewportOnly && !pg.artifactInfo && !pg.videoDiff && !pg.revealSelector })
+        await captureWithRetry(page, { path: out, fullPage: !pg.scrollTo && !pg.attachImages && !pg.viewportOnly && !pg.artifactInfo && !pg.videoDiff && !pg.revealSelector })
         // Emit the tag sidecar (<file>.png.meta, {"tags":[...]}) that the diff
         // viewer reads (internal/artifacts readTagsSidecar). theme + viewport +
         // section are scoped "category::value" labels — the viewer keeps one
