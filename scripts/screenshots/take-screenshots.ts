@@ -294,6 +294,12 @@ try {
       // focuses on a page's header region — e.g. the agent detail title bar —
       // rather than the long content (terminal, diff) below it.
       viewportOnly?: boolean
+      // Scrolls the matched element into the middle of the viewport (after any
+      // click/settleMasonry steps), then captures the viewport — for content that
+      // lives at the bottom of an inner scroll container the full-page capture
+      // can't reach (the document body doesn't scroll). Used to reveal the
+      // repository artifacts "Show build log" terminal.
+      revealSelector?: string
       // Forces a coarse (touch) pointer: makes the `(hover: hover) and (pointer:
       // fine)` media query report false, so keyboard-only affordances (shortcut
       // hints) hide exactly as they do on a real phone. The harness otherwise only
@@ -563,6 +569,12 @@ try {
       // the ref and renders its outputs single-sided. The deep link auto-expands
       // .hydra → artifacts; "screenshots" returns a ready set of mock images.
       { name: 'repository-artifacts', path: '/project/sim-project/repository/main/.hydra/artifacts/screenshots', settleMasonry: true },
+      // The same view with its "Show build log" toggle opened: the settled script's
+      // persisted log (log_url) loads into an xterm terminal below the images —
+      // documents the build-log pane (ANSI colour, button-less overlay scrollbar,
+      // Ctrl+C-to-copy). clicks waits out the log fetch the toggle fires; the log
+      // sits at the bottom of an inner scroll container, so reveal it for capture.
+      { name: 'repository-artifacts-log', path: '/project/sim-project/repository/main/.hydra/artifacts/screenshots', clicks: ['button:has-text("Show build log")'], settleMasonry: true, revealSelector: '.xterm' },
       // The repository browser (a file open) at the small viewports, to document
       // how its tree + content layout reflows. Named repository-* so they tag
       // section::repository; the viewport:: axis is set explicitly for the
@@ -1526,11 +1538,22 @@ try {
             await settle(page)
           }
         }
+        if (pg.revealSelector) {
+          // Bring an element inside an inner scroll container into the viewport's
+          // middle so a viewport capture shows it (the page body itself doesn't
+          // scroll, so fullPage can't reach it). The element isn't sticky, so
+          // scrollIntoView behaves — unlike the sticky section headings scrollTo
+          // handles by hand.
+          await page.evaluate((sel) => {
+            document.querySelector(sel)?.scrollIntoView({ block: 'center' })
+          }, pg.revealSelector)
+          await settle(page)
+        }
         const out = join(OUT, `${pg.name}${suffix}.png`)
         // Scrolled pages, the lightbox (a fixed, viewport-filling overlay),
         // header-focused shots and the hovered info tooltip (a fixed portal)
         // capture the viewport; others capture the full page.
-        await page.screenshot({ path: out, fullPage: !pg.scrollTo && !pg.attachImages && !pg.viewportOnly && !pg.artifactInfo && !pg.videoDiff })
+        await page.screenshot({ path: out, fullPage: !pg.scrollTo && !pg.attachImages && !pg.viewportOnly && !pg.artifactInfo && !pg.videoDiff && !pg.revealSelector })
         // Emit the tag sidecar (<file>.png.meta, {"tags":[...]}) that the diff
         // viewer reads (internal/artifacts readTagsSidecar). theme + viewport +
         // section are scoped "category::value" labels — the viewer keeps one

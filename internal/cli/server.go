@@ -168,6 +168,10 @@ func runSimulationServer() error {
 	mux.HandleFunc("/repository/projects/{project_id}/blob", server.HandleRepositoryBlob)
 	mux.HandleFunc("/repository/projects/{project_id}/agents/{id}/blob", server.HandleAgentBlob)
 
+	// Persisted build log behind the artifacts "Show build log" toggle (mirrors
+	// the real server's non-OpenAPI route), so that toggle can be screenshotted.
+	mux.HandleFunc("/artifacts/projects/{project_id}/log", server.HandleArtifactLog)
+
 	registerFrontend(mux)
 
 	addr := "localhost:8080"

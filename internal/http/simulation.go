@@ -1905,6 +1905,17 @@ func (s *SimulationServer) GetRepositoryArtifact(w http.ResponseWriter, r *http.
 	}
 }
 
+// HandleArtifactLog serves the persisted build log ({lines:[...]}) for a settled
+// script, mirroring the real server's non-OpenAPI route (Server.HandleArtifactLog)
+// so the "Show build log" toggle resolves to a real terminal in simulation mode.
+// It's addressed by an opaque (script, key) URL the set hands out, so any request
+// just returns the canned generation log.
+func (s *SimulationServer) HandleArtifactLog(w http.ResponseWriter, r *http.Request) {
+	api.WriteJSON(w, http.StatusOK, struct {
+		Lines []api.ArtifactLogLine `json:"lines"`
+	}{Lines: simArtifactLog()})
+}
+
 func (s *SimulationServer) GetConfig(w http.ResponseWriter, r *http.Request, projectId string, params api.GetConfigParams) {
 	resp := api.ConfigResponse{
 		Defaults: api.AgentConfig{
