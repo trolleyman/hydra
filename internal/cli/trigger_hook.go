@@ -212,7 +212,16 @@ func runTriggerHook(agentType string, eventOverride string, logFile *os.File) er
 		// prompt (a UserPromptSubmit follows), so it stays running. Without a
 		// resume signal we can't tell a restored session from a working one apart,
 		// which is why a resumed agent otherwise lingered as "running".
+		//
+		// But don't downgrade a terminal status: a head that had finished (or was
+		// stopped) before the daemon restarted is restored, not freshly waiting on
+		// the user — flipping it to "waiting" here would spuriously revert a finished
+		// head on every restart. ResumeHead seeds the same terminal status into
+		// status.json before launch, so currentStatus() sees it here.
 		if stringField(input, "source") == "resume" {
+			if cur := currentStatus(); cur == api.Finished || cur == api.Stopped {
+				return nil
+			}
 			status = api.Waiting
 		} else {
 			status = api.Running

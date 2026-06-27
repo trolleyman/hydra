@@ -773,21 +773,31 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 	}
 	// A resumed agent restores its prior conversation and then sits idle waiting
 	// for the user — it is not actively working. Report it as waiting rather than
-	// letting it inherit a stale "running"/"finished" (or the "stopped" left by a
-	// daemon restart): mark it waiting in both status.json and the DB so the
-	// displayed status is correct immediately, instead of after the next JSON poll,
-	// and the two stay consistent. Claude's own SessionStart hook (source="resume")
-	// reports the same once it fires; doing it here also covers agents (e.g. Gemini)
-	// whose resume hook carries no resume signal.
+	// letting it inherit a stale "running" (or the "stopped" left by a daemon
+	// restart): mark it in both status.json and the DB so the displayed status is
+	// correct immediately, instead of after the next JSON poll, and the two stay
+	// consistent. Claude's own SessionStart hook (source="resume") reports the same
+	// once it fires; doing it here also covers agents (e.g. Gemini) whose resume
+	// hook carries no resume signal.
+	//
+	// Exception: a head that had already *finished* its turn before the daemon
+	// stopped hasn't started waiting on anything just by being resumed — forcing it
+	// to "waiting" would spuriously revert a finished head to "waiting" on every
+	// restart. Preserve its finished status instead. (A running head is nudged
+	// below, which flips it back to running, so its momentary "waiting" is fine.)
+	resumeStatus := api.Waiting
+	if priorStatus == string(api.Finished) {
+		resumeStatus = api.Finished
+	}
 	ts := time.Now().Format(time.RFC3339Nano)
 	event := "resume"
-	waiting := &api.AgentStatusInfo{Status: api.Waiting, Event: &event, Timestamp: ts}
-	if err := WriteAgentStatus(projectRoot, head.ID, waiting); err != nil {
+	resumed := &api.AgentStatusInfo{Status: resumeStatus, Event: &event, Timestamp: ts}
+	if err := WriteAgentStatus(projectRoot, head.ID, resumed); err != nil {
 		log.Printf("warn: write resume status for %s: %v", head.ID, err)
 	}
 	if store != nil {
 		_ = store.UpdateSessionInfo(head.ID, sess.PID(), "running")
-		if err := store.UpdateAgentStatus(head.ID, "waiting", ts, false); err != nil {
+		if err := store.UpdateAgentStatus(head.ID, string(resumeStatus), ts, false); err != nil {
 			log.Printf("warn: update resume agent status for %s: %v", head.ID, err)
 		}
 	}

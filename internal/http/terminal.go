@@ -326,9 +326,16 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 
 	// Initial status again just in case it changed between checks. A just-resumed
 	// agent is idle waiting for the user (it restored its conversation but isn't
-	// working), so report waiting rather than a misleading "running".
+	// working), so report waiting rather than a misleading "running" — unless it had
+	// already finished its turn, which ResumeHead preserves, so read back the status
+	// it actually wrote rather than assuming "waiting" and flashing it on a finished
+	// head.
 	if resumed {
-		sendStatusUpdate(conn, "waiting")
+		resumeStatus := "waiting"
+		if a, err := s.DB.GetAgent(head.ID); err == nil && a != nil && a.AgentStatus != nil && *a.AgentStatus != "" {
+			resumeStatus = *a.AgentStatus
+		}
+		sendStatusUpdate(conn, resumeStatus)
 	} else {
 		sendStatusUpdate(conn, "running")
 	}

@@ -151,6 +151,73 @@ func TestTriggerHookSessionStartSource(t *testing.T) {
 	}
 }
 
+// TestTriggerHookResumePreservesTerminalStatus covers the daemon-restart case: a
+// head that had already finished its turn is resumed (claude --continue fires
+// SessionStart source="resume"). Because ResumeHead seeds the prior terminal
+// status into status.json before launch, the hook must NOT downgrade it to
+// "waiting" — otherwise a finished head spuriously reverts to waiting on every
+// restart. A non-terminal prior status still falls back to waiting.
+func TestTriggerHookResumePreservesTerminalStatus(t *testing.T) {
+	cases := []struct {
+		prior api.AgentStatus
+		want  api.AgentStatus
+	}{
+		{api.Finished, api.Finished},
+		{api.Stopped, api.Stopped},
+		{api.Running, api.Waiting},
+		{api.Waiting, api.Waiting},
+	}
+	for _, c := range cases {
+		dir := t.TempDir()
+		statusPath := filepath.Join(dir, "status.json")
+		t.Setenv("HYDRA_STATUS_PATH", statusPath)
+		t.Setenv("HYDRA_STATUS_LOG_PATH", filepath.Join(dir, "status_log.jsonl"))
+
+		seed, err := json.Marshal(api.AgentStatusInfo{Status: c.prior})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(statusPath, seed, 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		payload := map[string]interface{}{"hook_event_name": "SessionStart", "source": "resume"}
+		raw, err := json.Marshal(payload)
+		if err != nil {
+			t.Fatal(err)
+		}
+		in := filepath.Join(dir, "stdin.json")
+		if err := os.WriteFile(in, raw, 0644); err != nil {
+			t.Fatal(err)
+		}
+		f, err := os.Open(in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		orig := os.Stdin
+		os.Stdin = f
+		if err := runTriggerHook("claude", "", nil); err != nil {
+			f.Close()
+			os.Stdin = orig
+			t.Fatalf("runTriggerHook: %v", err)
+		}
+		f.Close()
+		os.Stdin = orig
+
+		data, err := os.ReadFile(statusPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var info api.AgentStatusInfo
+		if err := json.Unmarshal(data, &info); err != nil {
+			t.Fatal(err)
+		}
+		if info.Status != c.want {
+			t.Errorf("resume with prior %q: status = %q, want %q", c.prior, info.Status, c.want)
+		}
+	}
+}
+
 func TestQuestionText(t *testing.T) {
 	ask := map[string]interface{}{
 		"tool_input": map[string]interface{}{
