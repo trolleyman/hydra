@@ -595,6 +595,11 @@ func (s *Server) GetConfig(_ context.Context, request api.GetConfigRequestObject
 		resp.Services = &svcs
 	}
 
+	if cfg.ArtifactConcurrency > 0 {
+		n := cfg.ArtifactConcurrency
+		resp.ArtifactConcurrency = &n
+	}
+
 	return api.GetConfig200JSONResponse(resp), nil
 }
 
@@ -740,6 +745,12 @@ func (s *Server) SaveConfig(_ context.Context, request api.SaveConfigRequestObje
 		for _, svc := range *request.Body.Services {
 			newCfg.Services = append(newCfg.Services, fromAPIServiceScript(svc))
 		}
+	}
+	// Artifact concurrency: a positive value is applied; nil/absent leaves the
+	// existing artifact_concurrency untouched (renderConfig preserves it). 0 is
+	// treated as "unset" so it falls back to the built-in default.
+	if request.Body.ArtifactConcurrency != nil && *request.Body.ArtifactConcurrency > 0 {
+		newCfg.ArtifactConcurrency = *request.Body.ArtifactConcurrency
 	}
 
 	scope := api.SaveConfigParamsScopeProject
