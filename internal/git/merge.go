@@ -12,14 +12,31 @@ import (
 // Merge performs a git merge of srcRef into the current HEAD.
 // Uses fast-forward when possible, otherwise performs a --no-ff merge commit.
 // Returns an error if there are conflicting files.
+//
+// Merge refuses to run when the destination working tree has uncommitted changes
+// to tracked files: the fast-forward path resets the tree with `reset --hard`,
+// which would silently discard those changes, and a --no-ff merge into a dirty
+// tree leaves an inconsistent state. Aborting up front keeps working changes safe.
 func Merge(projectRoot, srcRef string, authorName, authorEmail string) error {
-	// Already merged: srcRef is an ancestor of HEAD.
+	// Already merged: srcRef is an ancestor of HEAD. Nothing is modified, so this
+	// is safe even with a dirty working tree.
 	alreadyMerged, err := gitIsAncestor(projectRoot, srcRef, "HEAD")
 	if err != nil {
 		return errtrace.Wrap(err)
 	}
 	if alreadyMerged {
 		return nil
+	}
+
+	// Bail out before touching the tree if it has uncommitted tracked changes, so
+	// the merge never overwrites or clobbers in-progress work. Untracked files are
+	// left out: neither `reset --hard` nor `merge` removes them.
+	dirty, err := HasUncommittedChanges(projectRoot)
+	if err != nil {
+		return errtrace.Wrap(err)
+	}
+	if dirty {
+		return errtrace.Wrap(fmt.Errorf("refusing to merge: %s has uncommitted changes that would be overwritten; commit or stash them first", projectRoot))
 	}
 
 	// Fast-forward: HEAD is an ancestor of srcRef.

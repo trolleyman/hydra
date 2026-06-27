@@ -131,6 +131,78 @@ func TestAddWorktreeForBranch(t *testing.T) {
 	}
 }
 
+// TestMergeAbortsOnDirtyTree verifies that Merge refuses to run when the
+// destination working tree has uncommitted changes to tracked files, and leaves
+// those changes intact. The fast-forward path resets with `reset --hard`, which
+// would otherwise silently discard them.
+func TestMergeAbortsOnDirtyTree(t *testing.T) {
+	dir := gitInit(t)
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@e",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@e")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	write := func(name, content string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	read := func(name string) string {
+		t.Helper()
+		b, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+
+	// main with a base commit, and a feature branch ahead of it so a merge into
+	// main can fast-forward (the destructive `reset --hard` path).
+	run("checkout", "-q", "-b", "main")
+	write("base.txt", "base\n")
+	run("add", ".")
+	run("commit", "-qm", "base")
+
+	run("checkout", "-q", "-b", "feature")
+	write("base.txt", "from feature\n")
+	run("add", ".")
+	run("commit", "-qm", "feature work")
+
+	run("checkout", "-q", "main")
+
+	// Dirty the working tree on main with an uncommitted edit to a tracked file.
+	write("base.txt", "uncommitted work\n")
+
+	err := Merge(dir, "feature", "t", "t@e")
+	if err == nil {
+		t.Fatal("expected Merge to abort on a dirty working tree, got nil")
+	}
+
+	// The uncommitted change must survive untouched (not clobbered by reset --hard),
+	// and main must not have advanced.
+	if got := read("base.txt"); got != "uncommitted work\n" {
+		t.Errorf("uncommitted change was overwritten: got %q", got)
+	}
+	if !gitContains(t, dir, "main", "main") || gitContains(t, dir, "main", "feature") {
+		t.Errorf("main advanced despite the abort")
+	}
+
+	// Once the tree is clean, the same merge succeeds.
+	run("checkout", "-q", "--", "base.txt")
+	if err := Merge(dir, "feature", "t", "t@e"); err != nil {
+		t.Fatalf("merge on clean tree: %v", err)
+	}
+	if !gitContains(t, dir, "main", "feature") {
+		t.Errorf("main did not contain feature after merging a clean tree")
+	}
+}
+
 func revParse(t *testing.T, dir, ref string) string {
 	t.Helper()
 	out, err := gitOutput(dir, "rev-parse", ref)
