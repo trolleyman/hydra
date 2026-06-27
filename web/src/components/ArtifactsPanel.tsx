@@ -6,7 +6,7 @@ import { api } from '../stores/apiClient'
 import type { ArtifactSet, ArtifactFile, ArtifactLogLine } from '../api'
 import { LoaderCircle, Image as ImageIcon, ImageOff, ChevronDown, ChevronRight, TriangleAlert, RefreshCw, ScrollText, RotateCcw, SquarePlus, SquareMinus, SquareDot, Search, X } from 'lucide-react'
 import { InfoTooltip } from './InfoTooltip'
-import { loadArtifactPrefs, saveArtifactPrefs, loadTagFilter, saveTagFilter, defaultTagFilter, isDefaultTagFilter, ARTIFACT_CHANGE_CATEGORY as CHANGE_CATEGORY, type ArtifactTagFilter } from '../lib/artifactPrefs'
+import { loadArtifactPrefs, saveArtifactPrefs, loadTagFilter, saveTagFilter, defaultTagFilter, isDefaultTagFilter, clampChangeThreshold, ARTIFACT_CHANGE_CATEGORY as CHANGE_CATEGORY, type ArtifactTagFilter } from '../lib/artifactPrefs'
 import { stripAnsi } from '../lib/ansi'
 import { useIsDark } from '../lib/theme'
 import {
@@ -430,6 +430,22 @@ const TYPE_CATEGORY = 'type'
 // lives in lib/artifactPrefs, which also seeds 'unchanged' hidden by default).
 const CHANGE_TYPE_ORDER = ['added', 'removed', 'modified', 'unchanged']
 
+// effectiveChangeType applies the change-type filter's "% changed" threshold: a
+// file the backend reported 'modified' counts as 'unchanged' when the fraction of
+// it that differs (change_ratio: pixels for images, frames for video) is below the
+// threshold. So a 1px tweak no longer "counts" as a change once the user raises the
+// gate. Every other change type — and modified files with no change_ratio (e.g.
+// byte-compared video) — passes through unchanged. With threshold 0 (the default)
+// this is a no-op. Used everywhere a file's change state drives the UI (filtering,
+// counts, the row badge) so the threshold is applied consistently.
+function effectiveChangeType(file: ArtifactFile, thresholdPct: number): string {
+  const ct = file.change_type as string
+  if (ct !== 'modified' || thresholdPct <= 0) return ct
+  const ratio = file.change_ratio
+  if (ratio == null) return ct
+  return ratio * 100 < thresholdPct ? 'unchanged' : ct
+}
+
 // fileMediaType classifies a file as 'video' or 'image' for the built-in type
 // filter, matching how FileRow routes it (isVideoArtifact → the video viewer).
 function fileMediaType(file: ArtifactFile): string {
@@ -476,7 +492,9 @@ function collectTags(sets: ArtifactSet[]): CollectedTags {
 // filterIsActive reports whether the filter would hide anything — i.e. any
 // scoped category or the free-form group has at least one value turned off.
 function filterIsActive(filter: ArtifactTagFilter): boolean {
-  return Object.values(filter.scoped).some((off) => off.length > 0) || filter.free.length > 0
+  // A non-zero change threshold can reclassify 'modified' files to 'unchanged'
+  // (and unchanged is hidden by default), so it too can hide files.
+  return Object.values(filter.scoped).some((off) => off.length > 0) || filter.free.length > 0 || clampChangeThreshold(filter.changeThreshold) > 0
 }
 
 // fileMatchesFilter reports whether a file passes the filter. Each array lists
@@ -496,8 +514,10 @@ function fileMatchesFilter(file: ArtifactFile, filter: ArtifactTagFilter): boole
       if (off.includes(fileMediaType(file))) return false
     } else if (cat === CHANGE_CATEGORY) {
       // The built-in change-type scope matches the file's change_type (added/
-      // removed/modified/unchanged) — its intrinsic state, not a tag it carries.
-      if (off.includes(file.change_type as string)) return false
+      // removed/modified/unchanged) — its intrinsic state, not a tag it carries —
+      // after the "% changed" threshold may have downgraded a modified file to
+      // unchanged (see effectiveChangeType).
+      if (off.includes(effectiveChangeType(file, clampChangeThreshold(filter.changeThreshold)))) return false
     } else if (off.some((v) => tags.includes(`${cat}::${v}`))) {
       return false
     }
@@ -628,6 +648,8 @@ function TagScopeFilter({
   onIsolate,
   onAll,
   onClear,
+  footer,
+  highlight = false,
 }: {
   label: string
   values: string[]
@@ -639,6 +661,12 @@ function TagScopeFilter({
   onIsolate: (val: string) => void
   onAll: () => void
   onClear: () => void
+  // Extra controls rendered at the bottom of the dropdown, below the value list —
+  // used by the "changes" scope for its "% changed" threshold slider.
+  footer?: React.ReactNode
+  // Force the trigger into its active (highlighted) style even when nothing is
+  // hidden — e.g. the change threshold is set but no value checkbox is off.
+  highlight?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -668,7 +696,7 @@ function TagScopeFilter({
       <button
         onClick={() => setOpen((o) => !o)}
         className={`flex items-center gap-1.5 h-7 px-2.5 rounded-md border text-[11px] font-medium transition-colors cursor-pointer ${
-          open || hiddenCount > 0
+          open || hiddenCount > 0 || highlight
             ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800'
             : 'bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
         }`}
@@ -715,14 +743,47 @@ function TagScopeFilter({
             ))}
           </div>
           <div className="px-3 py-1 border-t border-gray-100 dark:border-gray-700/60 text-[10px] text-gray-400 dark:text-gray-500">shift-click to isolate</div>
+          {footer}
         </div>
       )}
     </div>
   )
 }
 
-function FileRow({ file, mode }: { file: ArtifactFile; mode: ImageDiffMode }) {
-  const ct = file.change_type as string
+// ChangeThresholdControl is the "% changed" gate shown at the bottom of the
+// "changes" filter dropdown. A modified file whose change_ratio is below this
+// percentage is treated as identical (see effectiveChangeType): the slider says
+// how much of an image's pixels — or a video's frames — must differ before the
+// change "counts". 0 means any difference counts (the default).
+function ChangeThresholdControl({ value, onChange }: { value: number; onChange: (pct: number) => void }) {
+  return (
+    // stopPropagation so dragging the slider near the menu edge never closes it.
+    <div className="px-3 py-2 border-t border-gray-100 dark:border-gray-700/60" onClick={(e) => e.stopPropagation()}>
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-[11px] font-medium text-gray-600 dark:text-gray-300">% changed threshold</span>
+        <span className="text-[11px] tabular-nums text-gray-500 dark:text-gray-400">{value}%</span>
+      </div>
+      <input
+        type="range"
+        min={0}
+        max={100}
+        step={1}
+        value={value}
+        onChange={(e) => onChange(clampChangeThreshold(e.target.valueAsNumber))}
+        className="w-full accent-blue-500 cursor-pointer"
+      />
+      <div className="mt-1 text-[10px] leading-snug text-gray-400 dark:text-gray-500">
+        A modified file counts as identical until at least this share of its pixels (or video frames) differ.
+      </div>
+    </div>
+  )
+}
+
+function FileRow({ file, mode, changeThreshold = 0 }: { file: ArtifactFile; mode: ImageDiffMode; changeThreshold?: number }) {
+  // The badge reflects the *effective* change type, so a modified file gated below
+  // the "% changed" threshold shows as unchanged (no badge) — matching how it's
+  // filtered and counted.
+  const ct = effectiveChangeType(file, changeThreshold)
   return (
     // w-full: the masonry wrapper sets the tile's (column) width; the card fills it.
     <div className="p-3 w-full min-w-0 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40">
@@ -1103,12 +1164,15 @@ export function MasonryGrid({ items, spanScale = 1, spans, onSpanChange, scope }
 // right. Each tile auto-spans by aspect ratio (a wide desktop shot takes more
 // columns than a tall phone shot); side-by-side doubles the span so the before/after
 // pair has room. Drag a tile's edge to override its span.
-function FileGrid({ files, mode, spans, onSpanChange, scope }: {
+function FileGrid({ files, mode, spans, onSpanChange, scope, changeThreshold = 0 }: {
   files: ArtifactFile[]
   mode: ImageDiffMode
   spans: ArtifactSpans
   onSpanChange?: (key: string, span: number | null) => void
   scope?: string
+  // The active "% changed" threshold, forwarded to each FileRow so its change
+  // badge matches how the file was filtered/counted (see effectiveChangeType).
+  changeThreshold?: number
 }) {
   const spanScale = mode === 'side-by-side' ? 2 : 1
   const sources = useMemo(
@@ -1125,7 +1189,7 @@ function FileGrid({ files, mode, spans, onSpanChange, scope }: {
   const items = useMemo(
     () => files.map((f) => ({
       key: f.name,
-      node: <FileRow file={f} mode={mode} />,
+      node: <FileRow file={f} mode={mode} changeThreshold={changeThreshold} />,
       aspect: dims[f.name]?.aspect,
       pxWidth: dims[f.name]?.pxWidth,
       // Videos need a minimum tile width for their transport controls (see
@@ -1135,7 +1199,7 @@ function FileGrid({ files, mode, spans, onSpanChange, scope }: {
       // those resize via the edge handle only — see MasonryGrid's bodyResizable.
       bodyResizable: mode !== 'slider' && !isVideoArtifact(f.name),
     })),
-    [files, mode, dims],
+    [files, mode, dims, changeThreshold],
   )
   // pt-3 so the gap above the first row matches the card body's px-3 left inset.
   return (
@@ -1466,8 +1530,11 @@ function ArtifactSetCard({ set, mode, spans, onSpanChange, filter, search, onRef
   const searching = search.trim().length > 0
   const narrowed = isFiltered || searching
   const visibleFiles = computeVisibleFiles(set.files, filter, search)
-  const changedFiles = visibleFiles.filter((f) => f.change_type !== 'unchanged')
-  const totalChanged = set.files.filter((f) => f.change_type !== 'unchanged').length
+  // "changed" counts honour the change-type threshold, so a sub-threshold tweak
+  // doesn't inflate the "x/y changed" header (see effectiveChangeType).
+  const changeThreshold = clampChangeThreshold(filter.changeThreshold)
+  const changedFiles = visibleFiles.filter((f) => effectiveChangeType(f, changeThreshold) !== 'unchanged')
+  const totalChanged = set.files.filter((f) => effectiveChangeType(f, changeThreshold) !== 'unchanged').length
   const changedLabel = narrowed && changedFiles.length !== totalChanged ? `${changedFiles.length}/${totalChanged} changed` : `${totalChanged} changed`
   const noChanges = status === 'ready' && !set.changed
   // One side failed while the other rendered (status stays "ready"): surface a
@@ -1637,7 +1704,7 @@ function ArtifactSetCard({ set, mode, spans, onSpanChange, filter, search, onRef
               ) : visibleFiles.length === 0 ? (
                 <div className="my-2 text-xs text-gray-400 dark:text-gray-500">No files match {searching ? 'your search' : 'the current filters'}.</div>
               ) : (
-                <FileGrid files={visibleFiles} mode={mode} spans={spans} onSpanChange={onSpanChange} scope={`${agentId}/${set.name}`} />
+                <FileGrid files={visibleFiles} mode={mode} spans={spans} onSpanChange={onSpanChange} scope={`${agentId}/${set.name}`} changeThreshold={changeThreshold} />
               )}
             </>
           )}
@@ -1845,6 +1912,7 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
   const changeTypes = CHANGE_TYPE_ORDER
   const showChangeFilter = true
   const changeOff = tagFilter.scoped[CHANGE_CATEGORY] ?? []
+  const changeThreshold = clampChangeThreshold(tagFilter.changeThreshold)
 
   // Per-value item counts for each filter dropdown (see computeScopeCounts).
   // Flatten the files once; `shownFilter` is the current filter with this scope
@@ -1853,9 +1921,10 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
   const allFiles = useMemo(() => (sets ?? []).flatMap((s) => s.files), [sets])
   const scopeCounts = useCallback(
     (cat: string, values: string[]): Record<string, number> => {
+      const threshold = clampChangeThreshold(tagFilter.changeThreshold)
       const hasValue = (f: ArtifactFile, v: string) =>
         cat === TYPE_CATEGORY ? fileMediaType(f) === v
-          : cat === CHANGE_CATEGORY ? (f.change_type as string) === v
+          : cat === CHANGE_CATEGORY ? effectiveChangeType(f, threshold) === v
             : (f.tags ?? []).includes(`${cat}::${v}`)
       const shownFilter: ArtifactTagFilter = { ...tagFilter, scoped: { ...tagFilter.scoped, [cat]: [] } }
       return computeScopeCounts(allFiles, values, hasValue, shownFilter)
@@ -2020,6 +2089,13 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
                 onIsolate={(val) => updateTagFilter({ ...tagFilter, scoped: { ...tagFilter.scoped, [CHANGE_CATEGORY]: changeTypes.filter((x) => x !== val) } })}
                 onAll={() => updateTagFilter({ ...tagFilter, scoped: { ...tagFilter.scoped, [CHANGE_CATEGORY]: [] } })}
                 onClear={() => updateTagFilter({ ...tagFilter, scoped: { ...tagFilter.scoped, [CHANGE_CATEGORY]: [...changeTypes] } })}
+                highlight={changeThreshold > 0}
+                footer={
+                  <ChangeThresholdControl
+                    value={changeThreshold}
+                    onChange={(pct) => updateTagFilter({ ...tagFilter, changeThreshold: pct })}
+                  />
+                }
               />
             )}
           </div>

@@ -25,6 +25,10 @@ export type ArtifactFile = {
      */
     unverified?: boolean | null;
     /**
+     * Fraction (0..1) of the media that differs between the two versions, for a "modified" file. For images it is the share of pixels whose RGBA differs; for video the share of frames whose content hash differs (per-frame granularity, since ffmpeg hashes whole frames). 0 means pixel/frame-identical (such a file is reported "unchanged" instead), 1 a wholesale change (e.g. differing dimensions). Lets the UI apply a "% changed" threshold below which a change is treated as identical. Absent for added/removed/unchanged files and for video left byte-compared (see unverified).
+     */
+    change_ratio?: number | null;
+    /**
      * Frame rate of a video file, read from its sibling JSON sidecar (<file>.meta, {"fps": 60}). HTML5 video exposes no frame rate, so the viewer's frame-step buttons use it to size a single-frame step. Null/absent when the sidecar omits it, in which case the viewer assumes a sensible default. Only meaningful for video files.
      */
     fps?: number | null;

@@ -221,6 +221,15 @@ type FileDelta struct {
 	// is the raw byte-hash one and may be spurious — see Manager.Compare. The UI
 	// caveats it with a badge. Always false for images and frame-verified video.
 	Unverified bool
+	// ChangeRatio is the fraction (0..1) of the media that differs, for a
+	// ChangeModified file whose pixel/frame check ran. Images report the share of
+	// differing pixels; video the share of differing frames (per-frame
+	// granularity — ffmpeg hashes whole frames). 0 means identical (such a file is
+	// downgraded to ChangeUnchanged), 1 a wholesale change (e.g. differing
+	// dimensions). Left at 0 for added/removed/unchanged files and for video left
+	// Unverified. The UI uses it to apply a "% changed" threshold below which a
+	// modified file is treated as identical — see Manager.Compare.
+	ChangeRatio float64
 	// Fps is the video frame rate from the file's sidecar, with the head (right)
 	// side preferred over the base when both declare one. Zero when neither side
 	// declares it (or for images). The viewer uses it to size a frame step.
@@ -314,11 +323,15 @@ func AnyChanged(deltas []FileDelta) bool {
 // byte-hash verdict.
 //
 // Video (.webm) cannot be decoded by the stdlib, so it is refined out-of-process
-// via ffmpeg (videoFramesEqual): identical frames downgrade ChangeModified to
+// via ffmpeg (videoFramesDiffRatio): identical frames downgrade ChangeModified to
 // ChangeUnchanged, which strips spurious diffs from non-deterministic container
 // metadata. When ffmpeg is unavailable or errors the byte-hash verdict stands,
 // but the delta is marked Unverified so the UI can caveat a possibly-spurious
 // "modified".
+//
+// A file left ChangeModified also records the fraction of pixels (images) or
+// frames (video) that differ in FileDelta.ChangeRatio, so the UI can apply a
+// "% changed" threshold below which a modified file is treated as identical.
 func (m *Manager) Compare(left, right Meta) []FileDelta {
 	deltas := Compare(left.Files, right.Files)
 	for i := range deltas {
@@ -329,17 +342,23 @@ func (m *Manager) Compare(left, right Meta) []FileDelta {
 		lp := filepath.Join(m.entryDir(left.Script, left.Key), filepath.FromSlash(d.Name))
 		rp := filepath.Join(m.entryDir(right.Script, right.Key), filepath.FromSlash(d.Name))
 		if isVideoFile(d.Name) {
-			equal, err := videoFramesEqual(lp, rp)
+			ratio, err := videoFramesDiffRatio(lp, rp)
 			switch {
 			case err != nil:
 				d.Unverified = true
-			case equal:
+			case ratio == 0:
 				d.Change = ChangeUnchanged
+			default:
+				d.ChangeRatio = ratio
 			}
 			continue
 		}
-		if equal, err := imagesPixelEqual(lp, rp); err == nil && equal {
-			d.Change = ChangeUnchanged
+		if ratio, err := imagesPixelDiffRatio(lp, rp); err == nil {
+			if ratio == 0 {
+				d.Change = ChangeUnchanged
+			} else {
+				d.ChangeRatio = ratio
+			}
 		}
 	}
 	return deltas
@@ -352,32 +371,46 @@ func isVideoFile(name string) bool {
 	return strings.HasPrefix(mediaExts[strings.ToLower(filepath.Ext(name))], "video/")
 }
 
-// videoFramesEqual reports whether two video files decode to the same sequence
-// of frames, by comparing per-frame content hashes from ffmpeg. It returns an
-// error (so the caller falls back to the byte-hash verdict) when ffmpeg is not
-// installed or fails to decode either side.
-func videoFramesEqual(leftPath, rightPath string) (bool, error) {
+// videoFramesDiffRatio reports the fraction (0..1) of frames that differ between
+// two video files, by comparing per-frame content hashes from ffmpeg. Granularity
+// is per frame, not per pixel — framemd5 yields one hash per frame, so a frame
+// counts as changed if any of its pixels changed. A frame-count mismatch counts
+// the surplus frames as changed. It returns 0 when the frame sequences are
+// identical, and an error (so the caller falls back to the byte-hash verdict) when
+// ffmpeg is not installed or fails to decode either side.
+func videoFramesDiffRatio(leftPath, rightPath string) (float64, error) {
 	l, err := videoFrameHashes(leftPath)
 	if err != nil {
-		return false, errtrace.Wrap(err)
+		return 0, errtrace.Wrap(err)
 	}
 	r, err := videoFrameHashes(rightPath)
 	if err != nil {
-		return false, errtrace.Wrap(err)
+		return 0, errtrace.Wrap(err)
 	}
-	return l == r, nil
+	n := max(len(l), len(r))
+	if n == 0 {
+		return 0, nil
+	}
+	diff := 0
+	for i := range n {
+		// A frame present on only one side, or whose hash differs, counts as changed.
+		if i >= len(l) || i >= len(r) || l[i] != r[i] {
+			diff++
+		}
+	}
+	return float64(diff) / float64(n), nil
 }
 
-// videoFrameHashes returns a newline-joined list of per-frame content hashes for
-// the first video stream of path, using `ffmpeg -f framemd5`. Each row's hash is
-// the md5 of that frame's decoded (rawvideo) pixels, so it depends only on the
-// visual content — container muxing, timestamps and writing-app metadata do not
-// affect it. Only the hash column is kept, so differing presentation timestamps
-// on otherwise-identical frames don't register as a change.
-func videoFrameHashes(path string) (string, error) {
+// videoFrameHashes returns the per-frame content hashes for the first video stream
+// of path, using `ffmpeg -f framemd5`. Each entry is the md5 of that frame's
+// decoded (rawvideo) pixels, so it depends only on the visual content — container
+// muxing, timestamps and writing-app metadata do not affect it. Only the hash
+// column is kept, so differing presentation timestamps on otherwise-identical
+// frames don't register as a change.
+func videoFrameHashes(path string) ([]string, error) {
 	bin, err := exec.LookPath("ffmpeg")
 	if err != nil {
-		return "", errtrace.Wrap(err)
+		return nil, errtrace.Wrap(err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
@@ -387,9 +420,9 @@ func videoFrameHashes(path string) (string, error) {
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	if err := cmd.Run(); err != nil {
-		return "", errtrace.Wrap(err)
+		return nil, errtrace.Wrap(err)
 	}
-	var b strings.Builder
+	var hashes []string
 	sc := bufio.NewScanner(&out)
 	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 	for sc.Scan() {
@@ -400,49 +433,55 @@ func videoFrameHashes(path string) (string, error) {
 			continue
 		}
 		if i := strings.LastIndex(line, ","); i >= 0 {
-			b.WriteString(strings.TrimSpace(line[i+1:]))
-			b.WriteByte('\n')
+			hashes = append(hashes, strings.TrimSpace(line[i+1:]))
 		}
 	}
 	if err := sc.Err(); err != nil {
-		return "", errtrace.Wrap(err)
+		return nil, errtrace.Wrap(err)
 	}
-	return b.String(), nil
+	return hashes, nil
 }
 
-// imagesPixelEqual reports whether two image files decode to the same dimensions
-// and pixels. A decode failure (unsupported format, corrupt file) returns an
-// error so the caller can fall back to the byte-hash verdict.
-func imagesPixelEqual(leftPath, rightPath string) (bool, error) {
+// imagesPixelDiffRatio reports the fraction (0..1) of pixels that differ between
+// two image files, after aligning their (possibly differently-originated)
+// coordinate systems. It returns 0 when the images are pixel-identical and 1 when
+// their dimensions differ (a wholesale change). A decode failure (unsupported
+// format, corrupt file) returns an error so the caller can fall back to the
+// byte-hash verdict.
+func imagesPixelDiffRatio(leftPath, rightPath string) (float64, error) {
 	la, err := decodeImage(leftPath)
 	if err != nil {
-		return false, errtrace.Wrap(err)
+		return 0, errtrace.Wrap(err)
 	}
 	ra, err := decodeImage(rightPath)
 	if err != nil {
-		return false, errtrace.Wrap(err)
+		return 0, errtrace.Wrap(err)
 	}
 	lb, rb := la.Bounds(), ra.Bounds()
 	if lb.Dx() != rb.Dx() || lb.Dy() != rb.Dy() {
-		return false, nil
+		return 1, nil
+	}
+	total := lb.Dx() * lb.Dy()
+	if total == 0 {
+		return 0, nil
 	}
 	// Fast path: same concrete type with byte-identical pixel buffers.
 	if equalRawPix(la, ra) {
-		return true, nil
+		return 0, nil
 	}
-	// General path: compare pixel-by-pixel in RGBA space, aligning the two
-	// (possibly differently-originated) coordinate systems.
+	// General path: compare pixel-by-pixel in RGBA space, counting every mismatch.
 	ox, oy := rb.Min.X-lb.Min.X, rb.Min.Y-lb.Min.Y
+	diff := 0
 	for y := lb.Min.Y; y < lb.Max.Y; y++ {
 		for x := lb.Min.X; x < lb.Max.X; x++ {
 			lr, lg, lbl, laa := la.At(x, y).RGBA()
 			rr, rg, rbl, raa := ra.At(x+ox, y+oy).RGBA()
 			if lr != rr || lg != rg || lbl != rbl || laa != raa {
-				return false, nil
+				diff++
 			}
 		}
 	}
-	return true, nil
+	return float64(diff) / float64(total), nil
 }
 
 func decodeImage(path string) (image.Image, error) {

@@ -373,6 +373,9 @@ func (s *Server) buildArtifactSet(projectID, name string, leftSpec, rightSpec *c
 		if d.Unverified {
 			f.Unverified = ptr(true)
 		}
+		if d.ChangeRatio > 0 {
+			f.ChangeRatio = ptr(d.ChangeRatio)
+		}
 		if d.Fps > 0 {
 			f.Fps = ptr(d.Fps)
 		}
