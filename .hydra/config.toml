@@ -6,11 +6,14 @@ pre_prompt = """
 
 [sandbox]
 ## extra paths made writable in the sandbox (added to the built-in defaults).
-writable_paths = ["~/.cache/go-build", "~/.go/pkg", "~/.bun/install/cache", "~/.cache/goimports", "~/.magefile"]
+writable_paths = ["~/.cache/go", "~/.bun/install/cache", "~/.cache/goimports", "~/.magefile"]
 ## extra paths hidden in the sandbox (added to the built-in defaults).
 # masked_paths = ["~/.ssh", "~/.aws", "~/.azure", "~/.gnupg", "~/.docker", "~/.kube", "~/.password-store", "~/.config", "~/.netrc", "~/.git-credentials", "~/.npmrc", "~/.pypirc", "~/.zsh_history", "~/.bash_history", "~/.sh_history", "~/.config/mise/config.local.toml", "~/.dotfiles/mise/config.local.toml"]
 ## paths re-exposed read-only after a masked parent (added to the built-in defaults).
-# restore_ro = ["~/.config/git", "~/.config/gh", "~/.config/mise/config.toml"]
+## ~/.config/go holds `go env -w` settings (GOMODCACHE=~/.cache/go/pkg/mod,
+## GOCACHE=~/.cache/go/build, GOPATH=~/.local/share/go); ~/.config is masked by
+## default, so re-expose it or the sandboxed `go` falls back to ~/go/pkg/mod (not writable).
+restore_ro = ["~/.config/go"]
 ## worktree-relative paths mounted copy-on-write from the project root (read source, writes kept per-head; e.g. large gitignored build dirs).
 # cow_paths = []
 ## shell script run in the sandbox once before each agent launches (e.g. mise trust).
