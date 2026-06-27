@@ -23,5 +23,13 @@ export type SpawnAgentRequest = {
      * If true, the agent is a throwaway test agent whose worktree and branch are torn down when it stops.
      */
     ephemeral?: boolean;
+    /**
+     * Initial PTY width (columns), seeded from the spawning browser's last terminal geometry so the agent renders at the right width immediately instead of the 80-column default. When omitted, the server falls back to the project's most recently reported width (else 80).
+     */
+    cols?: number;
+    /**
+     * Initial PTY height (rows). The browser sends its last terminal height, or the user's configured default height when it has none yet. When omitted the PTY uses its built-in 24-row default.
+     */
+    rows?: number;
 };
 

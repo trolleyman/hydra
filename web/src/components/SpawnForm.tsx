@@ -11,6 +11,7 @@ import { ImageLightbox } from './ImageLightbox'
 import { AttachmentChips } from './AttachmentChips'
 import { StorageKeys, promptDraftKey, promptScrollKey, imageCounterKey, readLocal, writeLocal } from '../lib/storage'
 import { HighlightedTextarea } from '../lib/markdown'
+import { spawnGeometry } from '../lib/terminalGeometry'
 import { type Attachment, spawnDraftKey, loadAttachments, saveAttachments, nextAttachmentId } from '../lib/spawnDrafts'
 
 type AgentTypeOption = 'claude' | 'gemini' | 'copilot' | 'codex'
@@ -448,11 +449,18 @@ export function SpawnForm({
       const base = prompt.trim()
       const finalPrompt = paths ? (base ? `${base}\n\n${paths}` : paths) : base
       const finalId = idManuallyEdited ? slugify(agentId) : ''
+      // Seed the new head's PTY at this browser's last terminal width and either
+      // its last height or the user's configured default — so the agent renders
+      // at the right size from its first paint instead of the 80x24 default (its
+      // narrow-wrapped scrollback can't be re-flowed once a wide client attaches).
+      const geom = spawnGeometry()
       const req: SpawnAgentRequest = {
         prompt: finalPrompt,
         agent_type: agentType,
         id: finalId || generateId(base) || generateId(readyAttachments[0]?.filename ?? '') || 'attachment',
         ...(baseBranch ? { base_branch: baseBranch } : {}),
+        ...(geom.cols ? { cols: geom.cols } : {}),
+        rows: geom.rows,
       }
       const agent = await api.default.spawnAgent(projectId ?? '', req)
       setPrompt('')

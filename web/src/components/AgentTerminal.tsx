@@ -8,7 +8,7 @@ import { Tooltip } from './Tooltip'
 import { uploadFile, extractFiles } from '../api/uploads'
 import { useAgentStore } from '../stores/agentStore'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from '../lib/agentViewPrefs'
-import { StorageKeys, readLocal, writeLocal } from '../lib/storage'
+import { loadLastGeometry, saveLastGeometry } from '../lib/terminalGeometry'
 
 const DEFAULT_TERMINAL_HEIGHT = 450
 
@@ -25,27 +25,12 @@ interface PaneProps {
   onMetrics?: (m: { cols: number; rows: number; cellHeight: number }) => void
 }
 
-// The terminal panel's layout is the same across agents/windows, so the last
-// geometry we successfully sent is a good seed for the next connection. The
-// backend uses it as the *initial* PTY size when it has to start or resume a
-// session, so a fresh/resumed agent renders at the right width immediately
-// instead of flashing the 80x24 default and reflowing. It never resizes an
-// already-live PTY (that still waits for the client's settled measurement).
-function loadLastGeometry(): { cols: number; rows: number } | null {
-  const raw = readLocal(StorageKeys.terminalGeometry)
-  if (!raw) return null
-  try {
-    const g = JSON.parse(raw) as { cols?: unknown; rows?: unknown }
-    if (typeof g.cols === 'number' && typeof g.rows === 'number' && g.cols > 0 && g.rows > 0) {
-      return { cols: g.cols, rows: g.rows }
-    }
-  } catch { /* ignore malformed value */ }
-  return null
-}
-
-function saveLastGeometry(cols: number, rows: number) {
-  writeLocal(StorageKeys.terminalGeometry, JSON.stringify({ cols, rows }))
-}
+// loadLastGeometry/saveLastGeometry live in lib/terminalGeometry so the spawn
+// form and settings page can share them. The backend uses the last geometry as
+// the *initial* PTY size when it starts or resumes a session, so a fresh/resumed
+// agent renders at the right width immediately instead of flashing the 80x24
+// default and reflowing. It never resizes an already-live PTY (that still waits
+// for the client's settled measurement).
 
 function getWsUrl(agentId: string, projectId: string | null, shell?: boolean, sandboxed?: boolean, shellId?: string): string {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
