@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { ChevronDown, RotateCcw, Search, X } from 'lucide-react'
 import {
   type FilterableArtifact, parseScopedTag, collectTags, computeScopeCounts,
-  fileMediaType, TYPE_CATEGORY, CHANGE_TYPE_ORDER,
+  fileMediaType, effectiveChangeType, TYPE_CATEGORY, CHANGE_TYPE_ORDER,
 } from '../lib/artifactFilter'
 import {
-  defaultTagFilter, isDefaultTagFilter, ARTIFACT_CHANGE_CATEGORY as CHANGE_CATEGORY,
+  defaultTagFilter, isDefaultTagFilter, clampChangeThreshold, ARTIFACT_CHANGE_CATEGORY as CHANGE_CATEGORY,
   type ArtifactTagFilter,
 } from '../lib/artifactPrefs'
 
@@ -47,6 +47,8 @@ export function TagScopeFilter({
   onIsolate,
   onAll,
   onClear,
+  footer,
+  highlight = false,
 }: {
   label: string
   values: string[]
@@ -58,6 +60,12 @@ export function TagScopeFilter({
   onIsolate: (val: string) => void
   onAll: () => void
   onClear: () => void
+  // Extra controls rendered at the bottom of the dropdown, below the value list —
+  // used by the "changes" scope for its "% changed" threshold slider.
+  footer?: ReactNode
+  // Force the trigger into its active (highlighted) style even when nothing is
+  // hidden — e.g. the change threshold is set but no value checkbox is off.
+  highlight?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -87,7 +95,7 @@ export function TagScopeFilter({
       <button
         onClick={() => setOpen((o) => !o)}
         className={`flex items-center gap-1.5 h-7 px-2.5 rounded-md border text-[11px] font-medium transition-colors cursor-pointer ${
-          open || hiddenCount > 0
+          open || hiddenCount > 0 || highlight
             ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800'
             : 'bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
         }`}
@@ -134,8 +142,38 @@ export function TagScopeFilter({
             ))}
           </div>
           <div className="px-3 py-1 border-t border-gray-100 dark:border-gray-700/60 text-[10px] text-gray-400 dark:text-gray-500">shift-click to isolate</div>
+          {footer}
         </div>
       )}
+    </div>
+  )
+}
+
+// ChangeThresholdControl is the "% changed" gate shown at the bottom of the
+// "changes" filter dropdown. A modified file whose change_ratio is below this
+// percentage is treated as identical (see effectiveChangeType): the slider says how
+// much of an image's pixels — or a video's frames — must differ before the change
+// "counts". 0 means any difference counts (the default).
+function ChangeThresholdControl({ value, onChange }: { value: number; onChange: (pct: number) => void }) {
+  return (
+    // stopPropagation so dragging the slider near the menu edge never closes it.
+    <div className="px-3 py-2 border-t border-gray-100 dark:border-gray-700/60" onClick={(e) => e.stopPropagation()}>
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-[11px] font-medium text-gray-600 dark:text-gray-300">% changed threshold</span>
+        <span className="text-[11px] tabular-nums text-gray-500 dark:text-gray-400">{value}%</span>
+      </div>
+      <input
+        type="range"
+        min={0}
+        max={100}
+        step={1}
+        value={value}
+        onChange={(e) => onChange(clampChangeThreshold(e.target.valueAsNumber))}
+        className="w-full accent-blue-500 cursor-pointer"
+      />
+      <div className="mt-1 text-[10px] leading-snug text-gray-400 dark:text-gray-500">
+        A modified file counts as identical until at least this share of its pixels (or video frames) differ.
+      </div>
     </div>
   )
 }
@@ -192,15 +230,18 @@ export function ArtifactFilterBar({
   // loadTagFilter).
   const changeTypes = CHANGE_TYPE_ORDER
   const changeOff = filter.scoped[CHANGE_CATEGORY] ?? []
+  // The active "% changed" gate (see ChangeThresholdControl / effectiveChangeType).
+  const changeThreshold = clampChangeThreshold(filter.changeThreshold)
 
   // Per-value item counts for each dropdown (see computeScopeCounts). `shownFilter`
   // is the current filter with this scope cleared, so each value's count reflects
   // the other active filters but not its own toggle.
   const scopeCounts = useCallback(
     (cat: string, values: string[]): Record<string, number> => {
+      const threshold = clampChangeThreshold(filter.changeThreshold)
       const hasValue = (f: FilterableArtifact, v: string) =>
         cat === TYPE_CATEGORY ? fileMediaType(f) === v
-          : cat === CHANGE_CATEGORY ? (f.change_type as string) === v
+          : cat === CHANGE_CATEGORY ? effectiveChangeType(f, threshold) === v
             : (f.tags ?? []).includes(`${cat}::${v}`)
       const shownFilter: ArtifactTagFilter = { ...filter, scoped: { ...filter.scoped, [cat]: [] } }
       return computeScopeCounts(files, values, hasValue, shownFilter)
@@ -323,6 +364,13 @@ export function ArtifactFilterBar({
           onIsolate={(val) => onFilterChange({ ...filter, scoped: { ...filter.scoped, [CHANGE_CATEGORY]: changeTypes.filter((x) => x !== val) } })}
           onAll={() => onFilterChange({ ...filter, scoped: { ...filter.scoped, [CHANGE_CATEGORY]: [] } })}
           onClear={() => onFilterChange({ ...filter, scoped: { ...filter.scoped, [CHANGE_CATEGORY]: [...changeTypes] } })}
+          highlight={changeThreshold > 0}
+          footer={
+            <ChangeThresholdControl
+              value={changeThreshold}
+              onChange={(pct) => onFilterChange({ ...filter, changeThreshold: pct })}
+            />
+          }
         />
       )}
     </div>

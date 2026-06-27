@@ -338,7 +338,7 @@ try {
       // Each array lists a scope's HIDDEN values (e.g. { theme: ['dark'] } drops
       // the dark shots) — documents the header tag filter actively in use plus the
       // per-file tag badges. Only meaningful on the artifacts (agent-1) page.
-      tagFilter?: { scoped?: Record<string, string[]>; free?: string[] }
+      tagFilter?: { scoped?: Record<string, string[]>; free?: string[]; changeThreshold?: number }
       // Opens a tag-filter dropdown by its button label (e.g. 'theme'), so the
       // capture documents the menu itself: the all/clear header and the value
       // checkboxes (all on by default). Only meaningful on the artifacts page.
@@ -796,6 +796,24 @@ try {
         openFilter: 'theme',
         showArtifacts: true,
       },
+      // The "changes" filter dropdown opened to show the "% changed" threshold
+      // slider at its foot: it sets how much of an image's pixels (or a video's
+      // frames) must differ before a "modified" file counts as changed; below it,
+      // a file is treated as identical. Seeded to 10% (so the trigger reads its
+      // active style and the slider sits mid-track) — at that gate the near-
+      // identical home shots (3% changed, see simReadyChangedSet ChangeRatio) fold
+      // into the "unchanged" count while the larger login/profile/webm diffs stay
+      // "modified", which the per-value counts in the menu document.
+      {
+        name: 'artifacts-threshold',
+        path: '/project/sim-project/agent/agent-1',
+        scrollTo: 'Changes',
+        viewport: { width: 1280, height: 1280 },
+        imageDiffMode: 'side-by-side',
+        tagFilter: { changeThreshold: 10 },
+        openFilter: 'changes',
+        showArtifacts: true,
+      },
       // The artifacts panel's info (i) tooltip, opened — documents what artifacts
       // are, the script contract, the progress marker, and the tags/filter rules
       // (the tooltip's last paragraph). Hovered open and captured against the
@@ -1067,7 +1085,7 @@ try {
             try {
               localStorage.setItem(
                 'hydra-artifact-tagfilter-v2-sim-project-agent-1',
-                JSON.stringify({ scoped: f.scoped ?? {}, free: f.free ?? [] }),
+                JSON.stringify({ scoped: f.scoped ?? {}, free: f.free ?? [], changeThreshold: f.changeThreshold ?? 0 }),
               )
             } catch {
               // ignore storage failures

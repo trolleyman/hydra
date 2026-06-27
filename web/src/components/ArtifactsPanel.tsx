@@ -6,8 +6,8 @@ import { api } from '../stores/apiClient'
 import type { ArtifactSet, ArtifactFile, ArtifactLogLine } from '../api'
 import { LoaderCircle, Image as ImageIcon, ImageOff, ChevronDown, ChevronRight, TriangleAlert, RefreshCw, ScrollText, SquarePlus, SquareMinus, SquareDot } from 'lucide-react'
 import { InfoTooltip } from './InfoTooltip'
-import { loadArtifactPrefs, saveArtifactPrefs, loadTagFilter, saveTagFilter, type ArtifactTagFilter } from '../lib/artifactPrefs'
-import { computeVisibleFiles, filterIsActive } from '../lib/artifactFilter'
+import { loadArtifactPrefs, saveArtifactPrefs, loadTagFilter, saveTagFilter, clampChangeThreshold, type ArtifactTagFilter } from '../lib/artifactPrefs'
+import { computeVisibleFiles, filterIsActive, effectiveChangeType } from '../lib/artifactFilter'
 import { ArtifactFilterBar, TagBadge } from './ArtifactFilterBar'
 import { stripAnsi } from '../lib/ansi'
 import { useIsDark } from '../lib/theme'
@@ -402,8 +402,11 @@ export function ImageDiffView({ left, right, mode }: { left?: string | null; rig
   return <OnionCompare left={left} right={right} />
 }
 
-function FileRow({ file, mode }: { file: ArtifactFile; mode: ImageDiffMode }) {
-  const ct = file.change_type as string
+function FileRow({ file, mode, changeThreshold = 0 }: { file: ArtifactFile; mode: ImageDiffMode; changeThreshold?: number }) {
+  // The badge reflects the *effective* change type, so a modified file gated below
+  // the "% changed" threshold shows as unchanged (no badge) — matching how it's
+  // filtered and counted.
+  const ct = effectiveChangeType(file, changeThreshold)
   return (
     // w-full: the masonry wrapper sets the tile's (column) width; the card fills it.
     <div className="p-3 w-full min-w-0 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40">
@@ -784,12 +787,15 @@ export function MasonryGrid({ items, spanScale = 1, spans, onSpanChange, scope }
 // right. Each tile auto-spans by aspect ratio (a wide desktop shot takes more
 // columns than a tall phone shot); side-by-side doubles the span so the before/after
 // pair has room. Drag a tile's edge to override its span.
-function FileGrid({ files, mode, spans, onSpanChange, scope }: {
+function FileGrid({ files, mode, spans, onSpanChange, scope, changeThreshold = 0 }: {
   files: ArtifactFile[]
   mode: ImageDiffMode
   spans: ArtifactSpans
   onSpanChange?: (key: string, span: number | null) => void
   scope?: string
+  // The active "% changed" threshold, forwarded to each FileRow so its change
+  // badge matches how the file was filtered/counted (see effectiveChangeType).
+  changeThreshold?: number
 }) {
   const spanScale = mode === 'side-by-side' ? 2 : 1
   const sources = useMemo(
@@ -806,7 +812,7 @@ function FileGrid({ files, mode, spans, onSpanChange, scope }: {
   const items = useMemo(
     () => files.map((f) => ({
       key: f.name,
-      node: <FileRow file={f} mode={mode} />,
+      node: <FileRow file={f} mode={mode} changeThreshold={changeThreshold} />,
       aspect: dims[f.name]?.aspect,
       pxWidth: dims[f.name]?.pxWidth,
       // Videos need a minimum tile width for their transport controls (see
@@ -816,7 +822,7 @@ function FileGrid({ files, mode, spans, onSpanChange, scope }: {
       // those resize via the edge handle only — see MasonryGrid's bodyResizable.
       bodyResizable: mode !== 'slider' && !isVideoArtifact(f.name),
     })),
-    [files, mode, dims],
+    [files, mode, dims, changeThreshold],
   )
   // pt-3 so the gap above the first row matches the card body's px-3 left inset.
   return (
@@ -1147,8 +1153,11 @@ function ArtifactSetCard({ set, mode, spans, onSpanChange, filter, search, onRef
   const searching = search.trim().length > 0
   const narrowed = isFiltered || searching
   const visibleFiles = computeVisibleFiles(set.files, filter, search)
-  const changedFiles = visibleFiles.filter((f) => f.change_type !== 'unchanged')
-  const totalChanged = set.files.filter((f) => f.change_type !== 'unchanged').length
+  // "changed" counts honour the change-type threshold, so a sub-threshold tweak
+  // doesn't inflate the "x/y changed" header (see effectiveChangeType).
+  const changeThreshold = clampChangeThreshold(filter.changeThreshold)
+  const changedFiles = visibleFiles.filter((f) => effectiveChangeType(f, changeThreshold) !== 'unchanged')
+  const totalChanged = set.files.filter((f) => effectiveChangeType(f, changeThreshold) !== 'unchanged').length
   const changedLabel = narrowed && changedFiles.length !== totalChanged ? `${changedFiles.length}/${totalChanged} changed` : `${totalChanged} changed`
   const noChanges = status === 'ready' && !set.changed
   // One side failed while the other rendered (status stays "ready"): surface a
@@ -1318,7 +1327,7 @@ function ArtifactSetCard({ set, mode, spans, onSpanChange, filter, search, onRef
               ) : visibleFiles.length === 0 ? (
                 <div className="my-2 text-xs text-gray-400 dark:text-gray-500">No files match {searching ? 'your search' : 'the current filters'}.</div>
               ) : (
-                <FileGrid files={visibleFiles} mode={mode} spans={spans} onSpanChange={onSpanChange} scope={`${agentId}/${set.name}`} />
+                <FileGrid files={visibleFiles} mode={mode} spans={spans} onSpanChange={onSpanChange} scope={`${agentId}/${set.name}`} changeThreshold={changeThreshold} />
               )}
             </>
           )}

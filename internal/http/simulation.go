@@ -1360,6 +1360,9 @@ func simReadyChangedSet() api.ArtifactSet {
 				LeftUrl:    ptr(simSVGUI("Home", false, "#64748b", "Draft", 360, 220)),
 				RightUrl:   ptr(simSVGUI("Home", false, "#16a34a", "Live", 360, 220)),
 				Width:      ptr(1440), Height: ptr(880),
+				// Only the centred tile + status badge moved, so a small fraction of
+				// pixels differ — below a ~10% threshold this reads as "identical".
+				ChangeRatio: ptr(0.03),
 			},
 			{
 				Name:       "home-dark.png",
@@ -1368,6 +1371,7 @@ func simReadyChangedSet() api.ArtifactSet {
 				LeftUrl:    ptr(simSVGUI("Home", true, "#64748b", "Draft", 360, 220)),
 				RightUrl:   ptr(simSVGUI("Home", true, "#16a34a", "Live", 360, 220)),
 				Width:      ptr(1440), Height: ptr(880),
+				ChangeRatio: ptr(0.03),
 			},
 			{
 				Name:       "login-phone.png",
@@ -1376,6 +1380,9 @@ func simReadyChangedSet() api.ArtifactSet {
 				LeftUrl:    ptr(simSVGUI("Login", false, "#64748b", "Draft", 240, 480)),
 				RightUrl:   ptr(simSVGUI("Login", false, "#16a34a", "Live", 240, 480)),
 				Width:      ptr(960), Height: ptr(1920),
+				// A larger fraction differs here, so this one stays "modified" past a
+				// ~10% threshold — contrasting with the near-identical home shots.
+				ChangeRatio: ptr(0.18),
 			},
 			{
 				Name:       "profile-phone-dark.png",
@@ -1384,6 +1391,7 @@ func simReadyChangedSet() api.ArtifactSet {
 				LeftUrl:    ptr(simSVGUI("Profile", true, "#64748b", "Draft", 240, 480)),
 				RightUrl:   ptr(simSVGUI("Profile", true, "#16a34a", "Live", 240, 480)),
 				Width:      ptr(960), Height: ptr(1920),
+				ChangeRatio: ptr(0.42),
 			},
 			{
 				Name:       "settings-phone.png",
@@ -1402,6 +1410,9 @@ func simReadyChangedSet() api.ArtifactSet {
 				LeftUrl:    ptr(simWebM(simVideoBefore)),
 				RightUrl:   ptr(simWebM(simVideoAfter)),
 				Width:      ptr(280), Height: ptr(150),
+				// Video ratio is the share of differing frames; this animation changes
+				// across much of its run, so it stays "modified" at a ~10% threshold.
+				ChangeRatio: ptr(0.5),
 			},
 			{
 				Name:       "about.png",

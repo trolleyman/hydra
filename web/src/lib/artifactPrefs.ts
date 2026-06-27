@@ -71,6 +71,21 @@ export function saveArtifactPrefs(
 export type ArtifactTagFilter = {
   scoped: Record<string, string[]>
   free: string[]
+  // changeThreshold is the "% changed" gate on the built-in change-type filter: a
+  // file reported 'modified' whose change_ratio is below this percentage (0–100)
+  // is treated as 'unchanged' — i.e. how much of an image's pixels (or a video's
+  // frames) must differ before the change "counts". 0 (the default) gates nothing,
+  // so any real difference counts as modified. Lives on the filter so it persists
+  // and flows through the same plumbing as the scoped/free toggles.
+  changeThreshold?: number
+}
+
+// Clamp an arbitrary value to a sane change-threshold percentage (0–100, rounded).
+// Used when reading back persisted state and when the slider reports a new value.
+export function clampChangeThreshold(v: unknown): number {
+  const n = typeof v === 'number' ? v : Number(v)
+  if (!Number.isFinite(n) || n <= 0) return 0
+  return Math.min(100, Math.round(n))
 }
 
 // The built-in change-type filter is a reserved scope (like the media-type one in
@@ -93,6 +108,7 @@ export function defaultTagFilter(): ArtifactTagFilter {
 // set. Drives whether the "reset filters" button shows.
 export function isDefaultTagFilter(filter: ArtifactTagFilter): boolean {
   if (filter.free.length > 0) return false
+  if (clampChangeThreshold(filter.changeThreshold) !== 0) return false
   const cats = new Set([...Object.keys(filter.scoped), ARTIFACT_CHANGE_CATEGORY])
   for (const cat of cats) {
     const off = filter.scoped[cat] ?? []
@@ -106,7 +122,7 @@ export function loadTagFilter(projectId: string | null, agentId: string): Artifa
   const raw = readLocal(artifactTagFilterKey(projectId, agentId))
   if (!raw) return defaultTagFilter()
   try {
-    const parsed = JSON.parse(raw) as { scoped?: unknown; free?: unknown }
+    const parsed = JSON.parse(raw) as { scoped?: unknown; free?: unknown; changeThreshold?: unknown }
     const scoped: Record<string, string[]> = {}
     if (parsed.scoped && typeof parsed.scoped === 'object') {
       // Normalize each category to a string[]. Tolerate the legacy single-value
@@ -122,6 +138,7 @@ export function loadTagFilter(projectId: string | null, agentId: string): Artifa
     return {
       scoped,
       free: Array.isArray(parsed.free) ? parsed.free.filter((t): t is string => typeof t === 'string') : [],
+      changeThreshold: clampChangeThreshold(parsed.changeThreshold),
     }
   } catch {
     return defaultTagFilter()

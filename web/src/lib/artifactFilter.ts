@@ -10,17 +10,36 @@
 // what the user turns OFF, hiding files that carry a hidden value. A plain tag (no
 // "::") is free-form and works the same way.
 
-import { ARTIFACT_CHANGE_CATEGORY as CHANGE_CATEGORY, type ArtifactTagFilter } from './artifactPrefs'
+import { ARTIFACT_CHANGE_CATEGORY as CHANGE_CATEGORY, clampChangeThreshold, type ArtifactTagFilter } from './artifactPrefs'
 import { isVideoArtifact } from '../components/VideoDiffView'
 
 // The minimal shape the filter/search needs from a file: its name (for the built-in
-// type filter and search), its tags, and — for before/after sets — its change_type.
-// Both ArtifactFile and RepositoryArtifactFile satisfy this structurally; the latter
-// has no change_type (a single ref has no diff), so it's optional here.
+// type filter and search), its tags, and — for before/after sets — its change_type
+// (plus change_ratio, how much of it differs, for the "% changed" threshold). Both
+// ArtifactFile and RepositoryArtifactFile satisfy this structurally; the latter has
+// no change_type/change_ratio (a single ref has no diff), so they're optional here.
 export type FilterableArtifact = {
   name: string
   tags?: string[] | null
   change_type?: string | null
+  change_ratio?: number | null
+}
+
+// effectiveChangeType applies the change-type filter's "% changed" threshold: a file
+// the backend reported 'modified' counts as 'unchanged' when the fraction of it that
+// differs (change_ratio: pixels for images, frames for video) is below the
+// threshold. So a 1px tweak no longer "counts" as a change once the user raises the
+// gate. Every other change type — and modified files with no change_ratio (e.g.
+// byte-compared video), or files with no change_type at all (single-ref output) —
+// passes through unchanged. With threshold 0 (the default) this is a no-op. Used
+// everywhere a file's change state drives the UI so the threshold is applied
+// consistently (filtering, counts, the row badge).
+export function effectiveChangeType(file: FilterableArtifact, thresholdPct: number): string {
+  const ct = (file.change_type ?? '') as string
+  if (ct !== 'modified' || thresholdPct <= 0) return ct
+  const ratio = file.change_ratio
+  if (ratio == null) return ct
+  return ratio * 100 < thresholdPct ? 'unchanged' : ct
 }
 
 // parseScopedTag splits "category::value" into its parts, or returns null for a
@@ -87,7 +106,9 @@ export function collectTags(files: FilterableArtifact[], pending?: string[]): Co
 // filterIsActive reports whether the filter would hide anything — i.e. any scoped
 // category or the free-form group has at least one value turned off.
 export function filterIsActive(filter: ArtifactTagFilter): boolean {
-  return Object.values(filter.scoped).some((off) => off.length > 0) || filter.free.length > 0
+  // A non-zero change threshold can reclassify 'modified' files to 'unchanged'
+  // (and unchanged is hidden by default), so it too can hide files.
+  return Object.values(filter.scoped).some((off) => off.length > 0) || filter.free.length > 0 || clampChangeThreshold(filter.changeThreshold) > 0
 }
 
 // fileMatchesFilter reports whether a file passes the filter. Each array lists the
@@ -107,10 +128,11 @@ export function fileMatchesFilter(file: FilterableArtifact, filter: ArtifactTagF
       if (off.includes(fileMediaType(file))) return false
     } else if (cat === CHANGE_CATEGORY) {
       // The built-in change-type scope matches the file's change_type (added/
-      // removed/modified/unchanged) — its intrinsic state, not a tag it carries. A
-      // file with no change_type (single-ref output) carries none of the hidden
-      // values, so it's unaffected.
-      if (off.includes(file.change_type as string)) return false
+      // removed/modified/unchanged) — its intrinsic state, not a tag it carries —
+      // after the "% changed" threshold may have downgraded a modified file to
+      // unchanged (see effectiveChangeType). A file with no change_type (single-ref
+      // output) carries none of the hidden values, so it's unaffected.
+      if (off.includes(effectiveChangeType(file, clampChangeThreshold(filter.changeThreshold)))) return false
     } else if (off.some((v) => tags.includes(`${cat}::${v}`))) {
       return false
     }
