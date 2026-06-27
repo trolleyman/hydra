@@ -1241,6 +1241,18 @@ export function LogView({ log, emptyText = 'Waiting for output…' }: { log: Art
     term.open(el)
     try { fit.fit() } catch { /* not laid out yet; the ResizeObserver refits */ }
     term.write('\x1b[?25l') // hide the cursor — this is a read-only view
+
+    // Ctrl/Cmd+C copies the current selection. stdin is disabled (read-only log),
+    // so the key would otherwise do nothing; intercept it before xterm to put the
+    // selected text on the clipboard, and let the keypress through when there's no
+    // selection so the browser's own handling still applies.
+    term.attachCustomKeyEventHandler((e) => {
+      if (e.type === 'keydown' && (e.ctrlKey || e.metaKey) && !e.altKey && (e.key === 'c' || e.key === 'C') && term.hasSelection()) {
+        navigator.clipboard?.writeText(term.getSelection())
+        return false
+      }
+      return true
+    })
     termRef.current = term
     fitRef.current = fit
 
@@ -1354,7 +1366,7 @@ function LiveLogColumn({ label, log, logUrl }: { label: string; log: ArtifactLog
   return (
     <LogColumnFrame label={label}>
       {settled ? (
-        <LogView log={settledLog ?? []} emptyText="Loading log…" />
+        <LogView log={settledLog ?? []} emptyText="Loading…" />
       ) : (
         <LogView log={log} />
       )}

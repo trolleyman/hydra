@@ -71,20 +71,17 @@ function MediaCell({ file }: { file: RepositoryArtifactFile }) {
 function PersistedLog({ url }: { url: string }) {
   const [open, setOpen] = useState(false)
   const [lines, setLines] = useState<ArtifactLogLine[] | null>(null)
-  const [loading, setLoading] = useState(false)
   const [err, setErr] = useState<string | null>(null)
 
   useEffect(() => { setLines(null); setErr(null) }, [url])
   useEffect(() => {
     if (!open || lines !== null) return
     let cancelled = false
-    setLoading(true)
     setErr(null)
     fetch(url)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then((j: { lines?: ArtifactLogLine[] }) => { if (!cancelled) setLines(j.lines ?? []) })
       .catch((e) => { if (!cancelled) setErr(e instanceof Error ? e.message : String(e)) })
-      .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
   }, [open, url, lines])
 
@@ -97,12 +94,13 @@ function PersistedLog({ url }: { url: string }) {
         {open ? 'Hide' : 'Show'} build log
       </button>
       {open && (
-        loading ? (
-          <div className="my-2 text-xs text-gray-400 dark:text-gray-500">Loading log…</div>
-        ) : err ? (
+        err ? (
           <div className="my-2 text-xs text-red-500 dark:text-red-400">Failed to load log: {err}</div>
         ) : (
-          <div className="my-2"><LogView log={lines ?? []} emptyText="No output" /></div>
+          // While the log is in flight `lines` is still null — show the terminal
+          // straight away with "Loading…" inside it rather than a bare line of
+          // text, then swap in the output (or "No output") once it arrives.
+          <div className="my-2"><LogView log={lines ?? []} emptyText={lines === null ? 'Loading…' : 'No output'} /></div>
         )
       )}
     </div>

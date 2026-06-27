@@ -120,6 +120,23 @@ code.hljs.hljs-line { padding: 0 0 0 0.75rem; }
   background-color: rgba(107, 114, 128, 0.8);
 }
 
+/* xterm v6 ships its own overlay scrollbar (the VS Code "scrollable-element"
+   slider — a thin, button-less bar that fades in on hover). But its legacy
+   `.xterm-viewport` still declares `overflow-y: scroll`, so on platforms with
+   classic (non-overlay) native scrollbars — desktop Linux Chromium especially —
+   a SECOND, native scrollbar with increment/decrement arrow buttons is painted
+   on top of xterm's own. The global rules above can't drop those arrows there
+   because the viewport opts into `scrollbar-width: thin`, which makes Chromium
+   ignore the `::-webkit-scrollbar*` overrides. So hide the redundant native
+   scrollbar on the viewport outright and let xterm's clean overlay slider stand
+   alone. */
+.xterm .xterm-viewport {
+  scrollbar-width: none;
+}
+.xterm .xterm-viewport::-webkit-scrollbar {
+  display: none;
+}
+
 /* The prompt editor's highlight backdrop syntax-colours code blocks too, but it
    uses the proportional UI font and must stay glyph-aligned with the (invisible)
    textarea caret underneath. Token COLOUR is free — it doesn't affect layout —
