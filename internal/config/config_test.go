@@ -9,6 +9,55 @@ import (
 
 func ptr(s string) *string { return &s }
 
+func TestResolveFullscreen(t *testing.T) {
+	// Unset everywhere → disabled (the safe default that forces the classic renderer).
+	if (Config{}).ResolveFullscreen("claude") {
+		t.Error("fullscreen should default to false")
+	}
+	// Set at the defaults level → applies to every agent type.
+	def := Config{Defaults: AgentConfig{Fullscreen: boolPtr(true)}}
+	if !def.ResolveFullscreen("claude") {
+		t.Error("defaults fullscreen=true should resolve true for claude")
+	}
+	// A per-agent override wins over the default (either direction).
+	over := Config{
+		Defaults: AgentConfig{Fullscreen: boolPtr(true)},
+		Agents:   map[string]AgentConfig{"claude": {Fullscreen: boolPtr(false)}},
+	}
+	if over.ResolveFullscreen("claude") {
+		t.Error("[claude] fullscreen=false should override defaults true")
+	}
+	if !over.ResolveFullscreen("gemini") {
+		t.Error("gemini should still inherit the defaults fullscreen=true")
+	}
+}
+
+func TestFullscreenRenderRoundTrip(t *testing.T) {
+	// The empty template documents fullscreen as a commented-out default.
+	tmpl := renderConfig(nil, Config{})
+	if !strings.Contains(tmpl, docPrefix+" enable Claude Code's fullscreen") {
+		t.Errorf("template missing fullscreen doc line:\n%s", tmpl)
+	}
+	if !strings.Contains(tmpl, "# fullscreen = false") {
+		t.Errorf("template missing commented fullscreen default:\n%s", tmpl)
+	}
+
+	// An explicit per-agent override renders active under [claude] and survives a
+	// decode→render round-trip (i.e. it is not dropped on save).
+	cfg := Config{Agents: map[string]AgentConfig{"claude": {Fullscreen: boolPtr(true)}}}
+	out := renderConfig(nil, cfg)
+	if !strings.Contains(out, "[claude]") || !strings.Contains(out, "fullscreen = true") {
+		t.Errorf("claude fullscreen override not rendered:\n%s", out)
+	}
+	decoded, err := decodeConfig([]byte(out))
+	if err != nil {
+		t.Fatalf("decode rendered config: %v", err)
+	}
+	if c := decoded.Agents["claude"]; c.Fullscreen == nil || !*c.Fullscreen {
+		t.Errorf("claude fullscreen lost on round-trip: %+v", decoded.Agents["claude"])
+	}
+}
+
 func TestMarshalConfig_MultiLineStrings(t *testing.T) {
 	prePrompt := "You are an agent.\n- Do stuff\n- More stuff\n"
 

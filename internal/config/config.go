@@ -142,6 +142,13 @@ type AgentConfig struct {
 	Sandbox *SandboxConfig `toml:"sandbox"`
 	// PrePrompt is prepended to every agent prompt.
 	PrePrompt *string `toml:"pre_prompt"`
+	// Fullscreen enables Claude Code's fullscreen (alternate-screen) rendering.
+	// Only Claude reads it; nil/false means disabled, in which case Hydra forces
+	// the classic renderer (see ResolveFullscreen / claudeRenderingEnv). It lives
+	// on AgentConfig — rather than being Claude-only in the type system — so it can
+	// be set at the defaults level or overridden under [claude], exactly like
+	// pre_prompt.
+	Fullscreen *bool `toml:"fullscreen"`
 }
 
 // ArtifactScript describes a per-project command that generates visual
@@ -432,6 +439,9 @@ func (a *AgentConfig) Merge(other AgentConfig) {
 	if other.PrePrompt != nil {
 		a.PrePrompt = other.PrePrompt
 	}
+	if other.Fullscreen != nil {
+		a.Fullscreen = other.Fullscreen
+	}
 }
 
 // Merge merges another SandboxConfig into this one (path lists are replaced,
@@ -562,6 +572,17 @@ func (c Config) ResolveSandboxOptions(agentType string) (writable, masked, resto
 	return writable, masked, restore, cow, net, preSpawn
 }
 
+// ResolveFullscreen reports whether Claude Code's fullscreen (alternate-screen)
+// rendering should be enabled for an agent type (the per-agent override, else the
+// defaults). It defaults to false: with fullscreen off Hydra forces the classic
+// renderer, which keeps the web terminal's native scrollbar and select-to-copy
+// working and avoids the one-time opt-in prompt that collides with the resume
+// "Continue" nudge. Only meaningful for Claude.
+func (c Config) ResolveFullscreen(agentType string) bool {
+	resolved := c.GetResolvedConfig(agentType)
+	return resolved.Fullscreen != nil && *resolved.Fullscreen
+}
+
 // ResolvePreExitScript returns the sandboxed pre-exit teardown script for an
 // agent type (the per-agent override, else the defaults), or "" when unset.
 func (c Config) ResolvePreExitScript(agentType string) string {
@@ -668,6 +689,17 @@ func defaultsSpec() []specEntry {
 			get: func(a AgentConfig) (string, bool) {
 				if a.PrePrompt != nil {
 					return tomlStringValue(*a.PrePrompt), true
+				}
+				return "", false
+			},
+		},
+		{
+			table: "", key: "fullscreen",
+			doc: "enable Claude Code's fullscreen (alternate-screen) rendering. Claude only; off by default so the web terminal keeps native scrollbar + select-to-copy and skips the opt-in prompt. Set under [claude] to try it.",
+			def: func() string { return "false" },
+			get: func(a AgentConfig) (string, bool) {
+				if a.Fullscreen != nil {
+					return fmt.Sprintf("%t", *a.Fullscreen), true
 				}
 				return "", false
 			},
@@ -1426,6 +1458,12 @@ func emitAgent(out *[]string, name string, a AgentConfig, keyComments, tableComm
 		}
 		*out = append(*out, "pre_prompt = "+tomlStringValue(*a.PrePrompt))
 	}
+	if a.Fullscreen != nil {
+		if uc := keyComments[name+"\x00fullscreen"]; len(uc) > 0 {
+			*out = append(*out, uc...)
+		}
+		*out = append(*out, fmt.Sprintf("fullscreen = %t", *a.Fullscreen))
+	}
 	sb := a.Sandbox
 	if sb == nil || !sandboxHasContent(sb) {
 		return
@@ -1470,7 +1508,7 @@ func emitSetField(out *[]string, table, key, text string, set bool, keyComments 
 }
 
 func agentHasContent(a AgentConfig) bool {
-	return a.PrePrompt != nil || (a.Sandbox != nil && sandboxHasContent(a.Sandbox))
+	return a.PrePrompt != nil || a.Fullscreen != nil || (a.Sandbox != nil && sandboxHasContent(a.Sandbox))
 }
 
 func sandboxHasContent(sb *SandboxConfig) bool {
