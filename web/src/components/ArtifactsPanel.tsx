@@ -11,7 +11,7 @@ import { stripAnsi } from '../lib/ansi'
 import { useIsDark } from '../lib/theme'
 import {
   checkerStyle, IMG_CLASS, OVERLAY_CLASS, TAG_CLASS, makeAuxOpen,
-  DIFF_COLOR, DIFF_PIXEL_THRESHOLD,
+  DIFF_COLOR, DIFF_PIXEL_THRESHOLD, DIFF_ALPHA,
 } from './artifactDiffShared'
 import { type ArtifactSpans, BASE_ARTIFACT_COLUMNS, defaultSpanForAspect } from '../lib/artifactColumns'
 import { VideoDiffView, isVideoArtifact, VIDEO_MIN_TILE_PX } from './VideoDiffView'
@@ -142,9 +142,9 @@ export function SegmentedToggle<T extends string>({ value, onChange, options }: 
 // A/B switch: Before / After, with a Highlight checkbox. Before & After stay
 // mounted and stacked, so the toggle flips which is shown for an instant,
 // flicker-free hard switch. Clicking the image (or the buttons) flips Before↔After.
-// Ticking Highlight overlays the pixel-diff (every changed pixel painted magenta,
-// see DiffCanvas) on top of whichever side is shown, so the changes stay marked as
-// you flip between Before and After. Highlight is disabled when only one side
+// Ticking Highlight overlays the pixel-diff (every changed pixel tinted semi-
+// transparent magenta, see DiffCanvas) on top of whichever side is shown, so the
+// changes stay marked — yet still readable underneath — as you flip Before↔After. Highlight is disabled when only one side
 // exists (an added/removed file — there's nothing to diff). A missing side shows
 // the "No image" placeholder; middle-click opens the currently-shown image in a
 // new tab.
@@ -353,7 +353,7 @@ function DiffCanvas({ left, right }: { left: string; right: string }) {
             out[i] = DIFF_COLOR[0]
             out[i + 1] = DIFF_COLOR[1]
             out[i + 2] = DIFF_COLOR[2]
-            out[i + 3] = 255
+            out[i + 3] = DIFF_ALPHA
           }
         }
         ctx.putImageData(overlay, 0, 0)

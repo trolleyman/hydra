@@ -34,6 +34,10 @@ export const StorageKeys = {
   // the initial PTY size on the next connection so a fresh/resumed agent renders
   // at the right width instead of flashing the 80x24 default (see AgentTerminal).
   terminalGeometry: 'hydra-terminal-geometry',
+  // User-chosen default terminal height (rows) for newly spawned heads, set on the
+  // user settings page. Used as the spawn height only when no last-height geometry
+  // exists yet (see lib/terminalGeometry).
+  terminalDefaultRows: 'hydra-terminal-default-rows',
 
   repoWrap: 'hydra-repo-wrap',
   repoIcons: 'hydra-repo-icons',

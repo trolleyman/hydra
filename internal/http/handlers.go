@@ -788,6 +788,21 @@ func (s *Server) DevRestart(_ context.Context, _ api.DevRestartRequestObject) (a
 	return api.DevRestart200Response{}, nil
 }
 
+// spawnTermSize sanitises the optional rows/cols a spawn request carries into
+// uint16 PTY dimensions. A nil, non-positive, or absurdly large value becomes 0,
+// signalling "unset" so the caller can apply its own fallback (or leave it to the
+// PTY's built-in 24x80 default). The 2000 ceiling mirrors parseTermSize on the
+// terminal WebSocket so a bogus client can't request a giant PTY.
+func spawnTermSize(rows, cols *int) (uint16, uint16) {
+	clamp := func(v *int) uint16 {
+		if v == nil || *v <= 0 || *v > 2000 {
+			return 0
+		}
+		return uint16(*v)
+	}
+	return clamp(rows), clamp(cols)
+}
+
 func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestObject) (api.SpawnAgentResponseObject, error) {
 	if request.Body == nil {
 		return api.SpawnAgent400JSONResponse{
@@ -836,6 +851,21 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 		ephemeral = *request.Body.Ephemeral
 	}
 
+	// Seed the new head's PTY at the spawning browser's geometry so the agent
+	// renders at the right width from its first paint instead of the classic
+	// 80x24 — those narrow-wrapped bytes can't be re-flowed once a wider client
+	// replays the scrollback. The browser sends the last width it measured and
+	// either its last height or the user's configured default height. For any
+	// value the client omits (a fresh browser, or a non-web spawn), fall back to
+	// the project's most recently reported width; a missing height is left to the
+	// PTY's own 24-row default.
+	rows, cols := spawnTermSize(request.Body.Rows, request.Body.Cols)
+	if cols == 0 {
+		if _, c, err := s.DB.LatestTermSizeForProject(projectRoot); err == nil && c > 0 {
+			cols = c
+		}
+	}
+
 	head, err := heads.SpawnHead(ctx, s.Sessions, s.DB, projectRoot, heads.SpawnHeadOptions{
 		ID:            id,
 		PrePrompt:     prePrompt,
@@ -843,6 +873,8 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 		AgentType:     agentType,
 		BaseBranch:    baseBranch,
 		Ephemeral:     ephemeral,
+		Rows:          rows,
+		Cols:          cols,
 		BackgroundCtx: s.BackgroundCtx,
 		OnTitleChange: func() { s.notifyAgentsChanged(projectRoot, false) },
 	})
