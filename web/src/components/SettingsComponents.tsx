@@ -67,6 +67,23 @@ function ThemeSection() {
 // default.
 function TerminalSection() {
   const [rows, setRows] = useDefaultTerminalRows()
+  // Local draft so the field can hold an in-progress value (e.g. typing "3" on
+  // the way to "30") without the min-clamp snapping it up on every keystroke.
+  // We only normalise — clamp to [MIN, MAX] — when the field loses focus.
+  const [draft, setDraft] = useState<string>(rows == null ? '' : String(rows))
+  // Re-sync when the stored value changes from elsewhere (another tab/page),
+  // but not while the user is mid-edit (the input owns the value when focused).
+  useEffect(() => {
+    setDraft(rows == null ? '' : String(rows))
+  }, [rows])
+  const commit = () => {
+    if (draft.trim() === '') { setRows(null); return }
+    const n = parseInt(draft, 10)
+    if (!Number.isFinite(n)) { setDraft(rows == null ? '' : String(rows)); return }
+    const clamped = Math.min(MAX_SPAWN_ROWS, Math.max(MIN_SPAWN_ROWS, n))
+    setRows(clamped)
+    setDraft(String(clamped))
+  }
   return (
     <SettingSection
       title="Terminal"
@@ -77,14 +94,10 @@ function TerminalSection() {
           type="number"
           min={MIN_SPAWN_ROWS}
           max={MAX_SPAWN_ROWS}
-          value={rows ?? ''}
-          onChange={(e) => {
-            const v = e.target.value
-            if (v === '') { setRows(null); return }
-            const n = parseInt(v, 10)
-            if (!Number.isFinite(n)) return
-            setRows(Math.min(MAX_SPAWN_ROWS, Math.max(MIN_SPAWN_ROWS, n)))
-          }}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }}
           placeholder={String(DEFAULT_SPAWN_ROWS)}
           aria-label="Default terminal height in rows"
           className="w-28 text-sm px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-100 placeholder-gray-300 dark:placeholder-gray-600 font-mono shadow-inner focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
