@@ -234,7 +234,7 @@ export function AgentSidebarItem({
         // can shrink inside the flex row) for the horizontal ellipsis.
         <div className="mt-0.5 ml-4 h-4 flex items-center overflow-hidden text-[11px] text-gray-400 dark:text-gray-500">
           <span className="min-w-0 truncate">
-            {renderMarkdown(agentStatusDetail(agent), { dollarCommand: true })}
+            {renderMarkdown(agentStatusDetail(agent), { dollarCommand: true, singleLine: true })}
           </span>
         </div>
       )}

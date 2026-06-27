@@ -789,6 +789,9 @@ type SpawnAgentRequest struct {
 	// BaseBranch Base branch to create the worktree from (defaults to current branch)
 	BaseBranch *string `json:"base_branch,omitempty"`
 
+	// Cols Initial PTY width (columns), seeded from the spawning browser's last terminal geometry so the agent renders at the right width immediately instead of the 80-column default. When omitted, the server falls back to the project's most recently reported width (else 80).
+	Cols *int `json:"cols,omitempty"`
+
 	// Ephemeral If true, the agent is a throwaway test agent whose worktree and branch are torn down when it stops.
 	Ephemeral *bool `json:"ephemeral,omitempty"`
 
@@ -797,6 +800,9 @@ type SpawnAgentRequest struct {
 
 	// Prompt The prompt to give to the agent
 	Prompt *string `json:"prompt,omitempty"`
+
+	// Rows Initial PTY height (rows). The browser sends its last terminal height, or the user's configured default height when it has none yet. When omitted the PTY uses its built-in 24-row default.
+	Rows *int `json:"rows,omitempty"`
 }
 
 // StatusResponse defines model for StatusResponse.

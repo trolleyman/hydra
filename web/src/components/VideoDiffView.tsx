@@ -19,7 +19,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { Play, Pause, Repeat, VideoOff, StepBack, StepForward } from 'lucide-react'
 import {
   checkerStyle, IMG_CLASS, OVERLAY_CLASS, TAG_CLASS, makeAuxOpen,
-  DIFF_COLOR, DIFF_PIXEL_THRESHOLD,
+  DIFF_COLOR, DIFF_PIXEL_THRESHOLD, DIFF_ALPHA,
 } from './artifactDiffShared'
 import { SegmentedToggle, type ImageDiffMode } from './ArtifactsPanel'
 
@@ -341,7 +341,7 @@ function VideoAB({ controller, left, right }: { controller: Controller; left?: s
           out[i] = DIFF_COLOR[0]
           out[i + 1] = DIFF_COLOR[1]
           out[i + 2] = DIFF_COLOR[2]
-          out[i + 3] = 255
+          out[i + 3] = DIFF_ALPHA
         }
       }
       ctx.putImageData(overlay, 0, 0)

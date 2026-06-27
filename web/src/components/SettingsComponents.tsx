@@ -8,6 +8,7 @@ import { InfoTooltip } from './InfoTooltip'
 import { AgentTerminal } from './AgentTerminal'
 import { ShellEditor } from './ShellEditor'
 import { useThemeStore, THEME_MODES, THEME_MODE_ICON, THEME_MODE_LABEL } from '../lib/theme'
+import { useDefaultTerminalRows, DEFAULT_SPAWN_ROWS, MIN_SPAWN_ROWS, MAX_SPAWN_ROWS } from '../lib/terminalGeometry'
 import { AgentTypeIcon, AGENT_ACCENT, type AgentTypeIconName } from './AgentTypeIcon'
 
 // A labelled block at the top of settings: a Title-Case heading, an optional
@@ -53,6 +54,42 @@ function ThemeSection() {
             </button>
           )
         })}
+      </div>
+    </SettingSection>
+  )
+}
+
+// Terminal — a client-only user preference (localStorage, global; not project-
+// scoped, so it reads/writes the same value on either settings page, like Theme)
+// for the height new heads start at. Width always follows the browser's last
+// terminal width; height follows the last height too, falling back to this
+// default when the browser has no terminal history yet. Empty input = built-in
+// default.
+function TerminalSection() {
+  const [rows, setRows] = useDefaultTerminalRows()
+  return (
+    <SettingSection
+      title="Terminal"
+      description={`Height (rows) new heads start at when this browser has no last terminal height yet. Width always follows your last terminal width. Default ${DEFAULT_SPAWN_ROWS}.`}
+    >
+      <div className="flex items-center gap-2">
+        <input
+          type="number"
+          min={MIN_SPAWN_ROWS}
+          max={MAX_SPAWN_ROWS}
+          value={rows ?? ''}
+          onChange={(e) => {
+            const v = e.target.value
+            if (v === '') { setRows(null); return }
+            const n = parseInt(v, 10)
+            if (!Number.isFinite(n)) return
+            setRows(Math.min(MAX_SPAWN_ROWS, Math.max(MIN_SPAWN_ROWS, n)))
+          }}
+          placeholder={String(DEFAULT_SPAWN_ROWS)}
+          aria-label="Default terminal height in rows"
+          className="w-28 text-sm px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-100 placeholder-gray-300 dark:placeholder-gray-600 font-mono shadow-inner focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+        />
+        <span className="text-xs text-gray-400 dark:text-gray-500">rows</span>
       </div>
     </SettingSection>
   )
@@ -930,6 +967,7 @@ export function SettingsContent({
   return (
     <>
       <ThemeSection />
+      <TerminalSection />
       {scopeSelector}
       <SettingSection
         title="Agent"
