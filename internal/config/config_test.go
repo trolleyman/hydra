@@ -627,6 +627,57 @@ command = "bun shots.ts"
 	}
 }
 
+func TestArtifactConcurrencyRender(t *testing.T) {
+	num := func(n int) *int { return &n }
+
+	// A positive value is written authoritatively.
+	out := renderConfig(nil, Config{ArtifactConcurrency: num(5)})
+	if !strings.Contains(out, "artifact_concurrency = 5") {
+		t.Errorf("expected explicit value, got:\n%s", out)
+	}
+	loaded, err := decodeConfig([]byte(out))
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if loaded.ResolveArtifactConcurrency() != 5 {
+		t.Errorf("want 5, got %d", loaded.ResolveArtifactConcurrency())
+	}
+
+	// 0 is a real, distinct value: unlimited. It must survive a round-trip (not be
+	// confused with unset, which would resolve to the default).
+	unlimited := renderConfig(nil, Config{ArtifactConcurrency: num(0)})
+	if !strings.Contains(unlimited, "artifact_concurrency = 0") {
+		t.Errorf("expected 'artifact_concurrency = 0' for unlimited, got:\n%s", unlimited)
+	}
+	loadedU, err := decodeConfig([]byte(unlimited))
+	if err != nil {
+		t.Fatalf("decode unlimited: %v", err)
+	}
+	if loadedU.ArtifactConcurrency == nil || *loadedU.ArtifactConcurrency != 0 || loadedU.ResolveArtifactConcurrency() != 0 {
+		t.Errorf("0 (unlimited) should round-trip as a set value, got %v", loadedU.ArtifactConcurrency)
+	}
+
+	// Clearing it (nil) resets to the default: the existing file's value is NOT
+	// preserved — the line is re-emitted commented-out, so a later load falls back
+	// to DefaultArtifactConcurrency. This is what makes the UI's "clear" work.
+	const existing = `artifact_concurrency = 7
+`
+	reset := renderConfig([]byte(existing), Config{ArtifactConcurrency: nil})
+	if strings.Contains(reset, "\nartifact_concurrency = 7") || strings.Contains(reset, "\nartifact_concurrency = ") {
+		t.Errorf("clearing should not preserve the old value:\n%s", reset)
+	}
+	if !strings.Contains(reset, "# artifact_concurrency = 2") {
+		t.Errorf("clearing should re-emit the commented default:\n%s", reset)
+	}
+	loaded2, err := decodeConfig([]byte(reset))
+	if err != nil {
+		t.Fatalf("decode reset: %v", err)
+	}
+	if loaded2.ArtifactConcurrency != nil || loaded2.ResolveArtifactConcurrency() != DefaultArtifactConcurrency {
+		t.Errorf("after reset want unset (default), got %v", loaded2.ArtifactConcurrency)
+	}
+}
+
 func TestArtifactsSurviveDefaultsOnlySave(t *testing.T) {
 	const existing = `[sandbox]
 writable_paths = ["~/.cache"]

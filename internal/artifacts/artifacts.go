@@ -73,11 +73,11 @@ const (
 	// DefaultMaxAge and DefaultMaxBytes bound the on-disk artifact cache.
 	DefaultMaxAge   = 7 * 24 * time.Hour
 	DefaultMaxBytes = int64(2) << 30 // 2 GiB
-	// maxConcurrentGen caps how many generations run at once. Generations are
-	// heavy (a full build per ref) and run untrusted ref code, so distinct refs
-	// must not fan out without bound. A normal diff view (left+right of one
-	// script) saturates this; further requests queue behind the per-entry lock.
-	maxConcurrentGen = 2
+	// Generations are heavy (a full build per ref) and run untrusted ref code, so
+	// distinct refs must not fan out without bound: how many run at once is capped
+	// by genScheduler, whose limit comes from config.ArtifactConcurrency (default
+	// config.DefaultArtifactConcurrency). A normal diff view (left+right of one
+	// script) saturates the default; further requests queue, foreground first.
 	// maxLogLines bounds the in-memory live log kept per in-flight generation so
 	// a chatty build can't grow it without bound. Once exceeded, oldest lines are
 	// dropped (the latest output is what the UI is watching).
@@ -587,15 +587,26 @@ type Manager struct {
 	markerSeen map[string]bool      // entry dir -> a ProgressMarker line has been seen (stop stdout-as-progress)
 	subs       map[int]chan Event   // event subscribers (live progress streaming)
 	nextSub    int                  // next subscriber id
-	sem        chan struct{}        // bounds concurrent generations (maxConcurrentGen)
+
+	// sched bounds concurrent generations and prioritizes foreground (a user
+	// viewing a diff) over background (proactive pre-generation) work, without
+	// preempting in-flight runs. Its limit comes from config.ArtifactConcurrency.
+	sched *genScheduler
 
 	// pool reuses a bounded set of detached worktrees for commit checkouts rather
 	// than creating/destroying one per generation (PLAN #51).
 	pool *slotPool
 }
 
-// NewManager returns a Manager for the given project root.
+// NewManager returns a Manager for the given project root. The generation
+// concurrency is read from the project's config (artifact_concurrency, default
+// config.DefaultArtifactConcurrency) and can be updated later via SetConcurrency
+// when the config changes.
 func NewManager(projectRoot string) *Manager {
+	concurrency := config.DefaultArtifactConcurrency
+	if cfg, err := config.Load(projectRoot); err == nil {
+		concurrency = cfg.ResolveArtifactConcurrency()
+	}
 	m := &Manager{
 		projectRoot: projectRoot,
 		gens:        map[string]struct{}{},
@@ -604,11 +615,38 @@ func NewManager(projectRoot string) *Manager {
 		logs:        map[string][]LogLine{},
 		markerSeen:  map[string]bool{},
 		subs:        map[int]chan Event{},
-		sem:         make(chan struct{}, maxConcurrentGen),
+		sched:       newGenScheduler(concurrency),
 	}
-	m.pool = newSlotPool(m.projectRoot, m.slotsDir(), maxSlots)
+	m.pool = newSlotPool(m.projectRoot, m.slotsDir(), slotsForConcurrency(concurrency))
 	_ = paths.CreateGitignoreAllInDir(m.root())
 	return m
+}
+
+// SetConcurrency updates the generation parallelism (from a config change),
+// resizing both the priority scheduler and the worktree-slot pool. n is the cap,
+// where 0 means unlimited (no cap). Safe to call at any time; raising it (or
+// going unlimited) immediately admits queued work, lowering it lets the excess
+// drain without preempting in-flight generations.
+func (m *Manager) SetConcurrency(n int) {
+	if n < 0 {
+		n = 0
+	}
+	m.sched.setLimit(n)
+	m.pool.setMaxSlots(slotsForConcurrency(n))
+}
+
+// slotsForConcurrency sizes the worktree-slot pool for a generation concurrency.
+// Every commit-side generation holds one slot for its duration, so the pool must
+// have at least `n` slots or concurrent commit-side gens would deadlock waiting
+// for a slot. The +2 keeps freed slots "warm" on recently-used commits for
+// zero-cost affinity reuse, and the floor of maxSlots preserves that headroom at
+// the default concurrency. n == 0 (unlimited concurrency) maps to 0 (an
+// unbounded pool) so commit-side gens never block on a slot.
+func slotsForConcurrency(n int) int {
+	if n <= 0 {
+		return 0
+	}
+	return max(maxSlots, n+2)
 }
 
 // Subscribe registers a listener for generation events and returns the event
@@ -732,10 +770,29 @@ func (m *Manager) versionKey(v Version) (key, ref string, err error) {
 	return keyKindCommit + "/" + sha, sha, nil
 }
 
-// Get returns the cache entry for (spec, v), starting a background generation
+// Get returns the cache entry for (spec, v), starting a foreground generation
 // if it is neither cached nor already in flight. A returned Meta with status
-// StatusGenerating means the caller should poll again shortly.
+// StatusGenerating means the caller should poll again shortly. Foreground work
+// is prioritized over background pre-generation (see Prefetch): if this entry is
+// already queued as background, the call promotes it so it stops waiting behind
+// other background work.
 func (m *Manager) Get(spec config.ArtifactScript, v Version) (Meta, error) {
+	return m.get(spec, v, true)
+}
+
+// Prefetch starts a background generation for (spec, v) if it is neither cached
+// nor already in flight, so a later view finds it ready instead of triggering
+// the work on click. It returns immediately; the result is the cache entry it
+// will populate (StatusGenerating while it runs). Background generations yield
+// their slot to foreground requests in the queue but are never preempted once
+// running, so the proactive work is never wasted — a subsequent Get for the same
+// version reuses the in-flight run or its cached result. See the daemon's
+// artifact prefetcher (internal/http/prefetch.go).
+func (m *Manager) Prefetch(spec config.ArtifactScript, v Version) (Meta, error) {
+	return m.get(spec, v, false)
+}
+
+func (m *Manager) get(spec config.ArtifactScript, v Version, fg bool) (Meta, error) {
 	key, ref, err := m.versionKey(v)
 	if err != nil {
 		return Meta{}, errtrace.Wrap(err)
@@ -753,6 +810,11 @@ func (m *Manager) Get(spec config.ArtifactScript, v Version) (Meta, error) {
 		started := m.startedAt[dir]
 		logCopy := append([]LogLine(nil), m.logs[dir]...)
 		m.mu.Unlock()
+		// A foreground view of an entry already queued as background bumps it to
+		// the front of the queue (a no-op once it is running or already fg).
+		if fg {
+			m.sched.promote(dir)
+		}
 		return Meta{Script: spec.Name, Key: key, Ref: ref, Status: StatusGenerating, Progress: prog, StartedAt: started, Log: logCopy}, nil
 	}
 	started := time.Now().Unix()
@@ -762,11 +824,11 @@ func (m *Manager) Get(spec config.ArtifactScript, v Version) (Meta, error) {
 	m.mu.Unlock()
 
 	go func() {
-		// Bound concurrent generations. The entry stays marked in-flight while
-		// queued, so duplicate requests keep getting StatusGenerating instead of
-		// piling up more builds.
-		m.sem <- struct{}{}
-		defer func() { <-m.sem }()
+		// Bound concurrent generations, foreground before background. The entry
+		// stays marked in-flight while queued, so duplicate requests keep getting
+		// StatusGenerating instead of piling up more builds.
+		m.sched.acquire(dir, fg)
+		defer m.sched.release()
 
 		meta := m.generate(spec, v, key, ref)
 		if err := writeMeta(dir, meta); err != nil {

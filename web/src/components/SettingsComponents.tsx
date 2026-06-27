@@ -536,9 +536,15 @@ export function ConfigForm({
 export function ArtifactsEditor({
   artifacts,
   onChange,
+  concurrency,
+  onConcurrencyChange,
 }: {
   artifacts: ArtifactScript[]
   onChange: (artifacts: ArtifactScript[]) => void
+  // Project-level parallelism for artifact generation (artifact_concurrency).
+  // undefined/null means "use the built-in default".
+  concurrency?: number | null
+  onConcurrencyChange: (n: number | undefined) => void
 }) {
   function update(index: number, patch: Partial<ArtifactScript>) {
     const next = artifacts.map((a, i) => (i === index ? { ...a, ...patch } : a))
@@ -572,6 +578,30 @@ export function ArtifactsEditor({
       <p className="text-xs text-gray-500 dark:text-gray-400 mb-4 ml-10">
         Visual artifacts generated for the diff viewer, stored as <span className="font-mono">[[artifacts]]</span> in config.toml.
       </p>
+
+      <div className="ml-10 mb-5 flex items-end gap-3">
+        <div className="space-y-1">
+          <label className="text-xs font-semibold text-gray-400 dark:text-gray-500 flex items-center gap-1">
+            Max parallel generations
+            <InfoTooltip title="Artifact generation concurrency">
+              <p>How many artifact generations may run at once, across both foreground (a diff you're viewing) and background (proactive pre-generation) work.</p>
+              <p className="mt-1.5">Generations can be heavy — a full build per ref, and RAM-hungry tooling (e.g. emulators) — so lower this for memory-hungry generators. Foreground views are always served before queued background work, and a running generation is never interrupted.</p>
+              <p className="mt-1.5">Leave empty for the built-in default (2), or set <code className="text-blue-300">0</code> for unlimited (no cap).</p>
+            </InfoTooltip>
+          </label>
+          <input
+            type="number"
+            min={0}
+            value={concurrency ?? ''}
+            onChange={(e) => onConcurrencyChange(e.target.value === '' ? undefined : Math.max(0, parseInt(e.target.value, 10) || 0))}
+            placeholder="default (2)"
+            className="w-44 text-sm px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-100 placeholder-gray-300 dark:placeholder-gray-600 font-mono shadow-inner focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+          />
+        </div>
+        {concurrency === 0 && (
+          <span className="text-xs font-medium text-amber-600 dark:text-amber-400 h-[38px] flex items-center">Unlimited — no cap on parallel generations</span>
+        )}
+      </div>
 
       <div className="space-y-4">
         {artifacts.length === 0 && (
@@ -1022,6 +1052,8 @@ export function SettingsContent({
         <ArtifactsEditor
           artifacts={config.artifacts ?? []}
           onChange={(artifacts) => setConfig({ ...config, artifacts })}
+          concurrency={config.artifact_concurrency}
+          onConcurrencyChange={(n) => setConfig({ ...config, artifact_concurrency: n })}
         />
       </div>
 

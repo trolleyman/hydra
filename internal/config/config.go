@@ -215,6 +215,31 @@ type Config struct {
 	// sitting idle after its conversation is restored (see DefaultResumePrompt).
 	// nil = use DefaultResumePrompt; "" = disable the auto-continue nudge.
 	ResumePrompt *string `toml:"resume_prompt"`
+	// ArtifactConcurrency caps how many visual-artifact generations run at once,
+	// shared across foreground (a user viewing a diff) and background (proactive
+	// pre-generation) work. Generations can be heavy — a full build per ref, and
+	// some boot RAM-hungry tooling (e.g. emulators) — so this bounds how many run
+	// in parallel; lower it for memory-hungry generators. Foreground requests are
+	// always served before queued background ones, and a running generation is
+	// never preempted. It is a pointer so three states are distinct: nil/absent =
+	// use DefaultArtifactConcurrency; 0 = unlimited (no cap); N>0 = at most N.
+	ArtifactConcurrency *int `toml:"artifact_concurrency"`
+}
+
+// DefaultArtifactConcurrency is the artifact-generation parallelism used when
+// the config does not set artifact_concurrency. Two saturates a normal diff
+// view (left+right of one script) while keeping heavy builds from fanning out.
+const DefaultArtifactConcurrency = 2
+
+// ResolveArtifactConcurrency returns the effective artifact-generation
+// concurrency limit: the configured value when set (0 means unlimited), or
+// DefaultArtifactConcurrency when unset (nil). The result is the cap passed to
+// the generator's scheduler, where 0 disables the cap entirely.
+func (c Config) ResolveArtifactConcurrency() int {
+	if c.ArtifactConcurrency == nil {
+		return DefaultArtifactConcurrency
+	}
+	return *c.ArtifactConcurrency
 }
 
 // ResumeContinueMessage returns the message to auto-send to a resumed,
@@ -240,9 +265,10 @@ type rawConfig struct {
 	PrePrompt *string        `toml:"pre_prompt"`
 	Sandbox   *SandboxConfig `toml:"sandbox"`
 	// Shared.
-	Artifacts    []ArtifactScript `toml:"artifacts"`
-	Services     []ServiceScript  `toml:"services"`
-	ResumePrompt *string          `toml:"resume_prompt"`
+	Artifacts           []ArtifactScript `toml:"artifacts"`
+	Services            []ServiceScript  `toml:"services"`
+	ResumePrompt        *string          `toml:"resume_prompt"`
+	ArtifactConcurrency *int             `toml:"artifact_concurrency"`
 }
 
 // reservedTopLevel are the top-level TOML names that are NOT agent tables. Any
@@ -253,7 +279,7 @@ type rawConfig struct {
 var reservedTopLevel = map[string]bool{
 	"defaults": true, "agents": true,
 	"pre_prompt": true, "sandbox": true, "artifacts": true, "services": true,
-	"resume_prompt": true,
+	"resume_prompt": true, "artifact_concurrency": true,
 }
 
 // GetUserConfigPath returns the path to the global user configuration file.
@@ -337,6 +363,7 @@ func decodeConfig(data []byte) (Config, error) {
 	cfg.Artifacts = raw.Artifacts
 	cfg.Services = raw.Services
 	cfg.ResumePrompt = raw.ResumePrompt
+	cfg.ArtifactConcurrency = raw.ArtifactConcurrency
 
 	// Defaults: legacy [defaults] first, then the new top-level fields win.
 	if raw.Defaults != nil {
@@ -408,6 +435,12 @@ func (c *Config) Merge(other Config) {
 	// Service scripts are replaced wholesale when the other config sets any.
 	if other.Services != nil {
 		c.Services = other.Services
+	}
+	// Artifact concurrency is overridden only when the other config sets it
+	// (non-nil); a nil pointer means "unset", so it inherits. 0 is a real value
+	// here (unlimited), distinct from unset.
+	if other.ArtifactConcurrency != nil {
+		c.ArtifactConcurrency = other.ArtifactConcurrency
 	}
 }
 
@@ -781,6 +814,10 @@ func managedKeySet() map[string]bool {
 	// per-agent), but is still managed: a regenerated "# resume_prompt = ..."
 	// line must be recognised and dropped rather than kept as a user comment.
 	m["resume_prompt"] = true
+	// artifact_concurrency is likewise Config-level (emitArtifactConcurrency), so
+	// its regenerated "# artifact_concurrency = N" default line is recognised and
+	// dropped rather than kept as a stray user comment on the next save.
+	m["artifact_concurrency"] = true
 	// fullscreen is rendered specially under [claude] (emitClaudeAgent), not via
 	// the spec, but is likewise managed so its regenerated "# fullscreen = false"
 	// default line is recognised and replaced rather than kept as a user comment.
@@ -1249,6 +1286,11 @@ func renderConfig(existing []byte, cfg Config) string {
 			resumePrompt = prev.ResumePrompt
 		}
 	}
+	// artifact_concurrency is authoritative from cfg (unlike resume_prompt, the
+	// Settings editor DOES send it): a positive value is written, and 0 ("unset")
+	// renders the commented default instead of preserving the existing file's
+	// value — so clearing the field in the UI actually resets it to the default.
+	artifactConcurrency := cfg.ArtifactConcurrency
 
 	var out []string
 	spec := defaultsSpec()
@@ -1259,6 +1301,7 @@ func renderConfig(existing []byte, cfg Config) string {
 	}
 	emitSpecTable(&out, spec, "", "", cfg.Defaults, keyComments, tableComments)
 	emitResumePrompt(&out, resumePrompt, keyComments)
+	emitArtifactConcurrency(&out, artifactConcurrency, keyComments)
 	emitSpecTable(&out, spec, "sandbox", "[sandbox]", cfg.Defaults, keyComments, tableComments)
 	emitSpecTable(&out, spec, "sandbox.network", "[sandbox.network]", cfg.Defaults, keyComments, tableComments)
 
@@ -1388,6 +1431,24 @@ func emitResumePrompt(out *[]string, resumePrompt *string, keyComments map[strin
 		*out = append(*out, "resume_prompt = "+tomlStringValue(*resumePrompt))
 	} else {
 		*out = append(*out, "# resume_prompt = "+tomlStringValue(DefaultResumePrompt))
+	}
+}
+
+// emitArtifactConcurrency renders the top-level artifact_concurrency key (a
+// Config-level setting, like resume_prompt). Preserved user comment, Hydra doc
+// line, then the value (commented-out showing the default when unset).
+func emitArtifactConcurrency(out *[]string, concurrency *int, keyComments map[string][]string) {
+	if uc := keyComments["\x00artifact_concurrency"]; len(uc) > 0 {
+		*out = append(*out, uc...)
+	}
+	*out = append(*out, docPrefix+fmt.Sprintf(` max visual-artifact generations run at once, across foreground (viewing a diff) and background (proactive) work; lower it for RAM-hungry generators, or 0 for unlimited (default %d).`, DefaultArtifactConcurrency))
+	// nil = unset → show the commented default; a set value (including 0 =
+	// unlimited) is written authoritatively, so clearing the field in the editor
+	// resets to the default rather than preserving the old value.
+	if concurrency != nil {
+		*out = append(*out, fmt.Sprintf("artifact_concurrency = %d", *concurrency))
+	} else {
+		*out = append(*out, fmt.Sprintf("# artifact_concurrency = %d", DefaultArtifactConcurrency))
 	}
 }
 

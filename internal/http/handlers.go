@@ -595,6 +595,13 @@ func (s *Server) GetConfig(_ context.Context, request api.GetConfigRequestObject
 		resp.Services = &svcs
 	}
 
+	// Surface the configured value when set (nil = unset → the client shows the
+	// default; 0 = unlimited). Copy so the response doesn't alias cfg's pointer.
+	if cfg.ArtifactConcurrency != nil {
+		n := *cfg.ArtifactConcurrency
+		resp.ArtifactConcurrency = &n
+	}
+
 	return api.GetConfig200JSONResponse(resp), nil
 }
 
@@ -740,6 +747,16 @@ func (s *Server) SaveConfig(_ context.Context, request api.SaveConfigRequestObje
 		for _, svc := range *request.Body.Services {
 			newCfg.Services = append(newCfg.Services, fromAPIServiceScript(svc))
 		}
+	}
+	// Artifact concurrency: a set value (0 = unlimited, N>0 = at most N) is
+	// applied authoritatively; nil/absent clears it so it resets to the built-in
+	// default. Negatives are coerced to 0 (unlimited), matching the API minimum.
+	if request.Body.ArtifactConcurrency != nil {
+		n := *request.Body.ArtifactConcurrency
+		if n < 0 {
+			n = 0
+		}
+		newCfg.ArtifactConcurrency = &n
 	}
 
 	scope := api.SaveConfigParamsScopeProject
