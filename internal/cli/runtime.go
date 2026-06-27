@@ -180,6 +180,9 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 	go heads.RunLivenessReconciler(ctx, reg, store, roots, eventHub)
 	go heads.RunJSONStatusPoller(ctx, store, roots, eventHub)
 	go runStoragePruner(ctx, artifactReg, roots)
+	// Proactively pre-generate artifacts for settled heads so they're ready
+	// before a user clicks in, instead of starting the work only on view.
+	go server.RunArtifactPrefetcher(ctx, roots)
 
 	// Start each registered project's [[services]]. Done after the pollers so a
 	// slow service launch never delays request serving; StopAll on shutdown.

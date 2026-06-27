@@ -51,6 +51,26 @@ func newSlotPool(projectRoot, dir string, max int) *slotPool {
 	return p
 }
 
+// setMaxSlots adjusts the cap on live worktree slots, so the pool can grow with
+// a raised artifact-generation concurrency. Raising it wakes any acquire blocked
+// on the old cap (there is now room to grow a new slot); lowering it just stops
+// further growth — existing slots stay until clean(). Each commit-side
+// generation holds one slot for its duration, so the cap must stay at least as
+// large as the generation concurrency or acquires would deadlock waiting for a
+// free slot while every slot is held by a running generation.
+func (p *slotPool) setMaxSlots(max int) {
+	if max < 1 {
+		max = 1
+	}
+	p.mu.Lock()
+	grew := max > p.maxSlots
+	p.maxSlots = max
+	if grew {
+		p.cond.Broadcast() // room to grow now; let waiters retry the create path
+	}
+	p.mu.Unlock()
+}
+
 // acquire returns a worktree checked out at the given commit SHA. The caller must
 // release it when done. The slow git work (checkout / worktree add) runs without
 // the pool lock held, so concurrent acquires/releases never block on it.
