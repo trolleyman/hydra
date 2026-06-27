@@ -601,6 +601,13 @@ try {
       // below that — so the viewport must be tall enough to reach the very bottom
       // (simulation seeds one of each there).
       { name: 'settings', path: '/project/sim-project/settings', viewport: { width: 1280, height: 2900 } },
+      // The per-agent Claude settings tab, opened by clicking the "Claude" pill in
+      // the AgentSelector. Documents the agent-specific ConfigForm and, in
+      // particular, the Claude-only "Fullscreen Rendering" toggle that sits between
+      // the system pre-prompt and the sandbox policy (off by default — see
+      // ResolveFullscreen / claudeRenderingEnv). :text-is matches the pill's exact
+      // label, so it can't collide with the "All agents" tab.
+      { name: 'settings-claude', path: '/project/sim-project/settings', click: 'button:text-is("Claude")', viewport: { width: 1280, height: 2900 } },
       // The settings page at the small viewports. Below the lg breakpoint the
       // sidebar is collapsed, so a "Settings" header bar (with the show-sidebar
       // toggle) appears above the page; tablet-landscape is wide enough to keep
