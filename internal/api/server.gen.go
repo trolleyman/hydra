@@ -165,7 +165,9 @@ type AddProjectRequest struct {
 
 // AgentConfig defines model for AgentConfig.
 type AgentConfig struct {
-	PrePrompt *string `json:"pre_prompt"`
+	// Fullscreen Enable Claude Code's fullscreen (alternate-screen) rendering. Claude only; off by default so the web terminal keeps its native scrollbar and select-to-copy.
+	Fullscreen *bool   `json:"fullscreen"`
+	PrePrompt  *string `json:"pre_prompt"`
 
 	// Sandbox User-editable sandbox policy, additive on top of baked-in defaults
 	Sandbox *SandboxConfig `json:"sandbox,omitempty"`
