@@ -28,11 +28,19 @@ type Seg =
 // Fenced code block: an opening ``` (with an optional info string on the rest of
 // the line), then any number of lines, then a closing ``` at the start of a
 // line. Matched before the inline patterns and allowed to span newlines.
-// Non-greedy so it stops at the first closing fence. The body group is optional
-// so an empty block (```\n```, nothing between the fences) still matches and gets
-// highlighted. A fence with no closing ``` is left unmatched and falls through to
-// inline/plain handling.
-const FENCE_RE = /^```([^\n]*)\n(?:([\s\S]*?)\n)?```/
+// Non-greedy so it stops at the first valid closing fence. The body group is
+// optional so an empty block (```\n```, nothing between the fences) still matches
+// and gets highlighted.
+//
+// The closing ``` must stand alone on its line — only trailing spaces/tabs are
+// allowed after it, then a newline or end of input (CommonMark §4.5). So a fence
+// like ```#### does NOT close the block: trailing non-whitespace makes that line
+// part of the body, and with no later closing fence the whole thing is left
+// unmatched and falls through to inline/plain handling. (Without this, ```####
+// both closed the block AND, because the codeblock renders as a full-width
+// inline-block, pushed the #### onto its own visual line — drifting the highlight
+// overlay away from the textarea caret.)
+const FENCE_RE = /^```([^\n]*)\n(?:([\s\S]*?)\n)?```[ \t]*(?=\n|$)/
 
 // Inline patterns, tried in order at each position. `**`/`__` must precede the
 // single-char `*`/`_` so the longer marker wins. Each pattern is anchored to
