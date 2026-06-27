@@ -164,11 +164,19 @@ export interface RenderMarkdownOptions {
   // (the `$` included), overriding all other markdown parsing. Used for agent
   // activity lines that report a shell command being run.
   dollarCommand?: boolean
+  // When true, render for a single-line preview (e.g. the sidebar's fixed-height
+  // activity row): collapse every whitespace run — newlines included — to a
+  // single space before parsing. This keeps the output one line and, since a
+  // fenced code block needs real newlines to match, stops a code block in a
+  // `last_message` from rendering as a multi-line `display:block` chip that would
+  // overflow the row and show clipped, half-cut lines.
+  singleLine?: boolean
 }
 
 // renderMarkdown turns inline markdown into styled React nodes for read-only
 // display, dropping the markers themselves (so `*hi*` shows as italic "hi").
 export function renderMarkdown(text: string, opts: RenderMarkdownOptions = {}): ReactNode {
+  if (opts.singleLine) text = text.replace(/\s+/g, ' ').trim()
   if (opts.dollarCommand && text.startsWith('$')) {
     return <code className={CODE_CLASS}>{text}</code>
   }

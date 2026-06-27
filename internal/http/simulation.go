@@ -224,9 +224,12 @@ func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, pr
 			// sidebar, so the home/unread shots are unaffected.
 			Prompt: simAgent2Prompt,
 			AgentStatus: &api.AgentStatusInfo{
-				Status:      waiting,
-				Timestamp:   simNow().Format(time.RFC3339),
-				LastMessage: ptr("The spike is built, tested, and committed. Here's what landed…"),
+				Status:    waiting,
+				Timestamp: simNow().Format(time.RFC3339),
+				// A multi-line message with a fenced code block — the sidebar's
+				// activity row collapses it to a single truncated line (singleLine),
+				// so a code block can no longer render as a multi-line block and clip.
+				LastMessage: ptr("The spike is built and committed:\n```js\nconsole.log(\"aavawd\")\n```\nHere's what landed…"),
 			},
 		},
 		{
