@@ -148,6 +148,19 @@ func GetDiff(projectRoot, baseRef, headRef string, ignoreWhitespace, useTripleDo
 // expand many files at once without one git invocation (or HTTP request) per
 // file.
 func GetDiffPaths(projectRoot, baseRef, headRef string, ignoreWhitespace, useTripleDot bool, paths []string, context int) ([]DiffFile, error) {
+	// git only pairs a rename when BOTH the old and new names fall inside the
+	// diff's pathspec. A diff scoped to just a renamed file's new name drops the
+	// old name, so git reports the file as a brand-new add (every line green)
+	// instead of a rename with its real additions/deletions. Widen the pathspec
+	// with the old names of any requested renamed files so scoped diffs render
+	// renames the same way the unscoped (whole-tree) diff does. Best-effort: a
+	// failure here just falls back to the un-widened pathspec.
+	if len(paths) > 0 {
+		if extra, err := renameOldPaths(projectRoot, baseRef, headRef, useTripleDot, paths); err == nil && len(extra) > 0 {
+			paths = append(append([]string(nil), paths...), extra...)
+		}
+	}
+
 	args := []string{"diff", fmt.Sprintf("-U%d", context)}
 	if ignoreWhitespace {
 		args = append(args, "--ignore-space-change")
@@ -169,6 +182,58 @@ func GetDiffPaths(projectRoot, baseRef, headRef string, ignoreWhitespace, useTri
 		return nil, errtrace.Wrap(err)
 	}
 	return parseDiff(out)
+}
+
+// renameOldPaths returns the old names of any requested paths that are the new
+// side of a rename between the two refs. It runs a cheap whole-tree
+// `--name-status` diff (no hunks/content) where git's rename detection still
+// sees both sides, then maps each requested new name back to its old name. Used
+// to widen a scoped diff's pathspec so renames survive path filtering.
+func renameOldPaths(projectRoot, baseRef, headRef string, useTripleDot bool, paths []string) ([]string, error) {
+	args := []string{"diff", "--name-status", "-z", "--find-renames"}
+	if headRef == "" {
+		args = append(args, baseRef)
+	} else if useTripleDot {
+		args = append(args, baseRef+"..."+headRef)
+	} else {
+		args = append(args, baseRef, headRef)
+	}
+	out, err := gitOutput(projectRoot, args...)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+
+	want := make(map[string]bool, len(paths))
+	for _, p := range paths {
+		want[p] = true
+	}
+
+	// The -z name-status stream is a flat sequence of NUL-terminated fields:
+	// a non-rename entry is STATUS\0path, while a rename/copy is STATUS\0old\0new
+	// (STATUS being e.g. "R100"/"C075"). Walk it, consuming the right field count
+	// per entry so old/new stay paired.
+	fields := strings.Split(out, "\x00")
+	var extra []string
+	for i := 0; i < len(fields); {
+		status := fields[i]
+		if status == "" {
+			i++
+			continue
+		}
+		if status[0] == 'R' || status[0] == 'C' {
+			if i+2 >= len(fields) {
+				break
+			}
+			oldPath, newPath := fields[i+1], fields[i+2]
+			if want[newPath] && !want[oldPath] {
+				extra = append(extra, oldPath)
+			}
+			i += 3
+		} else {
+			i += 2
+		}
+	}
+	return extra, nil
 }
 
 // GetDiffFiles returns summary info (no hunks) for files changed between baseRef and headRef.

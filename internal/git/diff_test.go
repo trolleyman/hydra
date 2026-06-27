@@ -1,6 +1,11 @@
 package git
 
-import "testing"
+import (
+	"os"
+	"os/exec"
+	"path/filepath"
+	"testing"
+)
 
 // A symlink<->regular-file conversion is a git "type change": git emits two
 // `diff --git a/PATH b/PATH` stanzas for the same path (a deletion of the old
@@ -107,5 +112,74 @@ rename to new.txt
 	}
 	if files[0].Path != "new.txt" {
 		t.Errorf("path = %q, want new.txt", files[0].Path)
+	}
+}
+
+// A diff scoped to a renamed-and-modified file's NEW name must still come back as
+// a rename with its real additions/deletions — not as a brand-new add of the
+// whole file. git only pairs a rename when both names are in the pathspec, so
+// GetDiff widens the pathspec with the old name (regression test for the diff
+// viewer showing renamed files as entirely added).
+func TestGetDiffScopedRenameKeepsRename(t *testing.T) {
+	dir := gitInit(t)
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@e",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@e")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	write := func(name, content string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	write("old.txt", "line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8\n")
+	run("add", ".")
+	run("commit", "-qm", "first")
+	base, err := ResolveRef(dir, "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Rename old.txt -> new.txt and change one line plus add one line: high enough
+	// similarity that git detects the rename in an unscoped diff.
+	run("mv", "old.txt", "new.txt")
+	write("new.txt", "line1\nline2-changed\nline3\nline4\nline5\nline6\nline7\nline8\nline9-added\n")
+	run("commit", "-aqm", "rename")
+	head, err := ResolveRef(dir, "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Scope to the new path only — the case the diff viewer fetches per file.
+	files, err := GetDiff(dir, base, head, false, false, "new.txt", 3)
+	if err != nil {
+		t.Fatalf("GetDiff: %v", err)
+	}
+
+	var f *DiffFile
+	for i := range files {
+		if files[i].Path == "new.txt" {
+			f = &files[i]
+		}
+	}
+	if f == nil {
+		t.Fatalf("new.txt not in scoped diff; got %d files", len(files))
+	}
+	if f.ChangeType != "renamed" {
+		t.Errorf("change type = %q, want renamed (a scoped diff lost rename detection)", f.ChangeType)
+	}
+	if f.OldPath == nil || *f.OldPath != "old.txt" {
+		t.Errorf("old path = %v, want old.txt", f.OldPath)
+	}
+	// The real change is +2/-1, not the whole-file add the bug produced.
+	if f.Additions != 2 || f.Deletions != 1 {
+		t.Errorf("+%d -%d, want +2 -1", f.Additions, f.Deletions)
 	}
 }

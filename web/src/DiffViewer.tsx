@@ -749,7 +749,7 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onCo
         {!file.binary && (
           <div className="flex items-center gap-1.5 shrink-0 ml-1">
             {file.additions > 0 && <span className="text-xs text-green-600 dark:text-green-400 font-medium">+{file.additions}</span>}
-            {file.deletions > 0 && <span className="text-xs text-red-600 dark:text-red-400 font-medium">−{file.deletions}</span>}
+            {file.deletions > 0 && <span className="text-xs text-red-600 dark:text-red-400 font-medium">-{file.deletions}</span>}
           </div>
         )}
       </div>
@@ -1545,7 +1545,7 @@ export function FileRow({ file, isActive, onClick, indent = 0 }: {
       <ChangeTypeIcon type={file.change_type} className="w-3 h-3 shrink-0" />
       <div className="flex items-center gap-1 shrink-0 ml-auto">
         {file.additions > 0 && <span className="text-[10px] text-green-600 dark:text-green-400">+{file.additions}</span>}
-        {file.deletions > 0 && <span className="text-[10px] text-red-600 dark:text-red-400">−{file.deletions}</span>}
+        {file.deletions > 0 && <span className="text-[10px] text-red-600 dark:text-red-400">-{file.deletions}</span>}
       </div>
     </button>
   )
@@ -2233,7 +2233,7 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
         {diff && (
           <div className="flex items-center gap-1.5">
             <span className="text-xs text-green-600 dark:text-green-400 font-medium">+{totalAdditions}</span>
-            <span className="text-xs text-red-600 dark:text-red-400 font-medium">−{totalDeletions}</span>
+            <span className="text-xs text-red-600 dark:text-red-400 font-medium">-{totalDeletions}</span>
             <span className="text-xs text-gray-400 dark:text-gray-500">in {diff.files.length} file{diff.files.length !== 1 ? 's' : ''}</span>
           </div>
         )}
