@@ -12,10 +12,11 @@ import "sync"
 // thing the user is now watching stops waiting behind other background work.
 //
 // The limit is mutable (setLimit) so a config change to artifact_concurrency
-// takes effect without recreating the manager.
+// takes effect without recreating the manager. A limit of 0 means unlimited
+// (no cap) — every acquire is granted immediately.
 type genScheduler struct {
 	mu      sync.Mutex
-	limit   int
+	limit   int // 0 = unlimited (no cap)
 	running int
 	seq     int                // monotonic FIFO tiebreaker among equal-priority waiters
 	waiters map[string]*waiter // queued (not-yet-granted) waiters, keyed by entry dir
@@ -31,10 +32,16 @@ type waiter struct {
 }
 
 func newGenScheduler(limit int) *genScheduler {
-	if limit < 1 {
-		limit = 1
+	if limit < 0 {
+		limit = 0
 	}
 	return &genScheduler{limit: limit, waiters: map[string]*waiter{}}
+}
+
+// hasCapacityLocked reports whether another generation may start right now. A
+// limit of 0 means unlimited (always capacity). Caller holds mu.
+func (s *genScheduler) hasCapacityLocked() bool {
+	return s.limit == 0 || s.running < s.limit
 }
 
 // acquire blocks until a generation slot is free, honoring priority. key is the
@@ -43,7 +50,7 @@ func newGenScheduler(limit int) *genScheduler {
 // the initial priority. The caller must call release when the generation ends.
 func (s *genScheduler) acquire(key string, fg bool) {
 	s.mu.Lock()
-	if s.running < s.limit {
+	if s.hasCapacityLocked() {
 		s.running++
 		s.mu.Unlock()
 		return
@@ -85,13 +92,13 @@ func (s *genScheduler) promote(key string) {
 // the highest-priority queued waiters; lowering it just stops new grants until
 // running generations drain back under the new cap (no preemption).
 func (s *genScheduler) setLimit(n int) {
-	if n < 1 {
-		n = 1
+	if n < 0 {
+		n = 0
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.limit = n
-	for s.running < s.limit {
+	for s.hasCapacityLocked() {
 		k, w := s.bestLocked()
 		if w == nil {
 			break

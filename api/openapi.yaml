@@ -2323,7 +2323,7 @@ components:
         artifact_concurrency:
           type: integer
           nullable: true
-          minimum: 1
+          minimum: 0
           description: >-
             Max visual-artifact generations that run at once, across foreground
             (a user viewing a diff) and background (proactive pre-generation)
@@ -2331,7 +2331,8 @@ components:
             (a full build per ref, RAM-hungry tooling like emulators), so this
             caps parallelism — lower it for memory-hungry generators. Foreground
             requests are served before queued background ones; a running
-            generation is never preempted. Null/absent uses the built-in default.
+            generation is never preempted. 0 means unlimited (no cap);
+            null/absent uses the built-in default.
         default_pre_prompt:
           type: string
           description: Built-in default pre-prompt always prepended to agent prompts (read-only)

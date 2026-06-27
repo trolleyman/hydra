@@ -1,6 +1,7 @@
 package artifacts
 
 import (
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -93,6 +94,51 @@ func TestSchedulerSetLimitAdmits(t *testing.T) {
 	case <-done:
 	case <-time.After(2 * time.Second):
 		t.Fatal("raising the limit did not admit the queued waiter")
+	}
+}
+
+// TestSchedulerUnlimited verifies a limit of 0 caps nothing: many acquires all
+// proceed without blocking, and lowering the limit afterwards via setLimit lets
+// the running set drain without preempting.
+func TestSchedulerUnlimited(t *testing.T) {
+	s := newGenScheduler(0) // 0 = unlimited
+	const n = 50
+	done := make(chan struct{}, n)
+	for i := range n {
+		go func() { s.acquire(fmt.Sprintf("k%d", i), false); done <- struct{}{} }()
+	}
+	for i := range n {
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("unlimited scheduler blocked after %d acquires", i)
+		}
+	}
+	// All n are "running"; releasing them is a no-op queue-wise.
+	for range n {
+		s.release()
+	}
+}
+
+// TestSchedulerSetLimitUnlimitedAdmitsAll verifies switching to unlimited (0)
+// admits every queued waiter at once.
+func TestSchedulerSetLimitUnlimitedAdmitsAll(t *testing.T) {
+	s := newGenScheduler(1)
+	s.acquire("running", false)
+
+	const n = 8
+	done := make(chan struct{}, n)
+	for i := range n {
+		go func() { s.acquire(fmt.Sprintf("w%d", i), false); done <- struct{}{} }()
+	}
+	waitQueued(t, s, n)
+	s.setLimit(0) // unlimited → all queued waiters admitted
+	for i := range n {
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("going unlimited did not admit all waiters (%d/%d)", i, n)
+		}
 	}
 }
 

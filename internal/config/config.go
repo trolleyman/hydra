@@ -221,8 +221,9 @@ type Config struct {
 	// some boot RAM-hungry tooling (e.g. emulators) — so this bounds how many run
 	// in parallel; lower it for memory-hungry generators. Foreground requests are
 	// always served before queued background ones, and a running generation is
-	// never preempted. 0 or absent uses DefaultArtifactConcurrency.
-	ArtifactConcurrency int `toml:"artifact_concurrency"`
+	// never preempted. It is a pointer so three states are distinct: nil/absent =
+	// use DefaultArtifactConcurrency; 0 = unlimited (no cap); N>0 = at most N.
+	ArtifactConcurrency *int `toml:"artifact_concurrency"`
 }
 
 // DefaultArtifactConcurrency is the artifact-generation parallelism used when
@@ -230,13 +231,15 @@ type Config struct {
 // view (left+right of one script) while keeping heavy builds from fanning out.
 const DefaultArtifactConcurrency = 2
 
-// ArtifactConcurrencyOrDefault returns the configured artifact-generation
-// parallelism, falling back to DefaultArtifactConcurrency when unset (<= 0).
-func (c Config) ArtifactConcurrencyOrDefault() int {
-	if c.ArtifactConcurrency > 0 {
-		return c.ArtifactConcurrency
+// ResolveArtifactConcurrency returns the effective artifact-generation
+// concurrency limit: the configured value when set (0 means unlimited), or
+// DefaultArtifactConcurrency when unset (nil). The result is the cap passed to
+// the generator's scheduler, where 0 disables the cap entirely.
+func (c Config) ResolveArtifactConcurrency() int {
+	if c.ArtifactConcurrency == nil {
+		return DefaultArtifactConcurrency
 	}
-	return DefaultArtifactConcurrency
+	return *c.ArtifactConcurrency
 }
 
 // ResumeContinueMessage returns the message to auto-send to a resumed,
@@ -265,7 +268,7 @@ type rawConfig struct {
 	Artifacts           []ArtifactScript `toml:"artifacts"`
 	Services            []ServiceScript  `toml:"services"`
 	ResumePrompt        *string          `toml:"resume_prompt"`
-	ArtifactConcurrency int              `toml:"artifact_concurrency"`
+	ArtifactConcurrency *int             `toml:"artifact_concurrency"`
 }
 
 // reservedTopLevel are the top-level TOML names that are NOT agent tables. Any
@@ -434,8 +437,9 @@ func (c *Config) Merge(other Config) {
 		c.Services = other.Services
 	}
 	// Artifact concurrency is overridden only when the other config sets it
-	// (a positive value); 0 means "unset", so it inherits.
-	if other.ArtifactConcurrency > 0 {
+	// (non-nil); a nil pointer means "unset", so it inherits. 0 is a real value
+	// here (unlimited), distinct from unset.
+	if other.ArtifactConcurrency != nil {
 		c.ArtifactConcurrency = other.ArtifactConcurrency
 	}
 }
@@ -1433,13 +1437,16 @@ func emitResumePrompt(out *[]string, resumePrompt *string, keyComments map[strin
 // emitArtifactConcurrency renders the top-level artifact_concurrency key (a
 // Config-level setting, like resume_prompt). Preserved user comment, Hydra doc
 // line, then the value (commented-out showing the default when unset).
-func emitArtifactConcurrency(out *[]string, concurrency int, keyComments map[string][]string) {
+func emitArtifactConcurrency(out *[]string, concurrency *int, keyComments map[string][]string) {
 	if uc := keyComments["\x00artifact_concurrency"]; len(uc) > 0 {
 		*out = append(*out, uc...)
 	}
-	*out = append(*out, docPrefix+fmt.Sprintf(` max visual-artifact generations run at once, across foreground (viewing a diff) and background (proactive) work; lower it for RAM-hungry generators (default %d).`, DefaultArtifactConcurrency))
-	if concurrency > 0 {
-		*out = append(*out, fmt.Sprintf("artifact_concurrency = %d", concurrency))
+	*out = append(*out, docPrefix+fmt.Sprintf(` max visual-artifact generations run at once, across foreground (viewing a diff) and background (proactive) work; lower it for RAM-hungry generators, or 0 for unlimited (default %d).`, DefaultArtifactConcurrency))
+	// nil = unset → show the commented default; a set value (including 0 =
+	// unlimited) is written authoritatively, so clearing the field in the editor
+	// resets to the default rather than preserving the old value.
+	if concurrency != nil {
+		*out = append(*out, fmt.Sprintf("artifact_concurrency = %d", *concurrency))
 	} else {
 		*out = append(*out, fmt.Sprintf("# artifact_concurrency = %d", DefaultArtifactConcurrency))
 	}

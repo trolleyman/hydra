@@ -573,18 +573,21 @@ export function ArtifactsEditor({
             <InfoTooltip title="Artifact generation concurrency">
               <p>How many artifact generations may run at once, across both foreground (a diff you're viewing) and background (proactive pre-generation) work.</p>
               <p className="mt-1.5">Generations can be heavy — a full build per ref, and RAM-hungry tooling (e.g. emulators) — so lower this for memory-hungry generators. Foreground views are always served before queued background work, and a running generation is never interrupted.</p>
-              <p className="mt-1.5">Leave empty for the built-in default (2).</p>
+              <p className="mt-1.5">Leave empty for the built-in default (2), or set <code className="text-blue-300">0</code> for unlimited (no cap).</p>
             </InfoTooltip>
           </label>
           <input
             type="number"
-            min={1}
+            min={0}
             value={concurrency ?? ''}
-            onChange={(e) => onConcurrencyChange(e.target.value === '' ? undefined : Math.max(1, parseInt(e.target.value, 10) || 1))}
+            onChange={(e) => onConcurrencyChange(e.target.value === '' ? undefined : Math.max(0, parseInt(e.target.value, 10) || 0))}
             placeholder="default (2)"
             className="w-44 text-sm px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-100 placeholder-gray-300 dark:placeholder-gray-600 font-mono shadow-inner focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
           />
         </div>
+        {concurrency === 0 && (
+          <span className="text-xs font-medium text-amber-600 dark:text-amber-400 h-[38px] flex items-center">Unlimited — no cap on parallel generations</span>
+        )}
       </div>
 
       <div className="space-y-4">

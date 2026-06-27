@@ -59,11 +59,12 @@ func newSlotPool(projectRoot, dir string, max int) *slotPool {
 // large as the generation concurrency or acquires would deadlock waiting for a
 // free slot while every slot is held by a running generation.
 func (p *slotPool) setMaxSlots(max int) {
-	if max < 1 {
-		max = 1
+	if max < 0 {
+		max = 0
 	}
 	p.mu.Lock()
-	grew := max > p.maxSlots
+	// max == 0 means unlimited, which is always "more room" than any finite cap.
+	grew := max == 0 || max > p.maxSlots
 	p.maxSlots = max
 	if grew {
 		p.cond.Broadcast() // room to grow now; let waiters retry the create path
@@ -114,7 +115,8 @@ func (p *slotPool) acquire(sha string, cleanIgnored bool) (*slot, error) {
 		}
 
 		// 3. Room to grow — reserve a new slot under the lock, create it off the lock.
-		if len(p.all) < p.maxSlots {
+		//    maxSlots == 0 means unlimited (concurrency is unlimited), so always grow.
+		if p.maxSlots == 0 || len(p.all) < p.maxSlots {
 			s := &slot{path: filepath.Join(p.dir, strconv.Itoa(p.nextN))}
 			p.nextN++
 			p.all = append(p.all, s)

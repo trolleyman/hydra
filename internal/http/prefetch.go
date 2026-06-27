@@ -79,7 +79,7 @@ func (s *Server) prefetchOnce(ctx context.Context, roots []string, lastHash map[
 		}
 		// Apply any config change to the generation parallelism before this
 		// project's manager is exercised (cheap and idempotent).
-		s.Artifacts.Manager(root).SetConcurrency(cfg.ArtifactConcurrencyOrDefault())
+		s.Artifacts.Manager(root).SetConcurrency(cfg.ResolveArtifactConcurrency())
 
 		hs, err := heads.ListHeads(ctx, s.Sessions, s.DB, root)
 		if err != nil {

@@ -417,7 +417,7 @@ type CommitInfo struct {
 type ConfigResponse struct {
 	Agents map[string]AgentConfig `json:"agents"`
 
-	// ArtifactConcurrency Max visual-artifact generations that run at once, across foreground (a user viewing a diff) and background (proactive pre-generation) work (artifact_concurrency in config.toml). Generations can be heavy (a full build per ref, RAM-hungry tooling like emulators), so this caps parallelism — lower it for memory-hungry generators. Foreground requests are served before queued background ones; a running generation is never preempted. Null/absent uses the built-in default.
+	// ArtifactConcurrency Max visual-artifact generations that run at once, across foreground (a user viewing a diff) and background (proactive pre-generation) work (artifact_concurrency in config.toml). Generations can be heavy (a full build per ref, RAM-hungry tooling like emulators), so this caps parallelism — lower it for memory-hungry generators. Foreground requests are served before queued background ones; a running generation is never preempted. 0 means unlimited (no cap); null/absent uses the built-in default.
 	ArtifactConcurrency *int `json:"artifact_concurrency"`
 
 	// Artifacts Per-project visual-artifact generation scripts ([[artifacts]] in config.toml)

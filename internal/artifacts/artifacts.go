@@ -605,7 +605,7 @@ type Manager struct {
 func NewManager(projectRoot string) *Manager {
 	concurrency := config.DefaultArtifactConcurrency
 	if cfg, err := config.Load(projectRoot); err == nil {
-		concurrency = cfg.ArtifactConcurrencyOrDefault()
+		concurrency = cfg.ResolveArtifactConcurrency()
 	}
 	m := &Manager{
 		projectRoot: projectRoot,
@@ -623,12 +623,13 @@ func NewManager(projectRoot string) *Manager {
 }
 
 // SetConcurrency updates the generation parallelism (from a config change),
-// resizing both the priority scheduler and the worktree-slot pool. Safe to call
-// at any time; raising it immediately admits queued work, lowering it lets the
-// excess drain without preempting in-flight generations.
+// resizing both the priority scheduler and the worktree-slot pool. n is the cap,
+// where 0 means unlimited (no cap). Safe to call at any time; raising it (or
+// going unlimited) immediately admits queued work, lowering it lets the excess
+// drain without preempting in-flight generations.
 func (m *Manager) SetConcurrency(n int) {
-	if n < 1 {
-		n = 1
+	if n < 0 {
+		n = 0
 	}
 	m.sched.setLimit(n)
 	m.pool.setMaxSlots(slotsForConcurrency(n))
@@ -639,8 +640,12 @@ func (m *Manager) SetConcurrency(n int) {
 // have at least `n` slots or concurrent commit-side gens would deadlock waiting
 // for a slot. The +2 keeps freed slots "warm" on recently-used commits for
 // zero-cost affinity reuse, and the floor of maxSlots preserves that headroom at
-// the default concurrency.
+// the default concurrency. n == 0 (unlimited concurrency) maps to 0 (an
+// unbounded pool) so commit-side gens never block on a slot.
 func slotsForConcurrency(n int) int {
+	if n <= 0 {
+		return 0
+	}
 	return max(maxSlots, n+2)
 }
 
