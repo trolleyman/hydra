@@ -59,10 +59,12 @@ function ThemeSection() {
   )
 }
 
-// Terminal — a client-only user preference (localStorage, no project scope) for
-// the height new heads start at. Width always follows the browser's last terminal
-// width; height follows the last height too, falling back to this default when the
-// browser has no terminal history yet. Empty input = use the built-in default.
+// Terminal — a client-only user preference (localStorage, global; not project-
+// scoped, so it reads/writes the same value on either settings page, like Theme)
+// for the height new heads start at. Width always follows the browser's last
+// terminal width; height follows the last height too, falling back to this
+// default when the browser has no terminal history yet. Empty input = built-in
+// default.
 function TerminalSection() {
   const [rows, setRows] = useDefaultTerminalRows()
   return (
@@ -916,7 +918,6 @@ export function SettingsContent({
   onCloseTestAgent,
   projectId,
   scopeSelector,
-  showUserPrefs,
 }: {
   config: ConfigResponse
   setConfig: (c: ConfigResponse) => void
@@ -932,15 +933,12 @@ export function SettingsContent({
   // The scope (Project / Global) selector — rendered between Theme and Agent.
   // Supplied by the project settings page; the global page passes nothing.
   scopeSelector?: ReactNode
-  // Whether to show user-global client preferences (e.g. default terminal height).
-  // Only the user settings page sets this — these prefs aren't project-scoped.
-  showUserPrefs?: boolean
 }) {
 
   return (
     <>
       <ThemeSection />
-      {showUserPrefs && <TerminalSection />}
+      <TerminalSection />
       {scopeSelector}
       <SettingSection
         title="Agent"

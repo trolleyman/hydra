@@ -147,7 +147,6 @@ function SettingsPage() {
             onTest={handleTest}
             onCloseTestAgent={handleCloseTestAgent}
             projectId={selectedProjectId ?? null}
-            showUserPrefs
           />
         </div>
       </div>
