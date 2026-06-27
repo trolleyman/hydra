@@ -1277,17 +1277,16 @@ func renderConfig(existing []byte, cfg Config) string {
 	// file already had rather than silently dropping a hand-edited value. An
 	// explicit cfg.ResumePrompt still wins.
 	resumePrompt := cfg.ResumePrompt
-	artifactConcurrency := cfg.ArtifactConcurrency
-	if resumePrompt == nil || artifactConcurrency == 0 {
+	if resumePrompt == nil {
 		if prev, err := decodeConfig(existing); err == nil {
-			if resumePrompt == nil {
-				resumePrompt = prev.ResumePrompt
-			}
-			if artifactConcurrency == 0 {
-				artifactConcurrency = prev.ArtifactConcurrency
-			}
+			resumePrompt = prev.ResumePrompt
 		}
 	}
+	// artifact_concurrency is authoritative from cfg (unlike resume_prompt, the
+	// Settings editor DOES send it): a positive value is written, and 0 ("unset")
+	// renders the commented default instead of preserving the existing file's
+	// value — so clearing the field in the UI actually resets it to the default.
+	artifactConcurrency := cfg.ArtifactConcurrency
 
 	var out []string
 	spec := defaultsSpec()
