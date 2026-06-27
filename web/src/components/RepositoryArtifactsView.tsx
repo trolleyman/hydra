@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { LoaderCircle, RefreshCw, ImageOff, TriangleAlert, Camera } from 'lucide-react'
 import { api } from '../stores/apiClient'
 import { ApiError } from '../api'
@@ -7,7 +7,10 @@ import { RepositoryArtifactResponse } from '../api'
 import { formatError } from '../api/format_error'
 import { IMG_CLASS, checkerStyle } from './artifactDiffShared'
 import { isVideoArtifact, VIDEO_MIN_TILE_PX } from './VideoDiffView'
-import { TagBadge, LogView, ElapsedTime, MasonryGrid, useMediaDims } from './ArtifactsPanel'
+import { LogView, ElapsedTime, MasonryGrid, useMediaDims } from './ArtifactsPanel'
+import { ArtifactFilterBar, TagBadge } from './ArtifactFilterBar'
+import { computeVisibleFiles } from '../lib/artifactFilter'
+import { loadTagFilter, saveTagFilter, type ArtifactTagFilter } from '../lib/artifactPrefs'
 import { useArtifactSpans } from '../lib/artifactColumns'
 
 // RepositoryArtifactsView renders one [[artifacts]] script's output for a single
@@ -125,6 +128,23 @@ export function RepositoryArtifactsView({
   // Per-tile span overrides, shared (and persisted) with the diff viewer's
   // artifacts panel. Tiles without an override auto-span by aspect ratio.
   const { spans, setSpanOverride } = useArtifactSpans()
+
+  // Tag/type filter + free-text search, reusing the diff viewer's filter bar and
+  // rules (see ArtifactFilterBar / lib/artifactFilter). The change-type scope is
+  // omitted — a single ref has no before/after diff. The persisted filter is keyed
+  // per project + script (a "repo:<script>" agent slot), reloaded when either
+  // changes and saved only on an explicit edit so the reload can't clobber it.
+  const filterAgentKey = `repo:${scriptName}`
+  const [filter, setFilter] = useState<ArtifactTagFilter>(() => loadTagFilter(projectId, filterAgentKey))
+  useEffect(() => { setFilter(loadTagFilter(projectId, filterAgentKey)) }, [projectId, filterAgentKey])
+  const updateFilter = useCallback((f: ArtifactTagFilter) => {
+    setFilter(f)
+    saveTagFilter(projectId, filterAgentKey, f)
+  }, [projectId, filterAgentKey])
+  // Ephemeral search (narrows + ranks without persisting), cleared when the script
+  // changes since this view is reused across the repository browser's scripts.
+  const [search, setSearch] = useState('')
+  useEffect(() => { setSearch('') }, [projectId, scriptName])
   // Each file's aspect ratio + natural width, so the masonry can auto-span by shape
   // and cap the span to avoid upscaling a low-res shot (see MasonryGrid spanOf). The
   // server supplies width/height when it could measure them; useMediaDims only
@@ -134,6 +154,11 @@ export function RepositoryArtifactsView({
     [data?.files],
   )
   const dims = useMediaDims(dimSources)
+
+  // The files the filter + search leave visible, ranked by search score. dims are
+  // still measured over every file (keyed by name) so a re-show needs no remeasure.
+  const allFiles = useMemo(() => data?.files ?? [], [data?.files])
+  const visibleFiles = useMemo(() => computeVisibleFiles(allFiles, filter, search), [allFiles, filter, search])
 
   useEffect(() => {
     let cancelled = false
@@ -184,7 +209,19 @@ export function RepositoryArtifactsView({
         {status === RepositoryArtifactResponse.status.READY && data && data.files.length === 0 && (
           <span className="text-xs text-gray-400 dark:text-gray-500">No files produced</span>
         )}
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+          {/* The shared artifact filter bar (search + tag/type scopes). Only the
+              ready state has files to filter; the change-type scope is omitted as a
+              single ref has no before/after diff. */}
+          {status === RepositoryArtifactResponse.status.READY && allFiles.length > 0 && (
+            <ArtifactFilterBar
+              files={allFiles}
+              filter={filter}
+              onFilterChange={updateFilter}
+              search={search}
+              onSearchChange={setSearch}
+            />
+          )}
           <button
             onClick={onRefresh}
             disabled={loading || generating}
@@ -228,22 +265,30 @@ export function RepositoryArtifactsView({
         </div>
       ) : (
         <div className="space-y-3">
-          <MasonryGrid
-            items={data.files.map((f) => ({
-              key: f.name,
-              node: <MediaCell file={f} />,
-              aspect: dims[f.name]?.aspect,
-              pxWidth: dims[f.name]?.pxWidth,
-              // Videos need a minimum tile width for their transport controls.
-              minWidthPx: isVideoArtifact(f.name) ? VIDEO_MIN_TILE_PX : undefined,
-              // Video uses horizontal drag for scrubbing, so it resizes via the edge
-              // handle only; images are draggable anywhere (see MasonryGrid).
-              bodyResizable: !isVideoArtifact(f.name),
-            }))}
-            spans={spans}
-            onSpanChange={setSpanOverride}
-            scope={`${projectId}/repo/${scriptName}`}
-          />
+          {/* The filter/search may hide every file; show why rather than a blank
+              grid (the "no files produced" case is handled in the status bar). */}
+          {data.files.length > 0 && visibleFiles.length === 0 ? (
+            <div className="py-8 text-xs text-center text-gray-400 dark:text-gray-500">
+              No files match {search.trim() ? 'your search' : 'the current filters'}.
+            </div>
+          ) : (
+            <MasonryGrid
+              items={visibleFiles.map((f) => ({
+                key: f.name,
+                node: <MediaCell file={f} />,
+                aspect: dims[f.name]?.aspect,
+                pxWidth: dims[f.name]?.pxWidth,
+                // Videos need a minimum tile width for their transport controls.
+                minWidthPx: isVideoArtifact(f.name) ? VIDEO_MIN_TILE_PX : undefined,
+                // Video uses horizontal drag for scrubbing, so it resizes via the edge
+                // handle only; images are draggable anywhere (see MasonryGrid).
+                bodyResizable: !isVideoArtifact(f.name),
+              }))}
+              spans={spans}
+              onSpanChange={setSpanOverride}
+              scope={`${projectId}/repo/${scriptName}`}
+            />
+          )}
           {data.log_url && <PersistedLog url={data.log_url} />}
         </div>
       )}
