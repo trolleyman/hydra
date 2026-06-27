@@ -48,6 +48,11 @@ export function makeAuxOpen(pick: (e: React.MouseEvent) => string) {
 // Bright magenta (#FF00FF) — the colour every changed pixel is painted in the
 // "Highlight" view, chosen to stand out against typical UI screenshots.
 export const DIFF_COLOR: [number, number, number] = [255, 0, 255]
+// Alpha (0–255) the magenta is painted at. Deliberately semi-transparent (~80%)
+// so the underlying image still shows through the marked regions — otherwise the
+// changed pixels, which are exactly the ones painted, would be fully masked and
+// flipping Before↔After would look like it did nothing.
+export const DIFF_ALPHA = 204
 // A small per-pixel tolerance (sum of the absolute R/G/B/A channel deltas) below
 // which two pixels count as equal, so JPEG/codec/anti-aliasing speckle doesn't
 // paint a confetti of magenta over otherwise-identical regions. 0 would be exact.
