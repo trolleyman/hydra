@@ -54,6 +54,17 @@ func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
+// ClaudeManagedSettingsDir / ClaudeManagedSettingsPath are the system managed-
+// settings location Claude Code reads on Linux. Managed settings are the highest-
+// precedence scope and cannot be overridden: hooks defined here keep running even
+// if a writable user/project settings.json sets "disableAllHooks": true — which is
+// why Hydra's gate hook lives here, not in a (defeatable) read-only user
+// settings.json. The dir is overlaid with a tmpfs and the file bound read-only.
+const (
+	ClaudeManagedSettingsDir  = "/etc/claude-code"
+	ClaudeManagedSettingsPath = "/etc/claude-code/managed-settings.json"
+)
+
 // BuildClaudeSettings generates the settings.json content with hook configuration
 // for Claude Code. When gateEnabled, a second PreToolUse hook (`hydra gate`) is
 // registered alongside the status hook so the trusted policy can deny tool calls.

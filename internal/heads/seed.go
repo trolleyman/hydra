@@ -38,6 +38,10 @@ type seedResult struct {
 	WritablePaths []string
 	// Env are extra environment variables (HYDRA_STATUS_PATH etc.).
 	Env []string
+	// TmpfsDirs are paths overlaid with a fresh writable tmpfs inside the sandbox
+	// (applied before Binds) so per-head files can be bound into otherwise
+	// read-only system locations — e.g. /etc/claude-code for managed-settings.json.
+	TmpfsDirs []string
 }
 
 // seedHead generates the per-head agent configuration (hook settings, trust,
@@ -101,17 +105,27 @@ func seedHead(projectRoot, id string, agentType sandbox.AgentType, worktreePath,
 
 	switch agentType {
 	case sandbox.AgentTypeClaude:
-		settingsHost := filepath.Join(cacheDir, "claude-settings.json")
-		merged, err := sandbox.BuildClaudeSettings(readHostFile(filepath.Join(home, ".claude", "settings.json")), stableHydraBin, policy.GateEnabled, policy.MCPAllowed)
+		// Hooks (status + gate), skip-dangerous, and the MCP allow-list go into
+		// Claude's MANAGED settings, bound read-only at the system managed path. This
+		// is the only tamper-proof scope: managed hooks keep running even if the agent
+		// writes {"disableAllHooks": true} into a writable user/project settings.json
+		// (which a read-only ~/.claude/settings.json bind could NOT prevent, since the
+		// agent can still create a project-scope .claude/settings.json). We therefore
+		// do NOT seed ~/.claude/settings.json at all — the user's own settings apply
+		// normally and our policy layers on top authoritatively. (AUDIT.md F4.)
+		managed, err := sandbox.BuildClaudeSettings(nil, stableHydraBin, policy.GateEnabled, policy.MCPAllowed)
 		if err != nil {
 			return nil, errtrace.Wrap(err)
 		}
-		if err := os.WriteFile(settingsHost, merged, 0644); err != nil {
+		managedHost := filepath.Join(cacheDir, "claude-managed-settings.json")
+		if err := os.WriteFile(managedHost, managed, 0644); err != nil {
 			return nil, errtrace.Wrap(err)
 		}
-		// settings.json is bound READ-ONLY: it holds the gate + status hooks, so a
-		// writable copy would let the agent neuter its own gate (AUDIT.md F4).
-		res.Binds = append(res.Binds, sandbox.Bind{Source: settingsHost, Target: path.Join(home, ".claude", "settings.json"), ReadOnly: true})
+		// The managed dir doesn't exist on the host and lives under the read-only
+		// root, so overlay it with a fresh tmpfs (applied before binds) and bind our
+		// file into it read-only.
+		res.TmpfsDirs = append(res.TmpfsDirs, sandbox.ClaudeManagedSettingsDir)
+		res.Binds = append(res.Binds, sandbox.Bind{Source: managedHost, Target: sandbox.ClaudeManagedSettingsPath, ReadOnly: true})
 
 		claudeJSONHost := filepath.Join(cacheDir, "claude.json")
 		cfg, err := sandbox.BuildClaudeConfig(readHostFile(filepath.Join(home, ".claude.json")), worktreePath, policy.MCPAllowed)

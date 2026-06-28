@@ -52,6 +52,13 @@ var globalInstallRe = regexp.MustCompile(`(?i)\b(` +
 // box), excluding `--dry-run`.
 var gitPushRe = regexp.MustCompile(`(?i)\bgit\s+(-[^\s]+\s+)*push\b`)
 
+// settingsTamperRe is a tripwire for shell commands that try to disable the gate
+// by editing Claude's settings/hooks (the Write/Edit tools are already gated, so
+// this only catches the Bash bypass). Like the install tripwire it is best-effort
+// — the real defense is that the gate hook lives in read-only MANAGED settings, so
+// even a successful disableAllHooks write to a user/project file can't disable it.
+var settingsTamperRe = regexp.MustCompile(`(?i)(disableAllHooks|allowManagedHooksOnly|managed-settings\.json|\.claude/settings(\.local)?\.json|claude-code/managed)`)
+
 // Decide returns the gate's verdict for one tool call. It is a pure function of
 // the policy and the hook payload so it is exhaustively unit-testable. The
 // guiding principle (see AUDIT.md): default-allow for unrecognized tools (the OS
@@ -115,6 +122,12 @@ func Decide(p Policy, toolName string, toolInput map[string]any) Result {
 				Reason:   "global/system installs are forbidden by the sandbox rules; install project-local deps in the worktree instead",
 			}
 		}
+		if settingsTamperRe.MatchString(cmd) {
+			return Result{
+				Decision: Deny,
+				Reason:   "modifying Claude settings/hooks from the shell is not allowed (it would let the agent disable its own gate)",
+			}
+		}
 		if gitPushRe.MatchString(cmd) && !strings.Contains(cmd, "--dry-run") {
 			return Result{
 				Decision: Ask, Kind: "bash", Target: "git push",
@@ -152,7 +165,7 @@ func (p Policy) isPolicyFile(path string) bool {
 	abs := p.resolve(path)
 	base := filepath.Base(abs)
 	switch base {
-	case ".mcp.json", ".claude.json":
+	case ".mcp.json", ".claude.json", "managed-settings.json":
 		return true
 	case "settings.json", "settings.local.json":
 		// Only under a .claude directory (e.g. ~/.claude/settings.json or a repo's
