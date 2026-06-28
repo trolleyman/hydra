@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"braces.dev/errtrace"
+	"github.com/trolleyman/hydra/internal/config"
+	"github.com/trolleyman/hydra/internal/gate"
 	"github.com/trolleyman/hydra/internal/paths"
 	"github.com/trolleyman/hydra/internal/sandbox"
 )
@@ -19,6 +21,11 @@ import (
 // every sandbox (/tmp is always a fresh tmpfs in our bwrap config, so it is a
 // reliable mountpoint). Hooks and the namespace-host supervisor invoke it here.
 const SandboxHydraBinPath = "/tmp/hydra-internal"
+
+// GateSandboxPolicyPath is the well-known path the read-only gate policy.json is
+// bound to inside the sandbox (again under the reliable /tmp tmpfs). The
+// in-sandbox `hydra gate` hook reads it via gate.EnvPolicyPath.
+const GateSandboxPolicyPath = "/tmp/hydra-gate-policy.json"
 
 // seedResult holds the per-head sandbox inputs produced by seedHead.
 type seedResult struct {
@@ -50,7 +57,7 @@ type seedResult struct {
 // seeded here as context files (~/.gemini/GEMINI.md,
 // ~/.copilot/copilot-instructions.md, ~/.codex/AGENTS.md), merged on top of any
 // the host user already has.
-func seedHead(projectRoot, id string, agentType sandbox.AgentType, worktreePath, home, prePrompt string) (*seedResult, error) {
+func seedHead(projectRoot, id string, agentType sandbox.AgentType, worktreePath, home, prePrompt string, policy gate.Policy) (*seedResult, error) {
 	cacheDir := paths.GetCacheDirFromProjectRoot(projectRoot)
 	if err := paths.CreateGitignoreAllInDir(cacheDir); err != nil {
 		return nil, errtrace.Wrap(err)
@@ -95,17 +102,19 @@ func seedHead(projectRoot, id string, agentType sandbox.AgentType, worktreePath,
 	switch agentType {
 	case sandbox.AgentTypeClaude:
 		settingsHost := filepath.Join(cacheDir, "claude-settings.json")
-		merged, err := sandbox.BuildClaudeSettings(readHostFile(filepath.Join(home, ".claude", "settings.json")), stableHydraBin)
+		merged, err := sandbox.BuildClaudeSettings(readHostFile(filepath.Join(home, ".claude", "settings.json")), stableHydraBin, policy.GateEnabled, policy.MCPAllowed)
 		if err != nil {
 			return nil, errtrace.Wrap(err)
 		}
 		if err := os.WriteFile(settingsHost, merged, 0644); err != nil {
 			return nil, errtrace.Wrap(err)
 		}
-		res.Binds = append(res.Binds, sandbox.Bind{Source: settingsHost, Target: path.Join(home, ".claude", "settings.json")})
+		// settings.json is bound READ-ONLY: it holds the gate + status hooks, so a
+		// writable copy would let the agent neuter its own gate (AUDIT.md F4).
+		res.Binds = append(res.Binds, sandbox.Bind{Source: settingsHost, Target: path.Join(home, ".claude", "settings.json"), ReadOnly: true})
 
 		claudeJSONHost := filepath.Join(cacheDir, "claude.json")
-		cfg, err := sandbox.BuildClaudeConfig(readHostFile(filepath.Join(home, ".claude.json")), worktreePath)
+		cfg, err := sandbox.BuildClaudeConfig(readHostFile(filepath.Join(home, ".claude.json")), worktreePath, policy.MCPAllowed)
 		if err != nil {
 			return nil, errtrace.Wrap(err)
 		}
@@ -113,6 +122,15 @@ func seedHead(projectRoot, id string, agentType sandbox.AgentType, worktreePath,
 			return nil, errtrace.Wrap(err)
 		}
 		res.Binds = append(res.Binds, sandbox.Bind{Source: claudeJSONHost, Target: path.Join(home, ".claude.json")})
+
+		// Seed the decision gate's inputs: a read-only policy.json the in-sandbox
+		// hook reads, and a per-head writable approval directory for the "ask"
+		// round-trip. Only when the gate is enabled (otherwise no hook reads them).
+		if policy.GateEnabled {
+			if err := seedGatePolicy(res, cacheDir, id, projectRoot, worktreePath, home, policy); err != nil {
+				return nil, errtrace.Wrap(err)
+			}
+		}
 
 	case sandbox.AgentTypeGemini:
 		settingsHost := filepath.Join(cacheDir, "gemini-settings.json")
@@ -173,6 +191,43 @@ func seedHead(projectRoot, id string, agentType sandbox.AgentType, worktreePath,
 	}
 
 	return res, nil
+}
+
+// resolveGatePolicy converts the trusted per-agent config policy into the
+// gate.Policy seeded into the sandbox. Home/WorktreePath are filled later by
+// seedGatePolicy. gate_enabled defaults to true (opt-out).
+func resolveGatePolicy(cfg config.Config, agentType string) gate.Policy {
+	p := cfg.ResolvePolicy(agentType)
+	return gate.Policy{
+		GateEnabled:        p.IsGateEnabled(),
+		MCPAllowed:         p.MCPAllowed,
+		WebFetchAllowHosts: p.WebFetchAllowHosts,
+	}
+}
+
+// seedGatePolicy writes the trusted gate policy.json (bound read-only into the
+// sandbox at GateSandboxPolicyPath) and provisions the per-head writable approval
+// directory used for the "ask" round-trip, wiring both via env vars the
+// `hydra gate` hook reads. The policy's Home/WorktreePath are filled here so the
+// in-sandbox hook can resolve the credential/policy paths it protects.
+func seedGatePolicy(res *seedResult, cacheDir, id, projectRoot, worktreePath, home string, policy gate.Policy) error {
+	policy.Home = home
+	policy.WorktreePath = worktreePath
+
+	policyHost := filepath.Join(cacheDir, id+"-gate-policy.json")
+	if err := policy.Save(policyHost); err != nil {
+		return errtrace.Wrap(err)
+	}
+	res.Binds = append(res.Binds, sandbox.Bind{Source: policyHost, Target: GateSandboxPolicyPath, ReadOnly: true})
+	res.Env = append(res.Env, gate.EnvPolicyPath+"="+GateSandboxPolicyPath)
+
+	approvalDir := paths.GetApprovalsDirFromProjectRoot(projectRoot, id)
+	if err := os.MkdirAll(approvalDir, 0755); err != nil {
+		return errtrace.Wrap(err)
+	}
+	res.WritablePaths = append(res.WritablePaths, approvalDir)
+	res.Env = append(res.Env, gate.EnvApprovalDir+"="+approvalDir)
+	return nil
 }
 
 // seedGeminiPrePrompt delivers the pre-prompt to Gemini, which has no

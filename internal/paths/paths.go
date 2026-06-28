@@ -153,6 +153,14 @@ func GetBuildLogFromProjectRoot(projectRoot, id string) string {
 	return filepath.Join(GetStatusDirFromProjectRoot(projectRoot), id+"_build.log")
 }
 
+// GetApprovalsDirFromProjectRoot returns the per-head directory used for the
+// security-gate "ask" round-trip: the in-sandbox hook writes approval requests
+// here (the dir is made writable at its real host path, like status.json) and
+// the daemon writes back decisions. Lives under .hydra/local/approvals/<id>.
+func GetApprovalsDirFromProjectRoot(projectRoot, id string) string {
+	return filepath.Join(GetHydraLocalDirFromProjectRoot(projectRoot), "approvals", id)
+}
+
 // WriteFileIfChanged writes content to path only when it differs from the existing file.
 // Reports whether the file was (over)written.
 func WriteFileIfChanged(path, content string, perm os.FileMode) error {

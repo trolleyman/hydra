@@ -42,17 +42,30 @@ func HookCommand(hydraBin, agent string) string {
 	return shellQuote(hydraBin) + " trigger-hook " + agent
 }
 
+// GateCommand returns the shell command the decision-capable PreToolUse gate
+// runs (a second PreToolUse hook alongside HookCommand). A gate "deny" blocks
+// the tool even under --dangerously-skip-permissions.
+func GateCommand(hydraBin, agent string) string {
+	return shellQuote(hydraBin) + " gate " + agent
+}
+
 // shellQuote single-quotes s for safe embedding in a hook command string.
 func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
-// BuildClaudeSettings generates the settings.json content with hook configuration for Claude Code.
-func BuildClaudeSettings(existing []byte, hydraBin string) ([]byte, error) {
-	hooks := buildHooksMap(HookCommand(hydraBin, "claude"), []string{
+// BuildClaudeSettings generates the settings.json content with hook configuration
+// for Claude Code. When gateEnabled, a second PreToolUse hook (`hydra gate`) is
+// registered alongside the status hook so the trusted policy can deny tool calls.
+// mcpAllowed is the MCP server allow-list: only those project-scoped .mcp.json
+// servers are enabled (so allow-listed ones load without the interactive trust
+// prompt Hydra can't answer headless), and project auto-trust is turned off so
+// everything else stays inert.
+func BuildClaudeSettings(existing []byte, hydraBin string, gateEnabled bool, mcpAllowed []string) ([]byte, error) {
+	statusCmd := HookCommand(hydraBin, "claude")
+	hooks := buildHooksMap(statusCmd, []string{
 		"SessionStart",
 		"UserPromptSubmit",
-		"PreToolUse",
 		"PostToolUse",
 		"PostToolUseFailure",
 		"PermissionRequest",
@@ -63,6 +76,13 @@ func BuildClaudeSettings(existing []byte, hydraBin string) ([]byte, error) {
 		"SubagentStop",
 		"SessionEnd",
 	})
+	// PreToolUse runs the status hook AND, when enabled, the decision gate. Both
+	// share one matcher group; Claude runs every hook and any "deny" wins.
+	preToolHooks := []hookHandler{{Type: "command", Command: statusCmd}}
+	if gateEnabled {
+		preToolHooks = append(preToolHooks, hookHandler{Type: "command", Command: GateCommand(hydraBin, "claude")})
+	}
+	hooks["PreToolUse"] = []matcherGroup{{Hooks: preToolHooks}}
 
 	settings := make(map[string]interface{})
 	if len(existing) > 0 {
@@ -73,6 +93,8 @@ func BuildClaudeSettings(existing []byte, hydraBin string) ([]byte, error) {
 
 	settings["skipDangerousModePermissionPrompt"] = true
 	settings["hooks"] = hooks
+	settings["enableAllProjectMcpServers"] = false
+	settings["enabledMcpjsonServers"] = append([]string{}, mcpAllowed...)
 
 	data, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
@@ -81,8 +103,12 @@ func BuildClaudeSettings(existing []byte, hydraBin string) ([]byte, error) {
 	return data, nil
 }
 
-// BuildClaudeConfig generates the .claude.json content with project trust settings.
-func BuildClaudeConfig(existing []byte, worktreePath string) ([]byte, error) {
+// BuildClaudeConfig generates the .claude.json content with project trust
+// settings, and strips any MCP server (user-scope or per-project) not on
+// mcpAllowed so non-allow-listed servers never spawn (a stdio MCP server is code
+// that runs the moment the session starts, so gating tool calls alone is too
+// late).
+func BuildClaudeConfig(existing []byte, worktreePath string, mcpAllowed []string) ([]byte, error) {
 	cfg := make(map[string]interface{})
 	if len(existing) > 0 {
 		if err := json.Unmarshal(existing, &cfg); err != nil {
@@ -102,11 +128,43 @@ func BuildClaudeConfig(existing []byte, worktreePath string) ([]byte, error) {
 	projects[worktreePath] = project
 	cfg["projects"] = projects
 
+	stripMCPServers(cfg, mcpAllowed)
+
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return nil, errtrace.Wrap(fmt.Errorf("marshal claude config: %w", err))
 	}
 	return data, nil
+}
+
+// stripMCPServers removes every MCP server not on allowed from the seeded
+// ~/.claude.json — both the top-level user-scope `mcpServers` map and any
+// per-project `projects[*].mcpServers` map. Server names are matched
+// case-sensitively (MCP names are case-sensitive).
+func stripMCPServers(cfg map[string]interface{}, allowed []string) {
+	allow := make(map[string]bool, len(allowed))
+	for _, a := range allowed {
+		allow[a] = true
+	}
+	prune := func(container map[string]interface{}) {
+		servers, ok := container["mcpServers"].(map[string]interface{})
+		if !ok {
+			return
+		}
+		for name := range servers {
+			if !allow[name] {
+				delete(servers, name)
+			}
+		}
+	}
+	prune(cfg)
+	if projects, ok := cfg["projects"].(map[string]interface{}); ok {
+		for _, p := range projects {
+			if pm, ok := p.(map[string]interface{}); ok {
+				prune(pm)
+			}
+		}
+	}
 }
 
 // BuildGeminiSettings generates the settings.json content with hook configuration for Gemini CLI.

@@ -20,6 +20,7 @@ import (
 	"github.com/trolleyman/hydra/internal/api"
 	"github.com/trolleyman/hydra/internal/config"
 	"github.com/trolleyman/hydra/internal/db"
+	"github.com/trolleyman/hydra/internal/gate"
 	"github.com/trolleyman/hydra/internal/git"
 	"github.com/trolleyman/hydra/internal/nshost"
 	"github.com/trolleyman/hydra/internal/paths"
@@ -437,7 +438,7 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 	// persist across resumes but never touch the real source.
 	cowMounts := buildCowMounts(projectRoot, worktreePath, opts.ID, cowPaths, true)
 
-	seed, err := seedHead(projectRoot, opts.ID, opts.AgentType, worktreePath, home, opts.PrePrompt)
+	seed, err := seedHead(projectRoot, opts.ID, opts.AgentType, worktreePath, home, opts.PrePrompt, resolveGatePolicy(cfg, string(opts.AgentType)))
 	if err != nil {
 		spawnFail(store, projectRoot, opts.ID, setStatus, fmt.Errorf("seed head: %w", err))
 		return nil, errtrace.Wrap(err)
@@ -655,8 +656,9 @@ func StartShellSession(reg *session.Registry, projectRoot string, head Head, row
 		// script (e.g. a bashism error) abort the shell before /bin/bash ever
 		// exec'd, closing the terminal instantly.
 		writable, masked, restore, cowPaths, net, _ := cfg.ResolveSandboxOptions("bash")
-		// Bash is an interactive shell, not an agent — no system prompt to inject.
-		seed, err := seedHead(projectRoot, shellID, sandbox.AgentTypeBash, worktreePath, home, "")
+		// Bash is an interactive shell, not an agent — no system prompt to inject,
+		// and no PreToolUse gate (it has no hook system); the empty policy disables it.
+		seed, err := seedHead(projectRoot, shellID, sandbox.AgentTypeBash, worktreePath, home, "", gate.Policy{})
 		if err != nil {
 			return "", errtrace.Wrap(err)
 		}
@@ -734,7 +736,7 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 	// reaches that head. It must therefore be idempotent — it runs on every launch
 	// — and, as on spawn, a non-zero exit gates the launch (here, aborts resume).
 	writable, masked, restore, cowPaths, net, preSpawn := cfg.ResolveSandboxOptions(string(head.AgentType))
-	seed, err := seedHead(projectRoot, head.ID, head.AgentType, worktreePath, home, head.PrePrompt)
+	seed, err := seedHead(projectRoot, head.ID, head.AgentType, worktreePath, home, head.PrePrompt, resolveGatePolicy(cfg, string(head.AgentType)))
 	if err != nil {
 		return errtrace.Wrap(err)
 	}
