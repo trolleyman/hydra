@@ -580,13 +580,15 @@ type Manager struct {
 	projectRoot string
 
 	mu         sync.Mutex
-	gens       map[string]struct{}  // entry dirs with an in-flight generation
-	progress   map[string]string    // entry dir -> latest progress line of its in-flight gen
-	startedAt  map[string]int64     // entry dir -> Unix time its in-flight gen started
-	logs       map[string][]LogLine // entry dir -> captured log of its in-flight gen
-	markerSeen map[string]bool      // entry dir -> a ProgressMarker line has been seen (stop stdout-as-progress)
-	subs       map[int]chan Event   // event subscribers (live progress streaming)
-	nextSub    int                  // next subscriber id
+	gens       map[string]struct{}           // entry dirs with an in-flight generation
+	progress   map[string]string             // entry dir -> latest progress line of its in-flight gen
+	startedAt  map[string]int64              // entry dir -> Unix time its in-flight gen started
+	logs       map[string][]LogLine          // entry dir -> captured log of its in-flight gen
+	markerSeen map[string]bool               // entry dir -> a ProgressMarker line has been seen (stop stdout-as-progress)
+	cancel     map[string]context.CancelFunc // entry dir -> cancels its in-flight gen's command tree (for preemption)
+	fgWant     map[string]bool               // entry dir -> a foreground request wants it (exempt from background preemption)
+	subs       map[int]chan Event            // event subscribers (live progress streaming)
+	nextSub    int                           // next subscriber id
 
 	// sched bounds concurrent generations and prioritizes foreground (a user
 	// viewing a diff) over background (proactive pre-generation) work, without
@@ -614,6 +616,8 @@ func NewManager(projectRoot string) *Manager {
 		startedAt:   map[string]int64{},
 		logs:        map[string][]LogLine{},
 		markerSeen:  map[string]bool{},
+		cancel:      map[string]context.CancelFunc{},
+		fgWant:      map[string]bool{},
 		subs:        map[int]chan Event{},
 		sched:       newGenScheduler(concurrency),
 	}
@@ -806,32 +810,51 @@ func (m *Manager) get(spec config.ArtifactScript, v Version, fg bool) (Meta, err
 		return meta, nil
 	}
 	if _, inFlight := m.gens[dir]; inFlight {
+		// A foreground view claims the entry: mark it so background preemption
+		// (CancelStaleBackground) won't cancel what the user is now watching, and
+		// bump it ahead of other background work in the queue.
+		if fg {
+			m.fgWant[dir] = true
+		}
 		prog := m.progress[dir]
 		started := m.startedAt[dir]
 		logCopy := append([]LogLine(nil), m.logs[dir]...)
 		m.mu.Unlock()
-		// A foreground view of an entry already queued as background bumps it to
-		// the front of the queue (a no-op once it is running or already fg).
 		if fg {
 			m.sched.promote(dir)
 		}
 		return Meta{Script: spec.Name, Key: key, Ref: ref, Status: StatusGenerating, Progress: prog, StartedAt: started, Log: logCopy}, nil
 	}
 	started := time.Now().Unix()
+	// A cancellable context per generation so the prefetcher can preempt a stale
+	// background run (see CancelStaleBackground); generate derives its timeout from
+	// it, so cancelling kills the whole sandboxed command tree.
+	genCtx, genCancel := context.WithCancel(context.Background())
 	m.gens[dir] = struct{}{}
 	m.startedAt[dir] = started
 	m.logs[dir] = nil
+	m.cancel[dir] = genCancel
+	if fg {
+		m.fgWant[dir] = true
+	}
 	m.mu.Unlock()
 
 	go func() {
+		defer genCancel() // free the context on exit
 		// Bound concurrent generations, foreground before background. The entry
 		// stays marked in-flight while queued, so duplicate requests keep getting
 		// StatusGenerating instead of piling up more builds.
 		m.sched.acquire(dir, fg)
 		defer m.sched.release()
 
-		meta := m.generate(spec, v, key, ref)
-		if err := writeMeta(dir, meta); err != nil {
+		meta := m.generate(genCtx, spec, v, key, ref)
+		// A cancelled generation was preempted (a newer version superseded this
+		// one): don't cache the aborted run as an error — drop the entry so a later
+		// request regenerates cleanly instead of serving a stale failure.
+		cancelled := genCtx.Err() != nil
+		if cancelled {
+			_ = os.RemoveAll(dir)
+		} else if err := writeMeta(dir, meta); err != nil {
 			// Best-effort: a failed write just means the next request regenerates.
 			_ = err
 		}
@@ -844,11 +867,15 @@ func (m *Manager) get(spec config.ArtifactScript, v Version, fg bool) (Meta, err
 		delete(m.startedAt, dir)
 		delete(m.logs, dir)
 		delete(m.markerSeen, dir)
+		delete(m.cancel, dir)
+		delete(m.fgWant, dir)
 		// Notify subscribers the entry settled (meta is already written above) so
 		// they re-read it instead of waiting for the next poll.
 		m.broadcastLocked(Event{Dir: dir, Kind: "settled"})
 		m.mu.Unlock()
-		writeLogFile(dir, logCopy) // best-effort; dir exists from generate()
+		if !cancelled {
+			writeLogFile(dir, logCopy) // best-effort; dir exists from generate()
+		}
 	}()
 
 	return Meta{Script: spec.Name, Key: key, Ref: ref, Status: StatusGenerating, StartedAt: started}, nil
@@ -873,6 +900,27 @@ func (m *Manager) Invalidate(script string, v Version) error {
 		return nil
 	}
 	return errtrace.Wrap(os.RemoveAll(dir))
+}
+
+// CancelStaleBackground cancels the in-flight generation for the cache entry at
+// dir, but only while it is still running purely as background work — i.e. no
+// foreground viewer has claimed it (see the fgWant guard). The daemon's
+// prefetcher calls this when a head moves to a newer version so the now-stale
+// build (e.g. a render of the head's previous working-tree state) is killed at
+// once, freeing its generation slot and its (often heavy: a forked JVM, an
+// emulator) build memory for the new version instead of letting a dead render run
+// to completion. Cancelling tears down the whole sandboxed process tree (bwrap is
+// its PID-namespace init) and the run's goroutine drops the entry rather than
+// caching the aborted result. A no-op if the entry isn't in flight, already
+// settled, or a foreground request wants it.
+func (m *Manager) CancelStaleBackground(dir string) {
+	m.mu.Lock()
+	cancel := m.cancel[dir]
+	fgWant := m.fgWant[dir]
+	m.mu.Unlock()
+	if cancel != nil && !fgWant {
+		cancel()
+	}
 }
 
 // appendLog records one captured output line of an in-flight generation: it
@@ -916,8 +964,11 @@ func (m *Manager) setProgressLocked(dir, text string) {
 	m.broadcastLocked(Event{Dir: dir, Kind: "progress", Progress: text})
 }
 
-// generate runs the script for one version and returns the resulting Meta.
-func (m *Manager) generate(spec config.ArtifactScript, v Version, key, ref string) Meta {
+// generate runs the script for one version and returns the resulting Meta. The
+// parent ctx is cancellable (per generation): cancelling it kills the command —
+// and, because the sandbox's bwrap is the init of its own PID namespace, the
+// whole process tree — so a preempted run frees its resources at once.
+func (m *Manager) generate(parent context.Context, spec config.ArtifactScript, v Version, key, ref string) Meta {
 	meta := Meta{Script: spec.Name, Key: key, Ref: ref, UpdatedAt: time.Now().Unix()}
 
 	_ = paths.CreateGitignoreAllInDir(m.root())
@@ -950,7 +1001,7 @@ func (m *Manager) generate(spec config.ArtifactScript, v Version, key, ref strin
 	if spec.TimeoutSec > 0 {
 		timeout = time.Duration(spec.TimeoutSec) * time.Second
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
 
 	launch, err := m.buildCommandSpec(spec, runDir, dir, ref)

@@ -21,6 +21,10 @@ export type ConfigResponse = {
      */
     artifact_concurrency?: number | null;
     /**
+     * Whether the daemon proactively pre-generates a head's artifacts in the background once its working tree settles, so a diff is ready before it is opened (artifact_prefetch in config.toml). When false, artifacts are generated only when a diff is viewed; foreground generation and artifact_concurrency still apply. null/absent uses the built-in default (enabled).
+     */
+    artifact_prefetch?: boolean | null;
+    /**
      * Built-in default pre-prompt always prepended to agent prompts (read-only)
      */
     default_pre_prompt?: string;
