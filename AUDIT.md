@@ -188,17 +188,23 @@ in the loop.
 > - **Rec 1 (gate):** `internal/gate` + `hydra gate` — a decision-capable
 >   PreToolUse hook driven by a read-only, trusted `policy.json` that can deny
 >   (policy-file writes, credential reads, non-allow-listed MCP, global installs)
->   or park-for-approval (unknown MCP/WebFetch host, `git push`). settings.json is
->   bound read-only (F4).
+>   or park-for-approval (unknown MCP/WebFetch host, `git push`). The hooks live
+>   in **managed settings** (`/etc/claude-code/managed-settings.json`, bound
+>   read-only) — the only scope whose hooks survive a `disableAllHooks` write, so
+>   the gate is tamper-proof, not merely read-only (F4). (`--settings` was
+>   considered and rejected: it is defeatable by a writable project settings.json.)
 > - **Rec 2 (MCP):** pre-launch stripping of non-allow-listed `mcpServers` from the
 >   seeded `~/.claude.json` + `enabledMcpjsonServers`/`enableAllProjectMcpServers`,
 >   runtime gate backstop, and a web approval card (allow / always-allow / deny)
 >   that persists "always" to the trusted config.
 > - **Rec 3 (egress):** `internal/egress` — a per-head HTTP/HTTPS filtering proxy
->   enforcing `allowed_hosts`, wired via `HTTP(S)_PROXY`. Honest caveat: it filters
->   every proxy-respecting client but is not inescapable in the shared-net
->   unprivileged sandbox (a hard boundary needs slirp4netns/pasta or netfilter,
->   neither installable here); `network.enabled=false` stays the hard off-switch.
+>   enforcing `allowed_hosts`. When `pasta` (with `--map-host-loopback`) + `nft`
+>   are present and a runtime smoke test passes, the head runs in a pasta network
+>   namespace whose nft ruleset drops all egress except to the proxy — an
+>   **inescapable** boundary (agent runs caps-dropped). Otherwise it degrades to
+>   **advisory** mode (proxy via `HTTP(S)_PROXY` — filters every well-behaved
+>   client but a determined process can bypass it), surfaced as a UI warning.
+>   `network.enabled=false` stays the hard off-switch.
 >
 > Policy lives in per-agent `[<agent>.policy]` / `[<agent>.sandbox.network]` config,
 > resolved from the trusted project root. The original audit follows unchanged.
