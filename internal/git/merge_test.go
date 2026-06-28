@@ -1,6 +1,7 @@
 package git
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -132,9 +133,9 @@ func TestAddWorktreeForBranch(t *testing.T) {
 }
 
 // TestMergeAbortsOnDirtyTree verifies that Merge refuses to run when the
-// destination working tree has uncommitted changes to tracked files, and leaves
-// those changes intact. The fast-forward path resets with `reset --hard`, which
-// would otherwise silently discard them.
+// destination working tree has an uncommitted change to a tracked file that the
+// merge would overwrite, returns a *DirtyMergeError naming that file, and leaves
+// the change intact. The fast-forward path would otherwise discard it.
 func TestMergeAbortsOnDirtyTree(t *testing.T) {
 	dir := gitInit(t)
 	run := func(args ...string) {
@@ -183,8 +184,15 @@ func TestMergeAbortsOnDirtyTree(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected Merge to abort on a dirty working tree, got nil")
 	}
+	var dirty *DirtyMergeError
+	if !errors.As(err, &dirty) {
+		t.Fatalf("expected *DirtyMergeError, got %T: %v", err, err)
+	}
+	if len(dirty.Files) != 1 || dirty.Files[0] != "base.txt" {
+		t.Errorf("expected DirtyMergeError naming base.txt, got %v", dirty.Files)
+	}
 
-	// The uncommitted change must survive untouched (not clobbered by reset --hard),
+	// The uncommitted change must survive untouched (not clobbered by the merge),
 	// and main must not have advanced.
 	if got := read("base.txt"); got != "uncommitted work\n" {
 		t.Errorf("uncommitted change was overwritten: got %q", got)
@@ -200,6 +208,71 @@ func TestMergeAbortsOnDirtyTree(t *testing.T) {
 	}
 	if !gitContains(t, dir, "main", "feature") {
 		t.Errorf("main did not contain feature after merging a clean tree")
+	}
+}
+
+// TestMergeKeepsUnrelatedDirtyFiles verifies that uncommitted changes to a file
+// the merge does NOT touch neither block the merge nor get discarded. This is the
+// core of the fix: only overlap with the incoming changes should stop a merge.
+func TestMergeKeepsUnrelatedDirtyFiles(t *testing.T) {
+	dir := gitInit(t)
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@e",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@e")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	write := func(name, content string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	read := func(name string) string {
+		t.Helper()
+		b, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+
+	// main has two tracked files; feature only changes feature.txt, so a merge
+	// into main fast-forwards and touches feature.txt but never unrelated.txt.
+	run("checkout", "-q", "-b", "main")
+	write("unrelated.txt", "original\n")
+	write("feature.txt", "base\n")
+	run("add", ".")
+	run("commit", "-qm", "base")
+
+	run("checkout", "-q", "-b", "feature")
+	write("feature.txt", "from feature\n")
+	run("add", ".")
+	run("commit", "-qm", "feature work")
+
+	run("checkout", "-q", "main")
+
+	// Dirty an unrelated tracked file the merge won't touch.
+	write("unrelated.txt", "uncommitted edit\n")
+
+	if err := Merge(dir, "feature", "t", "t@e"); err != nil {
+		t.Fatalf("merge should succeed with unrelated dirty file, got: %v", err)
+	}
+
+	// The merge landed, and the unrelated uncommitted edit survived (a `reset
+	// --hard` fast-forward would have discarded it).
+	if !gitContains(t, dir, "main", "feature") {
+		t.Errorf("main did not advance to include feature")
+	}
+	if got := read("feature.txt"); got != "from feature\n" {
+		t.Errorf("feature.txt not updated by merge: got %q", got)
+	}
+	if got := read("unrelated.txt"); got != "uncommitted edit\n" {
+		t.Errorf("unrelated uncommitted edit was lost: got %q", got)
 	}
 }
 
