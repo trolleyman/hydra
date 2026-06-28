@@ -382,24 +382,29 @@ func agentResponse(h heads.Head) api.AgentResponse {
 		es := h.EndState
 		endState = &es
 	}
+	var netEnf *string
+	if m := string(heads.EgressModeFor(h.ID)); m != "" {
+		netEnf = &m
+	}
 	return api.AgentResponse{
-		Id:               h.ID,
-		Title:            &title,
-		BranchName:       h.Branch,
-		WorktreePath:     h.Worktree,
-		ProjectPath:      h.ProjectPath,
-		SessionPid:       h.SessionPID,
-		SessionStatus:    h.SessionStatus,
-		AgentType:        string(h.AgentType),
-		PrePrompt:        h.PrePrompt,
-		Prompt:           h.Prompt,
-		BaseBranch:       h.BaseBranch,
-		Ephemeral:        &h.Ephemeral,
-		CreatedAt:        createdAt,
-		AgentStatus:      h.AgentStatus,
-		HasUnreadChanges: &h.HasUnreadChanges,
-		Archived:         &archived,
-		EndState:         endState,
+		Id:                 h.ID,
+		Title:              &title,
+		BranchName:         h.Branch,
+		WorktreePath:       h.Worktree,
+		ProjectPath:        h.ProjectPath,
+		SessionPid:         h.SessionPID,
+		SessionStatus:      h.SessionStatus,
+		AgentType:          string(h.AgentType),
+		PrePrompt:          h.PrePrompt,
+		Prompt:             h.Prompt,
+		BaseBranch:         h.BaseBranch,
+		Ephemeral:          &h.Ephemeral,
+		CreatedAt:          createdAt,
+		AgentStatus:        h.AgentStatus,
+		NetworkEnforcement: netEnf,
+		HasUnreadChanges:   &h.HasUnreadChanges,
+		Archived:           &archived,
+		EndState:           endState,
 	}
 }
 

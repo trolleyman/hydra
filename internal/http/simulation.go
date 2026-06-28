@@ -258,15 +258,16 @@ func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, pr
 			// (an MCP server not on the allow-list), so it sits in a
 			// policy_approval wait and the detail page shows the approval card
 			// (agent-approvals shot). notification_type drives the card.
-			Id:            "agent-approval",
-			Title:         ptr("Wire up the GitHub MCP server"),
-			AgentType:     "claude",
-			BaseBranch:    "main",
-			BranchName:    ptr("hydra/feat-mcp"),
-			SessionPid:    1005,
-			SessionStatus: "running",
-			CreatedAt:     &createdAt0,
-			Prompt:        "Use the linear MCP server to pull the open issues and start on the highest-priority one.",
+			Id:                 "agent-approval",
+			Title:              ptr("Wire up the GitHub MCP server"),
+			AgentType:          "claude",
+			BaseBranch:         "main",
+			BranchName:         ptr("hydra/feat-mcp"),
+			SessionPid:         1005,
+			SessionStatus:      "running",
+			CreatedAt:          &createdAt0,
+			Prompt:             "Use the linear MCP server to pull the open issues and start on the highest-priority one.",
+			NetworkEnforcement: ptr("filtered-advisory"),
 			AgentStatus: &api.AgentStatusInfo{
 				Status:           needsInput,
 				Timestamp:        simNow().Format(time.RFC3339),
@@ -392,15 +393,16 @@ func (s *SimulationServer) GetAgent(w http.ResponseWriter, r *http.Request, proj
 	if id == "agent-approval" {
 		createdAt := simNow().Add(-30 * time.Minute).Unix()
 		api.WriteJSON(w, http.StatusOK, api.AgentResponse{
-			Id:            "agent-approval",
-			Title:         ptr("Wire up the GitHub MCP server"),
-			AgentType:     "claude",
-			BaseBranch:    "main",
-			BranchName:    ptr("hydra/feat-mcp"),
-			SessionPid:    1005,
-			SessionStatus: "running",
-			CreatedAt:     &createdAt,
-			Prompt:        "Use the linear MCP server to pull the open issues and start on the highest-priority one.",
+			Id:                 "agent-approval",
+			Title:              ptr("Wire up the GitHub MCP server"),
+			AgentType:          "claude",
+			BaseBranch:         "main",
+			BranchName:         ptr("hydra/feat-mcp"),
+			SessionPid:         1005,
+			SessionStatus:      "running",
+			CreatedAt:          &createdAt,
+			Prompt:             "Use the linear MCP server to pull the open issues and start on the highest-priority one.",
+			NetworkEnforcement: ptr("filtered-advisory"),
 			AgentStatus: &api.AgentStatusInfo{
 				Status:           api.NeedsInput,
 				Timestamp:        simNow().Format(time.RFC3339),

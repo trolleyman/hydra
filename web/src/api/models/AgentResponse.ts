@@ -32,6 +32,10 @@ export type AgentResponse = {
      * Unix timestamp (seconds) when the session was started; 0 if not started
      */
     created_at?: number;
+    /**
+     * Network egress posture for a live head: "off" (no network), "filtered-hard" (allow-list enforced in a pasta netns + nft lock — an inescapable boundary), "filtered-advisory" (allow-list enforced by the proxy via HTTP(S)_PROXY only; a determined process can bypass it), or absent/empty (no allow-list → unrestricted, or the head isn't live).
+     */
+    network_enforcement?: string;
     agent_status?: AgentStatusInfo;
     /**
      * True if the agent has changes the user has not yet looked at (set on a running→waiting/finished transition, cleared when the agent is opened).

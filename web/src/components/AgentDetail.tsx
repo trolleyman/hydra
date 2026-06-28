@@ -15,7 +15,7 @@ import { uploadBlobUrl } from '../api/uploads'
 import type { Attachment } from '../lib/spawnDrafts'
 import { DiffViewer } from '../DiffViewer'
 import { formatStartedAgo, agentStatusBadge, archivedEndStateBadge, agentDotClass, agentTypePill } from './AgentComponents'
-import { LoaderCircle, Merge, Trash2, Tag, RotateCcw, Pencil, TerminalSquare, Mail, ShieldAlert } from 'lucide-react'
+import { LoaderCircle, Merge, Trash2, Tag, RotateCcw, Pencil, TerminalSquare, Mail, ShieldAlert, ShieldCheck, ShieldOff } from 'lucide-react'
 import { Tooltip } from './Tooltip'
 import { AgentTypeIcon, type AgentTypeIconName } from './AgentTypeIcon'
 import { renderMarkdown } from '../lib/markdown'
@@ -212,6 +212,44 @@ function ArchivedAgentDetail({ agent, projectId, onPurged }: { agent: AgentRespo
         </div>
       </div>
     </div>
+  )
+}
+
+// NetworkEnforcementBadge shows a live head's egress posture (AUDIT.md rec 3),
+// warning clearly when filtering is only the advisory (proxy-respecting) fallback
+// rather than the hard netns boundary. Hidden when there's no allow-list (egress
+// unrestricted) or the head isn't live (mode absent).
+function NetworkEnforcementBadge({ mode }: { mode?: string }) {
+  if (!mode) return null
+  const cfg: Record<string, { label: string; className: string; Icon: typeof ShieldCheck; tip: string }> = {
+    'filtered-hard': {
+      label: 'egress locked',
+      className: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300',
+      Icon: ShieldCheck,
+      tip: 'Outbound network is confined to the allow-list inside a network namespace (pasta + nft) — a determined process cannot bypass it.',
+    },
+    'filtered-advisory': {
+      label: 'egress filtered (advisory)',
+      className: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300',
+      Icon: ShieldAlert,
+      tip: 'Outbound traffic is filtered via HTTP(S)_PROXY, so every well-behaved client is restricted to the allow-list — but this is NOT an inescapable boundary: a process that ignores the proxy can still reach the network. Install/upgrade passt (pasta with --map-host-loopback) for a hard boundary, or set network.enabled = false to block egress entirely.',
+    },
+    off: {
+      label: 'no network',
+      className: 'bg-gray-200 text-gray-600 dark:bg-gray-700 dark:text-gray-300',
+      Icon: ShieldOff,
+      tip: 'This head runs with no outbound network access.',
+    },
+  }
+  const c = cfg[mode]
+  if (!c) return null
+  return (
+    <Tooltip content={c.tip}>
+      <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded font-medium ${c.className}`}>
+        <c.Icon className="w-3 h-3 shrink-0" />
+        {c.label}
+      </span>
+    </Tooltip>
   )
 }
 
@@ -734,6 +772,7 @@ export function AgentDetail({
                 {agentStatusBadge(agent.agent_status.status).label}
               </span>
             )}
+            <NetworkEnforcementBadge mode={agent.network_enforcement} />
             {agent.branch_name && (
               <span className="text-xs font-mono text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
                 <Tag className="w-3.5 h-3.5" />

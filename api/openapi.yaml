@@ -1898,6 +1898,14 @@ components:
           type: integer
           format: int64
           description: Unix timestamp (seconds) when the session was started; 0 if not started
+        network_enforcement:
+          type: string
+          description: >-
+            Network egress posture for a live head: "off" (no network),
+            "filtered-hard" (allow-list enforced in a pasta netns + nft lock — an
+            inescapable boundary), "filtered-advisory" (allow-list enforced by the
+            proxy via HTTP(S)_PROXY only; a determined process can bypass it), or
+            absent/empty (no allow-list → unrestricted, or the head isn't live).
         agent_status:
           $ref: '#/components/schemas/AgentStatusInfo'
         has_unread_changes:

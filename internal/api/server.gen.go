@@ -209,9 +209,12 @@ type AgentResponse struct {
 	// HasUnreadChanges True if the agent has changes the user has not yet looked at (set on a running→waiting/finished transition, cleared when the agent is opened).
 	HasUnreadChanges *bool  `json:"has_unread_changes,omitempty"`
 	Id               string `json:"id"`
-	PrePrompt        string `json:"pre_prompt"`
-	ProjectPath      string `json:"project_path"`
-	Prompt           string `json:"prompt"`
+
+	// NetworkEnforcement Network egress posture for a live head: "off" (no network), "filtered-hard" (allow-list enforced in a pasta netns + nft lock — an inescapable boundary), "filtered-advisory" (allow-list enforced by the proxy via HTTP(S)_PROXY only; a determined process can bypass it), or absent/empty (no allow-list → unrestricted, or the head isn't live).
+	NetworkEnforcement *string `json:"network_enforcement,omitempty"`
+	PrePrompt          string  `json:"pre_prompt"`
+	ProjectPath        string  `json:"project_path"`
+	Prompt             string  `json:"prompt"`
 
 	// SessionPid PID of the running sandbox session, or 0 if not running
 	SessionPid int `json:"session_pid"`
