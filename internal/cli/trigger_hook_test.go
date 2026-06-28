@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/trolleyman/hydra/internal/api"
+	"github.com/trolleyman/hydra/internal/heads"
 )
 
 func TestStatusFilePathHonorsEnv(t *testing.T) {
@@ -312,6 +313,134 @@ func TestTriggerHookQuestionNotSuggested(t *testing.T) {
 	}
 	if info.LastMessageIsSuggestedNextMessage != nil {
 		t.Errorf("last_message_is_suggested_next_message = %v, want nil for a question", *info.LastMessageIsSuggestedNextMessage)
+	}
+}
+
+// runTriggerHookStatusFileForTest is like runTriggerHookInfoForTest but decodes
+// the full on-disk StatusFile, so tests can assert internal-only fields such as
+// notification_type. Returns nil if no status.json was written.
+func runTriggerHookStatusFileForTest(t *testing.T, agentType, event string, payload map[string]interface{}) *heads.StatusFile {
+	t.Helper()
+	dir := t.TempDir()
+	statusPath := filepath.Join(dir, "status.json")
+	t.Setenv("HYDRA_STATUS_PATH", statusPath)
+	t.Setenv("HYDRA_STATUS_LOG_PATH", filepath.Join(dir, "status_log.jsonl"))
+
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := filepath.Join(dir, "stdin.json")
+	if err := os.WriteFile(in, raw, 0644); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.Open(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	orig := os.Stdin
+	os.Stdin = f
+	defer func() { os.Stdin = orig }()
+
+	if err := runTriggerHook(agentType, event, nil); err != nil {
+		t.Fatalf("runTriggerHook: %v", err)
+	}
+
+	data, err := os.ReadFile(statusPath)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	var file heads.StatusFile
+	if err := json.Unmarshal(data, &file); err != nil {
+		t.Fatal(err)
+	}
+	return &file
+}
+
+// TestTriggerHookPermissionRequest covers ExitPlanMode, which fires no
+// PreToolUse and so is only detectable via PermissionRequest: the agent is
+// blocked on the user (waiting) and the plan becomes last_message but must not
+// be flagged as a suggested next message. A PermissionRequest for any other tool
+// still means the agent is blocked, so it is waiting too (just without a plan).
+func TestTriggerHookPermissionRequest(t *testing.T) {
+	plan := runTriggerHookInfoForTest(t, "claude", "", map[string]interface{}{
+		"hook_event_name": "PermissionRequest",
+		"tool_name":       "ExitPlanMode",
+		"tool_input":      map[string]interface{}{"plan": "Step 1: build the thing"},
+	})
+	if plan == nil {
+		t.Fatal("no status.json written")
+	}
+	if plan.Status != api.Waiting {
+		t.Errorf("ExitPlanMode status = %q, want waiting", plan.Status)
+	}
+	if plan.LastMessage == nil || *plan.LastMessage != "Step 1: build the thing" {
+		t.Errorf("last_message = %v", plan.LastMessage)
+	}
+	if plan.LastMessageIsSuggestedNextMessage != nil {
+		t.Errorf("suggested = %v, want nil for a plan", *plan.LastMessageIsSuggestedNextMessage)
+	}
+
+	other := runTriggerHookInfoForTest(t, "claude", "", map[string]interface{}{
+		"hook_event_name": "PermissionRequest",
+		"tool_name":       "Bash",
+		"tool_input":      map[string]interface{}{"command": "rm -rf /"},
+	})
+	if other == nil || other.Status != api.Waiting {
+		t.Errorf("non-plan PermissionRequest status = %v, want waiting", other)
+	}
+	if other != nil && other.LastMessage != nil {
+		t.Errorf("non-plan PermissionRequest last_message = %v, want none", *other.LastMessage)
+	}
+}
+
+// TestTriggerHookNotificationTypes covers the AskUserQuestion fix: the
+// notification_type drives both the status and the value persisted for the
+// poller's immediacy decision. Explicit prompts go to waiting; an answered
+// elicitation goes back to running; auth_success writes nothing.
+func TestTriggerHookNotificationTypes(t *testing.T) {
+	cases := []struct {
+		notificationType string
+		wantStatus       api.AgentStatus // "" means no status.json written
+	}{
+		{"idle_prompt", api.Waiting},
+		{"permission_prompt", api.Waiting},
+		{"elicitation_dialog", api.Waiting},
+		{"elicitation_complete", api.Running},
+		{"elicitation_response", api.Running},
+		{"auth_success", ""},
+		{"", api.Waiting}, // unrecognised/missing type defaults to waiting (deferred)
+	}
+	for _, c := range cases {
+		payload := map[string]interface{}{
+			"hook_event_name": "Notification",
+			"message":         "something",
+		}
+		if c.notificationType != "" {
+			payload["notification_type"] = c.notificationType
+		}
+		file := runTriggerHookStatusFileForTest(t, "claude", "", payload)
+		if c.wantStatus == "" {
+			if file != nil {
+				t.Errorf("notification_type %q: wrote status %q, want no write", c.notificationType, file.Status)
+			}
+			continue
+		}
+		if file == nil {
+			t.Errorf("notification_type %q: no status.json written, want %q", c.notificationType, c.wantStatus)
+			continue
+		}
+		if file.Status != c.wantStatus {
+			t.Errorf("notification_type %q: status = %q, want %q", c.notificationType, file.Status, c.wantStatus)
+		}
+		// The type must round-trip so the poller can classify the wait.
+		if file.NotificationType != c.notificationType {
+			t.Errorf("notification_type %q: persisted %q", c.notificationType, file.NotificationType)
+		}
 	}
 }
 

@@ -106,3 +106,81 @@ func TestPollerEventsOnlyOnRenderedChange(t *testing.T) {
 		t.Fatal("running→waiting transition did not emit agents_changed")
 	}
 }
+
+// writeNotificationStatusJSON writes a status.json for a Notification hook,
+// including the notification_type the poller keys its immediacy decision on.
+func writeNotificationStatusJSON(t *testing.T, projectRoot, id string, status api.AgentStatus, notificationType, ts string) {
+	t.Helper()
+	if err := os.MkdirAll(paths.GetStatusDirFromProjectRoot(projectRoot), 0755); err != nil {
+		t.Fatalf("mkdir status dir: %v", err)
+	}
+	event := "Notification"
+	file := StatusFile{
+		AgentStatusInfo:  api.AgentStatusInfo{Status: status, Event: &event, Timestamp: ts},
+		NotificationType: notificationType,
+	}
+	data, err := json.Marshal(file)
+	if err != nil {
+		t.Fatalf("marshal status: %v", err)
+	}
+	if err := os.WriteFile(paths.GetStatusJsonFromProjectRoot(projectRoot, id), data, 0644); err != nil {
+		t.Fatalf("write status json: %v", err)
+	}
+}
+
+// TestPollerNotificationUnreadImmediacy covers the AskUserQuestion fix: a
+// running→waiting transition driven by an explicit-prompt Notification
+// (elicitation_dialog / permission_prompt) raises has_unread_changes on the very
+// next poll, whereas the idle "gone quiet" nudge (idle_prompt) is deferred — it
+// flips the status to waiting but does NOT raise the unread flag immediately
+// (the debouncer holds it for graceUnread first).
+func TestPollerNotificationUnreadImmediacy(t *testing.T) {
+	cases := []struct {
+		name             string
+		notificationType string
+		wantUnread       bool
+	}{
+		{"elicitation_dialog immediate", "elicitation_dialog", true},
+		{"permission_prompt immediate", "permission_prompt", true},
+		{"idle_prompt deferred", "idle_prompt", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			root := t.TempDir()
+			store, err := db.Open(root)
+			if err != nil {
+				t.Fatalf("open db: %v", err)
+			}
+			t.Cleanup(func() { _ = store.Close() })
+
+			const id = "agent1"
+			if err := store.UpsertAgent(&db.Agent{ID: id, ProjectPath: root, AgentType: "claude", SessionStatus: "running"}); err != nil {
+				t.Fatalf("upsert agent: %v", err)
+			}
+
+			hub := events.NewHub()
+			deb := newUnreadDebouncer()
+			base := time.Date(2026, 6, 24, 18, 0, 0, 0, time.UTC)
+
+			// Establish the running baseline so the next poll sees a running→waiting
+			// transition (the unread flag only fires on that edge).
+			writeAgentStatusJSON(t, root, id, api.Running, "PostToolUse", base.Format(time.RFC3339Nano))
+			pollJSONStatusOnce(store, root, deb, hub)
+
+			// The notification arrives.
+			writeNotificationStatusJSON(t, root, id, api.Waiting, c.notificationType, base.Add(time.Second).Format(time.RFC3339Nano))
+			pollJSONStatusOnce(store, root, deb, hub)
+
+			agents, err := store.ListAgents(root)
+			if err != nil {
+				t.Fatalf("list agents: %v", err)
+			}
+			if got := agents[0].AgentStatus; got == nil || *got != "waiting" {
+				t.Fatalf("status = %v, want waiting", got)
+			}
+			if got := agents[0].HasUnreadChanges; got != c.wantUnread {
+				t.Errorf("has_unread_changes = %v, want %v for notification_type %q", got, c.wantUnread, c.notificationType)
+			}
+		})
+	}
+}

@@ -3,6 +3,8 @@ package heads
 import (
 	"testing"
 	"time"
+
+	"github.com/trolleyman/hydra/internal/api"
 )
 
 func TestStatusTimeAfter(t *testing.T) {
@@ -95,22 +97,43 @@ func TestUnreadDebouncerArmPreservesOriginalSince(t *testing.T) {
 	}
 }
 
-func TestIsUserInputEvent(t *testing.T) {
-	yes := []string{"PreToolUse", "preToolUse", "BeforeTool"}
-	for _, e := range yes {
-		e := e
-		if !isUserInputEvent(&e) {
-			t.Errorf("isUserInputEvent(%q) = false, want true", e)
+func TestIsImmediateWait(t *testing.T) {
+	immediate := func(event, notificationType string) bool {
+		return isImmediateWait(&StatusFile{
+			AgentStatusInfo:  api.AgentStatusInfo{Event: &event},
+			NotificationType: notificationType,
+		})
+	}
+
+	// Tool/permission events that mean the agent is unambiguously blocked on the user.
+	for _, e := range []string{"PreToolUse", "preToolUse", "BeforeTool", "PermissionRequest", "permissionRequest"} {
+		if !immediate(e, "") {
+			t.Errorf("isImmediateWait(event=%q) = false, want true", e)
 		}
 	}
-	no := []string{"Notification", "Stop", "SessionStart", ""}
-	for _, e := range no {
-		e := e
-		if isUserInputEvent(&e) {
-			t.Errorf("isUserInputEvent(%q) = true, want false", e)
+
+	// A Notification is immediate only for an explicit prompt, not the idle nudge.
+	for _, nt := range []string{"permission_prompt", "elicitation_dialog"} {
+		if !immediate("Notification", nt) {
+			t.Errorf("isImmediateWait(Notification, %q) = false, want true", nt)
 		}
 	}
-	if isUserInputEvent(nil) {
-		t.Error("isUserInputEvent(nil) = true, want false")
+	for _, nt := range []string{"idle_prompt", "auth_success", ""} {
+		if immediate("Notification", nt) {
+			t.Errorf("isImmediateWait(Notification, %q) = true, want false (deferred)", nt)
+		}
+	}
+
+	// Non-immediate events.
+	for _, e := range []string{"Stop", "SessionStart", ""} {
+		if immediate(e, "") {
+			t.Errorf("isImmediateWait(event=%q) = true, want false", e)
+		}
+	}
+	if isImmediateWait(nil) {
+		t.Error("isImmediateWait(nil) = true, want false")
+	}
+	if isImmediateWait(&StatusFile{}) {
+		t.Error("isImmediateWait(no event) = true, want false")
 	}
 }

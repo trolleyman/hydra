@@ -199,6 +199,11 @@ func runTriggerHook(agentType string, eventOverride string, logFile *os.File) er
 	// presenting to the user via a user-input tool (set below). Such a message is
 	// never a suggested next message, even when its shape looks terse.
 	lastMessageIsQuestion := false
+	// notificationType carries Claude's `notification_type` for Notification
+	// events (idle_prompt, permission_prompt, elicitation_dialog, …), persisted
+	// so the poller can tell an explicit "the agent is asking you" wait from the
+	// idle "gone quiet" nudge.
+	notificationType := ""
 
 	// Only update status.json for events that represent a meaningful status change.
 	// All other events are logged above but do not alter the displayed status.
@@ -240,8 +245,10 @@ func runTriggerHook(agentType string, eventOverride string, logFile *os.File) er
 		// "I need input" signal on turn end, and guessing from the message text
 		// (e.g. a trailing '?') misfires too often — plenty of finished turns
 		// end on a question. Genuine waits surface through other hooks instead:
-		// the AskUserQuestion/ExitPlanMode tool calls (PreToolUse) and the
-		// Notification event.
+		// ExitPlanMode's PermissionRequest and the Notification event whose
+		// notification_type marks an AskUserQuestion / permission prompt. (Claude
+		// does NOT fire PreToolUse/PostToolUse for AskUserQuestion or
+		// ExitPlanMode, so those tool calls can't be detected via PreToolUse.)
 		status = api.Finished
 	case "SessionEnd", "sessionEnd":
 		status = api.Stopped
@@ -263,21 +270,50 @@ func runTriggerHook(agentType string, eventOverride string, logFile *os.File) er
 		// working again. Rewriting status.json also refreshes the timestamp, so the
 		// frontend knows it may need to refresh (e.g. after a git commit).
 		status = api.Running
-	case "Notification", "notification":
-		// A notification means the agent is blocking on the user — either a
-		// permission prompt or the "waiting for your input" idle nudge. The idle
-		// nudge, though, also fires ~60s after a turn ends, when the agent has
-		// simply gone quiet. In that case the status is already terminal
-		// (finished/stopped) and downgrading it back to waiting would spuriously
-		// reset a finished agent to waiting with nothing having changed. A real
-		// permission prompt only fires mid-turn, so the status would be running;
-		// guard against clobbering a terminal status here.
-		if cur := currentStatus(); cur == api.Finished || cur == api.Stopped {
-			return nil
-		}
+	case "PermissionRequest", "permissionRequest":
+		// A tool is asking the user to approve it — the agent is blocked on the
+		// user. Under our bypass-permissions mode most tools never reach here, but
+		// plan approval (ExitPlanMode) and any genuinely non-bypassable prompt do.
+		// This is the reliable signal for ExitPlanMode, which fires no PreToolUse.
+		// We only OBSERVE: trigger-hook writes nothing to stdout, so the permission
+		// flow proceeds unchanged. The poller treats this wait as immediate unread.
 		status = api.Waiting
-		if lastMessage == "" {
-			lastMessage = stringField(input, "message")
+		if isUserInputTool(stringField(input, "tool_name")) {
+			if q := questionText(input); q != "" {
+				lastMessage = q
+				lastMessageIsQuestion = true
+			}
+		}
+	case "Notification", "notification":
+		// A notification means the agent is blocking on the user. The
+		// notification_type tells the kinds apart:
+		//   - elicitation_complete / elicitation_response: the user just answered
+		//     an AskUserQuestion, so the agent is working again.
+		//   - auth_success (and other informational types): no status change.
+		//   - permission_prompt / elicitation_dialog: an explicit prompt — a tool
+		//     needs approval, or AskUserQuestion is asking. This is how an
+		//     AskUserQuestion surfaces (it fires no PreToolUse); the poller flags
+		//     it as immediate unread.
+		//   - idle_prompt (and any unrecognised type): the agent has gone quiet.
+		//     The poller defers the unread flag for these (the idle nudge also
+		//     fires ~60s after a turn ends and when a head awaits a subagent).
+		// Either way, don't downgrade a terminal status: the idle nudge fires after
+		// a finished/stopped turn too, and flipping that back to waiting would
+		// spuriously revive it.
+		notificationType = stringField(input, "notification_type")
+		switch notificationType {
+		case "elicitation_complete", "elicitation_response":
+			status = api.Running
+		case "auth_success":
+			return nil
+		default:
+			if cur := currentStatus(); cur == api.Finished || cur == api.Stopped {
+				return nil
+			}
+			status = api.Waiting
+			if lastMessage == "" {
+				lastMessage = stringField(input, "message")
+			}
 		}
 	default:
 		return nil
@@ -320,7 +356,7 @@ func runTriggerHook(agentType string, eventOverride string, logFile *os.File) er
 		return errtrace.Wrap(fmt.Errorf("create status dir: %w", err))
 	}
 
-	data, err := json.Marshal(info)
+	data, err := json.Marshal(heads.StatusFile{AgentStatusInfo: info, NotificationType: notificationType})
 	if err != nil {
 		return errtrace.Wrap(fmt.Errorf("marshal status: %w", err))
 	}

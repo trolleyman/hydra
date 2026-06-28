@@ -55,6 +55,7 @@ func BuildClaudeSettings(existing []byte, hydraBin string) ([]byte, error) {
 		"PreToolUse",
 		"PostToolUse",
 		"PostToolUseFailure",
+		"PermissionRequest",
 		"Notification",
 		"Stop",
 		"PreCompact",

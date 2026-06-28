@@ -171,20 +171,44 @@ func (d *unreadDebouncer) ready(id, status string, now time.Time) bool {
 	return false
 }
 
-// isUserInputEvent reports whether the hook event that produced a waiting status
-// was a user-input tool call (AskUserQuestion / ExitPlanMode), which trigger_hook
-// surfaces via PreToolUse. Such a wait is an unambiguous "needs you" and is
-// flagged immediately, unlike an idle Notification wait which is deferred.
-func isUserInputEvent(event *string) bool {
-	if event == nil {
+// StatusFile is the on-disk shape of a per-head status.json: the API-facing
+// AgentStatusInfo plus internal-only fields the poller uses to classify a wait
+// but that are not part of the agent API. trigger_hook (the writer) and the
+// poller (the reader) share this type so the extra fields round-trip.
+type StatusFile struct {
+	api.AgentStatusInfo
+	// NotificationType is the Claude `notification_type` carried by a
+	// Notification hook (idle_prompt, permission_prompt, elicitation_dialog, …).
+	// It lets the poller tell an explicit "the agent is asking you" wait
+	// (flagged immediately) from the idle "gone quiet" nudge (deferred).
+	NotificationType string `json:"notification_type,omitempty"`
+}
+
+// isImmediateWait reports whether a running→waiting transition is an explicit
+// "the agent needs you now" signal that should raise the unread flag at once,
+// rather than an idle "gone quiet" wait that is deferred (see graceUnread).
+//
+// The immediate cases are the ones where the agent is unambiguously blocked on
+// the user: a user-input tool surfaced via PreToolUse (defensive — current
+// Claude does not fire PreToolUse for AskUserQuestion/ExitPlanMode), a
+// PermissionRequest (e.g. ExitPlanMode's plan approval), and a Notification
+// whose notification_type marks a real prompt — an AskUserQuestion elicitation
+// dialog or a permission prompt — as opposed to the idle nudge (which also
+// fires ~60s after a turn ends and when a head pauses for a background subagent).
+func isImmediateWait(info *StatusFile) bool {
+	if info == nil || info.Event == nil {
 		return false
 	}
-	switch *event {
-	case "PreToolUse", "preToolUse", "BeforeTool":
+	switch *info.Event {
+	case "PreToolUse", "preToolUse", "BeforeTool", "PermissionRequest", "permissionRequest":
 		return true
-	default:
-		return false
+	case "Notification", "notification":
+		switch info.NotificationType {
+		case "permission_prompt", "elicitation_dialog":
+			return true
+		}
 	}
+	return false
 }
 
 func pollJSONStatusOnce(store *db.Store, projectRoot string, deb *unreadDebouncer, hub *events.Hub) {
@@ -220,7 +244,7 @@ func pollJSONStatusOnce(store *db.Store, projectRoot string, deb *unreadDebounce
 			// when a head pauses to await a background subagent that resumes on
 			// its own.
 			prevRunning := a.AgentStatus != nil && *a.AgentStatus == "running"
-			immediate := prevRunning && agentStatus == "waiting" && isUserInputEvent(info.Event)
+			immediate := prevRunning && agentStatus == "waiting" && isImmediateWait(info)
 			// Only a change the client actually renders is worth an agents_changed
 			// event: the status string flipping, or the unread flag being raised
 			// (immediate). A running agent rewrites status.json on every tool call,
@@ -267,13 +291,13 @@ func pollJSONStatusOnce(store *db.Store, projectRoot string, deb *unreadDebounce
 	}
 }
 
-func readStatusJSON(projectRoot, id string) *api.AgentStatusInfo {
+func readStatusJSON(projectRoot, id string) *StatusFile {
 	path := paths.GetStatusJsonFromProjectRoot(projectRoot, id)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil
 	}
-	var s api.AgentStatusInfo
+	var s StatusFile
 	if err := json.Unmarshal(data, &s); err != nil {
 		return nil
 	}
