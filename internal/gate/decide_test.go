@@ -89,12 +89,12 @@ func TestHostAllowed(t *testing.T) {
 	yes := []string{"exact.com", "a.wild.com", "b.a.wild.com", "wild.com", "dot.com", "x.dot.com"}
 	no := []string{"notexact.com", "exact.com.evil.com", "wildxcom", "evil.com"}
 	for _, h := range yes {
-		if !hostAllowed(allow, h) {
+		if !HostAllowed(allow, h) {
 			t.Errorf("hostAllowed(%q) = false, want true", h)
 		}
 	}
 	for _, h := range no {
-		if hostAllowed(allow, h) {
+		if HostAllowed(allow, h) {
 			t.Errorf("hostAllowed(%q) = true, want false", h)
 		}
 	}

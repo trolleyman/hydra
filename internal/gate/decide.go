@@ -79,7 +79,7 @@ func Decide(p Policy, toolName string, toolInput map[string]any) Result {
 		if host == "" {
 			return Result{Decision: Allow}
 		}
-		if hostAllowed(p.WebFetchAllowHosts, host) {
+		if HostAllowed(p.WebFetchAllowHosts, host) {
 			return Result{Decision: Allow}
 		}
 		return Result{
@@ -238,10 +238,11 @@ func urlHost(raw string) string {
 	return strings.ToLower(u.Hostname())
 }
 
-// hostAllowed reports whether host matches an allow-list entry: an exact
+// HostAllowed reports whether host matches an allow-list entry: an exact
 // (case-insensitive) match, or a "*.suffix" / ".suffix" wildcard covering the
-// host and its subdomains.
-func hostAllowed(allow []string, host string) bool {
+// host and its subdomains. Shared with the egress proxy so the gate and the
+// network filter apply the same matching rules.
+func HostAllowed(allow []string, host string) bool {
 	host = strings.ToLower(strings.TrimSuffix(host, "."))
 	for _, a := range allow {
 		a = strings.ToLower(strings.TrimSpace(a))

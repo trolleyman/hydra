@@ -454,6 +454,9 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 	env = append(env, sandbox.MiseTrustEnv(projectRoot, worktreePath)...)
 	env = append(env, headContextEnv(opts.ID, opts.AgentType, projectRoot, worktreePath, branchName, baseBranch)...)
 	env = append(env, claudeRenderingEnv(opts.AgentType, cfg.ResolveFullscreen(string(opts.AgentType)))...)
+	// Filtering egress proxy: when the head has a network allow-list, route its
+	// outbound HTTP(S) through a per-head proxy that only relays allow-listed hosts.
+	env = append(env, startEgressProxy(opts.ID, net)...)
 
 	sess, err := startAgentSession(reg, projectRoot, opts.ID, opts.AgentType, worktreePath, opts.Rows, opts.Cols, sandbox.Options{
 		AgentType:      opts.AgentType,
@@ -752,6 +755,8 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 	env = append(env, sandbox.MiseTrustEnv(projectRoot, worktreePath)...)
 	env = append(env, headContextEnv(head.ID, head.AgentType, projectRoot, worktreePath, derefStr(head.Branch), head.BaseBranch)...)
 	env = append(env, claudeRenderingEnv(head.AgentType, cfg.ResolveFullscreen(string(head.AgentType)))...)
+	// Filtering egress proxy (see SpawnHead): restart it fresh on resume.
+	env = append(env, startEgressProxy(head.ID, net)...)
 
 	sess, err := startAgentSession(reg, projectRoot, head.ID, head.AgentType, worktreePath, rows, cols, sandbox.Options{
 		AgentType:      head.AgentType,
@@ -946,6 +951,8 @@ func KillHeadNoLock(ctx context.Context, reg *session.Registry, store *db.Store,
 			killErr = errtrace.Wrap(err)
 		}
 		reg.Remove(head.ID)
+		// Tear down the head's filtering egress proxy, if any.
+		stopEgressProxy(head.ID)
 		// Tear down any web bash shells for this head — they share its worktree,
 		// which is about to be removed, so they must not outlive it.
 		reg.KillMatching(head.ID + "-shell")
@@ -1117,6 +1124,7 @@ func PurgeHead(ctx context.Context, reg *session.Registry, store *db.Store, head
 			log.Printf("warn: heads: purge kill session failed for %s: %v", head.ID, err)
 		}
 		reg.Remove(head.ID)
+		stopEgressProxy(head.ID)
 		reg.KillMatching(head.ID + "-shell")
 	}
 
