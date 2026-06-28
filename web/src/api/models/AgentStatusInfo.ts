@@ -29,5 +29,9 @@ export type AgentStatusInfo = {
      * True when last_message reads as a suggested next message — a terse instruction you could send straight back to the agent (e.g. 'run it') — rather than a closing summary or a question the agent is asking the user. The UI marks these with a caret.
      */
     last_message_is_suggested_next_message?: boolean;
+    /**
+     * Classifies a needs-input wait. 'policy_approval' means the security gate parked a tool call awaiting the user's allow/deny (the UI shows the approval card); other values come from the agent's own notifications.
+     */
+    notification_type?: string;
 };
 

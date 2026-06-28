@@ -85,6 +85,22 @@ func ListRequests(dir string) ([]Request, error) {
 	return out, nil
 }
 
+// ReadRequest returns the parked request reqid in dir, or ok=false if absent.
+func ReadRequest(dir, reqid string) (Request, bool, error) {
+	data, err := os.ReadFile(filepath.Join(dir, reqid+reqSuffix))
+	if os.IsNotExist(err) {
+		return Request{}, false, nil
+	}
+	if err != nil {
+		return Request{}, false, errtrace.Wrap(err)
+	}
+	var r Request
+	if err := json.Unmarshal(data, &r); err != nil {
+		return Request{}, false, errtrace.Wrap(err)
+	}
+	return r, true, nil
+}
+
 // ReadDecision returns the decision for reqid in dir, or ok=false if none yet.
 func ReadDecision(dir, reqid string) (DecisionFile, bool, error) {
 	data, err := os.ReadFile(filepath.Join(dir, reqid+decisionSuffix))

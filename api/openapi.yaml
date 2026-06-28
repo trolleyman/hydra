@@ -755,6 +755,86 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /api/projects/{project_id}/agents/{id}/approvals:
+    get:
+      summary: List the agent's pending security-gate approval requests
+      operationId: listAgentApprovals
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            type: string
+          description: Project ID
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApprovalListResponse'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/projects/{project_id}/agents/{id}/approvals/{reqid}:
+    post:
+      summary: Resolve a pending security-gate approval (allow/deny, optionally remember)
+      operationId: decideAgentApproval
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            type: string
+          description: Project ID
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: reqid
+          required: true
+          schema:
+            type: string
+          description: The approval request ID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApprovalDecisionRequest'
+      responses:
+        '204':
+          description: No Content
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /api/projects/{project_id}/agents/{id}/read:
     post:
       summary: Mark an agent as read, clearing its unread-changes flag
@@ -1776,6 +1856,9 @@ components:
         last_message_is_suggested_next_message:
           type: boolean
           description: "True when last_message reads as a suggested next message — a terse instruction you could send straight back to the agent (e.g. 'run it') — rather than a closing summary or a question the agent is asking the user. The UI marks these with a caret."
+        notification_type:
+          type: string
+          description: "Classifies a needs-input wait. 'policy_approval' means the security gate parked a tool call awaiting the user's allow/deny (the UI shows the approval card); other values come from the agent's own notifications."
 
     AgentResponse:
       type: object
@@ -2196,6 +2279,53 @@ components:
         text:
           type: string
           description: Text to send to the agent's stdin (a newline is appended automatically)
+
+    ApprovalRequest:
+      type: object
+      required: [reqid, tool, kind, target, summary]
+      properties:
+        reqid:
+          type: string
+          description: Unique ID of the parked approval request
+        tool:
+          type: string
+          description: The tool the agent tried to use (e.g. WebFetch or an mcp__ name)
+        kind:
+          type: string
+          description: "What is being approved: 'mcp', 'webfetch', or 'bash'"
+        target:
+          type: string
+          description: The MCP server name, host, or command the approval is about
+        reason:
+          type: string
+          description: One-line explanation of why the gate parked the call
+        summary:
+          type: string
+          description: Human-readable "wants to …" summary for the approval card
+        ts:
+          type: string
+          description: ISO 8601 timestamp the request was raised
+
+    ApprovalListResponse:
+      type: object
+      required: [approvals]
+      properties:
+        approvals:
+          type: array
+          items:
+            $ref: '#/components/schemas/ApprovalRequest'
+
+    ApprovalDecisionRequest:
+      type: object
+      required: [decision]
+      properties:
+        decision:
+          type: string
+          enum: [allow, deny]
+          description: The user's verdict for the parked tool call
+        remember:
+          type: boolean
+          description: "When true and decision is allow, persist the server/host to the trusted config's allow-list so future launches don't ask again"
 
     NetworkConfig:
       type: object

@@ -1436,6 +1436,14 @@ func (s *SimulationServer) SendAgentInput(w http.ResponseWriter, r *http.Request
 	w.WriteHeader(http.StatusOK)
 }
 
+func (s *SimulationServer) ListAgentApprovals(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+	api.WriteJSON(w, http.StatusOK, api.ApprovalListResponse{Approvals: []api.ApprovalRequest{}})
+}
+
+func (s *SimulationServer) DecideAgentApproval(w http.ResponseWriter, r *http.Request, projectId string, id string, reqid string) {
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // simRepoOrder lists the simulated repository's tracked files in git's natural
 // (lexical) order, so the browser renders a stable, GitHub-like tree.
 var simRepoOrder = []string{

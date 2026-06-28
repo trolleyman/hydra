@@ -5,6 +5,8 @@
 import type { AddProjectRequest } from '../models/AddProjectRequest';
 import type { AgentInputRequest } from '../models/AgentInputRequest';
 import type { AgentResponse } from '../models/AgentResponse';
+import type { ApprovalDecisionRequest } from '../models/ApprovalDecisionRequest';
+import type { ApprovalListResponse } from '../models/ApprovalListResponse';
 import type { ArtifactsResponse } from '../models/ArtifactsResponse';
 import type { ClaudeUsageResponse } from '../models/ClaudeUsageResponse';
 import type { CommitInfo } from '../models/CommitInfo';
@@ -507,6 +509,61 @@ export class DefaultService {
             path: {
                 'project_id': projectId,
                 'id': id,
+            },
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                404: `Not Found`,
+                500: `Internal Server Error`,
+            },
+        });
+    }
+    /**
+     * List the agent's pending security-gate approval requests
+     * @param projectId Project ID
+     * @param id
+     * @returns ApprovalListResponse OK
+     * @throws ApiError
+     */
+    public listAgentApprovals(
+        projectId: string,
+        id: string,
+    ): CancelablePromise<ApprovalListResponse> {
+        return this.httpRequest.request({
+            method: 'GET',
+            url: '/api/projects/{project_id}/agents/{id}/approvals',
+            path: {
+                'project_id': projectId,
+                'id': id,
+            },
+            errors: {
+                404: `Not Found`,
+                500: `Internal Server Error`,
+            },
+        });
+    }
+    /**
+     * Resolve a pending security-gate approval (allow/deny, optionally remember)
+     * @param projectId Project ID
+     * @param id
+     * @param reqid The approval request ID
+     * @param requestBody
+     * @returns void
+     * @throws ApiError
+     */
+    public decideAgentApproval(
+        projectId: string,
+        id: string,
+        reqid: string,
+        requestBody: ApprovalDecisionRequest,
+    ): CancelablePromise<void> {
+        return this.httpRequest.request({
+            method: 'POST',
+            url: '/api/projects/{project_id}/agents/{id}/approvals/{reqid}',
+            path: {
+                'project_id': projectId,
+                'id': id,
+                'reqid': reqid,
             },
             body: requestBody,
             mediaType: 'application/json',

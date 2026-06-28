@@ -30,6 +30,12 @@ const (
 	Waiting    AgentStatus = "waiting"
 )
 
+// Defines values for ApprovalDecisionRequestDecision.
+const (
+	Allow ApprovalDecisionRequestDecision = "allow"
+	Deny  ApprovalDecisionRequestDecision = "deny"
+)
+
 // Defines values for ArtifactFileChangeType.
 const (
 	ArtifactFileChangeTypeAdded     ArtifactFileChangeType = "added"
@@ -235,6 +241,9 @@ type AgentStatusInfo struct {
 	// LastMessageIsSuggestedNextMessage True when last_message reads as a suggested next message — a terse instruction you could send straight back to the agent (e.g. 'run it') — rather than a closing summary or a question the agent is asking the user. The UI marks these with a caret.
 	LastMessageIsSuggestedNextMessage *bool `json:"last_message_is_suggested_next_message,omitempty"`
 
+	// NotificationType Classifies a needs-input wait. 'policy_approval' means the security gate parked a tool call awaiting the user's allow/deny (the UI shows the approval card); other values come from the agent's own notifications.
+	NotificationType *string `json:"notification_type,omitempty"`
+
 	// Reason Session end reason (only present on SessionEnd events)
 	Reason *string `json:"reason,omitempty"`
 
@@ -243,6 +252,47 @@ type AgentStatusInfo struct {
 
 	// Timestamp ISO 8601 timestamp of when the status was set
 	Timestamp string `json:"timestamp"`
+}
+
+// ApprovalDecisionRequest defines model for ApprovalDecisionRequest.
+type ApprovalDecisionRequest struct {
+	// Decision The user's verdict for the parked tool call
+	Decision ApprovalDecisionRequestDecision `json:"decision"`
+
+	// Remember When true and decision is allow, persist the server/host to the trusted config's allow-list so future launches don't ask again
+	Remember *bool `json:"remember,omitempty"`
+}
+
+// ApprovalDecisionRequestDecision The user's verdict for the parked tool call
+type ApprovalDecisionRequestDecision string
+
+// ApprovalListResponse defines model for ApprovalListResponse.
+type ApprovalListResponse struct {
+	Approvals []ApprovalRequest `json:"approvals"`
+}
+
+// ApprovalRequest defines model for ApprovalRequest.
+type ApprovalRequest struct {
+	// Kind What is being approved: 'mcp', 'webfetch', or 'bash'
+	Kind string `json:"kind"`
+
+	// Reason One-line explanation of why the gate parked the call
+	Reason *string `json:"reason,omitempty"`
+
+	// Reqid Unique ID of the parked approval request
+	Reqid string `json:"reqid"`
+
+	// Summary Human-readable "wants to …" summary for the approval card
+	Summary string `json:"summary"`
+
+	// Target The MCP server name, host, or command the approval is about
+	Target string `json:"target"`
+
+	// Tool The tool the agent tried to use (e.g. WebFetch or an mcp__ name)
+	Tool string `json:"tool"`
+
+	// Ts ISO 8601 timestamp the request was raised
+	Ts *string `json:"ts,omitempty"`
 }
 
 // ArtifactFile defines model for ArtifactFile.
@@ -1060,6 +1110,9 @@ type SpawnAgentJSONRequestBody = SpawnAgentRequest
 // UpdateAgentJSONRequestBody defines body for UpdateAgent for application/json ContentType.
 type UpdateAgentJSONRequestBody = UpdateAgentRequest
 
+// DecideAgentApprovalJSONRequestBody defines body for DecideAgentApproval for application/json ContentType.
+type DecideAgentApprovalJSONRequestBody = ApprovalDecisionRequest
+
 // SendAgentInputJSONRequestBody defines body for SendAgentInput for application/json ContentType.
 type SendAgentInputJSONRequestBody = AgentInputRequest
 
@@ -1101,6 +1154,12 @@ type ServerInterface interface {
 	// Update a Hydra agent's mutable fields (currently its title)
 	// (PATCH /api/projects/{project_id}/agents/{id})
 	UpdateAgent(w http.ResponseWriter, r *http.Request, projectId string, id string)
+	// List the agent's pending security-gate approval requests
+	// (GET /api/projects/{project_id}/agents/{id}/approvals)
+	ListAgentApprovals(w http.ResponseWriter, r *http.Request, projectId string, id string)
+	// Resolve a pending security-gate approval (allow/deny, optionally remember)
+	// (POST /api/projects/{project_id}/agents/{id}/approvals/{reqid})
+	DecideAgentApproval(w http.ResponseWriter, r *http.Request, projectId string, id string, reqid string)
 	// Get generated visual artifacts (e.g. screenshots) for both sides of a diff
 	// (GET /api/projects/{project_id}/agents/{id}/artifacts)
 	GetAgentArtifacts(w http.ResponseWriter, r *http.Request, projectId string, id string, params GetAgentArtifactsParams)
@@ -1464,6 +1523,83 @@ func (siw *ServerInterfaceWrapper) UpdateAgent(w http.ResponseWriter, r *http.Re
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.UpdateAgent(w, r, projectId, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListAgentApprovals operation middleware
+func (siw *ServerInterfaceWrapper) ListAgentApprovals(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListAgentApprovals(w, r, projectId, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DecideAgentApproval operation middleware
+func (siw *ServerInterfaceWrapper) DecideAgentApproval(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "reqid" -------------
+	var reqid string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "reqid", r.PathValue("reqid"), &reqid, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "reqid", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DecideAgentApproval(w, r, projectId, id, reqid)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2699,6 +2835,8 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("DELETE "+options.BaseURL+"/api/projects/{project_id}/agents/{id}", wrapper.KillAgent)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/{id}", wrapper.GetAgent)
 	m.HandleFunc("PATCH "+options.BaseURL+"/api/projects/{project_id}/agents/{id}", wrapper.UpdateAgent)
+	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/approvals", wrapper.ListAgentApprovals)
+	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/approvals/{reqid}", wrapper.DecideAgentApproval)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/artifacts", wrapper.GetAgentArtifacts)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/commits", wrapper.GetAgentCommits)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/diff", wrapper.GetAgentDiff)
@@ -3115,6 +3253,79 @@ func (response UpdateAgent404JSONResponse) VisitUpdateAgentResponse(w http.Respo
 type UpdateAgent500JSONResponse ErrorResponse
 
 func (response UpdateAgent500JSONResponse) VisitUpdateAgentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ListAgentApprovalsRequestObject struct {
+	ProjectId string `json:"project_id"`
+	Id        string `json:"id"`
+}
+
+type ListAgentApprovalsResponseObject interface {
+	VisitListAgentApprovalsResponse(w http.ResponseWriter) error
+}
+
+type ListAgentApprovals200JSONResponse ApprovalListResponse
+
+func (response ListAgentApprovals200JSONResponse) VisitListAgentApprovalsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ListAgentApprovals404JSONResponse ErrorResponse
+
+func (response ListAgentApprovals404JSONResponse) VisitListAgentApprovalsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ListAgentApprovals500JSONResponse ErrorResponse
+
+func (response ListAgentApprovals500JSONResponse) VisitListAgentApprovalsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type DecideAgentApprovalRequestObject struct {
+	ProjectId string `json:"project_id"`
+	Id        string `json:"id"`
+	Reqid     string `json:"reqid"`
+	Body      *DecideAgentApprovalJSONRequestBody
+}
+
+type DecideAgentApprovalResponseObject interface {
+	VisitDecideAgentApprovalResponse(w http.ResponseWriter) error
+}
+
+type DecideAgentApproval204Response struct {
+}
+
+func (response DecideAgentApproval204Response) VisitDecideAgentApprovalResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DecideAgentApproval404JSONResponse ErrorResponse
+
+func (response DecideAgentApproval404JSONResponse) VisitDecideAgentApprovalResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type DecideAgentApproval500JSONResponse ErrorResponse
+
+func (response DecideAgentApproval500JSONResponse) VisitDecideAgentApprovalResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(500)
 
@@ -4170,6 +4381,12 @@ type StrictServerInterface interface {
 	// Update a Hydra agent's mutable fields (currently its title)
 	// (PATCH /api/projects/{project_id}/agents/{id})
 	UpdateAgent(ctx context.Context, request UpdateAgentRequestObject) (UpdateAgentResponseObject, error)
+	// List the agent's pending security-gate approval requests
+	// (GET /api/projects/{project_id}/agents/{id}/approvals)
+	ListAgentApprovals(ctx context.Context, request ListAgentApprovalsRequestObject) (ListAgentApprovalsResponseObject, error)
+	// Resolve a pending security-gate approval (allow/deny, optionally remember)
+	// (POST /api/projects/{project_id}/agents/{id}/approvals/{reqid})
+	DecideAgentApproval(ctx context.Context, request DecideAgentApprovalRequestObject) (DecideAgentApprovalResponseObject, error)
 	// Get generated visual artifacts (e.g. screenshots) for both sides of a diff
 	// (GET /api/projects/{project_id}/agents/{id}/artifacts)
 	GetAgentArtifacts(ctx context.Context, request GetAgentArtifactsRequestObject) (GetAgentArtifactsResponseObject, error)
@@ -4581,6 +4798,68 @@ func (sh *strictHandler) UpdateAgent(w http.ResponseWriter, r *http.Request, pro
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(UpdateAgentResponseObject); ok {
 		if err := validResponse.VisitUpdateAgentResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListAgentApprovals operation middleware
+func (sh *strictHandler) ListAgentApprovals(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+	var request ListAgentApprovalsRequestObject
+
+	request.ProjectId = projectId
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListAgentApprovals(ctx, request.(ListAgentApprovalsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListAgentApprovals")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListAgentApprovalsResponseObject); ok {
+		if err := validResponse.VisitListAgentApprovalsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DecideAgentApproval operation middleware
+func (sh *strictHandler) DecideAgentApproval(w http.ResponseWriter, r *http.Request, projectId string, id string, reqid string) {
+	var request DecideAgentApprovalRequestObject
+
+	request.ProjectId = projectId
+	request.Id = id
+	request.Reqid = reqid
+
+	var body DecideAgentApprovalJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DecideAgentApproval(ctx, request.(DecideAgentApprovalRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DecideAgentApproval")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DecideAgentApprovalResponseObject); ok {
+		if err := validResponse.VisitDecideAgentApprovalResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
