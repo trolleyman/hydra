@@ -1,7 +1,9 @@
 package cli
 
 import (
+	"bytes"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -85,7 +87,7 @@ func runTriggerHookForTest(t *testing.T, agentType, event string, payload map[st
 	os.Stdin = f
 	defer func() { os.Stdin = orig }()
 
-	if err := runTriggerHook(agentType, event, nil); err != nil {
+	if err := runTriggerHook(agentType, event, nil, io.Discard); err != nil {
 		t.Fatalf("runTriggerHook(%q): %v", event, err)
 	}
 
@@ -197,7 +199,7 @@ func TestTriggerHookResumePreservesTerminalStatus(t *testing.T) {
 		}
 		orig := os.Stdin
 		os.Stdin = f
-		if err := runTriggerHook("claude", "", nil); err != nil {
+		if err := runTriggerHook("claude", "", nil, io.Discard); err != nil {
 			f.Close()
 			os.Stdin = orig
 			t.Fatalf("runTriggerHook: %v", err)
@@ -270,7 +272,7 @@ func runTriggerHookInfoForTest(t *testing.T, agentType, event string, payload ma
 	os.Stdin = f
 	defer func() { os.Stdin = orig }()
 
-	if err := runTriggerHook(agentType, event, nil); err != nil {
+	if err := runTriggerHook(agentType, event, nil, io.Discard); err != nil {
 		t.Fatalf("runTriggerHook: %v", err)
 	}
 
@@ -343,7 +345,7 @@ func runTriggerHookStatusFileForTest(t *testing.T, agentType, event string, payl
 	os.Stdin = f
 	defer func() { os.Stdin = orig }()
 
-	if err := runTriggerHook(agentType, event, nil); err != nil {
+	if err := runTriggerHook(agentType, event, nil, io.Discard); err != nil {
 		t.Fatalf("runTriggerHook: %v", err)
 	}
 
@@ -361,30 +363,80 @@ func runTriggerHookStatusFileForTest(t *testing.T, agentType, event string, payl
 	return &file
 }
 
-// TestTriggerHookPermissionRequest covers ExitPlanMode, which fires no
-// PreToolUse and so is only detectable via PermissionRequest: the agent is
-// blocked on the user (waiting) and the plan becomes last_message but must not
-// be flagged as a suggested next message. A PermissionRequest for any other tool
-// still means the agent is blocked, so it is waiting too (just without a plan).
-func TestTriggerHookPermissionRequest(t *testing.T) {
-	plan := runTriggerHookInfoForTest(t, "claude", "", map[string]interface{}{
+// TestTriggerHookExitPlanModeAutoApproves covers the plan-mode auto-approval: a
+// Hydra head runs fully autonomously in a throwaway sandbox, so the ExitPlanMode
+// permission gate is pure friction. The PermissionRequest hook must emit Claude's
+// "allow" decision on stdout (so the user is never prompted) and report the agent
+// as running — it proceeds straight into the work rather than waiting.
+func TestTriggerHookExitPlanModeAutoApproves(t *testing.T) {
+	dir := t.TempDir()
+	statusPath := filepath.Join(dir, "status.json")
+	t.Setenv("HYDRA_STATUS_PATH", statusPath)
+	t.Setenv("HYDRA_STATUS_LOG_PATH", filepath.Join(dir, "status_log.jsonl"))
+
+	raw, err := json.Marshal(map[string]interface{}{
 		"hook_event_name": "PermissionRequest",
 		"tool_name":       "ExitPlanMode",
 		"tool_input":      map[string]interface{}{"plan": "Step 1: build the thing"},
 	})
-	if plan == nil {
-		t.Fatal("no status.json written")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if plan.Status != api.Waiting {
-		t.Errorf("ExitPlanMode status = %q, want waiting", plan.Status)
+	in := filepath.Join(dir, "stdin.json")
+	if err := os.WriteFile(in, raw, 0644); err != nil {
+		t.Fatal(err)
 	}
-	if plan.LastMessage == nil || *plan.LastMessage != "Step 1: build the thing" {
-		t.Errorf("last_message = %v", plan.LastMessage)
+	f, err := os.Open(in)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if plan.LastMessageIsSuggestedNextMessage != nil {
-		t.Errorf("suggested = %v, want nil for a plan", *plan.LastMessageIsSuggestedNextMessage)
+	defer f.Close()
+	orig := os.Stdin
+	os.Stdin = f
+	defer func() { os.Stdin = orig }()
+
+	var stdout bytes.Buffer
+	if err := runTriggerHook("claude", "", nil, &stdout); err != nil {
+		t.Fatalf("runTriggerHook: %v", err)
 	}
 
+	// stdout must carry exactly Claude's PermissionRequest "allow" decision.
+	var out struct {
+		HookSpecificOutput struct {
+			HookEventName string `json:"hookEventName"`
+			Decision      struct {
+				Behavior string `json:"behavior"`
+			} `json:"decision"`
+		} `json:"hookSpecificOutput"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &out); err != nil {
+		t.Fatalf("stdout %q is not valid approval JSON: %v", stdout.String(), err)
+	}
+	if out.HookSpecificOutput.HookEventName != "PermissionRequest" {
+		t.Errorf("hookEventName = %q, want PermissionRequest", out.HookSpecificOutput.HookEventName)
+	}
+	if out.HookSpecificOutput.Decision.Behavior != "allow" {
+		t.Errorf("decision.behavior = %q, want allow", out.HookSpecificOutput.Decision.Behavior)
+	}
+
+	// The agent proceeds into the work, so it's running, not waiting on the user.
+	data, err := os.ReadFile(statusPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var info api.AgentStatusInfo
+	if err := json.Unmarshal(data, &info); err != nil {
+		t.Fatal(err)
+	}
+	if info.Status != api.Running {
+		t.Errorf("ExitPlanMode status = %q, want running", info.Status)
+	}
+}
+
+// TestTriggerHookPermissionRequest covers a non-ExitPlanMode permission prompt: a
+// genuinely non-bypassable prompt still means the agent is blocked on the user
+// (waiting) and is only observed — no approval is written to stdout.
+func TestTriggerHookPermissionRequest(t *testing.T) {
 	other := runTriggerHookInfoForTest(t, "claude", "", map[string]interface{}{
 		"hook_event_name": "PermissionRequest",
 		"tool_name":       "Bash",

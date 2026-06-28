@@ -160,7 +160,7 @@ var triggerHookCmd = &cobra.Command{
 			eventOverride = args[1]
 		}
 
-		if err := runTriggerHook(args[0], eventOverride, logFile); err != nil {
+		if err := runTriggerHook(args[0], eventOverride, logFile, os.Stdout); err != nil {
 			// Log to status_log.jsonl and stderr but don't propagate – hooks must not fail the agent.
 			fmt.Fprintf(os.Stderr, "hydra trigger-hook error: %v\n", err)
 			if logFile != nil {
@@ -171,7 +171,22 @@ var triggerHookCmd = &cobra.Command{
 	},
 }
 
-func runTriggerHook(agentType string, eventOverride string, logFile *os.File) error {
+// approvePermission writes the PermissionRequest hook's "allow" decision to w —
+// the JSON Claude Code reads on stdout to auto-approve a permission prompt
+// without ever showing it to the user. Schema: hooks docs, "PermissionRequest".
+func approvePermission(w io.Writer) {
+	if w == nil {
+		w = os.Stdout
+	}
+	appendJSONLine(w, map[string]interface{}{
+		"hookSpecificOutput": map[string]interface{}{
+			"hookEventName": "PermissionRequest",
+			"decision":      map[string]interface{}{"behavior": "allow"},
+		},
+	})
+}
+
+func runTriggerHook(agentType string, eventOverride string, logFile *os.File, stdout io.Writer) error {
 	raw, err := io.ReadAll(os.Stdin)
 	if err != nil {
 		return errtrace.Wrap(fmt.Errorf("read stdin: %w", err))
@@ -275,10 +290,26 @@ func runTriggerHook(agentType string, eventOverride string, logFile *os.File) er
 		// user. Under our bypass-permissions mode most tools never reach here, but
 		// plan approval (ExitPlanMode) and any genuinely non-bypassable prompt do.
 		// This is the reliable signal for ExitPlanMode, which fires no PreToolUse.
-		// We only OBSERVE: trigger-hook writes nothing to stdout, so the permission
-		// flow proceeds unchanged. The poller treats this wait as immediate unread.
+		tool := stringField(input, "tool_name")
+		if tool == "ExitPlanMode" {
+			// ExitPlanMode is the gate Claude shows when it finishes presenting a
+			// plan and asks "can I proceed?". The user never opted into plan mode —
+			// the agent entered it on its own — and a Hydra head already runs fully
+			// autonomously (--dangerously-skip-permissions) in a throwaway sandbox +
+			// worktree, so there's nothing for this gate to guard. Auto-approve it by
+			// emitting the PermissionRequest "allow" decision on stdout, and report
+			// the agent as running: it proceeds straight into the work rather than
+			// waiting on the user. Only ExitPlanMode is auto-approved; any other
+			// PermissionRequest is still surfaced as a wait below.
+			approvePermission(stdout)
+			status = api.Running
+			break
+		}
+		// We only OBSERVE other prompts: trigger-hook writes nothing to stdout, so
+		// the permission flow proceeds unchanged. The poller treats this wait as
+		// immediate unread.
 		status = api.Waiting
-		if isUserInputTool(stringField(input, "tool_name")) {
+		if isUserInputTool(tool) {
 			if q := questionText(input); q != "" {
 				lastMessage = q
 				lastMessageIsQuestion = true
