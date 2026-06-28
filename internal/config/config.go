@@ -224,6 +224,14 @@ type Config struct {
 	// never preempted. It is a pointer so three states are distinct: nil/absent =
 	// use DefaultArtifactConcurrency; 0 = unlimited (no cap); N>0 = at most N.
 	ArtifactConcurrency *int `toml:"artifact_concurrency"`
+	// ArtifactPrefetch toggles the daemon's proactive background pre-generation of
+	// artifacts for settled heads (see internal/http/prefetch.go). When on (the
+	// default) a head's diff artifacts are rendered in the background once its
+	// working tree stops changing, so they are ready the instant the user opens the
+	// panel. Turn it off for a project whose generators are too heavy to run
+	// speculatively: foreground generation (on open) and the concurrency cap above
+	// still apply. nil/absent = enabled.
+	ArtifactPrefetch *bool `toml:"artifact_prefetch"`
 }
 
 // DefaultArtifactConcurrency is the artifact-generation parallelism used when
@@ -240,6 +248,12 @@ func (c Config) ResolveArtifactConcurrency() int {
 		return DefaultArtifactConcurrency
 	}
 	return *c.ArtifactConcurrency
+}
+
+// IsArtifactPrefetchEnabled reports whether the daemon should proactively
+// pre-generate artifacts for settled heads. Absent (nil) means enabled.
+func (c Config) IsArtifactPrefetchEnabled() bool {
+	return c.ArtifactPrefetch == nil || *c.ArtifactPrefetch
 }
 
 // ResumeContinueMessage returns the message to auto-send to a resumed,
@@ -269,6 +283,7 @@ type rawConfig struct {
 	Services            []ServiceScript  `toml:"services"`
 	ResumePrompt        *string          `toml:"resume_prompt"`
 	ArtifactConcurrency *int             `toml:"artifact_concurrency"`
+	ArtifactPrefetch    *bool            `toml:"artifact_prefetch"`
 }
 
 // reservedTopLevel are the top-level TOML names that are NOT agent tables. Any
@@ -279,7 +294,7 @@ type rawConfig struct {
 var reservedTopLevel = map[string]bool{
 	"defaults": true, "agents": true,
 	"pre_prompt": true, "sandbox": true, "artifacts": true, "services": true,
-	"resume_prompt": true, "artifact_concurrency": true,
+	"resume_prompt": true, "artifact_concurrency": true, "artifact_prefetch": true,
 }
 
 // GetUserConfigPath returns the path to the global user configuration file.
@@ -364,6 +379,7 @@ func decodeConfig(data []byte) (Config, error) {
 	cfg.Services = raw.Services
 	cfg.ResumePrompt = raw.ResumePrompt
 	cfg.ArtifactConcurrency = raw.ArtifactConcurrency
+	cfg.ArtifactPrefetch = raw.ArtifactPrefetch
 
 	// Defaults: legacy [defaults] first, then the new top-level fields win.
 	if raw.Defaults != nil {
@@ -441,6 +457,11 @@ func (c *Config) Merge(other Config) {
 	// here (unlimited), distinct from unset.
 	if other.ArtifactConcurrency != nil {
 		c.ArtifactConcurrency = other.ArtifactConcurrency
+	}
+	// Artifact prefetch toggle: overridden only when the other config sets it
+	// (non-nil); a nil pointer means "unset", so it inherits.
+	if other.ArtifactPrefetch != nil {
+		c.ArtifactPrefetch = other.ArtifactPrefetch
 	}
 }
 
@@ -818,6 +839,9 @@ func managedKeySet() map[string]bool {
 	// its regenerated "# artifact_concurrency = N" default line is recognised and
 	// dropped rather than kept as a stray user comment on the next save.
 	m["artifact_concurrency"] = true
+	// artifact_prefetch is Config-level too (emitArtifactPrefetch); its regenerated
+	// "# artifact_prefetch = true" default line is likewise recognised and dropped.
+	m["artifact_prefetch"] = true
 	// fullscreen is rendered specially under [claude] (emitClaudeAgent), not via
 	// the spec, but is likewise managed so its regenerated "# fullscreen = false"
 	// default line is recognised and replaced rather than kept as a user comment.
@@ -1291,6 +1315,15 @@ func renderConfig(existing []byte, cfg Config) string {
 	// renders the commented default instead of preserving the existing file's
 	// value — so clearing the field in the UI actually resets it to the default.
 	artifactConcurrency := cfg.ArtifactConcurrency
+	// artifact_prefetch isn't in the Settings editor, so (like resume_prompt) a save
+	// that doesn't carry it preserves the file's existing value rather than dropping
+	// a hand-edited toggle. An explicit cfg value still wins.
+	artifactPrefetch := cfg.ArtifactPrefetch
+	if artifactPrefetch == nil {
+		if prev, err := decodeConfig(existing); err == nil {
+			artifactPrefetch = prev.ArtifactPrefetch
+		}
+	}
 
 	var out []string
 	spec := defaultsSpec()
@@ -1302,6 +1335,7 @@ func renderConfig(existing []byte, cfg Config) string {
 	emitSpecTable(&out, spec, "", "", cfg.Defaults, keyComments, tableComments)
 	emitResumePrompt(&out, resumePrompt, keyComments)
 	emitArtifactConcurrency(&out, artifactConcurrency, keyComments)
+	emitArtifactPrefetch(&out, artifactPrefetch, keyComments)
 	emitSpecTable(&out, spec, "sandbox", "[sandbox]", cfg.Defaults, keyComments, tableComments)
 	emitSpecTable(&out, spec, "sandbox.network", "[sandbox.network]", cfg.Defaults, keyComments, tableComments)
 
@@ -1449,6 +1483,21 @@ func emitArtifactConcurrency(out *[]string, concurrency *int, keyComments map[st
 		*out = append(*out, fmt.Sprintf("artifact_concurrency = %d", *concurrency))
 	} else {
 		*out = append(*out, fmt.Sprintf("# artifact_concurrency = %d", DefaultArtifactConcurrency))
+	}
+}
+
+// emitArtifactPrefetch renders the top-level artifact_prefetch key (a Config-level
+// boolean, like resume_prompt): preserved user comment, Hydra doc line, then the
+// value (commented-out showing the default when unset).
+func emitArtifactPrefetch(out *[]string, prefetch *bool, keyComments map[string][]string) {
+	if uc := keyComments["\x00artifact_prefetch"]; len(uc) > 0 {
+		*out = append(*out, uc...)
+	}
+	*out = append(*out, docPrefix+` pre-generate a head's artifacts in the background once it settles, so a diff is ready before you open it; set false to generate only when viewing — foreground generation and the concurrency cap still apply (default true).`)
+	if prefetch != nil {
+		*out = append(*out, fmt.Sprintf("artifact_prefetch = %t", *prefetch))
+	} else {
+		*out = append(*out, "# artifact_prefetch = true")
 	}
 }
 

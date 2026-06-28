@@ -601,6 +601,12 @@ func (s *Server) GetConfig(_ context.Context, request api.GetConfigRequestObject
 		n := *cfg.ArtifactConcurrency
 		resp.ArtifactConcurrency = &n
 	}
+	// Surface the prefetch toggle when set (nil = unset → the client shows the
+	// default, enabled). Copy so the response doesn't alias cfg's pointer.
+	if cfg.ArtifactPrefetch != nil {
+		b := *cfg.ArtifactPrefetch
+		resp.ArtifactPrefetch = &b
+	}
 
 	return api.GetConfig200JSONResponse(resp), nil
 }
@@ -757,6 +763,12 @@ func (s *Server) SaveConfig(_ context.Context, request api.SaveConfigRequestObje
 			n = 0
 		}
 		newCfg.ArtifactConcurrency = &n
+	}
+	// Artifact prefetch toggle: a set value is applied authoritatively; nil/absent
+	// leaves it to renderConfig, which preserves the file's existing value.
+	if request.Body.ArtifactPrefetch != nil {
+		b := *request.Body.ArtifactPrefetch
+		newCfg.ArtifactPrefetch = &b
 	}
 
 	scope := api.SaveConfigParamsScopeProject
