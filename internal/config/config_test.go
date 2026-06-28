@@ -627,6 +627,50 @@ command = "bun shots.ts"
 	}
 }
 
+func TestArtifactPrefetchRender(t *testing.T) {
+	boolp := func(b bool) *bool { return &b }
+
+	// An explicit value is written authoritatively and round-trips.
+	out := renderConfig(nil, Config{ArtifactPrefetch: boolp(false)})
+	if !strings.Contains(out, "artifact_prefetch = false") {
+		t.Errorf("expected explicit value, got:\n%s", out)
+	}
+	loaded, err := decodeConfig([]byte(out))
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if loaded.ArtifactPrefetch == nil || *loaded.ArtifactPrefetch || loaded.IsArtifactPrefetchEnabled() {
+		t.Errorf("want disabled, got %v", loaded.ArtifactPrefetch)
+	}
+
+	// Unset (nil) resolves to enabled and renders the commented default.
+	def := renderConfig(nil, Config{ArtifactPrefetch: nil})
+	if !strings.Contains(def, "# artifact_prefetch = true") {
+		t.Errorf("unset should re-emit the commented default:\n%s", def)
+	}
+	loadedDef, err := decodeConfig([]byte(def))
+	if err != nil {
+		t.Fatalf("decode default: %v", err)
+	}
+	if loadedDef.ArtifactPrefetch != nil || !loadedDef.IsArtifactPrefetchEnabled() {
+		t.Errorf("unset should resolve to enabled, got %v", loadedDef.ArtifactPrefetch)
+	}
+
+	// Unlike artifact_concurrency, a save that doesn't carry artifact_prefetch (cfg
+	// nil — the Settings editor has no field for it) PRESERVES the file's existing
+	// hand-edited value rather than resetting it.
+	const existing = `artifact_prefetch = false
+`
+	preserved := renderConfig([]byte(existing), Config{ArtifactPrefetch: nil})
+	loadedP, err := decodeConfig([]byte(preserved))
+	if err != nil {
+		t.Fatalf("decode preserved: %v", err)
+	}
+	if loadedP.ArtifactPrefetch == nil || *loadedP.ArtifactPrefetch {
+		t.Errorf("a save that omits artifact_prefetch should preserve the existing false, got %v:\n%s", loadedP.ArtifactPrefetch, preserved)
+	}
+}
+
 func TestArtifactConcurrencyRender(t *testing.T) {
 	num := func(n int) *int { return &n }
 

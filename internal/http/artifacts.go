@@ -159,6 +159,26 @@ func (p *artifactPlan) specsFor(name string) (left, right *config.ArtifactScript
 	return left, right
 }
 
+// staleableDirs returns the cache dirs of this plan's right (head) side when that
+// side is the uncommitted working tree — the only versions that go stale as the
+// head keeps editing. A commit/merge-base side is immutable and shared across
+// views, so it is deliberately excluded and never preempted. The prefetcher uses
+// these to cancel a head's superseded background renders when it moves on.
+func (p *artifactPlan) staleableDirs() []string {
+	if p.right.WorktreeDir == "" {
+		return nil
+	}
+	dirs := make([]string, 0, len(p.names))
+	for _, name := range p.names {
+		if _, rightSpec := p.specsFor(name); rightSpec != nil {
+			if d, err := p.mgr.EntryDir(name, p.right); err == nil {
+				dirs = append(dirs, d)
+			}
+		}
+	}
+	return dirs
+}
+
 // buildSet generates/loads one script (by name) and folds it into the API shape.
 func (p *artifactPlan) buildSet(s *Server, projectID, name string) api.ArtifactSet {
 	leftSpec, rightSpec := p.specsFor(name)
