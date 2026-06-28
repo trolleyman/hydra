@@ -124,10 +124,12 @@ func resolveAsk(agentType, toolName string, result gate.Result) gate.Decision {
 		fmt.Fprintf(os.Stderr, "hydra gate: write request: %v\n", err)
 		return gate.Deny
 	}
-	writeApprovalStatus(agentType, summary)
-
 	deadline := time.Now().Add(askTimeout)
 	for {
+		// Re-assert the policy-approval wait each iteration: the status hook also
+		// fires on this PreToolUse and may have written a plain "running" status, so
+		// re-stamping keeps the approval card reliably visible until a decision lands.
+		writeApprovalStatus(agentType, summary)
 		if d, ok, err := gate.ReadDecision(dir, reqid); err == nil && ok {
 			if d.Decision == gate.Allow {
 				return gate.Allow

@@ -182,6 +182,27 @@ in the loop.
 
 ## Recommendations
 
+> **Implementation status (2026-06-28).** All three "Should change" items below
+> are now implemented for Claude (the gate hook is Claude-first; non-Claude agents
+> still get config-level MCP stripping only). Specifically:
+> - **Rec 1 (gate):** `internal/gate` + `hydra gate` — a decision-capable
+>   PreToolUse hook driven by a read-only, trusted `policy.json` that can deny
+>   (policy-file writes, credential reads, non-allow-listed MCP, global installs)
+>   or park-for-approval (unknown MCP/WebFetch host, `git push`). settings.json is
+>   bound read-only (F4).
+> - **Rec 2 (MCP):** pre-launch stripping of non-allow-listed `mcpServers` from the
+>   seeded `~/.claude.json` + `enabledMcpjsonServers`/`enableAllProjectMcpServers`,
+>   runtime gate backstop, and a web approval card (allow / always-allow / deny)
+>   that persists "always" to the trusted config.
+> - **Rec 3 (egress):** `internal/egress` — a per-head HTTP/HTTPS filtering proxy
+>   enforcing `allowed_hosts`, wired via `HTTP(S)_PROXY`. Honest caveat: it filters
+>   every proxy-respecting client but is not inescapable in the shared-net
+>   unprivileged sandbox (a hard boundary needs slirp4netns/pasta or netfilter,
+>   neither installable here); `network.enabled=false` stays the hard off-switch.
+>
+> Policy lives in per-agent `[<agent>.policy]` / `[<agent>.sandbox.network]` config,
+> resolved from the trusted project root. The original audit follows unchanged.
+
 ### Should change (do these)
 
 1. **Make hooks decision-capable — the key lever (F1).**
@@ -446,4 +467,7 @@ gate. Verify Claude reads a read-only `settings.json` cleanly.
 
 ---
 
-*Note: this is an audit/recommendation document only — no behavior was changed.*
+*Note: the original audit was a recommendation document only. The three "Should
+change" recommendations (gate, MCP allow-list + approval UI, filtering egress
+proxy) have since been implemented for Claude — see the implementation-status
+callout under "Recommendations" above and the commit history.*
