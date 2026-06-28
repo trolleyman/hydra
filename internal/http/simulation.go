@@ -253,8 +253,40 @@ func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, pr
 				Activity: ptr("$ go test ./internal/heads/ -run TestResumeLazy"),
 			},
 		},
+		{
+			// Parked by the security gate: it tried a tool call the policy gates
+			// (an MCP server not on the allow-list), so it sits in a
+			// policy_approval wait and the detail page shows the approval card
+			// (agent-approvals shot). notification_type drives the card.
+			Id:            "agent-approval",
+			Title:         ptr("Wire up the GitHub MCP server"),
+			AgentType:     "claude",
+			BaseBranch:    "main",
+			BranchName:    ptr("hydra/feat-mcp"),
+			SessionPid:    1005,
+			SessionStatus: "running",
+			CreatedAt:     &createdAt0,
+			Prompt:        "Use the linear MCP server to pull the open issues and start on the highest-priority one.",
+			AgentStatus: &api.AgentStatusInfo{
+				Status:           needsInput,
+				Timestamp:        simNow().Format(time.RFC3339),
+				NotificationType: ptr("policy_approval"),
+				LastMessage:      ptr("wants to use MCP server \"linear\""),
+			},
+		},
 	}
 	api.WriteJSON(w, http.StatusOK, resp)
+}
+
+// simApprovals is the seeded set of parked gate approvals for the policy_approval
+// demo agent (agent-approvals shot).
+func simApprovals() []api.ApprovalRequest {
+	reason1 := "MCP server \"linear\" is not on the allow-list"
+	reason2 := "WebFetch to \"docs.linear.app\" is not on the allow-list"
+	return []api.ApprovalRequest{
+		{Reqid: "req-1", Tool: "mcp__linear__list_issues", Kind: "mcp", Target: "linear", Summary: "wants to use MCP server \"linear\"", Reason: &reason1},
+		{Reqid: "req-2", Tool: "WebFetch", Kind: "webfetch", Target: "docs.linear.app", Summary: "wants to fetch from \"docs.linear.app\"", Reason: &reason2},
+	}
 }
 
 // simArchivedAgents returns the seeded archived (killed/merged) history used by
@@ -353,6 +385,27 @@ func (s *SimulationServer) GetAgent(w http.ResponseWriter, r *http.Request, proj
 				Status:    api.Running,
 				Timestamp: simNow().Format(time.RFC3339),
 				Activity:  ptr("Wrapping `renderMarkdown()` over the **prompt** & *activity*"),
+			},
+		})
+		return
+	}
+	if id == "agent-approval" {
+		createdAt := simNow().Add(-30 * time.Minute).Unix()
+		api.WriteJSON(w, http.StatusOK, api.AgentResponse{
+			Id:            "agent-approval",
+			Title:         ptr("Wire up the GitHub MCP server"),
+			AgentType:     "claude",
+			BaseBranch:    "main",
+			BranchName:    ptr("hydra/feat-mcp"),
+			SessionPid:    1005,
+			SessionStatus: "running",
+			CreatedAt:     &createdAt,
+			Prompt:        "Use the linear MCP server to pull the open issues and start on the highest-priority one.",
+			AgentStatus: &api.AgentStatusInfo{
+				Status:           api.NeedsInput,
+				Timestamp:        simNow().Format(time.RFC3339),
+				NotificationType: ptr("policy_approval"),
+				LastMessage:      ptr("wants to use MCP server \"linear\""),
 			},
 		})
 		return
@@ -1437,7 +1490,11 @@ func (s *SimulationServer) SendAgentInput(w http.ResponseWriter, r *http.Request
 }
 
 func (s *SimulationServer) ListAgentApprovals(w http.ResponseWriter, r *http.Request, projectId string, id string) {
-	api.WriteJSON(w, http.StatusOK, api.ApprovalListResponse{Approvals: []api.ApprovalRequest{}})
+	approvals := []api.ApprovalRequest{}
+	if id == "agent-approval" {
+		approvals = simApprovals()
+	}
+	api.WriteJSON(w, http.StatusOK, api.ApprovalListResponse{Approvals: approvals})
 }
 
 func (s *SimulationServer) DecideAgentApproval(w http.ResponseWriter, r *http.Request, projectId string, id string, reqid string) {

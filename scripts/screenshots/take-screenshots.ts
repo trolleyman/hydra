@@ -702,6 +702,12 @@ try {
       // ListAgents so the detail page renders from the store (the one-shot getAgent
       // never resolves in simulation); stubUpload serves the thumbnails.
       { name: 'agent-prompt-attachments', path: '/project/sim-project/agent/agent-2', viewportOnly: true, stubUpload: 'web/public/android-chrome-512x512.png' },
+      // The security-gate approval card: agent-approval sits in a policy_approval
+      // wait (simulation.go gives it notification_type=policy_approval + two parked
+      // requests via simApprovals), so AgentDetail's ApprovalCard renders the
+      // "wants to use MCP server / fetch" rows with Allow once / Always allow / Deny.
+      // Viewport-only to focus on the card under the header rather than the terminal.
+      { name: 'agent-approvals', path: '/project/sim-project/agent/agent-approval', viewportOnly: true },
       { name: 'nested-folders', path: '/project/sim-project/agent/agent-3', scrollTo: 'Changes' },
       // The diff viewer's settings popup, opened from the gear in the sticky
       // "Changes" toolbar: the file-list view modes, the diff options (side-by-
