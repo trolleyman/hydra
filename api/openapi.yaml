@@ -2344,6 +2344,16 @@ components:
             requests are served before queued background ones; a running
             generation is never preempted. 0 means unlimited (no cap);
             null/absent uses the built-in default.
+        artifact_prefetch:
+          type: boolean
+          nullable: true
+          description: >-
+            Whether the daemon proactively pre-generates a head's artifacts in
+            the background once its working tree settles, so a diff is ready
+            before it is opened (artifact_prefetch in config.toml). When false,
+            artifacts are generated only when a diff is viewed; foreground
+            generation and artifact_concurrency still apply. null/absent uses
+            the built-in default (enabled).
         default_pre_prompt:
           type: string
           description: Built-in default pre-prompt always prepended to agent prompts (read-only)
