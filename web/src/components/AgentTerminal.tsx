@@ -801,7 +801,7 @@ export function AgentTerminal({ agentId, projectId, onRefresh, onStatusUpdate, o
 
         {/* Status + refresh */}
         <span className={`ml-auto text-[10px] px-1.5 py-0.5 rounded font-medium ${isRunning ? 'text-green-400' : isNeedsInput ? 'text-red-400' : isWaiting ? 'text-yellow-400' : isLoading ? 'text-blue-400' : 'text-gray-500'}`}>
-          {isRunning || isNeedsInput || isWaiting ? '● ' : '○ '}{isNeedsInput ? 'needs you' : status}
+          {isRunning || isNeedsInput || isWaiting ? '● ' : '○ '}{status}
         </span>
         <Tooltip content="Refresh" side="bottom">
           <button

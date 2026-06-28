@@ -84,7 +84,7 @@ export function agentStatusBadge(status: string | undefined): { label: string; c
     case 'deploying': return { label: 'deploying', className: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400' }
     case 'running':   return { label: 'running',   className: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' }
     case 'starting':  return { label: 'starting',  className: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' }
-    case 'needs_input': return { label: 'needs you', className: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' }
+    case 'needs_input': return { label: 'needs_input', className: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' }
     case 'waiting':   return { label: 'waiting',   className: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400' }
     case 'finished':  return { label: 'finished',  className: 'bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400' }
     case 'merging':   return { label: 'merging',   className: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' }
