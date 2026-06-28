@@ -239,4 +239,211 @@ F6 activity UI → F5/F7 scope tightening → F2 token scoping (stretch).
 
 ---
 
+## Recommendation 1 in detail — the gate policy
+
+What the decision-capable hook should actually **deny / allow / ask**. Design
+principle first, because a gate that adjudicates *everything* either stalls every
+unattended run or gives false confidence.
+
+### Principle
+
+- **Default = allow** for unrecognized tools/commands. Fail-*open*: the OS sandbox
+  confines the blast radius, and a fail-closed gate would block every new tool an
+  agent learns.
+- **Fail-closed (default deny) only for MCP**, where an allow-list is the point.
+- **Reserve "ask"** for rare, high-impact, plausibly-legitimate actions — "ask"
+  parks the head in `waiting` until a human responds in the UI, which is expensive
+  for unattended runs.
+- **Cache every decision** in trusted config keyed by (project, agent,
+  server/host) so a head never asks twice for the same thing.
+- **Decisions come from the trusted live config, never the branch** — the same
+  rule `internal/artifacts` already enforces for `unsafe_host`.
+
+### Policy table
+
+The reliable decisions are on **structured tool calls** (MCP, WebFetch,
+policy-file writes) where the payload gives a clean signal.
+
+| Tool / signal | Decision | Why |
+|---|---|---|
+| Read/Write/Edit **inside worktree + dev caches** | allow | sandbox already confines it |
+| Write/Edit to **policy files** (`~/.claude/settings.json`, `.claude/settings.json`, `.mcp.json`, `.github/hooks/*`) | deny | stops the agent neutering its own gate (F4) |
+| Read of **reachable creds** (`~/.claude.json`, `~/.config/gh`, provider dirs) | deny | agent rarely needs to read its own tokens; a read is the exfil setup step |
+| `mcp__<server>__<tool>`, server **on allow-list** | allow | user pre-approved it |
+| `mcp__<server>__<tool>`, server **unknown** | ask → remember | "let the user decide"; approval persists to trusted config |
+| `mcp__<server>__<tool>`, server **denied** | deny | |
+| `WebFetch` to **allow-listed host** | allow | |
+| `WebFetch` to **new host** | ask → remember | structured URL = clean signal; main exfil channel for the tool |
+| `WebSearch`, `Task`, `TodoWrite`, normal local Bash | allow | low risk / bread-and-butter |
+| `git push` / force-push / remote-affecting | ask | plausibly legit but leaves the box; cheap to confirm once |
+| Global/system installs (`apt`, `npm -g`, …) | deny | already forbidden by pre-prompt — enforce it |
+| Unrecognized tool | allow | fail-open; sandbox is the boundary |
+
+### MCP needs two controls, not one
+
+A stdio MCP server is **code that executes the moment the session starts**, so
+gating tool-*calls* is too late on its own:
+
+1. **Pre-launch (the important half):** strip any MCP server not on the
+   allow-list out of the seeded `~/.claude.json`, and refuse to auto-trust a
+   branch's `.mcp.json`. The server never spawns.
+2. **Runtime hook (the second half):** deny tool calls to servers not on the list
+   — catches HTTP servers and anything added dynamically.
+
+### Honest caveat on Bash
+
+A string-matching Bash gate is a **tripwire, not a boundary** — anything denied by
+pattern is trivially re-encoded (base64, env indirection, a compound line, a
+written script). `claude-sbx` only gets away with a Bash gate because it denies
+raw Bash *wholesale* and forces every command through a confining wrapper. For
+Hydra, don't try to make the Bash hook airtight: put the network boundary at the
+**OS layer** (F3 — default-off network or an enforced `AllowedHosts` proxy, where
+it can't be base64'd around) and let the Bash hook be a logged tripwire only. The
+hook earns its keep on MCP, WebFetch, push, and policy-file writes.
+
+---
+
+## Implementation plan for Recommendation 1
+
+### Step 0 — Load-bearing facts (verified against Claude Code docs)
+
+- ✅ **PreToolUse hooks fire before the permission-mode check, and a hook
+  `permissionDecision: "deny"` blocks the tool even under
+  `--dangerously-skip-permissions`.** Hook denials are independent of the bypass
+  flag — so the gate works on Hydra's current launch mode unchanged.
+- ⚠️ **`permissionDecision: "ask"` is a silent no-op under bypass** — it defers to
+  the interactive prompt, which the flag suppresses, so the action *proceeds*.
+  Hydra's web terminal has no interactive approve UI anyway. **Therefore "ask" is
+  implemented by the hook process BLOCKING** until a decision arrives from the UI,
+  then emitting `allow`/`deny`. Never emit `"ask"`.
+- ✅ Command-hook timeout is **10 min** (configurable per-hook via `"timeout"`),
+  with no interrupt of a long-running decision loop — a blocking ask is supported.
+  Set a deliberate ask timeout (e.g. 5 min) that **defaults to deny** on expiry.
+- ⚠️ **Project `.mcp.json` servers still require interactive approval even under
+  bypass** → a malicious branch's `.mcp.json` is *already inert* headless. The
+  live MCP vector is the **seeded `~/.claude.json` (user scope), which Hydra
+  controls** — so pre-launch stripping there is the high-value fix.
+- ✅ MCP tool calls are `mcp__<server>__<tool>` (plugins:
+  `mcp__plugin_<plugin>_<server>__<tool>`); hook matchers can target `mcp__.*`.
+
+### Step 1 — Trusted policy config (`internal/config/config.go`)
+
+Add a per-agent policy table (sibling to `Sandbox` on `AgentConfig`), e.g.
+`[<agent>.policy]`:
+
+```toml
+[claude.policy]
+mcp_allowed          = ["github"]      # allow-listed MCP server names
+webfetch_allow_hosts = ["docs.anthropic.com"]
+gate_enabled         = true            # default true
+```
+
+- New `PolicyConfig` struct + field on `AgentConfig`; extend `Merge` and add
+  `ResolvePolicy(agentType)` (mirrors `ResolveSandboxOptions`).
+- **Trust boundary:** the gate reads policy from the **project-root**
+  `config.toml` (what `config.Load(projectRoot)` returns — the same "trusted live
+  config" `internal/http/artifacts.go` already relies on), **never** the worktree
+  copy a branch can edit. Cleanest delivery: the daemon resolves the policy on the
+  host at launch and seeds it as a **read-only** `policy.json` bind (same
+  mechanism as the settings bind in `seed.go`), so the in-sandbox hook just reads
+  a file and never parses the branch's TOML.
+- "Remembered" approvals are written back here by the **daemon** (host side) via
+  `config.Save`, then re-seeded next launch.
+
+### Step 2 — The gate command (`internal/cli/gate.go`, new)
+
+A dedicated `hydra gate <agent>` command wired as a **second** PreToolUse hook
+(leave `trigger-hook` registered for status — Claude runs both, and any deny
+wins). Keeping them separate preserves trigger-hook's exit-0/silent contract for
+every other event.
+
+- Read the hook JSON from stdin; pull `tool_name` + `tool_input`.
+- A **pure decision function** `decide(policy, tool, input) -> {allow|deny|ask, reason}`
+  implementing the policy table. Pure + table-driven = trivially unit-testable.
+- Output: `deny` → emit the deny JSON on stdout, exit 0. `allow` → just exit 0
+  (silent = proceed). `ask` → run the Step 4 round-trip, then emit allow/deny.
+- Deny rules needing **no** round-trip (ship first):
+  - `Write`/`Edit` whose `file_path` is a policy file
+    (`~/.claude/settings.json`, `.claude/settings.json`, `.mcp.json`,
+    `.github/hooks/*`) → deny (anti-self-neuter, F4).
+  - `Read` of reachable creds (`~/.claude.json`, `~/.config/gh`, provider dirs)
+    → deny.
+  - `mcp__<server>__*` where `<server>` ∉ `mcp_allowed` → deny.
+  - Bash matching global-install patterns (`apt`, `npm i -g`, …) → deny.
+
+### Step 3 — Pre-launch MCP stripping (`internal/sandbox/agentcfg.go`, `seed.go`)
+
+- Extend `BuildClaudeConfig` to take the allow-list and **drop any `mcpServers`
+  entry not on it** from the seeded `~/.claude.json` (so non-allow-listed
+  user-scope servers never spawn).
+- In `BuildClaudeSettings`, set `enabledMcpjsonServers` to the allow-list (and
+  `enableAllProjectMcpServers: false`) so allow-listed project servers are usable
+  without the interactive prompt Hydra can't answer, and everything else stays
+  inert.
+- Net: branch `.mcp.json` is inert by default (Step 0); the seeded user-scope
+  config is filtered to the allow-list; runtime hook (Step 2) is the backstop.
+
+### Step 4 — The "ask" round-trip (reuse the file-polling channel)
+
+The daemon socket is **not** reachable in-sandbox (`HardenGUI` tmpfs's
+`XDG_RUNTIME_DIR`), so reuse the proven "hook writes a host-writable file / daemon
+polls / web via the events Hub" pattern already used for `status.json`:
+
+- **Hook side (in sandbox):** on `ask`, write a request record
+  `{reqid, tool, server/host, summary, ts}` to a per-head writable file
+  (`HYDRA_APPROVAL_REQ_PATH`, seeded + made writable exactly like
+  `HYDRA_STATUS_PATH` in `seed.go`); set `status.json` to `waiting` with a new
+  `notificationType: "policy_approval"` so the existing poller flags it as
+  immediate-unread. Then poll `HYDRA_APPROVAL_DECISION_DIR/<reqid>.json` until
+  present or timeout; emit allow/deny; **timeout → deny**.
+- **Daemon/API side (host):** the 1 s `RunJSONStatusPoller` (`heads/poller.go`)
+  already runs — extend it (or add a sibling watcher) to detect pending request
+  files and push an event over the `events.Hub`. New endpoint
+  `POST /api/heads/{id}/approvals/{reqid}` `{decision, remember}` writes the
+  decision file the hook is polling; if `remember`, append the server/host to the
+  trusted config via `config.Save`.
+
+### Step 5 — Web UI (`web/src/components/AgentDetail.tsx`)
+
+- When a head is `waiting` with `notificationType: "policy_approval"`, render an
+  approval card: *"Head X wants to use MCP server Y / fetch Z / git push"* with
+  **Allow / Deny / Always allow** → calls the new endpoint.
+- Spec-first: add the endpoint + payload to `api/openapi.yaml`, then
+  `mage generate:go` (server stub) and regen the TS client (per CLAUDE.md /
+  memory regen flow).
+
+### Step 6 — Make the gate tamper-proof (F4)
+
+Bind the seeded `settings.json` **read-only** (`ReadOnly: true` in the `seed.go`
+bind), or pass the gate hooks inline via `--settings` in `AgentArgv` (the
+`claude-sbx` approach), so an agent can't edit `settings.json` to remove its own
+gate. Verify Claude reads a read-only `settings.json` cleanly.
+
+### Step 7 — Tests
+
+- Table-driven unit tests for `decide(...)` (the bulk of the value, pure fn).
+- `BuildClaudeConfig`/`BuildClaudeSettings` MCP-stripping tests.
+- Config merge/resolve tests for `PolicyConfig`.
+- Round-trip integration test: write request → write decision → assert hook
+  output; and the timeout-defaults-to-deny path.
+
+### Step 8 — Scope & sequencing
+
+- **Claude-first.** Gemini (`BeforeTool`) and Copilot (`preToolUse`) hooks exist
+  but their deny semantics need their own verification; Codex has no hook we wire.
+  Until then, non-Claude agents get **config-level** MCP stripping (Step 3 applies
+  to their config files too) but **not** the runtime gate — call this out.
+- **Milestones:**
+  - **M1 (no UI, highest value):** Steps 1–3 + 6. Pre-launch MCP stripping +
+    deny-only gate (policy-file writes, cred reads, non-allow-listed MCP, global
+    installs) + read-only settings. "ask" cases temporarily **deny** with a clear
+    message. Closes the exfil + self-neuter surface immediately.
+  - **M2:** Step 4–5. Turn deny-only asks into ask→remember with the UI.
+  - **M3:** WebFetch host gating + `git push` gating + the F6 activity feed
+    (the `status_log.jsonl` data is already captured).
+  - **M4:** extend the runtime gate to Gemini/Copilot. Egress control (F3) is a
+    separate, parallel track.
+
+---
+
 *Note: this is an audit/recommendation document only — no behavior was changed.*
