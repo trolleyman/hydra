@@ -474,9 +474,32 @@ export function AgentDetail({
   }
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (isTypingTarget(e.target)) return
-      if (useDialogStore.getState().isOpen || useShortcutsStore.getState().open) return
+      const dialogOpen = useDialogStore.getState().isOpen || useShortcutsStore.getState().open
       const ctx = shortcutRef.current
+      // Merge (Ctrl+M) and mark-unread (Ctrl+U) fire even while the terminal is
+      // focused, so handle them before the typing-target guard below. They're
+      // agent-wide actions and the terminal's key handler suppresses these combos
+      // (Ctrl+M = Enter, Ctrl+U = kill-line) so they never reach the PTY. They
+      // still defer to an open dialog / help overlay.
+      if (hasMod(e) && !e.altKey && !e.shiftKey) {
+        const actionKey = e.key.toLowerCase()
+        if (actionKey === 'm') {
+          if (dialogOpen || ctx.archived || ctx.busy) return
+          e.preventDefault()
+          ctx.merge()
+          return
+        }
+        if (actionKey === 'u') {
+          if (dialogOpen || ctx.archived) return
+          e.preventDefault()
+          ctx.markUnread()
+          return
+        }
+      }
+      // The remaining shortcuts defer to typing surfaces (form fields, terminal)
+      // and to open modals.
+      if (isTypingTarget(e.target)) return
+      if (dialogOpen) return
       // Rename — F2, no modifier (Windows convention).
       if (e.key === 'F2' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
         if (ctx.archived) return
@@ -500,18 +523,11 @@ export function AgentDetail({
         }
         return
       }
-      // Action shortcuts — Ctrl+letter (Ctrl is hasMod on every platform).
+      // Kill — Ctrl+K (Ctrl is hasMod on every platform). Merge/mark-unread are
+      // handled above so they also work with the terminal focused; kill stays
+      // gated by the typing guard since Ctrl+K is kill-to-end-of-line in a shell.
       if (!hasMod(e) || e.altKey || e.shiftKey) return
-      const key = e.key.toLowerCase()
-      if (key === 'm') {
-        if (ctx.archived || ctx.busy) return
-        e.preventDefault()
-        ctx.merge()
-      } else if (key === 'u') {
-        if (ctx.archived) return
-        e.preventDefault()
-        ctx.markUnread()
-      } else if (key === 'k') {
+      if (e.key.toLowerCase() === 'k') {
         if (ctx.archived || ctx.busy) return
         e.preventDefault()
         ctx.kill()
