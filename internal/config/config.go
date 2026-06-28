@@ -65,6 +65,46 @@ type NetworkConfig struct {
 	AllowedHosts []string `toml:"allowed_hosts"`
 }
 
+// PolicyConfig is the per-agent security-gate policy — the "trusted live config"
+// the decision-capable PreToolUse gate (`hydra gate`) enforces. It is resolved on
+// the host from the project-root config.toml and seeded into the sandbox
+// read-only, so a malicious branch's worktree copy can never widen it (mirrors the
+// trust model internal/artifacts already uses for unsafe_host). The gate can deny
+// a tool call even under --dangerously-skip-permissions, because a PreToolUse hook
+// `permissionDecision: "deny"` fires ahead of the permission-mode check.
+type PolicyConfig struct {
+	// GateEnabled toggles the decision-capable gate hook. nil = default (enabled).
+	GateEnabled *bool `toml:"gate_enabled"`
+	// MCPAllowed lists the MCP server names the agent may use. Any server not
+	// listed is stripped from the seeded ~/.claude.json pre-launch (so it never
+	// spawns) and denied at runtime if reached another way.
+	MCPAllowed []string `toml:"mcp_allowed"`
+	// WebFetchAllowHosts lists hosts WebFetch may reach without an approval
+	// round-trip; a fetch to any other host parks the head for user approval.
+	WebFetchAllowHosts []string `toml:"webfetch_allow_hosts"`
+}
+
+// IsGateEnabled reports whether the decision-capable gate runs. Absent (nil)
+// means enabled — the gate is opt-out, so a config written before this flag keeps
+// the protective default.
+func (p PolicyConfig) IsGateEnabled() bool {
+	return p.GateEnabled == nil || *p.GateEnabled
+}
+
+// Merge merges another PolicyConfig into this one (slices are replaced wholesale
+// when set; a nil field leaves the existing value).
+func (p *PolicyConfig) Merge(other PolicyConfig) {
+	if other.GateEnabled != nil {
+		p.GateEnabled = other.GateEnabled
+	}
+	if other.MCPAllowed != nil {
+		p.MCPAllowed = other.MCPAllowed
+	}
+	if other.WebFetchAllowHosts != nil {
+		p.WebFetchAllowHosts = other.WebFetchAllowHosts
+	}
+}
+
 // SandboxConfig holds user-editable sandbox policy. All path lists are additive
 // on top of the baked-in defaults (sandbox.Defaults()).
 type SandboxConfig struct {
@@ -140,6 +180,8 @@ const DefaultServiceMaxRestarts = 3
 type AgentConfig struct {
 	// Sandbox overrides sandbox policy for this agent type.
 	Sandbox *SandboxConfig `toml:"sandbox"`
+	// Policy overrides the security-gate policy for this agent type.
+	Policy *PolicyConfig `toml:"policy"`
 	// PrePrompt is prepended to every agent prompt.
 	PrePrompt *string `toml:"pre_prompt"`
 	// Fullscreen enables Claude Code's fullscreen (alternate-screen) rendering.
@@ -278,6 +320,7 @@ type rawConfig struct {
 	// New flattened defaults (top level).
 	PrePrompt *string        `toml:"pre_prompt"`
 	Sandbox   *SandboxConfig `toml:"sandbox"`
+	Policy    *PolicyConfig  `toml:"policy"`
 	// Shared.
 	Artifacts           []ArtifactScript `toml:"artifacts"`
 	Services            []ServiceScript  `toml:"services"`
@@ -293,7 +336,7 @@ type rawConfig struct {
 // (claude/gemini/bash/copilot/codex).
 var reservedTopLevel = map[string]bool{
 	"defaults": true, "agents": true,
-	"pre_prompt": true, "sandbox": true, "artifacts": true, "services": true,
+	"pre_prompt": true, "sandbox": true, "policy": true, "artifacts": true, "services": true,
 	"resume_prompt": true, "artifact_concurrency": true, "artifact_prefetch": true,
 }
 
@@ -391,6 +434,9 @@ func decodeConfig(data []byte) (Config, error) {
 	if raw.Sandbox != nil {
 		cfg.Defaults.Sandbox = raw.Sandbox
 	}
+	if raw.Policy != nil {
+		cfg.Defaults.Policy = raw.Policy
+	}
 
 	// Agents: legacy [agents.*] map, then every non-reserved top-level table.
 	if raw.Agents != nil {
@@ -466,9 +512,9 @@ func (c *Config) Merge(other Config) {
 }
 
 // clone returns a deep-enough copy of the AgentConfig that Merge can mutate it
-// without touching the original's nested Sandbox/Network structs. (Merge replaces
-// slices and the PrePrompt/PreSpawnScript pointers wholesale, so only the Sandbox
-// and Network structs need fresh copies.)
+// without touching the original's nested Sandbox/Network/Policy structs. (Merge
+// replaces slices and the PrePrompt/PreSpawnScript pointers wholesale, so only the
+// Sandbox, Network and Policy structs need fresh copies.)
 func (a AgentConfig) clone() AgentConfig {
 	out := a
 	if a.Sandbox != nil {
@@ -478,6 +524,10 @@ func (a AgentConfig) clone() AgentConfig {
 			sb.Network = &n
 		}
 		out.Sandbox = &sb
+	}
+	if a.Policy != nil {
+		p := *a.Policy
+		out.Policy = &p
 	}
 	return out
 }
@@ -489,6 +539,12 @@ func (a *AgentConfig) Merge(other AgentConfig) {
 			a.Sandbox = &SandboxConfig{}
 		}
 		a.Sandbox.Merge(*other.Sandbox)
+	}
+	if other.Policy != nil {
+		if a.Policy == nil {
+			a.Policy = &PolicyConfig{}
+		}
+		a.Policy.Merge(*other.Policy)
 	}
 	if other.PrePrompt != nil {
 		a.PrePrompt = other.PrePrompt
@@ -626,6 +682,18 @@ func (c Config) ResolveSandboxOptions(agentType string) (writable, masked, resto
 	return writable, masked, restore, cow, net, preSpawn
 }
 
+// ResolvePolicy returns the effective security-gate policy for an agent type:
+// the defaults-level [policy] merged with the per-agent [<agent>.policy] override.
+// The gate hook reads this from the trusted project-root config (never the
+// branch's worktree copy); gate_enabled defaults to true when unset.
+func (c Config) ResolvePolicy(agentType string) PolicyConfig {
+	resolved := c.GetResolvedConfig(agentType)
+	if resolved.Policy != nil {
+		return *resolved.Policy
+	}
+	return PolicyConfig{}
+}
+
 // ResolveFullscreen reports whether Claude Code's fullscreen (alternate-screen)
 // rendering should be enabled for an agent type. It defaults to false: with
 // fullscreen off Hydra forces the classic renderer, which keeps the web
@@ -735,6 +803,20 @@ func sandboxSlice(pick func(*SandboxConfig) []string) func(AgentConfig) (string,
 	}
 }
 
+// policySlice builds a get func for a []string policy field.
+func policySlice(pick func(*PolicyConfig) []string) func(AgentConfig) (string, bool) {
+	return func(a AgentConfig) (string, bool) {
+		if a.Policy == nil {
+			return "", false
+		}
+		v := pick(a.Policy)
+		if len(v) == 0 {
+			return "", false
+		}
+		return tomlStringArray(v), true
+	}
+}
+
 // defaultsSpec is the ordered, declarative description of the managed default
 // settings. Root scalars come first because TOML requires root keys to precede
 // any table header. Adding an entry here makes it appear (commented-out) on the
@@ -811,7 +893,7 @@ func defaultsSpec() []specEntry {
 		},
 		{
 			table: "sandbox.network", key: "allowed_hosts",
-			doc: "reserved for a future proxy-based outbound host allow-list.",
+			doc: "outbound host allow-list enforced by the egress proxy when set (exact host or *.suffix); empty = all hosts (subject to network.enabled).",
 			def: func() string { return "[]" },
 			get: func(a AgentConfig) (string, bool) {
 				if a.Sandbox != nil && a.Sandbox.Network != nil && len(a.Sandbox.Network.AllowedHosts) > 0 {
@@ -819,6 +901,29 @@ func defaultsSpec() []specEntry {
 				}
 				return "", false
 			},
+		},
+		{
+			table: "policy", key: "gate_enabled",
+			doc: "enable the decision-capable gate that can deny tool calls (non-allow-listed MCP, credential reads, policy-file writes, global installs) even under skip-permissions (default true).",
+			def: func() string { return "true" },
+			get: func(a AgentConfig) (string, bool) {
+				if a.Policy != nil && a.Policy.GateEnabled != nil {
+					return fmt.Sprintf("%t", *a.Policy.GateEnabled), true
+				}
+				return "", false
+			},
+		},
+		{
+			table: "policy", key: "mcp_allowed",
+			doc: "MCP server names the agent may use; any other server is stripped before launch and denied at runtime (default none).",
+			def: func() string { return "[]" },
+			get: policySlice(func(p *PolicyConfig) []string { return p.MCPAllowed }),
+		},
+		{
+			table: "policy", key: "webfetch_allow_hosts",
+			doc: "hosts WebFetch may reach without an approval round-trip; a new host parks the head for your approval (default none).",
+			def: func() string { return "[]" },
+			get: policySlice(func(p *PolicyConfig) []string { return p.WebFetchAllowHosts }),
 		},
 	}
 }
@@ -1338,6 +1443,7 @@ func renderConfig(existing []byte, cfg Config) string {
 	emitArtifactPrefetch(&out, artifactPrefetch, keyComments)
 	emitSpecTable(&out, spec, "sandbox", "[sandbox]", cfg.Defaults, keyComments, tableComments)
 	emitSpecTable(&out, spec, "sandbox.network", "[sandbox.network]", cfg.Defaults, keyComments, tableComments)
+	emitSpecTable(&out, spec, "policy", "[policy]", cfg.Defaults, keyComments, tableComments)
 
 	// Per-agent overrides. The well-known agent types always get a documented
 	// mention: their real table when configured, otherwise a commented-out header
@@ -1575,6 +1681,7 @@ func emitAgent(out *[]string, name string, a AgentConfig, keyComments, tableComm
 		*out = append(*out, "pre_prompt = "+tomlStringValue(*a.PrePrompt))
 	}
 	emitAgentSandbox(out, name, a.Sandbox, keyComments, tableComments)
+	emitAgentPolicy(out, name, a.Policy, keyComments, tableComments)
 }
 
 // emitClaudeAgent renders the [claude] table. Claude is the only agent that reads
@@ -1609,6 +1716,7 @@ func emitClaudeAgent(out *[]string, a AgentConfig, keyComments, tableComments ma
 	}
 	if active {
 		emitAgentSandbox(out, name, a.Sandbox, keyComments, tableComments)
+		emitAgentPolicy(out, name, a.Policy, keyComments, tableComments)
 	}
 }
 
@@ -1646,6 +1754,24 @@ func emitAgentSandbox(out *[]string, name string, sb *SandboxConfig, keyComments
 	}
 }
 
+// emitAgentPolicy appends the [name.policy] subtable for the settings that are
+// set. No-op when the agent has no policy overrides.
+func emitAgentPolicy(out *[]string, name string, p *PolicyConfig, keyComments, tableComments map[string][]string) {
+	if !policyHasContent(p) {
+		return
+	}
+	*out = appendBlank(*out)
+	if tc := tableComments[name+".policy"]; len(tc) > 0 {
+		*out = append(*out, tc...)
+	}
+	*out = append(*out, "["+name+".policy]")
+	if p.GateEnabled != nil {
+		emitSetField(out, name+".policy", "gate_enabled", fmt.Sprintf("%t", *p.GateEnabled), true, keyComments)
+	}
+	emitSetField(out, name+".policy", "mcp_allowed", tomlStringArray(p.MCPAllowed), len(p.MCPAllowed) > 0, keyComments)
+	emitSetField(out, name+".policy", "webfetch_allow_hosts", tomlStringArray(p.WebFetchAllowHosts), len(p.WebFetchAllowHosts) > 0, keyComments)
+}
+
 // emitSetField appends "key = text" (with any preserved user comment) when set.
 func emitSetField(out *[]string, table, key, text string, set bool, keyComments map[string][]string) {
 	if !set {
@@ -1658,7 +1784,16 @@ func emitSetField(out *[]string, table, key, text string, set bool, keyComments 
 }
 
 func agentHasContent(a AgentConfig) bool {
-	return a.PrePrompt != nil || a.Fullscreen != nil || (a.Sandbox != nil && sandboxHasContent(a.Sandbox))
+	return a.PrePrompt != nil || a.Fullscreen != nil ||
+		(a.Sandbox != nil && sandboxHasContent(a.Sandbox)) || policyHasContent(a.Policy)
+}
+
+// policyHasContent reports whether a PolicyConfig has any setting worth rendering.
+func policyHasContent(p *PolicyConfig) bool {
+	if p == nil {
+		return false
+	}
+	return p.GateEnabled != nil || len(p.MCPAllowed) > 0 || len(p.WebFetchAllowHosts) > 0
 }
 
 func sandboxHasContent(sb *SandboxConfig) bool {
