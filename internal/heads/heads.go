@@ -454,9 +454,11 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 	env = append(env, sandbox.MiseTrustEnv(projectRoot, worktreePath)...)
 	env = append(env, headContextEnv(opts.ID, opts.AgentType, projectRoot, worktreePath, branchName, baseBranch)...)
 	env = append(env, claudeRenderingEnv(opts.AgentType, cfg.ResolveFullscreen(string(opts.AgentType)))...)
-	// Filtering egress proxy: when the head has a network allow-list, route its
-	// outbound HTTP(S) through a per-head proxy that only relays allow-listed hosts.
-	env = append(env, startEgressProxy(opts.ID, net)...)
+	// Filtering egress: when the head has a network allow-list, route its outbound
+	// HTTP(S) through a per-head proxy that only relays allow-listed hosts (hard
+	// netns+nft boundary when available, else advisory proxy env).
+	egressEnv, egressWrap := startEgress(opts.ID, net)
+	env = append(env, egressEnv...)
 
 	sess, err := startAgentSession(reg, projectRoot, opts.ID, opts.AgentType, worktreePath, opts.Rows, opts.Cols, sandbox.Options{
 		AgentType:      opts.AgentType,
@@ -473,6 +475,7 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 		Env:            env,
 		Argv:           argv,
 		PreSpawnScript: preSpawn,
+		EgressWrap:     egressWrap,
 		HardenGUI:      true,
 		Seccomp:        true,
 	})
@@ -756,8 +759,9 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 	env = append(env, sandbox.MiseTrustEnv(projectRoot, worktreePath)...)
 	env = append(env, headContextEnv(head.ID, head.AgentType, projectRoot, worktreePath, derefStr(head.Branch), head.BaseBranch)...)
 	env = append(env, claudeRenderingEnv(head.AgentType, cfg.ResolveFullscreen(string(head.AgentType)))...)
-	// Filtering egress proxy (see SpawnHead): restart it fresh on resume.
-	env = append(env, startEgressProxy(head.ID, net)...)
+	// Filtering egress (see SpawnHead): restart it fresh on resume.
+	egressEnv, egressWrap := startEgress(head.ID, net)
+	env = append(env, egressEnv...)
 
 	sess, err := startAgentSession(reg, projectRoot, head.ID, head.AgentType, worktreePath, rows, cols, sandbox.Options{
 		AgentType:      head.AgentType,
@@ -774,6 +778,7 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 		Env:            env,
 		Argv:           argv,
 		PreSpawnScript: preSpawn,
+		EgressWrap:     egressWrap,
 		HardenGUI:      true,
 		Seccomp:        true,
 	})

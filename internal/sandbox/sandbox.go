@@ -108,6 +108,13 @@ type Options struct {
 	// (see preSpawnExitTrap). Empty to skip. Ignored when NoSandbox is set.
 	PreSpawnScript string
 
+	// EgressWrap, when set, transforms the assembled bwrap argv into a final argv
+	// run in its place (argv[0] is the executable). Hydra uses it to wrap bwrap in
+	// a pasta network namespace with an nft egress lock, giving a hard
+	// allow-listed-egress boundary (see internal/egress). Linux only; nil = run
+	// bwrap directly. Ignored when NoSandbox is set.
+	EgressWrap func(bwrapArgv []string) []string
+
 	// HardenGUI hides the per-user runtime dir and unsets DISPLAY/WAYLAND/etc
 	// so the agent cannot drive the desktop session. Default true.
 	HardenGUI bool

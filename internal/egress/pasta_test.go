@@ -1,0 +1,74 @@
+package egress
+
+import (
+	"strings"
+	"testing"
+)
+
+func TestHardWrapArgvShape(t *testing.T) {
+	hm := HardMode{Available: true, PastaPath: "/usr/bin/pasta", NftPath: "/usr/sbin/nft"}
+	bwrap := []string{"/usr/bin/bwrap", "--ro-bind", "/", "/", "--", "claude"}
+	argv := HardWrapArgv(hm, 54321, bwrap)
+
+	if argv[0] != "/usr/bin/pasta" {
+		t.Fatalf("argv[0] should be pasta, got %q", argv[0])
+	}
+	// pasta must map the host loopback to the deterministic address used by both
+	// the nft rule and HTTP_PROXY.
+	if !contains(argv, "--map-host-loopback") || !contains(argv, MapAddr) {
+		t.Errorf("missing --map-host-loopback %s: %v", MapAddr, argv)
+	}
+	// The bwrap argv must be passed verbatim as the command pasta runs (after the
+	// `bash -c <script> bash` handoff), so exec "$@" runs it.
+	joined := strings.Join(argv, " ")
+	if !strings.Contains(joined, `exec "$@"`) {
+		t.Error("wrap must exec the positional bwrap argv")
+	}
+	if !strings.HasSuffix(joined, strings.Join(bwrap, " ")) {
+		t.Errorf("bwrap argv must be the trailing args: %v", argv)
+	}
+	// The nft lock must reference the proxy port and the map address.
+	if !strings.Contains(joined, "tcp dport 54321") || !strings.Contains(joined, "ip daddr "+MapAddr) {
+		t.Errorf("nft rule missing port/addr: %s", joined)
+	}
+	// Default-drop policy is the whole point.
+	if !strings.Contains(joined, "policy drop") {
+		t.Error("nft ruleset must default-drop egress")
+	}
+}
+
+func TestProxyEnvCoversCommonSpellings(t *testing.T) {
+	env := ProxyEnv("http://127.0.0.1:8080")
+	for _, want := range []string{"HTTP_PROXY=", "http_proxy=", "HTTPS_PROXY=", "ALL_PROXY=", "NO_PROXY=localhost"} {
+		if !hasPrefixIn(env, want) {
+			t.Errorf("ProxyEnv missing %q: %v", want, env)
+		}
+	}
+}
+
+func TestHostPort(t *testing.T) {
+	if got := HostPort("127.0.0.1:54321"); got != 54321 {
+		t.Errorf("HostPort = %d, want 54321", got)
+	}
+	if got := HostPort("garbage"); got != 0 {
+		t.Errorf("HostPort(garbage) = %d, want 0", got)
+	}
+}
+
+func contains(list []string, v string) bool {
+	for _, x := range list {
+		if x == v {
+			return true
+		}
+	}
+	return false
+}
+
+func hasPrefixIn(list []string, prefix string) bool {
+	for _, x := range list {
+		if strings.HasPrefix(x, prefix) {
+			return true
+		}
+	}
+	return false
+}

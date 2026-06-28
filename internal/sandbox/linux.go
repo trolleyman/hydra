@@ -257,9 +257,19 @@ func BuildSpec(opts Options) (*Spec, error) {
 	args = append(args, "--")
 	args = append(args, withPreSpawn(opts.PreSpawnScript, opts.Argv)...)
 
+	// Hard egress boundary: wrap the bwrap argv in a pasta netns + nft lock. The
+	// wrapper returns a new argv (argv[0] = pasta) that ultimately execs this
+	// bwrap, which must therefore NOT --unshare-net (it inherits pasta's netns —
+	// satisfied because hard egress only applies with Network.Enabled).
+	path, finalArgs := bwrap, args
+	if opts.EgressWrap != nil {
+		finalArgs = opts.EgressWrap(args)
+		path = finalArgs[0]
+	}
+
 	return &Spec{
-		Path:       bwrap,
-		Args:       args,
+		Path:       path,
+		Args:       finalArgs,
 		Env:        opts.Env,
 		Dir:        opts.WorktreePath,
 		ExtraFiles: extraFiles,

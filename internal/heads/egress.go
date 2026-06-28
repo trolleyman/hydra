@@ -8,56 +8,125 @@ import (
 	"github.com/trolleyman/hydra/internal/sandbox"
 )
 
-// egressProxies tracks the per-head filtering proxies so they can be torn down
-// when a head is killed or relaunched. A proxy is a lightweight loopback
-// listener; the map is keyed by head ID.
+// EgressMode is the network-enforcement posture in effect for a head, surfaced to
+// the UI so the user knows how strong the boundary is.
+type EgressMode string
+
+const (
+	// EgressNone: no allow-list, network on → unrestricted egress.
+	EgressNone EgressMode = ""
+	// EgressOff: network disabled entirely (the hard off-switch).
+	EgressOff EgressMode = "off"
+	// EgressHard: allow-list enforced in a pasta netns + nft lock — a real,
+	// inescapable boundary.
+	EgressHard EgressMode = "filtered-hard"
+	// EgressAdvisory: allow-list enforced by the proxy via HTTP(S)_PROXY only —
+	// filters every proxy-respecting client, but a determined process in the
+	// shared net namespace can bypass it (pasta/nft unavailable on this host).
+	EgressAdvisory EgressMode = "filtered-advisory"
+)
+
+// egressEntry is a head's running proxy plus its mode.
+type egressEntry struct {
+	proxy *egress.Proxy
+	mode  EgressMode
+}
+
 var egressProxies = struct {
 	mu sync.Mutex
-	m  map[string]*egress.Proxy
-}{m: map[string]*egress.Proxy{}}
+	m  map[string]*egressEntry
+}{m: map[string]*egressEntry{}}
 
-// startEgressProxy starts (or restarts) a head's filtering egress proxy when it
-// has a non-empty network allow-list, returning the HTTP(S)_PROXY environment to
-// inject so the sandboxed agent routes outbound traffic through it. With no
-// allow-list (or network disabled) it returns nil and no proxy runs — egress is
-// then unrestricted (network on) or fully blocked (network off), as before.
+// startEgress sets up a head's egress filtering and returns the proxy env to
+// inject plus, for hard mode, the bwrap-wrapping closure to put on
+// sandbox.Options.EgressWrap. With no allow-list it returns nil/nil and egress is
+// as before (unrestricted when network on, blocked when off).
 //
-// Any existing proxy for id is closed first, so a resume gets a fresh one.
-func startEgressProxy(id string, net sandbox.NetworkPolicy) []string {
+// Hard mode (pasta + nft, validated by a smoke test) confines the agent to a
+// netns whose only egress is the proxy. Otherwise it degrades to advisory mode:
+// the proxy still filters every well-behaved client via HTTP(S)_PROXY, but it is
+// not an inescapable boundary — surfaced to the UI via EgressMode.
+func startEgress(id string, net sandbox.NetworkPolicy) (env []string, wrap func([]string) []string) {
 	stopEgressProxy(id)
-	if !net.Enabled || len(net.AllowedHosts) == 0 {
-		return nil
+	if !net.Enabled {
+		setEgressMode(id, EgressOff)
+		return nil, nil
 	}
+	if len(net.AllowedHosts) == 0 {
+		setEgressMode(id, EgressNone)
+		return nil, nil
+	}
+
 	p, err := egress.Start(id, net.AllowedHosts)
 	if err != nil {
-		// Fail open on the proxy itself: the head still launches (the allow-list
-		// just isn't applied this run). Loud, because it widens egress.
 		log.Printf("hydra egress[%s]: could not start filtering proxy, continuing WITHOUT host filtering: %v", id, err)
-		return nil
+		setEgressMode(id, EgressNone)
+		return nil, nil
 	}
-	egressProxies.mu.Lock()
-	egressProxies.m[id] = p
-	egressProxies.mu.Unlock()
+	port := egress.HostPort(p.Addr())
 
-	url := "http://" + p.Addr()
-	const noProxy = "localhost,127.0.0.1,::1"
-	// Set both upper- and lower-case spellings: different clients read different
-	// ones (curl/git use lower-case; many Go/Node libraries accept either).
-	return []string{
-		"HTTP_PROXY=" + url, "http_proxy=" + url,
-		"HTTPS_PROXY=" + url, "https_proxy=" + url,
-		"ALL_PROXY=" + url, "all_proxy=" + url,
-		"NO_PROXY=" + noProxy, "no_proxy=" + noProxy,
+	if hm := egress.DetectHardMode(); hm.Available && port != 0 {
+		// Hard mode: the agent reaches the host proxy at the mapped address, and
+		// nft drops everything else. The proxy itself listens on host loopback.
+		storeEgress(id, p, EgressHard)
+		log.Printf("hydra egress[%s]: hard egress boundary active (pasta+nft), allow-list of %d host(s)", id, len(net.AllowedHosts))
+		env = egress.ProxyEnv("http://" + egress.MapAddr + ":" + itoa(port))
+		wrap = func(bwrapArgv []string) []string { return egress.HardWrapArgv(hm, port, bwrapArgv) }
+		return env, wrap
 	}
+
+	// Advisory mode: shared host net, proxy reachable on loopback, filtering via
+	// HTTP(S)_PROXY only.
+	storeEgress(id, p, EgressAdvisory)
+	log.Printf("hydra egress[%s]: advisory egress filtering (proxy only; pasta/nft unavailable), allow-list of %d host(s)", id, len(net.AllowedHosts))
+	return egress.ProxyEnv("http://" + p.Addr()), nil
+}
+
+// EgressModeFor returns the enforcement mode currently recorded for a head (used
+// by the API/UI). Unknown heads report EgressNone.
+func EgressModeFor(id string) EgressMode {
+	egressProxies.mu.Lock()
+	defer egressProxies.mu.Unlock()
+	if e := egressProxies.m[id]; e != nil {
+		return e.mode
+	}
+	return EgressNone
+}
+
+func storeEgress(id string, p *egress.Proxy, mode EgressMode) {
+	egressProxies.mu.Lock()
+	egressProxies.m[id] = &egressEntry{proxy: p, mode: mode}
+	egressProxies.mu.Unlock()
+}
+
+// setEgressMode records a mode with no running proxy (off / unrestricted).
+func setEgressMode(id string, mode EgressMode) {
+	egressProxies.mu.Lock()
+	egressProxies.m[id] = &egressEntry{mode: mode}
+	egressProxies.mu.Unlock()
 }
 
 // stopEgressProxy closes and forgets a head's egress proxy, if any.
 func stopEgressProxy(id string) {
 	egressProxies.mu.Lock()
-	p := egressProxies.m[id]
+	e := egressProxies.m[id]
 	delete(egressProxies.m, id)
 	egressProxies.mu.Unlock()
-	if p != nil {
-		_ = p.Close()
+	if e != nil && e.proxy != nil {
+		_ = e.proxy.Close()
 	}
+}
+
+func itoa(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	var b [20]byte
+	i := len(b)
+	for n > 0 {
+		i--
+		b[i] = byte('0' + n%10)
+		n /= 10
+	}
+	return string(b[i:])
 }
