@@ -80,8 +80,9 @@ const (
 
 // Defines values for MergeConflictErrorError.
 const (
-	MergeConflictErrorErrorConflict      MergeConflictErrorError = "conflict"
-	MergeConflictErrorErrorMergeConflict MergeConflictErrorError = "merge_conflict"
+	MergeConflictErrorErrorConflict           MergeConflictErrorError = "conflict"
+	MergeConflictErrorErrorMergeConflict      MergeConflictErrorError = "merge_conflict"
+	MergeConflictErrorErrorUncommittedChanges MergeConflictErrorError = "uncommitted_changes"
 )
 
 // Defines values for RepositoryArtifactResponseStatus.
@@ -548,6 +549,9 @@ type ErrorResponseError string
 type MergeConflictError struct {
 	// Code HTTP status code
 	Code int `json:"code"`
+
+	// ConflictingFiles For uncommitted_changes, the destination files with uncommitted local changes that the merge would overwrite.
+	ConflictingFiles *[]string `json:"conflicting_files,omitempty"`
 
 	// Details Human-readable error description
 	Details string                  `json:"details"`

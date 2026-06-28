@@ -1561,7 +1561,18 @@ components:
           properties:
             error:
               type: string
-              enum: [merge_conflict, conflict]
+              # merge_conflict: the two branches conflict in content.
+              # uncommitted_changes: the destination has uncommitted local changes
+              #   the merge would overwrite (see conflicting_files); commit or stash.
+              # conflict: the operation is already in progress.
+              enum: [merge_conflict, uncommitted_changes, conflict]
+            conflicting_files:
+              type: array
+              items:
+                type: string
+              description: >-
+                For uncommitted_changes, the destination files with uncommitted
+                local changes that the merge would overwrite.
 
     StatusResponse:
       type: object

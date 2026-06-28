@@ -390,7 +390,18 @@ export function AgentDetail({
           onKilled(agent.id)
         } catch (err: any) {
           const errorData = (err.body && typeof err.body === 'object') ? err.body : err
-          if (errorData.error === 'merge_conflict') {
+          if (errorData.error === 'uncommitted_changes') {
+            // The merge target (the base branch's checkout) has uncommitted local
+            // changes the merge would overwrite — distinct from a content conflict
+            // between the branches. Name the files and tell the user to commit/stash.
+            const files: string[] = Array.isArray(errorData.conflicting_files) ? errorData.conflicting_files : []
+            const fileList = files.length ? `\n\n${files.map((f) => `• ${f}`).join('\n')}` : ''
+            useDialogStore.getState().show({
+              title: 'Uncommitted Changes in Target',
+              message: `Can't merge: the merge target (${agent.base_branch}) has uncommitted changes that the merge would overwrite. Commit or stash them, then try again.${fileList}`,
+              type: 'warning'
+            })
+          } else if (errorData.error === 'merge_conflict') {
             useDialogStore.getState().show({
               title: 'Merge Conflict',
               message: `CONFLICT: Merge failed due to git conflicts. Please resolve them manually or update from base.`,
