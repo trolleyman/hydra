@@ -323,6 +323,14 @@ func projectRoots(pm *projects.Manager) []string {
 	return out
 }
 
+// resumeVerifyGrace is how long resumeHeadsOnBoot waits after launching a
+// resume before checking whether the agent's process actually came up. A resume
+// can launch a process that dies immediately (e.g. claude --continue with no
+// resumable conversation); its read loop may never observe the PTY close,
+// leaving a stale "running" session that pins the head. The grace lets a healthy
+// resume start its turn before we judge a silent one dead.
+const resumeVerifyGrace = 3 * time.Second
+
 // resumeHeadsOnBoot restarts agents that the DB marks as running but have no
 // live session (e.g. after a daemon restart), via each agent's own --resume.
 func resumeHeadsOnBoot(reg *session.Registry, store *db.Store, projectRoot string) {
@@ -331,6 +339,7 @@ func resumeHeadsOnBoot(reg *session.Registry, store *db.Store, projectRoot strin
 		log.Printf("warn: resume on boot: list heads: %v", err)
 		return
 	}
+	var resumed []string
 	for _, h := range hs {
 		if reg.IsLive(h.ID) {
 			continue
@@ -361,6 +370,26 @@ func resumeHeadsOnBoot(reg *session.Registry, store *db.Store, projectRoot strin
 			errMsg := err.Error()
 			_ = store.ClearHeadStatus(h.ID, &errMsg)
 			_ = store.UpdateSessionInfo(h.ID, 0, "stopped")
+			continue
 		}
+		resumed = append(resumed, h.ID)
+	}
+
+	// Fail-fast on resumes that launched but died immediately. The liveness
+	// reconciler would eventually reap these, but verifying here marks them
+	// stopped promptly (and logs why) instead of leaving them stuck "running"
+	// until the next reconcile tick. Async so a slow grace never delays boot.
+	if len(resumed) > 0 {
+		go func(ids []string) {
+			time.Sleep(resumeVerifyGrace)
+			for _, id := range ids {
+				if reg.ReapDead(id) {
+					log.Printf("daemon: resumed head %s exited immediately; marking stopped", id)
+					errMsg := "resumed session exited immediately"
+					_ = store.ClearHeadStatus(id, &errMsg)
+					_ = store.UpdateSessionInfo(id, 0, "stopped")
+				}
+			}
+		}(resumed)
 	}
 }

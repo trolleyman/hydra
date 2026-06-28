@@ -262,6 +262,37 @@ func (s *Session) PID() int {
 	return s.proc.Pid()
 }
 
+// alive reports whether the underlying OS process is still running, via a
+// signal-0 probe (side-effect-free; it only checks existence/permission).
+func (s *Session) alive() bool {
+	return s.proc.Signal(syscall.Signal(0)) == nil
+}
+
+// reapIfDead forces the session into the exited state when its process has
+// already died but the read loop never observed the PTY close — which would
+// otherwise pin the session "live" forever (IsLive true), blocking resume and
+// keeping the head's status stuck at "running". Returns true if it reaped.
+//
+// Idempotent: an already-exited session, or one whose process is still alive,
+// returns false and is left untouched. It best-effort closes the PTY to wake any
+// still-blocked read loop, which then runs the normal cleanup/onExit path; the
+// status flip here guarantees liveness flips even if that read never unblocks.
+func (s *Session) reapIfDead() bool {
+	s.mu.Lock()
+	if s.status == StatusExited || s.alive() {
+		s.mu.Unlock()
+		return false
+	}
+	s.status = StatusExited
+	for a := range s.attachers {
+		a.close()
+	}
+	s.mu.Unlock()
+
+	_ = s.proc.Close()
+	return true
+}
+
 func (s *Session) info() Info {
 	s.mu.Lock()
 	status := s.status

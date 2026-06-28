@@ -55,6 +55,17 @@ func ReconcileLivenessOnce(reg *session.Registry, store *db.Store, projectRoot s
 	changed := false
 	for _, a := range dbAgents {
 		info, ok := live[a.ID]
+		// A session can linger in the registry as "running" after its process has
+		// actually died, if the read loop never saw the PTY close (e.g. a resume
+		// whose agent exited immediately). Such a stale entry keeps IsLive true,
+		// which both blocks lazy resume-on-attach and pins the head at "running"
+		// here forever. Probe the real process and reap it if it's gone, so the
+		// branches below treat it as the dead session it is.
+		if ok && (info.Status == session.StatusRunning || info.Status == session.StatusStarting) {
+			if reg.ReapDead(a.ID) {
+				ok = false
+			}
+		}
 		switch {
 		case ok && (info.Status == session.StatusRunning || info.Status == session.StatusStarting):
 			if err := store.UpdateSessionInfo(a.ID, info.PID, "running"); err != nil {
@@ -66,7 +77,8 @@ func ReconcileLivenessOnce(reg *session.Registry, store *db.Store, projectRoot s
 				changed = true
 			}
 		case a.SessionStatus == "running":
-			// Was running but the session is gone (exited or daemon restarted).
+			// Was running but the session is gone (exited, reaped above, or daemon
+			// restarted).
 			if err := store.UpdateSessionInfo(a.ID, 0, "stopped"); err != nil {
 				log.Printf("warn: liveness reconciler: mark stopped %s: %v", a.ID, err)
 			}

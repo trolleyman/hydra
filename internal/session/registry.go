@@ -160,6 +160,20 @@ func (r *Registry) IsLive(id string) bool {
 	return s.status != StatusExited
 }
 
+// ReapDead forces the session for id into the exited state if its process has
+// died without the read loop noticing (e.g. the PTY never reported EOF). Returns
+// true if it reaped one. The liveness reconciler and boot resume use this to
+// unstick a session that would otherwise stay IsLive forever, pinning the head
+// at "running". A no-op (returns false) when the session is unknown, already
+// exited, or still alive.
+func (r *Registry) ReapDead(id string) bool {
+	s, ok := r.Get(id)
+	if !ok {
+		return false
+	}
+	return s.reapIfDead()
+}
+
 // Attach returns a consumer handle that replays scrollback then streams live
 // output. Returns ErrNotFound if the session is unknown. Pass rows/cols of 0 to
 // attach without resizing the PTY — the session keeps its current width, so an
