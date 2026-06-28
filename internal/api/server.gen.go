@@ -18,15 +18,16 @@ import (
 
 // Defines values for AgentStatus.
 const (
-	Building AgentStatus = "building"
-	Finished AgentStatus = "finished"
-	Killing  AgentStatus = "killing"
-	Merging  AgentStatus = "merging"
-	Pending  AgentStatus = "pending"
-	Running  AgentStatus = "running"
-	Starting AgentStatus = "starting"
-	Stopped  AgentStatus = "stopped"
-	Waiting  AgentStatus = "waiting"
+	Building   AgentStatus = "building"
+	Finished   AgentStatus = "finished"
+	Killing    AgentStatus = "killing"
+	Merging    AgentStatus = "merging"
+	NeedsInput AgentStatus = "needs_input"
+	Pending    AgentStatus = "pending"
+	Running    AgentStatus = "running"
+	Starting   AgentStatus = "starting"
+	Stopped    AgentStatus = "stopped"
+	Waiting    AgentStatus = "waiting"
 )
 
 // Defines values for ArtifactFileChangeType.
@@ -216,7 +217,7 @@ type AgentResponse struct {
 	WorktreePath *string `json:"worktree_path"`
 }
 
-// AgentStatus The computed status of the agent (derived from container, agent, and head status)
+// AgentStatus The computed status of the agent (derived from container, agent, and head status). `needs_input` is the explicit "the agent is blocked on you" state (an AskUserQuestion elicitation, an ExitPlanMode plan approval, or a permission prompt) and is surfaced prominently; `waiting` is the softer "gone quiet" idle nudge.
 type AgentStatus string
 
 // AgentStatusInfo defines model for AgentStatusInfo.
@@ -236,7 +237,7 @@ type AgentStatusInfo struct {
 	// Reason Session end reason (only present on SessionEnd events)
 	Reason *string `json:"reason,omitempty"`
 
-	// Status The computed status of the agent (derived from container, agent, and head status)
+	// Status The computed status of the agent (derived from container, agent, and head status). `needs_input` is the explicit "the agent is blocked on you" state (an AskUserQuestion elicitation, an ExitPlanMode plan approval, or a permission prompt) and is surfaced prominently; `waiting` is the softer "gone quiet" idle nudge.
 	Status AgentStatus `json:"status"`
 
 	// Timestamp ISO 8601 timestamp of when the status was set
@@ -870,7 +871,7 @@ type TerminalSizeEventType string
 
 // TerminalStatusEvent defines model for TerminalStatusEvent.
 type TerminalStatusEvent struct {
-	// Status The computed status of the agent (derived from container, agent, and head status)
+	// Status The computed status of the agent (derived from container, agent, and head status). `needs_input` is the explicit "the agent is blocked on you" state (an AskUserQuestion elicitation, an ExitPlanMode plan approval, or a permission prompt) and is surfaced prominently; `waiting` is the softer "gone quiet" idle nudge.
 	Status *AgentStatus            `json:"status,omitempty"`
 	Type   TerminalStatusEventType `json:"type"`
 }

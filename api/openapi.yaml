@@ -1733,12 +1733,13 @@ components:
         - building
         - starting
         - running
+        - needs_input
         - waiting
         - finished
         - stopped
         - killing
         - merging
-      description: "The computed status of the agent (derived from container, agent, and head status)"
+      description: "The computed status of the agent (derived from container, agent, and head status). `needs_input` is the explicit \"the agent is blocked on you\" state (an AskUserQuestion elicitation, an ExitPlanMode plan approval, or a permission prompt) and is surfaced prominently; `waiting` is the softer \"gone quiet\" idle nudge."
 
     AgentStatusInfo:
       type: object

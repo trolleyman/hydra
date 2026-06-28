@@ -289,9 +289,9 @@ func runTriggerHookInfoForTest(t *testing.T, agentType, event string, payload ma
 }
 
 // TestTriggerHookQuestionNotSuggested covers a user-input tool's PreToolUse: the
-// status flips to waiting and the question becomes last_message, but it must NOT
-// be flagged as a suggested next message — it's a question the agent is asking,
-// not an instruction you'd send back, even though its shape looks terse.
+// status flips to needs_input and the question becomes last_message, but it must
+// NOT be flagged as a suggested next message — it's a question the agent is
+// asking, not an instruction you'd send back, even though its shape looks terse.
 func TestTriggerHookQuestionNotSuggested(t *testing.T) {
 	info := runTriggerHookInfoForTest(t, "claude", "", map[string]interface{}{
 		"hook_event_name": "PreToolUse",
@@ -305,8 +305,8 @@ func TestTriggerHookQuestionNotSuggested(t *testing.T) {
 	if info == nil {
 		t.Fatal("no status.json written")
 	}
-	if info.Status != api.Waiting {
-		t.Errorf("status = %q, want waiting", info.Status)
+	if info.Status != api.NeedsInput {
+		t.Errorf("status = %q, want needs_input", info.Status)
 	}
 	if info.LastMessage == nil || *info.LastMessage != "Where should the app binary be distributed first?" {
 		t.Errorf("last_message = %v", info.LastMessage)
@@ -363,9 +363,10 @@ func runTriggerHookStatusFileForTest(t *testing.T, agentType, event string, payl
 
 // TestTriggerHookPermissionRequest covers ExitPlanMode, which fires no
 // PreToolUse and so is only detectable via PermissionRequest: the agent is
-// blocked on the user (waiting) and the plan becomes last_message but must not
-// be flagged as a suggested next message. A PermissionRequest for any other tool
-// still means the agent is blocked, so it is waiting too (just without a plan).
+// explicitly blocked on the user (needs_input) and the plan becomes last_message
+// but must not be flagged as a suggested next message. A PermissionRequest for
+// any other tool still means the agent is blocked on the user, so it is
+// needs_input too (just without a plan).
 func TestTriggerHookPermissionRequest(t *testing.T) {
 	plan := runTriggerHookInfoForTest(t, "claude", "", map[string]interface{}{
 		"hook_event_name": "PermissionRequest",
@@ -375,8 +376,8 @@ func TestTriggerHookPermissionRequest(t *testing.T) {
 	if plan == nil {
 		t.Fatal("no status.json written")
 	}
-	if plan.Status != api.Waiting {
-		t.Errorf("ExitPlanMode status = %q, want waiting", plan.Status)
+	if plan.Status != api.NeedsInput {
+		t.Errorf("ExitPlanMode status = %q, want needs_input", plan.Status)
 	}
 	if plan.LastMessage == nil || *plan.LastMessage != "Step 1: build the thing" {
 		t.Errorf("last_message = %v", plan.LastMessage)
@@ -390,8 +391,8 @@ func TestTriggerHookPermissionRequest(t *testing.T) {
 		"tool_name":       "Bash",
 		"tool_input":      map[string]interface{}{"command": "rm -rf /"},
 	})
-	if other == nil || other.Status != api.Waiting {
-		t.Errorf("non-plan PermissionRequest status = %v, want waiting", other)
+	if other == nil || other.Status != api.NeedsInput {
+		t.Errorf("non-plan PermissionRequest status = %v, want needs_input", other)
 	}
 	if other != nil && other.LastMessage != nil {
 		t.Errorf("non-plan PermissionRequest last_message = %v, want none", *other.LastMessage)
@@ -399,17 +400,19 @@ func TestTriggerHookPermissionRequest(t *testing.T) {
 }
 
 // TestTriggerHookNotificationTypes covers the AskUserQuestion fix: the
-// notification_type drives both the status and the value persisted for the
-// poller's immediacy decision. Explicit prompts go to waiting; an answered
-// elicitation goes back to running; auth_success writes nothing.
+// notification_type drives the status. An explicit prompt (permission_prompt /
+// elicitation_dialog) becomes needs_input — the red "the agent needs you now"
+// state the poller flags at once; the idle nudge (idle_prompt / unrecognised)
+// becomes the softer waiting; an answered elicitation goes back to running;
+// auth_success writes nothing.
 func TestTriggerHookNotificationTypes(t *testing.T) {
 	cases := []struct {
 		notificationType string
 		wantStatus       api.AgentStatus // "" means no status.json written
 	}{
 		{"idle_prompt", api.Waiting},
-		{"permission_prompt", api.Waiting},
-		{"elicitation_dialog", api.Waiting},
+		{"permission_prompt", api.NeedsInput},
+		{"elicitation_dialog", api.NeedsInput},
 		{"elicitation_complete", api.Running},
 		{"elicitation_response", api.Running},
 		{"auth_success", ""},
@@ -436,10 +439,6 @@ func TestTriggerHookNotificationTypes(t *testing.T) {
 		}
 		if file.Status != c.wantStatus {
 			t.Errorf("notification_type %q: status = %q, want %q", c.notificationType, file.Status, c.wantStatus)
-		}
-		// The type must round-trip so the poller can classify the wait.
-		if file.NotificationType != c.notificationType {
-			t.Errorf("notification_type %q: persisted %q", c.notificationType, file.NotificationType)
 		}
 	}
 }

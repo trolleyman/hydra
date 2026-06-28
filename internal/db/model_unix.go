@@ -38,12 +38,13 @@ type Agent struct {
 	TermCols int
 
 	// Agent — updated by JSON poller reading .hydra/local/status/<id>.json
-	AgentStatus     *string // starting|running|waiting|stopped (nil = not yet reported)
+	AgentStatus     *string // starting|running|needs_input|waiting|stopped (nil = not yet reported)
 	AgentStatusTime string  // RFC3339 of last AgentStatus update
 
-	// HasUnreadChanges is set when the agent transitions running→waiting/finished
-	// (the JSON poller) and cleared when the user opens the agent. Drives the
-	// "unread changes" dot in the UI.
+	// HasUnreadChanges is set when the agent needs the user's eyes — it reaches
+	// needs_input (at once) or settles into waiting/finished (deferred) — and is
+	// cleared when the user opens the agent. Drives the "unread changes" dot in
+	// the UI. Set by the JSON poller.
 	HasUnreadChanges bool `gorm:"default:false"`
 
 	// Operation — set atomically before long operations

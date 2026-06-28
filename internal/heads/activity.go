@@ -27,7 +27,7 @@ func enrichAgentStatus(projectRoot, id string, info *api.AgentStatusInfo) {
 		return
 	}
 	switch info.Status {
-	case api.Running, api.Waiting, api.Finished:
+	case api.Running, api.NeedsInput, api.Waiting, api.Finished:
 		// Worth enriching — the agent is live and may have recent activity.
 	default:
 		return

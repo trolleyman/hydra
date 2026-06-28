@@ -163,7 +163,7 @@ func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, pr
 	createdAt3 := simNow().Add(-3 * time.Hour).Unix()
 
 	running := api.Running
-	waiting := api.Waiting
+	needsInput := api.NeedsInput
 	finished := api.Finished
 	unread := true
 
@@ -209,7 +209,9 @@ func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, pr
 			},
 		},
 		{
-			// Finished while you were away → unread-changes dot lit.
+			// Blocked on the user (AskUserQuestion) while you were away → the red
+			// "needs you" status with the unread-changes dot lit. Demos how an
+			// explicit question stands apart from the softer yellow "waiting".
 			Id:               "agent-2",
 			Title:            ptr("Migrate auth providers to OAuth"),
 			AgentType:        "gemini",
@@ -224,12 +226,12 @@ func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, pr
 			// sidebar, so the home/unread shots are unaffected.
 			Prompt: simAgent2Prompt,
 			AgentStatus: &api.AgentStatusInfo{
-				Status:    waiting,
+				Status:    needsInput,
 				Timestamp: simNow().Format(time.RFC3339),
-				// A multi-line message with a fenced code block — the sidebar's
-				// activity row collapses it to a single truncated line (singleLine),
-				// so a code block can no longer render as a multi-line block and clip.
-				LastMessage: ptr("The spike is built and committed:\n```js\nconsole.log(\"aavawd\")\n```\nHere's what landed…"),
+				// A multi-line message — the sidebar's activity row collapses it to a
+				// single truncated line (singleLine), so a code block can no longer
+				// render as a multi-line block and clip.
+				LastMessage: ptr("Two providers expose refresh tokens differently:\n```\nGoogle: offline access\nGitHub: no refresh\n```\nShould I store refresh tokens or re-auth on expiry?"),
 			},
 		},
 		{
@@ -393,9 +395,9 @@ func (s *SimulationServer) GetAgent(w http.ResponseWriter, r *http.Request, proj
 			HasUnreadChanges: &unread,
 			Prompt:           simAgent2Prompt,
 			AgentStatus: &api.AgentStatusInfo{
-				Status:      api.Waiting,
+				Status:      api.NeedsInput,
 				Timestamp:   simNow().Format(time.RFC3339),
-				LastMessage: ptr("The spike is built, tested, and committed. Here's what landed…"),
+				LastMessage: ptr("Should I store refresh tokens or re-auth on expiry?"),
 			},
 		})
 		return

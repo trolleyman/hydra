@@ -183,44 +183,14 @@ func (d *unreadDebouncer) ready(id, status string, now time.Time) bool {
 	return false
 }
 
-// StatusFile is the on-disk shape of a per-head status.json: the API-facing
-// AgentStatusInfo plus internal-only fields the poller uses to classify a wait
-// but that are not part of the agent API. trigger_hook (the writer) and the
-// poller (the reader) share this type so the extra fields round-trip.
+// StatusFile is the on-disk shape of a per-head status.json. trigger_hook (the
+// writer) and the poller (the reader) share this type. It currently adds nothing
+// to the API-facing AgentStatusInfo — the immediacy of a wait is now encoded in
+// the status value itself (needs_input vs waiting) rather than in a side channel
+// — but it stays as the named on-disk type so the read/write split is explicit
+// and future internal-only fields have a home.
 type StatusFile struct {
 	api.AgentStatusInfo
-	// NotificationType is the Claude `notification_type` carried by a
-	// Notification hook (idle_prompt, permission_prompt, elicitation_dialog, …).
-	// It lets the poller tell an explicit "the agent is asking you" wait
-	// (flagged immediately) from the idle "gone quiet" nudge (deferred).
-	NotificationType string `json:"notification_type,omitempty"`
-}
-
-// isImmediateWait reports whether a running→waiting transition is an explicit
-// "the agent needs you now" signal that should raise the unread flag at once,
-// rather than an idle "gone quiet" wait that is deferred (see graceUnread).
-//
-// The immediate cases are the ones where the agent is unambiguously blocked on
-// the user: a user-input tool surfaced via PreToolUse (defensive — current
-// Claude does not fire PreToolUse for AskUserQuestion/ExitPlanMode), a
-// PermissionRequest (e.g. ExitPlanMode's plan approval), and a Notification
-// whose notification_type marks a real prompt — an AskUserQuestion elicitation
-// dialog or a permission prompt — as opposed to the idle nudge (which also
-// fires ~60s after a turn ends and when a head pauses for a background subagent).
-func isImmediateWait(info *StatusFile) bool {
-	if info == nil || info.Event == nil {
-		return false
-	}
-	switch *info.Event {
-	case "PreToolUse", "preToolUse", "BeforeTool", "PermissionRequest", "permissionRequest":
-		return true
-	case "Notification", "notification":
-		switch info.NotificationType {
-		case "permission_prompt", "elicitation_dialog":
-			return true
-		}
-	}
-	return false
 }
 
 func pollJSONStatusOnce(store *db.Store, projectRoot string, deb *unreadDebouncer, hub *events.Hub) {
@@ -248,15 +218,15 @@ func pollJSONStatusOnce(store *db.Store, projectRoot string, deb *unreadDebounce
 
 		if statusTimeAfter(info.Timestamp, a.AgentStatusTime) {
 			// The unread-changes flag is for the moments the user wants to be
-			// drawn back to: a running→waiting/finished transition (and only
-			// that — a starting→waiting flicker, say, doesn't count). A
-			// running→waiting from a user-input tool is an unambiguous request
-			// for the user and is flagged at once; running→finished and idle
-			// running→waiting are deferred (graceUnread) because they also fire
-			// when a head pauses to await a background subagent that resumes on
-			// its own.
+			// drawn back to. The needs_input status is the explicit "the agent is
+			// blocked on you" signal (AskUserQuestion/ExitPlanMode/permission), so
+			// it's flagged the moment it appears, whatever the prior state. A
+			// running→finished and the idle running→waiting nudge are deferred
+			// (graceUnread) because they also fire when a head pauses to await a
+			// background subagent that resumes on its own.
 			prevRunning := a.AgentStatus != nil && *a.AgentStatus == "running"
-			immediate := prevRunning && agentStatus == "waiting" && isImmediateWait(info)
+			statusChanged := a.AgentStatus == nil || *a.AgentStatus != agentStatus
+			immediate := statusChanged && agentStatus == "needs_input"
 			// Only a change the client actually renders is worth an agents_changed
 			// event: the status string flipping, or the unread flag being raised
 			// (immediate). A running agent rewrites status.json on every tool call,
@@ -265,7 +235,6 @@ func pollJSONStatusOnce(store *db.Store, projectRoot string, deb *unreadDebounce
 			// AgentResponse (the timestamp isn't exposed), so emitting an event for it
 			// just makes every connected client refetch agents (and, via the frontend,
 			// push-status) roughly once a second for no visible change.
-			statusChanged := a.AgentStatus == nil || *a.AgentStatus != agentStatus
 			if err := store.UpdateAgentStatus(a.ID, agentStatus, info.Timestamp, immediate); err != nil {
 				log.Printf("warn: json status poller: update agent status for %s: %v", a.ID, err)
 			} else if statusChanged || immediate {
@@ -323,6 +292,8 @@ func mapAgentStatus(s api.AgentStatus) string {
 		return "starting"
 	case api.Running:
 		return "running"
+	case api.NeedsInput:
+		return "needs_input"
 	case api.Waiting:
 		return "waiting"
 	case api.Finished:

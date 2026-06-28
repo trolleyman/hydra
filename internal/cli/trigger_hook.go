@@ -200,9 +200,9 @@ func runTriggerHook(agentType string, eventOverride string, logFile *os.File) er
 	// never a suggested next message, even when its shape looks terse.
 	lastMessageIsQuestion := false
 	// notificationType carries Claude's `notification_type` for Notification
-	// events (idle_prompt, permission_prompt, elicitation_dialog, …), persisted
-	// so the poller can tell an explicit "the agent is asking you" wait from the
-	// idle "gone quiet" nudge.
+	// events (idle_prompt, permission_prompt, elicitation_dialog, …). It selects
+	// between the explicit "the agent is asking you" prompt (status needs_input,
+	// surfaced at once) and the idle "gone quiet" nudge (status waiting, deferred).
 	notificationType := ""
 
 	// Only update status.json for events that represent a meaningful status change.
@@ -255,9 +255,10 @@ func runTriggerHook(agentType string, eventOverride string, logFile *os.File) er
 	case "PreToolUse", "preToolUse", "BeforeTool":
 		// A tool is about to run. Most tools mean the agent is working, but a tool
 		// that asks the user something (e.g. AskUserQuestion) blocks until the user
-		// answers — that's waiting on input, not working.
+		// answers — that's an explicit "needs you" wait, not working. (Defensive:
+		// current Claude fires no PreToolUse for AskUserQuestion/ExitPlanMode.)
 		if isUserInputTool(stringField(input, "tool_name")) {
-			status = api.Waiting
+			status = api.NeedsInput
 			if q := questionText(input); q != "" {
 				lastMessage = q
 				lastMessageIsQuestion = true
@@ -276,8 +277,9 @@ func runTriggerHook(agentType string, eventOverride string, logFile *os.File) er
 		// plan approval (ExitPlanMode) and any genuinely non-bypassable prompt do.
 		// This is the reliable signal for ExitPlanMode, which fires no PreToolUse.
 		// We only OBSERVE: trigger-hook writes nothing to stdout, so the permission
-		// flow proceeds unchanged. The poller treats this wait as immediate unread.
-		status = api.Waiting
+		// flow proceeds unchanged. This is an explicit "needs you" wait, so it gets
+		// the needs_input status (flagged as unread at once).
+		status = api.NeedsInput
 		if isUserInputTool(stringField(input, "tool_name")) {
 			if q := questionText(input); q != "" {
 				lastMessage = q
@@ -292,20 +294,25 @@ func runTriggerHook(agentType string, eventOverride string, logFile *os.File) er
 		//   - auth_success (and other informational types): no status change.
 		//   - permission_prompt / elicitation_dialog: an explicit prompt — a tool
 		//     needs approval, or AskUserQuestion is asking. This is how an
-		//     AskUserQuestion surfaces (it fires no PreToolUse); the poller flags
-		//     it as immediate unread.
+		//     AskUserQuestion surfaces (it fires no PreToolUse); it gets the
+		//     needs_input status so the UI flags it for the user at once.
 		//   - idle_prompt (and any unrecognised type): the agent has gone quiet.
-		//     The poller defers the unread flag for these (the idle nudge also
-		//     fires ~60s after a turn ends and when a head awaits a subagent).
-		// Either way, don't downgrade a terminal status: the idle nudge fires after
-		// a finished/stopped turn too, and flipping that back to waiting would
-		// spuriously revive it.
+		//     This gets the softer waiting status; the poller defers its unread
+		//     flag (the idle nudge also fires ~60s after a turn ends and when a
+		//     head awaits a subagent). Don't downgrade a terminal status here: the
+		//     idle nudge fires after a finished/stopped turn too, and flipping that
+		//     back to waiting would spuriously revive it.
 		notificationType = stringField(input, "notification_type")
 		switch notificationType {
 		case "elicitation_complete", "elicitation_response":
 			status = api.Running
 		case "auth_success":
 			return nil
+		case "permission_prompt", "elicitation_dialog":
+			status = api.NeedsInput
+			if lastMessage == "" {
+				lastMessage = stringField(input, "message")
+			}
 		default:
 			if cur := currentStatus(); cur == api.Finished || cur == api.Stopped {
 				return nil
@@ -356,7 +363,7 @@ func runTriggerHook(agentType string, eventOverride string, logFile *os.File) er
 		return errtrace.Wrap(fmt.Errorf("create status dir: %w", err))
 	}
 
-	data, err := json.Marshal(heads.StatusFile{AgentStatusInfo: info, NotificationType: notificationType})
+	data, err := json.Marshal(heads.StatusFile{AgentStatusInfo: info})
 	if err != nil {
 		return errtrace.Wrap(fmt.Errorf("marshal status: %w", err))
 	}

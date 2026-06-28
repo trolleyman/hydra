@@ -3,8 +3,6 @@ package heads
 import (
 	"testing"
 	"time"
-
-	"github.com/trolleyman/hydra/internal/api"
 )
 
 func TestStatusTimeAfter(t *testing.T) {
@@ -94,46 +92,5 @@ func TestUnreadDebouncerArmPreservesOriginalSince(t *testing.T) {
 
 	if !d.ready("a", "finished", t0.Add(graceUnread)) {
 		t.Fatal("re-arming restarted the grace window instead of preserving it")
-	}
-}
-
-func TestIsImmediateWait(t *testing.T) {
-	immediate := func(event, notificationType string) bool {
-		return isImmediateWait(&StatusFile{
-			AgentStatusInfo:  api.AgentStatusInfo{Event: &event},
-			NotificationType: notificationType,
-		})
-	}
-
-	// Tool/permission events that mean the agent is unambiguously blocked on the user.
-	for _, e := range []string{"PreToolUse", "preToolUse", "BeforeTool", "PermissionRequest", "permissionRequest"} {
-		if !immediate(e, "") {
-			t.Errorf("isImmediateWait(event=%q) = false, want true", e)
-		}
-	}
-
-	// A Notification is immediate only for an explicit prompt, not the idle nudge.
-	for _, nt := range []string{"permission_prompt", "elicitation_dialog"} {
-		if !immediate("Notification", nt) {
-			t.Errorf("isImmediateWait(Notification, %q) = false, want true", nt)
-		}
-	}
-	for _, nt := range []string{"idle_prompt", "auth_success", ""} {
-		if immediate("Notification", nt) {
-			t.Errorf("isImmediateWait(Notification, %q) = true, want false (deferred)", nt)
-		}
-	}
-
-	// Non-immediate events.
-	for _, e := range []string{"Stop", "SessionStart", ""} {
-		if immediate(e, "") {
-			t.Errorf("isImmediateWait(event=%q) = true, want false", e)
-		}
-	}
-	if isImmediateWait(nil) {
-		t.Error("isImmediateWait(nil) = true, want false")
-	}
-	if isImmediateWait(&StatusFile{}) {
-		t.Error("isImmediateWait(no event) = true, want false")
 	}
 }
