@@ -601,6 +601,12 @@ func (s *Server) GetConfig(_ context.Context, request api.GetConfigRequestObject
 		n := *cfg.ArtifactConcurrency
 		resp.ArtifactConcurrency = &n
 	}
+	// Surface the prefetch toggle when set (nil = unset → the client shows the
+	// default, enabled). Copy so the response doesn't alias cfg's pointer.
+	if cfg.ArtifactPrefetch != nil {
+		b := *cfg.ArtifactPrefetch
+		resp.ArtifactPrefetch = &b
+	}
 
 	return api.GetConfig200JSONResponse(resp), nil
 }
@@ -757,6 +763,12 @@ func (s *Server) SaveConfig(_ context.Context, request api.SaveConfigRequestObje
 			n = 0
 		}
 		newCfg.ArtifactConcurrency = &n
+	}
+	// Artifact prefetch toggle: a set value is applied authoritatively; nil/absent
+	// leaves it to renderConfig, which preserves the file's existing value.
+	if request.Body.ArtifactPrefetch != nil {
+		b := *request.Body.ArtifactPrefetch
+		newCfg.ArtifactPrefetch = &b
 	}
 
 	scope := api.SaveConfigParamsScopeProject
@@ -1154,6 +1166,20 @@ func (s *Server) MergeAgent(ctx context.Context, request api.MergeAgentRequestOb
 		if s.DB != nil {
 			_ = s.DB.ClearHeadStatus(head.ID, &errMsg)
 		}
+		// Distinguish a real content conflict between the two branches from the
+		// destination merely having uncommitted local changes the merge would
+		// overwrite — the latter is fixed by committing/stashing, not by resolving
+		// conflicts, so it gets its own error code and the offending file list.
+		var dirty *git.DirtyMergeError
+		if errors.As(err, &dirty) {
+			files := dirty.Files
+			return api.MergeAgent409JSONResponse(api.MergeConflictError{
+				Error:            api.MergeConflictErrorErrorUncommittedChanges,
+				Code:             409,
+				Details:          errMsg,
+				ConflictingFiles: &files,
+			}), nil
+		}
 		return api.MergeAgent409JSONResponse(api.MergeConflictError{
 			Error:   api.MergeConflictErrorErrorMergeConflict,
 			Code:    409,
@@ -1224,6 +1250,19 @@ func (s *Server) UpdateAgentFromBase(ctx context.Context, request api.UpdateAgen
 
 	if err := git.Merge(mergeDir, head.BaseBranch, authorName, authorEmail); err != nil {
 		errMsg := fmt.Sprintf("merge failed: %v", err)
+		// As in MergeAgent: a dirty worktree that the merge would overwrite is
+		// reported as uncommitted_changes (with the files), not as a content
+		// conflict the user would resolve by editing.
+		var dirty *git.DirtyMergeError
+		if errors.As(err, &dirty) {
+			files := dirty.Files
+			return api.UpdateAgentFromBase409JSONResponse(api.MergeConflictError{
+				Error:            api.MergeConflictErrorErrorUncommittedChanges,
+				Code:             409,
+				Details:          errMsg,
+				ConflictingFiles: &files,
+			}), nil
+		}
 		return api.UpdateAgentFromBase409JSONResponse(api.MergeConflictError{
 			Error:   api.MergeConflictErrorErrorMergeConflict,
 			Code:    409,

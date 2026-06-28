@@ -858,12 +858,15 @@ export function ElapsedTime({ startedAt }: { startedAt: number }) {
 // so we keep a generous buffer — vastly cheaper than the old one-DOM-node-per-line.
 const LOG_SCROLLBACK = 20000
 
-// xterm palettes for the build-log terminal, matching the light/dark log box. The
-// background is transparent so the container's tailwind background (including the
-// dark pane's alpha) shows through; only the foreground + ANSI palette differ.
-// stderr is tinted via SGR red, so `red` must read well on each background.
+// xterm palettes for the build-log terminal, matching the light/dark log box.
+// Each theme sets an OPAQUE background matching its container (gray-50 in light,
+// gray-900 in dark): xterm's `allowTransparency` doesn't reliably honour an
+// alpha-0 background here — the rgb is painted opaque — so a transparent
+// background rendered as solid black, leaving the light theme's dark gray-600
+// text unreadable on black. stderr is tinted via SGR red, so `red` must read
+// well on each background.
 const LOG_THEME_DARK = {
-  background: 'rgba(0,0,0,0)',
+  background: '#111827', // gray-900
   foreground: '#d1d5db', // gray-300
   black: '#1f2937', red: '#f87171', green: '#4ade80', yellow: '#fbbf24',
   blue: '#60a5fa', magenta: '#c084fc', cyan: '#22d3ee', white: '#f9fafb',
@@ -872,7 +875,7 @@ const LOG_THEME_DARK = {
   brightCyan: '#67e8f9', brightWhite: '#ffffff',
 }
 const LOG_THEME_LIGHT = {
-  background: 'rgba(0,0,0,0)',
+  background: '#f9fafb', // gray-50
   foreground: '#4b5563', // gray-600
   black: '#374151', red: '#dc2626', green: '#16a34a', yellow: '#ca8a04',
   blue: '#2563eb', magenta: '#9333ea', cyan: '#0891b2', white: '#6b7280',

@@ -538,6 +538,8 @@ export function ArtifactsEditor({
   onChange,
   concurrency,
   onConcurrencyChange,
+  prefetch,
+  onPrefetchChange,
 }: {
   artifacts: ArtifactScript[]
   onChange: (artifacts: ArtifactScript[]) => void
@@ -545,6 +547,10 @@ export function ArtifactsEditor({
   // undefined/null means "use the built-in default".
   concurrency?: number | null
   onConcurrencyChange: (n: number | undefined) => void
+  // Whether the daemon pre-generates artifacts in the background for settled
+  // heads (artifact_prefetch). undefined/null means "use the default" (enabled).
+  prefetch?: boolean | null
+  onPrefetchChange: (v: boolean) => void
 }) {
   function update(index: number, patch: Partial<ArtifactScript>) {
     const next = artifacts.map((a, i) => (i === index ? { ...a, ...patch } : a))
@@ -601,6 +607,25 @@ export function ArtifactsEditor({
         {concurrency === 0 && (
           <span className="text-xs font-medium text-amber-600 dark:text-amber-400 h-[38px] flex items-center">Unlimited — no cap on parallel generations</span>
         )}
+      </div>
+
+      <div className="ml-10 mb-5">
+        <label className="flex items-center gap-2 cursor-pointer select-none w-fit">
+          <input
+            type="checkbox"
+            checked={prefetch !== false}
+            onChange={(e) => onPrefetchChange(e.target.checked)}
+            className="w-4 h-4 rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-2 focus:ring-blue-500/20"
+          />
+          <span className="text-xs font-semibold text-gray-400 dark:text-gray-500 flex items-center gap-1">
+            Pre-generate artifacts in the background
+            <InfoTooltip title="Background pre-generation">
+              <p>When on, the daemon renders a head's diff artifacts in the background once its working tree stops changing, so they're ready the instant you open the diff instead of starting the work on click.</p>
+              <p className="mt-1.5">Turn it off for a project whose generators are too heavy to run speculatively — artifacts are then generated only when you view a diff. Foreground generation and the max-parallel cap above still apply either way.</p>
+              <p className="mt-1.5">Default: on.</p>
+            </InfoTooltip>
+          </span>
+        </label>
       </div>
 
       <div className="space-y-4">
@@ -1054,6 +1079,8 @@ export function SettingsContent({
           onChange={(artifacts) => setConfig({ ...config, artifacts })}
           concurrency={config.artifact_concurrency}
           onConcurrencyChange={(n) => setConfig({ ...config, artifact_concurrency: n })}
+          prefetch={config.artifact_prefetch}
+          onPrefetchChange={(v) => setConfig({ ...config, artifact_prefetch: v })}
         />
       </div>
 

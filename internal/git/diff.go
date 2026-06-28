@@ -379,23 +379,6 @@ func GetUncommittedSummary(projectRoot string) (*UncommittedSummary, error) {
 	return s, nil
 }
 
-// HasUncommittedChanges returns true if there are uncommitted changes to tracked files.
-func HasUncommittedChanges(projectRoot string) (bool, error) {
-	out, err := gitOutput(projectRoot, "status", "--porcelain=v1")
-	if err != nil {
-		return false, errtrace.Wrap(err)
-	}
-	for _, line := range strings.Split(out, "\n") {
-		if len(line) < 2 {
-			continue
-		}
-		if !(line[0] == '?' && line[1] == '?') {
-			return true, nil
-		}
-	}
-	return false, nil
-}
-
 // parseDiff parses raw unified diff output.
 func parseDiff(rawDiff string) ([]DiffFile, error) {
 	var files []DiffFile

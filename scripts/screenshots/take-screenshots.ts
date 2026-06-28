@@ -1034,7 +1034,7 @@ try {
     const tasks = pages.flatMap((pg) => themes.map((theme) => ({ pg, theme })))
     const totalShots = tasks.length
     const cpuCount = (typeof availableParallelism === 'function' ? availableParallelism() : cpus().length) || 8
-    const defaultConcurrency = Math.min(Math.max(cpuCount, 12), 32)
+    const defaultConcurrency = Math.min(Math.max(cpuCount, 6), 16)
     const concurrency = Math.max(1, Math.min(Number(process.env.HYDRA_SHOT_CONCURRENCY) || defaultConcurrency, totalShots))
     let done = 0
     let nextTask = 0

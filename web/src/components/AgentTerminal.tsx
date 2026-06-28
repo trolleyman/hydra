@@ -361,6 +361,20 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
         return false
       }
 
+      // Ctrl+M (merge) / Ctrl+U (mark unread) are agent-wide actions that must
+      // work even while the terminal is focused. In a terminal these combos are
+      // otherwise Enter (CR) and kill-line, so swallow them here: returning false
+      // stops xterm from sending the byte to the PTY, while the keydown still
+      // bubbles to the window listener in AgentDetail that runs the action. Ctrl
+      // on every platform (matches lib/shortcuts hasMod), keyed off e.key so it
+      // agrees with AgentDetail on which physical key counts as M / U.
+      const actionKey = e.key.toLowerCase()
+      const isAgentActionShortcut =
+        e.ctrlKey && !e.metaKey && !e.shiftKey && !e.altKey && (actionKey === 'm' || actionKey === 'u')
+      if (isAgentActionShortcut) {
+        return false
+      }
+
       // Copy with selection -> copy and clear selection (no ^C sent)
       if (isCopyShortcut) {
         const selection = term.getSelection()
