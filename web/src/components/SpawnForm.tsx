@@ -13,6 +13,7 @@ import { StorageKeys, promptDraftKey, promptScrollKey, imageCounterKey, readLoca
 import { HighlightedTextarea } from '../lib/markdown'
 import { spawnGeometry } from '../lib/terminalGeometry'
 import { type Attachment, spawnDraftKey, loadAttachments, saveAttachments, nextAttachmentId } from '../lib/spawnDrafts'
+import { PASTE_LINE_THRESHOLD, getClipboardText, countLines, detectCodeLanguage, fenceCode } from '../lib/pastedText'
 
 type AgentTypeOption = 'claude' | 'gemini' | 'copilot' | 'codex'
 
@@ -176,6 +177,14 @@ export function SpawnForm({
   // prompt. Per project + layout (persisted via imageCounterKey) so the count
   // doesn't bleed across projects, and reset after a successful spawn.
   const imageCounterRef = useRef(0)
+  // Numbers pasted-text attachments (pasted-text-1.txt, …) so each large paste
+  // gets a distinct, referenceable filename. Session-only, reset after a spawn.
+  const pastedTextCounterRef = useRef(0)
+  // The most recent large text paste that was turned into an attachment. An
+  // immediate re-paste of the SAME text inlines it instead (dropping the chip),
+  // fenced when `lang` is set. Cleared on a different paste, spawn, or project
+  // switch so a stale block can't be "re-pasted" later.
+  const lastPasteRef = useRef<{ text: string; attachmentId: number; lang: string | null } | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   // Mirrors `attachments` into a ref so the project-switch effect can stash the
   // outgoing project's attachments without depending on (and re-running for)
@@ -344,6 +353,9 @@ export function SpawnForm({
     if (prev === storeKey) return
     // Stash the outgoing project's attachments before loading the new one's.
     if (prev) saveAttachments(prev, attachmentsRef.current)
+    // A pasted block stashed for one box can't be "re-pasted" into another.
+    lastPasteRef.current = null
+    pastedTextCounterRef.current = 0
     if (storeKey) {
       setAttachments(loadAttachments(storeKey))
       imageCounterRef.current = Number(readLocal(counterKey!)) || 0
@@ -383,22 +395,49 @@ export function SpawnForm({
     return new File([file], `image${n}.${ext}`, { type: file.type, lastModified: file.lastModified })
   }
 
-  // Upload each file, tracking it as an attachment chip. The uploaded path is
-  // appended to the prompt on submit (and so wired through to the agent).
+  // Track one file as an uploading attachment chip, returning its id. The
+  // uploaded path is appended to the prompt on submit (and so wired through to
+  // the agent).
+  function uploadAttachment(file: File): number {
+    const id = nextAttachmentId()
+    const previewUrl = isImageFile(file) ? URL.createObjectURL(file) : undefined
+    setAttachments((prev) => [...prev, { id, filename: file.name || 'pasted-image', path: null, previewUrl, size: file.size, uploading: true }])
+    uploadFile(projectId, file)
+      .then((res) => {
+        setAttachments((prev) => prev.map((a) => (a.id === id ? { ...a, path: res.path, uploading: false } : a)))
+      })
+      .catch((err) => {
+        setAttachments((prev) => prev.map((a) => (a.id === id ? { ...a, uploading: false, error: formatError(err) } : a)))
+      })
+    return id
+  }
+
+  // Upload each file as an attachment chip.
   function addFiles(rawFiles: File[]) {
-    const files = rawFiles.map(numberGenericImage)
-    for (const file of files) {
-      const id = nextAttachmentId()
-      const previewUrl = isImageFile(file) ? URL.createObjectURL(file) : undefined
-      setAttachments((prev) => [...prev, { id, filename: file.name || 'pasted-image', path: null, previewUrl, size: file.size, uploading: true }])
-      uploadFile(projectId, file)
-        .then((res) => {
-          setAttachments((prev) => prev.map((a) => (a.id === id ? { ...a, path: res.path, uploading: false } : a)))
-        })
-        .catch((err) => {
-          setAttachments((prev) => prev.map((a) => (a.id === id ? { ...a, uploading: false, error: formatError(err) } : a)))
-        })
-    }
+    for (const file of rawFiles.map(numberGenericImage)) uploadAttachment(file)
+  }
+
+  // Attach a large text paste as a numbered .txt file so it rides along like any
+  // other attachment instead of burying the task description.
+  function attachPastedText(text: string): number {
+    const n = ++pastedTextCounterRef.current
+    return uploadAttachment(new File([text], `pasted-text-${n}.txt`, { type: 'text/plain' }))
+  }
+
+  // Splice text into the textarea at the caret (or appended if it isn't focused)
+  // and leave the caret just after it. Used when a re-paste inlines a block.
+  function insertAtCursor(text: string) {
+    const ta = textareaRef.current
+    const start = ta?.selectionStart ?? prompt.length
+    const end = ta?.selectionEnd ?? prompt.length
+    const next = prompt.slice(0, start) + text + prompt.slice(end)
+    handlePromptChange(next)
+    const caret = start + text.length
+    requestAnimationFrame(() => {
+      if (!ta) return
+      ta.focus()
+      ta.selectionStart = ta.selectionEnd = caret
+    })
   }
 
   function removeAttachment(id: number) {
@@ -410,10 +449,33 @@ export function SpawnForm({
   }
 
   function handlePaste(e: React.ClipboardEvent) {
+    // Pasted files (screenshots, copied files) keep their upload behavior.
     const files = extractFiles(e.clipboardData)
-    if (files.length === 0) return
+    if (files.length > 0) {
+      e.preventDefault()
+      addFiles(files)
+      return
+    }
+
+    // Short text pastes go straight into the box like normal.
+    const text = getClipboardText(e.clipboardData)
+    if (countLines(text) <= PASTE_LINE_THRESHOLD) return
+
+    const last = lastPasteRef.current
+    if (last && last.text === text) {
+      // Second paste of the same block: the user wants it inline after all —
+      // drop the chip and insert the text for real (fenced if it's code).
+      e.preventDefault()
+      removeAttachment(last.attachmentId)
+      insertAtCursor(last.lang ? fenceCode(text, last.lang) : text)
+      lastPasteRef.current = null
+      return
+    }
+
+    // First paste of a large block: attach it instead of dumping it in the box.
     e.preventDefault()
-    addFiles(files)
+    const id = attachPastedText(text)
+    lastPasteRef.current = { text, attachmentId: id, lang: detectCodeLanguage(e.clipboardData) }
   }
 
   function handleDrop(e: React.DragEvent) {
@@ -473,6 +535,8 @@ export function SpawnForm({
       if (storeKey) saveAttachments(storeKey, [])
       setLightboxIndex(null)
       imageCounterRef.current = 0
+      pastedTextCounterRef.current = 0
+      lastPasteRef.current = null
       if (counterKey) writeLocal(counterKey, null)
       onSpawned?.(agent)
     } catch (err) {
