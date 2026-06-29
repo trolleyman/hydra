@@ -24,5 +24,7 @@
     "noFallthroughCasesInSwitch": true,
     "noUncheckedSideEffectImports": true
   },
-  "include": ["src"]
+  "include": ["src"],
+  "comment": "Tests are excluded from the app build (tsc -b); vitest transpiles and runs them itself.",
+  "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx", "src/test"]
 }
