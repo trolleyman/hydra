@@ -34,12 +34,11 @@ export const THEME_MODE_LABEL: Record<ThemeMode, string> = {
 }
 export const THEME_MODES: ThemeMode[] = ['light', 'dark', 'system']
 
-function loadThemeMode(): ThemeMode {
+// Exported for unit testing. Reads the persisted theme preference, defaulting to
+// `system` when nothing valid is stored.
+export function loadThemeMode(): ThemeMode {
   const stored = readLocal(StorageKeys.themeMode)
   if (stored === 'light' || stored === 'dark' || stored === 'system') return stored
-  // Migrate the legacy boolean preference (`hydra-dark-mode`) if present.
-  const legacy = readLocal(StorageKeys.darkModeLegacy)
-  if (legacy !== null) return legacy === 'true' ? 'dark' : 'light'
   return 'system'
 }
 
@@ -52,7 +51,6 @@ export const useThemeStore = create<ThemeState>((set) => ({
   mode: loadThemeMode(),
   setMode: (mode) => {
     writeLocal(StorageKeys.themeMode, mode)
-    writeLocal(StorageKeys.darkModeLegacy, null) // drop the migrated legacy key
     set({ mode })
   },
 }))

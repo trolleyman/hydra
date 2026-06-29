@@ -2,19 +2,13 @@ import type { AgentResponse } from '../api'
 import { renderMarkdown } from '../lib/markdown'
 import { AgentTypeIcon, AGENT_ACCENT, type AgentTypeIconName } from './AgentTypeIcon'
 
-export function normalizeContainerState(status: string): string {
-  const s = status.toLowerCase()
-  if (s === 'running' || s.startsWith('up')) return 'running'
-  if (s === 'exited' || s.startsWith('exited')) return 'exited'
-  if (s === 'created') return 'created'
-  return s
-}
-
+// statusDotClass picks a dot colour from the raw sandbox session status
+// (running|exited|stopped|pending|starting|building). Used only as the fallback
+// in agentDotClass when no richer agent_status has been reported yet.
 export function statusDotClass(status: string): string {
-  switch (normalizeContainerState(status)) {
+  switch (status) {
     case 'running': return 'bg-green-500'
     case 'exited': return 'bg-red-400'
-    case 'created': return 'bg-blue-400'
     default: return 'bg-gray-300 dark:bg-gray-600'
   }
 }

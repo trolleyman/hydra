@@ -369,18 +369,18 @@
     - [ ] a) A `runWithToast`/`useApiAction` helper for the repeated `setBusy(true)` → `try`/`await` → `catch`→toast → `finally setBusy(false)` shape (~12 sites: AgentDetail decide/kill/merge/title, RepositoryView, `__root` handleSync/handleAddProject).
     - [ ] b) Replace `catch (err: any)` with `instanceof ApiError`, and type `format_error.ts`'s error body to drop the `(err.body as any).details` cast.
 
-62. [ ] **[Web refactor]** **Unify the two tooltip implementations.** `Tooltip.tsx` (hover-delay, top/bottom) and `InfoTooltip.tsx` (click/hover, off-screen clamping) are independent implementations of the same portal + `getBoundingClientRect` placement math — consolidate into one configurable component.
+62. [x] **[Web refactor]** **Unify the two tooltip implementations.** `Tooltip.tsx` (hover-delay, top/bottom) and `InfoTooltip.tsx` (click/hover, off-screen clamping) are independent implementations of the same portal + `getBoundingClientRect` placement math — consolidated into one configurable `Tooltip` (`variant="dark" | "card"`); `InfoTooltip` is now a thin preset wrapper over it so its call sites are unchanged. (`DiffViewer.tsx`'s local `CustomTooltip` — global single-active dedup + left/right sides — was left as-is; out of scope.)
 
 63. [ ] **[Web refactor]** **Split oversized components.**
 
     - [ ] a) `SettingsComponents.tsx` (1113) into per-section files (theme / terminal / config / artifacts / services) — already cleanly separated functions, mostly mechanical.
     - [ ] b) `ArtifactsPanel.tsx` (~1700, and growing — recent per-side-regen + build-log work added ~125 lines) — lift the embedded xterm log viewer and the video/image diff renderers into sibling components.
 
-64. [ ] **[Web refactor]** **Delete dead code / stale abstractions.**
+64. [x] **[Web refactor]** **Delete dead code / stale abstractions.**
 
-    - [ ] a) The `onRestarted` prop wiring (`AgentDetail.tsx`/`agent.$agentId.tsx`) — already documented as dead.
-    - [ ] b) `normalizeContainerState`'s Docker container-state branch in `AgentComponents.tsx` (a Docker→sandbox leftover), after confirming the modern `agent_status.status` path covers all cases.
-    - [ ] c) Legacy localStorage migration keys (`darkModeLegacy`, the `selectedAgent` prefix) once the migration window has passed.
+    - [x] a) The `onRestarted` prop wiring (`AgentDetail.tsx`/`agent.$agentId.tsx`) — already documented as dead. The prop was declared in `AgentDetail`'s type and passed by the route but never destructured/used; removed the type member, the route's `handleRestarted` handler + the prop pass-through, and the now-unused `AgentResponse` import and `updateAgent` store binding it pulled in.
+    - [x] b) `normalizeContainerState`'s Docker container-state branch in `AgentComponents.tsx` (a Docker→sandbox leftover). Confirmed the only caller is `statusDotClass` (itself only the fallback in `agentDotClass` when no richer `agent_status.status` exists), fed `session_status`, which the backend only ever sets to `pending|building|starting|running|stopped|exited` — never Docker's `Up …`/`Exited (…)`/`created` strings. Deleted the function entirely and inlined a plain `switch` on the raw status into `statusDotClass`, dropping the dead `created`→blue branch.
+    - [x] c) Legacy localStorage migration keys (`darkModeLegacy`, the `selectedAgent` prefix) — migration window has passed. Removed `StorageKeys.darkModeLegacy` + `SELECTED_AGENT_PREFIX`/`selectedAgentKey` from `storage.ts`, the boolean-theme migration in `theme.ts` (and the redundant `darkModeLegacy` clear on `setMode`), and the legacy selected-agent migration in `projectView.ts`'s `loadProjectView`. Updated `storage.test.ts`/`projectView.test.ts` to drop the now-gone keys and migration tests (43 tests still green).
 
 65. [ ] **[Web refactor]** **Shared UI primitives.** Introduce `<Badge>`/`<IconButton>` and consolidate the four parallel status-color switch statements (`statusDotClass`/`agentDotClass`/`agentStatusBadge`/`archivedEndStateBadge`) in `AgentComponents.tsx` into one source of truth.
 

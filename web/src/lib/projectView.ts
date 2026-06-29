@@ -1,14 +1,9 @@
 // Per-project memory of the last view the user had open — the selected agent,
 // the repository browser, or the bare project page — so switching back to a
 // project (or reloading the app) restores where you were rather than always
-// dropping you on the spawn page.
-//
-// Supersedes the old `hydra-selected-agent-<projectId>` key, which could only
-// remember an agent id and so couldn't represent "the repository was open", nor
-// distinguish "deliberately no agent" from "never set". That key is migrated on
-// first read, then dropped. One project-view entry per project.
+// dropping you on the spawn page. One project-view entry per project.
 
-import { projectViewKey, selectedAgentKey, readLocal, writeLocal } from './storage'
+import { projectViewKey, readLocal, writeLocal } from './storage'
 
 export type ProjectView =
   // The repository `path` is the splat under /repository/ (ref + file path);
@@ -32,19 +27,8 @@ function parse(raw: string | null): ProjectView | null {
 }
 
 // Load the saved view for a project, defaulting to the bare project page.
-// Migrates a legacy selected-agent entry the first time it's seen.
 export function loadProjectView(projectId: string): ProjectView {
-  const current = parse(readLocal(projectViewKey(projectId)))
-  if (current) return current
-
-  const legacyAgentId = readLocal(selectedAgentKey(projectId))
-  if (legacyAgentId) {
-    const migrated: ProjectView = { kind: 'agent', agentId: legacyAgentId }
-    saveProjectView(projectId, migrated)
-    writeLocal(selectedAgentKey(projectId), null)
-    return migrated
-  }
-  return PROJECT_ONLY
+  return parse(readLocal(projectViewKey(projectId))) ?? PROJECT_ONLY
 }
 
 export function saveProjectView(projectId: string, view: ProjectView): void {
