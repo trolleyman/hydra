@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import { api } from '../stores/apiClient'
 import type { ArtifactSet, ArtifactFile, ArtifactLogLine } from '../api'
+import { ArtifactFile as ArtifactFileNS } from '../api'
 import { LoaderCircle, Image as ImageIcon, ImageOff, ChevronDown, ChevronRight, TriangleAlert, RefreshCw, ScrollText, SquarePlus, SquareMinus, SquareDot } from 'lucide-react'
 import { InfoTooltip } from './InfoTooltip'
 import { loadArtifactPrefs, saveArtifactPrefs, loadTagFilter, saveTagFilter, clampChangeThreshold, type ArtifactTagFilter } from '../lib/artifactPrefs'
@@ -865,9 +867,16 @@ const LOG_SCROLLBACK = 20000
 // background rendered as solid black, leaving the light theme's dark gray-600
 // text unreadable on black. stderr is tinted via SGR red, so `red` must read
 // well on each background.
+// selectionBackground / selectionInactiveBackground are set explicitly: xterm's
+// default selection is a faint translucent grey that all but vanishes on the
+// light theme's near-white background, so dragging to select log text gave no
+// visible highlight (the log is copyable via Ctrl/Cmd+C — see LogView). A solid,
+// theme-appropriate blue (the VS Code selection colours) keeps the selected text
+// readable on both backgrounds.
 const LOG_THEME_DARK = {
   background: '#111827', // gray-900
   foreground: '#d1d5db', // gray-300
+  selectionBackground: '#264f78', selectionInactiveBackground: '#3a3d41',
   black: '#1f2937', red: '#f87171', green: '#4ade80', yellow: '#fbbf24',
   blue: '#60a5fa', magenta: '#c084fc', cyan: '#22d3ee', white: '#f9fafb',
   brightBlack: '#6b7280', brightRed: '#fca5a5', brightGreen: '#86efac',
@@ -877,6 +886,7 @@ const LOG_THEME_DARK = {
 const LOG_THEME_LIGHT = {
   background: '#f9fafb', // gray-50
   foreground: '#4b5563', // gray-600
+  selectionBackground: '#add6ff', selectionInactiveBackground: '#e2e8f0',
   black: '#374151', red: '#dc2626', green: '#16a34a', yellow: '#ca8a04',
   blue: '#2563eb', magenta: '#9333ea', cyan: '#0891b2', white: '#6b7280',
   brightBlack: '#6b7280', brightRed: '#ef4444', brightGreen: '#22c55e',
@@ -897,7 +907,7 @@ function formatLogLine(l: ArtifactLogLine): string {
 // through React, renders ANSI colour natively, and auto-follows the tail unless
 // the user scrolls up — xterm handles all three, so a very large, fast-updating
 // log stays smooth where the old map-the-whole-array approach lagged badly.
-export function LogView({ log, emptyText = 'Waiting for output…' }: { log: ArtifactLogLine[]; emptyText?: string }) {
+export function LogView({ log, emptyText = 'Waiting for output…', failed = false }: { log: ArtifactLogLine[]; emptyText?: string; failed?: boolean }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<Terminal | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
@@ -983,8 +993,15 @@ export function LogView({ log, emptyText = 'Waiting for output…' }: { log: Art
     lastLineRef.current = log.length > 0 ? log[log.length - 1] : null
   }, [log])
 
+  // A failed build's log gets a red border + faint red wash so the terminal
+  // itself reads as the error surface — the script's stderr (rendered red) is the
+  // failure detail, so no separate error box is needed beside it.
   return (
-    <div className="relative h-64 max-h-64 rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/60 p-2">
+    <div className={`relative h-64 max-h-64 rounded-md border p-2 ${
+      failed
+        ? 'border-red-300 dark:border-red-800/80 bg-red-50/40 dark:bg-red-950/20'
+        : 'border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/60'
+    }`}>
       <div ref={containerRef} className="h-full w-full" />
       {log.length === 0 && (
         <div className="pointer-events-none absolute inset-0 flex items-start p-2 font-mono text-[11px] text-gray-400 dark:text-gray-500">
@@ -1017,12 +1034,27 @@ function NoLog() {
   )
 }
 
-// LogColumn is one side's labelled log pane for the persisted (already-fetched)
-// view. A null log means the side is absent, shown as the "No log" placeholder.
-function LogColumn({ label, log }: { label: string; log: ArtifactLogLine[] | null }) {
+// SideLogPane is one side's labelled log pane for the persisted (already-fetched)
+// view. A side with no URL is absent on that version → "No log" placeholder.
+// Otherwise it always renders a terminal: "Loading…" while the fetch is in flight,
+// the fetch error inside the box (red border) if it failed, or the lines once
+// loaded — so a settled card shows two real terminals immediately rather than a
+// bare "Loading log…" line. `failed` marks a side whose build itself errored.
+function SideLogPane({ label, url, log, loading, error, failed }: {
+  label: string
+  url?: string | null
+  log: ArtifactLogLine[] | null
+  loading: boolean
+  error: string | null
+  failed?: boolean
+}) {
+  if (!url) {
+    return <LogColumnFrame label={label}><NoLog /></LogColumnFrame>
+  }
+  const emptyText = error ? `Failed to load log: ${error}` : loading ? 'Loading…' : 'No output'
   return (
     <LogColumnFrame label={label}>
-      {log === null ? <NoLog /> : <LogView log={log} />}
+      <LogView log={log ?? []} emptyText={emptyText} failed={failed || !!error} />
     </LogColumnFrame>
   )
 }
@@ -1064,17 +1096,6 @@ function LiveLogColumn({ label, log, logUrl }: { label: string; log: ArtifactLog
   )
 }
 
-// LogPanes shows two persisted (already-fetched) logs side by side, so the left
-// and right generations read as separate streams instead of interleaving.
-function LogPanes({ left, right }: { left: ArtifactLogLine[] | null; right: ArtifactLogLine[] | null }) {
-  return (
-    <div className="flex gap-2 my-2">
-      <LogColumn label="Before" log={left} />
-      <LogColumn label="After" log={right} />
-    </div>
-  )
-}
-
 // LiveLogPanes shows both in-flight builds side by side while the set generates,
 // each side falling back to its persisted log once it finishes (see LiveLogColumn).
 function LiveLogPanes({ set }: { set: ArtifactSet }) {
@@ -1090,7 +1111,7 @@ function LiveLogPanes({ set }: { set: ArtifactSet }) {
 // each side's persisted log (left_log_url / right_log_url) and shows them in the
 // same side-by-side panes as the live log. The open/close toggle lives in the card
 // header (the "build log" button next to refresh), so this is content-only.
-function PersistedLogView({ leftUrl, rightUrl, open }: { leftUrl?: string | null; rightUrl?: string | null; open: boolean }) {
+function PersistedLogView({ leftUrl, rightUrl, open, leftFailed, rightFailed }: { leftUrl?: string | null; rightUrl?: string | null; open: boolean; leftFailed?: boolean; rightFailed?: boolean }) {
   const [logs, setLogs] = useState<{ left: ArtifactLogLine[] | null; right: ArtifactLogLine[] | null } | null>(null)
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState<string | null>(null)
@@ -1133,20 +1154,28 @@ function PersistedLogView({ leftUrl, rightUrl, open }: { leftUrl?: string | null
 
   if (!open || (!leftUrl && !rightUrl)) return null
 
+  // Render the two terminals straight away — loading/error states live inside each
+  // pane (as its empty text + red border) rather than replacing the panes with a
+  // line of text, so the layout doesn't jump as the logs arrive.
   return (
     <div className="pt-1.5">
-      {loading ? (
-        <div className="my-2 text-xs text-gray-400 dark:text-gray-500">Loading log…</div>
-      ) : err ? (
-        <div className="my-2 text-xs text-red-500 dark:text-red-400">Failed to load log: {err}</div>
-      ) : (
-        <LogPanes left={logs?.left ?? null} right={logs?.right ?? null} />
-      )}
+      <div className="flex gap-2 my-2">
+        <SideLogPane label="Before" url={leftUrl} log={logs?.left ?? null} loading={loading} error={err} failed={leftFailed} />
+        <SideLogPane label="After" url={rightUrl} log={logs?.right ?? null} loading={loading} error={err} failed={rightFailed} />
+      </div>
     </div>
   )
 }
 
-function ArtifactSetCard({ set, mode, spans, onSpanChange, filter, search, onRefresh, projectId, agentId }: { set: ArtifactSet; mode: ImageDiffMode; spans: ArtifactSpans; onSpanChange: (key: string, span: number | null) => void; filter: ArtifactTagFilter; search: string; onRefresh: (name: string) => void; projectId: string | null; agentId: string }) {
+// The card header's action buttons (build log + regenerate) "melt" into the
+// header at rest — just a faint icon — and resolve into proper bordered buttons
+// only when the header cluster is hovered (the parent carries `group`). That
+// keeps them discoverable without shouting over the card's own content. MELT_BTN
+// is the shared resting+hover skin; per-button classes add the rounding/border
+// sides on top.
+const MELT_BTN = 'border border-transparent text-gray-400 dark:text-gray-500 group-hover:border-gray-200 dark:group-hover:border-gray-600 group-hover:bg-white dark:group-hover:bg-gray-700 group-hover:text-gray-500 dark:group-hover:text-gray-300 transition-colors cursor-pointer'
+
+function ArtifactSetCard({ set, mode, spans, onSpanChange, filter, search, onRefresh, projectId, agentId }: { set: ArtifactSet; mode: ImageDiffMode; spans: ArtifactSpans; onSpanChange: (key: string, span: number | null) => void; filter: ArtifactTagFilter; search: string; onRefresh: (name: string, side?: ArtifactSide) => void; projectId: string | null; agentId: string }) {
   const status = set.status as string
   // Apply the (shared) tag filter and the search query to this card's files. The
   // grid shows only matches — ranked by search score when searching; the header
@@ -1155,19 +1184,38 @@ function ArtifactSetCard({ set, mode, spans, onSpanChange, filter, search, onRef
   const isFiltered = filterIsActive(filter)
   const searching = search.trim().length > 0
   const narrowed = isFiltered || searching
-  const visibleFiles = computeVisibleFiles(set.files, filter, search)
+  const changeThreshold = clampChangeThreshold(filter.changeThreshold)
+
+  // Which side(s) failed. A whole-set "error" status means both sides failed (or
+  // the set couldn't be loaded at all); a "ready" set with a single side_error is
+  // a partial failure — the other side rendered. Either way the failing side's
+  // build log is the error surface (its stderr is the detail), so we mark it and
+  // show its red-bordered terminal rather than a separate error box.
+  const leftFailed = status === 'error' || !!set.left_error
+  const rightFailed = status === 'error' || !!set.right_error
+  // One side failed while the other rendered (status stays "ready").
+  const failedSide: 'left' | 'right' | null = status !== 'error' && set.left_error ? 'left' : status !== 'error' && set.right_error ? 'right' : null
+
+  // When one side failed, the surviving side's files would each surface as
+  // added/removed (the failed side contributes none), exploding the card into a
+  // pile of one-sided "changes" for a comparison we never actually made. Present
+  // them as unchanged instead, so the default change filter hides them and the
+  // card stays calm — the failure is already surfaced by the red-bordered
+  // build-log terminal and the header chip, not a flood of fake diffs.
+  const cardFiles = useMemo(
+    () => (failedSide ? set.files.map((f) => ({ ...f, change_type: ArtifactFileNS.change_type.UNCHANGED })) : set.files),
+    [set.files, failedSide],
+  )
+
+  const visibleFiles = computeVisibleFiles(cardFiles, filter, search)
   // "changed" counts honour the change-type threshold, so a sub-threshold tweak
   // doesn't inflate the "x/y changed" header (see effectiveChangeType).
-  const changeThreshold = clampChangeThreshold(filter.changeThreshold)
   const changedFiles = visibleFiles.filter((f) => effectiveChangeType(f, changeThreshold) !== 'unchanged')
-  const totalChanged = set.files.filter((f) => effectiveChangeType(f, changeThreshold) !== 'unchanged').length
+  const totalChanged = cardFiles.filter((f) => effectiveChangeType(f, changeThreshold) !== 'unchanged').length
   const changedLabel = narrowed && changedFiles.length !== totalChanged ? `${changedFiles.length}/${totalChanged} changed` : `${totalChanged} changed`
-  const noChanges = status === 'ready' && !set.changed
-  // One side failed while the other rendered (status stays "ready"): surface a
-  // warning but still show the surviving side's images. Both-sides-failed is the
-  // whole-set "error" status instead, so at most one of these is set here.
-  const failedSide: 'left' | 'right' | null = set.left_error ? 'left' : set.right_error ? 'right' : null
-  const failedSideError = set.left_error || set.right_error
+  // A partial failure isn't a "visual change" — the surviving side's files are
+  // neutralised above, so the header reads "no visual changes" + the failed chip.
+  const noChanges = status === 'ready' && (!set.changed || !!failedSide)
 
   // Restore any saved view prefs for this card (persisted per project+agent+name).
   // loadArtifactPrefs returns null when the saved status no longer matches the
@@ -1185,13 +1233,11 @@ function ArtifactSetCard({ set, mode, spans, onSpanChange, filter, search, onRef
   // at the call site, so switching agents remounts it and re-reads that agent's
   // saved state instead of leaking the previous agent's toggle.
   const [collapsed, setCollapsed] = useState(() => loadPrefs()?.collapsed ?? true)
-  const [buildLogOpen, setBuildLogOpen] = useState(() => loadPrefs()?.buildLogOpen ?? false)
-  // A search auto-expands the card (below), but the user can still collapse it to
-  // skim past one set's matches. This per-search override holds that explicit
-  // choice; it resets to "expanded" each time a search begins (so a fresh search
-  // re-opens the card) and is ignored entirely once the search clears — the saved
-  // `collapsed` then takes over again, untouched.
-  const [searchCollapsed, setSearchCollapsed] = useState(false)
+  // Default the build log open when a side failed: the red-bordered terminal is
+  // now the primary way the failure is surfaced (it replaces the old error box),
+  // so a freshly-expanded failed card should show it without a second click. A
+  // saved pref still wins, and the user can collapse it.
+  const [buildLogOpen, setBuildLogOpen] = useState(() => loadPrefs()?.buildLogOpen ?? (leftFailed || rightFailed))
 
   // Persist the view prefs whenever a toggle changes (and re-key them under the
   // current status, so they only restore while that status holds).
@@ -1199,33 +1245,48 @@ function ArtifactSetCard({ set, mode, spans, onSpanChange, filter, search, onRef
     saveArtifactPrefs(projectId, agentId, set.name, status, { collapsed, buildLogOpen })
   }, [projectId, agentId, set.name, status, collapsed, buildLogOpen])
 
-  // Re-open the card each time a search begins, so a fresh search surfaces its
-  // matches even if the user had collapsed it under a previous search.
-  useEffect(() => { if (searching) setSearchCollapsed(false) }, [searching])
-
   // The build log lives behind a header toggle (next to refresh) for settled cards
   // that produced a log. Opening it also expands the card, since the log renders in
   // the body.
   const hasBuildLog = (status === 'ready' || status === 'error') && !!(set.left_log_url || set.right_log_url)
   const toggleBuildLog = () => setBuildLogOpen((o) => {
     const next = !o
-    if (next) { setCollapsed(false); setSearchCollapsed(false) }
+    if (next) setCollapsed(false)
     return next
   })
+
+  // The regenerate button is a split button: a main click regenerates both sides,
+  // the chevron opens a menu to regenerate just the before/after side (handy when
+  // only one side failed, or only one is slow to rebuild). The menu is rendered in
+  // a portal with fixed coords because the card is `overflow-hidden` (to clip its
+  // rounded header), which would otherwise clip an in-flow absolute dropdown.
+  const [regenMenuOpen, setRegenMenuOpen] = useState(false)
+  const regenBtnRef = useRef<HTMLDivElement>(null)
+  const [regenCoords, setRegenCoords] = useState<{ left: number; top: number } | null>(null)
+  const REGEN_MENU_WIDTH = 208 // w-52
+  useLayoutEffect(() => {
+    if (!regenMenuOpen) return
+    const update = () => {
+      const el = regenBtnRef.current
+      if (!el) return
+      const rect = el.getBoundingClientRect()
+      const padding = 8
+      // Right-align the menu to the button group, clamped into the viewport.
+      const left = Math.max(padding, Math.min(rect.right - REGEN_MENU_WIDTH, window.innerWidth - REGEN_MENU_WIDTH - padding))
+      setRegenCoords({ left, top: rect.bottom + 4 })
+    }
+    update()
+    window.addEventListener('scroll', update, true)
+    window.addEventListener('resize', update)
+    return () => {
+      window.removeEventListener('scroll', update, true)
+      window.removeEventListener('resize', update)
+    }
+  }, [regenMenuOpen])
 
   // Header progress while generating: both sides' latest progress lines joined by
   // a "·" (the two builds run in parallel), e.g. "building frontend · home 7/24".
   const progressText = [set.left_progress, set.right_progress].filter(Boolean).join(' · ')
-
-  // While a search is active the card defaults to open so its ranked matches are
-  // actually visible (the panel only renders cards that have a match, so an
-  // expanded card always has something to show) — but the header click can still
-  // collapse it via the per-search `searchCollapsed` override. The saved collapsed
-  // state is left untouched, so clearing the search restores it.
-  const effectiveCollapsed = searching ? searchCollapsed : collapsed
-  // Toggle whichever state currently drives the view, so a header click always
-  // flips what's on screen (during a search that's the ephemeral override).
-  const toggleCollapsed = () => (searching ? setSearchCollapsed((c) => !c) : setCollapsed((c) => !c))
 
   return (
     <div className="border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 overflow-hidden">
@@ -1234,10 +1295,10 @@ function ArtifactSetCard({ set, mode, spans, onSpanChange, filter, search, onRef
           gray-800 over a gray-800 body was indistinguishable at rest. */}
       <div className="flex items-stretch bg-gray-100 dark:bg-gray-700/40">
         <button
-          onClick={toggleCollapsed}
+          onClick={() => setCollapsed((c) => !c)}
           className="flex-1 min-w-0 flex items-center gap-2 px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors cursor-pointer text-left"
         >
-          {effectiveCollapsed ? <ChevronRight className="w-3.5 h-3.5 text-gray-400 shrink-0" /> : <ChevronDown className="w-3.5 h-3.5 text-gray-400 shrink-0" />}
+          {collapsed ? <ChevronRight className="w-3.5 h-3.5 text-gray-400 shrink-0" /> : <ChevronDown className="w-3.5 h-3.5 text-gray-400 shrink-0" />}
           <ImageIcon className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400 shrink-0" />
           <span className="text-sm font-medium text-gray-700 dark:text-gray-300 truncate shrink-0">{set.name}</span>
           {status === 'generating' && (
@@ -1274,48 +1335,97 @@ function ArtifactSetCard({ set, mode, spans, onSpanChange, filter, search, onRef
             </span>
           )}
         </button>
-        {/* Show/hide the build log — sits left of refresh. Opening it expands the
-            card (the log renders in the body). Only for settled cards with a log. */}
-        {hasBuildLog && (
-          <button
-            onClick={toggleBuildLog}
-            title={buildLogOpen ? 'Hide build log' : 'Show build log'}
-            aria-label={buildLogOpen ? 'Hide build log' : 'Show build log'}
-            className={`shrink-0 px-3 flex items-center transition-colors cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700/60 ${
-              buildLogOpen
-                ? 'text-blue-600 dark:text-blue-400'
-                : 'text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300'
-            }`}
-          >
-            <ScrollText className="w-3.5 h-3.5" />
-          </button>
-        )}
-        {/* Bust the per-commit cache and regenerate — chiefly to retry a failure,
-            whose error is otherwise cached until the ref changes, but always
-            available (even with no visual changes) so a render can be re-run. */}
-        <button
-          onClick={() => onRefresh(set.name)}
-          title="Regenerate this artifact"
-          aria-label="Regenerate this artifact"
-          className="shrink-0 px-3 flex items-center text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors cursor-pointer"
-        >
-          <RefreshCw className="w-3.5 h-3.5" />
-        </button>
+        {/* Proper bordered buttons (matching the rest of the app's icon buttons),
+            vertically centred in the stretch-height header. */}
+        <div className="group shrink-0 flex items-center gap-1.5 pl-1 pr-2">
+          {/* Show/hide the build log. Opening it also expands the card (the log
+              renders in the body). Only for settled cards with a log. The open
+              state stays tinted blue even at rest so "log is showing" is legible;
+              the resting affordance otherwise melts away (see MELT_BTN). */}
+          {hasBuildLog && (
+            <button
+              onClick={toggleBuildLog}
+              title={buildLogOpen ? 'Hide build log' : 'Show build log'}
+              aria-label={buildLogOpen ? 'Hide build log' : 'Show build log'}
+              className={`h-7 px-2 inline-flex items-center justify-center rounded-md transition-colors cursor-pointer ${
+                buildLogOpen
+                  ? 'border border-transparent text-blue-500 dark:text-blue-400 group-hover:border-blue-300 dark:group-hover:border-blue-700 group-hover:bg-blue-50 dark:group-hover:bg-blue-900/30'
+                  : MELT_BTN
+              }`}
+            >
+              <ScrollText className="w-3.5 h-3.5" />
+            </button>
+          )}
+          {/* Split regenerate button: a main click busts the per-commit cache and
+              regenerates both sides (chiefly to retry a failure, whose error is
+              otherwise cached until the ref changes); the chevron opens a menu to
+              regenerate just one side. */}
+          <div ref={regenBtnRef} className="relative inline-flex">
+            <button
+              onClick={() => onRefresh(set.name)}
+              title="Regenerate this artifact"
+              aria-label="Regenerate this artifact"
+              className={`h-7 pl-2 pr-1.5 inline-flex items-center rounded-l-md border-r-0 ${MELT_BTN}`}
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+            </button>
+            <button
+              onClick={() => setRegenMenuOpen((o) => !o)}
+              title="Regenerate one side"
+              aria-label="Regenerate options"
+              aria-expanded={regenMenuOpen}
+              className={`h-7 px-1 inline-flex items-center rounded-r-md ${MELT_BTN}`}
+            >
+              <ChevronDown className="w-3 h-3" />
+            </button>
+            {/* Portal'd so the card's overflow-hidden can't clip it (see regenCoords). */}
+            {regenMenuOpen && regenCoords && createPortal(
+              <>
+                {/* click-away backdrop */}
+                <div className="fixed inset-0 z-[9998]" onClick={() => setRegenMenuOpen(false)} />
+                <div
+                  className="fixed z-[9999] w-52 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-lg py-1 text-xs"
+                  style={{ left: regenCoords.left, top: regenCoords.top }}
+                >
+                  {/* The main button already regenerates both sides; the menu is
+                      just the per-side shortcuts. */}
+                  {([
+                    { side: 'left' as ArtifactSide, label: 'Regenerate before' },
+                    { side: 'right' as ArtifactSide, label: 'Regenerate after' },
+                  ]).map(({ side, label }) => (
+                    <button
+                      key={label}
+                      onClick={() => { setRegenMenuOpen(false); onRefresh(set.name, side) }}
+                      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </>,
+              document.body,
+            )}
+          </div>
+        </div>
       </div>
 
-      {!effectiveCollapsed && (
+      {!collapsed && (
         <div className="px-3 pb-2">
           {/* While generating, stream both builds' live logs side by side; a side
               that finishes first shows its final log instead of "waiting". */}
           {status === 'generating' && <LiveLogPanes set={set} />}
           {status === 'error' && (
             <>
-              {/* Build log at the top so "Show build log" reveals it first; the
-                  error summary follows. */}
-              <PersistedLogView leftUrl={set.left_log_url} rightUrl={set.right_log_url} open={buildLogOpen} />
-              <div className="my-2 px-3 py-2 rounded-md bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 font-mono text-xs text-red-600 dark:text-red-400 whitespace-pre-wrap break-words">
-                {set.error ? stripAnsi(set.error) : 'Artifact generation failed.'}
-              </div>
+              {/* Both sides failed: the red-bordered build-log terminals (the
+                  script's stderr) ARE the error surface, so no separate error box.
+                  Fall back to the captured error text only when no log exists. */}
+              <PersistedLogView leftUrl={set.left_log_url} rightUrl={set.right_log_url} open={buildLogOpen} leftFailed={leftFailed} rightFailed={rightFailed} />
+              {!hasBuildLog && (
+                <div className="my-2 px-3 py-2 rounded-md bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 font-mono text-xs text-red-600 dark:text-red-400 whitespace-pre-wrap break-words">
+                  {set.error ? stripAnsi(set.error) : 'Artifact generation failed.'}
+                </div>
+              )}
             </>
           )}
           {status === 'ready' && (
@@ -1324,25 +1434,28 @@ function ArtifactSetCard({ set, mode, spans, onSpanChange, filter, search, onRef
             // one masonry. Empty states cover "produced nothing" vs "filtered out".
             <>
               {/* Build log sits at the top of the body so "Show build log" reveals
-                  it without scrolling past the image grid. */}
-              <PersistedLogView leftUrl={set.left_log_url} rightUrl={set.right_log_url} open={buildLogOpen} />
-              {failedSide && (
-                // One side died; show its error but keep rendering the side that
-                // succeeded (its files surface as added/removed in the grid).
-                <div className="my-2 px-3 py-2 rounded-md bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 text-xs text-amber-700 dark:text-amber-300">
-                  <div className="flex items-center gap-1.5 font-medium">
-                    <TriangleAlert className="w-3.5 h-3.5 shrink-0" />
-                    The {failedSide === 'left' ? 'before (left)' : 'after (right)'} side failed to render — showing the {failedSide === 'left' ? 'after' : 'before'} side only.
-                  </div>
-                  {failedSideError && (
-                    <pre className="mt-1.5 font-mono whitespace-pre-wrap break-words text-amber-800/90 dark:text-amber-200/80">{stripAnsi(failedSideError)}</pre>
-                  )}
+                  it without scrolling past the image grid. When one side failed it
+                  auto-opens with that side's terminal red-bordered (its stderr is
+                  the failure detail), and the surviving side's files are neutralised
+                  to "unchanged" (cardFiles) so they're hidden by default rather than
+                  flooding the grid with one-sided diffs. */}
+              <PersistedLogView leftUrl={set.left_log_url} rightUrl={set.right_log_url} open={buildLogOpen} leftFailed={leftFailed} rightFailed={rightFailed} />
+              {failedSide && !hasBuildLog && (
+                // One side died and left no log to show: fall back to a one-line note
+                // so the partial result is still explained.
+                <div className="my-2 flex items-center gap-1.5 px-3 py-2 rounded-md bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 text-xs font-medium text-amber-700 dark:text-amber-300">
+                  <TriangleAlert className="w-3.5 h-3.5 shrink-0" />
+                  The {failedSide === 'left' ? 'before (left)' : 'after (right)'} side failed to render — showing the {failedSide === 'left' ? 'after' : 'before'} side only.
                 </div>
               )}
-              {set.files.length === 0 ? (
+              {cardFiles.length === 0 ? (
                 <div className="my-2 text-xs text-gray-400 dark:text-gray-500">No artifacts produced.</div>
               ) : visibleFiles.length === 0 ? (
-                <div className="my-2 text-xs text-gray-400 dark:text-gray-500">No files match {searching ? 'your search' : 'the current filters'}.</div>
+                <div className="my-2 text-xs text-gray-400 dark:text-gray-500">
+                  {failedSide
+                    ? `Only the ${failedSide === 'left' ? 'after' : 'before'} side rendered — its ${cardFiles.length} file${cardFiles.length === 1 ? '' : 's'} ${cardFiles.length === 1 ? 'is' : 'are'} hidden as unchanged (nothing to compare). Show "unchanged" in the changes filter to view ${cardFiles.length === 1 ? 'it' : 'them'}.`
+                    : `No files match ${searching ? 'your search' : 'the current filters'}.`}
+                </div>
               ) : (
                 <FileGrid files={visibleFiles} mode={mode} spans={spans} onSpanChange={onSpanChange} scope={`${agentId}/${set.name}`} changeThreshold={changeThreshold} />
               )}
@@ -1397,7 +1510,7 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
   // Manual-refresh state for the polling fallback (the WS path sends a message
   // instead): stash the script name and bump the nonce to re-run the poll effect.
   const [refreshNonce, setRefreshNonce] = useState(0)
-  const refreshScriptRef = useRef<string | null>(null)
+  const refreshScriptRef = useRef<{ name: string; side?: ArtifactSide } | null>(null)
 
   // Tag filter, shared across every card for this agent. Reload it when the
   // project/agent changes; persist it only on an explicit user change (a save
@@ -1410,7 +1523,6 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
   // project/agent changes since this panel is reused across agents.
   const [search, setSearch] = useState('')
   useEffect(() => { setSearch('') }, [projectId, agentId])
-  const searching = search.trim().length > 0
   const updateTagFilter = useCallback((f: ArtifactTagFilter) => {
     setTagFilter(f)
     saveTagFilter(projectId, agentId, f)
@@ -1480,7 +1592,7 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
 
     const tick = async (first: boolean) => {
       try {
-        const resp = await api.default.getAgentArtifacts(projectId ?? '', agentId, baseRef, headRef, includeUncommitted, first ? refreshScript ?? undefined : undefined)
+        const resp = await api.default.getAgentArtifacts(projectId ?? '', agentId, baseRef, headRef, includeUncommitted, first ? refreshScript?.name : undefined, first ? refreshScript?.side : undefined)
         if (cancelled) return
         setSets(resp.scripts)
         setError(null)
@@ -1496,30 +1608,29 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
     return () => { cancelled = true; clear() }
   }, [mode, projectId, agentId, baseRef, headRef, includeUncommitted, refreshKey, refreshNonce])
 
-  const requestRefresh = useCallback((name: string) => {
+  const requestRefresh = useCallback((name: string, side?: ArtifactSide) => {
     // Optimistically flip the card to a fresh "generating" state so the spinner,
-    // a zeroed elapsed clock and an empty log show immediately.
+    // a zeroed elapsed clock and an empty log show immediately. A per-side refresh
+    // only zeroes that side — the other keeps its existing log/progress so it isn't
+    // visually thrown away while it stays cached.
+    const both = side === undefined
     setSets((prev) => prev?.map((s) => (s.name === name
       ? {
           ...s,
           status: 'generating' as unknown as ArtifactSet['status'],
-          error: null,
-          left_progress: null,
-          right_progress: null,
-          left_log: [],
-          right_log: [],
-          left_log_url: null,
-          right_log_url: null,
+          error: both ? null : s.error,
+          ...(both || side === 'left' ? { left_progress: null, left_log: [], left_log_url: null, left_error: null } : {}),
+          ...(both || side === 'right' ? { right_progress: null, right_log: [], right_log_url: null, right_error: null } : {}),
           started_at: Math.floor(Date.now() / 1000),
         }
       : s)) ?? prev)
     const ws = wsRef.current
     if (mode === 'ws' && ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: 'refresh', script: name }))
+      ws.send(JSON.stringify({ type: 'refresh', script: name, ...(side ? { side } : {}) }))
     } else {
-      // Polling fallback: forward the name to the next poll so the backend
-      // discards the cached (possibly errored) result and regenerates.
-      refreshScriptRef.current = name
+      // Polling fallback: forward the name (and side) to the next poll so the
+      // backend discards the cached (possibly errored) result and regenerates.
+      refreshScriptRef.current = { name, side }
       setRefreshNonce((n) => n + 1)
     }
   }, [mode])
@@ -1590,11 +1701,11 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
             cards keep the previous agent's expand/collapse state (and its save
             effect would then clobber the new agent's saved prefs). Re-keying per
             agent remounts each card so it re-reads that agent's saved state. */}
-        {sets
-          // While searching, drop cards with no matching file so results stay
-          // clean — the surviving cards auto-expand to show their ranked matches.
-          .filter((s) => !searching || computeVisibleFiles(s.files, tagFilter, search).length > 0)
-          .map((s) => <ArtifactSetCard key={`${projectId ?? '_'}-${agentId}-${s.name}`} set={s} mode={imageDiffMode} spans={artifactSpans} onSpanChange={onArtifactSpanChange} filter={tagFilter} search={search} onRefresh={requestRefresh} projectId={projectId} agentId={agentId} />)}
+        {/* Search narrows like the tag filter does — within each card, not by
+            removing cards: a card with no match stays put and shows its
+            "no files match" empty state when expanded (with its header count
+            reflecting the narrowing), rather than vanishing from the list. */}
+        {sets.map((s) => <ArtifactSetCard key={`${projectId ?? '_'}-${agentId}-${s.name}`} set={s} mode={imageDiffMode} spans={artifactSpans} onSpanChange={onArtifactSpanChange} filter={tagFilter} search={search} onRefresh={requestRefresh} projectId={projectId} agentId={agentId} />)}
       </div>
     </div>
   )

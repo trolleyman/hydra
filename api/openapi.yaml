@@ -695,8 +695,19 @@ paths:
             type: string
           description: >
             Name of a single artifact script whose cached result (including a
-            cached failure) should be discarded and regenerated for both sides
-            of the comparison before responding.
+            cached failure) should be discarded and regenerated before
+            responding. By default both sides of the comparison are regenerated;
+            pass refresh_side to regenerate just one.
+        - in: query
+          name: refresh_side
+          required: false
+          schema:
+            type: string
+            enum: [left, right]
+          description: >
+            Limits a refresh to a single side — "left" (before) or "right"
+            (after). Ignored unless refresh names a script; when omitted both
+            sides are regenerated.
       responses:
         '200':
           description: OK
