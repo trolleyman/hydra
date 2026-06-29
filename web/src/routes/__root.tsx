@@ -13,7 +13,7 @@ import { useEventStream } from '../lib/useEventStream'
 const EVENT_FALLBACK_MS = 30_000
 import type { ProjectInfo, AgentResponse, RepositoryPushStatus } from '../api'
 import { ApiError, ErrorResponse } from '../api'
-import { formatError } from '../api/format_error'
+import { formatError, apiErrorBody } from '../api/format_error'
 import { ChevronDown, ChevronRight, Folder, FolderGit2, FolderOpen, Plus, Settings, Check, X, LoaderCircle, AlertTriangle, PanelLeftClose, PanelLeftOpen, RotateCw, ArrowUp, ArrowDown, RefreshCw } from 'lucide-react'
 import { useApplyTheme } from '../lib/theme'
 import { useSidebarStore, SIDEBAR_OVERLAY_QUERY } from '../lib/sidebar'
@@ -1043,8 +1043,8 @@ function RootLayout() {
     setRestarting(true)
     try {
       await api.default.devRestart()
-    } catch (err: any) {
-      if (err?.status === 403) {
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 403) {
         useDialogStore.getState().show({
           title: 'Dev Mode Required',
           message: 'Server is not running in dev mode.',
@@ -1080,7 +1080,7 @@ function RootLayout() {
       navigate({ to: isOnSettings ? '/project/$projectId/settings' : '/project/$projectId', params: { projectId: p.id } })
     } catch (err) {
       if (err instanceof ApiError && err.status === 400) {
-        const errorType = err.body?.error
+        const errorType = apiErrorBody(err)?.error
         const isNotFound = errorType === ErrorResponse.error.PATH_NOT_FOUND
         const isNotGit = errorType === ErrorResponse.error.NOT_A_GIT_REPO
 

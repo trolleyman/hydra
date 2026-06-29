@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { formatError } from './format_error'
+import { formatError, apiErrorBody } from './format_error'
 import { ApiError } from './index'
 import type { ApiRequestOptions } from './core/ApiRequestOptions'
 import type { ApiResult } from './core/ApiResult'
@@ -46,5 +46,23 @@ describe('formatError', () => {
   it('stringifies non-Error values', () => {
     expect(formatError('just a string')).toBe('just a string')
     expect(formatError(42)).toBe('42')
+  })
+})
+
+describe('apiErrorBody', () => {
+  it('returns the typed body of an ApiError with an object body', () => {
+    const err = apiError({ body: { error: 'uncommitted_changes', conflicting_files: ['a.ts'] } })
+    expect(apiErrorBody(err)).toEqual({ error: 'uncommitted_changes', conflicting_files: ['a.ts'] })
+  })
+
+  it('returns undefined when the ApiError body is not an object', () => {
+    expect(apiErrorBody(apiError({ body: 'plain text' }))).toBeUndefined()
+    expect(apiErrorBody(apiError({ body: undefined }))).toBeUndefined()
+  })
+
+  it('returns undefined for non-ApiError values', () => {
+    expect(apiErrorBody(new Error('boom'))).toBeUndefined()
+    expect(apiErrorBody('nope')).toBeUndefined()
+    expect(apiErrorBody(undefined)).toBeUndefined()
   })
 })

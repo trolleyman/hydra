@@ -2,7 +2,8 @@ import { useState, useEffect, useRef, useMemo } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { api } from '../stores/apiClient'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from '../lib/agentViewPrefs'
-import { formatError } from '../api/format_error'
+import { formatError, apiErrorBody } from '../api/format_error'
+import { runWithToast } from '../lib/apiAction'
 import type { AgentResponse, RepositoryBranch, ApprovalRequest } from '../api'
 import { ApprovalDecisionRequest } from '../api'
 import { AgentTerminal } from './AgentTerminal'
@@ -297,15 +298,14 @@ function ApprovalCard({ agent, projectId, onRefresh }: { agent: AgentResponse; p
   async function decide(reqid: string, decision: ApprovalDecisionRequest.decision, remember: boolean) {
     if (!projectId) return
     setBusyId(reqid)
-    try {
-      await api.default.decideAgentApproval(projectId, agent.id, reqid, { decision, remember })
+    const res = await runWithToast(() =>
+      api.default.decideAgentApproval(projectId, agent.id, reqid, { decision, remember }),
+    )
+    if (res.ok) {
       setApprovals((prev) => prev.filter((a) => a.reqid !== reqid))
       onRefresh?.()
-    } catch (err) {
-      useToastStore.getState().show({ message: formatError(err), type: 'error' })
-    } finally {
-      setBusyId(null)
     }
+    setBusyId(null)
   }
 
   const btn = 'text-xs px-2.5 py-1 rounded font-medium disabled:opacity-50'
@@ -555,20 +555,20 @@ export function AgentDetail({
           // archived-list refetch (which only happens on a project switch).
           useAgentStore.getState().upsertArchived({ ...agent, archived: true, end_state: 'merged', session_status: 'stopped', session_pid: 0 })
           onKilled(agent.id)
-        } catch (err: any) {
-          const errorData = (err.body && typeof err.body === 'object') ? err.body : err
-          if (errorData.error === 'uncommitted_changes') {
+        } catch (err) {
+          const body = apiErrorBody(err)
+          if (body?.error === 'uncommitted_changes') {
             // The merge target (the base branch's checkout) has uncommitted local
             // changes the merge would overwrite — distinct from a content conflict
             // between the branches. Name the files and tell the user to commit/stash.
-            const files: string[] = Array.isArray(errorData.conflicting_files) ? errorData.conflicting_files : []
+            const files = body.conflicting_files ?? []
             const fileList = files.length ? `\n\n${files.map((f) => `• ${f}`).join('\n')}` : ''
             useDialogStore.getState().show({
               title: 'Uncommitted Changes in Target',
               message: `Can't merge: the merge target (${agent.base_branch}) has uncommitted changes that the merge would overwrite. Commit or stash them, then try again.${fileList}`,
               type: 'warning'
             })
-          } else if (errorData.error === 'merge_conflict') {
+          } else if (body?.error === 'merge_conflict') {
             useDialogStore.getState().show({
               title: 'Merge Conflict',
               message: `CONFLICT: Merge failed due to git conflicts. Please resolve them manually or update from base.`,
@@ -722,15 +722,15 @@ export function AgentDetail({
       return
     }
     setSavingTitle(true)
-    try {
-      const updated = await api.default.updateAgent(projectId ?? '', agent.id, { title: next })
-      updateAgentInStore(updated)
+    const res = await runWithToast(
+      () => api.default.updateAgent(projectId ?? '', agent.id, { title: next }),
+      { errorPrefix: 'Failed to rename agent' },
+    )
+    if (res.ok) {
+      updateAgentInStore(res.value)
       setEditingTitle(false)
-    } catch (err) {
-      useToastStore.getState().show({ message: `Failed to rename agent: ${formatError(err)}`, type: 'error' })
-    } finally {
-      setSavingTitle(false)
     }
+    setSavingTitle(false)
   }
 
   // Changing the base branch is metadata-only: it updates what update-from-base
@@ -740,15 +740,15 @@ export function AgentDetail({
   async function saveBase(next: string) {
     if (!next || next === (agent.base_branch || '')) return
     setSavingBase(true)
-    try {
-      const updated = await api.default.updateAgent(projectId ?? '', agent.id, { base_branch: next })
-      updateAgentInStore(updated)
-      useToastStore.getState().show({ message: `Base branch set to ${next} (commits not moved)`, type: 'success' })
-    } catch (err) {
-      useToastStore.getState().show({ message: `Failed to set base branch: ${formatError(err)}`, type: 'error' })
-    } finally {
-      setSavingBase(false)
-    }
+    const res = await runWithToast(
+      () => api.default.updateAgent(projectId ?? '', agent.id, { base_branch: next }),
+      {
+        success: `Base branch set to ${next} (commits not moved)`,
+        errorPrefix: 'Failed to set base branch',
+      },
+    )
+    if (res.ok) updateAgentInStore(res.value)
+    setSavingBase(false)
   }
 
   // Archived agents are read-only: render the history view instead of the live
