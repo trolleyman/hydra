@@ -3,6 +3,12 @@ pre_prompt = """
 - Use bun instead of npm, and bun x instead of npx
 - Check using mage build before committing
 """
+## message typed into an agent that was working when the daemon restarted, so it resumes its task instead of idling (default "Continue"; "" disables).
+# resume_prompt = "Continue"
+## max visual-artifact generations run at once, across foreground (viewing a diff) and background (proactive) work; lower it for RAM-hungry generators, or 0 for unlimited (default 2).
+# artifact_concurrency = 2
+## pre-generate a head's artifacts in the background once it settles, so a diff is ready before you open it; set false to generate only when viewing — foreground generation and the concurrency cap still apply (default true).
+# artifact_prefetch = true
 
 [sandbox]
 ## extra paths made writable in the sandbox (added to the built-in defaults).
@@ -10,25 +16,37 @@ writable_paths = ["~/.cache/go", "~/.bun/install/cache", "~/.cache/goimports", "
 ## extra paths hidden in the sandbox (added to the built-in defaults).
 # masked_paths = ["~/.ssh", "~/.aws", "~/.azure", "~/.gnupg", "~/.docker", "~/.kube", "~/.password-store", "~/.config", "~/.netrc", "~/.git-credentials", "~/.npmrc", "~/.pypirc", "~/.zsh_history", "~/.bash_history", "~/.sh_history", "~/.config/mise/config.local.toml", "~/.dotfiles/mise/config.local.toml"]
 ## paths re-exposed read-only after a masked parent (added to the built-in defaults).
-## ~/.config/go holds `go env -w` settings (GOMODCACHE=~/.cache/go/pkg/mod,
-## GOCACHE=~/.cache/go/build, GOPATH=~/.local/share/go); ~/.config is masked by
-## default, so re-expose it or the sandboxed `go` falls back to ~/go/pkg/mod (not writable).
+# ~/.config/go holds `go env -w` settings (GOMODCACHE=~/.cache/go/pkg/mod,
+# GOCACHE=~/.cache/go/build, GOPATH=~/.local/share/go); ~/.config is masked by
+# default, so re-expose it or the sandboxed `go` falls back to ~/go/pkg/mod (not writable).
 restore_ro = ["~/.config/go"]
 ## worktree-relative paths mounted copy-on-write from the project root (read source, writes kept per-head; e.g. large gitignored build dirs).
 # cow_paths = []
-## shell script run in the sandbox once before each agent launches (e.g. mise trust).
+## shell script run in the sandbox before every agent launch — spawn and resume, so it must be idempotent (e.g. mise trust).
 # pre_spawn_script = ""
+## shell script run in a sandbox when a head ends, before its worktree is removed — gets HYDRA_* + HYDRA_END_STATE; e.g. release a claimed resource.
+# pre_exit_script = ""
 
 [sandbox.network]
 ## allow outbound network access from the sandbox (default true).
 # enabled = true
-## outbound host allow-list, enforced by the per-head egress proxy (internal/egress):
-## set it and only these hosts are reachable (hard netns boundary where pasta+nft
-## are available, advisory HTTP(S)_PROXY filtering otherwise). Empty = unrestricted.
+## enforce the allowed_hosts list (deny-by-default egress). Unset = on when allowed_hosts is non-empty; true = only allowed_hosts reachable (empty list blocks all egress); false = allow every host.
+# filter_enabled = false
+## outbound host allow-list (exact host or *.suffix), enforced by the egress proxy when filter_enabled is on. Empty + filtering on = block all egress; filtering off = all hosts reachable.
 # allowed_hosts = []
+
+[policy]
+## enable the decision-capable gate that can deny tool calls (non-allow-listed MCP, credential reads, policy-file writes, global installs) even under skip-permissions (default true).
+# gate_enabled = true
+## MCP server names the agent may use; any other server is stripped before launch and denied at runtime (default none).
+# mcp_allowed = []
+## hosts WebFetch may reach without an approval round-trip; a new host parks the head for your approval (default none).
+# webfetch_allow_hosts = []
 
 ## Claude-specific overrides: any of the settings above, applied only to claude agents.
 # [claude]
+## enable Claude Code's fullscreen (alternate-screen) rendering — flicker-free, but it takes over the terminal and captures the mouse; off (the default) keeps this terminal's native scrollbar and select-to-copy.
+# fullscreen = false
 
 ## Gemini-specific overrides: any of the settings above, applied only to gemini agents.
 # [gemini]
@@ -36,23 +54,30 @@ restore_ro = ["~/.config/go"]
 ## Copilot-specific overrides: any of the settings above, applied only to copilot agents.
 # [copilot]
 
+## Codex-specific overrides: any of the settings above, applied only to codex agents.
+# [codex]
+
 ## [[artifacts]]: per-project commands that render visual artifacts (e.g. screenshots)
 ## of a checkout. The diff viewer runs each against both sides of a comparison and
 ## shows the outputs that differ. Fields:
 ##   name         unique label, also used as the cache directory (required).
-##   command      shell command run via `sh -c` in the checkout directory (required).
+##   command      shell command run via `bash -c` in the checkout directory (required).
 ##   timeout_sec  max seconds the command may run (0 = built-in default).
 ##   unsafe_host  run on the host with NO sandbox — full access to your machine and
 ##                credentials; only for audited, self-contained commands (default false).
+##   clean_ignored  also delete git-ignored files (e.g. node_modules) before each run —
+##                a pristine checkout (git clean -fdx) instead of the default that keeps
+##                dependency/build caches warm (-fd). Slower; set true only if stale
+##                ignored output can leak between commits (default false).
+##   enabled      set false to skip this script in the diff viewer (default true).
+## Formats: .png, .jpg and .gif are diffed pixel-by-pixel; .webm video is diffed
+## frame-by-frame when ffmpeg is installed (otherwise by byte hash). Other types
+## (.webp .avif .svg .bmp .pdf) are compared by byte hash. Video is .webm ONLY, and
+## should be LOSSLESS (e.g. ffmpeg ... -c:v libvpx-vp9 -lossless 1): the frame check
+## compares decoded pixels, so a lossy encode of identical frames still reads as
+## "modified".
 ## The command is given: HYDRA_ARTIFACT_OUTPUT (directory to write images into),
 ## HYDRA_ARTIFACT_SOURCE (the checkout dir), HYDRA_ARTIFACT_REF (the resolved ref).
-## Outputs may be still images (.png/.jpg/.gif/.webp/.avif/.svg/.bmp/.pdf) or video
-## (.webm) — useful for comparing an animation before/after. The viewer plays a
-## before/after .webm pair in lockstep (synchronized scrub) and offers a per-frame
-## difference view. Video is compared by per-frame decoded-pixel hashes (via
-## ffmpeg), so container metadata/timestamps don't matter, but the decoded frames
-## must be stable: encode LOSSLESS and deterministically or a re-render reads as
-## "modified": e.g. `ffmpeg -i in.mp4 -c:v libvpx-vp9 -lossless 1 -an out.webm`.
 ## Tags: alongside an image foo.png the command may write a JSON sidecar foo.png.meta
 ## like {"tags": ["theme::dark", "viewport::phone"]}. The diff viewer shows these as
 ## labels and offers a filter. A "category::value" tag is a scoped label: only one
@@ -70,3 +95,20 @@ restore_ro = ["~/.config/go"]
 name = "screenshots"
 command = "cd scripts/screenshots && bun install && bun take-screenshots.ts"
 timeout_sec = 900
+
+## [[services]]: per-project long-running commands the daemon supervises while the
+## project is registered. Each is started on daemon boot (and when the project is
+## added), restarted with capped backoff if it exits unexpectedly, and
+## process-group-killed on daemon shutdown, project removal, or a config save.
+## Fields:
+##   name          unique label, shown in the UI and logs (required).
+##   command       shell command run via `bash -c` from the project root (required).
+##   host          run on the host with NO sandbox — full machine/credential access;
+##                 needed for host devices the sandbox hides, e.g. /dev/kvm (default false).
+##   max_restarts  relaunch cap after an unexpected exit (default 3; 0 = never).
+##   enabled       set false to stop the daemon supervising this service (default true).
+# [[services]]
+# name = "emu-pool"
+# command = "scripts/emu-pool.sh up 3 --foreground"
+# host = true
+# max_restarts = 3

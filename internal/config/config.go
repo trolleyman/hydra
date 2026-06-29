@@ -61,7 +61,15 @@ const DefaultResumePrompt = "Continue"
 type NetworkConfig struct {
 	// Enabled toggles outbound network access. nil = inherit/default (enabled).
 	Enabled *bool `toml:"enabled"`
-	// AllowedHosts is reserved for a future proxy-based host allow-list.
+	// FilterEnabled toggles the outbound host allow-list (deny-by-default vs
+	// allow-by-default). nil = inferred (filter on when AllowedHosts is non-empty,
+	// off otherwise — the historical behaviour). true = enforce AllowedHosts: only
+	// those hosts are reachable, and an empty list blocks all egress. false = allow
+	// every host regardless of AllowedHosts. Subordinate to Enabled: with network
+	// off, nothing is reachable either way.
+	FilterEnabled *bool `toml:"filter_enabled"`
+	// AllowedHosts is the outbound host allow-list enforced by the egress proxy
+	// when filtering is on (exact host or *.suffix wildcard).
 	AllowedHosts []string `toml:"allowed_hosts"`
 }
 
@@ -576,6 +584,9 @@ func (s *SandboxConfig) Merge(other SandboxConfig) {
 		if other.Network.Enabled != nil {
 			s.Network.Enabled = other.Network.Enabled
 		}
+		if other.Network.FilterEnabled != nil {
+			s.Network.FilterEnabled = other.Network.FilterEnabled
+		}
 		if other.Network.AllowedHosts != nil {
 			s.Network.AllowedHosts = other.Network.AllowedHosts
 		}
@@ -674,6 +685,13 @@ func (c Config) ResolveSandboxOptions(agentType string) (writable, masked, resto
 				net.Enabled = *sb.Network.Enabled
 			}
 			net.AllowedHosts = sb.Network.AllowedHosts
+			if sb.Network.FilterEnabled != nil {
+				net.FilterHosts = *sb.Network.FilterEnabled
+			} else {
+				// Inferred default: filter when an allow-list is present, so existing
+				// configs that just set allowed_hosts keep enforcing it.
+				net.FilterHosts = len(sb.Network.AllowedHosts) > 0
+			}
 		}
 		if sb.PreSpawnScript != nil {
 			preSpawn = *sb.PreSpawnScript
@@ -892,8 +910,19 @@ func defaultsSpec() []specEntry {
 			},
 		},
 		{
+			table: "sandbox.network", key: "filter_enabled",
+			doc: "enforce the allowed_hosts list (deny-by-default egress). Unset = on when allowed_hosts is non-empty; true = only allowed_hosts reachable (empty list blocks all egress); false = allow every host.",
+			def: func() string { return "false" },
+			get: func(a AgentConfig) (string, bool) {
+				if a.Sandbox != nil && a.Sandbox.Network != nil && a.Sandbox.Network.FilterEnabled != nil {
+					return fmt.Sprintf("%t", *a.Sandbox.Network.FilterEnabled), true
+				}
+				return "", false
+			},
+		},
+		{
 			table: "sandbox.network", key: "allowed_hosts",
-			doc: "outbound host allow-list enforced by the egress proxy when set (exact host or *.suffix); empty = all hosts (subject to network.enabled).",
+			doc: "outbound host allow-list (exact host or *.suffix), enforced by the egress proxy when filter_enabled is on. Empty + filtering on = block all egress; filtering off = all hosts reachable.",
 			def: func() string { return "[]" },
 			get: func(a AgentConfig) (string, bool) {
 				if a.Sandbox != nil && a.Sandbox.Network != nil && len(a.Sandbox.Network.AllowedHosts) > 0 {
@@ -1741,7 +1770,7 @@ func emitAgentSandbox(out *[]string, name string, sb *SandboxConfig, keyComments
 	if sb.PreExitScript != nil && *sb.PreExitScript != "" {
 		emitSetField(out, name+".sandbox", "pre_exit_script", tomlStringValue(*sb.PreExitScript), true, keyComments)
 	}
-	if nw := sb.Network; nw != nil && (nw.Enabled != nil || len(nw.AllowedHosts) > 0) {
+	if nw := sb.Network; nw != nil && (nw.Enabled != nil || nw.FilterEnabled != nil || len(nw.AllowedHosts) > 0) {
 		*out = appendBlank(*out)
 		if tc := tableComments[name+".sandbox.network"]; len(tc) > 0 {
 			*out = append(*out, tc...)
@@ -1749,6 +1778,9 @@ func emitAgentSandbox(out *[]string, name string, sb *SandboxConfig, keyComments
 		*out = append(*out, "["+name+".sandbox.network]")
 		if nw.Enabled != nil {
 			emitSetField(out, name+".sandbox.network", "enabled", fmt.Sprintf("%t", *nw.Enabled), true, keyComments)
+		}
+		if nw.FilterEnabled != nil {
+			emitSetField(out, name+".sandbox.network", "filter_enabled", fmt.Sprintf("%t", *nw.FilterEnabled), true, keyComments)
 		}
 		emitSetField(out, name+".sandbox.network", "allowed_hosts", tomlStringArray(nw.AllowedHosts), len(nw.AllowedHosts) > 0, keyComments)
 	}
@@ -1809,7 +1841,7 @@ func sandboxHasContent(sb *SandboxConfig) bool {
 	if sb.PreExitScript != nil && *sb.PreExitScript != "" {
 		return true
 	}
-	return sb.Network != nil && (sb.Network.Enabled != nil || len(sb.Network.AllowedHosts) > 0)
+	return sb.Network != nil && (sb.Network.Enabled != nil || sb.Network.FilterEnabled != nil || len(sb.Network.AllowedHosts) > 0)
 }
 
 // appendBlank adds a single blank separator line if out is non-empty.

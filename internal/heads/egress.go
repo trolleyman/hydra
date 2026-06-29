@@ -13,8 +13,12 @@ import (
 type EgressMode string
 
 const (
-	// EgressNone: no allow-list, network on → unrestricted egress.
+	// EgressNone is the zero value: no mode recorded for the head (not live, or
+	// never started). The API omits it.
 	EgressNone EgressMode = ""
+	// EgressUnrestricted: network on with host filtering off → every host
+	// reachable. Surfaced so the user can see a head has an open egress channel.
+	EgressUnrestricted EgressMode = "unrestricted"
 	// EgressOff: network disabled entirely (the hard off-switch).
 	EgressOff EgressMode = "off"
 	// EgressHard: allow-list enforced in a pasta netns + nft lock — a real,
@@ -39,28 +43,30 @@ var egressProxies = struct {
 
 // startEgress sets up a head's egress filtering and returns the proxy env to
 // inject plus, for hard mode, the bwrap-wrapping closure to put on
-// sandbox.Options.EgressWrap. With no allow-list it returns nil/nil and egress is
-// as before (unrestricted when network on, blocked when off).
+// sandbox.Options.EgressWrap. With network off it blocks all egress; with
+// filtering off it returns nil/nil and leaves egress unrestricted.
 //
-// Hard mode (pasta + nft, validated by a smoke test) confines the agent to a
-// netns whose only egress is the proxy. Otherwise it degrades to advisory mode:
-// the proxy still filters every well-behaved client via HTTP(S)_PROXY, but it is
-// not an inescapable boundary — surfaced to the UI via EgressMode.
+// When filtering is on (net.FilterHosts), the allow-list is enforced — an empty
+// list blocks all egress (deny-by-default). Hard mode (pasta + nft, validated by
+// a smoke test) confines the agent to a netns whose only egress is the proxy.
+// Otherwise it degrades to advisory mode: the proxy still filters every
+// well-behaved client via HTTP(S)_PROXY, but it is not an inescapable boundary —
+// surfaced to the UI via EgressMode.
 func startEgress(id string, net sandbox.NetworkPolicy) (env []string, wrap func([]string) []string) {
 	stopEgressProxy(id)
 	if !net.Enabled {
 		setEgressMode(id, EgressOff)
 		return nil, nil
 	}
-	if len(net.AllowedHosts) == 0 {
-		setEgressMode(id, EgressNone)
+	if !net.FilterHosts {
+		setEgressMode(id, EgressUnrestricted)
 		return nil, nil
 	}
 
 	p, err := egress.Start(id, net.AllowedHosts)
 	if err != nil {
 		log.Printf("hydra egress[%s]: could not start filtering proxy, continuing WITHOUT host filtering: %v", id, err)
-		setEgressMode(id, EgressNone)
+		setEgressMode(id, EgressUnrestricted)
 		return nil, nil
 	}
 	port := egress.HostPort(p.Addr())

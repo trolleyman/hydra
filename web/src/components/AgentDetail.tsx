@@ -215,10 +215,11 @@ function ArchivedAgentDetail({ agent, projectId, onPurged }: { agent: AgentRespo
   )
 }
 
-// NetworkEnforcementBadge shows a live head's egress posture (AUDIT.md rec 3),
-// warning clearly when filtering is only the advisory (proxy-respecting) fallback
-// rather than the hard netns boundary. Hidden when there's no allow-list (egress
-// unrestricted) or the head isn't live (mode absent).
+// NetworkEnforcementBadge shows a live head's egress posture (AUDIT.md rec 3):
+// the green "locked" hard boundary, the amber advisory (proxy-respecting) fallback,
+// "no network", and the open "unrestricted" state (so an open egress channel is
+// always visible, not silently hidden). Hidden only when the head isn't live
+// (mode absent).
 function NetworkEnforcementBadge({ mode }: { mode?: string }) {
   if (!mode) return null
   const cfg: Record<string, { label: string; className: string; Icon: typeof ShieldCheck; tip: string }> = {
@@ -233,6 +234,12 @@ function NetworkEnforcementBadge({ mode }: { mode?: string }) {
       className: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300',
       Icon: ShieldAlert,
       tip: 'Outbound traffic is filtered via HTTP(S)_PROXY, so every well-behaved client is restricted to the allow-list — but this is NOT an inescapable boundary: a process that ignores the proxy can still reach the network. Install/upgrade passt (pasta with --map-host-loopback) for a hard boundary, or set network.enabled = false to block egress entirely.',
+    },
+    unrestricted: {
+      label: 'egress unrestricted',
+      className: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300',
+      Icon: ShieldAlert,
+      tip: 'Host filtering is off, so this head can reach any host on the network — a full outbound channel with the provider/GitHub tokens in reach. Set [sandbox.network] filter_enabled = true with an allowed_hosts list to restrict it, or network.enabled = false to block egress entirely.',
     },
     off: {
       label: 'no network',

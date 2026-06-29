@@ -24,8 +24,16 @@ func TestEnabledFlagRoundTrip(t *testing.T) {
 	}
 
 	tomlStr := renderConfig(nil, cfg)
-	if got := strings.Count(tomlStr, "enabled = false"); got != 2 {
-		t.Fatalf("expected exactly 2 `enabled = false` lines (one per disabled item), got %d:\n%s", got, tomlStr)
+	// Count whole-line `enabled = false` matches only — not commented defaults or
+	// other keys that end in "enabled" (e.g. filter_enabled).
+	active := 0
+	for line := range strings.SplitSeq(tomlStr, "\n") {
+		if strings.TrimSpace(line) == "enabled = false" {
+			active++
+		}
+	}
+	if active != 2 {
+		t.Fatalf("expected exactly 2 `enabled = false` lines (one per disabled item), got %d:\n%s", active, tomlStr)
 	}
 
 	parsed, err := decodeConfig([]byte(tomlStr))
