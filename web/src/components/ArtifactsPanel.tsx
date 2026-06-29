@@ -593,6 +593,12 @@ function ArtifactSetCard({ set, mode, spans, onSpanChange, filter, search, onRef
   // that produced a log. Opening it also expands the card, since the log renders in
   // the body.
   const hasBuildLog = (status === 'ready' || status === 'error') && !!(set.left_log_url || set.right_log_url)
+  // When either side failed, the build log is the error surface, so an expanded card
+  // ALWAYS shows it (its red-bordered stderr is the failure detail) — the user can't
+  // hide it, so the toggle is suppressed below. With no failure it follows the
+  // buildLogOpen toggle (restored from saved prefs).
+  const anyFailed = leftFailed || rightFailed
+  const buildLogVisible = buildLogOpen || anyFailed
   const toggleBuildLog = () => setBuildLogOpen((o) => {
     const next = !o
     if (next) setCollapsed(false)
@@ -685,8 +691,9 @@ function ArtifactSetCard({ set, mode, spans, onSpanChange, filter, search, onRef
           {/* Show/hide the build log. Opening it also expands the card (the log
               renders in the body). Only for settled cards with a log. The open
               state stays tinted blue even at rest so "log is showing" is legible;
-              the resting affordance otherwise melts away (see MELT_BTN). */}
-          {hasBuildLog && (
+              the resting affordance otherwise melts away (see MELT_BTN). Hidden when
+              a side failed: the log is force-shown there, so there's nothing to toggle. */}
+          {hasBuildLog && !anyFailed && (
             <button
               onClick={toggleBuildLog}
               title={buildLogOpen ? 'Hide build log' : 'Show build log'}
@@ -764,7 +771,7 @@ function ArtifactSetCard({ set, mode, spans, onSpanChange, filter, search, onRef
               {/* Both sides failed: the red-bordered build-log terminals (the
                   script's stderr) ARE the error surface, so no separate error box.
                   Fall back to the captured error text only when no log exists. */}
-              <PersistedLogView leftUrl={set.left_log_url} rightUrl={set.right_log_url} open={buildLogOpen} leftFailed={leftFailed} rightFailed={rightFailed} leftSucceeded={leftSucceeded} rightSucceeded={rightSucceeded} />
+              <PersistedLogView leftUrl={set.left_log_url} rightUrl={set.right_log_url} open={buildLogVisible} leftFailed={leftFailed} rightFailed={rightFailed} leftSucceeded={leftSucceeded} rightSucceeded={rightSucceeded} />
               {!hasBuildLog && (
                 <div className="my-2 px-3 py-2 rounded-md bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 font-mono text-xs text-red-600 dark:text-red-400 whitespace-pre-wrap break-words">
                   {set.error ? stripAnsi(set.error) : 'Artifact generation failed.'}
@@ -783,13 +790,13 @@ function ArtifactSetCard({ set, mode, spans, onSpanChange, filter, search, onRef
                   the failure detail), and the surviving side's files are neutralised
                   to "unchanged" (cardFiles) so they're hidden by default rather than
                   flooding the grid with one-sided diffs. */}
-              <PersistedLogView leftUrl={set.left_log_url} rightUrl={set.right_log_url} open={buildLogOpen} leftFailed={leftFailed} rightFailed={rightFailed} leftSucceeded={leftSucceeded} rightSucceeded={rightSucceeded} />
+              <PersistedLogView leftUrl={set.left_log_url} rightUrl={set.right_log_url} open={buildLogVisible} leftFailed={leftFailed} rightFailed={rightFailed} leftSucceeded={leftSucceeded} rightSucceeded={rightSucceeded} />
               {failedSide && !hasBuildLog && (
                 // One side died and left no log to show: fall back to a one-line note
                 // so the partial result is still explained.
                 <div className="my-2 flex items-center gap-1.5 px-3 py-2 rounded-md bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 text-xs font-medium text-amber-700 dark:text-amber-300">
                   <TriangleAlert className="w-3.5 h-3.5 shrink-0" />
-                  The {failedSide === 'left' ? 'before (left)' : 'after (right)'} side failed to render — showing the {failedSide === 'left' ? 'after' : 'before'} side only.
+                  The {failedSide === 'left' ? 'before' : 'after'} side failed to render — showing the {failedSide === 'left' ? 'after' : 'before'} side only.
                 </div>
               )}
               {cardFiles.length === 0 ? (
