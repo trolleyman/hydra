@@ -147,6 +147,12 @@ const (
 	Status      TerminalStatusEventType = "status"
 )
 
+// Defines values for GetAgentArtifactsParamsRefreshSide.
+const (
+	Left  GetAgentArtifactsParamsRefreshSide = "left"
+	Right GetAgentArtifactsParamsRefreshSide = "right"
+)
+
 // Defines values for GetConfigParamsScope.
 const (
 	GetConfigParamsScopeProject GetConfigParamsScope = "project"
@@ -977,9 +983,15 @@ type GetAgentArtifactsParams struct {
 	// IncludeUncommitted Use the agent's uncommitted working tree as the right version.
 	IncludeUncommitted *bool `form:"include_uncommitted,omitempty" json:"include_uncommitted,omitempty"`
 
-	// Refresh Name of a single artifact script whose cached result (including a cached failure) should be discarded and regenerated for both sides of the comparison before responding.
+	// Refresh Name of a single artifact script whose cached result (including a cached failure) should be discarded and regenerated before responding. By default both sides of the comparison are regenerated; pass refresh_side to regenerate just one.
 	Refresh *string `form:"refresh,omitempty" json:"refresh,omitempty"`
+
+	// RefreshSide Limits a refresh to a single side — "left" (before) or "right" (after). Ignored unless refresh names a script; when omitted both sides are regenerated.
+	RefreshSide *GetAgentArtifactsParamsRefreshSide `form:"refresh_side,omitempty" json:"refresh_side,omitempty"`
 }
+
+// GetAgentArtifactsParamsRefreshSide defines parameters for GetAgentArtifacts.
+type GetAgentArtifactsParamsRefreshSide string
 
 // GetAgentDiffParams defines parameters for GetAgentDiff.
 type GetAgentDiffParams struct {
@@ -1667,6 +1679,14 @@ func (siw *ServerInterfaceWrapper) GetAgentArtifacts(w http.ResponseWriter, r *h
 	err = runtime.BindQueryParameter("form", true, false, "refresh", r.URL.Query(), &params.Refresh)
 	if err != nil {
 		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "refresh", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "refresh_side" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "refresh_side", r.URL.Query(), &params.RefreshSide)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "refresh_side", Err: err})
 		return
 	}
 

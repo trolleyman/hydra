@@ -292,6 +292,12 @@ try {
       // Expands the named artifact card (clicks its header) after load — used to
       // document the in-flight card's live, scrollable generation log.
       expandArtifact?: string
+      // Types a query into the artifacts panel's search box after load — used to
+      // document that search narrows like the tag filter (cards stay put, their
+      // header counts reflect the narrowing) rather than removing non-matching
+      // cards or auto-expanding them. Only meaningful on the artifacts (agent-1)
+      // page; pair with imageDiffMode.
+      searchArtifacts?: string
       // Expands the ready "screenshots" card and pins it to the top, then eager-loads
       // every tile image and waits for the masonry to settle — so the capture shows
       // the actual before/after artifacts (the card defaults to collapsed, which
@@ -897,6 +903,18 @@ try {
         viewport: { width: 1280, height: 1800 },
         imageDiffMode: 'side-by-side',
       },
+      // Search narrows like the tag filter: a query that matches nothing leaves
+      // every card in place (each header count reflecting the narrowing, e.g.
+      // "0/N changed") rather than removing non-matching cards or auto-expanding
+      // them. Documents that the search box and the tag filter behave alike.
+      {
+        name: 'artifact-search-empty',
+        path: '/project/sim-project/agent/agent-1',
+        scrollTo: 'Changes',
+        viewport: { width: 1280, height: 900 },
+        imageDiffMode: 'side-by-side',
+        searchArtifacts: 'zzzznomatch',
+      },
       // The in-flight artifact card expanded to reveal its live generation logs:
       // the two sides (Before / After) build in parallel, each a scrollable,
       // monospaced stdout+stderr stream (stderr in red), with the header showing
@@ -909,6 +927,42 @@ try {
         viewport: { width: 1280, height: 1280 },
         imageDiffMode: 'side-by-side',
         expandArtifact: 'components',
+      },
+      // A wholly-failed artifact card expanded: both sides failed, so instead of a
+      // separate red error box the card surfaces the build log as two red-bordered
+      // terminals (the script's stderr is the failure detail). agent-1's
+      // "storybook" set is the error one (internal/http/simulation.go); the build
+      // log auto-opens on failure, so no extra click is needed.
+      {
+        name: 'artifact-failure',
+        path: '/project/sim-project/agent/agent-1',
+        scrollTo: 'Changes',
+        viewport: { width: 1280, height: 1280 },
+        imageDiffMode: 'side-by-side',
+        expandArtifact: 'storybook',
+      },
+      // A partially-failed card expanded: the before (left) side died but the after
+      // side rendered, so the card stays "ready" — the before terminal is
+      // red-bordered while the after terminal and the surviving side's images still
+      // show below. agent-1's "dashboard" set is the partial-failure one.
+      {
+        name: 'artifact-partial-failure',
+        path: '/project/sim-project/agent/agent-1',
+        scrollTo: 'Changes',
+        viewport: { width: 1280, height: 1400 },
+        imageDiffMode: 'side-by-side',
+        expandArtifact: 'dashboard',
+      },
+      // The split regenerate button's dropdown open, documenting per-side
+      // regeneration (regenerate both / before only / after only). Opened on the
+      // always-present "screenshots" card's header.
+      {
+        name: 'artifact-regen-menu',
+        path: '/project/sim-project/agent/agent-1',
+        scrollTo: 'Changes',
+        viewport: { width: 1280, height: 900 },
+        imageDiffMode: 'side-by-side',
+        click: 'div.rounded-lg:has-text("screenshots") button[aria-label="Regenerate options"]',
       },
       // The video diff viewer (VideoDiffView) shown directly: agent-1's
       // "screenshots" set carries a .webm artifact (loader-animation.webm) the
@@ -1350,6 +1404,15 @@ try {
             const btn = Array.from(document.querySelectorAll('button')).find((b) => b.textContent?.includes(name))
             btn?.click()
           }, pg.expandArtifact)
+          await settle(page)
+        }
+        if (pg.searchArtifacts) {
+          // Type a query into the artifacts panel's search box (the panel exists
+          // once the WS snapshot has populated the "screenshots" card).
+          await page.waitForFunction(() =>
+            Array.from(document.querySelectorAll('button')).some((b) => b.textContent?.includes('screenshots')),
+          )
+          await page.fill('input[placeholder="search"]', pg.searchArtifacts)
           await settle(page)
         }
         if (pg.click) {

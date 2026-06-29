@@ -458,7 +458,9 @@ export class DefaultService {
      * @param baseRef Left (base) commit SHA or ref. Defaults to the agent's base branch.
      * @param headRef Right (head) commit SHA or ref. Defaults to the agent's branch tip.
      * @param includeUncommitted Use the agent's uncommitted working tree as the right version.
-     * @param refresh Name of a single artifact script whose cached result (including a cached failure) should be discarded and regenerated for both sides of the comparison before responding.
+     * @param refresh Name of a single artifact script whose cached result (including a cached failure) should be discarded and regenerated before responding. By default both sides of the comparison are regenerated; pass refresh_side to regenerate just one.
+     *
+     * @param refreshSide Limits a refresh to a single side — "left" (before) or "right" (after). Ignored unless refresh names a script; when omitted both sides are regenerated.
      *
      * @returns ArtifactsResponse OK
      * @throws ApiError
@@ -470,6 +472,7 @@ export class DefaultService {
         headRef?: string,
         includeUncommitted?: boolean,
         refresh?: string,
+        refreshSide?: 'left' | 'right',
     ): CancelablePromise<ArtifactsResponse> {
         return this.httpRequest.request({
             method: 'GET',
@@ -483,6 +486,7 @@ export class DefaultService {
                 'head_ref': headRef,
                 'include_uncommitted': includeUncommitted,
                 'refresh': refresh,
+                'refresh_side': refreshSide,
             },
             errors: {
                 404: `Not Found`,

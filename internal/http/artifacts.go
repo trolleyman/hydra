@@ -45,11 +45,16 @@ func (s *Server) GetAgentArtifacts(ctx context.Context, request api.GetAgentArti
 	}
 
 	// A refresh request names one script whose cached result the user wants
-	// discarded and regenerated — chiefly to retry a cached failure. Drop both
-	// sides' cache entries before generating so the Get calls below kick off a
-	// fresh run instead of returning the stale (errored) meta.
+	// discarded and regenerated — chiefly to retry a cached failure. Drop the
+	// cache entry before generating so the Get calls below kick off a fresh run
+	// instead of returning the stale (errored) meta. refresh_side narrows that to
+	// just the before/after side, leaving the other side's cache untouched.
 	if request.Params.Refresh != nil {
-		plan.invalidate(*request.Params.Refresh)
+		side := ""
+		if request.Params.RefreshSide != nil {
+			side = string(*request.Params.RefreshSide)
+		}
+		plan.invalidateSide(*request.Params.Refresh, side)
 	}
 
 	return api.GetAgentArtifacts200JSONResponse(api.ArtifactsResponse{Scripts: plan.buildSets(s, request.ProjectId)}), nil
@@ -197,6 +202,14 @@ func (p *artifactPlan) buildSets(s *Server, projectID string) []api.ArtifactSet 
 // invalidate drops both sides' cache for one script so the next build regenerates
 // it (a no-op if the name isn't part of this comparison).
 func (p *artifactPlan) invalidate(name string) {
+	p.invalidateSide(name, "")
+}
+
+// invalidateSide drops one (or both) side's cache for one script so the next build
+// regenerates it, leaving the other side's cached result intact. side is "left"
+// (before) or "right" (after); any other value (e.g. "") invalidates both. A no-op
+// if the name isn't part of this comparison.
+func (p *artifactPlan) invalidateSide(name, side string) {
 	found := false
 	for _, n := range p.names {
 		if n == name {
@@ -207,8 +220,12 @@ func (p *artifactPlan) invalidate(name string) {
 	if !found {
 		return
 	}
-	_ = p.mgr.Invalidate(name, p.left)
-	_ = p.mgr.Invalidate(name, p.right)
+	if side != "right" {
+		_ = p.mgr.Invalidate(name, p.left)
+	}
+	if side != "left" {
+		_ = p.mgr.Invalidate(name, p.right)
+	}
 }
 
 // artifactSpecsByName loads the artifact scripts that apply to one side of the
