@@ -43,6 +43,21 @@ export function SeparatedRow({ children, className }: { children: ReactNode; cla
       if (first?.dataset.sep != null) first.style.display = 'none'
       if (last !== first && last?.dataset.sep != null) last.style.display = 'none'
     }
+    // Collapse runs of adjacent separators. A child component that renders null
+    // (e.g. a conditional badge) still contributes its leading separator but no
+    // content box, leaving two "·" back-to-back; keep the first of any such run
+    // and hide the rest. (Callers should pass null/false for absent children, but
+    // this makes the layout robust if one slips through.)
+    let prevVisibleSep = false
+    for (const b of boxes) {
+      if (b.style.display === 'none') continue
+      const isSep = b.dataset.sep != null
+      if (isSep && prevVisibleSep) {
+        b.style.display = 'none'
+        continue
+      }
+      prevVisibleSep = isSep
+    }
   }, [])
 
   // After each render (content may have changed width without a resize event).

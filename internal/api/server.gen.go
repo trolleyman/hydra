@@ -617,11 +617,14 @@ type MergeConflictErrorError string
 
 // NetworkConfig defines model for NetworkConfig.
 type NetworkConfig struct {
-	// AllowedHosts Reserved for a future proxy-based host allow-list (not yet enforced)
+	// AllowedHosts Outbound host allow-list (exact host or *.suffix), enforced by the egress proxy when filter_enabled is on.
 	AllowedHosts *[]string `json:"allowed_hosts"`
 
 	// Enabled Whether outbound network access is allowed (default true)
 	Enabled *bool `json:"enabled"`
+
+	// FilterEnabled Whether the allowed_hosts list is enforced (deny-by-default egress). Null/unset = inferred (on when allowed_hosts is non-empty); true = only allowed_hosts reachable (empty list blocks all egress); false = allow every host.
+	FilterEnabled *bool `json:"filter_enabled"`
 }
 
 // ProjectInfo defines model for ProjectInfo.

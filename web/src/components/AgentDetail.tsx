@@ -779,7 +779,7 @@ export function AgentDetail({
                 {agentStatusBadge(agent.agent_status.status).label}
               </span>
             )}
-            <NetworkEnforcementBadge mode={agent.network_enforcement} />
+            {agent.network_enforcement && <NetworkEnforcementBadge mode={agent.network_enforcement} />}
             {agent.branch_name && (
               <span className="text-xs font-mono text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
                 <Tag className="w-3.5 h-3.5" />

@@ -43,6 +43,19 @@ func TestDecide(t *testing.T) {
 		{"bash local install allowed", "Bash", map[string]any{"command": "bun install"}, Allow},
 		{"bash disableAllHooks denied", "Bash", map[string]any{"command": `echo '{"disableAllHooks":true}' > .claude/settings.json`}, Deny},
 		{"bash settings write denied", "Bash", map[string]any{"command": "tee ~/.claude/settings.json"}, Deny},
+		{"bash redirect into settings denied", "Bash", map[string]any{"command": "echo {} > ~/.claude/settings.json"}, Deny},
+		{"bash sed -i settings denied", "Bash", map[string]any{"command": "sed -i 's/x/y/' /etc/claude-code/managed-settings.json"}, Deny},
+		{"bash cp over settings denied", "Bash", map[string]any{"command": "cp /tmp/evil ~/.claude/settings.json"}, Deny},
+		// Read-only inspection of the same files must NOT trip the wire.
+		{"bash cat settings allowed", "Bash", map[string]any{"command": "cat /etc/claude-code/managed-settings.json"}, Allow},
+		{"bash cat settings stderr-redirect allowed", "Bash", map[string]any{"command": "cat ~/.claude/settings.json 2>/dev/null"}, Allow},
+		{"bash grep settings allowed", "Bash", map[string]any{"command": "grep model ~/.claude/settings.json"}, Allow},
+		{"bash jq settings allowed", "Bash", map[string]any{"command": "jq .hooks /etc/claude-code/managed-settings.json | head"}, Allow},
+		// A bare mention of the tamper keys (no write) is allowed — e.g. a commit
+		// message describing the gate, or echoing the key name.
+		{"bash commit msg mentioning key allowed", "Bash", map[string]any{"command": `git commit -m "gate: deny disableAllHooks writes to .claude/settings.json"`}, Allow},
+		{"bash echo key no write allowed", "Bash", map[string]any{"command": "echo checking for disableAllHooks"}, Allow},
+		{"bash write tamper key denied", "Bash", map[string]any{"command": `printf disableAllHooks >> /tmp/x`}, Deny},
 		{"write managed settings denied", "Write", map[string]any{"file_path": "/etc/claude-code/managed-settings.json"}, Deny},
 		{"bash git push asks", "Bash", map[string]any{"command": "git push origin main"}, Ask},
 		{"bash git push dry-run allowed", "Bash", map[string]any{"command": "git push --dry-run"}, Allow},

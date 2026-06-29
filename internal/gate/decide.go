@@ -52,12 +52,33 @@ var globalInstallRe = regexp.MustCompile(`(?i)\b(` +
 // box), excluding `--dry-run`.
 var gitPushRe = regexp.MustCompile(`(?i)\bgit\s+(-[^\s]+\s+)*push\b`)
 
-// settingsTamperRe is a tripwire for shell commands that try to disable the gate
-// by editing Claude's settings/hooks (the Write/Edit tools are already gated, so
-// this only catches the Bash bypass). Like the install tripwire it is best-effort
-// — the real defense is that the gate hook lives in read-only MANAGED settings, so
-// even a successful disableAllHooks write to a user/project file can't disable it.
-var settingsTamperRe = regexp.MustCompile(`(?i)(disableAllHooks|allowManagedHooksOnly|managed-settings\.json|\.claude/settings(\.local)?\.json|claude-code/managed)`)
+// settingsTamperIntentRe matches the hook-disabling settings keys. On its own a
+// mention is not enough to deny (it shows up in commit messages, an echo, a grep);
+// it only trips when the command also writes (settingsWriteIndicatorRe), i.e. is
+// actually setting the key somewhere.
+var settingsTamperIntentRe = regexp.MustCompile(`(?i)(disableAllHooks|allowManagedHooksOnly)`)
+
+// settingsWriteIndicatorRe matches any construct that writes to a file (used to
+// gate the tamper-intent keys above so a bare mention doesn't false-positive).
+var settingsWriteIndicatorRe = regexp.MustCompile(`(?i)(>>?|\btee\b|\bsed\s+-i|\bperl\s+-i|\bdd\b[^|;&]*of=)`)
+
+// settingsPathRe matches a reference to a security-policy settings file.
+var settingsPathRe = regexp.MustCompile(`(?i)(managed-settings\.json|\.claude/settings(\.local)?\.json|claude-code/managed)`)
+
+// settingsRedirectRe matches a redirect/tee whose *target* is a settings file.
+// Tying it to the path (rather than any `>`) means a stderr redirect while
+// reading — `cat settings.json 2>/dev/null` — does not trip the wire.
+var settingsRedirectRe = regexp.MustCompile(`(?i)(>>?\s*|\btee\s+(-a\s+)?)['"]?(~|\$HOME|\$\{HOME\})?/?[^\s'"|;&]*?(managed-settings\.json|\.claude/settings(\.local)?\.json|claude-code/managed)`)
+
+// settingsInPlaceRe matches commands that modify their file argument in place or
+// overwrite a file (in-place sed/perl, cp/mv/ln/install, truncate/dd, chmod/
+// chown). Combined with settingsPathRe (the path appears somewhere in the line),
+// this denies writes whose target isn't adjacent to the operator (e.g.
+// `sed -i 's/x/y/' settings.json`). Read-only inspection (cat/grep/jq/less/diff)
+// uses none of these tokens, so it is allowed. Like the install tripwire this is
+// best-effort: the real defense is that the gate hook lives in read-only MANAGED
+// settings, so even a successful disableAllHooks write can't disable it.
+var settingsInPlaceRe = regexp.MustCompile(`(?i)(\bsed\s+-i|\bperl\s+-i|\b(cp|mv|ln|install|truncate|chmod|chown)\b|\bdd\b[^|;&]*of=)`)
 
 // Decide returns the gate's verdict for one tool call. It is a pure function of
 // the policy and the hook payload so it is exhaustively unit-testable. The
@@ -122,7 +143,10 @@ func Decide(p Policy, toolName string, toolInput map[string]any) Result {
 				Reason:   "global/system installs are forbidden by the sandbox rules; install project-local deps in the worktree instead",
 			}
 		}
-		if settingsTamperRe.MatchString(cmd) {
+		writesSettings := settingsRedirectRe.MatchString(cmd) ||
+			(settingsInPlaceRe.MatchString(cmd) && settingsPathRe.MatchString(cmd))
+		disablesHooks := settingsTamperIntentRe.MatchString(cmd) && settingsWriteIndicatorRe.MatchString(cmd)
+		if writesSettings || disablesHooks {
 			return Result{
 				Decision: Deny,
 				Reason:   "modifying Claude settings/hooks from the shell is not allowed (it would let the agent disable its own gate)",
