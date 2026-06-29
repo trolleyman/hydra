@@ -184,7 +184,17 @@ export function AgentSidebarItem({
           className={`w-2 h-2 rounded-full shrink-0 ${archived ? 'bg-gray-300 dark:bg-gray-600' : agentDotClass(agent)}`}
         />
         <span className={`font-medium text-sm truncate ${archived ? 'text-gray-500 dark:text-gray-400' : 'text-gray-900 dark:text-gray-100'}`}>{agent.title || agent.id}</span>
-        {agent.has_unread_changes && !archived && (
+        {!archived && agent.agent_status?.status === 'needs_input' ? (
+          // Needs-input marker: a red sibling of the blue unread dot, pinned to
+          // the right of the title line. Driven by the live status rather than
+          // the unread flag, so it stays lit while the agent is blocked on you
+          // and clears on its own once you answer (not on open). Takes priority
+          // over the blue dot since "needs you now" is the stronger signal.
+          <span
+            aria-label="needs your input"
+            className="ml-auto shrink-0 w-2.5 h-2.5 rounded-full bg-red-500 ring-2 ring-red-500/25"
+          />
+        ) : agent.has_unread_changes && !archived ? (
           // Unread-changes marker, pinned to the right of the title line so it
           // never overlaps the type/status/created-time row below. Set when the
           // agent goes running→waiting/finished, cleared when it's opened.
@@ -192,7 +202,7 @@ export function AgentSidebarItem({
             aria-label="unread changes"
             className="ml-auto shrink-0 w-2.5 h-2.5 rounded-full bg-sky-400 ring-2 ring-sky-400/25"
           />
-        )}
+        ) : null}
       </div>
       <div className="flex items-center gap-1.5 mt-0.5 ml-4">
         <span className={`flex items-center gap-1 text-xs ${agentTypeColor(agent.agent_type)}`}>

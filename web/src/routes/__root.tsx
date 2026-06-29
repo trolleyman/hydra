@@ -188,6 +188,12 @@ function ProjectDropdown({
   const otherProjectsUnread = projects
     .filter((p) => p.id !== selectedId)
     .reduce((n, p) => n + (p.unread_count ?? 0), 0)
+  // Agents in other projects that are blocked on you (needs_input) — turns the
+  // folder-button dot red (the stronger "needs your input" signal) instead of
+  // the blue "updates waiting" dot.
+  const otherProjectsNeedsInput = projects
+    .filter((p) => p.id !== selectedId)
+    .reduce((n, p) => n + (p.needs_input_count ?? 0), 0)
 
   useEffect(() => {
     if (!open) return
@@ -284,12 +290,17 @@ function ProjectDropdown({
       >
         <span className="relative shrink-0">
           <Folder className="w-3.5 h-3.5" />
-          {otherProjectsUnread > 0 && (
+          {otherProjectsNeedsInput > 0 ? (
+            <span
+              aria-label="an agent in another project needs your input"
+              className="absolute -top-1 -right-1 w-1.5 h-1.5 rounded-full bg-red-500 ring-2 ring-white dark:ring-gray-900"
+            />
+          ) : otherProjectsUnread > 0 ? (
             <span
               aria-label="updates waiting in other projects"
               className="absolute -top-1 -right-1 w-1.5 h-1.5 rounded-full bg-sky-400 ring-2 ring-white dark:ring-gray-900"
             />
-          )}
+          ) : null}
         </span>
         <span className="truncate max-w-[160px]">{selected?.name ?? 'Select project'}</span>
         <ServiceHealthWarning projectId={selectedId} />
@@ -325,12 +336,17 @@ function ProjectDropdown({
                     <div className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{p.name}</div>
                     <div className="text-xs font-mono text-gray-400 dark:text-gray-500 truncate">{p.path}</div>
                   </div>
-                  {(p.unread_count ?? 0) > 0 && (
+                  {(p.needs_input_count ?? 0) > 0 ? (
+                    <span
+                      aria-label={`${p.needs_input_count} agents need your input`}
+                      className="shrink-0 mt-1.5 w-2 h-2 rounded-full bg-red-500"
+                    />
+                  ) : (p.unread_count ?? 0) > 0 ? (
                     <span
                       aria-label={`${p.unread_count} agents with unread changes`}
                       className="shrink-0 mt-1.5 w-2 h-2 rounded-full bg-sky-500"
                     />
-                  )}
+                  ) : null}
                   {p.id === selectedId && hoveredId !== p.id && (
                     <Check className="w-3.5 h-3.5 text-blue-500 shrink-0 mt-0.5" />
                   )}
