@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
 import { ImageOff } from 'lucide-react'
 import {
   checkerStyle, IMG_CLASS, OVERLAY_CLASS, TAG_CLASS, makeAuxOpen,
@@ -12,6 +12,19 @@ import type { LightboxImage } from './ImageLightbox'
 // its own any more — it's a "Highlight" checkbox that overlays the changes on the
 // Before/After view.)
 export type ImageDiffMode = 'side-by-side' | 'ab' | 'slider' | 'onion'
+
+// Global A/B controls. When a provider is present (the diff viewer's artifacts
+// panel), every A/B tile — image and video — reads its before/after view and
+// "highlight changed pixels" flag from here and hides its own per-tile pill, so one
+// control (and the B / H keyboard shortcuts) flips and highlights them all at once.
+// Absent (the repository browser, which has no shared toolbar) → each tile falls
+// back to its own local toggles, shown inline as before.
+export type ArtifactABControls = {
+  view: 'before' | 'after'
+  highlight: boolean
+  toggleView: () => void
+}
+export const ABControlsContext = createContext<ArtifactABControls | null>(null)
 
 export const IMAGE_DIFF_MODES: { value: ImageDiffMode; label: string }[] = [
   { value: 'ab', label: 'Before · After' },
@@ -140,55 +153,70 @@ export function SegmentedToggle<T extends string>({ value, onChange, options }: 
 }
 
 // A/B switch: Before / After, with a Highlight checkbox. Before & After stay
-// mounted and stacked, so the toggle flips which is shown for an instant,
-// flicker-free hard switch. Clicking the image (or the buttons) flips Before↔After.
-// Ticking Highlight overlays the pixel-diff (every changed pixel tinted semi-
-// transparent magenta, see DiffCanvas) on top of whichever side is shown, so the
-// changes stay marked — yet still readable underneath — as you flip Before↔After. Highlight is disabled when only one side
-// exists (an added/removed file — there's nothing to diff). A missing side shows
-// the "No image" placeholder; middle-click opens the currently-shown image in the
-// fullscreen lightbox.
+// mounted and stacked, so flipping which is shown is an instant, flicker-free hard
+// switch. Flipping is driven by the buttons — the panel's shared Before/After control
+// + the B key under the diff viewer, or this tile's own pill in the repository
+// browser; a click on the image opens the fullscreen lightbox (where, with nothing
+// left to open, a click flips instead). Ticking Highlight overlays the pixel-diff
+// (every changed pixel tinted semi-transparent magenta, see DiffCanvas) on top of
+// whichever side is shown, so the changes stay marked — yet still readable underneath
+// — as you flip Before↔After. Highlight is disabled when only one side exists (an
+// added/removed file — there's nothing to diff). A missing side shows the "No image"
+// placeholder; middle-click opens the currently-shown image in the lightbox.
 function ABSwitch({ left, right, name, gallery, index, disableOpen }: {
   left?: string | null; right?: string | null; name: string
   gallery?: LightboxImage[]; index?: number; disableOpen?: boolean
 }) {
   const openImage = useImageLightbox()
   const canDiff = !!left && !!right
-  const [view, setView] = useState<'before' | 'after'>('after')
-  const [highlight, setHighlight] = useState(false)
-  const showHighlight = highlight && canDiff
+  // Prefer the panel-wide controls (diff viewer) when present; otherwise keep this
+  // tile's own local toggles (repository browser). See ABControlsContext.
+  const global = useContext(ABControlsContext)
+  const [localView, setLocalView] = useState<'before' | 'after'>('after')
+  const [localHighlight, setLocalHighlight] = useState(false)
+  const view = global ? global.view : localView
+  const flip = global ? global.toggleView : () => setLocalView((v) => (v === 'before' ? 'after' : 'before'))
+  const showHighlight = (global ? global.highlight : localHighlight) && canDiff
   // At least one side is present (ImageDiffView only routes here otherwise); the
   // present image is the invisible sizer that gives the stacked box its size.
   const sizer = (right ?? left) as string
   return (
     <div className="min-w-0">
-      <div className="flex flex-wrap items-center gap-1 mb-1">
-        <SegmentedToggle
-          value={view}
-          onChange={setView}
-          options={[{ value: 'before', label: 'Before' }, { value: 'after', label: 'After' }]}
-        />
-        <label
-          title={canDiff ? 'Highlight changed pixels in magenta' : 'Needs both a before and after image'}
-          className={`ml-auto flex items-center gap-1 text-[10px] font-medium tracking-wide select-none ${
-            canDiff ? 'cursor-pointer text-gray-500 dark:text-gray-400' : 'opacity-40 cursor-not-allowed text-gray-400 dark:text-gray-500'
-          }`}
-        >
-          <input
-            type="checkbox"
-            checked={showHighlight}
-            disabled={!canDiff}
-            onChange={(e) => setHighlight(e.target.checked)}
-            className="accent-blue-500 cursor-pointer disabled:cursor-not-allowed"
+      {/* Only the standalone (no global controls) tile shows its own pill — under the
+          diff viewer the before/after + highlight controls live up in the panel header. */}
+      {!global && (
+        <div className="flex flex-wrap items-center gap-1 mb-1">
+          <SegmentedToggle
+            value={localView}
+            onChange={setLocalView}
+            options={[{ value: 'before', label: 'Before' }, { value: 'after', label: 'After' }]}
           />
-          Highlight
-        </label>
-      </div>
+          <label
+            title={canDiff ? 'Highlight changed pixels in magenta' : 'Needs both a before and after image'}
+            className={`ml-auto flex items-center gap-1 text-[10px] font-medium tracking-wide select-none ${
+              canDiff ? 'cursor-pointer text-gray-500 dark:text-gray-400' : 'opacity-40 cursor-not-allowed text-gray-400 dark:text-gray-500'
+            }`}
+          >
+            <input
+              type="checkbox"
+              checked={localHighlight && canDiff}
+              disabled={!canDiff}
+              onChange={(e) => setLocalHighlight(e.target.checked)}
+              className="accent-blue-500 cursor-pointer disabled:cursor-not-allowed"
+            />
+            Highlight
+          </label>
+        </div>
+      )}
       {/* select-none: flipping is a rapid click target, so without this a quick
           double-click would highlight the "No image" placeholder text. */}
+      {/* In the grid a click opens the fullscreen lightbox at this file (←/→ walks the
+          gallery, and the lightbox shows the comparison); flipping Before↔After is
+          reserved for the panel's Before/After control + the B key. Inside the lightbox
+          (disableOpen) there's nothing to open, so a click flips instead. */}
       <div
-        className="relative w-full cursor-pointer select-none"
-        onClick={() => setView((v) => (v === 'before' ? 'after' : 'before'))}
+        className={`relative w-full select-none ${disableOpen ? 'cursor-pointer' : 'cursor-zoom-in'}`}
+        onClick={disableOpen ? flip : () => openGalleryAt(openImage, gallery, index, (view === 'before' ? left : right) || sizer, name)}
         onAuxClick={disableOpen ? undefined : makeAuxOpen(
           () => (view === 'before' ? left : right) || sizer,
           (url) => openGalleryAt(openImage, gallery, index, url, name),

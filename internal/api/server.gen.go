@@ -310,6 +310,9 @@ type ArtifactFile struct {
 	ChangeRatio *float64               `json:"change_ratio"`
 	ChangeType  ArtifactFileChangeType `json:"change_type"`
 
+	// Dpi Pixel density (device-scale factor) the media was captured at, read from its sidecar (<file>.meta, {"dpi": 2}). The grid sizes a tile by the media's logical width (width / dpi) so a shot captured at 2x lays out the same as the same shot at 1x — only crisper. Null/absent → 1.
+	Dpi *float64 `json:"dpi"`
+
 	// Fps Frame rate of a video file, read from its sibling JSON sidecar (<file>.meta, {"fps": 60}). HTML5 video exposes no frame rate, so the viewer's frame-step buttons use it to size a single-frame step. Null/absent when the sidecar omits it, in which case the viewer assumes a sensible default. Only meaningful for video files.
 	Fps *float64 `json:"fps"`
 
@@ -656,6 +659,9 @@ type ProjectInfo struct {
 
 // RepositoryArtifactFile defines model for RepositoryArtifactFile.
 type RepositoryArtifactFile struct {
+	// Dpi Pixel density (device-scale factor) the media was captured at, from its sidecar ({"dpi": 2}); the grid sizes tiles by logical width (width / dpi). Null/absent → 1.
+	Dpi *float64 `json:"dpi"`
+
 	// Fps Frame rate of a video file, read from its sidecar; sizes the video viewer's frame-step.
 	Fps *float64 `json:"fps"`
 

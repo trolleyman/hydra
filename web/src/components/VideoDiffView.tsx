@@ -15,13 +15,13 @@
 //
 // WebP animations aren't handled here — the browser plays them in an <img> with no
 // seek/sync API, so they can't be frame-aligned; only .webm gets the video viewer.
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useContext, useEffect, useRef, useState, useCallback } from 'react'
 import { Play, Pause, Repeat, VideoOff, StepBack, StepForward } from 'lucide-react'
 import {
   checkerStyle, IMG_CLASS, OVERLAY_CLASS, TAG_CLASS, makeAuxOpen,
   DIFF_COLOR, DIFF_PIXEL_THRESHOLD, DIFF_ALPHA,
 } from './artifactDiffShared'
-import { SegmentedToggle, type ImageDiffMode } from './ArtifactImageDiff'
+import { SegmentedToggle, ABControlsContext, type ImageDiffMode } from './ArtifactImageDiff'
 
 // Extensions routed to the video viewer instead of the image one.
 export function isVideoArtifact(name: string): boolean {
@@ -290,11 +290,16 @@ function VideoSideBySide({ controller, left, right }: { controller: Controller; 
 // disabled when only one side exists (an added/removed file — nothing to diff).
 function VideoAB({ controller, left, right }: { controller: Controller; left?: string | null; right?: string | null }) {
   const canDiff = !!left && !!right
-  const [view, setView] = useState<'before' | 'after'>('after')
-  const [highlight, setHighlight] = useState(false)
+  // Panel-wide controls (diff viewer) win when present; else this tile's own toggles
+  // (repository browser). Mirrors the image ABSwitch — see ABControlsContext.
+  const global = useContext(ABControlsContext)
+  const [localView, setLocalView] = useState<'before' | 'after'>('after')
+  const [localHighlight, setLocalHighlight] = useState(false)
+  const view = global ? global.view : localView
+  const flip = global ? global.toggleView : () => setLocalView((v) => (v === 'before' ? 'after' : 'before'))
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const sizer = (right ?? left) as string
-  const showHighlight = highlight && canDiff
+  const showHighlight = (global ? global.highlight : localHighlight) && canDiff
 
   useEffect(() => {
     if (!showHighlight) return
@@ -352,31 +357,34 @@ function VideoAB({ controller, left, right }: { controller: Controller; left?: s
 
   return (
     <div className="min-w-0">
-      <div className="flex flex-wrap items-center gap-1 mb-1">
-        <SegmentedToggle
-          value={view}
-          onChange={setView}
-          options={[{ value: 'before', label: 'Before' }, { value: 'after', label: 'After' }]}
-        />
-        <label
-          title={canDiff ? 'Highlight changed pixels in magenta' : 'Needs both a before and after video'}
-          className={`ml-auto flex items-center gap-1 text-[10px] font-medium tracking-wide select-none ${
-            canDiff ? 'cursor-pointer text-gray-500 dark:text-gray-400' : 'opacity-40 cursor-not-allowed text-gray-400 dark:text-gray-500'
-          }`}
-        >
-          <input
-            type="checkbox"
-            checked={showHighlight}
-            disabled={!canDiff}
-            onChange={(e) => setHighlight(e.target.checked)}
-            className="accent-blue-500 cursor-pointer disabled:cursor-not-allowed"
+      {/* Standalone tile only — under the diff viewer the controls live in the panel header. */}
+      {!global && (
+        <div className="flex flex-wrap items-center gap-1 mb-1">
+          <SegmentedToggle
+            value={localView}
+            onChange={setLocalView}
+            options={[{ value: 'before', label: 'Before' }, { value: 'after', label: 'After' }]}
           />
-          Highlight
-        </label>
-      </div>
+          <label
+            title={canDiff ? 'Highlight changed pixels in magenta' : 'Needs both a before and after video'}
+            className={`ml-auto flex items-center gap-1 text-[10px] font-medium tracking-wide select-none ${
+              canDiff ? 'cursor-pointer text-gray-500 dark:text-gray-400' : 'opacity-40 cursor-not-allowed text-gray-400 dark:text-gray-500'
+            }`}
+          >
+            <input
+              type="checkbox"
+              checked={localHighlight && canDiff}
+              disabled={!canDiff}
+              onChange={(e) => setLocalHighlight(e.target.checked)}
+              className="accent-blue-500 cursor-pointer disabled:cursor-not-allowed"
+            />
+            Highlight
+          </label>
+        </div>
+      )}
       <div
         className="relative w-full cursor-pointer select-none"
-        onClick={() => setView((v) => (v === 'before' ? 'after' : 'before'))}
+        onClick={flip}
         onAuxClick={makeAuxOpen(() => (view === 'before' ? left : right) || sizer)}
       >
         <VideoSizer url={sizer} />
