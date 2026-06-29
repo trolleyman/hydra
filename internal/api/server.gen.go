@@ -641,6 +641,9 @@ type ProjectInfo struct {
 	// Name Human-readable project name (last path component)
 	Name string `json:"name"`
 
+	// NeedsInputCount Number of this project's agents currently blocked on the user (status `needs_input`). Drives the red "needs your input" indicator, which is shown whenever this is greater than zero.
+	NeedsInputCount *int `json:"needs_input_count,omitempty"`
+
 	// Path Absolute filesystem path to the project root
 	Path string `json:"path"`
 
