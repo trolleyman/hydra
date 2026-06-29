@@ -759,7 +759,7 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onCo
           {file.binary && isImagePath(file.path) ? (
             // In-tree image: reuse the artifacts panel's before/after differ.
             <div className="p-3">
-              <ImageDiffView left={imageBefore} right={imageAfter} mode={imageDiffMode ?? 'ab'} />
+              <ImageDiffView left={imageBefore} right={imageAfter} mode={imageDiffMode ?? 'ab'} name={file.path} />
             </div>
           ) : file.binary ? (
             <div className="px-4 py-3 text-xs text-gray-400 dark:text-gray-500 italic">Binary file changed</div>

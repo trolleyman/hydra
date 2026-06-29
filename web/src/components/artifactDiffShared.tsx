@@ -27,21 +27,23 @@ export const IMG_CLASS = 'block w-full h-auto rounded-md border border-gray-200 
 export const OVERLAY_CLASS = 'absolute inset-0 w-full h-full object-contain rounded-md border border-gray-200 dark:border-gray-700'
 export const TAG_CLASS = 'absolute top-1 z-10 text-[10px] font-semibold tracking-wide px-1.5 py-0.5 rounded bg-black/55 text-white pointer-events-none'
 
-// Open media in a new tab. In side-by-side mode the media is a target=_blank link,
-// so left-click already does this; the overlay modes bind left-click to comparison
-// gestures, so they route the new-tab affordance to the middle button.
+// Open media in a new tab — the fallback affordance for video frames (which the
+// image lightbox can't show); still images open in the fullscreen lightbox instead.
 export function openInNewTab(url: string) {
   window.open(url, '_blank', 'noopener,noreferrer')
 }
 
-// makeAuxOpen builds an onAuxClick handler that opens `pick()` in a new tab on a
+// makeAuxOpen builds an onAuxClick handler that runs `onOpen` with `pick()` on a
 // middle click. `pick` is a function so the chosen url can depend on state (e.g.
-// which side is currently shown) or the cursor position at click time.
-export function makeAuxOpen(pick: (e: React.MouseEvent) => string) {
+// which side is currently shown) or the cursor position at click time. The overlay
+// comparison modes bind left-click to their gesture (flip / slider / blend), so the
+// open affordance lives on the middle button. `onOpen` defaults to a new tab (used
+// by the video viewer); the still-image viewer passes the lightbox opener instead.
+export function makeAuxOpen(pick: (e: React.MouseEvent) => string, onOpen: (url: string) => void = openInNewTab) {
   return (e: React.MouseEvent) => {
     if (e.button !== 1) return
     e.preventDefault()
-    openInNewTab(pick(e))
+    onOpen(pick(e))
   }
 }
 

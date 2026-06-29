@@ -8,6 +8,7 @@ import { formatError } from '../api/format_error'
 import { IMG_CLASS, checkerStyle } from './artifactDiffShared'
 import { isVideoArtifact, VIDEO_MIN_TILE_PX } from './VideoDiffView'
 import { LogView, ElapsedTime, MasonryGrid, useMediaDims } from './ArtifactsPanel'
+import { useImageLightbox } from './ImageLightboxContext'
 import { ArtifactFilterBar, TagBadge } from './ArtifactFilterBar'
 import { computeVisibleFiles } from '../lib/artifactFilter'
 import { loadTagFilter, saveTagFilter, type ArtifactTagFilter } from '../lib/artifactPrefs'
@@ -27,6 +28,7 @@ const POLL_MS = 2500
 // machinery; width-driven (w-full) so it fills its masonry column.
 function MediaCell({ file }: { file: RepositoryArtifactFile }) {
   const url = file.url ?? undefined
+  const openImage = useImageLightbox()
   return (
     <div className="p-3 w-full min-w-0 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40">
       <div className="flex flex-wrap items-center gap-1.5 mb-2">
@@ -53,8 +55,13 @@ function MediaCell({ file }: { file: RepositoryArtifactFile }) {
           style={checkerStyle}
         />
       ) : (
-        // A plain click opens the image in a new tab; it fills the column width.
-        <a href={url} target="_blank" rel="noreferrer" className="block">
+        // A plain click opens the image in the fullscreen lightbox; it fills the
+        // column width.
+        <button
+          type="button"
+          onClick={() => openImage([{ url, filename: file.name, size: 0 }])}
+          className="block w-full cursor-zoom-in"
+        >
           <img
             src={url}
             loading="lazy"
@@ -62,7 +69,7 @@ function MediaCell({ file }: { file: RepositoryArtifactFile }) {
             style={checkerStyle}
             className={IMG_CLASS}
           />
-        </a>
+        </button>
       )}
     </div>
   )
