@@ -292,6 +292,12 @@ try {
       // Expands the named artifact card (clicks its header) after load — used to
       // document the in-flight card's live, scrollable generation log.
       expandArtifact?: string
+      // Types a query into the artifacts panel's search box after load — used to
+      // document that search narrows like the tag filter (cards stay put, their
+      // header counts reflect the narrowing) rather than removing non-matching
+      // cards or auto-expanding them. Only meaningful on the artifacts (agent-1)
+      // page; pair with imageDiffMode.
+      searchArtifacts?: string
       // Expands the ready "screenshots" card and pins it to the top, then eager-loads
       // every tile image and waits for the masonry to settle — so the capture shows
       // the actual before/after artifacts (the card defaults to collapsed, which
@@ -874,6 +880,18 @@ try {
         viewport: { width: 1280, height: 1800 },
         imageDiffMode: 'side-by-side',
       },
+      // Search narrows like the tag filter: a query that matches nothing leaves
+      // every card in place (each header count reflecting the narrowing, e.g.
+      // "0/N changed") rather than removing non-matching cards or auto-expanding
+      // them. Documents that the search box and the tag filter behave alike.
+      {
+        name: 'artifact-search-empty',
+        path: '/project/sim-project/agent/agent-1',
+        scrollTo: 'Changes',
+        viewport: { width: 1280, height: 900 },
+        imageDiffMode: 'side-by-side',
+        searchArtifacts: 'zzzznomatch',
+      },
       // The in-flight artifact card expanded to reveal its live generation logs:
       // the two sides (Before / After) build in parallel, each a scrollable,
       // monospaced stdout+stderr stream (stderr in red), with the header showing
@@ -1363,6 +1381,15 @@ try {
             const btn = Array.from(document.querySelectorAll('button')).find((b) => b.textContent?.includes(name))
             btn?.click()
           }, pg.expandArtifact)
+          await settle(page)
+        }
+        if (pg.searchArtifacts) {
+          // Type a query into the artifacts panel's search box (the panel exists
+          // once the WS snapshot has populated the "screenshots" card).
+          await page.waitForFunction(() =>
+            Array.from(document.querySelectorAll('button')).some((b) => b.textContent?.includes('screenshots')),
+          )
+          await page.fill('input[placeholder="search"]', pg.searchArtifacts)
           await settle(page)
         }
         if (pg.click) {

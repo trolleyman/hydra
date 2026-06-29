@@ -1238,12 +1238,6 @@ function ArtifactSetCard({ set, mode, spans, onSpanChange, filter, search, onRef
   // so a freshly-expanded failed card should show it without a second click. A
   // saved pref still wins, and the user can collapse it.
   const [buildLogOpen, setBuildLogOpen] = useState(() => loadPrefs()?.buildLogOpen ?? (leftFailed || rightFailed))
-  // A search auto-expands the card (below), but the user can still collapse it to
-  // skim past one set's matches. This per-search override holds that explicit
-  // choice; it resets to "expanded" each time a search begins (so a fresh search
-  // re-opens the card) and is ignored entirely once the search clears — the saved
-  // `collapsed` then takes over again, untouched.
-  const [searchCollapsed, setSearchCollapsed] = useState(false)
 
   // Persist the view prefs whenever a toggle changes (and re-key them under the
   // current status, so they only restore while that status holds).
@@ -1251,17 +1245,13 @@ function ArtifactSetCard({ set, mode, spans, onSpanChange, filter, search, onRef
     saveArtifactPrefs(projectId, agentId, set.name, status, { collapsed, buildLogOpen })
   }, [projectId, agentId, set.name, status, collapsed, buildLogOpen])
 
-  // Re-open the card each time a search begins, so a fresh search surfaces its
-  // matches even if the user had collapsed it under a previous search.
-  useEffect(() => { if (searching) setSearchCollapsed(false) }, [searching])
-
   // The build log lives behind a header toggle (next to refresh) for settled cards
   // that produced a log. Opening it also expands the card, since the log renders in
   // the body.
   const hasBuildLog = (status === 'ready' || status === 'error') && !!(set.left_log_url || set.right_log_url)
   const toggleBuildLog = () => setBuildLogOpen((o) => {
     const next = !o
-    if (next) { setCollapsed(false); setSearchCollapsed(false) }
+    if (next) setCollapsed(false)
     return next
   })
 
@@ -1298,16 +1288,6 @@ function ArtifactSetCard({ set, mode, spans, onSpanChange, filter, search, onRef
   // a "·" (the two builds run in parallel), e.g. "building frontend · home 7/24".
   const progressText = [set.left_progress, set.right_progress].filter(Boolean).join(' · ')
 
-  // While a search is active the card defaults to open so its ranked matches are
-  // actually visible (the panel only renders cards that have a match, so an
-  // expanded card always has something to show) — but the header click can still
-  // collapse it via the per-search `searchCollapsed` override. The saved collapsed
-  // state is left untouched, so clearing the search restores it.
-  const effectiveCollapsed = searching ? searchCollapsed : collapsed
-  // Toggle whichever state currently drives the view, so a header click always
-  // flips what's on screen (during a search that's the ephemeral override).
-  const toggleCollapsed = () => (searching ? setSearchCollapsed((c) => !c) : setCollapsed((c) => !c))
-
   return (
     <div className="border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 overflow-hidden">
       {/* Give the header a resting tint that's distinct from the card body
@@ -1315,10 +1295,10 @@ function ArtifactSetCard({ set, mode, spans, onSpanChange, filter, search, onRef
           gray-800 over a gray-800 body was indistinguishable at rest. */}
       <div className="flex items-stretch bg-gray-100 dark:bg-gray-700/40">
         <button
-          onClick={toggleCollapsed}
+          onClick={() => setCollapsed((c) => !c)}
           className="flex-1 min-w-0 flex items-center gap-2 px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors cursor-pointer text-left"
         >
-          {effectiveCollapsed ? <ChevronRight className="w-3.5 h-3.5 text-gray-400 shrink-0" /> : <ChevronDown className="w-3.5 h-3.5 text-gray-400 shrink-0" />}
+          {collapsed ? <ChevronRight className="w-3.5 h-3.5 text-gray-400 shrink-0" /> : <ChevronDown className="w-3.5 h-3.5 text-gray-400 shrink-0" />}
           <ImageIcon className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400 shrink-0" />
           <span className="text-sm font-medium text-gray-700 dark:text-gray-300 truncate shrink-0">{set.name}</span>
           {status === 'generating' && (
@@ -1429,7 +1409,7 @@ function ArtifactSetCard({ set, mode, spans, onSpanChange, filter, search, onRef
         </div>
       </div>
 
-      {!effectiveCollapsed && (
+      {!collapsed && (
         <div className="px-3 pb-2">
           {/* While generating, stream both builds' live logs side by side; a side
               that finishes first shows its final log instead of "waiting". */}
@@ -1542,7 +1522,6 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
   // project/agent changes since this panel is reused across agents.
   const [search, setSearch] = useState('')
   useEffect(() => { setSearch('') }, [projectId, agentId])
-  const searching = search.trim().length > 0
   const updateTagFilter = useCallback((f: ArtifactTagFilter) => {
     setTagFilter(f)
     saveTagFilter(projectId, agentId, f)
@@ -1721,11 +1700,11 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
             cards keep the previous agent's expand/collapse state (and its save
             effect would then clobber the new agent's saved prefs). Re-keying per
             agent remounts each card so it re-reads that agent's saved state. */}
-        {sets
-          // While searching, drop cards with no matching file so results stay
-          // clean — the surviving cards auto-expand to show their ranked matches.
-          .filter((s) => !searching || computeVisibleFiles(s.files, tagFilter, search).length > 0)
-          .map((s) => <ArtifactSetCard key={`${projectId ?? '_'}-${agentId}-${s.name}`} set={s} mode={imageDiffMode} spans={artifactSpans} onSpanChange={onArtifactSpanChange} filter={tagFilter} search={search} onRefresh={requestRefresh} projectId={projectId} agentId={agentId} />)}
+        {/* Search narrows like the tag filter does — within each card, not by
+            removing cards: a card with no match stays put and shows its
+            "no files match" empty state when expanded (with its header count
+            reflecting the narrowing), rather than vanishing from the list. */}
+        {sets.map((s) => <ArtifactSetCard key={`${projectId ?? '_'}-${agentId}-${s.name}`} set={s} mode={imageDiffMode} spans={artifactSpans} onSpanChange={onArtifactSpanChange} filter={tagFilter} search={search} onRefresh={requestRefresh} projectId={projectId} agentId={agentId} />)}
       </div>
     </div>
   )
