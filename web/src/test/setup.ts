@@ -6,6 +6,7 @@
 // leak persisted state into each other.
 import '@testing-library/jest-dom/vitest'
 import { afterEach } from 'vitest'
+import { cleanup } from '@testing-library/react'
 
 class MemoryStorage implements Storage {
   private store = new Map<string, string>()
@@ -23,5 +24,9 @@ for (const target of new Set<object>([globalThis, globalThis.window])) {
 }
 
 afterEach(() => {
+  // Unmount any React trees rendered via @testing-library/react. Vitest runs
+  // with globals off, so RTL can't auto-register this itself — without it the
+  // jsdom DOM accumulates across cases in a component test file.
+  cleanup()
   localStorage.clear()
 })
