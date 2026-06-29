@@ -2,7 +2,6 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import {
   StorageKeys,
   projectViewKey,
-  selectedAgentKey,
   artifactPrefsKey,
   artifactTagFilterKey,
   agentViewPrefsKey,
@@ -20,10 +19,6 @@ import {
 describe('per-id key builders', () => {
   it('projectViewKey embeds the project id with the shared prefix', () => {
     expect(projectViewKey('proj1')).toBe('hydra-project-view-proj1')
-  })
-
-  it('selectedAgentKey embeds the project id with the shared prefix', () => {
-    expect(selectedAgentKey('proj1')).toBe('hydra-selected-agent-proj1')
   })
 
   it('archivedCollapsedKey embeds the project id with the shared prefix', () => {
@@ -98,7 +93,6 @@ describe('key builders: distinctness and stability', () => {
   it('every built key shares the hydra- prefix', () => {
     const keys = [
       projectViewKey('p'),
-      selectedAgentKey('p'),
       archivedCollapsedKey('p'),
       agentViewPrefsKey('p', 'a'),
       artifactPrefsKey('p', 'a', 'n'),
