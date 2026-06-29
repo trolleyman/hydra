@@ -374,7 +374,7 @@
 63. [ ] **[Web refactor]** **Split oversized components.**
 
     - [ ] a) `SettingsComponents.tsx` (1113) into per-section files (theme / terminal / config / artifacts / services) — already cleanly separated functions, mostly mechanical.
-    - [ ] b) `ArtifactsPanel.tsx` (1587) — lift the embedded xterm log viewer and the video/image diff renderers into sibling components.
+    - [ ] b) `ArtifactsPanel.tsx` (~1700, and growing — recent per-side-regen + build-log work added ~125 lines) — lift the embedded xterm log viewer and the video/image diff renderers into sibling components.
 
 64. [ ] **[Web refactor]** **Delete dead code / stale abstractions.**
 
