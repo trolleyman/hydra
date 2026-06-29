@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import { render, screen, fireEvent, cleanup } from '@testing-library/react'
-import { ProjectDropdown } from './__root'
+import { ProjectDropdown } from './ProjectDropdown'
 import type { ProjectInfo } from '../api'
 
 // Component test for the project switcher's keyboard dismissal (Esc closes the

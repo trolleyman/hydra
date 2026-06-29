@@ -2,24 +2,23 @@ import { createRootRoute, Link, Outlet, useNavigate, useParams, useLocation } fr
 import { useEffect, useRef, useState, useCallback, type WheelEvent } from 'react'
 import { api } from '../stores/apiClient'
 import { useProjectStore } from '../stores/projectStore'
-import { useAgentStore, ARCHIVED_PAGE_SIZE } from '../stores/agentStore'
+import { useAgentStore } from '../stores/agentStore'
 import { usePageActive } from '../lib/usePageActive'
-import { useServerData } from '../lib/useServerData'
 import { useEventStream } from '../lib/useEventStream'
-
-// Fallback poll interval used as a safety net behind the events WebSocket: pushes
-// drive refetches immediately, but a slow periodic poll still recovers if the
-// socket is briefly down or an event is missed. Much lighter than the old 5–10s.
-const EVENT_FALLBACK_MS = 30_000
-import type { ProjectInfo, AgentResponse, RepositoryPushStatus, StatusResponse } from '../api'
+import { useAgentPolling } from '../lib/useAgentPolling'
+import { usePushStatus } from '../lib/usePushStatus'
+import { useSystemStatus } from '../lib/useSystemStatus'
+import { useArchivedAgents } from '../lib/useArchivedAgents'
+import { useGlobalShortcuts } from '../lib/useGlobalShortcuts'
+import type { AgentResponse } from '../api'
 import { ApiError, ErrorResponse } from '../api'
-import { formatError, apiErrorBody } from '../api/format_error'
-import { ChevronDown, ChevronRight, Folder, FolderGit2, FolderOpen, Plus, Settings, Check, X, LoaderCircle, AlertTriangle, PanelLeftClose, PanelLeftOpen, RotateCw, ArrowUp, ArrowDown, RefreshCw } from 'lucide-react'
+import { apiErrorBody } from '../api/format_error'
+import { ChevronDown, ChevronRight, FolderGit2, Settings, LoaderCircle, PanelLeftClose, PanelLeftOpen, RotateCw, ArrowUp, ArrowDown, RefreshCw } from 'lucide-react'
 import { useApplyTheme } from '../lib/theme'
 import { useSidebarStore, SIDEBAR_OVERLAY_QUERY } from '../lib/sidebar'
-import { folderPickerAvailable, openFolderPicker } from '../api/folderPicker'
 import { AgentSidebarItem } from '../components/AgentComponents'
 import { SpawnForm } from '../components/SpawnForm'
+import { ProjectDropdown } from '../components/ProjectDropdown'
 
 import { Dialog } from '../components/Dialog'
 import { Toaster } from '../components/Toaster'
@@ -28,9 +27,6 @@ import { Tooltip } from '../components/Tooltip'
 import { ClaudeUsageIndicator } from '../components/ClaudeUsageIndicator'
 import { TrustProjectModal } from '../components/TrustProjectModal'
 import { KeyboardShortcutsModal } from '../components/KeyboardShortcutsModal'
-import { useShortcutsStore } from '../stores/shortcutsStore'
-import { isTypingTarget } from '../lib/shortcuts'
-import { useFinePointer } from '../lib/useFinePointer'
 
 export const Route = createRootRoute({
   component: RootLayout,
@@ -38,7 +34,6 @@ export const Route = createRootRoute({
 })
 
 import { useDialogStore } from '../stores/dialogStore'
-import { useToastStore } from '../stores/toastStore'
 import { pruneArtifactPrefs } from '../lib/artifactPrefs'
 import { pruneAgentViewPrefs } from '../lib/agentViewPrefs'
 import { StorageKeys, readLocal, writeLocal, readTrustedProjects, trustProject, archivedCollapsedKey } from '../lib/storage'
@@ -56,12 +51,6 @@ function formatUptime(ms: number): string {
   const days = Math.floor(hours / 24)
   return `up ${days} ${days === 1 ? 'day' : 'days'}`
 }
-
-// Project-switch shortcut hint. We bind Ctrl (not Cmd) on every platform,
-// including macOS: macOS reserves Cmd+` for its own "cycle windows within an
-// app", so it never reaches the page — Ctrl+` is free there and keeps one
-// binding everywhere.
-const SWITCH_PROJECT_HINT = 'Hold Ctrl, tap ` to switch · ⇧ for previous'
 
 const SIDEBAR_MIN = 160
 const SIDEBAR_MAX = 600
@@ -85,347 +74,6 @@ function forwardSidebarWheelToMain(e: WheelEvent<HTMLDivElement>) {
   }
 }
 
-// ── Service Health Warning ─────────────────────────────────────────────────────
-// Polls the selected project's service status and shows a warning icon (next to
-// the project name) when any supervised service has failed. Tooltip lists them.
-
-function ServiceHealthWarning({ projectId }: { projectId: string | null }) {
-  const { data: failed, refetch } = useServerData<string[]>(
-    projectId,
-    async (id) => {
-      const resp = await api.default.getServices(id)
-      return resp.services.filter((s) => s.state === 'failed').map((s) => s.name)
-    },
-    { intervalMs: EVENT_FALLBACK_MS, initial: [] },
-  )
-
-  // Refresh the failed-service indicator the instant a service's state changes.
-  useEventStream(projectId, { onServicesChanged: refetch })
-
-  if (failed.length === 0) return null
-  return (
-    <span
-      className="shrink-0 inline-flex"
-      aria-label="service failure"
-      title={`Service${failed.length > 1 ? 's' : ''} failed: ${failed.join(', ')}. Open Settings to restart.`}
-    >
-      <AlertTriangle className="w-3.5 h-3.5 text-amber-500" />
-    </span>
-  )
-}
-
-// ── Project Dropdown ───────────────────────────────────────────────────────────
-
-export function ProjectDropdown({
-  projects,
-  selectedId,
-  onSelect,
-  onDeselect,
-  onAddProject,
-  onRemoveProject,
-  keyboardIndex,
-}: {
-  projects: ProjectInfo[]
-  selectedId: string | null
-  onSelect: (id: string) => void
-  onDeselect: () => void
-  onAddProject: (path: string) => Promise<void>
-  onRemoveProject: (id: string) => Promise<void>
-  // Drives the Ctrl+` alt-tab switcher: when non-null the dropdown is forced open
-  // and the row at this index is highlighted (committed on Ctrl release by the
-  // handler in RootLayout). null = normal click-driven dropdown.
-  keyboardIndex: number | null
-}) {
-  const [open, setOpen] = useState(false)
-  const [showAddInput, setShowAddInput] = useState(false)
-  const [newPath, setNewPath] = useState('')
-  const [adding, setAdding] = useState(false)
-  const [addError, setAddError] = useState<string | null>(null)
-  // Native folder picker: only offered to local clients on a system with a
-  // dialog tool (the daemon checks both). `browsing` is true while the OS
-  // dialog is open and we're awaiting the user's pick.
-  const [pickerAvailable, setPickerAvailable] = useState(false)
-  const [browsing, setBrowsing] = useState(false)
-  const [hoveredId, setHoveredId] = useState<string | null>(null)
-  const dropdownRef = useRef<HTMLDivElement>(null)
-  const inputRef = useRef<HTMLInputElement>(null)
-  const activeRowRef = useRef<HTMLDivElement>(null)
-  // The Ctrl+` switch hint is keyboard-only — hide it on touch devices.
-  const finePointer = useFinePointer()
-
-  // The Ctrl+` switcher forces the dropdown open and highlights a row; otherwise
-  // it's the usual click-to-open menu.
-  const keyboardActive = keyboardIndex !== null
-  const isOpen = open || keyboardActive
-
-  // Keep the keyboard-highlighted row in view as the user steps through a long
-  // project list.
-  useEffect(() => {
-    if (keyboardActive) activeRowRef.current?.scrollIntoView({ block: 'nearest' })
-  }, [keyboardIndex, keyboardActive])
-
-  const selected = projects.find((p) => p.id === selectedId)
-  // Unread agents sitting in projects other than the one you're looking at —
-  // drives the dot on the folder button ("updates waiting elsewhere").
-  const otherProjectsUnread = projects
-    .filter((p) => p.id !== selectedId)
-    .reduce((n, p) => n + (p.unread_count ?? 0), 0)
-  // Agents in other projects that are blocked on you (needs_input) — turns the
-  // folder-button dot red (the stronger "needs your input" signal) instead of
-  // the blue "updates waiting" dot.
-  const otherProjectsNeedsInput = projects
-    .filter((p) => p.id !== selectedId)
-    .reduce((n, p) => n + (p.needs_input_count ?? 0), 0)
-
-  useEffect(() => {
-    if (!open) return
-    function handleClick(e: MouseEvent) {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
-        setOpen(false)
-        setShowAddInput(false)
-        setAddError(null)
-      }
-    }
-    function handleKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') {
-        setOpen(false)
-        setShowAddInput(false)
-        setAddError(null)
-      }
-    }
-    document.addEventListener('mousedown', handleClick)
-    document.addEventListener('keydown', handleKey)
-    return () => {
-      document.removeEventListener('mousedown', handleClick)
-      document.removeEventListener('keydown', handleKey)
-    }
-  }, [open])
-
-  useEffect(() => {
-    if (showAddInput) {
-      inputRef.current?.focus()
-    }
-  }, [showAddInput])
-
-  useEffect(() => {
-    let cancelled = false
-    void folderPickerAvailable().then((a) => {
-      if (!cancelled) setPickerAvailable(a)
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
-  // Open the native OS folder dialog, then add the picked project immediately.
-  async function handleBrowse() {
-    if (browsing) return
-    setBrowsing(true)
-    setAddError(null)
-    try {
-      const res = await openFolderPicker()
-      if (res.cancelled || !res.path) return
-      await onAddProject(res.path)
-      setShowAddInput(false)
-      setOpen(false)
-    } catch (err) {
-      setAddError(formatError(err))
-    } finally {
-      setBrowsing(false)
-    }
-  }
-
-  async function handleAdd(e: React.FormEvent) {
-    e.preventDefault()
-    const path = newPath.trim()
-    if (!path || adding) return
-    setAdding(true)
-    setAddError(null)
-    try {
-      await onAddProject(path)
-      setNewPath('')
-      setShowAddInput(false)
-      setOpen(false)
-    } catch (err) {
-      setAddError(formatError(err))
-    } finally {
-      setAdding(false)
-    }
-  }
-
-  function handleRemove(e: React.MouseEvent, projectId: string, projectName: string) {
-    e.stopPropagation()
-    useDialogStore.getState().show({
-      title: 'Remove Project',
-      message: `Remove "${projectName}" from Hydra? This will not delete any files on disk.`,
-      type: 'confirm',
-      showCancel: true,
-      onConfirm: async () => {
-        try {
-          await onRemoveProject(projectId)
-        } catch (err) {
-          useDialogStore.getState().show({
-            title: 'Remove Failed',
-            message: `Failed to remove project: ${formatError(err)}`,
-            type: 'error',
-          })
-        }
-      },
-    })
-  }
-
-  return (
-    <div ref={dropdownRef} className="relative shrink-0">
-      <button
-        aria-label="Select project"
-        onClick={() => { setOpen((o) => !o); setShowAddInput(false); setAddError(null) }}
-        className="flex items-center gap-1.5 h-8 px-2.5 rounded-md text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors max-w-xs cursor-pointer"
-      >
-        <span className="relative shrink-0">
-          <Folder className="w-3.5 h-3.5" />
-          {otherProjectsNeedsInput > 0 ? (
-            <span
-              aria-label="an agent in another project needs your input"
-              className="absolute -top-1 -right-1 w-1.5 h-1.5 rounded-full bg-red-500 ring-2 ring-white dark:ring-gray-900"
-            />
-          ) : otherProjectsUnread > 0 ? (
-            <span
-              aria-label="updates waiting in other projects"
-              className="absolute -top-1 -right-1 w-1.5 h-1.5 rounded-full bg-sky-400 ring-2 ring-white dark:ring-gray-900"
-            />
-          ) : null}
-        </span>
-        <span className="truncate max-w-[160px]">{selected?.name ?? 'Select project'}</span>
-        <ServiceHealthWarning projectId={selectedId} />
-        <ChevronDown className="w-3 h-3" />
-      </button>
-
-      {isOpen && (
-        <div className="absolute left-0 top-full mt-1 w-72 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50 max-h-[70vh] overflow-y-auto">
-          {projects.length > 0 && (
-            <div className="py-1 border-b border-gray-100 dark:border-gray-700">
-              {projects.map((p, i) => (
-                <div
-                  key={p.id}
-                  ref={keyboardActive && i === keyboardIndex ? activeRowRef : undefined}
-                  className={`relative flex items-start gap-2.5 px-3 py-2 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors ${
-                    keyboardActive && i === keyboardIndex
-                      ? 'bg-blue-100 dark:bg-blue-900/40'
-                      : p.id === selectedId ? 'bg-blue-50 dark:bg-blue-900/20' : ''
-                  }`}
-                  onMouseEnter={() => setHoveredId(p.id)}
-                  onMouseLeave={() => setHoveredId(null)}
-                  onClick={() => {
-                    if (p.id === selectedId) {
-                      onDeselect()
-                    } else {
-                      onSelect(p.id)
-                    }
-                    setOpen(false)
-                  }}
-                >
-                  <Folder className="w-3.5 h-3.5 mt-0.5 shrink-0 text-gray-400" />
-                  <div className="min-w-0 flex-1">
-                    <div className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{p.name}</div>
-                    <div className="text-xs font-mono text-gray-400 dark:text-gray-500 truncate">{p.path}</div>
-                  </div>
-                  {(p.needs_input_count ?? 0) > 0 ? (
-                    <span
-                      aria-label={`${p.needs_input_count} agents need your input`}
-                      className="shrink-0 mt-1.5 w-2 h-2 rounded-full bg-red-500"
-                    />
-                  ) : (p.unread_count ?? 0) > 0 ? (
-                    <span
-                      aria-label={`${p.unread_count} agents with unread changes`}
-                      className="shrink-0 mt-1.5 w-2 h-2 rounded-full bg-sky-500"
-                    />
-                  ) : null}
-                  {p.id === selectedId && hoveredId !== p.id && (
-                    <Check className="w-3.5 h-3.5 text-blue-500 shrink-0 mt-0.5" />
-                  )}
-                  {hoveredId === p.id && (
-                    <button
-                      onClick={(e) => handleRemove(e, p.id, p.name)}
-                      className="shrink-0 mt-0.5 p-0.5 rounded text-gray-400 hover:text-red-500 transition-colors cursor-pointer"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-
-          <div className="py-1">
-            {pickerAvailable && !showAddInput && (
-              <>
-                <button
-                  onClick={handleBrowse}
-                  disabled={browsing}
-                  className="w-full flex items-center gap-2 px-3 py-2 cursor-pointer text-left text-sm text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors disabled:opacity-50 disabled:cursor-default"
-                >
-                  <FolderOpen className="w-3 h-3" />
-                  {browsing ? 'Waiting for folder…' : 'Browse…'}
-                </button>
-                {addError && (
-                  <p className="text-[10px] text-red-500 px-3 pb-1 leading-snug">{addError}</p>
-                )}
-              </>
-            )}
-            {!showAddInput ? (
-              <button
-                onClick={() => { setShowAddInput(true); setAddError(null) }}
-                className="w-full flex items-center gap-2 px-3 py-2 cursor-pointer text-left text-sm text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-              >
-                <Plus className="w-3 h-3" />
-                {pickerAvailable ? 'Enter path manually…' : 'Open folder…'}
-              </button>
-            ) : (
-              <form onSubmit={handleAdd} className="px-3 py-2">
-                <label className="text-xs text-gray-500 dark:text-gray-400 mb-1 block">Folder path</label>
-                <input
-                  ref={inputRef}
-                  type="text"
-                  value={newPath}
-                  onChange={(e) => setNewPath(e.target.value)}
-                  placeholder="/absolute/path/to/project"
-                  disabled={adding}
-                  className="w-full text-xs font-mono px-2 py-1.5 rounded border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100 placeholder-gray-300 dark:placeholder-gray-500 focus:outline-none focus:border-blue-400 dark:focus:border-blue-500 disabled:opacity-50"
-                />
-                {addError && (
-                  <p className="text-[10px] text-red-500 mt-1 leading-snug">{addError}</p>
-                )}
-                <div className="flex gap-2 mt-2">
-                  <button
-                    type="submit"
-                    disabled={!newPath.trim() || adding}
-                    className="flex-1 text-xs py-1 px-2 rounded bg-blue-600 text-white font-medium hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
-                  >
-                    {adding ? 'Opening…' : 'Open'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => { setShowAddInput(false); setNewPath(''); setAddError(null) }}
-                    className="text-xs py-1 px-2 rounded border border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </form>
-            )}
-          </div>
-
-          {projects.length > 1 && finePointer && (
-            <div className="px-3 py-1.5 border-t border-gray-100 dark:border-gray-700 text-[10px] text-gray-400 dark:text-gray-500 font-mono">
-              {SWITCH_PROJECT_HINT}
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  )
-}
-
 // ── Root Layout ────────────────────────────────────────────────────────────────
 
 // Derive the current view from the active route so it can be persisted as the
@@ -445,7 +93,6 @@ function currentViewFromRoute(projectId: string, agentId: string | undefined, pa
 }
 
 function RootLayout() {
-  const spawnedAt = useRef<number | null>(null)
   // Guards the one-time redirect from the bare root path to the selected
   // project (see effect below).
   const didAutoNavigate = useRef(false)
@@ -455,13 +102,7 @@ function RootLayout() {
   // the remembered agent with `{ kind: 'project' }`. The memory is kept so a
   // later switch back restores the agent once it's been read.
   const deflectedUnreadProject = useRef<string | null>(null)
-  const [, setTick] = useState(0)
-  const [development, setDevelopment] = useState(false)
   const [restarting, setRestarting] = useState(false)
-  // Alt-tab-style project switcher: while Ctrl is held, each Ctrl+` press steps
-  // the highlight through this overlay (Shift reverses); releasing Ctrl commits.
-  // `null` = overlay closed; otherwise the highlighted index into `projects`.
-  const [switcherIndex, setSwitcherIndex] = useState<number | null>(null)
   // The sidebar can be hidden on any screen size via the collapse button in its
   // header (revealed again by the floating button / agent top bar over the
   // content). On wide screens collapsing reclaims the space; below the overlay
@@ -473,15 +114,11 @@ function RootLayout() {
   // prompt re-evaluates reactively when one is accepted (see lib/storage).
   const [trustedProjectIds, setTrustedProjectIds] = useState<Set<string>>(() => readTrustedProjects())
 
-  const { projects, selectedProjectId, setProjects, setSelectedProjectId, setSystemStatus } = useProjectStore()
+  const { projects, selectedProjectId, setProjects, setSelectedProjectId } = useProjectStore()
   const { agents, setAgents, addAgent, markRead } = useAgentStore()
   const archived = useAgentStore((s) => s.archived)
   const archivedLoading = useAgentStore((s) => s.archivedLoading)
   const archivedHasMore = useAgentStore((s) => s.archivedHasMore)
-  const resetArchived = useAgentStore((s) => s.resetArchived)
-  const setArchivedLoading = useAgentStore((s) => s.setArchivedLoading)
-  const setArchivedFirstPage = useAgentStore((s) => s.setArchivedFirstPage)
-  const appendArchived = useAgentStore((s) => s.appendArchived)
   const dialog = useDialogStore()
   const navigate = useNavigate()
   const location = useLocation()
@@ -609,114 +246,16 @@ function RootLayout() {
   // control itself now lives on the Settings page.
   useApplyTheme()
 
-  // Agent list for the selected project: refreshed by the events stream (below),
-  // with a slow visibility-gated poll as a fallback. The data lands in the agent
-  // store (onData) rather than local state; `refetchAgents` is wired into the
-  // events stream so a push triggers a fetch without restarting the hook.
-  const { refetch: refetchAgents } = useServerData<AgentResponse[]>(
-    currentProjectId,
-    (id) => api.default.listAgents(id),
-    { intervalMs: EVENT_FALLBACK_MS, initial: [], onData: setAgents },
-  )
-
-  // Clear agents when project deselected (useServerData resets only its own local
-  // copy; the live list lives in the store, so it's cleared here).
-  useEffect(() => {
-    if (!currentProjectId) setAgents([])
-  }, [currentProjectId, setAgents])
-
-  // Push/pull status for the project's current branch: drives the sidebar Sync
-  // button, which shows how far ahead/behind the remote the branch is and, when
-  // clicked, pulls then pushes. Refreshed on the same slow poll as the agent
-  // list, plus on demand after a sync or when the events stream reports a change
-  // (via the hook's stable `refetchPushStatus`).
-  // Track which projects have an in-flight sync, keyed by project id, so the
-  // spinner/disabled state stays tied to the project the sync was started for
-  // rather than bleeding onto whatever project/tab the sidebar shows next.
-  const [syncingProjects, setSyncingProjects] = useState<ReadonlySet<string>>(() => new Set())
-  const syncing = currentProjectId ? syncingProjects.has(currentProjectId) : false
-  const { data: pushStatus, setData: setPushStatus, refetch: refetchPushStatus } =
-    useServerData<RepositoryPushStatus | null>(
-      currentProjectId,
-      (id) => api.default.getRepositoryPushStatus(id),
-      { intervalMs: EVENT_FALLBACK_MS, initial: null, resetOnError: true },
-    )
-
-  const handleSync = useCallback(async () => {
-    if (!currentProjectId || syncingProjects.has(currentProjectId)) return
-    const projectId = currentProjectId
-    const toast = useToastStore.getState()
-    setSyncingProjects((prev) => new Set(prev).add(projectId))
-    const toastId = toast.show({ message: 'Syncing with remote…', type: 'info', duration: 0 })
-    try {
-      const result = await api.default.syncRepository(projectId)
-      // Only paint the result if the user is still looking at this project;
-      // otherwise the per-project poll/websocket keeps the visible one correct.
-      if (currentProjectIdRef.current === projectId) setPushStatus(result)
-      toast.dismiss(toastId)
-      const where = result.remote && result.branch ? ` with ${result.remote}/${result.branch}` : ''
-      toast.show({ message: `Synced${where}`, type: 'success' })
-    } catch (err) {
-      toast.dismiss(toastId)
-      // A 409 means the pull couldn't merge cleanly; surface it distinctly.
-      const conflict = err instanceof ApiError && err.status === 409
-      toast.show({
-        message: conflict
-          ? `Sync failed: pull conflicts — resolve in the repository, then retry`
-          : `Sync failed: ${formatError(err)}`,
-        type: 'error',
-        duration: 6000,
-      })
-    } finally {
-      setSyncingProjects((prev) => {
-        const next = new Set(prev)
-        next.delete(projectId)
-        return next
-      })
-      refetchPushStatus()
-    }
-  }, [currentProjectId, syncingProjects, refetchPushStatus])
-
-  // Archived (killed/merged) history list. Loaded lazily and paginated for
-  // infinite scroll — it is historical, so unlike the live list it is not
-  // polled. Reset + load the first page whenever the selected project changes.
-  const archivedLoadingRef = useRef(false)
-  useEffect(() => {
-    resetArchived()
-    if (!currentProjectId) return
-    let cancelled = false
-    archivedLoadingRef.current = true
-    setArchivedLoading(true)
-    api.default.listArchivedAgents(currentProjectId, ARCHIVED_PAGE_SIZE, 0)
-      .then((page) => { if (!cancelled) setArchivedFirstPage(page) })
-      .catch(() => { if (!cancelled) setArchivedLoading(false) })
-      .finally(() => { archivedLoadingRef.current = false })
-    return () => { cancelled = true }
-  }, [currentProjectId, resetArchived, setArchivedLoading, setArchivedFirstPage])
-
-  const loadMoreArchived = useCallback(() => {
-    if (!currentProjectId || archivedLoadingRef.current) return
-    const { archivedHasMore: hasMore, archived: current } = useAgentStore.getState()
-    if (!hasMore) return
-    archivedLoadingRef.current = true
-    setArchivedLoading(true)
-    api.default.listArchivedAgents(currentProjectId, ARCHIVED_PAGE_SIZE, current.length)
-      .then((page) => appendArchived(page))
-      .catch(() => setArchivedLoading(false))
-      .finally(() => { archivedLoadingRef.current = false })
-  }, [currentProjectId, setArchivedLoading, appendArchived])
-
-  // Trigger the next archived page when the sentinel scrolls into view.
-  const archivedSentinelRef = useRef<HTMLDivElement | null>(null)
-  useEffect(() => {
-    const el = archivedSentinelRef.current
-    if (!el || !archivedHasMore) return
-    const obs = new IntersectionObserver((entries) => {
-      if (entries.some((e) => e.isIntersecting)) loadMoreArchived()
-    }, { rootMargin: '120px' })
-    obs.observe(el)
-    return () => obs.disconnect()
-  }, [archivedHasMore, loadMoreArchived, archived.length])
+  // The four server-data loops — agent list, push status, archived history and
+  // system status — are each owned by a dedicated hook built on useServerData
+  // (PLAN #58). They land their data in the relevant store and expose stable
+  // `refetch` handles + the bits of derived state RootLayout still renders; the
+  // refetches are wired into the single events stream below so a push triggers a
+  // fetch without restarting the hooks.
+  const { refetchAgents } = useAgentPolling(currentProjectId)
+  const { pushStatus, syncing, handleSync, refetchPushStatus } = usePushStatus(currentProjectId)
+  const { sentinelRef: archivedSentinelRef } = useArchivedAgents(currentProjectId)
+  const { refetchStatus, development, spawnedAt } = useSystemStatus()
 
   // Auto-clear an agent's unread dot when it's the one currently open AND the
   // page is actually in front of the user. Covers both opening an unread agent
@@ -769,54 +308,6 @@ function RootLayout() {
     else if (onRepository) parts.push('Repository')
     document.title = parts.join(' · ')
   }, [anyUnread, titleProjectName, titleAgentName, onRepository])
-
-  // System status + project list: refreshed by the events stream, with a slow
-  // visibility-gated fallback poll. The fetch lands the status in the store and,
-  // chained off it, refreshes the project list + auto-selects a project on a cold
-  // load. The once-armed uptime ticker is a separate effect below.
-  const [uptimeTracking, setUptimeTracking] = useState(false)
-  const handleStatus = useCallback((status: StatusResponse) => {
-    setSystemStatus(status)
-    setDevelopment(status.development ?? false)
-    if (status.uptime_seconds != null) {
-      if (spawnedAt.current === null) {
-        spawnedAt.current = Date.now() - status.uptime_seconds * 1000
-        setTick((n) => n + 1)
-      }
-      setUptimeTracking(true)
-    }
-    api.default.listProjects().then((ps) => {
-      setProjects(ps)
-      const currentId = useProjectStore.getState().selectedProjectId
-      if (currentId == null || !ps.some((p) => p.id === currentId)) {
-        let newId: string | null = null
-        if (status.default_project_id != null && ps.some((p) => p.id === status.default_project_id)) {
-          newId = status.default_project_id
-        } else if (ps.length > 0) {
-          newId = ps[0].id
-        }
-        // Just record the selection; the redirect effect below moves the UI onto
-        // the project's page if we're sitting on the root route.
-        if (newId != null) setSelectedProjectId(newId)
-      }
-    }).catch(() => {
-      // ignore project fetch errors silently
-    })
-  }, [setProjects, setSelectedProjectId, setSystemStatus])
-
-  const { refetch: refetchStatus } = useServerData<StatusResponse>(
-    'system-status',
-    () => api.default.getStatus(),
-    { intervalMs: EVENT_FALLBACK_MS, onData: handleStatus },
-  )
-
-  // Uptime ticker: once the server reports an uptime, re-render every second so
-  // the "up N minutes" label advances. Armed once and runs until unmount.
-  useEffect(() => {
-    if (!uptimeTracking) return
-    const ticker = setInterval(() => setTick((n) => n + 1), 1000)
-    return () => clearInterval(ticker)
-  }, [uptimeTracking])
 
   // Server-push: refetch agents / projects the moment the daemon signals a change,
   // instead of relying on the (now slow) fallback polls above. The stream also
@@ -901,98 +392,12 @@ function RootLayout() {
     }
   }, [location.pathname])
 
-  // Ctrl/Cmd + . collapses or expands the sidebar from anywhere (mirrors the
-  // collapse button). Treated as an explicit toggle, so it persists.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key === '.') {
-        e.preventDefault()
-        toggleSidebar()
-      }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [toggleSidebar])
-
-  // `?` toggles the keyboard-shortcuts help overlay from anywhere — except while
-  // typing (a terminal, a form field), where `?` is just a character. No modifier
-  // so it's as quick to reach as a real cheat-sheet key.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== '?' || e.ctrlKey || e.metaKey || e.altKey) return
-      if (isTypingTarget(e.target)) return
-      e.preventDefault()
-      useShortcutsStore.getState().toggle()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [])
-
-  // Alt-tab-style project switcher. Hold Ctrl and tap ` to open the project
-  // dropdown (the same selector in the sidebar header) with the *next* project
-  // highlighted; each further ` steps forward, Shift+` steps back (both wrap).
-  // Releasing Ctrl commits the highlight; Escape or losing focus cancels. The
-  // highlight index is fed to ProjectDropdown via its keyboardIndex prop, which
-  // forces the dropdown open and styles the active row — so the switcher reuses
-  // the real selector UI rather than a separate overlay. We reveal the sidebar
-  // first (transient, non-persisted) so the dropdown is on screen when collapsed.
-  // We bind Ctrl on every platform — macOS reserves Cmd+` for its own "cycle
-  // windows within an app", so Cmd never reaches us; Ctrl+` is free there too,
-  // keeping one binding everywhere. We match on e.code === 'Backquote' so it's
-  // keyboard-layout independent (Shift+` is '~' on US layouts).
-  //
-  // selectProject is read through a ref so committing on Ctrl-up doesn't force
-  // this listener to re-bind every render; the keydown/keyup handlers are
-  // otherwise stable and use functional state updates.
-  const selectProjectRef = useRef(selectProject)
-  selectProjectRef.current = selectProject
-  const projectsRef = useRef(projects)
-  projectsRef.current = projects
-  const currentProjectIdRef = useRef(currentProjectId)
-  currentProjectIdRef.current = currentProjectId
-  const switcherIndexRef = useRef(switcherIndex)
-  switcherIndexRef.current = switcherIndex
-  useEffect(() => {
-    function onKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') {
-        setSwitcherIndex(null) // no-op (React bails) if already closed
-        return
-      }
-      if (e.code !== 'Backquote' || !e.ctrlKey || e.altKey || e.metaKey) return
-      const list = projectsRef.current
-      if (list.length < 2) return
-      e.preventDefault()
-      if (e.repeat) return // one step per physical press, not per auto-repeat
-      // Reveal the sidebar (transient, non-persisted) so the dropdown the switcher
-      // drives is actually on screen when the sidebar is collapsed.
-      if (switcherIndexRef.current === null) useSidebarStore.getState().setCollapsed(false, false)
-      const dir = e.shiftKey ? -1 : 1
-      setSwitcherIndex((cur) => {
-        // First press steps off the current project; later presses step off the
-        // current highlight. With nothing selected, land on first/last.
-        const base = cur ?? list.findIndex((p) => p.id === currentProjectIdRef.current)
-        const start = base === -1 ? (dir === 1 ? -1 : 0) : base
-        return (start + dir + list.length) % list.length
-      })
-    }
-    function onKeyUp(e: KeyboardEvent) {
-      if (e.key !== 'Control') return
-      const cur = switcherIndexRef.current
-      if (cur === null) return
-      setSwitcherIndex(null)
-      const proj = projectsRef.current[cur]
-      if (proj && proj.id !== currentProjectIdRef.current) selectProjectRef.current(proj.id)
-    }
-    function onBlur() { setSwitcherIndex(null) }
-    window.addEventListener('keydown', onKeyDown)
-    window.addEventListener('keyup', onKeyUp)
-    window.addEventListener('blur', onBlur)
-    return () => {
-      window.removeEventListener('keydown', onKeyDown)
-      window.removeEventListener('keyup', onKeyUp)
-      window.removeEventListener('blur', onBlur)
-    }
-  }, [])
+  // App-wide keyboard shortcuts (PLAN #58): Ctrl+. sidebar toggle, `?` help
+  // overlay, and the Ctrl+` alt-tab project switcher — all merged into one hook.
+  // The switcher feeds its highlight index back through `switcherIndex`, which is
+  // passed to ProjectDropdown via `keyboardIndex` (forcing the dropdown open and
+  // styling the active row, so the switcher reuses the real selector UI).
+  const switcherIndex = useGlobalShortcuts({ projects, currentProjectId, selectProject })
 
   async function handleRestart() {
     setRestarting(true)

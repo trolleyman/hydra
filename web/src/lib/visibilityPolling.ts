@@ -1,3 +1,8 @@
+// Fallback poll interval used as a safety net behind the events WebSocket: pushes
+// drive refetches immediately, but a slow periodic poll still recovers if the
+// socket is briefly down or an event is missed. Much lighter than the old 5–10s.
+export const EVENT_FALLBACK_MS = 30_000
+
 // startVisibilityPolling is setInterval(fn, intervalMs) that only fires while the
 // tab is visible (document.hidden === false).
 //
