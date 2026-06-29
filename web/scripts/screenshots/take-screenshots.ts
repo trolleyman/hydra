@@ -1612,6 +1612,37 @@ try {
           // layout is deterministic, so a fixed wait past it stays byte-stable.
           await page.waitForTimeout(500)
           await settle(page)
+          // Force every .webm tile to decode + paint a frame. Each video sits on a
+          // transparent checkerboard backdrop (checkerStyle), so if it hasn't
+          // decoded a frame by capture time the tile shows through as a bare
+          // checkerboard — a flaky, environment-dependent render. play() is no-op'd
+          // by the init script, so autoplay can't advance the video; only the
+          // browser's own first-frame decode would paint it, and that races the
+          // screenshot. Seeking pins a frame deterministically (same trick the
+          // videoDiff shots use): once metadata is in we seek a little past the
+          // midpoint so the tile shows a representative, mid-animation frame — and
+          // for an overlay mode (onion/slider) before/after actually differ there,
+          // unlike the identical frame 0. The 'seeked' event then confirms the
+          // decode, so the tile reliably paints instead of rendering transparent.
+          await page.evaluate(async () => {
+            const vids = Array.from(document.querySelectorAll('video'))
+            await Promise.all(vids.map((v) => new Promise<void>((res) => {
+              const seekToMid = () => {
+                // 60% of the run lands mid-animation for any clip length; fall back
+                // to a tiny non-zero time when duration isn't known yet (which still
+                // forces a first-frame decode).
+                const t = Number.isFinite(v.duration) && v.duration > 0 ? v.duration * 0.6 : 0.05
+                const done = () => { v.removeEventListener('seeked', done); res() }
+                v.addEventListener('seeked', done)
+                try { v.currentTime = t } catch { res() }
+              }
+              v.pause()
+              if (v.readyState >= 1 /* HAVE_METADATA */) seekToMid()
+              else v.addEventListener('loadedmetadata', seekToMid, { once: true })
+              setTimeout(res, 5000) // fallback must exceed 4000ms (init script zeroes shorter timers)
+            })))
+          })
+          await settle(page)
           // Pin the "screenshots" card to the top of the scroll container so its
           // expanded grid is the focus (same sticky-aware offset as expandArtifact).
           await page.evaluate(() => {
