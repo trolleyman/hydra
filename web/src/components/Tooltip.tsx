@@ -3,6 +3,10 @@ import { createPortal } from 'react-dom'
 
 type Placement = 'top' | 'bottom'
 
+// Max width of the compact dark hint, in px. The box wraps at this width (see
+// max-w below) so computePos can clamp it on-screen using a known worst case.
+const DARK_MAX_WIDTH = 320
+
 interface Position {
   top: number
   left: number
@@ -76,11 +80,21 @@ export function Tooltip({
     }
     const tooltipHeight = 36
     const placement = side ?? (rect.top < tooltipHeight + padding ? 'bottom' : 'top')
+    // Clamp horizontally so a long dark hint never spills off-screen, then shift
+    // the arrow back so it still points at the trigger. The box is capped at
+    // DARK_MAX_WIDTH (matching max-w below) and wraps, so half that width is the
+    // worst-case overhang to keep on screen.
+    const centerX = rect.left + rect.width / 2
+    const clampPad = 8
+    let left = centerX
+    if (left - DARK_MAX_WIDTH / 2 < clampPad) left = DARK_MAX_WIDTH / 2 + clampPad
+    else if (left + DARK_MAX_WIDTH / 2 > window.innerWidth - clampPad)
+      left = window.innerWidth - DARK_MAX_WIDTH / 2 - clampPad
     return {
       top: placement === 'top' ? rect.top - padding : rect.bottom + padding,
-      left: rect.left + rect.width / 2,
+      left,
       placement,
-      arrowX: '50%',
+      arrowX: `calc(50% + ${centerX - left}px)`,
     }
   }, [card, side, width])
 
@@ -177,18 +191,19 @@ export function Tooltip({
           </div>
         ) : (
           <div
-            className={`fixed z-[9999] -translate-x-1/2 pointer-events-none px-2 py-1 bg-gray-900 dark:bg-gray-700 text-white text-[11px] rounded shadow-lg whitespace-nowrap border border-gray-700 dark:border-gray-600 ${
+            className={`fixed z-[9999] -translate-x-1/2 pointer-events-none px-2 py-1 bg-gray-900 dark:bg-gray-700 text-white text-[11px] rounded shadow-lg max-w-[320px] break-words border border-gray-700 dark:border-gray-600 ${
               pos.placement === 'top' ? '-translate-y-full' : ''
             }`}
             style={{ top: pos.top, left: pos.left }}
           >
             {content}
             <div
-              className={`absolute left-1/2 -translate-x-1/2 border-4 border-transparent ${
+              className={`absolute -translate-x-1/2 border-4 border-transparent ${
                 pos.placement === 'top'
                   ? 'top-full border-t-gray-900 dark:border-t-gray-700'
                   : 'bottom-full border-b-gray-900 dark:border-b-gray-700'
               }`}
+              style={{ left: pos.arrowX }}
             />
           </div>
         ),
