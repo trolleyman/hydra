@@ -55,6 +55,16 @@ test.describe('project-view persistence (readJSON / writeJSON round-trip)', () =
     await page.goto(`${PROJECT}repository`)
     await expect(page).toHaveURL(/\/project\/sim-project\/repository\b/)
 
+    // Wait until the persist effect has actually written the view: the boot
+    // restore below races it, and reloading first would read a stale/empty value
+    // and fall back to the bare project page.
+    await expect
+      .poll(async () => {
+        const raw = await page.evaluate((k) => window.localStorage.getItem(k), PROJECT_VIEW_KEY)
+        return raw ? JSON.parse(raw) : null
+      })
+      .toEqual({ kind: 'repository', path: '' })
+
     // Land on the bare root: the boot restore reads the saved view back and
     // navigates into the remembered view rather than the spawn/landing page.
     await page.goto('/')
