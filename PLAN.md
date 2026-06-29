@@ -335,3 +335,51 @@
     _Fixed:_ moved hljs off the UI thread into a Web Worker pool. New `web/src/lib/highlightCore.ts` holds the pure helpers (`splitHighlightedLines`, `highlightLines`) extracted from `DiffViewer`; `highlight.worker.ts` runs them off-thread; `highlightClient.ts` manages a small pool (`min(3, cores-1)` workers, round-robin by request id) with a request/response protocol keyed by id, and degrades to **synchronous main-thread** highlighting when `Worker` is unavailable (tests/SSR) or a worker errors (drains in-flight requests via the stored request, then stops using the pool). `FileDiff` now highlights inline only for tiny files (`HL_SYNC_MAX` lowered 600→80, where the round-trip + a plain→coloured flash aren't worth it); anything larger paints immediately as plain text and the colours stream in from the worker as each file completes — `buildHighlightMaps` refactored into `extractSides` + `mapFromHtml` so the sync and worker paths share the line-number ↔ HTML mapping. The whole-file input is preserved on both paths, so multi-line constructs (block comments, template strings) stay correct. `FileDiff` is shared with the repository diff view, so that benefits too.
 
     Design decisions (no user input): the worker bundles its own `highlight.js` copy (a ~940 KB lazy chunk loaded only when the pool first spins up) — unavoidable for off-thread hljs, and `highlight.js` already shipped in the main bundle for the inline fast path + `RepositoryView`/`markdown`/`ShellEditor`, so this only adds one *deferred* copy, not initial-load weight. Kept a small synchronous threshold (rather than routing 100% through the worker) so trivially small hunks don't flash or pay round-trip overhead; the worker pool is capped at 3 (the goal is freeing the UI thread, not maximal parallelism).
+
+55. [x] **[Web state]** **Sidebar sync-button state bled across projects.** The sidebar's "sync main branch" button used a single app-wide `syncing` boolean in `__root.tsx`. Because the root layout (and its sidebar) never unmounts on tab/project navigation, pressing Sync on project A and switching to project B left B's button stuck disabled+spinning until A's request resolved. Fixed by keying the in-flight state per-project (a `ReadonlySet<string>` of syncing project ids, `syncing` derived for the current project) and guarding the post-sync `setPushStatus` so a completed sync only repaints when still on that project. Also corrected a misleading comment in `AgentTerminal.tsx` that implied the component staying mounted preserves the terminal — in fact the xterm instance + WebSocket are torn down and rebuilt on every agent switch (effect keyed on `agentId`); seamlessness comes from the backend replaying scrollback on reattach.
+
+56. [ ] **[Web refactor]** **Test scaffolding (prerequisite for the refactors below).** There are currently **zero** frontend tests (no vitest/jest config or specs; `playwright` is in `devDeps` but unused). The high-value refactors below are subtle async/timing code (optimistic-override TTLs, refetch coalescing, project-switch deflection, unread-dot gating), so a test seam should land first to de-risk them.
+
+    - [ ] a) vitest + `@testing-library/react`, with unit tests for the already-pure, high-value logic: `agentStore` optimistic/read/unread merge, `lib/projectView`, `lib/artifactFilter`, `lib/terminalGeometry`, `api/format_error`, and the `storage.ts` key builders.
+    - [ ] b) 2–3 Playwright smokes (the dep is already present) for the load-bearing flows that have no unit seam: project-switch restores the remembered view, opening an agent clears its unread dot, a spawned agent appears in the sidebar.
+
+57. [ ] **[Web refactor]** **Extract a `useServerData` hook and collapse the hand-rolled fetch+poll+refetchRef sites.** The same idiom (`useState` data + `let cancelled` + async fetch + `try/catch` swallow + `refetchRef.current = …` + `startVisibilityPolling(fn, EVENT_FALLBACK_MS)` + cleanup) is copy-pasted at ~7 sites, with `api.default.*` called directly in ~15 files and no shared staleness/dedup layer. Lighter than full TanStack Query — the WS already pushes invalidations, so a small custom hook captures ~90% of the benefit.
+
+    - [ ] a) Build `useServerData(key, fetcher, { wsEvents })` that internally owns the cancel flag, the visibility-gated poll, the refetch handle, and the WS-trigger wiring (replacing the `refetchRef` ceremony, ~16 grep hits).
+    - [ ] b) Migrate the ~7 sites onto it: `ServiceHealthWarning`, `fetchAgents`, `fetchPushStatus`, `fetchStatus`/projects (all in `__root.tsx`), `ClaudeUsageIndicator.tsx`, `ApprovalCard` (`AgentDetail.tsx`), and the `DiffViewer` silent-refresh; fold the agentStore optimistic-override layer's three near-identical functions into the hook's update path.
+
+58. [ ] **[Web refactor]** **Decompose `__root.tsx` (~1500 → ~700 lines).** It is a god-component conflating sidebar, polling, WebSocket wiring, project switching, keyboard shortcuts, theme, and the trust modal.
+
+    - [ ] a) Extract the `ProjectDropdown` sub-component (~280 lines) and `ServiceHealthWarning` into their own files under `components/`.
+    - [ ] b) Pull the data loops into hooks (`useAgentPolling`, `usePushStatus`, `useSystemStatus`, `useArchivedAgents`) — built on #57's `useServerData`.
+    - [ ] c) Merge the three keyboard `useEffect`s (sidebar toggle, `?` help, Ctrl+\` switcher) into one `useGlobalShortcuts`.
+
+59. [ ] **[Web refactor]** **Remount the agent subtree on switch instead of hand-resetting state.** The route doesn't key `AgentDetail` by agent id, so it's reused across agents and several pieces of state bleed (the rename-draft `editingTitle`/`titleDraft` is the live one) — compensated today by scattered render-time "reset on id change" hacks. Agent IDs are globally unique, so the key is collision-safe; use `${projectId}-${agentId}` to match the `storage.ts` builder convention.
+
+    - [ ] a) Add `` key={`${projectId}-${agent.id}`} `` to `<AgentDetail>` in `agent.$agentId.tsx`, fixing the rename-draft bleed at the source.
+    - [ ] b) Delete the now-redundant reset hacks: `AgentTerminal.tsx` height + bash-tabs render-time resets, and `DiffViewer.tsx` collapsed-files + commit-selector reset. Verify the prefs-persist effects still hydrate correctly at mount (needs #56's tests).
+
+60. [ ] **[Web refactor]** **localStorage cleanup.** Per-id persisted prefs (`agentViewPrefs.ts`, `artifactPrefs.ts`, `spawnDrafts.ts`) each re-implement the same load/save/TTL/prune boilerplate, and the global preference stores hand-roll `readLocal`/`writeLocal`. (NB: a single persisted per-project/per-agent *store* is deliberately avoided — it would grow an unbounded blob and lose the per-id TTL/prune the sharded keys give.)
+
+    - [ ] a) A generic `createNamespacedStore<T>(prefix, ttl)` factory to dedupe the per-id load/save/prune logic across `agentViewPrefs`/`artifactPrefs`/`spawnDrafts`.
+    - [ ] b) Adopt zustand `persist` middleware for the **global** singletons only (`theme`, `sidebar`, `terminalGeometry`), replacing their manual read-on-init + write-on-set.
+
+61. [ ] **[Web refactor]** **Standardize API error handling.** It's inconsistent — some sites narrow with `err instanceof ApiError`, others use `catch (err: any)`, and ~17 blocks in `__root.tsx` just swallow.
+
+    - [ ] a) A `runWithToast`/`useApiAction` helper for the repeated `setBusy(true)` → `try`/`await` → `catch`→toast → `finally setBusy(false)` shape (~12 sites: AgentDetail decide/kill/merge/title, RepositoryView, `__root` handleSync/handleAddProject).
+    - [ ] b) Replace `catch (err: any)` with `instanceof ApiError`, and type `format_error.ts`'s error body to drop the `(err.body as any).details` cast.
+
+62. [ ] **[Web refactor]** **Unify the two tooltip implementations.** `Tooltip.tsx` (hover-delay, top/bottom) and `InfoTooltip.tsx` (click/hover, off-screen clamping) are independent implementations of the same portal + `getBoundingClientRect` placement math — consolidate into one configurable component.
+
+63. [ ] **[Web refactor]** **Split oversized components.**
+
+    - [ ] a) `SettingsComponents.tsx` (1113) into per-section files (theme / terminal / config / artifacts / services) — already cleanly separated functions, mostly mechanical.
+    - [ ] b) `ArtifactsPanel.tsx` (1587) — lift the embedded xterm log viewer and the video/image diff renderers into sibling components.
+
+64. [ ] **[Web refactor]** **Delete dead code / stale abstractions.**
+
+    - [ ] a) The `onRestarted` prop wiring (`AgentDetail.tsx`/`agent.$agentId.tsx`) — already documented as dead.
+    - [ ] b) `normalizeContainerState`'s Docker container-state branch in `AgentComponents.tsx` (a Docker→sandbox leftover), after confirming the modern `agent_status.status` path covers all cases.
+    - [ ] c) Legacy localStorage migration keys (`darkModeLegacy`, the `selectedAgent` prefix) once the migration window has passed.
+
+65. [ ] **[Web refactor]** **Shared UI primitives.** Introduce `<Badge>`/`<IconButton>` and consolidate the four parallel status-color switch statements (`statusDotClass`/`agentDotClass`/`agentStatusBadge`/`archivedEndStateBadge`) in `AgentComponents.tsx` into one source of truth.
