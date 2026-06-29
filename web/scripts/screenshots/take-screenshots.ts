@@ -14,9 +14,12 @@
 //   HYDRA_ARTIFACT_REF     the resolved ref being rendered (informational)
 //
 // Tags: alongside each <name>.png we write a <name>.png.meta JSON sidecar
-// ({"tags": [...]}) that the diff viewer surfaces as labels + filters (see
-// internal/artifacts readTagsSidecar). Every shot is tagged with its theme,
-// viewport, and UI section as scoped "category::value" labels.
+// ({"tags": [...], "dpi": 2}) that the diff viewer surfaces as labels + filters (see
+// internal/artifacts readSidecar). Every shot is tagged with its theme, viewport, and
+// UI section as scoped "category::value" labels. The optional "dpi" records the
+// device-scale factor the shot was captured at (phone shots use 2 for crispness); the
+// grid sizes a tile by its logical width (physical px ÷ dpi), so dpi 2 lays out the
+// same as dpi 1, only sharper. Absent ⇒ 1.
 //
 // Run with: bun scripts/screenshots/take-screenshots.ts  (from web/)
 //
@@ -1246,9 +1249,17 @@ try {
 
     const captureShot = async (pg: (typeof pages)[number], theme: (typeof themes)[number]) => {
         const suffix = theme === 'dark' ? '-dark' : '-light'
+        // Capture phone shots at 2x so they stay crisp when the diff grid gives them a
+        // generous (logical) width; desktop shots stay at 1x (they're already wide
+        // enough). The dpi is written into the .meta sidecar (below) so the grid sizes
+        // a tile by its LOGICAL width (physical px ÷ dpi) — a 2x phone shot lays out the
+        // same as a 1x one, just sharper. "Mobile" matches the viewport tag derived
+        // below: an explicit mobile* viewportTag, else a narrow capture width.
+        const isMobile = pg.viewportTag ? pg.viewportTag.startsWith('mobile') : (pg.viewport?.width ?? 1280) < 700
+        const dpi = isMobile ? 2 : 1
         const ctx = await browser.newContext({
           viewport: pg.viewport ?? { width: 1280, height: 800 },
-          deviceScaleFactor: 1,
+          deviceScaleFactor: dpi,
           colorScheme: theme,
         })
         // Pin Date/now to a fixed instant (matching the server's simNow) so the
@@ -1932,7 +1943,9 @@ try {
         // desktop.
         const viewport = pg.viewportTag ?? ((pg.viewport?.width ?? 1280) < 700 ? 'mobile' : 'desktop')
         const tags = [`theme::${theme}`, `viewport::${viewport}`, `section::${sectionFor(pg.name)}`]
-        writeFileSync(`${out}.meta`, JSON.stringify({ tags }))
+        // Record dpi only when non-default (the 2x phone shots) — Hydra treats an
+        // absent dpi as 1, so desktop sidecars stay byte-identical to before.
+        writeFileSync(`${out}.meta`, JSON.stringify(dpi !== 1 ? { tags, dpi } : { tags }))
         console.log(`wrote ${out}`)
         await ctx.close()
         done++

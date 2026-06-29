@@ -420,6 +420,9 @@ func (s *Server) buildArtifactSet(projectID, name string, leftSpec, rightSpec *c
 			f.Width = ptr(d.Width)
 			f.Height = ptr(d.Height)
 		}
+		if d.Dpi > 0 {
+			f.Dpi = ptr(d.Dpi)
+		}
 		set.Files = append(set.Files, f)
 	}
 	return set

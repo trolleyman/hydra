@@ -232,3 +232,76 @@ func TestCompareFps(t *testing.T) {
 		}
 	}
 }
+
+// TestScanOutputsReadsDpi checks that scanOutputs picks up a dpi from the sidecar,
+// leaves it zero when absent, and warns on (and ignores) a non-positive value.
+func TestScanOutputsReadsDpi(t *testing.T) {
+	m := NewManager(t.TempDir())
+	const script, key = "shot", "commit/dpi"
+	dir := m.entryDir(script, key)
+
+	writeArtifact(t, m, script, key, "retina.webm", []byte("WEBM"))
+	writeArtifact(t, m, script, key, "plain.webm", []byte("WEBM"))
+	writeArtifact(t, m, script, key, "bad.webm", []byte("WEBM"))
+	if err := os.WriteFile(filepath.Join(dir, "retina.webm.meta"), []byte(`{"dpi": 2}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// plain.webm has a sidecar with no dpi → dpi stays zero (unset → treated as 1).
+	if err := os.WriteFile(filepath.Join(dir, "plain.webm.meta"), []byte(`{"tags": ["wip"]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "bad.webm.meta"), []byte(`{"dpi": -1}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	files, warnings, err := scanOutputs(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dpiByName := map[string]float64{}
+	for _, f := range files {
+		dpiByName[f.Name] = f.Dpi
+	}
+	if dpiByName["retina.webm"] != 2 {
+		t.Errorf("retina.webm dpi = %v, want 2", dpiByName["retina.webm"])
+	}
+	if dpiByName["plain.webm"] != 0 {
+		t.Errorf("plain.webm dpi = %v, want 0 (unset)", dpiByName["plain.webm"])
+	}
+	if dpiByName["bad.webm"] != 0 {
+		t.Errorf("bad.webm dpi = %v, want 0 (non-positive ignored)", dpiByName["bad.webm"])
+	}
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "bad.webm") || !strings.Contains(warnings[0], "dpi") {
+		t.Errorf("want one warning mentioning bad.webm + dpi, got %v", warnings)
+	}
+}
+
+// TestCompareDpi checks the diff dpi prefers the head side, falls back to the base,
+// and passes a one-sided file's value through.
+func TestCompareDpi(t *testing.T) {
+	left := []FileMeta{
+		{Name: "both.png", Hash: "a", Dpi: 1},
+		{Name: "base-only.png", Hash: "b", Dpi: 2},
+		{Name: "base-has-dpi.png", Hash: "x", Dpi: 2},
+	}
+	right := []FileMeta{
+		{Name: "both.png", Hash: "a", Dpi: 2},
+		{Name: "head-only.png", Hash: "c", Dpi: 2},
+		// head re-render dropped the sidecar dpi → falls back to the base's.
+		{Name: "base-has-dpi.png", Hash: "y"},
+	}
+	dpiByName := map[string]float64{}
+	for _, d := range Compare(left, right) {
+		dpiByName[d.Name] = d.Dpi
+	}
+	for name, want := range map[string]float64{
+		"both.png":         2, // head wins
+		"base-only.png":    2, // base passes through
+		"head-only.png":    2, // head passes through
+		"base-has-dpi.png": 2, // head unset → base fallback
+	} {
+		if dpiByName[name] != want {
+			t.Errorf("%s dpi = %v, want %v", name, dpiByName[name], want)
+		}
+	}
+}

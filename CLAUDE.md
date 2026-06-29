@@ -49,9 +49,12 @@ entry here — not attach an image file.** Concretely:
   object with optional knobs (viewport, `scrollTo`, `click`/`clicks`,
   `imageDiffMode`, `showArtifacts`, etc. — all documented inline on the page
   type). Every page is captured in both light and dark themes and written as
-  `<name>-<theme>.png` (+ a `.png.meta` tag sidecar). Mock data the shots rely on
-  lives in `internal/http/simulation.go`. No config change is needed — the script
-  auto-surfaces every file it writes.
+  `<name>-<theme>.png` (+ a `.png.meta` JSON sidecar of `{ tags, dpi }`). Mock data
+  the shots rely on lives in `internal/http/simulation.go`. No config change is
+  needed — the script auto-surfaces every file it writes. The `.meta` `dpi` is the
+  device-scale factor the shot was captured at (phone shots use 2 for crispness);
+  the diff grid sizes a tile by its *logical* width (physical px ÷ dpi), so a 2x
+  shot lays out the same as a 1x one, only sharper. Absent ⇒ 1.
 - **A whole new artifact command** (e.g. a different generator/script) → add a new
   `[[artifacts]]` section to `.hydra/config.toml`. See the documented fields there
   (`name`, `command`, `timeout_sec`, `unsafe_host`) and the `HYDRA_ARTIFACT_*`

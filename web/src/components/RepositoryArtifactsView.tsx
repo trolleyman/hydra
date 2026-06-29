@@ -170,7 +170,7 @@ export function RepositoryArtifactsView({
   // server supplies width/height when it could measure them; useMediaDims only
   // downloads the rest to measure client-side.
   const dimSources = useMemo(
-    () => (data?.files ?? []).map((f) => ({ key: f.name, url: f.url ?? null, video: isVideoArtifact(f.name), width: f.width, height: f.height })),
+    () => (data?.files ?? []).map((f) => ({ key: f.name, url: f.url ?? null, video: isVideoArtifact(f.name), width: f.width, height: f.height, dpi: f.dpi })),
     [data?.files],
   )
   const dims = useMediaDims(dimSources)
@@ -307,6 +307,7 @@ export function RepositoryArtifactsView({
                 node: <MediaCell file={f} gallery={gallery} />,
                 aspect: dims[f.name]?.aspect,
                 pxWidth: dims[f.name]?.pxWidth,
+                dpi: dims[f.name]?.dpi,
                 // Videos need a minimum tile width for their transport controls.
                 minWidthPx: isVideoArtifact(f.name) ? VIDEO_MIN_TILE_PX : undefined,
                 // Video uses horizontal drag for scrubbing, so it resizes via the edge

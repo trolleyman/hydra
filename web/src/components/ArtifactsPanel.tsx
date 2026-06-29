@@ -109,7 +109,10 @@ function FileRow({ file, mode, changeThreshold = 0, gallery, index }: {
 // An artifact's measured intrinsic dimensions: its aspect ratio (width / height)
 // drives the default column span, and its natural pixel width lets the grid avoid
 // upscaling a low-resolution shot past 1:1 on a high-DPI/large screen (see spanOf).
-export type ArtifactDim = { aspect: number; pxWidth: number }
+// dpi is the media's capture density (device-scale factor); pxWidth / dpi is its
+// logical width, which is what the grid caps a tile to (see spanOf). 1 when unknown
+// (measured client-side, or a server entry without a dpi sidecar) — logical == physical.
+export type ArtifactDim = { aspect: number; pxWidth: number; dpi: number }
 
 // useArtifactDims measures each artifact's intrinsic aspect ratio and natural pixel
 // width by loading the media off-screen, so the masonry can pick a sensible default
@@ -129,7 +132,8 @@ export function useArtifactDims(sources: { key: string; url: string | null; vide
     let cancelled = false
     const set = (key: string, w: number, h: number) => {
       if (cancelled || !w || !h) return
-      setDims((a) => (a[key] != null ? a : { ...a, [key]: { aspect: w / h, pxWidth: w } }))
+      // Client-measured bytes carry no density, so dpi is 1 (logical == physical).
+      setDims((a) => (a[key] != null ? a : { ...a, [key]: { aspect: w / h, pxWidth: w, dpi: 1 } }))
     }
     for (const s of ref.current) {
       if (!s.url) continue
@@ -158,12 +162,12 @@ export function useArtifactDims(sources: { key: string; url: string | null; vide
 // so for those the visible <img>'s loading="lazy" survives — a large diff no longer
 // eagerly fetches every image up front just to lay out the grid.
 export function useMediaDims(
-  sources: { key: string; url: string | null; video: boolean; width?: number | null; height?: number | null }[],
+  sources: { key: string; url: string | null; video: boolean; width?: number | null; height?: number | null; dpi?: number | null }[],
 ): Record<string, ArtifactDim> {
   const serverDims = useMemo(() => {
     const m: Record<string, ArtifactDim> = {}
     for (const s of sources) {
-      if (s.width && s.height) m[s.key] = { aspect: s.width / s.height, pxWidth: s.width }
+      if (s.width && s.height) m[s.key] = { aspect: s.width / s.height, pxWidth: s.width, dpi: s.dpi && s.dpi > 0 ? s.dpi : 1 }
     }
     return m
   }, [sources])
@@ -188,7 +192,7 @@ export function MasonryGrid({ items, spanScale = 1, scale = 1, spans, onSpanChan
   // bodyResizable defaults to true; set false for tiles whose media owns horizontal
   // drag (the before/after slider, video scrubbing) — those resize via the edge
   // handle only, so the two gestures don't fight.
-  items: { key: string; node: React.ReactNode; aspect?: number; pxWidth?: number; minWidthPx?: number; bodyResizable?: boolean }[]
+  items: { key: string; node: React.ReactNode; aspect?: number; pxWidth?: number; dpi?: number; minWidthPx?: number; bodyResizable?: boolean }[]
   spanScale?: number
   // User's global size multiplier (diff settings size slider): scales every tile's
   // auto span up/down. 1 = the aspect-ratio default. Explicit drag overrides ignore it.
@@ -288,26 +292,29 @@ export function MasonryGrid({ items, spanScale = 1, scale = 1, spans, onSpanChan
   }, [width])
 
   // Resolve a tile's span: an explicit override (from dragging) wins, otherwise the
-  // aspect-ratio default scaled for side-by-side, then capped so we never blow a
-  // shot up past its own resolution. Clamped to the rendered columns.
+  // aspect-ratio default scaled for side-by-side, then capped to the media's logical
+  // width so we never lay it out wider than it "is". Clamped to the rendered columns.
   //
-  // The cap is the DPI fix: a tile's media fills its column run (w-full), so a
-  // low-resolution shot stretched across a wide run on a large/high-DPI screen gets
-  // upscaled and looks blurry. We cap the auto span to the widest run whose CSS width
-  // stays within the image's own CSS width (natural px ÷ devicePixelRatio) — i.e. the
-  // most columns it can cover at ≤1:1 device pixels. In side-by-side the run holds the
+  // The cap reasons in LOGICAL pixels, not physical ones: what matters for a UI
+  // screenshot is its logical size (a 390pt phone shot is a phone whether captured at
+  // 1x or 2x), so we cap the auto span to the widest run that stays within the media's
+  // logical width = natural px ÷ its capture dpi (the device-scale factor from its
+  // sidecar; 1 when unknown). This keeps a consistent default regardless of how
+  // densely the shot was captured or what display you're viewing on — a 2x capture
+  // lays out the same as a 1x one, just sharper. In side-by-side the run holds the
   // before+after pair so each image only gets ~half of it, hence the spanScale budget.
-  // Explicit drag overrides bypass the cap: enlarging past native is then deliberate.
-  const spanOf = useCallback((it: { key: string; aspect?: number; pxWidth?: number; minWidthPx?: number }): number => {
+  // The `scale` multiplier (size slider) loosens the cap so turning the slider up
+  // enlarges past logical size deliberately. Explicit drag overrides bypass it entirely.
+  const spanOf = useCallback((it: { key: string; aspect?: number; pxWidth?: number; dpi?: number; minWidthPx?: number }): number => {
     let req = spans[spanKey(it.key)]
     if (req == null) {
       req = defaultSpanForAspect(it.aspect) * spanScale * scale
       const unit = layout.colW + layout.gap
       if (it.pxWidth && layout.colW > 0) {
-        const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1
-        // Scale the no-upscale budget by the same `scale`: a user who turns the size
-        // slider up is opting into some upscaling, so the cap loosens with them.
-        const budgetCss = (it.pxWidth / dpr) * spanScale * scale
+        const dpi = it.dpi && it.dpi > 0 ? it.dpi : 1
+        // The media's logical width, then scaled by the size-slider `scale` (turning it
+        // up opts into enlarging past logical size).
+        const budgetCss = (it.pxWidth / dpi) * spanScale * scale
         // tileW(s) = s*colW + (s-1)*gap ≤ budgetCss  ⇒  s ≤ (budgetCss + gap)/(colW + gap)
         const maxSpan = Math.max(1, Math.floor((budgetCss + layout.gap) / unit))
         req = Math.min(req, maxSpan)
@@ -530,6 +537,7 @@ function FileGrid({ files, mode, scale = 1, spans, onSpanChange, scope, changeTh
       video: isVideoArtifact(f.name),
       width: f.width,
       height: f.height,
+      dpi: f.dpi,
     })),
     [files],
   )
@@ -564,6 +572,7 @@ function FileGrid({ files, mode, scale = 1, spans, onSpanChange, scope, changeTh
       node: <FileRow file={f} mode={mode} changeThreshold={changeThreshold} gallery={diffGallery} index={galleryIndex.get(f.name)} />,
       aspect: dims[f.name]?.aspect,
       pxWidth: dims[f.name]?.pxWidth,
+      dpi: dims[f.name]?.dpi,
       // Videos need a minimum tile width for their transport controls (see
       // VIDEO_MIN_TILE_PX); images have no such chrome.
       minWidthPx: isVideoArtifact(f.name) ? VIDEO_MIN_TILE_PX : undefined,
