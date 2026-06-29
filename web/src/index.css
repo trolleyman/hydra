@@ -57,6 +57,23 @@ body {
   animation: fade-in-out 2s ease-in-out forwards;
 }
 
+/* Gentle "whirring" breathe for the status dot while an agent is actively
+   working (running/starting/etc.) — a subtle scale + opacity pulse so it reads
+   as alive without being a distracting blink. Color-agnostic so it works for
+   whichever bg-* the dot carries. */
+@keyframes status-pulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.35); opacity: 0.65; }
+}
+
+.animate-status-pulse {
+  animation: status-pulse 1.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-status-pulse { animation: none; }
+}
+
 /* highlight.js v11's github theme sets `code.hljs { padding: 3px 5px }`. The
    repository file view renders one `<code class="hljs">` per line, so that
    vertical padding pushed each line below its line-number gutter (numbers looked

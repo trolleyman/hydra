@@ -1730,6 +1730,37 @@ try {
           // layout is deterministic, so a fixed wait past it stays byte-stable.
           await page.waitForTimeout(500)
           await settle(page)
+          // Force every .webm tile to decode + paint a frame. Each video sits on a
+          // transparent checkerboard backdrop (checkerStyle), so if it hasn't
+          // decoded a frame by capture time the tile shows through as a bare
+          // checkerboard — a flaky, environment-dependent render. play() is no-op'd
+          // by the init script, so autoplay can't advance the video; only the
+          // browser's own first-frame decode would paint it, and that races the
+          // screenshot. Seeking pins a frame deterministically (same trick the
+          // videoDiff shots use): once metadata is in we seek a little past the
+          // midpoint so the tile shows a representative, mid-animation frame — and
+          // for an overlay mode (onion/slider) before/after actually differ there,
+          // unlike the identical frame 0. The 'seeked' event then confirms the
+          // decode, so the tile reliably paints instead of rendering transparent.
+          await page.evaluate(async () => {
+            const vids = Array.from(document.querySelectorAll('video'))
+            await Promise.all(vids.map((v) => new Promise<void>((res) => {
+              const seekToMid = () => {
+                // 60% of the run lands mid-animation for any clip length; fall back
+                // to a tiny non-zero time when duration isn't known yet (which still
+                // forces a first-frame decode).
+                const t = Number.isFinite(v.duration) && v.duration > 0 ? v.duration * 0.6 : 0.05
+                const done = () => { v.removeEventListener('seeked', done); res() }
+                v.addEventListener('seeked', done)
+                try { v.currentTime = t } catch { res() }
+              }
+              v.pause()
+              if (v.readyState >= 1 /* HAVE_METADATA */) seekToMid()
+              else v.addEventListener('loadedmetadata', seekToMid, { once: true })
+              setTimeout(res, 5000) // fallback must exceed 4000ms (init script zeroes shorter timers)
+            })))
+          })
+          await settle(page)
           // Pin the "screenshots" card to the top of the scroll container so its
           // expanded grid is the focus (same sticky-aware offset as expandArtifact).
           await page.evaluate(() => {
@@ -1977,6 +2008,85 @@ try {
     }
     progress('recording spinner video')
     for (const theme of themes) await recordSpinner(theme)
+
+    // Record the sidebar's status dot gently pulsing while an agent is "running",
+    // together with its small detail row (type pill, status badge, live-activity
+    // line) — the moving twin of the static sidebar shot, and a second clip for
+    // the video diff viewer. We clip tightly to just the one agent row.
+    //
+    // Like the spinner, the pulse is a CSS keyframe (animate-status-pulse: a
+    // scale + opacity breathe), so we DON'T let it free-run on the wall clock.
+    // We kill every CSS animation and drive the dot's scale/opacity ourselves per
+    // frame, mirroring the keyframe with a raised-cosine pulse (1 → peak → 1 over
+    // the cycle), so the frames are deterministic and a re-render never reads
+    // "modified". Same bitexact/lossless ffmpeg encode as recordSpinner.
+    // 30fps for a smooth breathe (the spinner clip's 12fps is choppy for a
+    // scale/opacity pulse). 42 frames = one 1.4s cycle, matching the CSS
+    // animation's real duration. Cost is only capture time (one screenshot per
+    // frame); determinism is unaffected by fps.
+    const PULSE_FPS = 30
+    const PULSE_FRAMES = 42 // one 1.4s breathe cycle at 30fps
+    const recordStatusDot = async (theme: (typeof themes)[number]) => {
+      const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 }, deviceScaleFactor: 1, colorScheme: theme })
+      await ctx.clock.setFixedTime(SIM_NOW)
+      await ctx.addInitScript(({ key, mode }) => { try { localStorage.setItem(key, mode) } catch { /* ignore */ } }, { key: StorageKeys.themeMode, mode: theme })
+      await ctx.addInitScript(({ key, value }) => { try { window.localStorage.setItem(key, value) } catch { /* ignore */ } }, { key: StorageKeys.trustedProjects, value: JSON.stringify([SIM_PROJECT]) })
+      const page = await ctx.newPage()
+      try {
+        await page.goto(base + '/project/sim-project/', { waitUntil: 'domcontentloaded' })
+        // The first sidebar agent (agent-md) is "running" (see simulation.go
+        // ListAgents), so its status dot pulses green and its detail row carries a
+        // live-activity line — exactly the "status icon + small agent detail" we want.
+        const row = page.locator('aside button:has-text("Add inline markdown rendering")').first()
+        await row.waitFor()
+        await page.evaluate(async () => { if (document.fonts && document.fonts.ready) await document.fonts.ready })
+        // Kill every CSS animation/transition so the pulse doesn't free-run on the
+        // wall clock; we set the dot's scale/opacity explicitly per frame below.
+        await page.addStyleTag({ content: '*,*::before,*::after{animation:none!important;transition:none!important}' })
+        const box = await row.boundingBox()
+        if (!box) throw new Error('sidebar agent row has no bounding box')
+        // Clip tightly to the row, rounded to an even-sided box.
+        const clip = {
+          x: Math.round(box.x),
+          y: Math.round(box.y),
+          width: Math.round(box.width / 2) * 2,
+          height: Math.round(box.height / 2) * 2,
+        }
+        const tmp = mkdtempSync(join(tmpdir(), 'hydra-pulse-'))
+        for (let i = 0; i < PULSE_FRAMES; i++) {
+          const p = i / PULSE_FRAMES
+          const e = (1 - Math.cos(2 * Math.PI * p)) / 2 // raised cosine: 0 → 1 → 0
+          const scale = 1 + 0.35 * e
+          const opacity = 1 - 0.35 * e
+          await row.evaluate((el, s) => {
+            const dot = el.querySelector('.animate-status-pulse') as HTMLElement | null
+            if (dot) {
+              dot.style.transform = `scale(${s.scale})`
+              dot.style.opacity = String(s.opacity)
+            }
+          }, { scale, opacity })
+          // Commit the inline style before the shot (two rAFs, like settle()).
+          await page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))))
+          await page.screenshot({ path: join(tmp, `f${String(i).padStart(3, '0')}.png`), clip })
+        }
+        const out = join(OUT, `status-dot-pulse-${theme}.webm`)
+        const r = spawnSync(ffmpegBin, [
+          '-y', '-nostdin', '-loglevel', 'error',
+          '-framerate', String(PULSE_FPS), '-i', join(tmp, 'f%03d.png'),
+          '-c:v', 'libvpx-vp9', '-lossless', '1', '-pix_fmt', 'yuv444p',
+          '-g', String(PULSE_FPS), '-threads', '1', '-an',
+          '-flags', '+bitexact', '-fflags', '+bitexact',
+          out,
+        ], { encoding: 'utf8' })
+        if (r.status !== 0) throw new Error(`ffmpeg failed (${r.status}): ${r.stderr}`)
+        writeFileSync(`${out}.meta`, JSON.stringify({ tags: [`theme::${theme}`, 'section::agent'] }))
+        console.log(`wrote ${out}`)
+      } finally {
+        await ctx.close()
+      }
+    }
+    progress('recording status-dot video')
+    for (const theme of themes) await recordStatusDot(theme)
   } finally {
     await browser.close()
   }

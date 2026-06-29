@@ -51,6 +51,26 @@ export function agentDotClass(agent: AgentResponse): string {
   return statusDotClass(agent.session_status)
 }
 
+// agentDotAnimate returns the pulse-animation class for the status dot while the
+// agent is actively "whirring" — spinning up (starting/building/pending) or doing
+// work (running/merging/killing) — so the dot gently breathes to signal it's live.
+// Returns '' for settled states (waiting, needs_input, finished, stopped) so they
+// stay calm/static.
+export function agentDotAnimate(agent: AgentResponse): string {
+  switch (agent.agent_status?.status) {
+    case 'running':
+    case 'merging':
+    case 'starting':
+    case 'building':
+    case 'pending':
+    case 'killing':
+      return 'animate-status-pulse'
+  }
+  // No agent status yet — fall back to the raw session state so a live session
+  // still pulses while it reports in.
+  return agent.session_status === 'running' ? 'animate-status-pulse' : ''
+}
+
 export function formatStartedAgo(createdAt: number): string {
   const seconds = Math.floor((Date.now() - createdAt * 1000) / 1000)
   if (seconds < 5) return 'just now'
@@ -179,7 +199,7 @@ export function AgentSidebarItem({
     >
       <div className="flex items-center gap-2 min-w-0">
         <span
-          className={`w-2 h-2 rounded-full shrink-0 ${archived ? 'bg-gray-300 dark:bg-gray-600' : agentDotClass(agent)}`}
+          className={`w-2 h-2 rounded-full shrink-0 ${archived ? 'bg-gray-300 dark:bg-gray-600' : `${agentDotClass(agent)} ${agentDotAnimate(agent)}`}`}
         />
         <span className={`font-medium text-sm truncate ${archived ? 'text-gray-500 dark:text-gray-400' : 'text-gray-900 dark:text-gray-100'}`}>{agent.title || agent.id}</span>
         {!archived && agent.agent_status?.status === 'needs_input' ? (
