@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback, Fragment, useMemo, memo } fro
 import { highlightLines } from './lib/highlightCore'
 import { highlightSides } from './lib/highlightClient'
 import { api } from './stores/apiClient'
-import { formatError } from './api/format_error'
+import { formatError, apiErrorBody } from './api/format_error'
 import type { AgentResponse, CommitInfo, DiffFile, DiffHunk, DiffLine, DiffResponse } from './api'
 import {
   Plus, Calendar, TriangleAlert,
@@ -1419,19 +1419,19 @@ function BehindBaseButton({ diff, agent, projectId, onUpdated }: {
         try {
           await api.default.updateAgentFromBase(projectId ?? '', agent.id)
           onUpdated()
-        } catch (err: any) {
-          const errorData = (err.body && typeof err.body === 'object') ? err.body : err
-          if (errorData.error === 'uncommitted_changes') {
+        } catch (err) {
+          const body = apiErrorBody(err)
+          if (body?.error === 'uncommitted_changes') {
             // The worktree has uncommitted changes the incoming base would overwrite
             // — not a content conflict. Name the files and ask the user to commit/stash.
-            const files: string[] = Array.isArray(errorData.conflicting_files) ? errorData.conflicting_files : []
+            const files = body.conflicting_files ?? []
             const fileList = files.length ? `\n\n${files.map((f) => `• ${f}`).join('\n')}` : ''
             useDialogStore.getState().show({
               title: 'Uncommitted Changes',
               message: `Can't update: your worktree has uncommitted changes that merging "${baseBranch}" would overwrite. Commit or stash them, then try again.${fileList}`,
               type: 'warning',
             })
-          } else if (errorData.error === 'merge_conflict') {
+          } else if (body?.error === 'merge_conflict') {
             useDialogStore.getState().show({
               title: 'Update Conflict',
               message: `CONFLICT: Merging "${baseBranch}" failed due to git conflicts. Resolve them manually in the worktree.`,

@@ -1,6 +1,7 @@
 import React, { useEffect, type ReactNode } from 'react'
 import { AlertCircle, AlertTriangle, ArrowRight, Info, HelpCircle, Merge, Trash2, X } from 'lucide-react'
 import { useDialogStore } from '../stores/dialogStore'
+import { IconButton } from './IconButton'
 import type { DialogDetails } from '../stores/dialogStore'
 
 export const Dialog: React.FC = () => {
@@ -90,12 +91,9 @@ export const Dialog: React.FC = () => {
                 {title}
               </h3>
             </div>
-            <button
-              onClick={handleCancel}
-              className="p-1 rounded-md text-gray-400 hover:text-gray-500 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors cursor-pointer"
-            >
+            <IconButton onClick={handleCancel}>
               <X className="w-5 h-5" />
-            </button>
+            </IconButton>
           </div>
 
           <div className="px-6 py-4">

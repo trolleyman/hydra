@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest'
-import { statusDotClass, agentDotClass } from './AgentComponents'
+import { statusDotClass, agentDotClass, agentStatusBadge, archivedEndStateBadge } from './AgentComponents'
 import type { AgentResponse } from '../api'
 import { AgentStatus } from '../api'
+import { TONE_DOT, TONE_BADGE } from './Badge'
 
 // Helper: build a minimal-but-valid AgentResponse. `session` seeds the raw
 // sandbox session status; `status` (when given) seeds agent_status, the richer
@@ -90,5 +91,74 @@ describe('agentDotClass', () => {
     expect(agentDotClass(makeAgent({ session: 'running' }))).toBe('bg-green-500')
     expect(agentDotClass(makeAgent({ session: 'exited' }))).toBe('bg-red-400')
     expect(agentDotClass(makeAgent({ session: 'stopped' }))).toBe(GRAY)
+  })
+})
+
+// PLAN #65: the status badge helpers and the dots now derive from one set of tone
+// tables (Badge.tsx). These pin that the consolidation preserved every status'
+// label + colour, so a tone change lights up exactly the affected statuses.
+describe('agentStatusBadge', () => {
+  it.each([
+    ['pending', 'pending', TONE_BADGE.neutral],
+    ['building', 'building', TONE_BADGE.blue],
+    ['deploying', 'deploying', TONE_BADGE.indigo],
+    ['running', 'running', TONE_BADGE.green],
+    ['starting', 'starting', TONE_BADGE.blue],
+    ['needs_input', 'needs_input', TONE_BADGE.red],
+    ['waiting', 'waiting', TONE_BADGE.yellow],
+    ['finished', 'finished', TONE_BADGE.violet],
+    ['merging', 'merging', TONE_BADGE.green],
+    ['ended', 'ended', TONE_BADGE.muted],
+    ['exited', 'exited', TONE_BADGE.red],
+  ])('%s → { %s, … }', (status, label, className) => {
+    expect(agentStatusBadge(status)).toEqual({ label, className })
+  })
+
+  it('renders statuses without a chip of their own with the dim faint fill', () => {
+    expect(agentStatusBadge('killing')).toEqual({ label: 'killing', className: TONE_BADGE.faint })
+    expect(agentStatusBadge('stopped')).toEqual({ label: 'stopped', className: TONE_BADGE.faint })
+  })
+
+  it('handles an unknown / missing status with a faint, echoed label', () => {
+    expect(agentStatusBadge('mystery')).toEqual({ label: 'mystery', className: TONE_BADGE.faint })
+    expect(agentStatusBadge(undefined)).toEqual({ label: '', className: TONE_BADGE.faint })
+  })
+
+  it('keeps the literal class values stable', () => {
+    expect(agentStatusBadge('running').className).toBe('bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400')
+    expect(agentStatusBadge('ended').className).toBe('bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400')
+    expect(agentStatusBadge(undefined).className).toBe('bg-gray-50 text-gray-400 dark:bg-gray-800 dark:text-gray-500')
+  })
+})
+
+describe('archivedEndStateBadge', () => {
+  it.each([
+    ['merged', 'merged'],
+    ['killed', 'killed'],
+  ])('%s → %s, muted', (endState, label) => {
+    expect(archivedEndStateBadge(endState)).toEqual({ label, className: TONE_BADGE.muted })
+  })
+
+  it('falls back to the "archived" label for any other / missing end state', () => {
+    expect(archivedEndStateBadge('purged')).toEqual({ label: 'archived', className: TONE_BADGE.muted })
+    expect(archivedEndStateBadge(null)).toEqual({ label: 'archived', className: TONE_BADGE.muted })
+    expect(archivedEndStateBadge(undefined)).toEqual({ label: 'archived', className: TONE_BADGE.muted })
+  })
+})
+
+describe('dot and badge derive from the same tone', () => {
+  // The point of the consolidation: a status' dot and its badge are two views of
+  // the same tone, so for the statuses that carry both they can never drift apart.
+  it.each([
+    [AgentStatus.RUNNING, 'green'],
+    [AgentStatus.MERGING, 'green'],
+    [AgentStatus.NEEDS_INPUT, 'red'],
+    [AgentStatus.WAITING, 'yellow'],
+    [AgentStatus.FINISHED, 'violet'],
+    [AgentStatus.STARTING, 'blue'],
+    [AgentStatus.BUILDING, 'blue'],
+  ] as const)('%s shares one tone across dot and badge', (status, tone) => {
+    expect(agentDotClass(makeAgent({ status }))).toBe(TONE_DOT[tone])
+    expect(agentStatusBadge(status).className).toBe(TONE_BADGE[tone])
   })
 })

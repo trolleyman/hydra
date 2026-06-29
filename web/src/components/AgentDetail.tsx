@@ -3,7 +3,8 @@ import { useNavigate } from '@tanstack/react-router'
 import { api } from '../stores/apiClient'
 import { useServerData } from '../lib/useServerData'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from '../lib/agentViewPrefs'
-import { formatError } from '../api/format_error'
+import { formatError, apiErrorBody } from '../api/format_error'
+import { runWithToast } from '../lib/apiAction'
 import type { AgentResponse, RepositoryBranch, ApprovalRequest } from '../api'
 import { ApprovalDecisionRequest } from '../api'
 import { AgentTerminal } from './AgentTerminal'
@@ -18,6 +19,7 @@ import { DiffViewer } from '../DiffViewer'
 import { formatStartedAgo, agentStatusBadge, archivedEndStateBadge, agentDotClass, agentTypePill } from './AgentComponents'
 import { LoaderCircle, Merge, Trash2, Tag, RotateCcw, Pencil, TerminalSquare, Mail, ShieldAlert, ShieldCheck, ShieldOff } from 'lucide-react'
 import { Tooltip } from './Tooltip'
+import { Badge } from './Badge'
 import { AgentTypeIcon, type AgentTypeIconName } from './AgentTypeIcon'
 import { renderMarkdown } from '../lib/markdown'
 
@@ -157,13 +159,14 @@ function ArchivedAgentDetail({ agent, projectId, onPurged }: { agent: AgentRespo
         <div className="mb-6">
           {/* Metadata row */}
           <SeparatedRow className="flex items-center gap-3 flex-wrap">
-            <span className={`inline-flex items-center gap-1 text-xs px-2.5 py-0.5 rounded-full font-medium ${agentTypeClass}`}>
-              <AgentTypeIcon name={agent.agent_type as AgentTypeIconName} className="w-3 h-3 shrink-0" />
+            <Badge
+              variant="pill"
+              className={agentTypeClass}
+              icon={<AgentTypeIcon name={agent.agent_type as AgentTypeIconName} className="w-3 h-3 shrink-0" />}
+            >
               {agent.agent_type}
-            </span>
-            <span className={`text-xs px-2 py-0.5 rounded font-medium ${endBadge.className}`}>
-              {endBadge.label}
-            </span>
+            </Badge>
+            <Badge className={endBadge.className}>{endBadge.label}</Badge>
             {agent.branch_name && (
               <span className="text-xs font-mono text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
                 <Tag className="w-3.5 h-3.5" />
@@ -253,10 +256,9 @@ function NetworkEnforcementBadge({ mode }: { mode?: string }) {
   if (!c) return null
   return (
     <Tooltip content={c.tip}>
-      <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded font-medium ${c.className}`}>
-        <c.Icon className="w-3 h-3 shrink-0" />
+      <Badge className={c.className} icon={<c.Icon className="w-3 h-3 shrink-0" />}>
         {c.label}
-      </span>
+      </Badge>
     </Tooltip>
   )
 }
@@ -286,15 +288,14 @@ function ApprovalCard({ agent, projectId, onRefresh }: { agent: AgentResponse; p
   async function decide(reqid: string, decision: ApprovalDecisionRequest.decision, remember: boolean) {
     if (!projectId) return
     setBusyId(reqid)
-    try {
-      await api.default.decideAgentApproval(projectId, agent.id, reqid, { decision, remember })
+    const res = await runWithToast(() =>
+      api.default.decideAgentApproval(projectId, agent.id, reqid, { decision, remember }),
+    )
+    if (res.ok) {
       setApprovals((prev) => prev.filter((a) => a.reqid !== reqid))
       onRefresh?.()
-    } catch (err) {
-      useToastStore.getState().show({ message: formatError(err), type: 'error' })
-    } finally {
-      setBusyId(null)
     }
+    setBusyId(null)
   }
 
   const btn = 'text-xs px-2.5 py-1 rounded font-medium disabled:opacity-50'
@@ -541,20 +542,20 @@ export function AgentDetail({
           // archived-list refetch (which only happens on a project switch).
           useAgentStore.getState().upsertArchived({ ...agent, archived: true, end_state: 'merged', session_status: 'stopped', session_pid: 0 })
           onKilled(agent.id)
-        } catch (err: any) {
-          const errorData = (err.body && typeof err.body === 'object') ? err.body : err
-          if (errorData.error === 'uncommitted_changes') {
+        } catch (err) {
+          const body = apiErrorBody(err)
+          if (body?.error === 'uncommitted_changes') {
             // The merge target (the base branch's checkout) has uncommitted local
             // changes the merge would overwrite — distinct from a content conflict
             // between the branches. Name the files and tell the user to commit/stash.
-            const files: string[] = Array.isArray(errorData.conflicting_files) ? errorData.conflicting_files : []
+            const files = body.conflicting_files ?? []
             const fileList = files.length ? `\n\n${files.map((f) => `• ${f}`).join('\n')}` : ''
             useDialogStore.getState().show({
               title: 'Uncommitted Changes in Target',
               message: `Can't merge: the merge target (${agent.base_branch}) has uncommitted changes that the merge would overwrite. Commit or stash them, then try again.${fileList}`,
               type: 'warning'
             })
-          } else if (errorData.error === 'merge_conflict') {
+          } else if (body?.error === 'merge_conflict') {
             useDialogStore.getState().show({
               title: 'Merge Conflict',
               message: `CONFLICT: Merge failed due to git conflicts. Please resolve them manually or update from base.`,
@@ -708,15 +709,15 @@ export function AgentDetail({
       return
     }
     setSavingTitle(true)
-    try {
-      const updated = await api.default.updateAgent(projectId ?? '', agent.id, { title: next })
-      updateAgentInStore(updated)
+    const res = await runWithToast(
+      () => api.default.updateAgent(projectId ?? '', agent.id, { title: next }),
+      { errorPrefix: 'Failed to rename agent' },
+    )
+    if (res.ok) {
+      updateAgentInStore(res.value)
       setEditingTitle(false)
-    } catch (err) {
-      useToastStore.getState().show({ message: `Failed to rename agent: ${formatError(err)}`, type: 'error' })
-    } finally {
-      setSavingTitle(false)
     }
+    setSavingTitle(false)
   }
 
   // Changing the base branch is metadata-only: it updates what update-from-base
@@ -726,15 +727,15 @@ export function AgentDetail({
   async function saveBase(next: string) {
     if (!next || next === (agent.base_branch || '')) return
     setSavingBase(true)
-    try {
-      const updated = await api.default.updateAgent(projectId ?? '', agent.id, { base_branch: next })
-      updateAgentInStore(updated)
-      useToastStore.getState().show({ message: `Base branch set to ${next} (commits not moved)`, type: 'success' })
-    } catch (err) {
-      useToastStore.getState().show({ message: `Failed to set base branch: ${formatError(err)}`, type: 'error' })
-    } finally {
-      setSavingBase(false)
-    }
+    const res = await runWithToast(
+      () => api.default.updateAgent(projectId ?? '', agent.id, { base_branch: next }),
+      {
+        success: `Base branch set to ${next} (commits not moved)`,
+        errorPrefix: 'Failed to set base branch',
+      },
+    )
+    if (res.ok) updateAgentInStore(res.value)
+    setSavingBase(false)
   }
 
   // Archived agents are read-only: render the history view instead of the live
@@ -785,14 +786,17 @@ export function AgentDetail({
         <div className="mb-6">
           {/* Metadata row */}
           <SeparatedRow className="flex items-center gap-x-3 gap-y-1 flex-wrap">
-            <span className={`inline-flex items-center gap-1 text-xs px-2.5 py-0.5 rounded-full font-medium ${agentTypeClass}`}>
-              <AgentTypeIcon name={agent.agent_type as AgentTypeIconName} className="w-3 h-3 shrink-0" />
+            <Badge
+              variant="pill"
+              className={agentTypeClass}
+              icon={<AgentTypeIcon name={agent.agent_type as AgentTypeIconName} className="w-3 h-3 shrink-0" />}
+            >
               {agent.agent_type}
-            </span>
+            </Badge>
             {agent.agent_status && (
-              <span className={`text-xs px-2 py-0.5 rounded font-medium ${agentStatusBadge(agent.agent_status.status).className}`}>
+              <Badge className={agentStatusBadge(agent.agent_status.status).className}>
                 {agentStatusBadge(agent.agent_status.status).label}
-              </span>
+              </Badge>
             )}
             {agent.network_enforcement && <NetworkEnforcementBadge mode={agent.network_enforcement} />}
             {agent.branch_name && (
