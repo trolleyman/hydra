@@ -453,6 +453,35 @@
 
     _Open decisions for `claude design` to call:_ (i) does the gate also block on `errored`, or only on `failing` (lean: block on both, since "unknown" before a merge is itself a reason to pause — but make the force copy distinguish them); (ii) is the base-green cross-reference in v1 or cut; (iii) where the Tests surface primarily lives — a diff-viewer tab vs. a header-chip popover vs. both.
 
+    #### Design locked (2026-06-29) — `claude design` returned, decisions resolved
+
+    Visual spec delivered as mockups (light+dark) under `.hydra/local/uploads/` and is the implementation reference. Decisions resolved:
+
+    - **(i) Gate blocks on both `failing` and `errored`**, with *different copy*. Failing → button reads **"Force merge"**, confirm: _"2 tests are failing on this commit — their failures land on main."_ Errored → button reads **"Merge anyway"**, confirm: _"Tests couldn't run on this commit — there's no verdict, not a pass."_
+    - **(ii) Base-green cross-reference is IN**, but as the cheapest possible form: a single inline note on a `failing`/`errored` panel header (_"both failures are pre-existing on main — not introduced here"_), computed by a lazy base-ref verdict lookup. No per-case diff.
+    - **(iii)** The Tests surface lives in **both** places: a compact popover from the header **verdict chip**, and the full **Tests card** in the diff-viewer area (hosting the live log tail via `ArtifactLogView`).
+
+    **Verdict chip — six states, one footprint** (sidebar row + agent header):
+    - `passing` — green soft chip, check glyph, `✓ 142`. Skip count rides *after a divider* on the same chip.
+    - `failing` — red soft chip, ✗ glyph, `✗ 2 failed`. Soft-gates merge.
+    - `running` — indigo/blue soft chip, spinner, `84/142 · 12s` (reuses artifacts progress).
+    - `errored` — **slate** soft chip (never red), warning-triangle, `couldn't run`.
+    - `stale` — gray soft chip with **dashed** border, clock glyph, `142 · stale`.
+    - `none` — renders nothing.
+    - **Skipped renders GRAY** (neutral `inert/no-signal` tone), **not amber** — per user; amber implies a warning a skipped test doesn't warrant. Glyph is **skip-forward** (▶|), never the ⊘ no-entry mark (reads as "blocked"). Errored stays slate; skipped stays gray; the two never share a row so they don't collide.
+
+    **Tests card (single-sided, failing-first):** header line `✓ 142  ✗ 2  ⊘ 3 · 4.2s · <runner>` + an inline pre-existing-on-main note when relevant; then failing cases expanded first (mono test id + assertion `message` block), with collapsed `N passing` / `N skipped` rows below. A `Re-run` button (= `Invalidate` + re-`Get`). Running state shows the indigo header, a thin progress bar, the live `vitest`/`go test` log tail, and partial `✓/✗` counts.
+
+    **Merge button — one control, six states:**
+    - `passing`/`none` → solid green **Merge**, no friction.
+    - `failing` → split button **Force merge ▾** (red-tinted) + the failing-copy confirm.
+    - `errored` → split button **Merge anyway ▾** (slate-tinted) + the errored-copy confirm.
+    - `running` → green split button **Merge when green** (body arms auto-merge); caret menu: **Merge now (don't wait)** · **Test, then merge**.
+    - `armed` → calm green pill **"Merges when green"** + clock + always-present **Cancel**.
+    - `merging` → disabled spinner **Merging…** (no double-submit).
+
+    **Armed in context:** an armed head wears a small **clock** + `merges when green` chip in its sidebar row (with the `waiting on tests · 84/142` subline). If the next commit's tests go red, auto-merge **cancels itself** and raises a toast (_"Auto-merge cancelled — 2 tests went red on commit a1b2c3. The branch was not merged."_) with **View tests** / **Re-arm** actions. It never merges a failing commit silently.
+
 69. [x] **[Sandbox]** **Run `.hydra/config.toml` commands under `set -eo pipefail` (strict mode) by default.** Every user-declared config command was launched as a bare `bash -c <command>` with no shell flags, so a mid-script failure whose *last* command happened to exit 0 was silently swallowed — masking real failures where exit codes drive behavior: artifacts **cache by outcome** (#38), so a half-broken render cached as a success until the ref changed; services **restart on unexpected exit**, so a failed startup step read as healthy; and a `generate | tee out.png` pipe hid the generator's failure entirely. The four launch sites were `internal/artifacts/artifacts.go` (`[[artifacts]]`), `internal/services/services.go` (`[[services]]`), `internal/heads/heads.go`+`nshost.go` (`pre_exit_script`), and `internal/sandbox/sandbox.go` `withPreSpawn` (`pre_spawn_script`).
 
     _Done:_ commands now run under `set -eo pipefail` (errexit + pipefail) by default. **`nounset` (`-u`) is deliberately omitted** — config scripts routinely read optional env vars, and aborting on the first unset one would break too many real scripts. A shared `sandbox.StrictShellPreamble`/`StrictScript(cmd)` helper prepends the preamble; `[[artifacts]]`/`[[services]]` gained a `strict` opt-out (`config.ArtifactScript.Strict`/`ServiceScript.Strict` `*bool`, default-on via `IsStrict()`, mirroring `IsEnabled`), threaded through the TOML round-trip (field emitters + renderer doc blocks + the live `.hydra/config.toml`), the API (`strict` on both schemas, regenerated Go stub + TS client), the handler mappings, and a **Strict mode** checkbox in the Settings artifacts + services editors. `pre_spawn_script` and `pre_exit_script` are single inline scripts (no array entry to hang a field on), so they apply strict automatically with `set +e`-as-first-line / `cmd || true` as the documented opt-out — pre_exit notes that teardown wanting best-effort should use it.
