@@ -806,6 +806,20 @@ try {
       // variant — red icon tile + a warning chip naming how many unmerged files
       // the worktree deletion will discard (count fetched in the background).
       { name: 'agent-kill-dialog', path: '/project/sim-project/agent/agent-1', viewportOnly: true, click: 'button[aria-label="Kill"]' },
+      // The redesigned merge-conflict panel: agent-3's diff carries the
+      // merge_conflict flag (simulation.go GetAgentDiff), so the Changes toolbar
+      // shows a red "N conflict" button; clicking it opens the rich panel — red
+      // icon tile + title/subtitle, an uppercase "Conflicting files" chip and the
+      // dark "Resolving locally" command block, with Dismiss / Fix-with-agent in
+      // the shared dialog-button styling. scrollTo brings the toolbar into view for
+      // the click; the panel itself is a fixed, centered overlay.
+      { name: 'merge-conflict-dialog', path: '/project/sim-project/agent/agent-3', viewportOnly: true, scrollTo: 'Changes', click: 'button:has-text("conflict")' },
+      // The redesigned update-from-base confirmation: agent-2's diff trails its
+      // base (behind_count) so the Changes toolbar shows an amber "N behind"
+      // button; clicking it opens the rich panel — amber icon tile, a base→branch
+      // chip with the behind count, and (because agent-2 also has uncommitted
+      // changes) the amber caution note. scrollTo reveals the toolbar for the click.
+      { name: 'agent-update-base-dialog', path: '/project/sim-project/agent/agent-2', viewportOnly: true, scrollTo: 'Changes', click: 'button:has-text("behind")' },
       // The agent-detail prompt block rendering the upload paths a prompt carries
       // as attachment chips instead of raw links: three image thumbnails (served a
       // fixed stub PNG) and one non-image file shown with a generic icon, the
