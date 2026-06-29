@@ -82,20 +82,24 @@ func (s *SimulationServer) GetClaudeUsage(w http.ResponseWriter, r *http.Request
 }
 
 func (s *SimulationServer) ListProjects(w http.ResponseWriter, r *http.Request) {
-	simUnread := 1   // matches the one unread agent in ListAgents
-	otherUnread := 3 // updates waiting in a project you're not looking at
+	simUnread := 1       // matches the one unread agent in ListAgents
+	simNeedsInput := 1   // matches the one needs_input agent in ListAgents
+	otherUnread := 3     // updates waiting in a project you're not looking at
+	otherNeedsInput := 1 // one of those is blocked on you → red dot elsewhere
 	resp := api.ListProjects200JSONResponse{
 		{
-			Id:          "sim-project",
-			Path:        "/simulated/project",
-			Name:        "simulated-project",
-			UnreadCount: &simUnread,
+			Id:              "sim-project",
+			Path:            "/simulated/project",
+			Name:            "simulated-project",
+			UnreadCount:     &simUnread,
+			NeedsInputCount: &simNeedsInput,
 		},
 		{
-			Id:          "mobile-app",
-			Path:        "/simulated/mobile-app",
-			Name:        "mobile-app",
-			UnreadCount: &otherUnread,
+			Id:              "mobile-app",
+			Path:            "/simulated/mobile-app",
+			Name:            "mobile-app",
+			UnreadCount:     &otherUnread,
+			NeedsInputCount: &otherNeedsInput,
 		},
 	}
 	api.WriteJSON(w, http.StatusOK, resp)
@@ -192,15 +196,19 @@ func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, pr
 			// suggested next message — short, single-clause — so the sidebar marks
 			// it with a `❯ ` caret (see isSuggestedNextMessage in AgentComponents),
 			// in contrast to agent-2's multi-sentence report, which stays plain.
-			Id:            "agent-1",
-			Title:         ptr("Add renameable agent titles"),
-			AgentType:     "claude",
-			BaseBranch:    "main",
-			BranchName:    ptr("hydra/feat-1"),
-			SessionPid:    1001,
-			SessionStatus: "running",
-			CreatedAt:     &createdAt1,
-			Prompt:        simAgent1Prompt,
+			// Also carries the blue unread-changes dot: it went quiet (running→
+			// finished) while you were away, the classic case the blue marker is
+			// for — distinct from agent-2's red needs-input marker right below it.
+			Id:               "agent-1",
+			Title:            ptr("Add renameable agent titles"),
+			AgentType:        "claude",
+			BaseBranch:       "main",
+			BranchName:       ptr("hydra/feat-1"),
+			SessionPid:       1001,
+			SessionStatus:    "running",
+			CreatedAt:        &createdAt1,
+			HasUnreadChanges: &unread,
+			Prompt:           simAgent1Prompt,
 			AgentStatus: &api.AgentStatusInfo{
 				Status:                            finished,
 				Timestamp:                         simNow().Format(time.RFC3339),
@@ -210,7 +218,8 @@ func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, pr
 		},
 		{
 			// Blocked on the user (AskUserQuestion) while you were away → the red
-			// "needs you" status with the unread-changes dot lit. Demos how an
+			// "needs you" status, which also lights the red needs-input marker on
+			// the right of the row (instead of the blue unread dot). Demos how an
 			// explicit question stands apart from the softer yellow "waiting".
 			Id:               "agent-2",
 			Title:            ptr("Migrate auth providers to OAuth"),
@@ -1375,12 +1384,12 @@ func simArtifactSets(id string) []api.ArtifactSet {
 		// red-bordered terminals (the script's stderr is the error) instead of a
 		// separate error box. refresh retries.
 		{
-			Name:       "storybook",
-			Status:     api.ArtifactSetStatusError,
-			Error:      ptr("exited 1: error: Cannot find module 'playwright'\n  at file:///app/web/scripts/screenshots/take-screenshots.ts:21:1"),
-			LeftLogUrl: ptr(simLogURL("storybook", "error/left")),
+			Name:        "storybook",
+			Status:      api.ArtifactSetStatusError,
+			Error:       ptr("exited 1: error: Cannot find module 'playwright'\n  at file:///app/web/scripts/screenshots/take-screenshots.ts:21:1"),
+			LeftLogUrl:  ptr(simLogURL("storybook", "error/left")),
 			RightLogUrl: ptr(simLogURL("storybook", "error/right")),
-			Files:      []api.ArtifactFile{},
+			Files:       []api.ArtifactFile{},
 		},
 		// Partial failure: the LEFT (before) side died, but the RIGHT (after) side
 		// rendered, so the card stays "ready" and shows the surviving side's images
