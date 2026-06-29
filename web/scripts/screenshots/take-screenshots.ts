@@ -544,6 +544,14 @@ try {
       // view. Viewport-only to focus on the header + prompt (agent-md's seeded
       // prompt overflows the block's max height, so the fade is visible).
       { name: 'agent-markdown', path: '/project/sim-project/agent/agent-md', viewportOnly: true },
+      // The test gate (PLAN #68): click the failing verdict chip on agent-2 to
+      // open the single-sided, failing-first tests panel (assertion messages +
+      // collapsed passing/skipped rows). agent-2's fixtures (simTestRunners) are a
+      // regression — two failing cases — so the panel shows the gate's headline.
+      { name: 'tests-panel', path: '/project/sim-project/agent/agent-2', viewportOnly: true, click: 'button[title="Show test results"]' },
+      // The same surface mid-run (agent-md is seeded as a running verdict): the
+      // live log tail + progress bar + partial counts.
+      { name: 'tests-panel-running', path: '/project/sim-project/agent/agent-md', viewportOnly: true, click: 'button[title="Show test results"]' },
       // The agent-type picker dropdown, opened on the compact ("mini") spawn box
       // in the sidebar. The picker is an icon-only trigger (the active agent's
       // brand mark) that opens a menu listing every agent type as its canonical

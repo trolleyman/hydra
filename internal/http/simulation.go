@@ -404,6 +404,8 @@ func (s *SimulationServer) GetAgent(w http.ResponseWriter, r *http.Request, proj
 				Timestamp: simNow().Format(time.RFC3339),
 				Activity:  ptr("Wrapping `renderMarkdown()` over the **prompt** & *activity*"),
 			},
+			Tests:          simTestSummary("agent-md"),
+			MergeWhenGreen: ptr(true),
 		})
 		return
 	}
@@ -471,6 +473,7 @@ func (s *SimulationServer) GetAgent(w http.ResponseWriter, r *http.Request, proj
 				Timestamp:   simNow().Format(time.RFC3339),
 				LastMessage: ptr("Should I store refresh tokens or re-auth on expiry?"),
 			},
+			Tests: simTestSummary("agent-2"),
 		})
 		return
 	}
