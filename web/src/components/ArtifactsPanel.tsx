@@ -371,6 +371,11 @@ export function MasonryGrid({ items, spanScale = 1, spans, onSpanChange, scope }
     if (e.button !== 0 || !onSpanChange) return
     // Only the media drags; the card header/padding is left alone (text-selectable).
     if (!(e.target instanceof Element) || !e.target.closest('[data-tile-drag]')) return
+    // …but never hijack an interactive control that owns its own horizontal drag — the
+    // onion-skin opacity slider (an <input type="range">) lives inside the media region,
+    // and dragging it must move the slider, not resize the tile. `data-no-tile-drag` is
+    // the general escape hatch for any such control.
+    if (e.target.closest('input, [data-no-tile-drag]')) return
     draggedKeyRef.current = null // reset any stale value from a drag that produced no click
     const startX = e.clientX
     const startY = e.clientY

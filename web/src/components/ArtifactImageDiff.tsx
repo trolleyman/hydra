@@ -290,7 +290,9 @@ function OnionCompare({ left, right, name, before, after, index }: {
         <LayerNode url={left} />
         <LayerNode url={right} style={{ opacity: opacity / 100 }} />
       </div>
-      <div className="flex items-center gap-2 mt-1">
+      {/* data-no-tile-drag: this opacity slider owns its own horizontal drag, so the
+          masonry tile's drag-to-resize must not hijack it (see startBodyResize). */}
+      <div data-no-tile-drag className="flex items-center gap-2 mt-1">
         <span className="text-[10px] font-semibold tracking-wide text-gray-400 dark:text-gray-500">Before</span>
         <input
           type="range" min={0} max={100} value={opacity}
