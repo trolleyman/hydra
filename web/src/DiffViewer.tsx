@@ -1430,11 +1430,13 @@ function BehindBaseButton({ diff, agent, projectId, onUpdated }: {
         : undefined
 
     useDialogStore.getState().show({
-      title: `Update from ${baseBranch}?`,
-      message: `Merges ${baseBranch} into this branch to bring it up to date, and re-baselines diff artifacts (e.g. screenshots) against the latest base.`,
+      // The updateBase panel builds its body from `details` (branch pills +
+      // behind count); `message` is unused for this variant but kept non-empty
+      // for the store contract.
+      title: 'Update from base',
+      message: `Update from ${baseBranch}`,
       type: note ? 'warning' : 'confirm',
       variant: 'updateBase',
-      confirmLabel: 'Update branch',
       details: { fromBranch: baseBranch ?? '—', toBranch: agent.branch_name ?? '—', behind, note },
       onConfirm: async () => {
         setUpdating(true)

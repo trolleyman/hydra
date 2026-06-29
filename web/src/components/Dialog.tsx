@@ -79,18 +79,13 @@ export const Dialog: React.FC = () => {
           <KillDetails details={details} />
         </RichConfirmPanel>
       ) : variant === 'updateBase' ? (
-        <RichConfirmPanel
-          tone="amber"
-          icon={<FolderSync className="w-5 h-5" />}
+        <UpdateBasePanel
           title={title}
-          description={message}
-          confirmLabel={confirmLabel ?? 'Update branch'}
-          confirmIcon={<FolderSync className="w-4 h-4" />}
+          confirmLabel={confirmLabel ?? 'Confirm'}
+          details={details}
           onConfirm={handleConfirm}
           onCancel={handleCancel}
-        >
-          <UpdateBaseDetails details={details} />
-        </RichConfirmPanel>
+        />
       ) : (
         <div
           className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200"
@@ -245,22 +240,78 @@ function MergeDetails({ details }: { details?: DialogDetails }) {
   )
 }
 
-function UpdateBaseDetails({ details }: { details?: DialogDetails }) {
-  // base → this branch: the base is merged *into* the agent's branch, so the
-  // arrow points from base to branch (the reverse of MergeDetails).
+// A branch name rendered as an inline mono pill, the way the update-from-base
+// dialog embeds branch names mid-sentence.
+function BranchPill({ children }: { children: ReactNode }) {
+  return (
+    <span className="inline-flex items-center rounded-md bg-gray-100 dark:bg-gray-700/60 border border-gray-200 dark:border-gray-600 px-1.5 py-px font-mono text-[0.9em] text-gray-700 dark:text-gray-200 align-baseline">
+      {children}
+    </span>
+  )
+}
+
+// The update-from-base confirmation. Unlike the merge/kill panels (icon tile +
+// subtitle + chip), this one keeps a bordered header (icon tile + title + close)
+// over a prose body that embeds the branch names as inline pills, with a blue
+// Confirm — matching the agreed redesign. The base is merged *into* the agent's
+// branch, so the branch is named first and the base second.
+function UpdateBasePanel({
+  title,
+  confirmLabel,
+  details,
+  onConfirm,
+  onCancel,
+}: {
+  title: string
+  confirmLabel: string
+  details?: DialogDetails
+  onConfirm: () => void
+  onCancel: () => void
+}) {
   const base = details?.fromBranch || '—'
   const branch = details?.toBranch || '—'
   const behind = details?.behind ?? 0
   return (
-    <>
-      <BranchChip
-        from={base}
-        to={branch}
-        arrowClass="text-amber-600 dark:text-amber-400"
-        right={<span className="text-amber-600 dark:text-amber-400">{behind} behind</span>}
-      />
-      {details?.note && <CautionNote note={details.note} />}
-    </>
+    <div
+      className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in-95 duration-200"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="dialog-title"
+    >
+      <div className="flex items-center gap-3.5 px-5 py-4 border-b border-gray-100 dark:border-gray-700">
+        <DialogIconTile tone="blue">
+          <FolderSync className="w-5 h-5" />
+        </DialogIconTile>
+        <h3 id="dialog-title" className="flex-1 text-lg font-bold leading-tight text-gray-900 dark:text-gray-100">
+          {title}
+        </h3>
+        <IconButton onClick={onCancel} aria-label="Close">
+          <X className="w-5 h-5" />
+        </IconButton>
+      </div>
+
+      <div className="px-5 py-4 flex flex-col gap-3">
+        <p className="text-sm leading-relaxed text-gray-700 dark:text-gray-300">
+          <BranchPill>{branch}</BranchPill> is{' '}
+          <span className="font-semibold text-gray-900 dark:text-gray-100">
+            {behind} commit{behind !== 1 ? 's' : ''} behind
+          </span>{' '}
+          <BranchPill>{base}</BranchPill>.
+        </p>
+        <p className="text-sm leading-relaxed text-gray-500 dark:text-gray-400">
+          Merge <BranchPill>{base}</BranchPill> into your branch to bring it up to date? This also re-baselines diff
+          artifacts (e.g. screenshots) against the latest base.
+        </p>
+        {details?.note && <CautionNote note={details.note} />}
+      </div>
+
+      <div className="flex justify-end gap-2.5 px-5 py-3.5 border-t border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/40">
+        <DialogCancelButton onClick={onCancel}>Cancel</DialogCancelButton>
+        <DialogConfirmButton tone="blue" onClick={onConfirm}>
+          {confirmLabel}
+        </DialogConfirmButton>
+      </div>
+    </div>
   )
 }
 
