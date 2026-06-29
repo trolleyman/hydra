@@ -23,6 +23,26 @@ for (const target of new Set<object>([globalThis, globalThis.window])) {
   Object.defineProperty(target, 'localStorage', { value: memory, writable: true, configurable: true })
 }
 
+// jsdom doesn't implement window.matchMedia, which some store modules touch at
+// import time (e.g. sidebar.ts seeds its collapsed default from a media query).
+// Stub it to a never-matching query so importing those modules doesn't throw.
+if (typeof window !== 'undefined' && typeof window.matchMedia !== 'function') {
+  Object.defineProperty(window, 'matchMedia', {
+    value: (query: string): MediaQueryList => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {},
+      dispatchEvent: () => false,
+    }),
+    writable: true,
+    configurable: true,
+  })
+}
+
 // jsdom doesn't implement HTMLCanvasElement.getContext and logs a noisy "Not
 // implemented" error the first time any imported module touches a canvas (the
 // artifact diff viewers' pixel-diff overlays — DiffCanvas / VideoDiffView). No

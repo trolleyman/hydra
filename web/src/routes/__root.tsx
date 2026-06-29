@@ -116,7 +116,7 @@ function ServiceHealthWarning({ projectId }: { projectId: string | null }) {
 
 // ── Project Dropdown ───────────────────────────────────────────────────────────
 
-function ProjectDropdown({
+export function ProjectDropdown({
   projects,
   selectedId,
   onSelect,
@@ -186,8 +186,19 @@ function ProjectDropdown({
         setAddError(null)
       }
     }
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') {
+        setOpen(false)
+        setShowAddInput(false)
+        setAddError(null)
+      }
+    }
     document.addEventListener('mousedown', handleClick)
-    return () => document.removeEventListener('mousedown', handleClick)
+    document.addEventListener('keydown', handleKey)
+    return () => {
+      document.removeEventListener('mousedown', handleClick)
+      document.removeEventListener('keydown', handleKey)
+    }
   }, [open])
 
   useEffect(() => {
