@@ -155,6 +155,53 @@ type Options struct {
 	NoSandbox bool
 }
 
+// StrictShellPreamble makes a bash `-c` script fail-fast: errexit (`set -e`, so a
+// failing command aborts the script) plus pipefail (so a failure anywhere in a
+// pipeline propagates rather than being hidden by the last stage's exit code).
+// Without it a mid-script failure whose final command happens to exit 0 is
+// silently swallowed — which would cache a half-broken artifact render as a
+// success, or read a service that failed its setup as healthy. nounset (`-u`) is
+// deliberately NOT included: config scripts routinely read optional environment
+// variables, and aborting on the first unset one would break too many real
+// scripts. A script opts out of strict mode by leading with `set +e` /
+// `set +o pipefail` (or, for [[artifacts]]/[[services]], `strict = false`).
+const StrictShellPreamble = "set -eo pipefail\n"
+
+// StrictScript prepends StrictShellPreamble to a user-supplied config.toml
+// command so its failures propagate. Used for the `bash -c <command>` config
+// commands ([[artifacts]], [[services]], pre_exit_script). pre_spawn applies the
+// same preamble inline (only when its interpreter is bash — see withPreSpawn).
+func StrictScript(command string) string {
+	return StrictShellPreamble + command
+}
+
+// interpIsBash reports whether an interpreter command line (as returned by
+// preSpawnInterp) runs bash — either a direct `#!/<...>/bash` or a
+// `#!/<...>/env bash`. Only then can a pre-spawn script safely take the
+// bash-only StrictShellPreamble; a non-bash interpreter (zsh, dash, …) is left
+// untouched (`set -o pipefail` is a bashism dash rejects outright). The default
+// (no shebang) is ["/bin/bash"], so plain scripts get strict mode.
+func interpIsBash(interp []string) bool {
+	if len(interp) == 0 {
+		return false
+	}
+	if filepath.Base(interp[0]) == "bash" {
+		return true
+	}
+	if filepath.Base(interp[0]) == "env" {
+		for _, f := range interp[1:] {
+			if f == "" || strings.HasPrefix(f, "-") {
+				continue // skip env's own flags / VAR=val assignments
+			}
+			if strings.Contains(f, "=") {
+				continue
+			}
+			return filepath.Base(f) == "bash" // first program word
+		}
+	}
+	return false
+}
+
 // preSpawnExitTrap is installed before the pre-spawn script runs and fires only
 // when the script aborts the launch: an explicit `exit N`, or a `set -e` failure,
 // terminates the shell before it reaches `exec`, leaving this EXIT trap to run.
@@ -176,16 +223,25 @@ const preSpawnExitTrap = `trap 'hydra_ec=$?; printf "\n[hydra] pre_spawn_script 
 // to /bin/bash, so bashisms like `set -o pipefail` — which dash rejects with
 // "Illegal option" — work out of the box. The shebang line itself is a harmless
 // comment to the interpreter that ends up running the wrapper.
+//
+// When that interpreter is bash (the default, or an explicit bash shebang) the
+// script also runs under StrictShellPreamble so a failing setup step aborts the
+// launch (the EXIT trap reports it) instead of being swallowed; a non-bash
+// interpreter is left as-is. Lead the script with `set +e` to opt out.
 func withPreSpawn(script string, argv []string) []string {
 	if strings.TrimSpace(script) == "" || len(argv) == 0 {
 		return argv
 	}
 	interp := preSpawnInterp(script)
+	body := script
+	if interpIsBash(interp) {
+		body = StrictShellPreamble + script
+	}
 	// Run the script in the agent's own shell (so its exports carry into the
 	// exec'd agent), guarded by an EXIT trap that reports a gating failure. $0 is
 	// the wrapper name; $@ is the original argv, exec'd once the script falls
 	// through (the trap is cleared first so exec-failure isn't misreported).
-	wrapper := preSpawnExitTrap + "\n" + script + "\ntrap - EXIT\nexec \"$@\""
+	wrapper := preSpawnExitTrap + "\n" + body + "\ntrap - EXIT\nexec \"$@\""
 	cmd := append(interp, "-c", wrapper, "hydra-pre-spawn")
 	return append(cmd, argv...)
 }

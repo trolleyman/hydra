@@ -355,7 +355,7 @@ type ArtifactScript struct {
 	// CleanIgnored Also delete git-ignored files (e.g. node_modules) before each run — a pristine checkout (git clean -fdx) instead of the default that keeps caches warm (-fd). Slower; only if stale ignored output can leak between commits (default false)
 	CleanIgnored *bool `json:"clean_ignored,omitempty"`
 
-	// Command Shell command run via `sh -c` in the checkout directory
+	// Command Shell command run via `bash -c` in the checkout directory
 	Command string `json:"command"`
 
 	// Enabled Whether the diff viewer runs this script (absent/null or true = enabled; false = skipped)
@@ -363,6 +363,9 @@ type ArtifactScript struct {
 
 	// Name Unique label, also used as the cache directory
 	Name string `json:"name"`
+
+	// Strict Run the command under `set -eo pipefail` so a failing step aborts and propagates instead of being swallowed into a success (absent/null or true = strict; false = run exactly as written)
+	Strict *bool `json:"strict"`
 
 	// TimeoutSec Max seconds the command may run (0 = built-in default)
 	TimeoutSec *int `json:"timeout_sec,omitempty"`
@@ -829,6 +832,9 @@ type ServiceScript struct {
 
 	// Name Unique label, shown in the UI and logs
 	Name string `json:"name"`
+
+	// Strict Run the command under `set -eo pipefail` so a failed startup step surfaces as a crash instead of a healthy process (absent/null or true = strict; false = run exactly as written)
+	Strict *bool `json:"strict"`
 }
 
 // ServiceStatus Live status of one supervised service

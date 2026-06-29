@@ -97,15 +97,17 @@ func TestWithPreSpawn(t *testing.T) {
 	}
 
 	// Script set, no shebang: defaults to /bin/bash -c, exec'ing argv via "$@"
-	// after an EXIT trap that reports a gating failure.
+	// after an EXIT trap that reports a gating failure. Being bash, the body also
+	// runs under the strict preamble (set -eo pipefail).
 	got := withPreSpawn("mise trust", argv)
-	want := []string{"/bin/bash", "-c", preSpawnExitTrap + "\nmise trust\ntrap - EXIT\nexec \"$@\"", "hydra-pre-spawn", "claude", "--dangerously-skip-permissions"}
+	want := []string{"/bin/bash", "-c", preSpawnExitTrap + "\n" + StrictShellPreamble + "mise trust\ntrap - EXIT\nexec \"$@\"", "hydra-pre-spawn", "claude", "--dangerously-skip-permissions"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("wrapped argv:\n got %#v\nwant %#v", got, want)
 	}
 
 	// A shebang selects the interpreter (here zsh); the script body, shebang line
-	// included, is passed verbatim to `-c`.
+	// included, is passed verbatim to `-c` — and a non-bash interpreter gets NO
+	// strict preamble (set -o pipefail is a bashism).
 	body := "#!/bin/zsh\nset -o pipefail\nmise trust"
 	got = withPreSpawn(body, argv)
 	want = []string{"/bin/zsh", "-c", preSpawnExitTrap + "\n" + body + "\ntrap - EXIT\nexec \"$@\"", "hydra-pre-spawn", "claude", "--dangerously-skip-permissions"}
@@ -117,6 +119,76 @@ func TestWithPreSpawn(t *testing.T) {
 	got = withPreSpawn("#!/usr/bin/env bash\necho hi", argv)
 	if len(got) < 3 || got[0] != "/usr/bin/env" || got[1] != "bash" || got[2] != "-c" {
 		t.Errorf("env shebang: got %#v", got)
+	}
+}
+
+// TestWithPreSpawnStrict asserts the strict preamble is applied iff the
+// interpreter is bash (the default or an explicit bash shebang), and never for a
+// non-bash interpreter.
+func TestWithPreSpawnStrict(t *testing.T) {
+	argv := []string{"claude"}
+	body := func(script string) string {
+		got := withPreSpawn(script, argv)
+		// The script body is the argument right after `-c` (its index shifts with
+		// the interpreter, e.g. `env bash -c <body>` vs `/bin/bash -c <body>`).
+		for i, a := range got {
+			if a == "-c" && i+1 < len(got) {
+				return got[i+1]
+			}
+		}
+		t.Fatalf("withPreSpawn(%q) has no -c body: %#v", script, got)
+		return ""
+	}
+	cases := []struct {
+		name       string
+		script     string
+		wantStrict bool
+	}{
+		{"no shebang defaults bash", "mise trust", true},
+		{"explicit bash shebang", "#!/bin/bash\nmise trust", true},
+		{"env bash shebang", "#!/usr/bin/env bash\nmise trust", true},
+		{"zsh shebang", "#!/bin/zsh\nmise trust", false},
+		{"sh shebang", "#!/bin/sh\nmise trust", false},
+		{"env python shebang", "#!/usr/bin/env python3\nprint(1)", false},
+	}
+	for _, c := range cases {
+		got := strings.Contains(body(c.script), StrictShellPreamble)
+		if got != c.wantStrict {
+			t.Errorf("%s: strict preamble present=%v, want %v (body=%q)", c.name, got, c.wantStrict, body(c.script))
+		}
+	}
+}
+
+func TestStrictScript(t *testing.T) {
+	if got := StrictScript("bun run shots.ts"); got != "set -eo pipefail\nbun run shots.ts" {
+		t.Errorf("StrictScript = %q", got)
+	}
+	// nounset is deliberately absent so optional-env-var reads don't abort.
+	if strings.Contains(StrictShellPreamble, "-u") || strings.Contains(StrictShellPreamble, "nounset") {
+		t.Errorf("strict preamble must not enable nounset: %q", StrictShellPreamble)
+	}
+}
+
+func TestInterpIsBash(t *testing.T) {
+	cases := []struct {
+		interp []string
+		want   bool
+	}{
+		{[]string{"/bin/bash"}, true},
+		{[]string{"bash"}, true},
+		{[]string{"/usr/local/bin/bash"}, true},
+		{[]string{"/usr/bin/env", "bash"}, true},
+		{[]string{"/usr/bin/env", "-S", "bash"}, true},
+		{[]string{"/usr/bin/env", "FOO=bar", "bash"}, true},
+		{[]string{"/bin/zsh"}, false},
+		{[]string{"/bin/sh"}, false},
+		{[]string{"/usr/bin/env", "python3"}, false},
+		{nil, false},
+	}
+	for _, c := range cases {
+		if got := interpIsBash(c.interp); got != c.want {
+			t.Errorf("interpIsBash(%#v) = %v, want %v", c.interp, got, c.want)
+		}
 	}
 }
 

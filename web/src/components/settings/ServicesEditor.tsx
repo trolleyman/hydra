@@ -122,6 +122,7 @@ export function ServicesEditor({
         )}
         {services.map((svc, index) => {
           const host = svc.host === true
+          const strict = svc.strict !== false
           const enabled = svc.enabled !== false
           return (
             <div key={index} className={`rounded-xl border p-4 space-y-3 transition-colors ${enabled ? 'border-gray-200 dark:border-gray-700 bg-gray-50/40 dark:bg-gray-800/20' : 'border-dashed border-gray-300 dark:border-gray-600 bg-gray-100/70 dark:bg-gray-900/40'}`}>
@@ -174,6 +175,21 @@ export function ServicesEditor({
                         <InfoTooltip title="Host Execution">
                           <p>Runs the command directly on the host with <strong>no sandbox</strong> — full access to your machine, network and credentials.</p>
                           <p className="mt-1.5">Required for services that need host devices the sandbox hides, e.g. <code className="text-blue-300">/dev/kvm</code> for emulators.</p>
+                        </InfoTooltip>
+                      </span>
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer h-[38px]">
+                      <input
+                        type="checkbox"
+                        checked={strict}
+                        onChange={(e) => update(index, { strict: e.target.checked ? undefined : false })}
+                        className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                      />
+                      <span className="text-xs font-medium text-gray-600 dark:text-gray-300 flex items-center gap-1">
+                        Strict mode
+                        <InfoTooltip title="Strict Mode">
+                          <p>Runs the command under <code className="font-mono">set -eo pipefail</code> so a failed startup step surfaces as a crash (and triggers the restart policy) instead of a healthy-looking process.</p>
+                          <p className="mt-1.5"><code className="font-mono">nounset</code> (<code className="font-mono">-u</code>) is not applied. Uncheck to run the command exactly as written.</p>
                         </InfoTooltip>
                       </span>
                     </label>

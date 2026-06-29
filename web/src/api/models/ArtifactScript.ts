@@ -11,7 +11,7 @@ export type ArtifactScript = {
      */
     name: string;
     /**
-     * Shell command run via `sh -c` in the checkout directory
+     * Shell command run via `bash -c` in the checkout directory
      */
     command: string;
     /**
@@ -26,6 +26,10 @@ export type ArtifactScript = {
      * Also delete git-ignored files (e.g. node_modules) before each run — a pristine checkout (git clean -fdx) instead of the default that keeps caches warm (-fd). Slower; only if stale ignored output can leak between commits (default false)
      */
     clean_ignored?: boolean;
+    /**
+     * Run the command under `set -eo pipefail` so a failing step aborts and propagates instead of being swallowed into a success (absent/null or true = strict; false = run exactly as written)
+     */
+    strict?: boolean | null;
     /**
      * Whether the diff viewer runs this script (absent/null or true = enabled; false = skipped)
      */

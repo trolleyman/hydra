@@ -1087,7 +1087,7 @@ func runPreExitScript(ctx context.Context, head Head, endState string) {
 		RestoreRO:     restore,
 		Network:       net,
 		Env:           env,
-		Argv:          []string{"bash", "-c", script},
+		Argv:          []string{"bash", "-c", sandbox.StrictScript(script)},
 		HardenGUI:     true,
 		Seccomp:       true,
 	})
