@@ -153,14 +153,16 @@ export function SegmentedToggle<T extends string>({ value, onChange, options }: 
 }
 
 // A/B switch: Before / After, with a Highlight checkbox. Before & After stay
-// mounted and stacked, so the toggle flips which is shown for an instant,
-// flicker-free hard switch. Clicking the image (or the buttons) flips Before↔After.
-// Ticking Highlight overlays the pixel-diff (every changed pixel tinted semi-
-// transparent magenta, see DiffCanvas) on top of whichever side is shown, so the
-// changes stay marked — yet still readable underneath — as you flip Before↔After. Highlight is disabled when only one side
-// exists (an added/removed file — there's nothing to diff). A missing side shows
-// the "No image" placeholder; middle-click opens the currently-shown image in the
-// fullscreen lightbox.
+// mounted and stacked, so flipping which is shown is an instant, flicker-free hard
+// switch. Flipping is driven by the buttons — the panel's shared Before/After control
+// + the B key under the diff viewer, or this tile's own pill in the repository
+// browser; a click on the image opens the fullscreen lightbox (where, with nothing
+// left to open, a click flips instead). Ticking Highlight overlays the pixel-diff
+// (every changed pixel tinted semi-transparent magenta, see DiffCanvas) on top of
+// whichever side is shown, so the changes stay marked — yet still readable underneath
+// — as you flip Before↔After. Highlight is disabled when only one side exists (an
+// added/removed file — there's nothing to diff). A missing side shows the "No image"
+// placeholder; middle-click opens the currently-shown image in the lightbox.
 function ABSwitch({ left, right, name, gallery, index, disableOpen }: {
   left?: string | null; right?: string | null; name: string
   gallery?: LightboxImage[]; index?: number; disableOpen?: boolean
@@ -208,9 +210,13 @@ function ABSwitch({ left, right, name, gallery, index, disableOpen }: {
       )}
       {/* select-none: flipping is a rapid click target, so without this a quick
           double-click would highlight the "No image" placeholder text. */}
+      {/* In the grid a click opens the fullscreen lightbox at this file (←/→ walks the
+          gallery, and the lightbox shows the comparison); flipping Before↔After is
+          reserved for the panel's Before/After control + the B key. Inside the lightbox
+          (disableOpen) there's nothing to open, so a click flips instead. */}
       <div
-        className="relative w-full cursor-pointer select-none"
-        onClick={flip}
+        className={`relative w-full select-none ${disableOpen ? 'cursor-pointer' : 'cursor-zoom-in'}`}
+        onClick={disableOpen ? flip : () => openGalleryAt(openImage, gallery, index, (view === 'before' ? left : right) || sizer, name)}
         onAuxClick={disableOpen ? undefined : makeAuxOpen(
           () => (view === 'before' ? left : right) || sizer,
           (url) => openGalleryAt(openImage, gallery, index, url, name),

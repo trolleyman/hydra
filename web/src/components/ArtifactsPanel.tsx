@@ -558,6 +558,7 @@ function FileGrid({ files, mode, scale = 1, spans, onSpanChange, scope, changeTh
       filename: f.name,
       size: 0,
       diff: { left: f.left_url, right: f.right_url, mode },
+      dpi: f.dpi ?? undefined,
     })),
     [imageFiles, mode],
   )
