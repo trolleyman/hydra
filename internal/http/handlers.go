@@ -231,14 +231,21 @@ func (s *Server) ListProjects(_ context.Context, _ api.ListProjectsRequestObject
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
+	// A second query gives the red "needs your input" counts the same way.
+	needsInput, err := s.DB.CountNeedsInputByProject()
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
 	resp := make(api.ListProjects200JSONResponse, len(ps))
 	for i, p := range ps {
 		count := unread[p.Path]
+		needs := needsInput[p.Path]
 		resp[i] = api.ProjectInfo{
-			Id:          p.ID,
-			Path:        p.Path,
-			Name:        p.Name,
-			UnreadCount: &count,
+			Id:              p.ID,
+			Path:            p.Path,
+			Name:            p.Name,
+			UnreadCount:     &count,
+			NeedsInputCount: &needs,
 		}
 	}
 	return resp, nil

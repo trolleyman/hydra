@@ -10,7 +10,7 @@
 // column-by-column; those overrides are what we persist here (keyed by file name).
 
 import { useCallback, useEffect, useState } from 'react'
-import { StorageKeys, readLocal, writeLocal } from './storage'
+import { StorageKeys, readJSON, writeJSON } from './storage'
 
 // Total columns in the masonry grid — the unit each tile's span is measured in.
 // Six gives a desktop shot ~half width and a phone shot a sixth, the spread the
@@ -23,18 +23,14 @@ export const BASE_ARTIFACT_COLUMNS = 6
 export type ArtifactSpans = Record<string, number>
 
 function loadSpans(): ArtifactSpans {
-  const raw = readLocal(StorageKeys.diffArtifactSpans)
-  if (raw) {
-    try {
-      const p = JSON.parse(raw) as Record<string, unknown>
-      const out: ArtifactSpans = {}
-      for (const [k, v] of Object.entries(p)) {
-        if (typeof v === 'number' && v >= 1) out[k] = Math.round(v)
-      }
-      return out
-    } catch { /* fall through to empty */ }
-  }
-  return {}
+  return readJSON(StorageKeys.diffArtifactSpans, (v) => {
+    if (!v || typeof v !== 'object') return null
+    const out: ArtifactSpans = {}
+    for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
+      if (typeof val === 'number' && val >= 1) out[k] = Math.round(val)
+    }
+    return out
+  }) ?? {}
 }
 
 // useArtifactSpans owns the persisted per-tile span overrides. Returns the current
@@ -42,7 +38,7 @@ function loadSpans(): ArtifactSpans {
 // clears it so the tile falls back to its aspect-ratio default).
 export function useArtifactSpans() {
   const [spans, setSpans] = useState<ArtifactSpans>(loadSpans)
-  useEffect(() => { writeLocal(StorageKeys.diffArtifactSpans, JSON.stringify(spans)) }, [spans])
+  useEffect(() => { writeJSON(StorageKeys.diffArtifactSpans, spans) }, [spans])
   const setSpanOverride = useCallback((key: string, span: number | null) => {
     setSpans((s) => {
       if (span == null) {

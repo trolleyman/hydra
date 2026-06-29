@@ -2,19 +2,13 @@ import type { AgentResponse } from '../api'
 import { renderMarkdown } from '../lib/markdown'
 import { AgentTypeIcon, AGENT_ACCENT, type AgentTypeIconName } from './AgentTypeIcon'
 
-export function normalizeContainerState(status: string): string {
-  const s = status.toLowerCase()
-  if (s === 'running' || s.startsWith('up')) return 'running'
-  if (s === 'exited' || s.startsWith('exited')) return 'exited'
-  if (s === 'created') return 'created'
-  return s
-}
-
+// statusDotClass picks a dot colour from the raw sandbox session status
+// (running|exited|stopped|pending|starting|building). Used only as the fallback
+// in agentDotClass when no richer agent_status has been reported yet.
 export function statusDotClass(status: string): string {
-  switch (normalizeContainerState(status)) {
+  switch (status) {
     case 'running': return 'bg-green-500'
     case 'exited': return 'bg-red-400'
-    case 'created': return 'bg-blue-400'
     default: return 'bg-gray-300 dark:bg-gray-600'
   }
 }
@@ -184,7 +178,17 @@ export function AgentSidebarItem({
           className={`w-2 h-2 rounded-full shrink-0 ${archived ? 'bg-gray-300 dark:bg-gray-600' : agentDotClass(agent)}`}
         />
         <span className={`font-medium text-sm truncate ${archived ? 'text-gray-500 dark:text-gray-400' : 'text-gray-900 dark:text-gray-100'}`}>{agent.title || agent.id}</span>
-        {agent.has_unread_changes && !archived && (
+        {!archived && agent.agent_status?.status === 'needs_input' ? (
+          // Needs-input marker: a red sibling of the blue unread dot, pinned to
+          // the right of the title line. Driven by the live status rather than
+          // the unread flag, so it stays lit while the agent is blocked on you
+          // and clears on its own once you answer (not on open). Takes priority
+          // over the blue dot since "needs you now" is the stronger signal.
+          <span
+            aria-label="needs your input"
+            className="ml-auto shrink-0 w-2.5 h-2.5 rounded-full bg-red-500 ring-2 ring-red-500/25"
+          />
+        ) : agent.has_unread_changes && !archived ? (
           // Unread-changes marker, pinned to the right of the title line so it
           // never overlaps the type/status/created-time row below. Set when the
           // agent goes running→waiting/finished, cleared when it's opened.
@@ -192,7 +196,7 @@ export function AgentSidebarItem({
             aria-label="unread changes"
             className="ml-auto shrink-0 w-2.5 h-2.5 rounded-full bg-sky-400 ring-2 ring-sky-400/25"
           />
-        )}
+        ) : null}
       </div>
       <div className="flex items-center gap-1.5 mt-0.5 ml-4">
         <span className={`flex items-center gap-1 text-xs ${agentTypeColor(agent.agent_type)}`}>

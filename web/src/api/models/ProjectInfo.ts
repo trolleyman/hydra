@@ -19,5 +19,9 @@ export type ProjectInfo = {
      * Number of this project's agents with unread changes. Drives the cross-project "updates waiting" indicator.
      */
     unread_count?: number;
+    /**
+     * Number of this project's agents currently blocked on the user (status `needs_input`). Drives the red "needs your input" indicator, which is shown whenever this is greater than zero.
+     */
+    needs_input_count?: number;
 };
 
