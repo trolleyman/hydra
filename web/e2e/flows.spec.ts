@@ -69,6 +69,40 @@ test('opening an unread agent clears its unread-changes dot', async ({ page }) =
   await expect(page.getByLabel('unread changes')).toHaveCount(0)
 })
 
+test('switching agents remounts the detail view, so an unsaved rename never bleeds across', async ({ page }) => {
+  await page.goto(PROJECT)
+
+  // Open agent-1 and start an inline rename: focusing the title field begins the
+  // edit (AgentTopBar), and we type a draft we never successfully save. In the
+  // simulation server UpdateAgent returns 501, so the blur-triggered save fails
+  // and the editor is left open with the draft intact — exactly the state that
+  // used to leak onto the next agent when AgentDetail was reused rather than
+  // remounted.
+  await agentRow(page, 'Add renameable agent titles').click()
+  await expect(page).toHaveURL(/\/project\/sim-project\/agent\/agent-1\b/)
+  const title = page.getByRole('textbox', { name: 'Agent title' })
+  await title.click()
+  await title.fill('UNSAVED RENAME DRAFT')
+  await expect(title).toHaveValue('UNSAVED RENAME DRAFT')
+
+  // Switch to agent-2 from the sidebar. The route keys the detail subtree by
+  // project+agent, so it remounts with fresh state: agent-2's header shows
+  // agent-2's own title in a clean (read-only, not mid-edit) field — never the
+  // leftover draft from agent-1.
+  await agentRow(page, 'Migrate auth providers to OAuth').click()
+  await expect(page).toHaveURL(/\/project\/sim-project\/agent\/agent-2\b/)
+  await expect(title).toHaveValue('Migrate auth providers to OAuth')
+  await expect(title).toHaveJSProperty('readOnly', true)
+  // The body re-rendered for the new agent too (agent-2's unique prompt text).
+  await expect(page.getByText('OAuth 2.0 with PKCE', { exact: false })).toBeVisible()
+
+  // And switching back lands on agent-1's real title, not the abandoned draft.
+  await agentRow(page, 'Add renameable agent titles').click()
+  await expect(page).toHaveURL(/\/project\/sim-project\/agent\/agent-1\b/)
+  await expect(title).toHaveValue('Add renameable agent titles')
+  await expect(title).toHaveJSProperty('readOnly', true)
+})
+
 test('the project switcher opens and lists the projects', async ({ page }) => {
   await page.goto(PROJECT)
 
