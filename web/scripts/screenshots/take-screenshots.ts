@@ -1844,15 +1844,18 @@ try {
           }
         }
         if (pg.highlightArtifacts) {
-          // Tick the "Highlight" checkbox on every before/after image tile so the
-          // magenta pixel-diff overlay (DiffCanvas) is painted over each changed
-          // image. Each AB tile owns its own Highlight checkbox (local state) and
-          // it's the only checkbox the tile renders, so click every enabled one
-          // (single-sided added/removed tiles have nothing to diff → disabled).
+          // Turn on the artifacts panel's global "Highlight" toggle (in the header,
+          // shown in A/B mode) so the magenta pixel-diff overlay (DiffCanvas) is
+          // painted over every changed image tile. Highlight is a single panel-wide
+          // control now — driving all tiles via context — not a per-tile checkbox, so
+          // there's one labelled "Highlight" checkbox to tick rather than one per tile.
+          await page.waitForFunction(() =>
+            Array.from(document.querySelectorAll('label')).some((l) => l.textContent?.trim() === 'Highlight'),
+          )
           await page.evaluate(() => {
-            document.querySelectorAll<HTMLInputElement>('[data-mkey] input[type=checkbox]').forEach((c) => {
-              if (!c.disabled && !c.checked) c.click()
-            })
+            const label = Array.from(document.querySelectorAll('label')).find((l) => l.textContent?.trim() === 'Highlight')
+            const cb = label?.querySelector<HTMLInputElement>('input[type=checkbox]')
+            if (cb && !cb.checked) cb.click()
           })
           // Each ticked tile mounts a DiffCanvas that loads both images and paints
           // its overlay asynchronously, clearing the canvas's opacity-0 once ready.
