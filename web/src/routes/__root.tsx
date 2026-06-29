@@ -642,7 +642,11 @@ function RootLayout() {
   // list, plus on demand after a sync or when the events stream reports a change.
   // refetchPushStatusRef lets those triggers fire a fetch without restarting it.
   const [pushStatus, setPushStatus] = useState<RepositoryPushStatus | null>(null)
-  const [syncing, setSyncing] = useState(false)
+  // Track which projects have an in-flight sync, keyed by project id, so the
+  // spinner/disabled state stays tied to the project the sync was started for
+  // rather than bleeding onto whatever project/tab the sidebar shows next.
+  const [syncingProjects, setSyncingProjects] = useState<ReadonlySet<string>>(() => new Set())
+  const syncing = currentProjectId ? syncingProjects.has(currentProjectId) : false
   const refetchPushStatusRef = useRef<() => void>(() => {})
   useEffect(() => {
     if (!currentProjectId) {
@@ -673,14 +677,16 @@ function RootLayout() {
   }, [currentProjectId])
 
   const handleSync = useCallback(async () => {
-    if (!currentProjectId || syncing) return
+    if (!currentProjectId || syncingProjects.has(currentProjectId)) return
     const projectId = currentProjectId
     const toast = useToastStore.getState()
-    setSyncing(true)
+    setSyncingProjects((prev) => new Set(prev).add(projectId))
     const toastId = toast.show({ message: 'Syncing with remote…', type: 'info', duration: 0 })
     try {
       const result = await api.default.syncRepository(projectId)
-      setPushStatus(result)
+      // Only paint the result if the user is still looking at this project;
+      // otherwise the per-project poll/websocket keeps the visible one correct.
+      if (currentProjectIdRef.current === projectId) setPushStatus(result)
       toast.dismiss(toastId)
       const where = result.remote && result.branch ? ` with ${result.remote}/${result.branch}` : ''
       toast.show({ message: `Synced${where}`, type: 'success' })
@@ -696,10 +702,14 @@ function RootLayout() {
         duration: 6000,
       })
     } finally {
-      setSyncing(false)
+      setSyncingProjects((prev) => {
+        const next = new Set(prev)
+        next.delete(projectId)
+        return next
+      })
       refetchPushStatusRef.current()
     }
-  }, [currentProjectId, syncing])
+  }, [currentProjectId, syncingProjects])
 
   // Archived (killed/merged) history list. Loaded lazily and paginated for
   // infinite scroll — it is historical, so unlike the live list it is not
