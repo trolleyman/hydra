@@ -7,7 +7,7 @@ import type { AgentResponse, CommitInfo, DiffFile, DiffHunk, DiffLine, DiffRespo
 import {
   Plus, Calendar, TriangleAlert,
   ChevronDown, ChevronUp, ChevronRight, ChevronLeft, Check, LoaderCircle, RefreshCw, RotateCcw,
-  Settings, Copy, Folder, FolderOpen, X, GitMerge, Bot, File,
+  Settings, Copy, Folder, FolderOpen, X, GitMergeConflict, Bot, File,
   MoveRight, MessageSquarePlus, FolderSync,
   SquarePlus, SquareMinus, SquareArrowRight,
 } from 'lucide-react'
@@ -1302,7 +1302,7 @@ function MergeConflictButton({ diff, agent, projectId }: {
             onClick={() => setOpen(true)}
             className="flex items-center gap-1 h-7 px-2 rounded-md text-xs font-medium text-red-700 dark:text-red-400 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 hover:bg-red-100 dark:hover:bg-red-900/40 transition-colors cursor-pointer"
           >
-            <GitMerge className="w-3.5 h-3.5 shrink-0" />
+            <GitMergeConflict className="w-3.5 h-3.5 shrink-0" />
             <span>{count} conflict{plural ? 's' : ''}</span>
           </button>
         </Tooltip>
@@ -1322,7 +1322,7 @@ function MergeConflictButton({ diff, agent, projectId }: {
               {/* Header */}
               <div className="flex items-start gap-3.5 px-5 pt-5 pb-4">
                 <DialogIconTile tone="red">
-                  <GitMerge className="w-5 h-5" />
+                  <GitMergeConflict className="w-5 h-5" />
                 </DialogIconTile>
                 <div className="flex flex-col gap-1 min-w-0 pt-0.5 flex-1">
                   <h3 className="text-[16px] font-bold leading-tight text-gray-900 dark:text-gray-100">
