@@ -356,8 +356,8 @@
 
 59. [x] **[Web refactor]** **Remount the agent subtree on switch instead of hand-resetting state.** The route doesn't key `AgentDetail` by agent id, so it's reused across agents and several pieces of state bleed (the rename-draft `editingTitle`/`titleDraft` is the live one) — compensated today by scattered render-time "reset on id change" hacks. Agent IDs are globally unique, so the key is collision-safe; use `${projectId}-${agentId}` to match the `storage.ts` builder convention.
 
-    - [ ] a) Add `` key={`${projectId}-${agent.id}`} `` to `<AgentDetail>` in `agent.$agentId.tsx`, fixing the rename-draft bleed at the source.
-    - [ ] b) Delete the now-redundant reset hacks: `AgentTerminal.tsx` height + bash-tabs render-time resets, and `DiffViewer.tsx` collapsed-files + commit-selector reset. Verify the prefs-persist effects still hydrate correctly at mount (needs #56's tests).
+    - [x] a) Add `` key={`${projectId}-${agent.id}`} `` to `<AgentDetail>` in `agent.$agentId.tsx`, fixing the rename-draft bleed at the source.
+    - [x] b) Delete the now-redundant reset hacks: `AgentTerminal.tsx` height + bash-tabs render-time resets, and `DiffViewer.tsx` collapsed-files + commit-selector reset. Verify the prefs-persist effects still hydrate correctly at mount (needs #56's tests).
 
 60. [ ] **[Web refactor]** **localStorage cleanup.** Per-id persisted prefs (`agentViewPrefs.ts`, `artifactPrefs.ts`, `spawnDrafts.ts`) each re-implement the same load/save/TTL/prune boilerplate, and the global preference stores hand-roll `readLocal`/`writeLocal`. (NB: a single persisted per-project/per-agent *store* is deliberately avoided — it would grow an unbounded blob and lose the per-id TTL/prune the sharded keys give.)
 
