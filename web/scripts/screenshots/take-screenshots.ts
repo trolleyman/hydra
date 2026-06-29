@@ -1859,6 +1859,80 @@ try {
     }
     progress('recording spinner video')
     for (const theme of themes) await recordSpinner(theme)
+
+    // Record the sidebar's status dot gently pulsing while an agent is "running",
+    // together with its small detail row (type pill, status badge, live-activity
+    // line) — the moving twin of the static sidebar shot, and a second clip for
+    // the video diff viewer. We clip tightly to just the one agent row.
+    //
+    // Like the spinner, the pulse is a CSS keyframe (animate-status-pulse: a
+    // scale + opacity breathe), so we DON'T let it free-run on the wall clock.
+    // We kill every CSS animation and drive the dot's scale/opacity ourselves per
+    // frame, mirroring the keyframe with a raised-cosine pulse (1 → peak → 1 over
+    // the cycle), so the frames are deterministic and a re-render never reads
+    // "modified". Same bitexact/lossless ffmpeg encode as recordSpinner.
+    const PULSE_FRAMES = 16 // one breathe cycle at 12fps → ~1.3s clip
+    const recordStatusDot = async (theme: (typeof themes)[number]) => {
+      const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 }, deviceScaleFactor: 1, colorScheme: theme })
+      await ctx.clock.setFixedTime(SIM_NOW)
+      await ctx.addInitScript(({ key, mode }) => { try { localStorage.setItem(key, mode) } catch { /* ignore */ } }, { key: StorageKeys.themeMode, mode: theme })
+      await ctx.addInitScript(({ key, value }) => { try { window.localStorage.setItem(key, value) } catch { /* ignore */ } }, { key: StorageKeys.trustedProjects, value: JSON.stringify([SIM_PROJECT]) })
+      const page = await ctx.newPage()
+      try {
+        await page.goto(base + '/project/sim-project/', { waitUntil: 'domcontentloaded' })
+        // The first sidebar agent (agent-md) is "running" (see simulation.go
+        // ListAgents), so its status dot pulses green and its detail row carries a
+        // live-activity line — exactly the "status icon + small agent detail" we want.
+        const row = page.locator('aside button:has-text("Add inline markdown rendering")').first()
+        await row.waitFor()
+        await page.evaluate(async () => { if (document.fonts && document.fonts.ready) await document.fonts.ready })
+        // Kill every CSS animation/transition so the pulse doesn't free-run on the
+        // wall clock; we set the dot's scale/opacity explicitly per frame below.
+        await page.addStyleTag({ content: '*,*::before,*::after{animation:none!important;transition:none!important}' })
+        const box = await row.boundingBox()
+        if (!box) throw new Error('sidebar agent row has no bounding box')
+        // Clip tightly to the row, rounded to an even-sided box.
+        const clip = {
+          x: Math.round(box.x),
+          y: Math.round(box.y),
+          width: Math.round(box.width / 2) * 2,
+          height: Math.round(box.height / 2) * 2,
+        }
+        const tmp = mkdtempSync(join(tmpdir(), 'hydra-pulse-'))
+        for (let i = 0; i < PULSE_FRAMES; i++) {
+          const p = i / PULSE_FRAMES
+          const e = (1 - Math.cos(2 * Math.PI * p)) / 2 // raised cosine: 0 → 1 → 0
+          const scale = 1 + 0.35 * e
+          const opacity = 1 - 0.35 * e
+          await row.evaluate((el, s) => {
+            const dot = el.querySelector('.animate-status-pulse') as HTMLElement | null
+            if (dot) {
+              dot.style.transform = `scale(${s.scale})`
+              dot.style.opacity = String(s.opacity)
+            }
+          }, { scale, opacity })
+          // Commit the inline style before the shot (two rAFs, like settle()).
+          await page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))))
+          await page.screenshot({ path: join(tmp, `f${String(i).padStart(3, '0')}.png`), clip })
+        }
+        const out = join(OUT, `status-dot-pulse-${theme}.webm`)
+        const r = spawnSync(ffmpegBin, [
+          '-y', '-nostdin', '-loglevel', 'error',
+          '-framerate', '12', '-i', join(tmp, 'f%03d.png'),
+          '-c:v', 'libvpx-vp9', '-lossless', '1', '-pix_fmt', 'yuv444p',
+          '-g', '12', '-threads', '1', '-an',
+          '-flags', '+bitexact', '-fflags', '+bitexact',
+          out,
+        ], { encoding: 'utf8' })
+        if (r.status !== 0) throw new Error(`ffmpeg failed (${r.status}): ${r.stderr}`)
+        writeFileSync(`${out}.meta`, JSON.stringify({ tags: [`theme::${theme}`, 'section::agent'] }))
+        console.log(`wrote ${out}`)
+      } finally {
+        await ctx.close()
+      }
+    }
+    progress('recording status-dot video')
+    for (const theme of themes) await recordStatusDot(theme)
   } finally {
     await browser.close()
   }
