@@ -82,6 +82,36 @@ func TestUnreadDebouncerStatusChangeClearsPending(t *testing.T) {
 	}
 }
 
+func TestUnreadDebouncerTakeRaisesOnSessionExit(t *testing.T) {
+	// An agent that finishes and then exits before the grace window elapses: the
+	// poller calls take() when it sees the session gone. A pending entry means a
+	// real finish the window had not yet confirmed, so take reports it (and the
+	// caller raises the flag) — the session ending is itself the confirmation.
+	d := newUnreadDebouncer()
+	t0 := time.Unix(5000, 0)
+	d.arm("a", "finished", t0)
+
+	if !d.take("a") {
+		t.Fatal("take did not report the pending unread on session exit")
+	}
+	// take clears the entry, so a later poll (and ready) does not double-fire.
+	if d.take("a") {
+		t.Fatal("take fired twice for one transition")
+	}
+	if d.ready("a", "finished", t0.Add(2*graceUnread)) {
+		t.Fatal("ready matured after take already consumed the pending entry")
+	}
+}
+
+func TestUnreadDebouncerTakeNoPending(t *testing.T) {
+	// No transition was pending (e.g. the agent was killed from running, or its
+	// flag already matured) — a session exit must not raise a spurious dot.
+	d := newUnreadDebouncer()
+	if d.take("a") {
+		t.Fatal("take reported a pending entry that was never armed")
+	}
+}
+
 func TestUnreadDebouncerArmPreservesOriginalSince(t *testing.T) {
 	// Re-arming the same status across polls must keep counting from the first
 	// observation, not restart the window each tick.

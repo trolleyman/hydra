@@ -14,8 +14,14 @@ export interface EventStreamHandlers {
 // on every (re)connect — giving a returning/reconnecting client fresh data.
 //
 // - Reconnects with capped exponential backoff if the socket drops.
-// - Closes the socket while the tab is hidden and reconnects on return, matching
-//   startVisibilityPolling so a backgrounded tab holds no connection.
+// - Stays connected while the tab is hidden, UNLIKE the visibility-gated fallback
+//   polls. The socket is push-based — it sits idle and only delivers a frame when
+//   something actually changes — so holding it open costs ~nothing and does NOT
+//   hammer the daemon the way a background poll would. Keeping it open is what
+//   lets a backgrounded tab still learn about unread changes and light the unread
+//   dot in its title (the whole point of that indicator is to alert you while the
+//   tab is NOT in front). On becoming visible we force an immediate reconnect if
+//   the socket dropped while hidden, so a returning user never waits on backoff.
 // - Handlers are read through a ref, so passing fresh closures each render does
 //   NOT reconnect; only a projectId change restarts the stream.
 export function useEventStream(projectId: string | null, handlers: EventStreamHandlers): void {
@@ -58,7 +64,7 @@ export function useEventStream(projectId: string | null, handlers: EventStreamHa
     }
 
     const connect = () => {
-      if (stopped || document.hidden || ws) return
+      if (stopped || ws) return
       const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
       const url = `${proto}://${window.location.host}/ws/projects/${encodeURIComponent(projectId)}/events`
       const sock = new WebSocket(url)
@@ -76,7 +82,7 @@ export function useEventStream(projectId: string | null, handlers: EventStreamHa
       }
       sock.onclose = () => {
         if (ws === sock) ws = null
-        if (stopped || document.hidden) return
+        if (stopped) return
         clearReconnect()
         reconnectTimer = setTimeout(connect, backoff)
         backoff = Math.min(backoff * 2, 30_000)
@@ -91,13 +97,14 @@ export function useEventStream(projectId: string | null, handlers: EventStreamHa
     }
 
     const onVisibility = () => {
-      if (document.hidden) {
-        clearReconnect()
-        closeSocket()
-      } else if (!ws) {
-        backoff = 1000
-        connect()
-      }
+      // We deliberately keep the socket open while hidden (see the header), so
+      // there's nothing to do on hide. On return, if the socket dropped while we
+      // were backgrounded (e.g. the browser froze the connection), reconnect at
+      // once rather than waiting out the pending backoff timer.
+      if (document.hidden || ws) return
+      backoff = 1000
+      clearReconnect()
+      connect()
     }
 
     connect()

@@ -259,6 +259,20 @@ export function AgentTopBar({
 
   const editing = rename?.editing ?? false
 
+  // When editing is triggered without a click (F2 / the menu's Rename item),
+  // focus + select the field. A click already focuses it and positions the
+  // caret where the user clicked, so we skip select() in that case (the input
+  // is already the active element by the time this runs) to preserve the caret.
+  const inputRef = useRef<HTMLInputElement>(null)
+  useEffect(() => {
+    if (!editing) return
+    const el = inputRef.current
+    if (el && document.activeElement !== el) {
+      el.focus()
+      el.select()
+    }
+  }, [editing])
+
   return (
     // A real header above the scrolling content (not sticky inside it), so it
     // aligns with the sidebar header and never collides with the diff's own
@@ -280,14 +294,26 @@ export function AgentTopBar({
           the toolbar always has room to lay out. AdaptiveActions measures this
           row via its own parentElement, so the row needs no ref. */}
       <div className="flex items-center gap-1 min-w-0 flex-1">
-        {editing && rename ? (
+        {rename ? (
+          // A single always-mounted input (read-only until editing) so the box
+          // keeps its full width, clicking places the caret where you click, and
+          // the text never shifts between the display and edit states. The bottom
+          // border is always reserved (transparent → blue) to avoid any reflow.
           <input
-            autoFocus
-            value={rename.draft}
+            ref={inputRef}
+            type="text"
+            value={editing ? rename.draft : title}
+            readOnly={!editing}
             disabled={rename.saving}
             onChange={(e) => rename.onChange(e.target.value)}
-            onBlur={rename.onSave}
+            onFocus={() => {
+              if (!editing) rename.onStart()
+            }}
+            onBlur={() => {
+              if (editing && !rename.saving) rename.onSave()
+            }}
             onKeyDown={(e) => {
+              if (!editing) return
               if (e.key === 'Enter') {
                 e.preventDefault()
                 rename.onSave()
@@ -296,19 +322,20 @@ export function AgentTopBar({
                 rename.onCancel()
               }
             }}
-            className="min-w-0 w-64 max-w-full text-sm font-semibold bg-transparent border-b border-blue-400 focus:outline-none text-gray-800 dark:text-gray-100 disabled:opacity-50"
+            title={editing ? undefined : 'Rename'}
+            className={`min-w-0 flex-1 text-sm font-semibold bg-transparent border-b px-1 py-1 rounded focus:outline-none text-gray-800 dark:text-gray-100 transition-colors disabled:opacity-50 ${
+              editing
+                ? 'border-blue-400'
+                : 'border-transparent cursor-text hover:bg-gray-100 dark:hover:bg-gray-700'
+            }`}
           />
         ) : (
-          <button
-            type="button"
-            onClick={() => rename?.onStart()}
-            title={rename ? 'Rename' : title}
-            className={`min-w-0 flex-1 truncate text-left text-sm font-semibold text-gray-800 dark:text-gray-100 px-1 py-1 rounded transition-colors ${
-              rename ? 'cursor-text hover:bg-gray-100 dark:hover:bg-gray-700' : 'cursor-default'
-            }`}
+          <span
+            title={title}
+            className="min-w-0 flex-1 truncate text-sm font-semibold text-gray-800 dark:text-gray-100 px-1 py-1"
           >
             {title}
-          </button>
+          </span>
         )}
 
         {!editing && actions.length > 0 && (
