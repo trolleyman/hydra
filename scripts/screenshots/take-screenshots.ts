@@ -647,6 +647,12 @@ try {
       // ResolveFullscreen / claudeRenderingEnv). :text-is matches the pill's exact
       // label, so it can't collide with the "All agents" tab.
       { name: 'settings-claude', path: '/project/sim-project/settings', click: 'button:text-is("Claude")', viewport: { width: 1280, height: 2900 } },
+      // The OS-sandbox network host-filtering controls with filtering ACTIVE: the
+      // "Filter outbound hosts" toggle on and the allow-list populated with a few
+      // hosts (simulation.go seeds defaults.sandbox.network filter_enabled + four
+      // hosts). scrollTo pins the "Agent" section so the sandbox policy + network
+      // filter fill the frame rather than the page top.
+      { name: 'settings-host-filter', path: '/project/sim-project/settings', scrollTo: 'Agent', viewport: { width: 1280, height: 1400 } },
       // The settings page at the small viewports. Below the lg breakpoint the
       // sidebar is collapsed, so a "Settings" header bar (with the show-sidebar
       // toggle) appears above the page; tablet-landscape is wide enough to keep
