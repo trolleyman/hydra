@@ -364,11 +364,17 @@ try {
       highlightArtifacts?: boolean
       // Clicks the first before/after artifact image (after showArtifacts has
       // expanded the card and decoded the tiles) to open it in the fullscreen
-      // lightbox — documents that clicking an artifact image now opens it semi-
-      // fullscreen (the spawn box's ImageLightbox) instead of in a new tab.
-      // Captures the viewport (the lightbox is a fixed overlay). Pair with
-      // showArtifacts + imageDiffMode 'side-by-side' (a plain, single-image tile).
+      // lightbox. The lightbox is diff-aware: it shows the before/after comparator
+      // (with a mode selector + ←/→ between files), opening in the tile's current
+      // mode. Captures the viewport (the lightbox is a fixed overlay). Pair with
+      // showArtifacts + imageDiffMode 'side-by-side' (whose tiles open on a plain
+      // left-click).
       openArtifactImage?: boolean
+      // After openArtifactImage, click the lightbox's mode selector to switch the
+      // fullscreen comparator to this mode (by the selector's button label) — shows
+      // before/after, onion, etc. working inside the lightbox. Only meaningful with
+      // openArtifactImage.
+      lightboxMode?: string
       // Eager-loads every masonry tile image and waits for the layout to settle
       // before capturing — for the repository artifacts view, whose masonry is shown
       // without an expand step. Keeps the width-driven layout byte-reproducible
@@ -797,6 +803,20 @@ try {
       // variant — red icon tile + a warning chip naming how many unmerged files
       // the worktree deletion will discard (count fetched in the background).
       { name: 'agent-kill-dialog', path: '/project/sim-project/agent/agent-1', viewportOnly: true, click: 'button[aria-label="Kill"]' },
+      // The redesigned merge-conflict panel: agent-3's diff carries the
+      // merge_conflict flag (simulation.go GetAgentDiff), so the Changes toolbar
+      // shows a red "N conflict" button; clicking it opens the rich panel — red
+      // icon tile + title/subtitle, an uppercase "Conflicting files" chip and the
+      // dark "Resolving locally" command block, with Dismiss / Fix-with-agent in
+      // the shared dialog-button styling. scrollTo brings the toolbar into view for
+      // the click; the panel itself is a fixed, centered overlay.
+      { name: 'merge-conflict-dialog', path: '/project/sim-project/agent/agent-3', viewportOnly: true, scrollTo: 'Changes', click: 'button:has-text("conflict")' },
+      // The redesigned update-from-base confirmation: agent-2's diff trails its
+      // base (behind_count) so the Changes toolbar shows an amber "N behind"
+      // button; clicking it opens the rich panel — amber icon tile, a base→branch
+      // chip with the behind count, and (because agent-2 also has uncommitted
+      // changes) the amber caution note. scrollTo reveals the toolbar for the click.
+      { name: 'agent-update-base-dialog', path: '/project/sim-project/agent/agent-2', viewportOnly: true, scrollTo: 'Changes', click: 'button:has-text("behind")' },
       // The agent-detail prompt block rendering the upload paths a prompt carries
       // as attachment chips instead of raw links: three image thumbnails (served a
       // fixed stub PNG) and one non-image file shown with a generic icon, the
@@ -872,6 +892,30 @@ try {
         imageDiffMode: 'side-by-side',
         showArtifacts: true,
         openArtifactImage: true,
+      },
+      // The lightbox is diff-aware: opened from a tile, it shows the before/after
+      // comparator fullscreen with a mode selector. These two switch it to the AB
+      // (Before · After toggle) and onion-skin modes inside the lightbox, documenting
+      // that every diff mode works there — not just a static image.
+      {
+        name: 'artifact-lightbox-ab',
+        path: '/project/sim-project/agent/agent-1',
+        scrollTo: 'Changes',
+        viewport: { width: 1280, height: 1280 },
+        imageDiffMode: 'side-by-side',
+        showArtifacts: true,
+        openArtifactImage: true,
+        lightboxMode: 'Before · After',
+      },
+      {
+        name: 'artifact-lightbox-onion',
+        path: '/project/sim-project/agent/agent-1',
+        scrollTo: 'Changes',
+        viewport: { width: 1280, height: 1280 },
+        imageDiffMode: 'side-by-side',
+        showArtifacts: true,
+        openArtifactImage: true,
+        lightboxMode: 'Onion skin',
       },
       // The collapsed artifacts panel: each set is a single header row ("N changed",
       // a spinner while generating, etc.) until clicked open — the default, opt-in
@@ -1781,6 +1825,12 @@ try {
             !!document.querySelector('figure figcaption')?.textContent?.includes('×'),
           )
           await settle(page)
+          if (pg.lightboxMode) {
+            // Switch the in-lightbox comparator to another mode via its selector
+            // (button text === the mode label), then let the new layers decode.
+            await page.click(`figure button:text-is("${pg.lightboxMode}")`)
+            await settle(page)
+          }
         }
         if (pg.highlightArtifacts) {
           // Tick the "Highlight" checkbox on every before/after image tile so the

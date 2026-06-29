@@ -553,11 +553,16 @@ func (s *SimulationServer) GetAgentCommits(w http.ResponseWriter, r *http.Reques
 
 func (s *SimulationServer) GetAgentDiff(w http.ResponseWriter, r *http.Request, projectId string, id string, params api.GetAgentDiffParams) {
 	if id == "agent-2" {
-		// Mock uncommitted changes
+		// Mock uncommitted changes + a branch that trails its base, so agent-2's
+		// Changes toolbar shows the "behind" button and the redesigned
+		// update-from-base dialog (captured by `agent-update-base-dialog`). With
+		// uncommitted changes present, that dialog also surfaces its caution note.
 		uncommitted := true
+		behind := 3
 		resp := api.DiffResponse{
 			BaseRef:            "main",
 			HeadRef:            "hydra/feat-2",
+			BehindCount:        &behind,
 			UncommittedChanges: &uncommitted,
 			UncommittedSummary: &api.UncommittedSummary{
 				TrackedCount:   2,
@@ -999,9 +1004,17 @@ func (s *SimulationServer) GetAgentDiff(w http.ResponseWriter, r *http.Request, 
 		//   - web/src/{index.ts,components/…}  `web` folds into `src`, but `src`
 		//                                      holds a file AND a folder so the
 		//                                      chain stops there (no over-merging).
+		// agent-3 also conflicts with its base branch, so its diff carries the
+		// merge-conflict flag + the offending file. This surfaces the redesigned
+		// merge-conflict panel (DiffViewer.tsx → MergeConflictButton) in the Changes
+		// toolbar and is captured by the `merge-conflict-dialog` screenshot.
+		mergeConflict := true
+		conflictFiles := []string{"internal/app/services/billing/stripe/webhook.go"}
 		resp := api.DiffResponse{
-			BaseRef: "main",
-			HeadRef: "hydra/feat-3",
+			BaseRef:       "main",
+			HeadRef:       "hydra/feat-3",
+			MergeConflict: &mergeConflict,
+			ConflictFiles: &conflictFiles,
 			Files: []api.DiffFile{
 				simFile("README.md", api.DiffFileChangeTypeModified, 3, 0,
 					"@@ -1,2 +1,5 @@", 1, 1,
