@@ -533,6 +533,10 @@ function ArtifactSetCard({ set, mode, spans, onSpanChange, filter, search, onRef
   // show its red-bordered terminal rather than a separate error box.
   const leftFailed = status === 'error' || !!set.left_error
   const rightFailed = status === 'error' || !!set.right_error
+  // The mirror of *Failed: a side that settled cleanly (it produced a build log and
+  // didn't error) gets a green-bordered terminal, matching the red one for failures.
+  const leftSucceeded = !leftFailed && !!set.left_log_url
+  const rightSucceeded = !rightFailed && !!set.right_log_url
   // One side failed while the other rendered (status stays "ready").
   const failedSide: 'left' | 'right' | null = status !== 'error' && set.left_error ? 'left' : status !== 'error' && set.right_error ? 'right' : null
 
@@ -760,7 +764,7 @@ function ArtifactSetCard({ set, mode, spans, onSpanChange, filter, search, onRef
               {/* Both sides failed: the red-bordered build-log terminals (the
                   script's stderr) ARE the error surface, so no separate error box.
                   Fall back to the captured error text only when no log exists. */}
-              <PersistedLogView leftUrl={set.left_log_url} rightUrl={set.right_log_url} open={buildLogOpen} leftFailed={leftFailed} rightFailed={rightFailed} />
+              <PersistedLogView leftUrl={set.left_log_url} rightUrl={set.right_log_url} open={buildLogOpen} leftFailed={leftFailed} rightFailed={rightFailed} leftSucceeded={leftSucceeded} rightSucceeded={rightSucceeded} />
               {!hasBuildLog && (
                 <div className="my-2 px-3 py-2 rounded-md bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 font-mono text-xs text-red-600 dark:text-red-400 whitespace-pre-wrap break-words">
                   {set.error ? stripAnsi(set.error) : 'Artifact generation failed.'}
@@ -779,7 +783,7 @@ function ArtifactSetCard({ set, mode, spans, onSpanChange, filter, search, onRef
                   the failure detail), and the surviving side's files are neutralised
                   to "unchanged" (cardFiles) so they're hidden by default rather than
                   flooding the grid with one-sided diffs. */}
-              <PersistedLogView leftUrl={set.left_log_url} rightUrl={set.right_log_url} open={buildLogOpen} leftFailed={leftFailed} rightFailed={rightFailed} />
+              <PersistedLogView leftUrl={set.left_log_url} rightUrl={set.right_log_url} open={buildLogOpen} leftFailed={leftFailed} rightFailed={rightFailed} leftSucceeded={leftSucceeded} rightSucceeded={rightSucceeded} />
               {failedSide && !hasBuildLog && (
                 // One side died and left no log to show: fall back to a one-line note
                 // so the partial result is still explained.

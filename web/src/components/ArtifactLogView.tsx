@@ -57,7 +57,7 @@ function formatLogLine(l: ArtifactLogLine): string {
 // through React, renders ANSI colour natively, and auto-follows the tail unless
 // the user scrolls up — xterm handles all three, so a very large, fast-updating
 // log stays smooth where the old map-the-whole-array approach lagged badly.
-export function LogView({ log, emptyText = 'Waiting for output…', failed = false }: { log: ArtifactLogLine[]; emptyText?: string; failed?: boolean }) {
+export function LogView({ log, emptyText = 'Waiting for output…', failed = false, succeeded = false }: { log: ArtifactLogLine[]; emptyText?: string; failed?: boolean; succeeded?: boolean }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<Terminal | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
@@ -145,11 +145,15 @@ export function LogView({ log, emptyText = 'Waiting for output…', failed = fal
 
   // A failed build's log gets a red border + faint red wash so the terminal
   // itself reads as the error surface — the script's stderr (rendered red) is the
-  // failure detail, so no separate error box is needed beside it.
+  // failure detail, so no separate error box is needed beside it. A build that
+  // finished successfully gets the mirror-image green border + faint green wash, so
+  // a settled log reads its outcome at a glance (failed > succeeded if both set).
   return (
     <div className={`relative h-64 max-h-64 rounded-md border p-2 ${
       failed
         ? 'border-red-300 dark:border-red-800/80 bg-red-50/40 dark:bg-red-950/20'
+        : succeeded
+        ? 'border-green-300 dark:border-green-800/80 bg-green-50/40 dark:bg-green-950/20'
         : 'border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/60'
     }`}>
       <div ref={containerRef} className="h-full w-full" />
@@ -189,22 +193,26 @@ function NoLog() {
 // Otherwise it always renders a terminal: "Loading…" while the fetch is in flight,
 // the fetch error inside the box (red border) if it failed, or the lines once
 // loaded — so a settled card shows two real terminals immediately rather than a
-// bare "Loading log…" line. `failed` marks a side whose build itself errored.
-function SideLogPane({ label, url, log, loading, error, failed }: {
+// bare "Loading log…" line. `failed` marks a side whose build itself errored;
+// `succeeded` marks one that finished cleanly (green border). A fetch error counts
+// as failed and overrides succeeded.
+function SideLogPane({ label, url, log, loading, error, failed, succeeded }: {
   label: string
   url?: string | null
   log: ArtifactLogLine[] | null
   loading: boolean
   error: string | null
   failed?: boolean
+  succeeded?: boolean
 }) {
   if (!url) {
     return <LogColumnFrame label={label}><NoLog /></LogColumnFrame>
   }
   const emptyText = error ? `Failed to load log: ${error}` : loading ? 'Loading…' : 'No output'
+  const didFail = failed || !!error
   return (
     <LogColumnFrame label={label}>
-      <LogView log={log ?? []} emptyText={emptyText} failed={failed || !!error} />
+      <LogView log={log ?? []} emptyText={emptyText} failed={didFail} succeeded={succeeded && !didFail} />
     </LogColumnFrame>
   )
 }
@@ -261,7 +269,7 @@ export function LiveLogPanes({ set }: { set: ArtifactSet }) {
 // each side's persisted log (left_log_url / right_log_url) and shows them in the
 // same side-by-side panes as the live log. The open/close toggle lives in the card
 // header (the "build log" button next to refresh), so this is content-only.
-export function PersistedLogView({ leftUrl, rightUrl, open, leftFailed, rightFailed }: { leftUrl?: string | null; rightUrl?: string | null; open: boolean; leftFailed?: boolean; rightFailed?: boolean }) {
+export function PersistedLogView({ leftUrl, rightUrl, open, leftFailed, rightFailed, leftSucceeded, rightSucceeded }: { leftUrl?: string | null; rightUrl?: string | null; open: boolean; leftFailed?: boolean; rightFailed?: boolean; leftSucceeded?: boolean; rightSucceeded?: boolean }) {
   const [logs, setLogs] = useState<{ left: ArtifactLogLine[] | null; right: ArtifactLogLine[] | null } | null>(null)
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState<string | null>(null)
@@ -310,8 +318,8 @@ export function PersistedLogView({ leftUrl, rightUrl, open, leftFailed, rightFai
   return (
     <div className="pt-1.5">
       <div className="flex gap-2 my-2">
-        <SideLogPane label="Before" url={leftUrl} log={logs?.left ?? null} loading={loading} error={err} failed={leftFailed} />
-        <SideLogPane label="After" url={rightUrl} log={logs?.right ?? null} loading={loading} error={err} failed={rightFailed} />
+        <SideLogPane label="Before" url={leftUrl} log={logs?.left ?? null} loading={loading} error={err} failed={leftFailed} succeeded={leftSucceeded} />
+        <SideLogPane label="After" url={rightUrl} log={logs?.right ?? null} loading={loading} error={err} failed={rightFailed} succeeded={rightSucceeded} />
       </div>
     </div>
   )
