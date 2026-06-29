@@ -627,6 +627,50 @@ command = "bun shots.ts"
 	}
 }
 
+// TestStrictDefaultAndRoundTrip checks that strict defaults to on (absent flag)
+// and that an explicit strict = false survives a render→decode round-trip for
+// both artifacts and services (so a UI/file opt-out is not silently dropped).
+func TestStrictDefaultAndRoundTrip(t *testing.T) {
+	// Default: an absent flag means strict.
+	if !(ArtifactScript{}).IsStrict() {
+		t.Error("artifact with no strict flag should be strict by default")
+	}
+	if !(ServiceScript{}).IsStrict() {
+		t.Error("service with no strict flag should be strict by default")
+	}
+	if (ArtifactScript{Strict: boolPtr(false)}).IsStrict() {
+		t.Error("strict = false must disable strict mode")
+	}
+
+	cfg := Config{
+		Artifacts: []ArtifactScript{
+			{Name: "lenient", Command: "bun shots.ts", Strict: boolPtr(false)},
+			{Name: "strict-default", Command: "make docs"},
+		},
+		Services: []ServiceScript{
+			{Name: "lenient-svc", Command: "run.sh", Strict: boolPtr(false)},
+		},
+	}
+	out := renderConfig(nil, cfg)
+	if !strings.Contains(out, "strict = false") {
+		t.Fatalf("strict = false not rendered:\n%s", out)
+	}
+	loaded, err := decodeConfig([]byte(out))
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(loaded.Artifacts) != 2 || loaded.Artifacts[0].IsStrict() {
+		t.Errorf("artifact strict = false lost on round-trip: %+v", loaded.Artifacts)
+	}
+	// The strict-by-default artifact has no flag written, so it stays strict.
+	if loaded.Artifacts[1].Strict != nil || !loaded.Artifacts[1].IsStrict() {
+		t.Errorf("strict-default artifact should keep an absent flag: %+v", loaded.Artifacts[1])
+	}
+	if len(loaded.Services) != 1 || loaded.Services[0].IsStrict() {
+		t.Errorf("service strict = false lost on round-trip: %+v", loaded.Services)
+	}
+}
+
 func TestArtifactPrefetchRender(t *testing.T) {
 	boolp := func(b bool) *bool { return &b }
 

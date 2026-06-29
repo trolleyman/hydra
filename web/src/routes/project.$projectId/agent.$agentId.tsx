@@ -6,7 +6,6 @@ import { useProjectStore } from '../../stores/projectStore'
 import { api } from '../../stores/apiClient'
 import { AgentDetail } from '../../components/AgentDetail'
 import { saveProjectView } from '../../lib/projectView'
-import type { AgentResponse } from '../../api'
 
 export const Route = createFileRoute('/project/$projectId/agent/$agentId')({
   component: AgentPage,
@@ -14,7 +13,7 @@ export const Route = createFileRoute('/project/$projectId/agent/$agentId')({
 
 function AgentPage() {
   const { projectId, agentId } = useParams({ from: '/project/$projectId/agent/$agentId' })
-  const { agents, loading, removeAgent, updateAgent, setAgents } = useAgentStore()
+  const { agents, loading, removeAgent, setAgents } = useAgentStore()
   const archived = useAgentStore((s) => s.archived)
   const upsertArchived = useAgentStore((s) => s.upsertArchived)
   const projects = useProjectStore((s) => s.projects)
@@ -87,13 +86,6 @@ function AgentPage() {
     }
   }
 
-  function handleRestarted(newAgent: AgentResponse) {
-    updateAgent(newAgent)
-    if (isMounted.current && newAgent.id === agentIdRef.current) {
-      navigate({ to: '/project/$projectId/agent/$agentId', params: { projectId, agentId: newAgent.id } })
-    }
-  }
-
   async function handleRefresh() {
     try {
       const result = await api.default.listAgents(projectId)
@@ -121,12 +113,18 @@ function AgentPage() {
   }
 
   return (
+    // Key by project+agent so switching agents remounts the whole detail subtree
+    // (AgentDetail, its terminal, diff viewer) with fresh state, rather than
+    // reusing one instance and hand-resetting the bits that would otherwise bleed
+    // across agents (rename draft, terminal height/tabs, collapsed diff files, …).
+    // Agent IDs are globally unique so the key is collision-safe; the
+    // `${projectId}-${agentId}` shape matches the storage.ts key builders.
     <AgentDetail
+      key={`${projectId}-${agentId}`}
       agent={agent}
       projectId={projectId}
       onKilled={handleKilled}
       onUnselect={handleUnselect}
-      onRestarted={handleRestarted}
       onRefresh={handleRefresh}
     />
   )

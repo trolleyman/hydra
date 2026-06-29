@@ -1751,6 +1751,9 @@ components:
         unread_count:
           type: integer
           description: Number of this project's agents with unread changes. Drives the cross-project "updates waiting" indicator.
+        needs_input_count:
+          type: integer
+          description: Number of this project's agents currently blocked on the user (status `needs_input`). Drives the red "needs your input" indicator, which is shown whenever this is greater than zero.
 
     ConfigTomlResponse:
       type: object
@@ -2432,7 +2435,7 @@ components:
           description: Unique label, also used as the cache directory
         command:
           type: string
-          description: Shell command run via `sh -c` in the checkout directory
+          description: Shell command run via `bash -c` in the checkout directory
         timeout_sec:
           type: integer
           description: Max seconds the command may run (0 = built-in default)
@@ -2442,6 +2445,10 @@ components:
         clean_ignored:
           type: boolean
           description: Also delete git-ignored files (e.g. node_modules) before each run — a pristine checkout (git clean -fdx) instead of the default that keeps caches warm (-fd). Slower; only if stale ignored output can leak between commits (default false)
+        strict:
+          type: boolean
+          nullable: true
+          description: Run the command under `set -eo pipefail` so a failing step aborts and propagates instead of being swallowed into a success (absent/null or true = strict; false = run exactly as written)
         enabled:
           type: boolean
           nullable: true
@@ -2465,6 +2472,10 @@ components:
           type: integer
           nullable: true
           description: Relaunch cap after an unexpected exit (null = default 3; 0 = never restart)
+        strict:
+          type: boolean
+          nullable: true
+          description: Run the command under `set -eo pipefail` so a failed startup step surfaces as a crash instead of a healthy process (absent/null or true = strict; false = run exactly as written)
         enabled:
           type: boolean
           nullable: true

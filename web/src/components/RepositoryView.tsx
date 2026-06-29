@@ -17,12 +17,13 @@ import { canCopyImages, copyImageToClipboard } from '../lib/clipboard'
 import { BranchSelector } from './BranchSelector'
 import { RepositoryArtifactsView } from './RepositoryArtifactsView'
 import { Tooltip } from './Tooltip'
+import { IconButton } from './IconButton'
 import { useSidebarStore } from '../lib/sidebar'
 import {
   FileDiff, FileRow, ChangeTypeIcon, TreeNodeView,
   buildFileTree, compactTree as compactDiffTree, getGroupedFiles, type FileView,
 } from '../DiffViewer'
-import { IMAGE_DIFF_MODES, type ImageDiffMode } from './ArtifactsPanel'
+import { IMAGE_DIFF_MODES, type ImageDiffMode } from './ArtifactImageDiff'
 import { repoBlobUrl } from '../lib/imageDiff'
 
 // ── File tree model ────────────────────────────────────────────────────────────
@@ -1263,14 +1264,9 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
       >
         {collapsed && (
           <Tooltip content="Show sidebar (Ctrl+.)">
-            <button
-              type="button"
-              aria-label="Show sidebar"
-              onClick={toggleSidebar}
-              className="shrink-0 -ml-1 w-9 h-9 flex items-center justify-center rounded-lg text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors cursor-pointer"
-            >
+            <IconButton variant="panel" aria-label="Show sidebar" onClick={toggleSidebar} className="shrink-0 -ml-1">
               <PanelLeftOpen className="w-5 h-5" />
-            </button>
+            </IconButton>
           </Tooltip>
         )}
         <span className="shrink-0 text-sm font-semibold text-gray-800 dark:text-gray-100">Repository</span>

@@ -6,6 +6,7 @@
 // leak persisted state into each other.
 import '@testing-library/jest-dom/vitest'
 import { afterEach } from 'vitest'
+import { cleanup } from '@testing-library/react'
 
 class MemoryStorage implements Storage {
   private store = new Map<string, string>()
@@ -22,6 +23,21 @@ for (const target of new Set<object>([globalThis, globalThis.window])) {
   Object.defineProperty(target, 'localStorage', { value: memory, writable: true, configurable: true })
 }
 
+// jsdom doesn't implement HTMLCanvasElement.getContext and logs a noisy "Not
+// implemented" error the first time any imported module touches a canvas (the
+// artifact diff viewers' pixel-diff overlays — DiffCanvas / VideoDiffView). No
+// test renders those overlays, and the real code already treats a null context
+// as "can't diff", so stub getContext to return null: same effective behaviour,
+// without the warning. Override the prototype (not a jsdom internal) so it sticks
+// regardless of how the canvas was created.
+if (typeof HTMLCanvasElement !== 'undefined') {
+  HTMLCanvasElement.prototype.getContext = () => null
+}
+
 afterEach(() => {
+  // Unmount anything @testing-library/react rendered (auto-cleanup is off with
+  // vitest globals disabled, so component renders would otherwise pile up in the
+  // shared document.body and trip "multiple elements found" across tests).
+  cleanup()
   localStorage.clear()
 })

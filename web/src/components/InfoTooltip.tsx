@@ -1,132 +1,22 @@
-import React, { useState, useRef, useLayoutEffect } from 'react'
-import { createPortal } from 'react-dom'
+import type { ReactNode } from 'react'
 import { Info } from 'lucide-react'
+import { Tooltip } from './Tooltip'
 
 interface InfoTooltipProps {
   title?: string
-  children: React.ReactNode
+  children: ReactNode
   // Tooltip width in px. Defaults to 384 (the old w-96). Used for both the box
-  // itself and the off-screen-clamping math in updateCoords, so they stay in sync.
+  // itself and the off-screen-clamping math, so they stay in sync.
   width?: number
 }
 
+// Thin preset over <Tooltip variant="card">: an Info icon trigger whose hover
+// card holds the passed-in body. All the portal/placement/show-hide logic lives
+// in Tooltip.tsx — this just wires up the icon and the card defaults.
 export function InfoTooltip({ title, children, width = 384 }: InfoTooltipProps) {
-  const [isOpen, setIsOpen] = useState(false)
-  const [isTooltipHovered, setIsTooltipHovered] = useState(false)
-  const [coords, setCoords] = useState({ top: 0, left: 0, arrowX: '50%' })
-  const iconRef = useRef<SVGSVGElement>(null)
-  const closeTimeoutRef = useRef<number | null>(null)
-
-  const updateCoords = () => {
-    if (iconRef.current) {
-      const rect = iconRef.current.getBoundingClientRect()
-      const centerX = rect.left + rect.width / 2
-      const tooltipWidth = width
-      const padding = 16
-
-      let left = centerX
-      if (left - tooltipWidth / 2 < padding) {
-        left = tooltipWidth / 2 + padding
-      } else if (left + tooltipWidth / 2 > window.innerWidth - padding) {
-        left = window.innerWidth - tooltipWidth / 2 - padding
-      }
-
-      const arrowOffset = centerX - left
-
-      setCoords({
-        top: rect.top,
-        left: left,
-        arrowX: `calc(50% + ${arrowOffset}px)`
-      })
-    }
-  }
-
-  useLayoutEffect(() => {
-    if (isOpen) {
-      updateCoords()
-      window.addEventListener('scroll', updateCoords, true)
-      window.addEventListener('resize', updateCoords)
-    }
-    return () => {
-      window.removeEventListener('scroll', updateCoords, true)
-      window.removeEventListener('resize', updateCoords)
-    }
-  }, [isOpen])
-
-  React.useEffect(() => {
-    return () => {
-      if (closeTimeoutRef.current) {
-        window.clearTimeout(closeTimeoutRef.current)
-      }
-    }
-  }, [])
-
-  const handleMouseEnterIcon = () => {
-    if (closeTimeoutRef.current) {
-      window.clearTimeout(closeTimeoutRef.current)
-      closeTimeoutRef.current = null
-    }
-    updateCoords()
-    setIsOpen(true)
-  }
-
-  const handleMouseLeaveIcon = () => {
-    closeTimeoutRef.current = window.setTimeout(() => {
-      if (!isTooltipHovered) {
-        setIsOpen(false)
-      }
-    }, 100)
-  }
-
-  const handleMouseEnterTooltip = () => {
-    if (closeTimeoutRef.current) {
-      window.clearTimeout(closeTimeoutRef.current)
-      closeTimeoutRef.current = null
-    }
-    setIsTooltipHovered(true)
-  }
-
-  const handleMouseLeaveTooltip = () => {
-    setIsTooltipHovered(false)
-    setIsOpen(false)
-  }
-
   return (
-    <div className="inline-block ml-1 align-middle">
-      <Info
-        ref={iconRef}
-        className="w-3.5 h-3.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 cursor-help transition-colors"
-        onMouseEnter={handleMouseEnterIcon}
-        onMouseLeave={handleMouseLeaveIcon}
-      />
-      {isOpen && createPortal(
-        <div
-          className="fixed z-[9999] -translate-x-1/2 -translate-y-full p-3 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100 text-[11px] rounded-lg shadow-xl animate-in fade-in zoom-in-95 duration-100 border border-gray-200 dark:border-gray-700"
-          style={{
-            width,
-            top: coords.top - 8,
-            left: coords.left,
-            visibility: coords.top === 0 ? 'hidden' : 'visible'
-          }}
-          onMouseEnter={handleMouseEnterTooltip}
-          onMouseLeave={handleMouseLeaveTooltip}
-        >
-          {title && <p className="font-bold mb-1.5 border-b border-gray-200 dark:border-gray-700 pb-1">{title}</p>}
-          {/* Body text + code spans. Callers tag <code> with text-blue-300 (sized
-              for a dark tooltip); re-tint to a darker blue in light mode here so it
-              stays readable on the white surface (descendant selector wins on
-              specificity, no caller changes needed). */}
-          <div className="text-gray-600 dark:text-gray-300 space-y-2 [&_code]:text-blue-700 dark:[&_code]:text-blue-300">
-            {children}
-          </div>
-          {/* Arrow */}
-          <div
-            className="absolute top-full -translate-x-1/2 border-8 border-transparent border-t-white dark:border-t-gray-800"
-            style={{ left: coords.arrowX }}
-          />
-        </div>,
-        document.body
-      )}
-    </div>
+    <Tooltip variant="card" title={title} width={width} content={children} className="ml-1 align-middle">
+      <Info className="w-3.5 h-3.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 cursor-help transition-colors" />
+    </Tooltip>
   )
 }

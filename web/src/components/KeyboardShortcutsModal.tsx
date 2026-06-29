@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { X } from 'lucide-react'
 import { useShortcutsStore } from '../stores/shortcutsStore'
 import { SHORTCUT_GROUPS } from '../lib/shortcuts'
+import { IconButton } from './IconButton'
 
 // A single key rendered as a lowlit keycap.
 function Key({ children }: { children: string }) {
@@ -47,13 +48,9 @@ export function KeyboardShortcutsModal() {
           <h3 id="shortcuts-title" className="text-lg font-semibold text-gray-900 dark:text-gray-100">
             Keyboard shortcuts
           </h3>
-          <button
-            onClick={() => setOpen(false)}
-            aria-label="Close"
-            className="p-1 rounded-md text-gray-400 hover:text-gray-500 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors cursor-pointer"
-          >
+          <IconButton onClick={() => setOpen(false)} aria-label="Close">
             <X className="w-5 h-5" />
-          </button>
+          </IconButton>
         </div>
 
         <div className="px-6 py-4 max-h-[70vh] overflow-y-auto">

@@ -231,14 +231,21 @@ func (s *Server) ListProjects(_ context.Context, _ api.ListProjectsRequestObject
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
+	// A second query gives the red "needs your input" counts the same way.
+	needsInput, err := s.DB.CountNeedsInputByProject()
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
 	resp := make(api.ListProjects200JSONResponse, len(ps))
 	for i, p := range ps {
 		count := unread[p.Path]
+		needs := needsInput[p.Path]
 		resp[i] = api.ProjectInfo{
-			Id:          p.ID,
-			Path:        p.Path,
-			Name:        p.Name,
-			UnreadCount: &count,
+			Id:              p.ID,
+			Path:            p.Path,
+			Name:            p.Name,
+			UnreadCount:     &count,
+			NeedsInputCount: &needs,
 		}
 	}
 	return resp, nil
@@ -628,6 +635,7 @@ func toAPIArtifactScript(a config.ArtifactScript) api.ArtifactScript {
 	if a.CleanIgnored {
 		out.CleanIgnored = &a.CleanIgnored
 	}
+	out.Strict = a.Strict
 	out.Enabled = a.Enabled
 	return out
 }
@@ -644,6 +652,7 @@ func fromAPIArtifactScript(a api.ArtifactScript) config.ArtifactScript {
 	if a.CleanIgnored != nil {
 		out.CleanIgnored = *a.CleanIgnored
 	}
+	out.Strict = a.Strict
 	out.Enabled = a.Enabled
 	return out
 }
@@ -655,6 +664,7 @@ func toAPIServiceScript(svc config.ServiceScript) api.ServiceScript {
 		out.Host = &svc.Host
 	}
 	out.MaxRestarts = svc.MaxRestarts
+	out.Strict = svc.Strict
 	out.Enabled = svc.Enabled
 	return out
 }
@@ -666,6 +676,7 @@ func fromAPIServiceScript(svc api.ServiceScript) config.ServiceScript {
 		out.Host = *svc.Host
 	}
 	out.MaxRestarts = svc.MaxRestarts
+	out.Strict = svc.Strict
 	out.Enabled = svc.Enabled
 	return out
 }

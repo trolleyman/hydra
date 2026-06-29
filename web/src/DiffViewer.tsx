@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback, Fragment, useMemo, memo } fro
 import { highlightLines } from './lib/highlightCore'
 import { highlightSides } from './lib/highlightClient'
 import { api } from './stores/apiClient'
-import { formatError } from './api/format_error'
+import { formatError, apiErrorBody } from './api/format_error'
 import type { AgentResponse, CommitInfo, DiffFile, DiffHunk, DiffLine, DiffResponse } from './api'
 import {
   Plus, Calendar, TriangleAlert,
@@ -13,7 +13,8 @@ import {
 } from 'lucide-react'
 import { getFileIcon } from './lib/fileIcons'
 import { Tooltip } from './components/Tooltip'
-import { ArtifactsPanel, ImageDiffView, IMAGE_DIFF_MODES, type ImageDiffMode } from './components/ArtifactsPanel'
+import { ArtifactsPanel } from './components/ArtifactsPanel'
+import { ImageDiffView, IMAGE_DIFF_MODES, type ImageDiffMode } from './components/ArtifactImageDiff'
 import { isImagePath, agentBlobUrl } from './lib/imageDiff'
 import { useArtifactSpans } from './lib/artifactColumns'
 import { useDialogStore } from './stores/dialogStore'
@@ -1418,19 +1419,19 @@ function BehindBaseButton({ diff, agent, projectId, onUpdated }: {
         try {
           await api.default.updateAgentFromBase(projectId ?? '', agent.id)
           onUpdated()
-        } catch (err: any) {
-          const errorData = (err.body && typeof err.body === 'object') ? err.body : err
-          if (errorData.error === 'uncommitted_changes') {
+        } catch (err) {
+          const body = apiErrorBody(err)
+          if (body?.error === 'uncommitted_changes') {
             // The worktree has uncommitted changes the incoming base would overwrite
             // — not a content conflict. Name the files and ask the user to commit/stash.
-            const files: string[] = Array.isArray(errorData.conflicting_files) ? errorData.conflicting_files : []
+            const files = body.conflicting_files ?? []
             const fileList = files.length ? `\n\n${files.map((f) => `• ${f}`).join('\n')}` : ''
             useDialogStore.getState().show({
               title: 'Uncommitted Changes',
               message: `Can't update: your worktree has uncommitted changes that merging "${baseBranch}" would overwrite. Commit or stash them, then try again.${fileList}`,
               type: 'warning',
             })
-          } else if (errorData.error === 'merge_conflict') {
+          } else if (body?.error === 'merge_conflict') {
             useDialogStore.getState().show({
               title: 'Update Conflict',
               message: `CONFLICT: Merging "${baseBranch}" failed due to git conflicts. Resolve them manually in the worktree.`,
@@ -1744,19 +1745,10 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
   useEffect(() => { writeLocal(StorageKeys.diffSidebarWidth, String(sidebarWidth)) }, [sidebarWidth])
   useEffect(() => { writeLocal(StorageKeys.diffImageMode, imageDiffMode) }, [imageDiffMode])
 
-  // DiffViewer is reused (not remounted) when switching agents, so reload the
-  // collapsed-file set when the agent changes. Reset during render (per React's
-  // "adjust state when a prop changes" guidance) so the persist effect below
-  // sees the new agent's set, not the old one. The commit selectors also reset
-  // to base → latest, since a commit picked for one agent is meaningless for
-  // another (different branch/history).
-  const collapsedAgentRef = useRef(agent.id)
-  if (collapsedAgentRef.current !== agent.id) {
-    collapsedAgentRef.current = agent.id
-    setCollapsedFiles(new Set(loadAgentViewPrefs(projectId, agent.id).collapsedFiles ?? []))
-    setLeftSel({ type: 'base' })
-    setRightSel({ type: 'latest' })
-  }
+  // DiffViewer is remounted on every agent switch (the route keys the whole
+  // AgentDetail subtree by project+agent), so the collapsed-file set and the
+  // commit selectors initialise fresh from this agent's prefs above — no
+  // hand-reset on an agent-id change is needed.
   useEffect(() => {
     patchAgentViewPrefs(projectId, agent.id, { collapsedFiles: [...collapsedFiles] })
   }, [projectId, agent.id, collapsedFiles])

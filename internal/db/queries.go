@@ -192,6 +192,34 @@ func (s *Store) CountUnreadByProject() (map[string]int, error) {
 	return counts, nil
 }
 
+// CountNeedsInputByProject returns, for every project, how many of its active
+// agents are currently blocked on the user (status needs_input). Projects with
+// no such agents are omitted. Used to drive the cross-project red "needs your
+// input" indicator. Unlike unread changes this is keyed off the live status, so
+// it clears on its own once the agent is answered rather than on an explicit
+// read action.
+func (s *Store) CountNeedsInputByProject() (map[string]int, error) {
+	var rows []struct {
+		ProjectPath string
+		N           int
+	}
+	// Exclude ephemeral agents to match CountUnreadByProject: the sidebar hides
+	// them, so they must not inflate the per-project count either.
+	err := s.reader().Model(&Agent{}).
+		Select("project_path, count(*) as n").
+		Where("agent_status = ? AND ephemeral = ?", "needs_input", false).
+		Group("project_path").
+		Scan(&rows).Error
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	counts := make(map[string]int, len(rows))
+	for _, r := range rows {
+		counts[r.ProjectPath] = r.N
+	}
+	return counts, nil
+}
+
 // UpdateAgentTitle updates the user-facing display title for an agent.
 func (s *Store) UpdateAgentTitle(id, title string) error {
 	result := s.db.Model(&Agent{}).Where("id = ?", id).Update("title", title)

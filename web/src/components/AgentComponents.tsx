@@ -1,22 +1,44 @@
 import type { AgentResponse } from '../api'
 import { renderMarkdown } from '../lib/markdown'
 import { AgentTypeIcon, AGENT_ACCENT, type AgentTypeIconName } from './AgentTypeIcon'
+import { Badge, type Tone, TONE_DOT, TONE_BADGE } from './Badge'
 
-export function normalizeContainerState(status: string): string {
-  const s = status.toLowerCase()
-  if (s === 'running' || s.startsWith('up')) return 'running'
-  if (s === 'exited' || s.startsWith('exited')) return 'exited'
-  if (s === 'created') return 'created'
-  return s
+// Single source of truth for agent status colors + labels. Every status maps to
+// a `badge` tone (used by agentStatusBadge) and an optional `dot` tone (used by
+// agentDotClass). The dot tone is only set where the live dot wants its own
+// emphasis — needs_input reads a stronger red as a dot than its badge — and is
+// left off for states that only appear as a badge (deploying/ended/exited),
+// whose dot falls back to the raw session status. `killing`/`stopped` have no
+// badge of their own, so they reuse the dim `faint` fill (matching the previous
+// default-case behavior) while keeping their distinct dot color.
+const AGENT_STATUS: Record<string, { label: string; badge: Tone; dot?: Tone }> = {
+  pending: { label: 'pending', badge: 'neutral', dot: 'neutral' },
+  building: { label: 'building', badge: 'blue', dot: 'blue' },
+  deploying: { label: 'deploying', badge: 'indigo' },
+  running: { label: 'running', badge: 'green', dot: 'green' },
+  starting: { label: 'starting', badge: 'blue', dot: 'blue' },
+  needs_input: { label: 'needs_input', badge: 'red', dot: 'red' },
+  waiting: { label: 'waiting', badge: 'yellow', dot: 'yellow' },
+  finished: { label: 'finished', badge: 'violet', dot: 'violet' },
+  merging: { label: 'merging', badge: 'green', dot: 'green' },
+  ended: { label: 'ended', badge: 'muted' },
+  exited: { label: 'exited', badge: 'red' },
+  killing: { label: 'killing', badge: 'faint', dot: 'redSoft' },
+  stopped: { label: 'stopped', badge: 'faint', dot: 'neutral' },
 }
 
+// Raw session (PTY) status → dot tone, used as the fallback for statuses that
+// have no agent-status dot of their own.
+const SESSION_DOT: Record<string, Tone> = {
+  running: 'green',
+  exited: 'redSoft',
+}
+
+// statusDotClass picks a dot colour from the raw sandbox session status
+// (running|exited|stopped|pending|starting|building). Used only as the fallback
+// in agentDotClass when no richer agent_status has been reported yet.
 export function statusDotClass(status: string): string {
-  switch (normalizeContainerState(status)) {
-    case 'running': return 'bg-green-500'
-    case 'exited': return 'bg-red-400'
-    case 'created': return 'bg-blue-400'
-    default: return 'bg-gray-300 dark:bg-gray-600'
-  }
+  return TONE_DOT[SESSION_DOT[status] ?? 'neutral']
 }
 
 // agentDotClass picks the sidebar status dot color. It mirrors the status badge
@@ -24,18 +46,8 @@ export function statusDotClass(status: string): string {
 // reads yellow at a distance, not green just because its session is still alive.
 // Falls back to the raw session status when no agent status has been reported.
 export function agentDotClass(agent: AgentResponse): string {
-  switch (agent.agent_status?.status) {
-    case 'running':
-    case 'merging':  return 'bg-green-500'
-    case 'needs_input': return 'bg-red-500'
-    case 'waiting':  return 'bg-yellow-400'
-    case 'finished': return 'bg-violet-500'
-    case 'starting':
-    case 'building': return 'bg-blue-400'
-    case 'killing':  return 'bg-red-400'
-    case 'pending':
-    case 'stopped':  return 'bg-gray-300 dark:bg-gray-600'
-  }
+  const entry = agent.agent_status?.status ? AGENT_STATUS[agent.agent_status.status] : undefined
+  if (entry?.dot) return TONE_DOT[entry.dot]
   return statusDotClass(agent.session_status)
 }
 
@@ -98,20 +110,9 @@ export function agentTypePill(agentType: string): string {
 }
 
 export function agentStatusBadge(status: string | undefined): { label: string; className: string } {
-  switch (status) {
-    case 'pending':   return { label: 'pending',   className: 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400' }
-    case 'building':  return { label: 'building',  className: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' }
-    case 'deploying': return { label: 'deploying', className: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400' }
-    case 'running':   return { label: 'running',   className: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' }
-    case 'starting':  return { label: 'starting',  className: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' }
-    case 'needs_input': return { label: 'needs_input', className: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' }
-    case 'waiting':   return { label: 'waiting',   className: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400' }
-    case 'finished':  return { label: 'finished',  className: 'bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400' }
-    case 'merging':   return { label: 'merging',   className: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' }
-    case 'ended':     return { label: 'ended',     className: 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400' }
-    case 'exited':    return { label: 'exited',    className: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' }
-    default:          return { label: status ?? '', className: 'bg-gray-50 text-gray-400 dark:bg-gray-800 dark:text-gray-500' }
-  }
+  const entry = status ? AGENT_STATUS[status] : undefined
+  if (entry) return { label: entry.label, className: TONE_BADGE[entry.badge] }
+  return { label: status ?? '', className: TONE_BADGE.faint }
 }
 
 // Playful placeholders shown while an agent is running but hasn't reported a
@@ -169,11 +170,8 @@ export function agentStatusDetail(agent: AgentResponse): string {
 // archivedEndStateBadge renders the gray "killed"/"merged" chip for an archived
 // (finished) agent, shown in place of the live status badge.
 export function archivedEndStateBadge(endState: string | null | undefined): { label: string; className: string } {
-  switch (endState) {
-    case 'merged': return { label: 'merged', className: 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400' }
-    case 'killed': return { label: 'killed', className: 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400' }
-    default:       return { label: 'archived', className: 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400' }
-  }
+  const label = endState === 'merged' ? 'merged' : endState === 'killed' ? 'killed' : 'archived'
+  return { label, className: TONE_BADGE.muted }
 }
 
 export function AgentSidebarItem({
@@ -204,7 +202,17 @@ export function AgentSidebarItem({
           className={`w-2 h-2 rounded-full shrink-0 ${archived ? 'bg-gray-300 dark:bg-gray-600' : `${agentDotClass(agent)} ${agentDotAnimate(agent)}`}`}
         />
         <span className={`font-medium text-sm truncate ${archived ? 'text-gray-500 dark:text-gray-400' : 'text-gray-900 dark:text-gray-100'}`}>{agent.title || agent.id}</span>
-        {agent.has_unread_changes && !archived && (
+        {!archived && agent.agent_status?.status === 'needs_input' ? (
+          // Needs-input marker: a red sibling of the blue unread dot, pinned to
+          // the right of the title line. Driven by the live status rather than
+          // the unread flag, so it stays lit while the agent is blocked on you
+          // and clears on its own once you answer (not on open). Takes priority
+          // over the blue dot since "needs you now" is the stronger signal.
+          <span
+            aria-label="needs your input"
+            className="ml-auto shrink-0 w-2.5 h-2.5 rounded-full bg-red-500 ring-2 ring-red-500/25"
+          />
+        ) : agent.has_unread_changes && !archived ? (
           // Unread-changes marker, pinned to the right of the title line so it
           // never overlaps the type/status/created-time row below. Set when the
           // agent goes running→waiting/finished, cleared when it's opened.
@@ -212,7 +220,7 @@ export function AgentSidebarItem({
             aria-label="unread changes"
             className="ml-auto shrink-0 w-2.5 h-2.5 rounded-full bg-sky-400 ring-2 ring-sky-400/25"
           />
-        )}
+        ) : null}
       </div>
       <div className="flex items-center gap-1.5 mt-0.5 ml-4">
         <span className={`flex items-center gap-1 text-xs ${agentTypeColor(agent.agent_type)}`}>
@@ -220,13 +228,13 @@ export function AgentSidebarItem({
           {agent.agent_type || 'unknown'}
         </span>
         {archived ? (
-          <span className={`text-[10px] px-1 py-0.5 rounded font-medium ${archivedEndStateBadge(agent.end_state).className}`}>
+          <Badge variant="xs" className={archivedEndStateBadge(agent.end_state).className}>
             {archivedEndStateBadge(agent.end_state).label}
-          </span>
+          </Badge>
         ) : agent.agent_status && (
-          <span className={`text-[10px] px-1 py-0.5 rounded font-medium ${agentStatusBadge(agent.agent_status.status).className}`}>
+          <Badge variant="xs" className={agentStatusBadge(agent.agent_status.status).className}>
             {agentStatusBadge(agent.agent_status.status).label}
-          </span>
+          </Badge>
         )}
         {agent.created_at ? (
           // Non-intrusive relative timestamp (when the agent was created), pushed
