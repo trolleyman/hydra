@@ -695,9 +695,12 @@ try {
       { name: 'agent-title', path: '/project/sim-project/agent/agent-1', viewportOnly: true },
       // The inline rename in progress: clicking the title (it carries an I-beam to
       // signal it's editable) swaps it for an input seeded with the current title
-      // (Enter saves via PATCH, Esc cancels). The title button is tagged
-      // title="Rename", so the selector targets it unambiguously.
-      { name: 'agent-rename', path: '/project/sim-project/agent/agent-1', viewportOnly: true, click: 'button[title="Rename"]' },
+      // (Enter saves via PATCH, Esc cancels). Target the Rename action by its
+      // aria-label, which is the bare label "Rename" — the `title` attribute now
+      // carries the keyboard hint ("Rename (F2)") on fine-pointer devices
+      // (AgentTopBar actionTitle/useFinePointer), so a title="Rename" match no
+      // longer works.
+      { name: 'agent-rename', path: '/project/sim-project/agent/agent-1', viewportOnly: true, click: 'button[aria-label="Rename"]' },
       // The agent-detail prompt block rendering the upload paths a prompt carries
       // as attachment chips instead of raw links: three image thumbnails (served a
       // fixed stub PNG) and one non-image file shown with a generic icon, the
