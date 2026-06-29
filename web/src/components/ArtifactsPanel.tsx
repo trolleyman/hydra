@@ -12,6 +12,7 @@ import { stripAnsi } from '../lib/ansi'
 import { type ArtifactSpans, BASE_ARTIFACT_COLUMNS, defaultSpanForAspect } from '../lib/artifactColumns'
 import { VideoDiffView, isVideoArtifact, VIDEO_MIN_TILE_PX } from './VideoDiffView'
 import { ImageDiffView, type ImageDiffMode } from './ArtifactImageDiff'
+import type { LightboxImage } from './ImageLightbox'
 import { LiveLogPanes, PersistedLogView } from './ArtifactLogView'
 
 const CHANGE_LABEL: Record<string, string> = {
@@ -45,7 +46,12 @@ function ArtifactChangeIcon({ type, className = 'w-3.5 h-3.5' }: { type: string;
 const BASE_MIN_COL_PX = 140
 const MASONRY_GAP = 12
 
-function FileRow({ file, mode, changeThreshold = 0 }: { file: ArtifactFile; mode: ImageDiffMode; changeThreshold?: number }) {
+function FileRow({ file, mode, changeThreshold = 0, before, after, index }: {
+  file: ArtifactFile; mode: ImageDiffMode; changeThreshold?: number
+  // The grid's same-side galleries + this file's index in them, so opening an image
+  // lets ←/→ walk that side across the grid (see ImageDiffView). Images only.
+  before?: LightboxImage[]; after?: LightboxImage[]; index?: number
+}) {
   // The badge reflects the *effective* change type, so a modified file gated below
   // the "% changed" threshold shows as unchanged (no badge) — matching how it's
   // filtered and counted.
@@ -84,7 +90,7 @@ function FileRow({ file, mode, changeThreshold = 0 }: { file: ArtifactFile; mode
         {isVideoArtifact(file.name) ? (
           <VideoDiffView left={file.left_url} right={file.right_url} mode={mode} fps={file.fps} />
         ) : (
-          <ImageDiffView left={file.left_url} right={file.right_url} mode={mode} name={file.name} />
+          <ImageDiffView left={file.left_url} right={file.right_url} mode={mode} name={file.name} before={before} after={after} index={index} />
         )}
       </div>
     </div>
@@ -462,10 +468,32 @@ function FileGrid({ files, mode, spans, onSpanChange, scope, changeThreshold = 0
     [files],
   )
   const dims = useMediaDims(sources)
+  // The lightbox galleries: each visible image file (videos play inline, so they're
+  // excluded) contributes one entry per side, in display order. before/after stay in
+  // lockstep (same files, same order) so a file's index is the same in both — letting
+  // ←/→ walk whichever side you opened. A file with no image at all is skipped, so it
+  // simply has no index and falls back to opening the single clicked image.
+  const imageFiles = useMemo(
+    () => files.filter((f) => !isVideoArtifact(f.name) && (f.left_url || f.right_url)),
+    [files],
+  )
+  const beforeGallery = useMemo<LightboxImage[]>(
+    () => imageFiles.map((f) => ({ url: (f.left_url ?? f.right_url) as string, filename: f.name, size: 0 })),
+    [imageFiles],
+  )
+  const afterGallery = useMemo<LightboxImage[]>(
+    () => imageFiles.map((f) => ({ url: (f.right_url ?? f.left_url) as string, filename: f.name, size: 0 })),
+    [imageFiles],
+  )
+  const galleryIndex = useMemo(() => {
+    const m = new Map<string, number>()
+    imageFiles.forEach((f, i) => m.set(f.name, i))
+    return m
+  }, [imageFiles])
   const items = useMemo(
     () => files.map((f) => ({
       key: f.name,
-      node: <FileRow file={f} mode={mode} changeThreshold={changeThreshold} />,
+      node: <FileRow file={f} mode={mode} changeThreshold={changeThreshold} before={beforeGallery} after={afterGallery} index={galleryIndex.get(f.name)} />,
       aspect: dims[f.name]?.aspect,
       pxWidth: dims[f.name]?.pxWidth,
       // Videos need a minimum tile width for their transport controls (see
@@ -476,7 +504,7 @@ function FileGrid({ files, mode, spans, onSpanChange, scope, changeThreshold = 0
       // bodyResizable. Other images resize by dragging the media (data-tile-drag).
       bodyResizable: mode !== 'slider' && !isVideoArtifact(f.name),
     })),
-    [files, mode, dims, changeThreshold],
+    [files, mode, dims, changeThreshold, beforeGallery, afterGallery, galleryIndex],
   )
   // pt-3 so the gap above the first row matches the card body's px-3 left inset.
   return (

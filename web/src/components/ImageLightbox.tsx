@@ -16,6 +16,10 @@ function formatBytes(n: number): string {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`
 }
 
+// Checkerboard behind images so transparent PNGs read as transparent rather than
+// blending into the dark backdrop. Shared by the main image and the side previews.
+const CHECKER = 'repeating-conic-gradient(#bfbfbf 0% 25%, #f5f5f5 0% 50%) 0 0 / 20px 20px'
+
 // A Slack-style fullscreen image viewer: a blurred dark backdrop with the image
 // centered, optional prev/next arrows when there's more than one image, and
 // keyboard support (Esc closes, ←/→ navigate). Clicking the backdrop closes it.
@@ -51,6 +55,36 @@ export function ImageLightbox({
   const current = images[index]
   if (!current) return null
 
+  // On large screens, when there's more than one image, the prev/next images peek
+  // in dimmed gutters either side of the picture — a Lightroom-style filmstrip hint
+  // so you can see what ←/→ will bring up. The main image is narrowed to leave room
+  // for them (the gutters are hidden, and this narrowing dropped, below `lg`).
+  const hasSiblings = count > 1
+  // Reserve gutter room for the previews only when they're actually shown.
+  const figureWidth = hasSiblings ? 'max-w-[90vw] lg:max-w-[64vw]' : 'max-w-[90vw]'
+  const sidePreview = (dir: 'prev' | 'next') => {
+    const i = dir === 'prev' ? (index - 1 + count) % count : (index + 1) % count
+    const onClick = dir === 'prev' ? prev : next
+    return (
+      <button
+        type="button"
+        // The chevron buttons and ←/→ keys are the primary controls; the preview is
+        // a redundant click target, so keep it out of the tab order.
+        tabIndex={-1}
+        onClick={(e) => { e.stopPropagation(); onClick() }}
+        aria-hidden="true"
+        className={`group hidden lg:flex absolute inset-y-0 ${dir === 'prev' ? 'left-0' : 'right-0'} w-[16vw] items-center justify-center cursor-pointer`}
+      >
+        <img
+          src={images[i].url}
+          alt=""
+          style={{ background: CHECKER }}
+          className="max-h-[55vh] max-w-[13vw] object-contain rounded-lg opacity-25 group-hover:opacity-60 transition-opacity duration-150 shadow-xl"
+        />
+      </button>
+    )
+  }
+
   // Portal to <body> so the fixed overlay is positioned against the viewport, not
   // a transformed ancestor — the sidebar's slide animation (translate-x) makes it
   // a containing block for fixed descendants, which would otherwise clip/shrink
@@ -72,6 +106,9 @@ export function ImageLightbox({
         <X className="w-5 h-5" />
       </button>
 
+      {/* Previous image preview (large screens only) */}
+      {hasSiblings && sidePreview('prev')}
+
       {/* Previous arrow */}
       {count > 1 && (
         <button
@@ -86,7 +123,7 @@ export function ImageLightbox({
 
       {/* Image + caption (clicks here don't close) */}
       <figure
-        className="flex flex-col items-center gap-3 max-w-[90vw] max-h-[90vh] animate-in zoom-in-95 duration-150"
+        className={`flex flex-col items-center gap-3 ${figureWidth} max-h-[90vh] animate-in zoom-in-95 duration-150`}
         onClick={(e) => e.stopPropagation()}
       >
         <img
@@ -97,10 +134,8 @@ export function ImageLightbox({
           // read as transparent rather than blending into the dark backdrop. The
           // <img> sizes to the image's own aspect ratio, so this sits exactly
           // behind the picture; opaque images simply cover it.
-          style={{
-            background: 'repeating-conic-gradient(#bfbfbf 0% 25%, #f5f5f5 0% 50%) 0 0 / 20px 20px',
-          }}
-          className="max-h-[85vh] max-w-[90vw] object-contain rounded-lg shadow-2xl"
+          style={{ background: CHECKER }}
+          className={`max-h-[85vh] ${figureWidth} object-contain rounded-lg shadow-2xl`}
         />
         <figcaption className="flex items-center gap-2 text-xs font-mono">
           {[
@@ -130,6 +165,9 @@ export function ImageLightbox({
           <ChevronRight className="w-7 h-7" />
         </button>
       )}
+
+      {/* Next image preview (large screens only) */}
+      {hasSiblings && sidePreview('next')}
     </div>,
     document.body,
   )
