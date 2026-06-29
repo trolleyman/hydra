@@ -5,7 +5,7 @@ import './index.css'
 
 import { routeTree } from './routeTree.gen'
 import { AuthGate } from './components/AuthGate'
-import { ImageLightboxProvider } from './components/ImageLightboxContext'
+import { ImageLightboxHost } from './components/ImageLightboxHost'
 
 const router = createRouter({ routeTree })
 
@@ -21,9 +21,8 @@ if (!rootElement.innerHTML) {
   root.render(
     <StrictMode>
       <AuthGate>
-        <ImageLightboxProvider>
-          <RouterProvider router={router} />
-        </ImageLightboxProvider>
+        <RouterProvider router={router} />
+        <ImageLightboxHost />
       </AuthGate>
     </StrictMode>,
   )

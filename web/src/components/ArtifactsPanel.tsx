@@ -17,7 +17,7 @@ import {
   checkerStyle, IMG_CLASS, OVERLAY_CLASS, TAG_CLASS, makeAuxOpen,
   DIFF_COLOR, DIFF_PIXEL_THRESHOLD, DIFF_ALPHA,
 } from './artifactDiffShared'
-import { useImageLightbox } from './ImageLightboxContext'
+import { useImageLightbox } from '../stores/imageLightboxStore'
 import type { LightboxImage } from './ImageLightbox'
 import { type ArtifactSpans, BASE_ARTIFACT_COLUMNS, defaultSpanForAspect } from '../lib/artifactColumns'
 import { VideoDiffView, isVideoArtifact, VIDEO_MIN_TILE_PX } from './VideoDiffView'
