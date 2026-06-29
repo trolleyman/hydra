@@ -1394,9 +1394,27 @@ function RootLayout() {
               const cls = settingsActive
                 ? 'shrink-0 w-7 h-7 flex items-center justify-center rounded-lg cursor-pointer bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-300'
                 : 'shrink-0 w-7 h-7 flex items-center justify-center rounded-lg cursor-pointer text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors'
+              // While on Settings, the button acts as a toggle: clicking it again
+              // deselects Settings and returns to the project page (or the root
+              // when no project is selected).
               return (
-                <Tooltip content="Settings">
-                  {currentProjectId ? (
+                <Tooltip content={settingsActive ? 'Close settings' : 'Settings'}>
+                  {settingsActive ? (
+                    <button
+                      type="button"
+                      aria-label="Close settings"
+                      className={cls}
+                      onClick={() => {
+                        if (currentProjectId) {
+                          navigate({ to: '/project/$projectId', params: { projectId: currentProjectId } })
+                        } else {
+                          navigate({ to: '/' })
+                        }
+                      }}
+                    >
+                      <Settings className="w-5 h-5 shrink-0" />
+                    </button>
+                  ) : currentProjectId ? (
                     <Link to="/project/$projectId/settings" params={{ projectId: currentProjectId }} aria-label="Settings" className={cls}>
                       <Settings className="w-5 h-5 shrink-0" />
                     </Link>
