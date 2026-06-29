@@ -56,6 +56,13 @@ export type { TerminalDiffRefreshEvent } from './models/TerminalDiffRefreshEvent
 export { TerminalEvent } from './models/TerminalEvent';
 export type { TerminalSizeEvent } from './models/TerminalSizeEvent';
 export type { TerminalStatusEvent } from './models/TerminalStatusEvent';
+export type { TestCase } from './models/TestCase';
+export { TestCaseStatus } from './models/TestCaseStatus';
+export type { TestRunResult } from './models/TestRunResult';
+export type { TestScript } from './models/TestScript';
+export type { TestsResponse } from './models/TestsResponse';
+export { TestStatus } from './models/TestStatus';
+export type { TestSummary } from './models/TestSummary';
 export type { UncommittedSummary } from './models/UncommittedSummary';
 export type { UpdateAgentRequest } from './models/UpdateAgentRequest';
 

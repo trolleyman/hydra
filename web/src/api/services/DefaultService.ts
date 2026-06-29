@@ -23,6 +23,7 @@ import type { RepositoryTreeResponse } from '../models/RepositoryTreeResponse';
 import type { ServiceStatusResponse } from '../models/ServiceStatusResponse';
 import type { SpawnAgentRequest } from '../models/SpawnAgentRequest';
 import type { StatusResponse } from '../models/StatusResponse';
+import type { TestsResponse } from '../models/TestsResponse';
 import type { UpdateAgentRequest } from '../models/UpdateAgentRequest';
 import type { CancelablePromise } from '../core/CancelablePromise';
 import type { BaseHttpRequest } from '../core/BaseHttpRequest';
@@ -290,12 +291,14 @@ export class DefaultService {
      * Merge a Hydra agent's branch into its base branch and kill it
      * @param projectId Project ID
      * @param id
+     * @param force Bypass the test gate (PLAN #68). Without it, a merge is soft-blocked with 409 tests_failing / tests_errored when the head's configured tests are failing, errored, or still running. force=true merges anyway — covering both "don't wait" (tests still running) and "override" (tests red). Merge-conflict and operation-in-progress checks still apply.
      * @returns void
      * @throws ApiError
      */
     public mergeAgent(
         projectId: string,
         id: string,
+        force?: boolean,
     ): CancelablePromise<void> {
         return this.httpRequest.request({
             method: 'POST',
@@ -303,6 +306,9 @@ export class DefaultService {
             path: {
                 'project_id': projectId,
                 'id': id,
+            },
+            query: {
+                'force': force,
             },
             errors: {
                 400: `Bad Request (e.g. no branch to merge)`,
@@ -487,6 +493,93 @@ export class DefaultService {
                 'include_uncommitted': includeUncommitted,
                 'refresh': refresh,
                 'refresh_side': refreshSide,
+            },
+            errors: {
+                404: `Not Found`,
+                500: `Internal Server Error`,
+            },
+        });
+    }
+    /**
+     * Get the test-runner verdict(s) for a head's branch
+     * Returns, per configured [[tests]] runner, the parsed pass/fail verdict for the head's current commit (or working tree). Generation runs in the background and is cached per commit SHA; a runner with status "running" should be polled. Returns an empty list when the project configures no test runners. Single-sided — there is no before/after comparison (PLAN #68).
+     *
+     * @param projectId Project ID
+     * @param id
+     * @param headRef Commit SHA or ref to test. Defaults to the agent's branch tip.
+     * @param includeUncommitted Test the agent's uncommitted working tree instead of a commit.
+     * @param refresh Name of a single test runner whose cached result (including a cached failure) should be discarded and re-run before responding.
+     * @returns TestsResponse OK
+     * @throws ApiError
+     */
+    public getAgentTests(
+        projectId: string,
+        id: string,
+        headRef?: string,
+        includeUncommitted?: boolean,
+        refresh?: string,
+    ): CancelablePromise<TestsResponse> {
+        return this.httpRequest.request({
+            method: 'GET',
+            url: '/api/projects/{project_id}/agents/{id}/tests',
+            path: {
+                'project_id': projectId,
+                'id': id,
+            },
+            query: {
+                'head_ref': headRef,
+                'include_uncommitted': includeUncommitted,
+                'refresh': refresh,
+            },
+            errors: {
+                404: `Not Found`,
+                500: `Internal Server Error`,
+            },
+        });
+    }
+    /**
+     * Arm auto-merge — merge this head when its tests settle passing
+     * Arms "merge when green" (PLAN #68): the daemon merges this head as soon as its tests settle passing, and disarms it (with a notification) if they settle failing/errored. Arming kicks a fresh test run if none is in flight. Idempotent.
+     *
+     * @param projectId Project ID
+     * @param id
+     * @returns void
+     * @throws ApiError
+     */
+    public armMergeWhenGreen(
+        projectId: string,
+        id: string,
+    ): CancelablePromise<void> {
+        return this.httpRequest.request({
+            method: 'POST',
+            url: '/api/projects/{project_id}/agents/{id}/merge-when-green',
+            path: {
+                'project_id': projectId,
+                'id': id,
+            },
+            errors: {
+                404: `Not Found`,
+                500: `Internal Server Error`,
+            },
+        });
+    }
+    /**
+     * Disarm auto-merge for a head
+     * @param projectId Project ID
+     * @param id
+     * @returns void
+     * @throws ApiError
+     */
+    public disarmMergeWhenGreen(
+        projectId: string,
+        id: string,
+    ): CancelablePromise<void> {
+        return this.httpRequest.request({
+            method: 'DELETE',
+            url: '/api/projects/{project_id}/agents/{id}/merge-when-green',
+            path: {
+                'project_id': projectId,
+                'id': id,
             },
             errors: {
                 404: `Not Found`,
