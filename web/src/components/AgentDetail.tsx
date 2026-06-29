@@ -14,7 +14,7 @@ import { ImageLightbox } from './ImageLightbox'
 import { uploadBlobUrl } from '../api/uploads'
 import type { Attachment } from '../lib/spawnDrafts'
 import { DiffViewer } from '../DiffViewer'
-import { formatStartedAgo, agentStatusBadge, archivedEndStateBadge, agentDotClass, agentTypePill } from './AgentComponents'
+import { formatStartedAgo, agentStatusBadge, archivedEndStateBadge, agentDotClass, agentDotAnimate, agentTypePill } from './AgentComponents'
 import { LoaderCircle, Merge, Trash2, Tag, RotateCcw, Pencil, TerminalSquare, Mail, ShieldAlert, ShieldCheck, ShieldOff } from 'lucide-react'
 import { Tooltip } from './Tooltip'
 import { AgentTypeIcon, type AgentTypeIconName } from './AgentTypeIcon'
@@ -767,7 +767,7 @@ export function AgentDetail({
           never collides with the diff's own sticky "Changes" header. */}
       <AgentTopBar
         title={agent.title || agent.id}
-        statusDot={<span className={`block w-2.5 h-2.5 rounded-full ${agentDotClass(agent)}`} />}
+        statusDot={<span className={`block w-2.5 h-2.5 rounded-full ${agentDotClass(agent)} ${agentDotAnimate(agent)}`} />}
         rename={{
           editing: editingTitle,
           draft: titleDraft,
