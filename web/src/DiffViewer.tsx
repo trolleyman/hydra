@@ -13,7 +13,8 @@ import {
 } from 'lucide-react'
 import { getFileIcon } from './lib/fileIcons'
 import { Tooltip } from './components/Tooltip'
-import { ArtifactsPanel, ImageDiffView, IMAGE_DIFF_MODES, type ImageDiffMode } from './components/ArtifactsPanel'
+import { ArtifactsPanel } from './components/ArtifactsPanel'
+import { ImageDiffView, IMAGE_DIFF_MODES, type ImageDiffMode } from './components/ArtifactImageDiff'
 import { isImagePath, agentBlobUrl } from './lib/imageDiff'
 import { useArtifactSpans } from './lib/artifactColumns'
 import { useDialogStore } from './stores/dialogStore'
@@ -1744,19 +1745,10 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
   useEffect(() => { writeLocal(StorageKeys.diffSidebarWidth, String(sidebarWidth)) }, [sidebarWidth])
   useEffect(() => { writeLocal(StorageKeys.diffImageMode, imageDiffMode) }, [imageDiffMode])
 
-  // DiffViewer is reused (not remounted) when switching agents, so reload the
-  // collapsed-file set when the agent changes. Reset during render (per React's
-  // "adjust state when a prop changes" guidance) so the persist effect below
-  // sees the new agent's set, not the old one. The commit selectors also reset
-  // to base → latest, since a commit picked for one agent is meaningless for
-  // another (different branch/history).
-  const collapsedAgentRef = useRef(agent.id)
-  if (collapsedAgentRef.current !== agent.id) {
-    collapsedAgentRef.current = agent.id
-    setCollapsedFiles(new Set(loadAgentViewPrefs(projectId, agent.id).collapsedFiles ?? []))
-    setLeftSel({ type: 'base' })
-    setRightSel({ type: 'latest' })
-  }
+  // DiffViewer is remounted on every agent switch (the route keys the whole
+  // AgentDetail subtree by project+agent), so the collapsed-file set and the
+  // commit selectors initialise fresh from this agent's prefs above — no
+  // hand-reset on an agent-id change is needed.
   useEffect(() => {
     patchAgentViewPrefs(projectId, agent.id, { collapsedFiles: [...collapsedFiles] })
   }, [projectId, agent.id, collapsedFiles])

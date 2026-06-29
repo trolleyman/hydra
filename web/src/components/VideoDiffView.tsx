@@ -21,7 +21,7 @@ import {
   checkerStyle, IMG_CLASS, OVERLAY_CLASS, TAG_CLASS, makeAuxOpen,
   DIFF_COLOR, DIFF_PIXEL_THRESHOLD, DIFF_ALPHA,
 } from './artifactDiffShared'
-import { SegmentedToggle, type ImageDiffMode } from './ArtifactsPanel'
+import { SegmentedToggle, type ImageDiffMode } from './ArtifactImageDiff'
 
 // Extensions routed to the video viewer instead of the image one.
 export function isVideoArtifact(name: string): boolean {

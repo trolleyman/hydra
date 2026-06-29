@@ -3,12 +3,14 @@ import { test, expect } from '@playwright/test'
 // Behavioural smokes for the load-bearing sidebar flows, exercised against the
 // simulation server (internal/http/simulation.go). The sim seeds a project
 // "sim-project" (name "simulated-project") plus a second project "mobile-app",
-// and a handful of agents — agent-1 ("Add renameable agent titles"), agent-2
-// ("Migrate auth providers to OAuth", which carries the unread-changes dot),
-// agent-md, agent-3, agent-approval. Selectors mirror the real markup:
+// and a handful of agents — agent-1 ("Add renameable agent titles", which
+// carries the blue unread-changes dot), agent-2 ("Migrate auth providers to
+// OAuth", which is needs_input → red needs-input dot), agent-md, agent-3,
+// agent-approval. Selectors mirror the real markup:
 //   - sidebar agent rows are <button>s whose accessible name starts with the
 //     agent title (web/src/components/AgentComponents.tsx AgentSidebarItem)
-//   - the unread dot is <span aria-label="unread changes"> on that row
+//   - the blue unread dot is <span aria-label="unread changes"> on that row;
+//     the red needs-input dot is <span aria-label="needs your input">
 //   - the project switcher is <button aria-label="Select project"> (__root.tsx)
 
 const PROJECT = '/project/sim-project/'
@@ -57,16 +59,103 @@ test('opening an unread agent clears its unread-changes dot', async ({ page }) =
   await page.bringToFront()
   await page.goto(PROJECT)
 
-  // agent-2 is the one seeded with has_unread_changes → exactly one unread dot.
+  // agent-1 is the one seeded with has_unread_changes (and a non-needs_input
+  // status) → exactly one blue unread dot.
   const dot = page.getByLabel('unread changes')
   await expect(dot).toHaveCount(1)
   await expect(dot).toBeVisible()
 
-  await agentRow(page, 'Migrate auth providers to OAuth').click()
-  await expect(page).toHaveURL(/\/project\/sim-project\/agent\/agent-2\b/)
+  await agentRow(page, 'Add renameable agent titles').click()
+  await expect(page).toHaveURL(/\/project\/sim-project\/agent\/agent-1\b/)
 
   // Opening the agent optimistically marks it read, so the sidebar dot is gone.
   await expect(page.getByLabel('unread changes')).toHaveCount(0)
+})
+
+test('the red needs-input dot stays lit when its agent is opened', async ({ page }) => {
+  // Unlike the blue unread dot, the red needs-input marker is driven by the live
+  // status (agent-2 is needs_input), so it is NOT cleared by opening the agent —
+  // it clears on its own once the agent is answered. Two agents need input
+  // (agent-2 + agent-approval), so the dot count holds across the open.
+  await page.bringToFront()
+  await page.goto(PROJECT)
+
+  // agent-2's sidebar row carries the red needs-input dot before it's opened…
+  const row = agentRow(page, 'Migrate auth providers to OAuth')
+  await expect(row.getByLabel('needs your input')).toBeVisible()
+
+  await row.click()
+  await expect(page).toHaveURL(/\/project\/sim-project\/agent\/agent-2\b/)
+
+  // …and it's still there after opening (the dot is status-driven, so opening
+  // doesn't clear it — only answering the agent does).
+  await expect(row.getByLabel('needs your input')).toBeVisible()
+})
+
+test('switching agents remounts the detail view, so an unsaved rename never bleeds across', async ({ page }) => {
+  await page.goto(PROJECT)
+
+  // Open agent-1 and start an inline rename: focusing the title field begins the
+  // edit (AgentTopBar), and we type a draft we never successfully save. In the
+  // simulation server UpdateAgent returns 501, so the blur-triggered save fails
+  // and the editor is left open with the draft intact — exactly the state that
+  // used to leak onto the next agent when AgentDetail was reused rather than
+  // remounted.
+  await agentRow(page, 'Add renameable agent titles').click()
+  await expect(page).toHaveURL(/\/project\/sim-project\/agent\/agent-1\b/)
+  const title = page.getByRole('textbox', { name: 'Agent title' })
+  await title.click()
+  await title.fill('UNSAVED RENAME DRAFT')
+  await expect(title).toHaveValue('UNSAVED RENAME DRAFT')
+
+  // Switch to agent-2 from the sidebar. The route keys the detail subtree by
+  // project+agent, so it remounts with fresh state: agent-2's header shows
+  // agent-2's own title in a clean (read-only, not mid-edit) field — never the
+  // leftover draft from agent-1.
+  await agentRow(page, 'Migrate auth providers to OAuth').click()
+  await expect(page).toHaveURL(/\/project\/sim-project\/agent\/agent-2\b/)
+  await expect(title).toHaveValue('Migrate auth providers to OAuth')
+  await expect(title).toHaveJSProperty('readOnly', true)
+  // The body re-rendered for the new agent too (agent-2's unique prompt text).
+  await expect(page.getByText('OAuth 2.0 with PKCE', { exact: false })).toBeVisible()
+
+  // And switching back lands on agent-1's real title, not the abandoned draft.
+  await agentRow(page, 'Add renameable agent titles').click()
+  await expect(page).toHaveURL(/\/project\/sim-project\/agent\/agent-1\b/)
+  await expect(title).toHaveValue('Add renameable agent titles')
+  await expect(title).toHaveJSProperty('readOnly', true)
+})
+
+// ServiceHealthWarning (a useServerData site, PLAN #57) polls the selected
+// project's service status and raises an amber warning when one has failed. The
+// sim seeds mobile-app's "emu-pool" service as failed and every other project's
+// as healthy (internal/http/simulation.go GetServices), so the warning's
+// presence is a direct, per-project assertion on that data path.
+test("a failed service raises the project's health warning", async ({ page }) => {
+  await page.goto('/project/mobile-app/')
+  await expect(page.getByLabel('service failure')).toBeVisible()
+})
+
+test('a healthy project shows no service-health warning', async ({ page }) => {
+  await page.goto(PROJECT) // sim-project — its service pool is healthy
+  // Wait for the agent list to paint so the project's data has loaded, then
+  // assert the warning never appears for the healthy project.
+  await expect(agentRow(page, 'Add renameable agent titles')).toBeVisible()
+  await expect(page.getByLabel('service failure')).toHaveCount(0)
+})
+
+// Switching projects must re-key the warning: useServerData drops the previous
+// project's data on a key change, so the failed-service warning seen on
+// mobile-app must NOT linger after switching to the healthy sim-project.
+test('the service-health warning is re-keyed when switching projects', async ({ page }) => {
+  await page.goto('/project/mobile-app/')
+  await expect(page.getByLabel('service failure')).toBeVisible()
+
+  await page.getByRole('button', { name: 'Select project' }).click()
+  await page.getByText('simulated-project', { exact: true }).click()
+
+  await expect(page).toHaveURL(/\/project\/sim-project\b/)
+  await expect(page.getByLabel('service failure')).toHaveCount(0)
 })
 
 // Integration coverage for PLAN #64b: the sidebar status dot is coloured by

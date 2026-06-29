@@ -82,66 +82,34 @@ interface AgentState {
   markUnread: (id: string) => void
 }
 
-// applyOptimistic overlays the still-active overrides onto a fresh agent list,
-// dropping overrides that have expired or that the backend has already caught
-// up to (its reported status matches the override).
-function applyOptimistic(
+// applyOverrides overlays one family of optimistic overrides onto a fresh agent
+// list. The three families (status, marked-read, marked-unread) share the exact
+// same shape — keep an override only while it hasn't expired AND the backend
+// hasn't already caught up to it; drop it otherwise; rewrite the matching agent
+// while it's live — and differ only in three callbacks:
+//   - expiry(o): the override's wall-clock expiry (`o.until`, or the bare number)
+//   - settled(agent, o): true once the backend already reports the override's
+//     outcome, so the override has served its purpose and can be dropped
+//   - rewrite(agent, o): the agent with the optimistic value forced on
+// It returns the merged agents plus the surviving (non-expired, non-settled)
+// overrides so the caller can persist a pruned map.
+function applyOverrides<O>(
   agents: AgentResponse[],
-  optimistic: Record<string, OptimisticOverride>,
-): { agents: AgentResponse[]; optimistic: Record<string, OptimisticOverride> } {
+  overrides: Record<string, O>,
+  expiry: (o: O) => number,
+  settled: (agent: AgentResponse, o: O) => boolean,
+  rewrite: (agent: AgentResponse, o: O) => AgentResponse,
+): { agents: AgentResponse[]; overrides: Record<string, O> } {
   const now = Date.now()
-  const next: Record<string, OptimisticOverride> = {}
+  const next: Record<string, O> = {}
   const merged = agents.map((a) => {
-    const o = optimistic[a.id]
-    if (!o || o.until <= now) return a
-    // Backend already reports the optimistic status — the override served its
-    // purpose, so drop it and use the real (authoritative) data.
-    if (a.agent_status?.status === o.status) return a
+    const o = overrides[a.id]
+    if (o === undefined || expiry(o) <= now) return a
+    if (settled(a, o)) return a
     next[a.id] = o
-    const base = a.agent_status ?? { status: o.status, timestamp: '' }
-    return { ...a, agent_status: { ...base, status: o.status } }
+    return rewrite(a, o)
   })
-  return { agents: merged, optimistic: next }
-}
-
-// applyReadOverrides forces has_unread_changes false on agents with an active
-// "marked read" override, dropping overrides that have expired or that the
-// backend has already caught up to (it already reports the agent as read).
-function applyReadOverrides(
-  agents: AgentResponse[],
-  readUntil: Record<string, number>,
-): { agents: AgentResponse[]; readUntil: Record<string, number> } {
-  const now = Date.now()
-  const next: Record<string, number> = {}
-  const merged = agents.map((a) => {
-    const until = readUntil[a.id]
-    if (!until || until <= now) return a
-    // Backend already cleared the flag — the override served its purpose.
-    if (!a.has_unread_changes) return a
-    next[a.id] = until
-    return { ...a, has_unread_changes: false }
-  })
-  return { agents: merged, readUntil: next }
-}
-
-// applyUnreadOverrides forces has_unread_changes true on agents with an active
-// "marked unread" override, dropping overrides that have expired or that the
-// backend has already caught up to (it already reports the agent as unread).
-function applyUnreadOverrides(
-  agents: AgentResponse[],
-  unreadUntil: Record<string, number>,
-): { agents: AgentResponse[]; unreadUntil: Record<string, number> } {
-  const now = Date.now()
-  const next: Record<string, number> = {}
-  const merged = agents.map((a) => {
-    const until = unreadUntil[a.id]
-    if (!until || until <= now) return a
-    // Backend already raised the flag — the override served its purpose.
-    if (a.has_unread_changes) return a
-    next[a.id] = until
-    return { ...a, has_unread_changes: true }
-  })
-  return { agents: merged, unreadUntil: next }
+  return { agents: merged, overrides: next }
 }
 
 export const useAgentStore = create<AgentState>((set) => ({
@@ -155,10 +123,28 @@ export const useAgentStore = create<AgentState>((set) => ({
   readUntil: {},
   unreadUntil: {},
   setAgents: (agents) => set((state) => {
-    const opt = applyOptimistic(agents, state.optimistic)
-    const rd = applyReadOverrides(opt.agents, state.readUntil)
-    const ur = applyUnreadOverrides(rd.agents, state.unreadUntil)
-    return { agents: ur.agents, optimistic: opt.optimistic, readUntil: rd.readUntil, unreadUntil: ur.unreadUntil, loading: false, error: null }
+    // Status: drop the override once the backend reports the optimistic status.
+    const opt = applyOverrides(
+      agents, state.optimistic,
+      (o) => o.until,
+      (a, o) => a.agent_status?.status === o.status,
+      (a, o) => ({ ...a, agent_status: { ...(a.agent_status ?? { status: o.status, timestamp: '' }), status: o.status } }),
+    )
+    // Marked read: force the flag off until the backend reports it cleared.
+    const rd = applyOverrides(
+      opt.agents, state.readUntil,
+      (until) => until,
+      (a) => !a.has_unread_changes,
+      (a) => ({ ...a, has_unread_changes: false }),
+    )
+    // Marked unread: force the flag on until the backend reports it raised.
+    const ur = applyOverrides(
+      rd.agents, state.unreadUntil,
+      (until) => until,
+      (a) => !!a.has_unread_changes,
+      (a) => ({ ...a, has_unread_changes: true }),
+    )
+    return { agents: ur.agents, optimistic: opt.overrides, readUntil: rd.overrides, unreadUntil: ur.overrides, loading: false, error: null }
   }),
   setLoading: (loading) => set({ loading }),
   setError: (error) => set({ error, loading: false }),
