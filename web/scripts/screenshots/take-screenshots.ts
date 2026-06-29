@@ -1871,7 +1871,12 @@ try {
     // frame, mirroring the keyframe with a raised-cosine pulse (1 → peak → 1 over
     // the cycle), so the frames are deterministic and a re-render never reads
     // "modified". Same bitexact/lossless ffmpeg encode as recordSpinner.
-    const PULSE_FRAMES = 16 // one breathe cycle at 12fps → ~1.3s clip
+    // 30fps for a smooth breathe (the spinner clip's 12fps is choppy for a
+    // scale/opacity pulse). 42 frames = one 1.4s cycle, matching the CSS
+    // animation's real duration. Cost is only capture time (one screenshot per
+    // frame); determinism is unaffected by fps.
+    const PULSE_FPS = 30
+    const PULSE_FRAMES = 42 // one 1.4s breathe cycle at 30fps
     const recordStatusDot = async (theme: (typeof themes)[number]) => {
       const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 }, deviceScaleFactor: 1, colorScheme: theme })
       await ctx.clock.setFixedTime(SIM_NOW)
@@ -1918,9 +1923,9 @@ try {
         const out = join(OUT, `status-dot-pulse-${theme}.webm`)
         const r = spawnSync(ffmpegBin, [
           '-y', '-nostdin', '-loglevel', 'error',
-          '-framerate', '12', '-i', join(tmp, 'f%03d.png'),
+          '-framerate', String(PULSE_FPS), '-i', join(tmp, 'f%03d.png'),
           '-c:v', 'libvpx-vp9', '-lossless', '1', '-pix_fmt', 'yuv444p',
-          '-g', '12', '-threads', '1', '-an',
+          '-g', String(PULSE_FPS), '-threads', '1', '-an',
           '-flags', '+bitexact', '-fflags', '+bitexact',
           out,
         ], { encoding: 'utf8' })
