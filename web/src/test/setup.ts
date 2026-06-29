@@ -35,9 +35,9 @@ if (typeof HTMLCanvasElement !== 'undefined') {
 }
 
 afterEach(() => {
-  // Unmount any React trees rendered via @testing-library/react. Vitest runs
-  // with globals off, so RTL can't auto-register this itself — without it the
-  // jsdom DOM accumulates across cases in a component test file.
+  // Unmount anything @testing-library/react rendered (auto-cleanup is off with
+  // vitest globals disabled, so component renders would otherwise pile up in the
+  // shared document.body and trip "multiple elements found" across tests).
   cleanup()
   localStorage.clear()
 })

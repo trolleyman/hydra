@@ -1,6 +1,7 @@
 import React from 'react'
 import { CheckCircle, AlertCircle, Info, X } from 'lucide-react'
 import { useToastStore, type ToastType } from '../stores/toastStore'
+import { IconButton } from './IconButton'
 
 const getIcon = (type: ToastType) => {
   switch (type) {
@@ -31,12 +32,9 @@ export const Toaster: React.FC = () => {
         >
           {getIcon(toast.type)}
           <p className="text-sm text-gray-700 dark:text-gray-200 leading-relaxed">{toast.message}</p>
-          <button
-            onClick={() => dismiss(toast.id)}
-            className="p-1 rounded-md text-gray-400 hover:text-gray-500 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors cursor-pointer"
-          >
+          <IconButton onClick={() => dismiss(toast.id)}>
             <X className="w-4 h-4" />
-          </button>
+          </IconButton>
         </div>
       ))}
     </div>
