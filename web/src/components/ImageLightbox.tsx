@@ -55,16 +55,22 @@ export function ImageLightbox({
   const current = images[index]
   if (!current) return null
 
-  // On large screens, when there's more than one image, the prev/next images peek
-  // in dimmed gutters either side of the picture — a Lightroom-style filmstrip hint
-  // so you can see what ←/→ will bring up. The main image is narrowed to leave room
-  // for them (the gutters are hidden, and this narrowing dropped, below `lg`).
+  // On large screens, when there's more than one image, the prev/next images sit
+  // mostly off-screen at the edges with only a sliver (~12%) peeking in — a
+  // Lightroom-style filmstrip hint of what ←/→ will bring up. Hovering slides the
+  // peeked image a little further in. The main image is narrowed slightly so the
+  // arrows have gutter room beside the peek (both dropped below `lg`).
   const hasSiblings = count > 1
-  // Reserve gutter room for the previews only when they're actually shown.
-  const figureWidth = hasSiblings ? 'max-w-[90vw] lg:max-w-[64vw]' : 'max-w-[90vw]'
+  const figureWidth = hasSiblings ? 'max-w-[90vw] lg:max-w-[80vw]' : 'max-w-[90vw]'
   const sidePreview = (dir: 'prev' | 'next') => {
     const i = dir === 'prev' ? (index - 1 + count) % count : (index + 1) % count
     const onClick = dir === 'prev' ? prev : next
+    // Translate the whole button (not just the image) so its click area travels
+    // off-screen with it — only the visible sliver stays clickable, rather than a
+    // full-width hit zone covering the gutter.
+    const slide = dir === 'prev'
+      ? '-translate-x-[88%] hover:-translate-x-[78%]'
+      : 'translate-x-[88%] hover:translate-x-[78%]'
     return (
       <button
         type="button"
@@ -73,13 +79,13 @@ export function ImageLightbox({
         tabIndex={-1}
         onClick={(e) => { e.stopPropagation(); onClick() }}
         aria-hidden="true"
-        className={`group hidden lg:flex absolute inset-y-0 ${dir === 'prev' ? 'left-0' : 'right-0'} w-[16vw] items-center justify-center cursor-pointer`}
+        className={`group hidden lg:block absolute top-1/2 -translate-y-1/2 ${dir === 'prev' ? 'left-0' : 'right-0'} ${slide} transition-transform duration-200 cursor-pointer`}
       >
         <img
           src={images[i].url}
           alt=""
           style={{ background: CHECKER }}
-          className="max-h-[55vh] max-w-[13vw] object-contain rounded-lg opacity-25 group-hover:opacity-60 transition-opacity duration-150 shadow-xl"
+          className={`max-h-[70vh] max-w-[22vw] object-contain ${dir === 'prev' ? 'rounded-r-2xl' : 'rounded-l-2xl'} opacity-40 group-hover:opacity-80 transition-opacity duration-200 shadow-2xl`}
         />
       </button>
     )
@@ -91,7 +97,7 @@ export function ImageLightbox({
   // the lightbox when it's opened from the compact (in-sidebar) spawn form.
   return createPortal(
     <div
-      className="fixed inset-0 z-[110] flex items-center justify-center bg-black/70 backdrop-blur-md animate-in fade-in duration-150"
+      className="fixed inset-0 z-[110] overflow-hidden flex items-center justify-center bg-black/70 backdrop-blur-md animate-in fade-in duration-150"
       onClick={onClose}
       role="dialog"
       aria-modal="true"
@@ -115,7 +121,9 @@ export function ImageLightbox({
           type="button"
           onClick={(e) => { e.stopPropagation(); prev() }}
           aria-label="Previous image"
-          className="absolute left-4 p-2 rounded-full bg-white/10 text-white/80 hover:bg-white/20 hover:text-white transition-colors cursor-pointer"
+          // Sits at the edge on small screens; on `lg` it moves inward to clear the
+          // peeking preview, landing in the gutter beside it.
+          className="absolute left-4 lg:left-[4.5vw] p-2 rounded-full bg-white/10 text-white/80 hover:bg-white/20 hover:text-white transition-colors cursor-pointer"
         >
           <ChevronLeft className="w-7 h-7" />
         </button>
@@ -160,7 +168,7 @@ export function ImageLightbox({
           type="button"
           onClick={(e) => { e.stopPropagation(); next() }}
           aria-label="Next image"
-          className="absolute right-4 p-2 rounded-full bg-white/10 text-white/80 hover:bg-white/20 hover:text-white transition-colors cursor-pointer"
+          className="absolute right-4 lg:right-[4.5vw] p-2 rounded-full bg-white/10 text-white/80 hover:bg-white/20 hover:text-white transition-colors cursor-pointer"
         >
           <ChevronRight className="w-7 h-7" />
         </button>
