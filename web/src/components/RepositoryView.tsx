@@ -22,7 +22,7 @@ import {
   FileDiff, FileRow, ChangeTypeIcon, TreeNodeView,
   buildFileTree, compactTree as compactDiffTree, getGroupedFiles, type FileView,
 } from '../DiffViewer'
-import { IMAGE_DIFF_MODES, type ImageDiffMode } from './ArtifactsPanel'
+import { IMAGE_DIFF_MODES, type ImageDiffMode } from './ArtifactImageDiff'
 import { repoBlobUrl } from '../lib/imageDiff'
 
 // ── File tree model ────────────────────────────────────────────────────────────
