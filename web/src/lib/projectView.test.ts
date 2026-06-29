@@ -54,6 +54,17 @@ describe('projectView', () => {
     })
   })
 
+  // Regression guard for PLAN #64c: the legacy `hydra-selected-agent-<id>` key
+  // used to be migrated into a project-view entry on first read. That migration
+  // window has passed and the code is gone, so a lingering legacy key must now be
+  // ignored entirely — no migration, no resurrection of the old selection.
+  describe('legacy selected-agent key is no longer migrated', () => {
+    it('ignores a lingering legacy key and returns the default view', () => {
+      localStorage.setItem('hydra-selected-agent-proj-legacy', 'legacy-agent-id')
+      expect(loadProjectView('proj-legacy')).toEqual({ kind: 'project' })
+    })
+  })
+
   describe('malformed stored data', () => {
     it('returns the default for garbage JSON, without throwing', () => {
       localStorage.setItem(projectViewKey('proj-bad'), '{not valid json')

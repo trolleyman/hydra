@@ -34,7 +34,9 @@ export const THEME_MODE_LABEL: Record<ThemeMode, string> = {
 }
 export const THEME_MODES: ThemeMode[] = ['light', 'dark', 'system']
 
-function loadThemeMode(): ThemeMode {
+// Exported for unit testing. Reads the persisted theme preference, defaulting to
+// `system` when nothing valid is stored.
+export function loadThemeMode(): ThemeMode {
   const stored = readLocal(StorageKeys.themeMode)
   if (stored === 'light' || stored === 'dark' || stored === 'system') return stored
   return 'system'
