@@ -507,13 +507,13 @@ export function ElapsedTime({ startedAt }: { startedAt: number }) {
   return <>{formatElapsed(Math.max(0, Math.floor(now / 1000 - startedAt)))}</>
 }
 
-// The card header's action buttons (build log + regenerate) "melt" into the
-// header at rest — just a faint icon — and resolve into proper bordered buttons
-// only when the header cluster is hovered (the parent carries `group`). That
-// keeps them discoverable without shouting over the card's own content. MELT_BTN
-// is the shared resting+hover skin; per-button classes add the rounding/border
-// sides on top.
-const MELT_BTN = 'border border-transparent text-gray-400 dark:text-gray-500 group-hover:border-gray-200 dark:group-hover:border-gray-600 group-hover:bg-white dark:group-hover:bg-gray-700 group-hover:text-gray-500 dark:group-hover:text-gray-300 transition-colors cursor-pointer'
+// The card header's action buttons (build log + regenerate) sit as faint icons at
+// rest and brighten ONLY the icon the pointer is actually over — a per-button
+// `hover:` (not a shared `group-hover:`), with no border or background. So hovering
+// one button no longer lights up its neighbour or boxes the whole cluster; it just
+// darkens that one icon. MELT_BTN is the shared resting+hover skin; per-button
+// classes add the rounding/layout on top.
+const MELT_BTN = 'text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 transition-colors cursor-pointer'
 
 function ArtifactSetCard({ set, mode, spans, onSpanChange, filter, search, onRefresh, projectId, agentId }: { set: ArtifactSet; mode: ImageDiffMode; spans: ArtifactSpans; onSpanChange: (key: string, span: number | null) => void; filter: ArtifactTagFilter; search: string; onRefresh: (name: string, side?: ArtifactSide) => void; projectId: string | null; agentId: string }) {
   const status = set.status as string
@@ -685,14 +685,16 @@ function ArtifactSetCard({ set, mode, spans, onSpanChange, filter, search, onRef
             </span>
           )}
         </button>
-        {/* Proper bordered buttons (matching the rest of the app's icon buttons),
-            vertically centred in the stretch-height header. */}
-        <div className="group shrink-0 flex items-center gap-1.5 pl-1 pr-2">
+        {/* Faint icon buttons, vertically centred in the stretch-height header.
+            Each brightens only on its own hover (see MELT_BTN) — no shared group
+            hover, so they don't light up together. */}
+        <div className="shrink-0 flex items-center gap-1.5 pl-1 pr-2">
           {/* Show/hide the build log. Opening it also expands the card (the log
               renders in the body). Only for settled cards with a log. The open
-              state stays tinted blue even at rest so "log is showing" is legible;
-              the resting affordance otherwise melts away (see MELT_BTN). Hidden when
-              a side failed: the log is force-shown there, so there's nothing to toggle. */}
+              state stays tinted blue even at rest so "log is showing" is legible,
+              brightening a touch on its own hover; the resting affordance otherwise
+              melts away (see MELT_BTN). Hidden when a side failed: the log is
+              force-shown there, so there's nothing to toggle. */}
           {hasBuildLog && !anyFailed && (
             <button
               onClick={toggleBuildLog}
@@ -700,7 +702,7 @@ function ArtifactSetCard({ set, mode, spans, onSpanChange, filter, search, onRef
               aria-label={buildLogOpen ? 'Hide build log' : 'Show build log'}
               className={`h-7 px-2 inline-flex items-center justify-center rounded-md transition-colors cursor-pointer ${
                 buildLogOpen
-                  ? 'border border-transparent text-blue-500 dark:text-blue-400 group-hover:border-blue-300 dark:group-hover:border-blue-700 group-hover:bg-blue-50 dark:group-hover:bg-blue-900/30'
+                  ? 'text-blue-500 dark:text-blue-400 hover:text-blue-600 dark:hover:text-blue-300'
                   : MELT_BTN
               }`}
             >
@@ -716,7 +718,7 @@ function ArtifactSetCard({ set, mode, spans, onSpanChange, filter, search, onRef
               onClick={() => onRefresh(set.name)}
               title="Regenerate this artifact"
               aria-label="Regenerate this artifact"
-              className={`h-7 pl-2 pr-1.5 inline-flex items-center rounded-l-md border-r-0 ${MELT_BTN}`}
+              className={`h-7 pl-2 pr-1.5 inline-flex items-center rounded-l-md ${MELT_BTN}`}
             >
               <RefreshCw className="w-3.5 h-3.5" />
             </button>

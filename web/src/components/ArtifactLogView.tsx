@@ -274,17 +274,18 @@ export function PersistedLogView({ leftUrl, rightUrl, open, leftFailed, rightFai
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState<string | null>(null)
 
-  // Lazily fetch each side's log the first time the view is open — driven by an
-  // effect (not the click handler) so a restored-open state also loads the log.
-  // Keyed by url-pair via a ref so the fetch runs once per pair (and refetches if
-  // a regenerate swaps the urls), without `logs`/`loading` in the deps — which
-  // would re-fire the effect mid-flight and cancel the request.
-  const fetchedKey = useRef<string | null>(null)
+  // Lazily fetch each side's log whenever the view is open — driven by an effect
+  // (not the click handler) so a restored-open state also loads the log. The deps
+  // ([open, leftUrl, rightUrl]) already make this run once per url-pair and refetch
+  // when a regenerate swaps the urls; unrelated re-renders don't change them so they
+  // don't re-fire it. Each run owns its own `cancelled` flag and always clears
+  // `loading` in its finally, so a run superseded mid-flight — React StrictMode's
+  // mount→cleanup→remount, which fires for a card whose log is open from the start
+  // (a failed build) — never strands the panes on "Loading…": the latest run
+  // resolves the state. (An earlier url-keyed ref guard bailed the remount out
+  // before re-fetching, leaving the cancelled first run's `loading` stuck true.)
   useEffect(() => {
     if (!open || (!leftUrl && !rightUrl)) return
-    const key = `${leftUrl ?? ''}|${rightUrl ?? ''}`
-    if (fetchedKey.current === key) return
-    fetchedKey.current = key
     let cancelled = false
     setLoading(true)
     setErr(null)
@@ -302,7 +303,7 @@ export function PersistedLogView({ leftUrl, rightUrl, open, leftFailed, rightFai
         const [left, right] = await Promise.all([fetchSide(leftUrl), fetchSide(rightUrl)])
         if (!cancelled) setLogs({ left, right })
       } catch (e) {
-        if (!cancelled) { setErr(e instanceof Error ? e.message : String(e)); fetchedKey.current = null }
+        if (!cancelled) setErr(e instanceof Error ? e.message : String(e))
       } finally {
         if (!cancelled) setLoading(false)
       }
