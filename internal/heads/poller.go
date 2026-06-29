@@ -163,6 +163,20 @@ func (d *unreadDebouncer) forget(id string) {
 	delete(d.pending, id)
 }
 
+// take removes id's pending entry and reports whether one was present. The
+// poller uses it when an agent's session ends: a pending entry means the agent
+// had reached finished/waiting and we were still riding out the grace window to
+// tell a genuine finish from a transient subagent blip. A blip keeps the same
+// session alive, so the session ending is definitive proof of a real finish —
+// the caller raises the flag now instead of dropping it.
+func (d *unreadDebouncer) take(id string) bool {
+	if _, ok := d.pending[id]; !ok {
+		return false
+	}
+	delete(d.pending, id)
+	return true
+}
+
 // ready reports whether id's deferred flag has matured: the agent is still in
 // the status it was armed for and graceUnread has elapsed. The entry is cleared
 // when it fires, or when the status no longer matches (the transition was a
@@ -202,9 +216,30 @@ func pollJSONStatusOnce(store *db.Store, projectRoot string, deb *unreadDebounce
 
 	now := time.Now()
 	changed := false
+	// Tracks whether an unread flag actually went up this tick (distinct from any
+	// status churn). A raised flag moves this project's cross-project unread total,
+	// so it warrants a broadcast projects_changed; ordinary status changes do not.
+	unreadRaised := false
 	for _, a := range agents {
 		if a.SessionStatus != "running" {
-			deb.forget(a.ID)
+			// The session has ended. If a deferred unread was still pending for
+			// this agent — it had reached finished/waiting and we were riding out
+			// the grace window to tell a real finish from a transient subagent
+			// blip — the session exiting confirms a genuine finish (a blip keeps
+			// the same session alive; only a real end stops it). Raise the flag now
+			// instead of dropping it, so the unread dot still appears for an agent
+			// that finishes and exits before the grace window elapses. This is
+			// mostly invisible for an agent you have open (opening it resumes the
+			// session and the auto-clear effect dismisses the dot), so it bit
+			// non-selected agents.
+			if deb.take(a.ID) {
+				if err := store.RaiseUnread(a.ID); err != nil {
+					log.Printf("warn: json status poller: raise unread on session exit for %s: %v", a.ID, err)
+				} else {
+					changed = true
+					unreadRaised = true
+				}
+			}
 			continue
 		}
 		info := readStatusJSON(projectRoot, a.ID)
@@ -237,8 +272,13 @@ func pollJSONStatusOnce(store *db.Store, projectRoot string, deb *unreadDebounce
 			// push-status) roughly once a second for no visible change.
 			if err := store.UpdateAgentStatus(a.ID, agentStatus, info.Timestamp, immediate); err != nil {
 				log.Printf("warn: json status poller: update agent status for %s: %v", a.ID, err)
-			} else if statusChanged || immediate {
-				changed = true
+			} else {
+				if statusChanged || immediate {
+					changed = true
+				}
+				if immediate {
+					unreadRaised = true
+				}
 			}
 			switch {
 			case immediate:
@@ -259,16 +299,25 @@ func pollJSONStatusOnce(store *db.Store, projectRoot string, deb *unreadDebounce
 				log.Printf("warn: json status poller: raise unread for %s: %v", a.ID, err)
 			} else {
 				changed = true
+				unreadRaised = true
 			}
 		}
 	}
 
 	// Coalesced push: one agents_changed for the project if anything moved this
-	// tick. A raised unread flag is also a cross-project signal, but the
-	// projects_changed nudge for that is left to the (slow) fallback poll to keep
-	// the hot 1s path cheap; the in-project list still updates immediately.
+	// tick, so clients viewing this project refetch its list immediately.
 	if changed {
 		hub.AgentsChanged(projectRoot)
+	}
+	// A raised unread flag also moves this project's cross-project unread total,
+	// which drives the "updates elsewhere" indicator and the browser-tab dot on
+	// clients viewing *other* projects (their per-project agents_changed never
+	// reaches them). Broadcast projects_changed so they refetch the project list —
+	// but only when an unread flag actually went up, so ordinary status churn
+	// still stays off this cross-project path and the hot 1s loop stays cheap. The
+	// read/clear path does the same from the API handler (notifyAgentsChanged).
+	if unreadRaised {
+		hub.ProjectsChanged()
 	}
 }
 
