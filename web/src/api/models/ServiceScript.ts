@@ -23,6 +23,10 @@ export type ServiceScript = {
      */
     max_restarts?: number | null;
     /**
+     * Run the command under `set -eo pipefail` so a failed startup step surfaces as a crash instead of a healthy process (absent/null or true = strict; false = run exactly as written)
+     */
+    strict?: boolean | null;
+    /**
      * Whether the daemon supervises this service (absent/null or true = enabled; false = skipped)
      */
     enabled?: boolean | null;

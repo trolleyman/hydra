@@ -628,6 +628,7 @@ func toAPIArtifactScript(a config.ArtifactScript) api.ArtifactScript {
 	if a.CleanIgnored {
 		out.CleanIgnored = &a.CleanIgnored
 	}
+	out.Strict = a.Strict
 	out.Enabled = a.Enabled
 	return out
 }
@@ -644,6 +645,7 @@ func fromAPIArtifactScript(a api.ArtifactScript) config.ArtifactScript {
 	if a.CleanIgnored != nil {
 		out.CleanIgnored = *a.CleanIgnored
 	}
+	out.Strict = a.Strict
 	out.Enabled = a.Enabled
 	return out
 }
@@ -655,6 +657,7 @@ func toAPIServiceScript(svc config.ServiceScript) api.ServiceScript {
 		out.Host = &svc.Host
 	}
 	out.MaxRestarts = svc.MaxRestarts
+	out.Strict = svc.Strict
 	out.Enabled = svc.Enabled
 	return out
 }
@@ -666,6 +669,7 @@ func fromAPIServiceScript(svc api.ServiceScript) config.ServiceScript {
 		out.Host = *svc.Host
 	}
 	out.MaxRestarts = svc.MaxRestarts
+	out.Strict = svc.Strict
 	out.Enabled = svc.Enabled
 	return out
 }

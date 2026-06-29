@@ -383,12 +383,18 @@ func (m *Manager) buildCmd(ctx context.Context, root string, sv *supervised) (*e
 	)
 	env = append(env, sandbox.MiseTrustEnv(root, root)...)
 
+	command := sv.spec.Command
+	if sv.spec.IsStrict() {
+		// Fail-fast: a service that fails its setup mid-script must surface as a
+		// crash (and restart) rather than a healthy process (strict = false opts out).
+		command = sandbox.StrictScript(sv.spec.Command)
+	}
 	opts := sandbox.Options{
 		AgentType:    sandbox.AgentTypeBash,
 		WorktreePath: root, // services run against the live project root
 		Home:         home,
 		Env:          env,
-		Argv:         []string{"bash", "-c", sv.spec.Command},
+		Argv:         []string{"bash", "-c", command},
 		NoSandbox:    sv.spec.Host,
 	}
 	if !sv.spec.Host {

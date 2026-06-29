@@ -69,6 +69,9 @@ restore_ro = ["~/.config/go"]
 ##                a pristine checkout (git clean -fdx) instead of the default that keeps
 ##                dependency/build caches warm (-fd). Slower; set true only if stale
 ##                ignored output can leak between commits (default false).
+##   strict       run the command under `set -eo pipefail` so a failing step aborts
+##                and propagates instead of being swallowed (default true; set false
+##                to run the command exactly as written).
 ##   enabled      set false to skip this script in the diff viewer (default true).
 ## Formats: .png, .jpg and .gif are diffed pixel-by-pixel; .webm video is diffed
 ## frame-by-frame when ffmpeg is installed (otherwise by byte hash). Other types
@@ -106,6 +109,8 @@ timeout_sec = 900
 ##   host          run on the host with NO sandbox — full machine/credential access;
 ##                 needed for host devices the sandbox hides, e.g. /dev/kvm (default false).
 ##   max_restarts  relaunch cap after an unexpected exit (default 3; 0 = never).
+##   strict        run the command under `set -eo pipefail` so a failed startup step
+##                 surfaces as a crash instead of a healthy process (default true).
 ##   enabled       set false to stop the daemon supervising this service (default true).
 # [[services]]
 # name = "emu-pool"

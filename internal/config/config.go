@@ -132,8 +132,11 @@ type SandboxConfig struct {
 	Network *NetworkConfig `toml:"network"`
 	// PreSpawnScript is an optional shell script run inside the sandbox
 	// immediately before each agent is launched (e.g. `mise trust` or other
-	// arbitrary setup). It runs via /bin/sh in the agent's worktree with the
-	// same environment and confinement as the agent. nil/empty = no script.
+	// arbitrary setup). It runs in the agent's worktree with the same environment
+	// and confinement as the agent, under the interpreter named by a leading `#!`
+	// shebang or /bin/bash by default. When that interpreter is bash it runs under
+	// `set -eo pipefail`, so a failing setup step aborts the launch (lead the
+	// script with `set +e` to opt out). nil/empty = no script.
 	PreSpawnScript *string `toml:"pre_spawn_script"`
 	// PreExitScript is an optional shell script run inside a sandbox when a head
 	// ends — after the agent's session is killed but BEFORE the worktree/branch
@@ -142,9 +145,12 @@ type SandboxConfig struct {
 	// the same HYDRA_* head-context variables plus HYDRA_END_STATE
 	// ("killed"|"merged"|""). Use it for per-head teardown the agent didn't do
 	// itself — e.g. releasing a claimed emulator slot from the worktree's
-	// .hydra/emu.env. It is best-effort and bounded by a timeout. Being sandboxed,
-	// it cannot reach host-only resources (the host adb server, /dev/kvm); those
-	// belong to a host-side [[services]] pool. nil/empty = no script.
+	// .hydra/emu.env. It is best-effort and bounded by a timeout. It runs via
+	// `bash -c` under `set -eo pipefail`, so a failing step aborts the rest of the
+	// teardown; lead the script with `set +e` (or use `cmd || true`) if cleanup
+	// must continue past errors. Being sandboxed, it cannot reach host-only
+	// resources (the host adb server, /dev/kvm); those belong to a host-side
+	// [[services]] pool. nil/empty = no script.
 	PreExitScript *string `toml:"pre_exit_script"`
 }
 
@@ -174,11 +180,22 @@ type ServiceScript struct {
 	// or shown a live status). nil is the default so configs written before this
 	// flag keep their services running.
 	Enabled *bool `toml:"enabled"`
+	// Strict runs the command under `set -eo pipefail` (errexit + pipefail) so a
+	// failure in the startup script surfaces as a crash (and triggers the restart
+	// policy) instead of a healthy-looking process whose setup silently failed.
+	// nounset (-u) is not applied. nil or true = strict; false runs the command
+	// exactly as written. nil is the default so pre-flag configs become strict; a
+	// service needing lenient execution sets it false or leads with `set +e`.
+	Strict *bool `toml:"strict"`
 }
 
 // IsEnabled reports whether the service should be supervised. An absent flag
 // (nil) means enabled, for backward compatibility with pre-flag configs.
 func (s ServiceScript) IsEnabled() bool { return s.Enabled == nil || *s.Enabled }
+
+// IsStrict reports whether the command runs under `set -eo pipefail`. An absent
+// flag (nil) means strict, so a failed startup step surfaces rather than hiding.
+func (s ServiceScript) IsStrict() bool { return s.Strict == nil || *s.Strict }
 
 // DefaultServiceMaxRestarts is the restart cap applied when a service does not
 // set max_restarts.
@@ -214,7 +231,7 @@ type AgentConfig struct {
 type ArtifactScript struct {
 	// Name uniquely identifies the script; used as the UI label and cache dir.
 	Name string `toml:"name"`
-	// Command is the shell command run (via `sh -c`) in the checkout directory.
+	// Command is the shell command run (via `bash -c`) in the checkout directory.
 	Command string `toml:"command"`
 	// TimeoutSec bounds how long the command may run (0 = default, see artifacts).
 	TimeoutSec int `toml:"timeout_sec"`
@@ -245,11 +262,24 @@ type ArtifactScript struct {
 	// the live (human-controlled) config is authoritative — a disabled script is
 	// skipped regardless of what a diffed ref's own config claims.
 	Enabled *bool `toml:"enabled"`
+	// Strict runs the command under `set -eo pipefail` (errexit + pipefail) so a
+	// failing step — or a failure mid-pipeline — aborts and propagates a non-zero
+	// exit instead of being swallowed into a 0 that caches a half-broken render as
+	// a success. nounset (-u) is not applied, since generators commonly read
+	// optional env vars. nil or true = strict; false runs the command exactly as
+	// written (bash defaults). nil is the default so pre-flag configs become
+	// strict (the safer behavior); a script needing lenient execution sets it
+	// false or leads its command with `set +e`.
+	Strict *bool `toml:"strict"`
 }
 
 // IsEnabled reports whether the artifact script should run. An absent flag (nil)
 // means enabled, for backward compatibility with pre-flag configs.
 func (a ArtifactScript) IsEnabled() bool { return a.Enabled == nil || *a.Enabled }
+
+// IsStrict reports whether the command runs under `set -eo pipefail`. An absent
+// flag (nil) means strict, so a failing step surfaces rather than being swallowed.
+func (a ArtifactScript) IsStrict() bool { return a.Strict == nil || *a.Strict }
 
 type Config struct {
 	// Defaults for all agents.
@@ -1000,6 +1030,9 @@ func artifactsDocLines() []string {
 		docPrefix + "                a pristine checkout (git clean -fdx) instead of the default that keeps",
 		docPrefix + "                dependency/build caches warm (-fd). Slower; set true only if stale",
 		docPrefix + "                ignored output can leak between commits (default false).",
+		docPrefix + "   strict       run the command under `set -eo pipefail` so a failing step aborts",
+		docPrefix + "                and propagates instead of being swallowed (default true; set false",
+		docPrefix + "                to run the command exactly as written).",
 		docPrefix + "   enabled      set false to skip this script in the diff viewer (default true).",
 		docPrefix + " Formats: .png, .jpg and .gif are diffed pixel-by-pixel; .webm video is diffed",
 		docPrefix + " frame-by-frame when ffmpeg is installed (otherwise by byte hash). Other types",
@@ -1049,6 +1082,9 @@ func artifactFieldLines(a ArtifactScript) []string {
 	if a.CleanIgnored {
 		out = append(out, "clean_ignored = true")
 	}
+	if a.Strict != nil && !*a.Strict {
+		out = append(out, "strict = false")
+	}
 	if a.Enabled != nil && !*a.Enabled {
 		out = append(out, "enabled = false")
 	}
@@ -1094,6 +1130,8 @@ func servicesDocLines() []string {
 		docPrefix + "   host          run on the host with NO sandbox — full machine/credential access;",
 		docPrefix + "                 needed for host devices the sandbox hides, e.g. /dev/kvm (default false).",
 		docPrefix + fmt.Sprintf("   max_restarts  relaunch cap after an unexpected exit (default %d; 0 = never).", DefaultServiceMaxRestarts),
+		docPrefix + "   strict        run the command under `set -eo pipefail` so a failed startup step",
+		docPrefix + "                 surfaces as a crash instead of a healthy process (default true).",
 		docPrefix + "   enabled       set false to stop the daemon supervising this service (default true).",
 	}
 }
@@ -1120,6 +1158,9 @@ func serviceFieldLines(svc ServiceScript) []string {
 	}
 	if svc.MaxRestarts != nil {
 		out = append(out, fmt.Sprintf("max_restarts = %d", *svc.MaxRestarts))
+	}
+	if svc.Strict != nil && !*svc.Strict {
+		out = append(out, "strict = false")
 	}
 	if svc.Enabled != nil && !*svc.Enabled {
 		out = append(out, "enabled = false")

@@ -221,7 +221,7 @@ func startAgentSession(reg *session.Registry, projectRoot, id string, agentType 
 // the master) or ctx fires, whichever comes first.
 func runPreExitInNamespace(ctx context.Context, host *nsHost, worktree string, env []string, script string) ([]byte, error) {
 	sp, err := host.client.Spawn(nshost.SpawnRequest{
-		Argv: []string{"/bin/bash", "-c", script},
+		Argv: []string{"/bin/bash", "-c", sandbox.StrictScript(script)},
 		Env:  env,
 		Cwd:  worktree,
 		Rows: 24, Cols: 80,
