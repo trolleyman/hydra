@@ -50,6 +50,13 @@ type Agent struct {
 	HeadStatus string  `gorm:"default:idle"` // idle|killing|merging
 	LastError  *string // error message from failed operation
 
+	// MergeWhenGreen arms auto-merge (PLAN #68): when true, the daemon merges this
+	// head as soon as its tests settle passing, and disarms it if they settle
+	// failing/errored or a new commit's tests go red. MergeWhenGreenAt is the
+	// RFC3339 time it was armed. Set/cleared via the arm/disarm endpoints.
+	MergeWhenGreen   bool `gorm:"default:false"`
+	MergeWhenGreenAt string
+
 	// EndState records how an archived (soft-deleted) agent ended: "killed" |
 	// "merged", or "" for an active agent or an aborted spawn. The archived-history
 	// list shows only soft-deleted rows with a non-empty EndState, so aborted
