@@ -18,12 +18,14 @@ import (
 )
 
 // SandboxHydraBinPath is the well-known path the hydra binary is bound to inside
-// every sandbox (/tmp is always a fresh tmpfs in our bwrap config, so it is a
-// reliable mountpoint). Hooks and the namespace-host supervisor invoke it here.
+// every sandbox. /tmp is always a fresh, per-head writable mount in our bwrap
+// config (a private host-backed dir on Linux, else a tmpfs — see
+// sandbox.Options.TmpDir), so it is a reliable mountpoint and these seeded binds
+// nest on top of it. Hooks and the namespace-host supervisor invoke it here.
 const SandboxHydraBinPath = "/tmp/hydra-internal"
 
 // GateSandboxPolicyPath is the well-known path the read-only gate policy.json is
-// bound to inside the sandbox (again under the reliable /tmp tmpfs). The
+// bound to inside the sandbox (again under the reliable per-head /tmp mount). The
 // in-sandbox `hydra gate` hook reads it via gate.EnvPolicyPath.
 const GateSandboxPolicyPath = "/tmp/hydra-gate-policy.json"
 

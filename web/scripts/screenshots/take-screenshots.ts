@@ -29,7 +29,7 @@
 
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import { createServer } from 'node:net'
-import { mkdtempSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, existsSync, readFileSync, writeFileSync, rmSync } from 'node:fs'
 import { availableParallelism, cpus, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chromium } from 'playwright'
@@ -2134,6 +2134,11 @@ try {
   }
 } finally {
   server.kill('SIGTERM')
+  // Remove the throwaway binary dir (hydra-shot-*). Without this every artifact
+  // run leaks a ~30MB dir into the host's /tmp — they pile up fast since this
+  // runs on both sides of every screenshot comparison. Safe to unlink even
+  // though the server still holds the binary open (Linux/macOS unlink-on-use).
+  rmSync(binDir, { recursive: true, force: true })
 }
 
 progress('done')
