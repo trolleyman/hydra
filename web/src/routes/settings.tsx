@@ -1,4 +1,4 @@
-import { createFileRoute, useBlocker } from '@tanstack/react-router'
+import { createFileRoute, useBlocker, useCanGoBack, useRouter } from '@tanstack/react-router'
 import { useEffect, useState, useMemo } from 'react'
 import { api } from '../stores/apiClient'
 import { formatError } from '../api/format_error'
@@ -18,6 +18,8 @@ export const Route = createFileRoute('/settings')({
 })
 
 function SettingsPage() {
+  const router = useRouter()
+  const canGoBack = useCanGoBack()
   const { selectedProjectId, projects } = useProjectStore()
   const [config, setConfig] = useState<ConfigResponse | null>(null)
   const [baseConfig, setBaseConfig] = useState<string | null>(null)
@@ -122,6 +124,7 @@ function SettingsPage() {
       <PageTopBar
         title="Settings"
         always
+        onBack={canGoBack ? () => router.history.back() : undefined}
         right={
           <button
             onClick={handleSave}

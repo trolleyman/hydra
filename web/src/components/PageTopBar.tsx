@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { PanelLeftOpen } from 'lucide-react'
+import { PanelLeftOpen, ChevronLeft } from 'lucide-react'
 import { useSidebarStore } from '../lib/sidebar'
 import { Tooltip } from './Tooltip'
 import { IconButton } from './IconButton'
@@ -9,7 +9,7 @@ import { IconButton } from './IconButton'
 // toggle — and a bit of context — while the sidebar is collapsed. It renders
 // nothing when the sidebar is open (the sidebar itself provides the context and
 // the toggle), so it only appears on small screens / when hidden.
-export function PageTopBar({ title, right, always }: { title: string; right?: ReactNode; always?: boolean }) {
+export function PageTopBar({ title, right, always, onBack }: { title: string; right?: ReactNode; always?: boolean; onBack?: () => void }) {
   const collapsed = useSidebarStore((s) => s.collapsed)
   const toggle = useSidebarStore((s) => s.toggle)
   if (!collapsed && !always) return null
@@ -21,6 +21,15 @@ export function PageTopBar({ title, right, always }: { title: string; right?: Re
         <Tooltip content="Show sidebar (Ctrl+.)">
           <IconButton variant="panel" aria-label="Show sidebar" onClick={toggle} className="shrink-0 -ml-1">
             <PanelLeftOpen className="w-5 h-5" />
+          </IconButton>
+        </Tooltip>
+      )}
+      {/* Back arrow — only shown when there's somewhere to return to (we arrived
+          here from another page rather than landing on it directly). */}
+      {onBack && (
+        <Tooltip content="Back">
+          <IconButton variant="panel" aria-label="Back" onClick={onBack} className="shrink-0 -ml-1">
+            <ChevronLeft className="w-5 h-5" />
           </IconButton>
         </Tooltip>
       )}
