@@ -361,9 +361,6 @@ export function AgentDetail({
   // from the list. Used by "Mark as unread", which keeps the agent around with
   // its unread dot lit.
   onUnselect?: () => void
-  // Restart was removed from the agent header (the action no longer surfaces in
-  // the UI); the prop is retained so the route can keep wiring it for now.
-  onRestarted?: (agent: AgentResponse) => void
   onRefresh?: () => void
 }) {
   const [killing, setKilling] = useState(false)

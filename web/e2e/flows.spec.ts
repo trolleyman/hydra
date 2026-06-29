@@ -101,6 +101,25 @@ test('the service-health warning is re-keyed when switching projects', async ({ 
   await expect(page.getByLabel('service failure')).toHaveCount(0)
 })
 
+// Integration coverage for PLAN #64b: the sidebar status dot is coloured by
+// agentDotClass off the modern agent_status.status (AgentComponents.tsx). This
+// drives the real simulated agents end-to-end and asserts the rendered dot class
+// per status — guarding that the agent_status path (not the removed Docker
+// session-state normaliser) is what reaches the DOM. The dot is the first
+// rounded-full span inside the agent's sidebar row.
+test('sidebar status dots are coloured from agent_status', async ({ page }) => {
+  await page.goto(PROJECT)
+
+  const dot = (title: string) =>
+    agentRow(page, title).locator('span.rounded-full').first()
+
+  // agent-md is running → green, agent-1 finished → violet, agent-2 needs_input
+  // → red (see internal/http/simulation.go seeds).
+  await expect(dot('Add inline markdown rendering')).toHaveClass(/bg-green-500/)
+  await expect(dot('Add renameable agent titles')).toHaveClass(/bg-violet-500/)
+  await expect(dot('Migrate auth providers to OAuth')).toHaveClass(/bg-red-500/)
+})
+
 test('the project switcher opens and lists the projects', async ({ page }) => {
   await page.goto(PROJECT)
 

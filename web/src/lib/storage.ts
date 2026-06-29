@@ -10,7 +10,6 @@
 export const StorageKeys = {
   projectId: 'hydra-project-id',
   themeMode: 'hydra-theme-mode',
-  darkModeLegacy: 'hydra-dark-mode', // migrated away from; only read to migrate
   sidebarWidth: 'hydra-sidebar-width',
   // '1' when the user has collapsed the sidebar (no top bar layout). Only the
   // explicit toggle persists this; the small-screen auto-close on navigation is
@@ -64,12 +63,6 @@ export const StorageKeys = {
 export const PROJECT_VIEW_PREFIX = 'hydra-project-view-'
 export const projectViewKey = (projectId: string): string =>
   `${PROJECT_VIEW_PREFIX}${projectId}`
-
-// Legacy: which agent was selected within a project. Superseded by the richer
-// project-view key above; still read once so an existing selection migrates.
-export const SELECTED_AGENT_PREFIX = 'hydra-selected-agent-'
-export const selectedAgentKey = (projectId: string): string =>
-  `${SELECTED_AGENT_PREFIX}${projectId}`
 
 // Per-artifact view prefs, keyed by project + agent + artifact name (see
 // artifactPrefs.ts). projectId may be null → '_' keeps the key shape stable.
