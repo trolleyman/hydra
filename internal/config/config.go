@@ -1049,6 +1049,8 @@ func artifactsDocLines() []string {
 		docPrefix + " The sidecar may also carry an optional dpi — the device-scale factor the shot was",
 		docPrefix + ` captured at, e.g. {"tags": [...], "dpi": 2} — so the grid sizes a tile by its`,
 		docPrefix + " logical width (pixels / dpi): a 2x shot lays out like a 1x one, only sharper.",
+		docPrefix + ` For a video, an optional fps (e.g. {"fps": 60}) sets the frame rate the diff`,
+		docPrefix + " viewer's frame-step buttons use (HTML5 video exposes no frame rate of its own).",
 	}
 }
 
