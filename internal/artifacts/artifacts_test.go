@@ -263,6 +263,34 @@ func TestPersistedLogRoundTrip(t *testing.T) {
 	}
 }
 
+// TestFailureSummaryAppendedToLog verifies the failure summary (the exit code,
+// or a timeout) is appended as the final stderr line of the captured log, so the
+// build log itself explains why the run ended — without a separate UI banner that
+// would duplicate the stderr. A timeout SIGKILLs the script and a bare non-zero
+// exit prints nothing, so this framing would otherwise be invisible.
+func TestFailureSummaryAppendedToLog(t *testing.T) {
+	repo := initRepo(t)
+	m := NewManager(repo)
+	spec := config.ArtifactScript{Name: "shots", Command: "echo capturing; exit 7", UnsafeHost: true}
+	v := Version{Ref: "HEAD"}
+	if meta := waitReady(t, m, spec, v); meta.Status != StatusError {
+		t.Fatalf("expected error status, got %s", meta.Status)
+	}
+	key, _, err := m.versionKey(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines, ok := m.ReadLog("shots", key)
+	if !ok || len(lines) == 0 {
+		t.Fatal("expected a persisted log")
+	}
+	// The script's own output comes first; Hydra's exit summary is the last line.
+	last := lines[len(lines)-1]
+	if last.Text != "exited 7" || last.Stream != StreamStderr {
+		t.Fatalf("last log line = %+v, want stderr %q", last, "exited 7")
+	}
+}
+
 // TestGenerateSandboxed exercises the default (sandboxed) path: the command runs
 // inside bwrap with the output dir bound writable. Skipped where unprivileged
 // user namespaces are unavailable (e.g. nested sandboxes / hardened kernels).

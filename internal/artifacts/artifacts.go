@@ -38,6 +38,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"image"
 	_ "image/gif"  // register GIF decoder for pixel comparison
@@ -1069,13 +1070,30 @@ func (m *Manager) generate(parent context.Context, spec config.ArtifactScript, v
 	err = cmd.Wait()
 	scanWG.Wait() // drain both pipes before reading stderr / returning
 	if err != nil {
-		msg := err.Error()
-		if ctx.Err() == context.DeadlineExceeded {
-			msg = "timed out after " + timeout.String()
+		// A concise failure summary: the exit code, or "timed out after …" when the
+		// per-script timeout fired. This is Hydra's framing — NOT something the
+		// script prints — so it is otherwise invisible: a timeout SIGKILLs the
+		// script before it can say anything, and a bare non-zero exit may print
+		// nothing after its last progress line.
+		summary := err.Error()
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			summary = fmt.Sprintf("exited %d", exitErr.ExitCode())
 		}
+		if ctx.Err() == context.DeadlineExceeded {
+			summary = "timed out after " + timeout.String()
+		}
+		// Append the summary as the log's final line so the captured build log
+		// itself explains why the run ended — the script's own stderr is already
+		// streamed above, so the UI shows this inline as the last (red) line rather
+		// than in a separate banner that would duplicate the stderr and push the
+		// terminal down.
+		m.appendLog(dir, summary, StreamStderr, false)
+
 		stderrMu.Lock()
 		tail := strings.TrimSpace(stderrBuf.String())
 		stderrMu.Unlock()
+		msg := summary
 		if tail != "" {
 			msg += ": " + lastLines(tail, 15)
 		}

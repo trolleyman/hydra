@@ -195,7 +195,9 @@ function NoLog() {
 // loaded — so a settled card shows two real terminals immediately rather than a
 // bare "Loading log…" line. `failed` marks a side whose build itself errored;
 // `succeeded` marks one that finished cleanly (green border). A fetch error counts
-// as failed and overrides succeeded.
+// as failed and overrides succeeded. The build's own failure summary (its exit
+// status, "timed out after …") is appended to the captured log by the backend, so
+// it reads inline as the log's final line — no separate banner needed.
 function SideLogPane({ label, url, log, loading, error, failed, succeeded }: {
   label: string
   url?: string | null
