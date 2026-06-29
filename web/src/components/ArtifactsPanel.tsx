@@ -12,6 +12,7 @@ import { stripAnsi } from '../lib/ansi'
 import { type ArtifactSpans, BASE_ARTIFACT_COLUMNS, defaultSpanForAspect } from '../lib/artifactColumns'
 import { VideoDiffView, isVideoArtifact, VIDEO_MIN_TILE_PX } from './VideoDiffView'
 import { ImageDiffView, SegmentedToggle, ABControlsContext, type ImageDiffMode, type ArtifactABControls } from './ArtifactImageDiff'
+import type { LightboxImage } from './ImageLightbox'
 import { LiveLogPanes, PersistedLogView } from './ArtifactLogView'
 
 const CHANGE_LABEL: Record<string, string> = {
@@ -54,7 +55,12 @@ const MASONRY_GAP = 12
 const TILE_EASE = 'cubic-bezier(0.34, 1.56, 0.64, 1)'
 const TILE_TRANSITION = `left 220ms ${TILE_EASE}, top 220ms ${TILE_EASE}, width 280ms ${TILE_EASE}`
 
-function FileRow({ file, mode, changeThreshold = 0 }: { file: ArtifactFile; mode: ImageDiffMode; changeThreshold?: number }) {
+function FileRow({ file, mode, changeThreshold = 0, gallery, index }: {
+  file: ArtifactFile; mode: ImageDiffMode; changeThreshold?: number
+  // The grid's diff gallery + this file's index in it, so opening an image lets ←/→
+  // walk the files and the lightbox shows the comparison (see ImageDiffView). Images only.
+  gallery?: LightboxImage[]; index?: number
+}) {
   // The badge reflects the *effective* change type, so a modified file gated below
   // the "% changed" threshold shows as unchanged (no badge) — matching how it's
   // filtered and counted.
@@ -93,7 +99,7 @@ function FileRow({ file, mode, changeThreshold = 0 }: { file: ArtifactFile; mode
         {isVideoArtifact(file.name) ? (
           <VideoDiffView left={file.left_url} right={file.right_url} mode={mode} fps={file.fps} />
         ) : (
-          <ImageDiffView left={file.left_url} right={file.right_url} mode={mode} name={file.name} />
+          <ImageDiffView left={file.left_url} right={file.right_url} mode={mode} name={file.name} gallery={gallery} index={index} />
         )}
       </div>
     </div>
@@ -409,6 +415,11 @@ export function MasonryGrid({ items, spanScale = 1, scale = 1, spans, onSpanChan
     if (e.button !== 0 || !onSpanChange) return
     // Only the media drags; the card header/padding is left alone (text-selectable).
     if (!(e.target instanceof Element) || !e.target.closest('[data-tile-drag]')) return
+    // …but never hijack an interactive control that owns its own horizontal drag — the
+    // onion-skin opacity slider (an <input type="range">) lives inside the media region,
+    // and dragging it must move the slider, not resize the tile. `data-no-tile-drag` is
+    // the general escape hatch for any such control.
+    if (e.target.closest('input, [data-no-tile-drag]')) return
     draggedKeyRef.current = null // reset any stale value from a drag that produced no click
     const startX = e.clientX
     const startY = e.clientY
@@ -523,10 +534,34 @@ function FileGrid({ files, mode, scale = 1, spans, onSpanChange, scope, changeTh
     [files],
   )
   const dims = useMediaDims(sources)
+  // The lightbox diff gallery: each visible image file (videos play inline, so they're
+  // excluded) contributes one entry, in display order, carrying its before/after pair
+  // and the current comparison mode — so opening any image lets ←/→ walk the files and
+  // the lightbox shows the same comparison. A file with no image at all is skipped, so
+  // it has no index and falls back to opening the single clicked image. `url` is the
+  // representative side, used for the lightbox's edge previews.
+  const imageFiles = useMemo(
+    () => files.filter((f) => !isVideoArtifact(f.name) && (f.left_url || f.right_url)),
+    [files],
+  )
+  const diffGallery = useMemo<LightboxImage[]>(
+    () => imageFiles.map((f) => ({
+      url: (f.right_url ?? f.left_url) as string,
+      filename: f.name,
+      size: 0,
+      diff: { left: f.left_url, right: f.right_url, mode },
+    })),
+    [imageFiles, mode],
+  )
+  const galleryIndex = useMemo(() => {
+    const m = new Map<string, number>()
+    imageFiles.forEach((f, i) => m.set(f.name, i))
+    return m
+  }, [imageFiles])
   const items = useMemo(
     () => files.map((f) => ({
       key: f.name,
-      node: <FileRow file={f} mode={mode} changeThreshold={changeThreshold} />,
+      node: <FileRow file={f} mode={mode} changeThreshold={changeThreshold} gallery={diffGallery} index={galleryIndex.get(f.name)} />,
       aspect: dims[f.name]?.aspect,
       pxWidth: dims[f.name]?.pxWidth,
       // Videos need a minimum tile width for their transport controls (see
@@ -537,7 +572,7 @@ function FileGrid({ files, mode, scale = 1, spans, onSpanChange, scope, changeTh
       // bodyResizable. Other images resize by dragging the media (data-tile-drag).
       bodyResizable: mode !== 'slider' && !isVideoArtifact(f.name),
     })),
-    [files, mode, dims, changeThreshold],
+    [files, mode, dims, changeThreshold, diffGallery, galleryIndex],
   )
   // pt-3 so the gap above the first row matches the card body's px-3 left inset.
   return (
