@@ -370,6 +370,7 @@ export function AgentTopBar({
           <input
             ref={inputRef}
             type="text"
+            aria-label="Agent title"
             value={editing ? rename.draft : title}
             readOnly={!editing}
             disabled={rename.saving}
