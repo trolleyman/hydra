@@ -113,6 +113,14 @@ func GetArtifactsDirFromProjectRoot(projectRoot string) string {
 	return filepath.Join(GetHydraLocalDirFromProjectRoot(projectRoot), "artifacts")
 }
 
+// GetTestsDirFromProjectRoot returns the (gitignored) directory holding per-head
+// test-runner results (TestReport meta.json + build logs) and their ephemeral
+// checkouts. Mirrors GetArtifactsDirFromProjectRoot for the test gate (see PLAN
+// #68); kept separate so the two generators don't share a slot pool dir.
+func GetTestsDirFromProjectRoot(projectRoot string) string {
+	return filepath.Join(GetHydraLocalDirFromProjectRoot(projectRoot), "tests")
+}
+
 // GetUploadsDirFromProjectRoot returns the (gitignored) directory holding files
 // pasted/attached to prompts. It sits under .hydra/local so it's readable
 // read-only inside agent sandboxes at the same absolute path.

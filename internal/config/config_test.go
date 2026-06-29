@@ -278,6 +278,79 @@ func TestArtifactsMergeReplaces(t *testing.T) {
 	}
 }
 
+func TestTestsRoundTrip(t *testing.T) {
+	cfg := Config{
+		Tests: []TestScript{
+			{Name: "go", Command: "gotestsum --junitfile $HYDRA_TEST_OUTPUT/go.xml ./...", TimeoutSec: 600},
+			{Name: "web", Command: "bun vitest run", Strict: boolPtr(false), Enabled: boolPtr(false)},
+		},
+		TestConcurrency: intPtr(2),
+	}
+
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := SaveToFile(path, cfg); err != nil {
+		t.Fatalf("SaveToFile: %v", err)
+	}
+	loaded, err := LoadFile(path)
+	if err != nil {
+		t.Fatalf("LoadFile: %v", err)
+	}
+	if loaded == nil || len(loaded.Tests) != 2 {
+		t.Fatalf("expected 2 tests, got %+v", loaded)
+	}
+	if loaded.Tests[0].Name != "go" || loaded.Tests[0].TimeoutSec != 600 || !loaded.Tests[0].IsStrict() {
+		t.Errorf("test[0] mismatch: %+v", loaded.Tests[0])
+	}
+	if loaded.Tests[1].Name != "web" || loaded.Tests[1].IsStrict() || loaded.Tests[1].IsEnabled() {
+		t.Errorf("test[1] mismatch (strict/enabled should be false): %+v", loaded.Tests[1])
+	}
+	if loaded.ResolveTestConcurrency() != 2 {
+		t.Errorf("test_concurrency = %d, want 2", loaded.ResolveTestConcurrency())
+	}
+}
+
+func TestTestsMergeReplaces(t *testing.T) {
+	base := Config{Tests: []TestScript{{Name: "a", Command: "x"}}}
+	base.Merge(Config{Tests: []TestScript{{Name: "b", Command: "y"}}})
+	if len(base.Tests) != 1 || base.Tests[0].Name != "b" {
+		t.Errorf("expected merge to replace tests, got %+v", base.Tests)
+	}
+	base.Merge(Config{})
+	if len(base.Tests) != 1 || base.Tests[0].Name != "b" {
+		t.Errorf("expected tests preserved, got %+v", base.Tests)
+	}
+}
+
+// TestArtifactsAndTestsCoexist guards that [[artifacts]] and [[tests]] blocks in
+// the same file are decoded into their own slices (the array-table router keys on
+// the header name, so they must not bleed into each other).
+func TestArtifactsAndTestsCoexist(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	content := []byte(`
+[[artifacts]]
+name = "shots"
+command = "shot"
+
+[[tests]]
+name = "go"
+command = "go test ./..."
+`)
+	arts, err := ArtifactsAtProjectTOML(content)
+	if err != nil {
+		t.Fatalf("ArtifactsAtProjectTOML: %v", err)
+	}
+	tests, err := TestsAtProjectTOML(content)
+	if err != nil {
+		t.Fatalf("TestsAtProjectTOML: %v", err)
+	}
+	if len(arts) != 1 || arts[0].Name != "shots" {
+		t.Errorf("artifacts = %+v", arts)
+	}
+	if len(tests) != 1 || tests[0].Name != "go" || tests[0].Command != "go test ./..." {
+		t.Errorf("tests = %+v", tests)
+	}
+}
+
 func contains(s, sub string) bool {
 	return len(s) >= len(sub) && (s == sub || len(sub) == 0 ||
 		func() bool {
