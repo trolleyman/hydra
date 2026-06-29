@@ -5,6 +5,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import { api } from '../stores/apiClient'
 import type { ArtifactSet, ArtifactFile, ArtifactLogLine } from '../api'
+import { ArtifactFile as ArtifactFileNS } from '../api'
 import { LoaderCircle, Image as ImageIcon, ImageOff, ChevronDown, ChevronRight, TriangleAlert, RefreshCw, ScrollText, SquarePlus, SquareMinus, SquareDot } from 'lucide-react'
 import { InfoTooltip } from './InfoTooltip'
 import { loadArtifactPrefs, saveArtifactPrefs, loadTagFilter, saveTagFilter, clampChangeThreshold, type ArtifactTagFilter } from '../lib/artifactPrefs'
@@ -1175,14 +1176,8 @@ function ArtifactSetCard({ set, mode, spans, onSpanChange, filter, search, onRef
   const isFiltered = filterIsActive(filter)
   const searching = search.trim().length > 0
   const narrowed = isFiltered || searching
-  const visibleFiles = computeVisibleFiles(set.files, filter, search)
-  // "changed" counts honour the change-type threshold, so a sub-threshold tweak
-  // doesn't inflate the "x/y changed" header (see effectiveChangeType).
   const changeThreshold = clampChangeThreshold(filter.changeThreshold)
-  const changedFiles = visibleFiles.filter((f) => effectiveChangeType(f, changeThreshold) !== 'unchanged')
-  const totalChanged = set.files.filter((f) => effectiveChangeType(f, changeThreshold) !== 'unchanged').length
-  const changedLabel = narrowed && changedFiles.length !== totalChanged ? `${changedFiles.length}/${totalChanged} changed` : `${totalChanged} changed`
-  const noChanges = status === 'ready' && !set.changed
+
   // Which side(s) failed. A whole-set "error" status means both sides failed (or
   // the set couldn't be loaded at all); a "ready" set with a single side_error is
   // a partial failure — the other side rendered. Either way the failing side's
@@ -1192,6 +1187,27 @@ function ArtifactSetCard({ set, mode, spans, onSpanChange, filter, search, onRef
   const rightFailed = status === 'error' || !!set.right_error
   // One side failed while the other rendered (status stays "ready").
   const failedSide: 'left' | 'right' | null = status !== 'error' && set.left_error ? 'left' : status !== 'error' && set.right_error ? 'right' : null
+
+  // When one side failed, the surviving side's files would each surface as
+  // added/removed (the failed side contributes none), exploding the card into a
+  // pile of one-sided "changes" for a comparison we never actually made. Present
+  // them as unchanged instead, so the default change filter hides them and the
+  // card stays calm — the failure is already surfaced by the red-bordered
+  // build-log terminal and the header chip, not a flood of fake diffs.
+  const cardFiles = useMemo(
+    () => (failedSide ? set.files.map((f) => ({ ...f, change_type: ArtifactFileNS.change_type.UNCHANGED })) : set.files),
+    [set.files, failedSide],
+  )
+
+  const visibleFiles = computeVisibleFiles(cardFiles, filter, search)
+  // "changed" counts honour the change-type threshold, so a sub-threshold tweak
+  // doesn't inflate the "x/y changed" header (see effectiveChangeType).
+  const changedFiles = visibleFiles.filter((f) => effectiveChangeType(f, changeThreshold) !== 'unchanged')
+  const totalChanged = cardFiles.filter((f) => effectiveChangeType(f, changeThreshold) !== 'unchanged').length
+  const changedLabel = narrowed && changedFiles.length !== totalChanged ? `${changedFiles.length}/${totalChanged} changed` : `${totalChanged} changed`
+  // A partial failure isn't a "visual change" — the surviving side's files are
+  // neutralised above, so the header reads "no visual changes" + the failed chip.
+  const noChanges = status === 'ready' && (!set.changed || !!failedSide)
 
   // Restore any saved view prefs for this card (persisted per project+agent+name).
   // loadArtifactPrefs returns null when the saved status no longer matches the
@@ -1413,10 +1429,11 @@ function ArtifactSetCard({ set, mode, spans, onSpanChange, filter, search, onRef
             // one masonry. Empty states cover "produced nothing" vs "filtered out".
             <>
               {/* Build log sits at the top of the body so "Show build log" reveals
-                  it without scrolling past the image grid. When one side failed,
-                  it auto-opens with that side's terminal red-bordered (its stderr
-                  is the failure detail) — so the surviving side's images still show
-                  below, but the failure reads off the terminal, not a separate box. */}
+                  it without scrolling past the image grid. When one side failed it
+                  auto-opens with that side's terminal red-bordered (its stderr is
+                  the failure detail), and the surviving side's files are neutralised
+                  to "unchanged" (cardFiles) so they're hidden by default rather than
+                  flooding the grid with one-sided diffs. */}
               <PersistedLogView leftUrl={set.left_log_url} rightUrl={set.right_log_url} open={buildLogOpen} leftFailed={leftFailed} rightFailed={rightFailed} />
               {failedSide && !hasBuildLog && (
                 // One side died and left no log to show: fall back to a one-line note
@@ -1426,10 +1443,14 @@ function ArtifactSetCard({ set, mode, spans, onSpanChange, filter, search, onRef
                   The {failedSide === 'left' ? 'before (left)' : 'after (right)'} side failed to render — showing the {failedSide === 'left' ? 'after' : 'before'} side only.
                 </div>
               )}
-              {set.files.length === 0 ? (
+              {cardFiles.length === 0 ? (
                 <div className="my-2 text-xs text-gray-400 dark:text-gray-500">No artifacts produced.</div>
               ) : visibleFiles.length === 0 ? (
-                <div className="my-2 text-xs text-gray-400 dark:text-gray-500">No files match {searching ? 'your search' : 'the current filters'}.</div>
+                <div className="my-2 text-xs text-gray-400 dark:text-gray-500">
+                  {failedSide
+                    ? `Only the ${failedSide === 'left' ? 'after' : 'before'} side rendered — its ${cardFiles.length} file${cardFiles.length === 1 ? '' : 's'} ${cardFiles.length === 1 ? 'is' : 'are'} hidden as unchanged (nothing to compare). Show "unchanged" in the changes filter to view ${cardFiles.length === 1 ? 'it' : 'them'}.`
+                    : `No files match ${searching ? 'your search' : 'the current filters'}.`}
+                </div>
               ) : (
                 <FileGrid files={visibleFiles} mode={mode} spans={spans} onSpanChange={onSpanChange} scope={`${agentId}/${set.name}`} changeThreshold={changeThreshold} />
               )}
