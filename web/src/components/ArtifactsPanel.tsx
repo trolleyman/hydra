@@ -15,6 +15,8 @@ import {
   checkerStyle, IMG_CLASS, OVERLAY_CLASS, TAG_CLASS, makeAuxOpen,
   DIFF_COLOR, DIFF_PIXEL_THRESHOLD, DIFF_ALPHA,
 } from './artifactDiffShared'
+import { useImageLightbox } from './ImageLightboxContext'
+import type { LightboxImage } from './ImageLightbox'
 import { type ArtifactSpans, BASE_ARTIFACT_COLUMNS, defaultSpanForAspect } from '../lib/artifactColumns'
 import { VideoDiffView, isVideoArtifact, VIDEO_MIN_TILE_PX } from './VideoDiffView'
 
@@ -62,16 +64,27 @@ export const IMAGE_DIFF_MODES: { value: ImageDiffMode; label: string }[] = [
 const BASE_MIN_COL_PX = 140
 const MASONRY_GAP = 12
 
-function ImageCell({ url, label }: { url?: string | null; label: string }) {
+// A single artifact image as a lightbox entry; size is unknown here (the diff
+// viewer doesn't carry byte sizes) so it's left out of the caption.
+function lightboxImage(url: string, name: string): LightboxImage {
+  return { url, filename: name, size: 0 }
+}
+
+function ImageCell({ url, label, name }: { url?: string | null; label: string; name: string }) {
+  const openImage = useImageLightbox()
   return (
     // flex-1 min-w-0 so the two cells split their row evenly and the width-driven
     // images (w-full) each fill their half.
     <div className="flex-1 min-w-0">
       <div className="text-[10px] font-semibold tracking-wide text-gray-400 dark:text-gray-500 mb-1">{label}</div>
       {url ? (
-        // A plain click opens the image in a new tab via the <a>. The image fills the
-        // cell width (w-full) and its height follows the aspect ratio.
-        <a href={url} target="_blank" rel="noreferrer" className="block">
+        // A plain click opens the image in the fullscreen lightbox. The image fills
+        // the cell width (w-full) and its height follows the aspect ratio.
+        <button
+          type="button"
+          onClick={() => openImage([lightboxImage(url, name)])}
+          className="block w-full cursor-zoom-in"
+        >
           <img
             src={url}
             loading="lazy"
@@ -79,7 +92,7 @@ function ImageCell({ url, label }: { url?: string | null; label: string }) {
             style={checkerStyle}
             className={IMG_CLASS}
           />
-        </a>
+        </button>
       ) : (
         // No image on this side (the file was added or removed). Render a panel of
         // similar visual weight to the present image — same framing, a clear "No
@@ -148,9 +161,10 @@ export function SegmentedToggle<T extends string>({ value, onChange, options }: 
 // transparent magenta, see DiffCanvas) on top of whichever side is shown, so the
 // changes stay marked — yet still readable underneath — as you flip Before↔After. Highlight is disabled when only one side
 // exists (an added/removed file — there's nothing to diff). A missing side shows
-// the "No image" placeholder; middle-click opens the currently-shown image in a
-// new tab.
-function ABSwitch({ left, right }: { left?: string | null; right?: string | null }) {
+// the "No image" placeholder; middle-click opens the currently-shown image in the
+// fullscreen lightbox.
+function ABSwitch({ left, right, name }: { left?: string | null; right?: string | null; name: string }) {
+  const openImage = useImageLightbox()
   const canDiff = !!left && !!right
   const [view, setView] = useState<'before' | 'after'>('after')
   const [highlight, setHighlight] = useState(false)
@@ -187,7 +201,7 @@ function ABSwitch({ left, right }: { left?: string | null; right?: string | null
       <div
         className="relative w-full cursor-pointer select-none"
         onClick={() => setView((v) => (v === 'before' ? 'after' : 'before'))}
-        onAuxClick={makeAuxOpen(() => (view === 'before' ? left : right) || sizer)}
+        onAuxClick={makeAuxOpen(() => (view === 'before' ? left : right) || sizer, (url) => openImage([lightboxImage(url, name)]))}
       >
         <img src={sizer} style={{ visibility: 'hidden' }} className={`${IMG_CLASS} block`} draggable={false} />
         <LayerNode url={right} style={{ visibility: view === 'before' ? 'hidden' : 'visible' }} />
@@ -201,8 +215,9 @@ function ABSwitch({ left, right }: { left?: string | null; right?: string | null
 // Before/after slider: "after" is the base layer; "before" sits on top, clipped to
 // the region left of the draggable handle, giving a sharp (hard-cut) boundary. A
 // missing side shows the "No image" placeholder in its slot. Middle-click opens
-// whichever side is currently visible under the cursor.
-function SliderCompare({ left, right }: { left?: string | null; right?: string | null }) {
+// whichever side is currently visible under the cursor in the fullscreen lightbox.
+function SliderCompare({ left, right, name }: { left?: string | null; right?: string | null; name: string }) {
+  const openImage = useImageLightbox()
   const [pos, setPos] = useState(50)
   const [dragging, setDragging] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -243,7 +258,7 @@ function SliderCompare({ left, right }: { left?: string | null; right?: string |
         const r = el.getBoundingClientRect()
         const x = ((e.clientX - r.left) / r.width) * 100
         return (x < pos ? left : right) || sizer
-      })}
+      }, (url) => openImage([lightboxImage(url, name)]))}
     >
       <span className={`${TAG_CLASS} left-1`}>Before</span>
       <span className={`${TAG_CLASS} right-1`}>After</span>
@@ -260,15 +275,16 @@ function SliderCompare({ left, right }: { left?: string | null; right?: string |
 // Onion skin: "before" is the base layer with "after" blended over it; the range
 // slider controls the opacity of the "after" image (0 = before, 1 = after). A
 // missing side shows the "No image" placeholder in its slot. Middle-click opens
-// the side currently weighted by the blend.
-function OnionCompare({ left, right }: { left?: string | null; right?: string | null }) {
+// the side currently weighted by the blend in the fullscreen lightbox.
+function OnionCompare({ left, right, name }: { left?: string | null; right?: string | null; name: string }) {
+  const openImage = useImageLightbox()
   const [opacity, setOpacity] = useState(50)
   const sizer = (right ?? left) as string
   return (
     <div className="min-w-0">
       <div
         className="relative w-full select-none"
-        onAuxClick={makeAuxOpen(() => (opacity >= 50 ? right : left) || sizer)}
+        onAuxClick={makeAuxOpen(() => (opacity >= 50 ? right : left) || sizer, (url) => openImage([lightboxImage(url, name)]))}
       >
         <img src={sizer} style={{ visibility: 'hidden' }} className={`${IMG_CLASS} block`} draggable={false} />
         <LayerNode url={left} />
@@ -380,11 +396,11 @@ function DiffCanvas({ left, right }: { left: string; right: string }) {
 
 // The side-by-side pair: before and after fill half the tile width each (the cards
 // span two masonry columns in this mode, so there's room — see FileGrid).
-function SideBySide({ left, right }: { left?: string | null; right?: string | null }) {
+function SideBySide({ left, right, name }: { left?: string | null; right?: string | null; name: string }) {
   return (
     <div className="flex gap-3 w-full">
-      <ImageCell url={left} label="Before" />
-      <ImageCell url={right} label="After" />
+      <ImageCell url={left} label="Before" name={name} />
+      <ImageCell url={right} label="After" name={name} />
     </div>
   )
 }
@@ -393,13 +409,13 @@ function SideBySide({ left, right }: { left?: string | null; right?: string | nu
 // modes keep their own layout even when one side is missing (added/removed file),
 // substituting a "No image" placeholder; we only fall back to the side-by-side
 // pair for that mode itself, or the degenerate case of no images at all.
-export function ImageDiffView({ left, right, mode }: { left?: string | null; right?: string | null; mode: ImageDiffMode }) {
+export function ImageDiffView({ left, right, mode, name }: { left?: string | null; right?: string | null; mode: ImageDiffMode; name: string }) {
   if (mode === 'side-by-side' || (!left && !right)) {
-    return <SideBySide left={left} right={right} />
+    return <SideBySide left={left} right={right} name={name} />
   }
-  if (mode === 'ab') return <ABSwitch left={left} right={right} />
-  if (mode === 'slider') return <SliderCompare left={left} right={right} />
-  return <OnionCompare left={left} right={right} />
+  if (mode === 'ab') return <ABSwitch left={left} right={right} name={name} />
+  if (mode === 'slider') return <SliderCompare left={left} right={right} name={name} />
+  return <OnionCompare left={left} right={right} name={name} />
 }
 
 function FileRow({ file, mode, changeThreshold = 0 }: { file: ArtifactFile; mode: ImageDiffMode; changeThreshold?: number }) {
@@ -437,7 +453,7 @@ function FileRow({ file, mode, changeThreshold = 0 }: { file: ArtifactFile; mode
       {isVideoArtifact(file.name) ? (
         <VideoDiffView left={file.left_url} right={file.right_url} mode={mode} fps={file.fps} />
       ) : (
-        <ImageDiffView left={file.left_url} right={file.right_url} mode={mode} />
+        <ImageDiffView left={file.left_url} right={file.right_url} mode={mode} name={file.name} />
       )}
     </div>
   )
