@@ -1,4 +1,4 @@
-import { Check, X, AlertTriangle, Clock, LoaderCircle, SkipForward } from 'lucide-react'
+import { Check, X, AlertTriangle, Clock, SkipForward } from 'lucide-react'
 import { Badge, type Tone } from './Badge'
 import type { TestSummary } from '../api/models/TestSummary'
 import type { TestStatus } from '../api/models/TestStatus'
@@ -31,7 +31,11 @@ function VerdictIcon({ status, className = 'w-3 h-3' }: { status: TestStatus; cl
     case 'failing':
       return <X className={className} strokeWidth={3} />
     case 'running':
-      return <LoaderCircle className={`${className} animate-spin`} />
+      // A CSS border-spinner (not a lucide icon) so the perpetually-running
+      // sidebar chip in --simulation doesn't trip screenshot waits that detect an
+      // in-progress upload via a document-wide lucide-loader-circle check; also
+      // matches the design mockup's spinner.
+      return <span className={`${className} inline-block rounded-full border-2 border-current border-t-transparent animate-spin`} />
     case 'errored':
       return <AlertTriangle className={className} />
     case 'stale':

@@ -552,6 +552,15 @@ try {
       // The same surface mid-run (agent-md is seeded as a running verdict): the
       // live log tail + progress bar + partial counts.
       { name: 'tests-panel-running', path: '/project/sim-project/agent/agent-md', viewportOnly: true, click: 'button[title="Show test results"]' },
+      // The merge gate in the header: agent-2's failing verdict turns the primary
+      // action into "Force merge" and shows the red failing chip in the metadata
+      // row (the soft gate — force is always reachable).
+      { name: 'tests-merge-gate', path: '/project/sim-project/agent/agent-2', viewportOnly: true },
+      // The force-merge confirm that names exactly what's being overridden.
+      { name: 'tests-force-merge-confirm', path: '/project/sim-project/agent/agent-2', viewportOnly: true, click: 'button:has-text("Force merge")' },
+      // Auto-merge armed: agent-md (running + merge_when_green) shows the green
+      // "merges when green" chip and a "Cancel auto-merge" primary action.
+      { name: 'tests-merge-when-green', path: '/project/sim-project/agent/agent-md', viewportOnly: true },
       // The agent-type picker dropdown, opened on the compact ("mini") spawn box
       // in the sidebar. The picker is an icon-only trigger (the active agent's
       // brand mark) that opens a menu listing every agent type as its canonical
@@ -1551,11 +1560,18 @@ try {
             })),
           )
           // Wait until every chip has rendered (its View label is present) and
-          // none is still uploading (no spinner), so the layout is stable.
+          // none is still uploading (no spinner), so the layout is stable. Scoped
+          // to the full-page spawn form so a stray spinner elsewhere (e.g. a
+          // running test-verdict chip in the sidebar) can't keep it from settling.
           await page.waitForFunction(
-            (n) =>
-              document.querySelectorAll('[aria-label^="View "]').length === n &&
-              !document.querySelector('svg.lucide-loader-circle'),
+            (n) => {
+              const form = document.querySelector('.max-w-4xl')
+              if (!form) return false
+              return (
+                form.querySelectorAll('[aria-label^="View "]').length === n &&
+                !form.querySelector('svg.lucide-loader-circle')
+              )
+            },
             pg.attachImages.length,
           )
           // Open the lightbox on the first image.
