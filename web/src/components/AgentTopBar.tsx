@@ -3,10 +3,17 @@ import { PanelLeftOpen, MoreHorizontal } from 'lucide-react'
 import { useSidebarStore } from '../lib/sidebar'
 import { useFinePointer } from '../lib/useFinePointer'
 
+// Visual treatment for an action button. 'primary' is a filled accent button
+// (the merge call-to-action); 'segment' members are borderless and render inside
+// a shared pill container; 'danger' is the red-outlined destructive button.
+// Omitted → a neutral outlined button. `danger` (legacy) maps to 'danger'.
+export type AgentTopBarVariant = 'primary' | 'segment' | 'danger'
+
 export interface AgentTopBarAction {
   label: string
   icon: ReactNode
   onClick: () => void
+  variant?: AgentTopBarVariant
   danger?: boolean
   disabled?: boolean
   // Lowlit keyboard-shortcut hint (e.g. "Ctrl+M"), shown right-aligned in the
@@ -28,20 +35,85 @@ export interface AgentTopBarRename {
   onCancel: () => void
 }
 
-// gap-1 between toolbar buttons, in px — used by the fit calculation below.
-const GAP = 4
-function actionBtnClass(mode: 'labels' | 'icons', danger?: boolean): string {
-  const base =
-    'shrink-0 h-7 inline-flex items-center justify-center rounded-md border text-sm transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer'
-  const shape = mode === 'labels' ? 'gap-1.5 px-2' : 'w-7'
-  const color = danger
-    ? 'border-red-300 dark:border-red-700 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20'
-    : 'border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-600'
-  return `${base} ${shape} ${color}`
+// gap between toolbar buttons / button groups, in px — used by the fit calc.
+const GAP = 6
+// Extra width a segment pill adds over its bare members (container padding +
+// border). The off-screen measurer sizes members individually, so the budget
+// calc reserves this so the chrome never tips a tight row into a clipped fit.
+const SEGMENT_CHROME = 10
+
+// Normalise the legacy `danger` flag into the variant union.
+function actionVariant(a: AgentTopBarAction): AgentTopBarVariant | undefined {
+  return a.variant ?? (a.danger ? 'danger' : undefined)
 }
 
+function actionBtnClass(mode: 'labels' | 'icons', a: AgentTopBarAction): string {
+  const v = actionVariant(a)
+  const dis = 'disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer'
+  // Segment members are smaller (h-7) and borderless — the pill frames them.
+  if (v === 'segment') {
+    const shape = mode === 'labels' ? 'gap-1.5 px-2.5' : 'w-7'
+    return `shrink-0 h-7 inline-flex items-center justify-center rounded-md text-[12.5px] font-semibold transition-colors ${dis} ${shape} bg-transparent text-gray-600 dark:text-gray-300 hover:bg-white dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-gray-100`
+  }
+  const base = `shrink-0 h-8 inline-flex items-center justify-center rounded-lg text-[13px] font-semibold transition-colors ${dis}`
+  const shape = mode === 'labels' ? 'gap-1.5 px-3' : 'w-8'
+  if (v === 'primary') {
+    return `${base} ${shape} bg-emerald-600 hover:bg-emerald-500 text-white border border-emerald-700/30 shadow-sm`
+  }
+  if (v === 'danger') {
+    return `${base} ${shape} bg-white dark:bg-gray-800 border border-red-300 dark:border-red-800/60 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20`
+  }
+  return `${base} ${shape} bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700`
+}
+
+// The pill that frames a contiguous run of 'segment' actions (see the mockup's
+// Unread/Rename group). p-0.5 over h-7 members lands the pill at the h-8 height
+// of its primary/danger neighbours.
+const segmentGroupClass =
+  'shrink-0 inline-flex items-center gap-0.5 p-0.5 rounded-lg bg-gray-100 dark:bg-gray-700/50 border border-gray-200 dark:border-gray-600'
+
 const moreBtnClass =
-  'shrink-0 w-7 h-7 inline-flex items-center justify-center rounded-md border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors cursor-pointer'
+  'shrink-0 w-8 h-8 inline-flex items-center justify-center rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors cursor-pointer'
+
+// Render a single action button.
+function ActionButton({ a, mode, showShortcut }: { a: AgentTopBarAction; mode: 'labels' | 'icons'; showShortcut: boolean }) {
+  return (
+    <button
+      type="button"
+      disabled={a.disabled}
+      onClick={a.onClick}
+      aria-label={a.label}
+      title={actionTitle(a, showShortcut)}
+      className={actionBtnClass(mode, a)}
+    >
+      {a.icon}
+      {mode === 'labels' && <span className="whitespace-nowrap">{a.label}</span>}
+    </button>
+  )
+}
+
+// Walk a visible action list, wrapping each contiguous run of 'segment' actions
+// in the shared pill while standalone actions render bare.
+function renderActions(list: AgentTopBarAction[], mode: 'labels' | 'icons', showShortcut: boolean): ReactNode[] {
+  const out: ReactNode[] = []
+  for (let i = 0; i < list.length; ) {
+    if (actionVariant(list[i]) === 'segment') {
+      const group: AgentTopBarAction[] = []
+      while (i < list.length && actionVariant(list[i]) === 'segment') group.push(list[i++])
+      out.push(
+        <div key={`seg-${group[0].label}`} className={segmentGroupClass}>
+          {group.map((g) => (
+            <ActionButton key={g.label} a={g} mode={mode} showShortcut={showShortcut} />
+          ))}
+        </div>,
+      )
+    } else {
+      out.push(<ActionButton key={list[i].label} a={list[i]} mode={mode} showShortcut={showShortcut} />)
+      i++
+    }
+  }
+  return out
+}
 
 function actionTitle(a: AgentTopBarAction, showShortcut: boolean): string {
   return showShortcut && a.shortcut ? `${a.label} (${a.shortcut})` : a.label
@@ -91,7 +163,13 @@ function AdaptiveActions({
     // Reserve the title's full width first — but never more than leaves room for
     // the "⋯" button, so a pathologically long title still yields the menu.
     const titleReserve = Math.min(titleNatural, Math.max(0, cont.clientWidth - more - GAP))
-    const budget = Math.max(0, cont.clientWidth - titleReserve - GAP)
+    // Reserve the pill chrome around each contiguous run of segment actions —
+    // the measurer sizes members bare, so this keeps a tight row honest.
+    let groups = 0
+    for (let i = 0; i < n; i++) {
+      if (actionVariant(actions[i]) === 'segment' && (i === 0 || actionVariant(actions[i - 1]) !== 'segment')) groups++
+    }
+    const budget = Math.max(0, cont.clientWidth - titleReserve - GAP - groups * SEGMENT_CHROME)
     const span = (arr: number[], k: number) => arr.slice(0, k).reduce((a, b) => a + b, 0) + Math.max(0, k - 1) * GAP
     let next: { mode: 'labels' | 'icons'; count: number }
     if (span(labeled, n) <= budget) {
@@ -148,21 +226,8 @@ function AdaptiveActions({
   const overflow = hidden.length > 0
 
   return (
-    <div ref={rootRef} className="shrink-0 flex items-center gap-1">
-      {visible.map((a) => (
-        <button
-          key={a.label}
-          type="button"
-          disabled={a.disabled}
-          onClick={a.onClick}
-          aria-label={a.label}
-          title={actionTitle(a, showShortcut)}
-          className={actionBtnClass(vis.mode, a.danger)}
-        >
-          {a.icon}
-          {vis.mode === 'labels' && <span className="whitespace-nowrap">{a.label}</span>}
-        </button>
-      ))}
+    <div ref={rootRef} className="shrink-0 flex items-center gap-1.5">
+      {renderActions(visible, vis.mode, showShortcut)}
 
       {overflow && (
         // flex (not the default block) so the button doesn't pick up a line-box
@@ -190,9 +255,11 @@ function AdaptiveActions({
                     a.onClick()
                   }}
                   className={`w-full flex items-center gap-2.5 px-3 py-2 text-sm text-left transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer ${
-                    a.danger
+                    actionVariant(a) === 'danger'
                       ? 'text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20'
-                      : 'text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700'
+                      : actionVariant(a) === 'primary'
+                        ? 'text-emerald-700 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/20'
+                        : 'text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700'
                   }`}
                 >
                   <span className="shrink-0">{a.icon}</span>
@@ -211,15 +278,15 @@ function AdaptiveActions({
           the "⋯" button) so recompute() can read their natural widths. invisible +
           absolute keeps it out of flow and unpainted; whitespace-nowrap stops the
           labels wrapping so the measured widths are the real single-line widths. */}
-      <div aria-hidden className="invisible pointer-events-none absolute -left-[9999px] top-0 flex items-center gap-1">
+      <div aria-hidden className="invisible pointer-events-none absolute -left-[9999px] top-0 flex items-center gap-1.5">
         {actions.map((a, i) => (
-          <button key={`l-${a.label}`} ref={(el) => { labeledRefs.current[i] = el }} className={actionBtnClass('labels', a.danger)} tabIndex={-1}>
+          <button key={`l-${a.label}`} ref={(el) => { labeledRefs.current[i] = el }} className={actionBtnClass('labels', a)} tabIndex={-1}>
             {a.icon}
             <span className="whitespace-nowrap">{a.label}</span>
           </button>
         ))}
         {actions.map((a, i) => (
-          <button key={`i-${a.label}`} ref={(el) => { iconRefs.current[i] = el }} className={actionBtnClass('icons', a.danger)} tabIndex={-1}>
+          <button key={`i-${a.label}`} ref={(el) => { iconRefs.current[i] = el }} className={actionBtnClass('icons', a)} tabIndex={-1}>
             {a.icon}
           </button>
         ))}
