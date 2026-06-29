@@ -219,6 +219,27 @@ func (m *Manager) Peek(runner string, v Version) (Report, bool, error) {
 	return rep, ok, nil
 }
 
+// Latest returns the most-recently-updated cached report for a runner across all
+// commits, ignoring which version it was computed for. Used to detect a "stale"
+// verdict (a cached result that predates the head's current commit) for the head
+// summary chip. Returns (Report{}, false) when nothing is cached.
+func (m *Manager) Latest(runner string) (Report, bool) {
+	base := filepath.Join(m.outDir(), sanitizeName(runner))
+	var best Report
+	found := false
+	// Layout: out/<runner>/<kind>/<id>/report.json
+	_ = filepath.WalkDir(base, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() || d.Name() != reportFile {
+			return nil
+		}
+		if rep, ok := readReport(filepath.Dir(path)); ok && rep.UpdatedAt >= best.UpdatedAt {
+			best, found = rep, true
+		}
+		return nil
+	})
+	return best, found
+}
+
 func (m *Manager) get(spec config.TestScript, v Version, fg bool) (Report, error) {
 	key, ref, err := m.versionKey(v)
 	if err != nil {

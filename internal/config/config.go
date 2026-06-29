@@ -449,7 +449,7 @@ type rawConfig struct {
 var reservedTopLevel = map[string]bool{
 	"defaults": true, "agents": true,
 	"pre_prompt": true, "sandbox": true, "policy": true, "artifacts": true, "services": true,
-	"tests": true,
+	"tests":         true,
 	"resume_prompt": true, "artifact_concurrency": true, "artifact_prefetch": true, "test_concurrency": true,
 }
 
