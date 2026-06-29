@@ -3,14 +3,6 @@ import { renderMarkdown } from '../lib/markdown'
 import { AgentTypeIcon, AGENT_ACCENT, type AgentTypeIconName } from './AgentTypeIcon'
 import { Badge, type Tone, TONE_DOT, TONE_BADGE } from './Badge'
 
-export function normalizeContainerState(status: string): string {
-  const s = status.toLowerCase()
-  if (s === 'running' || s.startsWith('up')) return 'running'
-  if (s === 'exited' || s.startsWith('exited')) return 'exited'
-  if (s === 'created') return 'created'
-  return s
-}
-
 // Single source of truth for agent status colors + labels. Every status maps to
 // a `badge` tone (used by agentStatusBadge) and an optional `dot` tone (used by
 // agentDotClass). The dot tone is only set where the live dot wants its own
@@ -40,11 +32,13 @@ const AGENT_STATUS: Record<string, { label: string; badge: Tone; dot?: Tone }> =
 const SESSION_DOT: Record<string, Tone> = {
   running: 'green',
   exited: 'redSoft',
-  created: 'blue',
 }
 
+// statusDotClass picks a dot colour from the raw sandbox session status
+// (running|exited|stopped|pending|starting|building). Used only as the fallback
+// in agentDotClass when no richer agent_status has been reported yet.
 export function statusDotClass(status: string): string {
-  return TONE_DOT[SESSION_DOT[normalizeContainerState(status)] ?? 'neutral']
+  return TONE_DOT[SESSION_DOT[status] ?? 'neutral']
 }
 
 // agentDotClass picks the sidebar status dot color. It mirrors the status badge
