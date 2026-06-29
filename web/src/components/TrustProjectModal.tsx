@@ -3,6 +3,7 @@ import { ShieldAlert } from 'lucide-react'
 import { api } from '../stores/apiClient'
 import type { ProjectInfo } from '../api'
 import { formatError } from '../api/format_error'
+import { DialogIconTile, DialogCancelButton, DialogConfirmButton } from './dialogPrimitives'
 
 // TrustProjectModal asks the user to review a project's .hydra/config.toml the
 // first time they open it. That file is read straight from the repository and
@@ -55,8 +56,10 @@ export function TrustProjectModal({
         aria-modal="true"
         aria-labelledby="trust-dialog-title"
       >
-        <div className="flex items-center gap-3 px-6 py-4 border-b border-gray-100 dark:border-gray-700">
-          <ShieldAlert className="w-6 h-6 text-amber-500 shrink-0" />
+        <div className="flex items-center gap-3.5 px-6 py-4 border-b border-gray-100 dark:border-gray-700">
+          <DialogIconTile tone="amber">
+            <ShieldAlert className="w-5 h-5" />
+          </DialogIconTile>
           <h3 id="trust-dialog-title" className="text-lg font-semibold text-gray-900 dark:text-gray-100">
             Trust this project?
           </h3>
@@ -98,20 +101,11 @@ export function TrustProjectModal({
           {error && <p className="text-xs text-red-500 mt-3 leading-snug">{error}</p>}
         </div>
 
-        <div className="px-6 py-4 bg-gray-50 dark:bg-gray-800/50 flex justify-end gap-3 border-t border-gray-100 dark:border-gray-700">
-          <button
-            onClick={onCancel}
-            className="px-4 py-2 rounded-lg text-sm font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors cursor-pointer disabled:opacity-50"
-          >
-            Don't trust
-          </button>
-          <button
-            onClick={onTrusted}
-            disabled={loading}
-            className="px-4 py-2 rounded-lg text-sm font-medium bg-amber-600 hover:bg-amber-700 text-white transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-          >
+        <div className="px-6 py-4 bg-gray-50 dark:bg-gray-800/50 flex justify-end gap-2.5 border-t border-gray-100 dark:border-gray-700">
+          <DialogCancelButton onClick={onCancel}>Don't trust</DialogCancelButton>
+          <DialogConfirmButton tone="amber" onClick={onTrusted} disabled={loading}>
             Trust project
-          </button>
+          </DialogConfirmButton>
         </div>
       </div>
     </div>

@@ -1,7 +1,8 @@
 import React, { useEffect, type ReactNode } from 'react'
-import { AlertCircle, AlertTriangle, ArrowRight, Info, HelpCircle, Merge, Trash2, X } from 'lucide-react'
+import { AlertCircle, AlertTriangle, ArrowRight, Info, HelpCircle, Merge, Trash2, FolderSync, X } from 'lucide-react'
 import { useDialogStore } from '../stores/dialogStore'
 import { IconButton } from './IconButton'
+import { DialogIconTile, DialogCancelButton, DialogConfirmButton, type DialogTone } from './dialogPrimitives'
 import type { DialogDetails } from '../stores/dialogStore'
 
 export const Dialog: React.FC = () => {
@@ -77,6 +78,14 @@ export const Dialog: React.FC = () => {
         >
           <KillDetails details={details} />
         </RichConfirmPanel>
+      ) : variant === 'updateBase' ? (
+        <UpdateBasePanel
+          title={title}
+          confirmLabel={confirmLabel ?? 'Confirm'}
+          details={details}
+          onConfirm={handleConfirm}
+          onCancel={handleCancel}
+        />
       ) : (
         <div
           className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200"
@@ -102,25 +111,13 @@ export const Dialog: React.FC = () => {
             </p>
           </div>
 
-          <div className="px-6 py-4 bg-gray-50 dark:bg-gray-800/50 flex justify-end gap-3">
+          <div className="px-6 py-4 bg-gray-50 dark:bg-gray-800/50 flex justify-end gap-2.5 border-t border-gray-100 dark:border-gray-700">
             {(showCancel || type === 'confirm') && (
-              <button
-                onClick={handleCancel}
-                className="px-4 py-2 rounded-lg text-sm font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors cursor-pointer"
-              >
-                Cancel
-              </button>
+              <DialogCancelButton onClick={handleCancel}>Cancel</DialogCancelButton>
             )}
-            <button
-              onClick={handleConfirm}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
-                type === 'error'
-                  ? 'bg-red-600 hover:bg-red-700 text-white'
-                  : 'bg-blue-600 hover:bg-blue-700 text-white'
-              }`}
-            >
+            <DialogConfirmButton tone={type === 'error' ? 'red' : 'blue'} onClick={handleConfirm}>
               {type === 'confirm' ? 'Confirm' : 'OK'}
-            </button>
+            </DialogConfirmButton>
           </div>
         </div>
       )}
@@ -143,7 +140,7 @@ function RichConfirmPanel({
   onCancel,
   children,
 }: {
-  tone: 'emerald' | 'red'
+  tone: DialogTone
   icon: ReactNode
   title: string
   description: string
@@ -153,14 +150,6 @@ function RichConfirmPanel({
   onCancel: () => void
   children: ReactNode
 }) {
-  const tile =
-    tone === 'emerald'
-      ? 'bg-emerald-100 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400'
-      : 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400'
-  const confirm =
-    tone === 'emerald'
-      ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm'
-      : 'bg-red-600 hover:bg-red-700 text-white shadow-sm'
   return (
     <div
       className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-[470px] overflow-hidden animate-in zoom-in-95 duration-200"
@@ -170,7 +159,7 @@ function RichConfirmPanel({
     >
       <div className="px-5 pt-5 pb-4 flex flex-col gap-4">
         <div className="flex items-start gap-3.5">
-          <span className={`w-10 h-10 shrink-0 rounded-xl flex items-center justify-center ${tile}`}>{icon}</span>
+          <DialogIconTile tone={tone}>{icon}</DialogIconTile>
           <div className="flex flex-col gap-1 min-w-0 pt-0.5">
             <h3 id="dialog-title" className="text-[16px] font-bold leading-tight text-gray-900 dark:text-gray-100">
               {title}
@@ -181,19 +170,10 @@ function RichConfirmPanel({
         {children}
       </div>
       <div className="flex justify-end gap-2.5 px-5 py-3.5 border-t border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/40">
-        <button
-          onClick={onCancel}
-          className="px-4 py-2 rounded-lg text-sm font-semibold bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:border-gray-300 dark:hover:bg-gray-700 transition-colors cursor-pointer"
-        >
-          Cancel
-        </button>
-        <button
-          onClick={onConfirm}
-          className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold transition-colors cursor-pointer ${confirm}`}
-        >
-          {confirmIcon}
+        <DialogCancelButton onClick={onCancel}>Cancel</DialogCancelButton>
+        <DialogConfirmButton tone={tone} icon={confirmIcon} onClick={onConfirm}>
           {confirmLabel}
-        </button>
+        </DialogConfirmButton>
       </div>
     </div>
   )
@@ -210,29 +190,128 @@ function CautionNote({ note }: { note: string }) {
   )
 }
 
+// The `from → to` branch chip shared by the merge / update-from-base panels.
+// Only `from` truncates (the agent branch is long); `to` is the base branch —
+// usually short like `main`, so it keeps its own width and only ellipsizes once
+// it would eat more than ~40% of the row. `right` holds the trailing stats.
+function BranchChip({
+  from,
+  to,
+  right,
+  arrowClass = 'text-emerald-600 dark:text-emerald-400',
+}: {
+  from: string
+  to: string
+  right: ReactNode
+  arrowClass?: string
+}) {
+  return (
+    <div className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl bg-gray-50 dark:bg-gray-900/40 border border-gray-200 dark:border-gray-700 text-xs font-mono">
+      <span className="text-gray-700 dark:text-gray-300 truncate min-w-0" title={from}>{from}</span>
+      <ArrowRight className={`w-3.5 h-3.5 shrink-0 ${arrowClass}`} />
+      <span className="text-gray-700 dark:text-gray-300 shrink-0 truncate max-w-[40%]" title={to}>{to}</span>
+      <span className="ml-auto flex items-center gap-2.5 shrink-0 pl-1">{right}</span>
+    </div>
+  )
+}
+
 function MergeDetails({ details }: { details?: DialogDetails }) {
   const from = details?.fromBranch || '—'
   const to = details?.toBranch || '—'
   const loading = details?.loading ?? false
   return (
     <>
-      <div className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl bg-gray-50 dark:bg-gray-900/40 border border-gray-200 dark:border-gray-700 text-xs font-mono">
-        <span className="text-gray-700 dark:text-gray-300 truncate">{from}</span>
-        <ArrowRight className="w-3.5 h-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
-        <span className="text-gray-700 dark:text-gray-300 truncate">{to}</span>
-        <span className="ml-auto flex items-center gap-2.5 shrink-0">
-          {loading ? (
+      <BranchChip
+        from={from}
+        to={to}
+        right={
+          loading ? (
             <span className="text-gray-400 dark:text-gray-500">…</span>
           ) : (
             <>
               <span className="text-emerald-600 dark:text-emerald-400">+{details?.additions ?? 0}</span>
               <span className="text-red-500 dark:text-red-400">−{details?.deletions ?? 0}</span>
             </>
-          )}
-        </span>
-      </div>
+          )
+        }
+      />
       {details?.note && <CautionNote note={details.note} />}
     </>
+  )
+}
+
+// A branch name rendered as an inline mono pill, the way the update-from-base
+// dialog embeds branch names mid-sentence.
+function BranchPill({ children }: { children: ReactNode }) {
+  return (
+    <span className="inline-flex items-center rounded-md bg-gray-100 dark:bg-gray-700/60 border border-gray-200 dark:border-gray-600 px-1.5 py-px font-mono text-[0.9em] text-gray-700 dark:text-gray-200 align-baseline">
+      {children}
+    </span>
+  )
+}
+
+// The update-from-base confirmation. Unlike the merge/kill panels (icon tile +
+// subtitle + chip), this one keeps a bordered header (icon tile + title + close)
+// over a prose body that embeds the branch names as inline pills, with a blue
+// Confirm — matching the agreed redesign. The base is merged *into* the agent's
+// branch, so the branch is named first and the base second.
+function UpdateBasePanel({
+  title,
+  confirmLabel,
+  details,
+  onConfirm,
+  onCancel,
+}: {
+  title: string
+  confirmLabel: string
+  details?: DialogDetails
+  onConfirm: () => void
+  onCancel: () => void
+}) {
+  const base = details?.fromBranch || '—'
+  const branch = details?.toBranch || '—'
+  const behind = details?.behind ?? 0
+  return (
+    <div
+      className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in-95 duration-200"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="dialog-title"
+    >
+      <div className="flex items-center gap-3.5 px-5 py-4 border-b border-gray-100 dark:border-gray-700">
+        <DialogIconTile tone="blue">
+          <FolderSync className="w-5 h-5" />
+        </DialogIconTile>
+        <h3 id="dialog-title" className="flex-1 text-lg font-bold leading-tight text-gray-900 dark:text-gray-100">
+          {title}
+        </h3>
+        <IconButton onClick={onCancel} aria-label="Close">
+          <X className="w-5 h-5" />
+        </IconButton>
+      </div>
+
+      <div className="px-5 py-4 flex flex-col gap-3">
+        <p className="text-sm leading-relaxed text-gray-700 dark:text-gray-300">
+          <BranchPill>{branch}</BranchPill> is{' '}
+          <span className="font-semibold text-gray-900 dark:text-gray-100">
+            {behind} commit{behind !== 1 ? 's' : ''} behind
+          </span>{' '}
+          <BranchPill>{base}</BranchPill>.
+        </p>
+        <p className="text-sm leading-relaxed text-gray-500 dark:text-gray-400">
+          Merge <BranchPill>{base}</BranchPill> into your branch to bring it up to date? This also re-baselines diff
+          artifacts (e.g. screenshots) against the latest base.
+        </p>
+        {details?.note && <CautionNote note={details.note} />}
+      </div>
+
+      <div className="flex justify-end gap-2.5 px-5 py-3.5 border-t border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/40">
+        <DialogCancelButton onClick={onCancel}>Cancel</DialogCancelButton>
+        <DialogConfirmButton tone="blue" onClick={onConfirm}>
+          {confirmLabel}
+        </DialogConfirmButton>
+      </div>
+    </div>
   )
 }
 

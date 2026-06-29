@@ -7,10 +7,12 @@ import type { AgentResponse, CommitInfo, DiffFile, DiffHunk, DiffLine, DiffRespo
 import {
   Plus, Calendar, TriangleAlert,
   ChevronDown, ChevronUp, ChevronRight, ChevronLeft, Check, LoaderCircle, RefreshCw, RotateCcw,
-  Settings, Copy, Folder, FolderOpen, X, GitMerge, Bot,
+  Settings, Copy, Folder, FolderOpen, X, GitMergeConflict, Bot, File,
   MoveRight, MessageSquarePlus, FolderSync,
   SquarePlus, SquareMinus, SquareArrowRight,
 } from 'lucide-react'
+import { DialogIconTile, DialogSectionLabel, DialogCancelButton, DialogConfirmButton } from './components/dialogPrimitives'
+import { IconButton } from './components/IconButton'
 import { getFileIcon } from './lib/fileIcons'
 import { Tooltip } from './components/Tooltip'
 import { ArtifactsPanel } from './components/ArtifactsPanel'
@@ -1268,7 +1270,9 @@ function MergeConflictButton({ diff, agent, projectId }: {
   if (!diff?.merge_conflict) return null
 
   const conflictFiles = diff.conflict_files ?? []
-  const count = conflictFiles.length || '?'
+  const n = conflictFiles.length
+  const count = n || '?'
+  const plural = n !== 1
   const worktreePath = agent.worktree_path ?? '<worktree-path>'
   const baseBranch = agent.base_branch
 
@@ -1298,77 +1302,88 @@ function MergeConflictButton({ diff, agent, projectId }: {
             onClick={() => setOpen(true)}
             className="flex items-center gap-1 h-7 px-2 rounded-md text-xs font-medium text-red-700 dark:text-red-400 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 hover:bg-red-100 dark:hover:bg-red-900/40 transition-colors cursor-pointer"
           >
-            <GitMerge className="w-3.5 h-3.5 shrink-0" />
-            <span>{count} conflict{count !== 1 ? 's' : ''}</span>
+            <GitMergeConflict className="w-3.5 h-3.5 shrink-0" />
+            <span>{count} conflict{plural ? 's' : ''}</span>
           </button>
         </Tooltip>
 
         {open && (
-          <div className="fixed inset-0 z-[300] flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-[300] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
             {/* Backdrop */}
-            <div className="absolute inset-0 bg-black/40" onClick={() => setOpen(false)} />
+            <div className="absolute inset-0" onClick={() => setOpen(false)} />
 
-            {/* Panel */}
-            <div className="relative bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl shadow-2xl w-full max-w-lg">
+            {/* Panel — mirrors the merge/kill RichConfirmPanel: icon tile + stacked
+                title/description, uppercase section labels, shared footer buttons. */}
+            <div
+              className="relative bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-[560px] overflow-hidden animate-in zoom-in-95 duration-200"
+              role="dialog"
+              aria-modal="true"
+            >
               {/* Header */}
-              <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-200 dark:border-gray-700">
-                <GitMerge className="w-4 h-4 text-red-500 shrink-0" />
-                <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 flex-1">
-                  Merge Conflict — {count} file{count !== 1 ? 's' : ''} conflict with <span className="font-mono text-red-600 dark:text-red-400">{baseBranch}</span>
-                </h3>
-                <button onClick={() => setOpen(false)} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 cursor-pointer">
-                  <X className="w-4 h-4" />
-                </button>
+              <div className="flex items-start gap-3.5 px-5 pt-5 pb-4">
+                <DialogIconTile tone="red">
+                  <GitMergeConflict className="w-5 h-5" />
+                </DialogIconTile>
+                <div className="flex flex-col gap-1 min-w-0 pt-0.5 flex-1">
+                  <h3 className="text-[16px] font-bold leading-tight text-gray-900 dark:text-gray-100">
+                    Merge conflict
+                  </h3>
+                  <p className="text-[12.5px] leading-snug text-gray-500 dark:text-gray-400">
+                    {count} file{plural ? 's' : ''} conflict{plural ? '' : 's'} with{' '}
+                    <span className="font-mono font-semibold text-red-600 dark:text-red-400">{baseBranch}</span> — resolve{' '}
+                    {plural ? 'them' : 'it'} before this branch can merge.
+                  </p>
+                </div>
+                <IconButton onClick={() => setOpen(false)} aria-label="Close">
+                  <X className="w-5 h-5" />
+                </IconButton>
               </div>
 
-              {/* Conflicting files */}
-              {conflictFiles.length > 0 && (
-                <div className="px-4 pt-3 pb-1">
-                  <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">Conflicting files</p>
-                  <div className="bg-gray-50 dark:bg-gray-800 rounded-lg overflow-hidden divide-y divide-gray-100 dark:divide-gray-700/50 max-h-32 overflow-y-auto">
-                    {conflictFiles.map((f) => (
-                      <div key={f} className="px-3 py-1.5 font-mono text-xs text-gray-700 dark:text-gray-300">{f}</div>
-                    ))}
+              <div className="px-5 pb-2 flex flex-col gap-4">
+                {/* Conflicting files */}
+                {conflictFiles.length > 0 && (
+                  <div>
+                    <DialogSectionLabel>Conflicting files</DialogSectionLabel>
+                    <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40 divide-y divide-gray-100 dark:divide-gray-700/50 max-h-40 overflow-y-auto">
+                      {conflictFiles.map((f) => (
+                        <div key={f} className="flex items-center gap-2.5 px-3.5 py-2.5">
+                          <File className="w-4 h-4 shrink-0 text-red-500 dark:text-red-400" />
+                          <span className="font-mono text-sm font-medium text-gray-800 dark:text-gray-200 truncate">{f}</span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                </div>
-              )}
+                )}
 
-              {/* Resolution instructions */}
-              <div className="px-4 py-3">
-                <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">Resolving locally</p>
-                <div className="bg-gray-900 dark:bg-gray-950 rounded-lg p-3 space-y-1.5 text-xs font-mono">
-                  <p className="text-gray-400"># Navigate to the agent's worktree</p>
-                  <p className="text-green-400">cd {worktreePath}</p>
-                  <p className="text-gray-400 mt-2"># Merge the base branch (triggers conflict markers)</p>
-                  <p className="text-green-400">git merge {baseBranch}</p>
-                  <p className="text-gray-400 mt-2"># Edit conflicting files, then stage and commit</p>
-                  <p className="text-green-400">git add {'<resolved-files>'}</p>
-                  <p className="text-green-400">git commit</p>
+                {/* Resolution instructions */}
+                <div>
+                  <DialogSectionLabel>Resolving locally</DialogSectionLabel>
+                  <div className="bg-gray-900 dark:bg-gray-950 rounded-xl p-4 space-y-1.5 text-[13px] font-mono leading-relaxed">
+                    <p className="text-gray-400"># Navigate to the agent's worktree</p>
+                    <p className="text-green-400 break-all">cd {worktreePath}</p>
+                    <p className="text-gray-400 pt-2"># Merge the base branch (triggers conflict markers)</p>
+                    <p className="text-green-400">git merge {baseBranch}</p>
+                    <p className="text-gray-400 pt-2"># Edit conflicting files, then stage and commit</p>
+                    <p className="text-green-400">git add {'<resolved-files>'}</p>
+                    <p className="text-green-400">git commit</p>
+                  </div>
+                  <p className="text-xs text-gray-400 dark:text-gray-500 mt-2.5 leading-snug">
+                    The worktree at <span className="font-mono">{worktreePath}</span> is isolated — changes only affect this agent's branch.
+                  </p>
                 </div>
-                <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-2">
-                  The worktree at <span className="font-mono">{worktreePath}</span> is isolated — changes only affect this agent's branch.
-                </p>
               </div>
 
               {/* Footer */}
-              <div className="flex items-center gap-2 px-4 py-3 border-t border-gray-200 dark:border-gray-700">
-                <button
-                  onClick={() => setOpen(false)}
-                  className="flex items-center gap-1.5 h-7 px-3 rounded-md text-xs font-medium text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer"
-                >
-                  Dismiss
-                </button>
-                <button
+              <div className="flex justify-end gap-2.5 px-5 py-3.5 mt-2 border-t border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/40">
+                <DialogCancelButton onClick={() => setOpen(false)}>Dismiss</DialogCancelButton>
+                <DialogConfirmButton
+                  tone="indigo"
                   onClick={handleFixWithAgent}
                   disabled={sending}
-                  className="flex items-center gap-1.5 h-7 px-3 rounded-md text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-60 transition-colors cursor-pointer ml-auto"
+                  icon={sending ? <LoaderCircle className="w-4 h-4 animate-spin" /> : <Bot className="w-4 h-4" />}
                 >
-                  {sending ? (
-                    <><LoaderCircle className="w-3.5 h-3.5 animate-spin" /> Sending…</>
-                  ) : (
-                    <><Bot className="w-3.5 h-3.5" /> Fix with agent</>
-                  )}
-                </button>
+                  {sending ? 'Sending…' : 'Fix with agent'}
+                </DialogConfirmButton>
               </div>
             </div>
           </div>
@@ -1405,15 +1420,24 @@ function BehindBaseButton({ diff, agent, projectId, onUpdated }: {
   const hasUncommitted = diff?.uncommitted_changes ?? false
 
   const handleClick = () => {
-    const warnings: string[] = []
-    if (running) warnings.push("⚠️ An agent session is currently running — merging now may collide with work in progress.")
-    if (hasUncommitted) warnings.push("⚠️ This branch has uncommitted changes — the merge may fail or conflict until they're committed.")
-    const warnText = warnings.length ? '\n\n' + warnings.join('\n') : ''
+    // A running session is the headline caution (merging shifts files under
+    // active work); it takes precedence over the uncommitted-changes note, the
+    // way the merge dialog prioritises its parent-running warning.
+    const note = running
+      ? 'An agent session is running — merging now may collide with work in progress.'
+      : hasUncommitted
+        ? "This branch has uncommitted changes — the merge may fail or conflict until they're committed."
+        : undefined
 
     useDialogStore.getState().show({
+      // The updateBase panel builds its body from `details` (branch pills +
+      // behind count); `message` is unused for this variant but kept non-empty
+      // for the store contract.
       title: 'Update from base',
-      message: `"${agent.branch_name}" is ${behind} commit${behind !== 1 ? 's' : ''} behind "${baseBranch}".\n\nMerge "${baseBranch}" into your branch to bring it up to date? This also re-baselines diff artifacts (e.g. screenshots) against the latest base.${warnText}`,
-      type: warnings.length ? 'warning' : 'confirm',
+      message: `Update from ${baseBranch}`,
+      type: note ? 'warning' : 'confirm',
+      variant: 'updateBase',
+      details: { fromBranch: baseBranch ?? '—', toBranch: agent.branch_name ?? '—', behind, note },
       onConfirm: async () => {
         setUpdating(true)
         try {
