@@ -13,7 +13,7 @@
 // store stays compact and a single TTL prune drops everything for a stale
 // agent at once. Entries untouched for AGENT_VIEW_TTL_MS are pruned on boot.
 
-import { agentViewPrefsKey, AGENT_VIEW_PREFS_PREFIX, readLocal, writeLocal } from './storage'
+import { agentViewPrefsKey, AGENT_VIEW_PREFS_PREFIX, createShardedStore } from './storage'
 
 // A persisted bash shell tab. `id` doubles as the backend shell_id, so on
 // restore the pane reconnects to the same session if it's still alive.
@@ -31,29 +31,17 @@ export type AgentViewPrefs = {
   activeTabId?: string
 }
 
-// What we actually store: the prefs plus a last-touched timestamp for TTL.
-type StoredAgentViewPrefs = AgentViewPrefs & { t: number }
-
 const AGENT_VIEW_TTL_MS = 1000 * 60 * 60 * 24 * 30 // 30 days
 
-function readStored(k: string): StoredAgentViewPrefs | null {
-  const raw = readLocal(k)
-  if (!raw) return null
-  try {
-    const parsed = JSON.parse(raw) as StoredAgentViewPrefs
-    if (!parsed || typeof parsed !== 'object' || typeof parsed.t !== 'number') return null
-    return parsed
-  } catch {
-    return null
-  }
-}
+// The shared sharded-store machinery handles the JSON/TTL/prune boilerplate; this
+// module just supplies the value shape and its typed wrappers (see storage.ts).
+const store = createShardedStore<AgentViewPrefs>(AGENT_VIEW_PREFS_PREFIX, AGENT_VIEW_TTL_MS)
 
 // Load the saved view prefs for an agent. Returns an empty object when nothing
 // is stored or the entry has expired (→ callers fall back to their defaults).
 export function loadAgentViewPrefs(projectId: string | null, agentId: string): AgentViewPrefs {
-  const stored = readStored(agentViewPrefsKey(projectId, agentId))
+  const stored = store.load(agentViewPrefsKey(projectId, agentId))
   if (!stored) return {}
-  if (Date.now() - stored.t > AGENT_VIEW_TTL_MS) return {}
   return {
     terminalHeight: stored.terminalHeight,
     scrollTop: stored.scrollTop,
@@ -71,23 +59,10 @@ export function patchAgentViewPrefs(
   agentId: string,
   patch: Partial<AgentViewPrefs>,
 ): void {
-  const k = agentViewPrefsKey(projectId, agentId)
-  const current = readStored(k)
-  const value: StoredAgentViewPrefs = { ...current, ...patch, t: Date.now() }
-  writeLocal(k, JSON.stringify(value))
+  store.patch(agentViewPrefsKey(projectId, agentId), patch)
 }
 
 // Drop expired agent-view-pref entries. Cheap to call once on app boot.
 export function pruneAgentViewPrefs(): void {
-  try {
-    const now = Date.now()
-    const stale: string[] = []
-    for (let i = 0; i < localStorage.length; i++) {
-      const k = localStorage.key(i)
-      if (!k || !k.startsWith(AGENT_VIEW_PREFS_PREFIX)) continue
-      const stored = readStored(k)
-      if (!stored || now - stored.t > AGENT_VIEW_TTL_MS) stale.push(k)
-    }
-    for (const k of stale) localStorage.removeItem(k)
-  } catch { /* ignore */ }
+  store.prune()
 }

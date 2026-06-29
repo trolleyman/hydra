@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import {
   StorageKeys,
   projectViewKey,
@@ -12,6 +12,9 @@ import {
   imageCounterKey,
   readLocal,
   writeLocal,
+  readJSON,
+  writeJSON,
+  createShardedStore,
   readTrustedProjects,
   isProjectTrusted,
   trustProject,
@@ -166,6 +169,129 @@ describe('readLocal / writeLocal swallow throws', () => {
     } finally {
       localStorage.removeItem = orig
     }
+  })
+})
+
+describe('readJSON / writeJSON', () => {
+  beforeEach(() => localStorage.clear())
+
+  it('round-trips a JSON value through the identity validator', () => {
+    writeJSON('hydra-json', { a: 1, b: ['x'] })
+    expect(readJSON('hydra-json', (v) => v)).toEqual({ a: 1, b: ['x'] })
+  })
+
+  it('returns null for a missing key', () => {
+    expect(readJSON('hydra-missing', (v) => v)).toBe(null)
+  })
+
+  it('returns null (without throwing) for malformed JSON', () => {
+    localStorage.setItem('hydra-bad', '{not json')
+    expect(() => readJSON('hydra-bad', (v) => v)).not.toThrow()
+    expect(readJSON('hydra-bad', (v) => v)).toBe(null)
+  })
+
+  it('returns whatever the validator returns, including null to reject', () => {
+    writeJSON('hydra-num', 42)
+    expect(readJSON('hydra-num', (v) => (typeof v === 'number' ? v + 1 : null))).toBe(43)
+    writeJSON('hydra-str', 'nope')
+    expect(readJSON('hydra-str', (v) => (typeof v === 'number' ? v : null))).toBe(null)
+  })
+
+  it('writeJSON removes the key when given null or undefined', () => {
+    writeJSON('hydra-json', { a: 1 })
+    writeJSON('hydra-json', null)
+    expect(readLocal('hydra-json')).toBe(null)
+    writeJSON('hydra-json', { a: 1 })
+    writeJSON('hydra-json', undefined)
+    expect(readLocal('hydra-json')).toBe(null)
+  })
+})
+
+describe('createShardedStore', () => {
+  const PREFIX = 'hydra-test-shard-'
+  const TTL = 1000
+  type Prefs = { count?: number; label?: string }
+  const store = createShardedStore<Prefs>(PREFIX, TTL)
+  const key = (id: string) => `${PREFIX}${id}`
+
+  beforeEach(() => {
+    localStorage.clear()
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(2026, 0, 1))
+  })
+  afterEach(() => vi.useRealTimers())
+
+  it('saves then loads, stamping a numeric timestamp', () => {
+    store.save(key('a'), { count: 3, label: 'hi' })
+    const loaded = store.load(key('a'))
+    expect(loaded).toMatchObject({ count: 3, label: 'hi' })
+    expect(typeof loaded?.t).toBe('number')
+  })
+
+  it('returns null for a missing or corrupt entry', () => {
+    expect(store.load(key('missing'))).toBe(null)
+    localStorage.setItem(key('corrupt'), '{not json')
+    expect(store.load(key('corrupt'))).toBe(null)
+    // An object without the timestamp is treated as corrupt.
+    localStorage.setItem(key('notime'), JSON.stringify({ count: 1 }))
+    expect(store.load(key('notime'))).toBe(null)
+  })
+
+  it('returns null once an entry has outlived the TTL', () => {
+    store.save(key('a'), { count: 1 })
+    vi.advanceTimersByTime(TTL + 1)
+    expect(store.load(key('a'))).toBe(null)
+  })
+
+  it('patch merges into the existing entry without clobbering other fields', () => {
+    store.save(key('a'), { count: 1, label: 'orig' })
+    store.patch(key('a'), { count: 2 })
+    expect(store.load(key('a'))).toMatchObject({ count: 2, label: 'orig' })
+  })
+
+  it('patch creates a fresh entry when none exists', () => {
+    store.patch(key('new'), { label: 'made' })
+    expect(store.load(key('new'))).toMatchObject({ label: 'made' })
+  })
+
+  it('patch refreshes the TTL so a near-stale entry survives', () => {
+    store.save(key('a'), { count: 1 })
+    vi.advanceTimersByTime(TTL - 1)
+    store.patch(key('a'), { count: 2 })
+    vi.advanceTimersByTime(TTL - 1) // total > original TTL, but < TTL since patch
+    expect(store.load(key('a'))).toMatchObject({ count: 2 })
+  })
+
+  it('prune drops expired and corrupt entries but keeps fresh ones', () => {
+    store.save(key('fresh'), { count: 1 })
+    store.save(key('stale'), { count: 2 })
+    localStorage.setItem(key('corrupt'), '{not json')
+    vi.advanceTimersByTime(TTL + 1)
+    store.save(key('fresh'), { count: 1 }) // re-stamp so it stays fresh
+    store.prune()
+    expect(store.load(key('fresh'))).toMatchObject({ count: 1 })
+    expect(localStorage.getItem(key('stale'))).toBe(null)
+    expect(localStorage.getItem(key('corrupt'))).toBe(null)
+  })
+
+  it('prune leaves entries under other prefixes untouched', () => {
+    localStorage.setItem('hydra-other-key', 'keep me')
+    store.save(key('stale'), { count: 1 })
+    vi.advanceTimersByTime(TTL + 1)
+    store.prune()
+    expect(localStorage.getItem('hydra-other-key')).toBe('keep me')
+  })
+
+  it('prune skips a configured skipPrefix even when it shares the prefix', () => {
+    const SKIP = `${PREFIX}sub-`
+    const skipStore = createShardedStore<Prefs>(PREFIX, TTL, { skipPrefix: SKIP })
+    // A differently-shaped sibling entry (no timestamp) under the skip prefix.
+    localStorage.setItem(`${SKIP}x`, JSON.stringify({ anything: true }))
+    skipStore.save(key('stale'), { count: 1 })
+    vi.advanceTimersByTime(TTL + 1)
+    skipStore.prune()
+    expect(localStorage.getItem(`${SKIP}x`)).toBe(JSON.stringify({ anything: true }))
+    expect(localStorage.getItem(key('stale'))).toBe(null)
   })
 })
 
