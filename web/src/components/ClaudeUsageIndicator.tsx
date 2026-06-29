@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { api } from '../stores/apiClient'
-import { startVisibilityPolling } from '../lib/visibilityPolling'
+import { useServerData } from '../lib/useServerData'
 import { Tooltip } from './Tooltip'
 import type { ClaudeUsageResponse } from '../api'
 
@@ -47,31 +47,14 @@ function UsageStat({ label, value, valueClass }: { label: string; value: string;
 // determined (no subscription, CLI missing, non-localhost, etc.), so it stays
 // out of the way when not applicable.
 export function ClaudeUsageIndicator() {
-  const [data, setData] = useState<ClaudeUsageResponse | null>(null)
-  const [loading, setLoading] = useState(false)
   const [, setTick] = useState(0)
-  const mounted = useRef(true)
-
-  const fetchUsage = useCallback(async (force: boolean) => {
-    setLoading(true)
-    try {
-      const res = await api.default.getClaudeUsage(force ? true : undefined)
-      if (mounted.current) setData(res)
-    } catch {
-      // Keep the last good snapshot; transient errors shouldn't blank the UI.
-    } finally {
-      if (mounted.current) setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    mounted.current = true
-    const stop = startVisibilityPolling(() => void fetchUsage(false), POLL_MS)
-    return () => {
-      mounted.current = false
-      stop()
-    }
-  }, [fetchUsage])
+  // Background poll (force=false → uses the server's ~30s cache); a click forces
+  // a fresh re-probe. Transient errors keep the last good snapshot (no resetOnError).
+  const { data, refetch: fetchUsage, loading } = useServerData<ClaudeUsageResponse | null, boolean>(
+    'claude-usage',
+    (_key, force) => api.default.getClaudeUsage(force ? true : undefined),
+    { intervalMs: POLL_MS, initial: null },
+  )
 
   const resetsAt = data?.session_resets_at ? Date.parse(data.session_resets_at) : NaN
 
