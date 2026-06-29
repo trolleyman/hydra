@@ -37,9 +37,6 @@ export const THEME_MODES: ThemeMode[] = ['light', 'dark', 'system']
 function loadThemeMode(): ThemeMode {
   const stored = readLocal(StorageKeys.themeMode)
   if (stored === 'light' || stored === 'dark' || stored === 'system') return stored
-  // Migrate the legacy boolean preference (`hydra-dark-mode`) if present.
-  const legacy = readLocal(StorageKeys.darkModeLegacy)
-  if (legacy !== null) return legacy === 'true' ? 'dark' : 'light'
   return 'system'
 }
 
@@ -52,7 +49,6 @@ export const useThemeStore = create<ThemeState>((set) => ({
   mode: loadThemeMode(),
   setMode: (mode) => {
     writeLocal(StorageKeys.themeMode, mode)
-    writeLocal(StorageKeys.darkModeLegacy, null) // drop the migrated legacy key
     set({ mode })
   },
 }))
