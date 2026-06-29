@@ -354,7 +354,7 @@
     - [ ] b) Pull the data loops into hooks (`useAgentPolling`, `usePushStatus`, `useSystemStatus`, `useArchivedAgents`) — built on #57's `useServerData`.
     - [ ] c) Merge the three keyboard `useEffect`s (sidebar toggle, `?` help, Ctrl+\` switcher) into one `useGlobalShortcuts`.
 
-59. [ ] **[Web refactor]** **Remount the agent subtree on switch instead of hand-resetting state.** The route doesn't key `AgentDetail` by agent id, so it's reused across agents and several pieces of state bleed (the rename-draft `editingTitle`/`titleDraft` is the live one) — compensated today by scattered render-time "reset on id change" hacks. Agent IDs are globally unique, so the key is collision-safe; use `${projectId}-${agentId}` to match the `storage.ts` builder convention.
+59. [x] **[Web refactor]** **Remount the agent subtree on switch instead of hand-resetting state.** The route doesn't key `AgentDetail` by agent id, so it's reused across agents and several pieces of state bleed (the rename-draft `editingTitle`/`titleDraft` is the live one) — compensated today by scattered render-time "reset on id change" hacks. Agent IDs are globally unique, so the key is collision-safe; use `${projectId}-${agentId}` to match the `storage.ts` builder convention.
 
     - [ ] a) Add `` key={`${projectId}-${agent.id}`} `` to `<AgentDetail>` in `agent.$agentId.tsx`, fixing the rename-draft bleed at the source.
     - [ ] b) Delete the now-redundant reset hacks: `AgentTerminal.tsx` height + bash-tabs render-time resets, and `DiffViewer.tsx` collapsed-files + commit-selector reset. Verify the prefs-persist effects still hydrate correctly at mount (needs #56's tests).

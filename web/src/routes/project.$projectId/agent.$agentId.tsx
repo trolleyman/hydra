@@ -121,7 +121,14 @@ function AgentPage() {
   }
 
   return (
+    // Key by project+agent so switching agents remounts the whole detail subtree
+    // (AgentDetail, its terminal, diff viewer) with fresh state, rather than
+    // reusing one instance and hand-resetting the bits that would otherwise bleed
+    // across agents (rename draft, terminal height/tabs, collapsed diff files, …).
+    // Agent IDs are globally unique so the key is collision-safe; the
+    // `${projectId}-${agentId}` shape matches the storage.ts key builders.
     <AgentDetail
+      key={`${projectId}-${agentId}`}
       agent={agent}
       projectId={projectId}
       onKilled={handleKilled}
