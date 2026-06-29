@@ -22,7 +22,9 @@ restore_ro = ["~/.config/go"]
 [sandbox.network]
 ## allow outbound network access from the sandbox (default true).
 # enabled = true
-## reserved for a future proxy-based outbound host allow-list.
+## outbound host allow-list, enforced by the per-head egress proxy (internal/egress):
+## set it and only these hosts are reachable (hard netns boundary where pasta+nft
+## are available, advisory HTTP(S)_PROXY filtering otherwise). Empty = unrestricted.
 # allowed_hosts = []
 
 ## Claude-specific overrides: any of the settings above, applied only to claude agents.
