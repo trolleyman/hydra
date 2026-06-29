@@ -33,7 +33,11 @@ func Defaults() DefaultConfig {
 			"~/.gemini",                 // gemini config + creds
 			"~/.copilot",                // copilot config + creds
 			"~/.codex",                  // codex config + creds + session history
-			"/tmp",                      // temp scratch
+			// NB: /tmp is deliberately NOT here. On Linux it is a per-head
+			// private dir (Options.TmpDir, bound over /tmp in linux.go) so agent
+			// temp files are reclaimed on teardown; on macOS the static profile
+			// (profiles/sandbox.sb) allows /tmp writes. Adding it here would
+			// re-bind the host's shared /tmp and leak temp across heads.
 		},
 		// Masked: credential + secret directories/files hidden entirely.
 		MaskedPaths: []string{

@@ -136,6 +136,16 @@ func BuildSpec(opts Options) (*Spec, error) {
 		addRWDir(p)
 	}
 
+	// Per-head private /tmp: bind a host-backed scratch dir over the base /tmp
+	// tmpfs so the agent's temp files (Claude's scratchpad, test-framework
+	// extractions, build junk) are isolated per head and reclaimed when the head
+	// is torn down, instead of piling up on the host's shared /tmp. Subsequent
+	// binds (e.g. the seeded hydra binary at /tmp/hydra-internal) nest on top.
+	// Empty leaves the fresh tmpfs from the base args.
+	if opts.TmpDir != "" {
+		args = append(args, "--bind", opts.TmpDir, "/tmp")
+	}
+
 	// Copy-on-write mounts: expose a read-only Lower dir at Dest, but redirect
 	// writes to a per-head Upper via overlayfs. Applied after the worktree bind so
 	// the mountpoint's parent is already writable. When this bwrap lacks overlay
