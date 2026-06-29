@@ -7,8 +7,9 @@ import {
   saveLastGeometry,
   loadDefaultRows,
   spawnGeometry,
+  useDefaultRowsStore,
 } from './terminalGeometry'
-import { StorageKeys, writeLocal } from './storage'
+import { StorageKeys, writeLocal, readLocal } from './storage'
 
 describe('constants', () => {
   it('has sane guardrails', () => {
@@ -109,5 +110,29 @@ describe('spawnGeometry', () => {
     writeLocal(StorageKeys.terminalDefaultRows, '42')
     saveLastGeometry(100, 70)
     expect(spawnGeometry()).toEqual({ cols: 100, rows: 70 })
+  })
+})
+
+// The store adopts zustand persist via singleFieldStorage, keeping the stored
+// value as the bare rows string so spawnGeometry/loadDefaultRows still read it
+// directly at spawn time.
+describe('useDefaultRowsStore persistence', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    useDefaultRowsStore.persist.rehydrate()
+  })
+
+  it('setRows persists the bare rows string, readable via loadDefaultRows', () => {
+    useDefaultRowsStore.getState().setRows(42)
+    expect(useDefaultRowsStore.getState().rows).toBe(42)
+    expect(readLocal(StorageKeys.terminalDefaultRows)).toBe('42')
+    expect(loadDefaultRows()).toBe(42)
+  })
+
+  it('setRows(null) clears the stored value', () => {
+    useDefaultRowsStore.getState().setRows(30)
+    useDefaultRowsStore.getState().setRows(null)
+    expect(useDefaultRowsStore.getState().rows).toBe(null)
+    expect(readLocal(StorageKeys.terminalDefaultRows)).toBe(null)
   })
 })
