@@ -35,6 +35,17 @@ import { join } from 'node:path'
 import { chromium } from 'playwright'
 import ffmpegStatic from 'ffmpeg-static'
 
+// Share the app's localStorage key registry rather than re-typing the 'hydra-*'
+// strings: keys are built here in Node and passed into the browser-context init
+// scripts below. storage.ts is dependency-free, so it imports cleanly under bun.
+import { StorageKeys, artifactTagFilterKey, promptDraftKey } from '../../src/lib/storage'
+
+// Identifiers seeded by the simulation server (internal/http/simulation.go),
+// named where they feed the shared key builders above.
+const SIM_PROJECT = 'sim-project'
+const SIM_PROJECT_MOBILE = 'mobile-app'
+const SIM_AGENT = 'agent-1'
+
 // A fixed instant the browser clock is pinned to for every capture, so any
 // duration the UI derives from "now" — an agent's "spawned X ago", the artifacts
 // panel's elapsed timer — renders deterministically and doesn't make two
@@ -1116,7 +1127,7 @@ try {
     // Capture every page in both themes. Dark mode has its own colours (e.g.
     // diff add/remove backgrounds), so a light-only render would miss visual
     // changes that only show up in dark mode. The app stores its theme
-    // preference in localStorage ('hydra-theme-mode') and toggles a `dark`
+    // preference in localStorage (StorageKeys.themeMode) and toggles a `dark`
     // class on <html>; we seed that key before the app boots so each capture
     // renders the chosen theme deterministically (no reliance on the OS
     // `prefers-color-scheme`). Each render is tagged by theme in its filename:
@@ -1154,13 +1165,13 @@ try {
         // unaffected.
         await ctx.clock.setFixedTime(SIM_NOW)
         // Seed the theme preference before any app code runs.
-        await ctx.addInitScript((mode) => {
+        await ctx.addInitScript(({ key, mode }) => {
           try {
-            localStorage.setItem('hydra-theme-mode', mode)
+            localStorage.setItem(key, mode)
           } catch {
             // ignore storage failures
           }
-        }, theme)
+        }, { key: StorageKeys.themeMode, mode: theme })
         // Emulate a touch device's coarse pointer by forcing the fine-pointer
         // media query false, so keyboard-only chrome (shortcut hints) hides like it
         // does on a real phone. Delegates every other query to the real matchMedia
@@ -1186,71 +1197,71 @@ try {
         // Seed the diff viewer's image-diff mode so the artifacts panel renders
         // before/after pairs in the requested comparison style.
         if (pg.imageDiffMode) {
-          await ctx.addInitScript((mode) => {
+          await ctx.addInitScript(({ key, mode }) => {
             try {
-              localStorage.setItem('hydra-diff-image-mode', mode)
+              localStorage.setItem(key, mode)
             } catch {
               // ignore storage failures
             }
-          }, pg.imageDiffMode)
+          }, { key: StorageKeys.diffImageMode, mode: pg.imageDiffMode })
         }
         // Seed the repository diff's one-file-at-a-time preference so the
         // all-files-stacked view can be captured (the default is one file).
         if (pg.repoDiffSingleFile !== undefined) {
-          await ctx.addInitScript((single) => {
+          await ctx.addInitScript(({ key, single }) => {
             try {
-              localStorage.setItem('hydra-repo-diff-single-file', String(single))
+              localStorage.setItem(key, String(single))
             } catch {
               // ignore storage failures
             }
-          }, pg.repoDiffSingleFile)
+          }, { key: StorageKeys.repoDiffSingleFile, single: pg.repoDiffSingleFile })
         }
         // Seed the artifact tag filter so the panel renders with a filter applied.
-        // The key must match web/src/lib/storage.ts artifactTagFilterKey(projectId,
-        // agentId); these pages are all the sim project's agent-1.
+        // The key comes from the app's shared artifactTagFilterKey builder; these
+        // pages are all the sim project's agent-1.
         if (pg.tagFilter) {
-          await ctx.addInitScript((f) => {
+          await ctx.addInitScript(({ key, f }) => {
             try {
               localStorage.setItem(
-                'hydra-artifact-tagfilter-v2-sim-project-agent-1',
+                key,
                 JSON.stringify({ scoped: f.scoped ?? {}, free: f.free ?? [], changeThreshold: f.changeThreshold ?? 0 }),
               )
             } catch {
               // ignore storage failures
             }
-          }, pg.tagFilter)
+          }, { key: artifactTagFilterKey(SIM_PROJECT, SIM_AGENT), f: pg.tagFilter })
         }
-        // Seed an unsent spawn-prompt draft so the spawn box renders pre-filled.
-        // The keys must match web/src/lib/storage.ts promptDraftKey(projectId,
-        // compact) for both layouts; these pages are all the sim project.
+        // Seed an unsent spawn-prompt draft so the spawn box renders pre-filled,
+        // for both layouts; the keys come from the app's shared promptDraftKey
+        // builder. These pages are all the sim project.
         if (pg.seedPrompt) {
-          await ctx.addInitScript((text) => {
+          await ctx.addInitScript(({ fullKey, compactKey, text }) => {
             try {
-              localStorage.setItem('hydra-prompt-draft-full-sim-project', text)
-              localStorage.setItem('hydra-prompt-draft-compact-sim-project', text)
+              localStorage.setItem(fullKey, text)
+              localStorage.setItem(compactKey, text)
             } catch {
               // ignore storage failures
             }
-          }, pg.seedPrompt)
+          }, { fullKey: promptDraftKey(SIM_PROJECT, false), compactKey: promptDraftKey(SIM_PROJECT, true), text: pg.seedPrompt })
         }
         // Capture-only: widen the sidebar so the compact spawn box has more
         // horizontal room and its seeded markdown wraps less / reads better.
-        // The width is React state seeded from this localStorage key (see
-        // web/src/lib/storage.ts StorageKeys.sidebarWidth; __root.tsx clamps it
-        // to <=600 and defaults to 264), so seeding it before boot is stable
-        // across re-renders. The app's default width is unchanged outside this shot.
+        // The width is React state seeded from this localStorage key (the app's
+        // shared StorageKeys.sidebarWidth; __root.tsx clamps it to <=600 and
+        // defaults to 264), so seeding it before boot is stable across re-renders.
+        // The app's default width is unchanged outside this shot.
         if (pg.tallSpawn) {
-          await ctx.addInitScript(() => {
-            try { localStorage.setItem('hydra-sidebar-width', '380') } catch { /* ignore */ }
-          })
+          await ctx.addInitScript((key) => {
+            try { localStorage.setItem(key, '380') } catch { /* ignore */ }
+          }, StorageKeys.sidebarWidth)
         }
-        await ctx.addInitScript(() => {
-          // Pre-trust the simulated project so the first-open "Trust this
+        await ctx.addInitScript((opts) => {
+          // Pre-trust the simulated projects so the first-open "Trust this
           // project?" modal (web/src/components/TrustProjectModal.tsx) never
           // pops up — it's a fixed inset-0 overlay that otherwise intercepts
           // every click/scroll the capture flow performs. Trust is client-side
-          // localStorage keyed by project id (lib/storage StorageKeys.trustedProjects).
-          try { window.localStorage.setItem('hydra-trusted-projects', '["sim-project","mobile-app"]') } catch { /* ignore */ }
+          // localStorage keyed by project id (the shared StorageKeys.trustedProjects).
+          try { window.localStorage.setItem(opts.trustedKey, opts.trustedValue) } catch { /* ignore */ }
           // Deterministic shuffle (spawn-form placeholder order).
           ;(Math as unknown as { random: () => number }).random = () => 0.5
           // Freeze short-lived timers (the typewriter placeholder animation runs
@@ -1267,7 +1278,7 @@ try {
           // any shot containing the video row flap between "modified"/"unchanged".
           // Frame 0 is identical across renders, keeping those captures stable.
           ;(HTMLMediaElement.prototype as unknown as { play: () => Promise<void> }).play = () => Promise.resolve()
-        })
+        }, { trustedKey: StorageKeys.trustedProjects, trustedValue: JSON.stringify([SIM_PROJECT, SIM_PROJECT_MOBILE]) })
         const page = await ctx.newPage()
         if (pg.holdRequest) {
           // Hold the matching request open (never continued/fulfilled) so the
@@ -1794,8 +1805,8 @@ try {
     const recordSpinner = async (theme: (typeof themes)[number]) => {
       const ctx = await browser.newContext({ viewport: { width: 900, height: 600 }, deviceScaleFactor: 1, colorScheme: theme })
       await ctx.clock.setFixedTime(SIM_NOW)
-      await ctx.addInitScript((mode) => { try { localStorage.setItem('hydra-theme-mode', mode) } catch { /* ignore */ } }, theme)
-      await ctx.addInitScript(() => { try { window.localStorage.setItem('hydra-trusted-projects', '["sim-project"]') } catch { /* ignore */ } })
+      await ctx.addInitScript(({ key, mode }) => { try { localStorage.setItem(key, mode) } catch { /* ignore */ } }, { key: StorageKeys.themeMode, mode: theme })
+      await ctx.addInitScript(({ key, value }) => { try { window.localStorage.setItem(key, value) } catch { /* ignore */ } }, { key: StorageKeys.trustedProjects, value: JSON.stringify([SIM_PROJECT]) })
       const page = await ctx.newPage()
       try {
         // Hold the file-contents request so the repository view stays in its
