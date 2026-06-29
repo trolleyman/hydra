@@ -39,38 +39,43 @@ function MediaCell({ file }: { file: RepositoryArtifactFile }) {
           {(file.tags ?? []).map((t) => <TagBadge key={t} tag={t} />)}
         </div>
       )}
-      {!url ? (
-        <div className="select-none flex flex-col items-center justify-center gap-1 w-full h-32 rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 text-gray-400 dark:text-gray-500">
-          <ImageOff className="w-5 h-5" />
-          <span className="text-[11px] font-medium">No file</span>
-        </div>
-      ) : isVideoArtifact(file.name) ? (
-        <video
-          src={url}
-          controls
-          muted
-          playsInline
-          preload="metadata"
-          className={`${IMG_CLASS} block`}
-          style={checkerStyle}
-        />
-      ) : (
-        // A plain click opens the image in the fullscreen lightbox; it fills the
-        // column width.
-        <button
-          type="button"
-          onClick={() => openImage([{ url, filename: file.name, size: 0 }])}
-          className="block w-full cursor-zoom-in"
-        >
-          <img
+      {/* data-tile-drag marks the resize surface: only a horizontal drag starting on
+          the media grows the tile (see MasonryGrid.startBodyResize), so dragging the
+          file name above just selects it. */}
+      <div data-tile-drag>
+        {!url ? (
+          <div className="select-none flex flex-col items-center justify-center gap-1 w-full h-32 rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 text-gray-400 dark:text-gray-500">
+            <ImageOff className="w-5 h-5" />
+            <span className="text-[11px] font-medium">No file</span>
+          </div>
+        ) : isVideoArtifact(file.name) ? (
+          <video
             src={url}
-            loading="lazy"
-            draggable={false}
+            controls
+            muted
+            playsInline
+            preload="metadata"
+            className={`${IMG_CLASS} block`}
             style={checkerStyle}
-            className={IMG_CLASS}
           />
-        </button>
-      )}
+        ) : (
+          // A plain click opens the image in the fullscreen lightbox; it fills the
+          // column width.
+          <button
+            type="button"
+            onClick={() => openImage([{ url, filename: file.name, size: 0 }])}
+            className="block w-full cursor-zoom-in"
+          >
+            <img
+              src={url}
+              loading="lazy"
+              draggable={false}
+              style={checkerStyle}
+              className={IMG_CLASS}
+            />
+          </button>
+        )}
+      </div>
     </div>
   )
 }
@@ -288,7 +293,7 @@ export function RepositoryArtifactsView({
                 // Videos need a minimum tile width for their transport controls.
                 minWidthPx: isVideoArtifact(f.name) ? VIDEO_MIN_TILE_PX : undefined,
                 // Video uses horizontal drag for scrubbing, so it resizes via the edge
-                // handle only; images are draggable anywhere (see MasonryGrid).
+                // handle only; images resize by dragging the media (see MasonryGrid).
                 bodyResizable: !isVideoArtifact(f.name),
               }))}
               spans={spans}
