@@ -89,7 +89,7 @@ for all agent types and is independent of the chat work.
 > responsive (`SpawnForm.tsx`). Screenshots now cover phone portrait/landscape,
 > tablet portrait/landscape and the collapsed states — each tagged with its
 > `viewport::` axis (`mobile`, `mobile-landscape`, `tablet`, `tablet-landscape`,
-> `desktop`) in `scripts/screenshots/take-screenshots.ts`. Still outstanding: the
+> `desktop`) in `web/scripts/screenshots/take-screenshots.ts`. Still outstanding: the
 > repository browser's two-column tree+content layout, a shorter default terminal
 > height on mobile, and touch support for the desktop resize handles (currently
 > just hidden below `lg`).

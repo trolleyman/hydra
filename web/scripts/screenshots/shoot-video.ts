@@ -7,14 +7,14 @@
 // dev helper, not the byte-stable artifact generator, so it keeps real timers
 // (video playback needs them) and shoots one element rather than the whole panel.
 //
-// Run from scripts/screenshots/:  HYDRA_BIN=/path/to/hydra bun shoot-video.ts
+// Run from web/:  HYDRA_BIN=/path/to/hydra bun scripts/screenshots/shoot-video.ts
 import { spawn, type ChildProcess } from 'node:child_process'
 import { createServer } from 'node:net'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { chromium } from 'playwright'
 
-const SRC = join(import.meta.dir, '..', '..')
+const SRC = join(import.meta.dir, '..', '..', '..')
 const BIN = process.env.HYDRA_BIN || '/tmp/hydra-vidshot'
 const OUT = join(import.meta.dir, 'out-video')
 const MODES = ['side-by-side', 'ab', 'slider', 'onion', 'difference'] as const

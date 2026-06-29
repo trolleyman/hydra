@@ -25,7 +25,7 @@ type SimulationServer struct {
 // artifacts panel's elapsed timer) would make otherwise-identical renders differ
 // and show up as a spurious visual change. Pinning the server's clock — together
 // with the screenshot script pinning the browser's clock to the SAME instant
-// (scripts/screenshots/take-screenshots.ts, page.clock) — makes every duration
+// (web/scripts/screenshots/take-screenshots.ts, page.clock) — makes every duration
 // label deterministic, down to the second. Keep the two instants in sync.
 func simNow() time.Time {
 	return time.Date(2025, 1, 1, 12, 0, 0, 0, time.UTC)
@@ -1324,14 +1324,14 @@ func simArtifactFailedLog(script string) []api.ArtifactLogLine {
 			out("capturing screenshots"),
 			errLine("Error: page.goto: net::ERR_CONNECTION_REFUSED"),
 			errLine("    at http://localhost:3000/dashboard"),
-			errLine("    at /app/scripts/screenshots/take-screenshots.ts:88:14"),
+			errLine("    at /app/web/scripts/screenshots/take-screenshots.ts:88:14"),
 			errLine("exited 1"),
 		)
 	default:
 		lines = append(lines,
-			out("+ (/checkout) bun x take-screenshots.ts"),
+			out("+ (/checkout/web) bun x scripts/screenshots/take-screenshots.ts"),
 			errLine("error: Cannot find module 'playwright'"),
-			errLine("    at file:///app/scripts/screenshots/take-screenshots.ts:21:1"),
+			errLine("    at file:///app/web/scripts/screenshots/take-screenshots.ts:21:1"),
 			errLine("exited 1"),
 		)
 	}
@@ -1377,7 +1377,7 @@ func simArtifactSets(id string) []api.ArtifactSet {
 		{
 			Name:       "storybook",
 			Status:     api.ArtifactSetStatusError,
-			Error:      ptr("exited 1: error: Cannot find module 'playwright'\n  at file:///app/scripts/screenshots/take-screenshots.ts:21:1"),
+			Error:      ptr("exited 1: error: Cannot find module 'playwright'\n  at file:///app/web/scripts/screenshots/take-screenshots.ts:21:1"),
 			LeftLogUrl: ptr(simLogURL("storybook", "error/left")),
 			RightLogUrl: ptr(simLogURL("storybook", "error/right")),
 			Files:      []api.ArtifactFile{},
@@ -1391,7 +1391,7 @@ func simArtifactSets(id string) []api.ArtifactSet {
 			Name:        "dashboard",
 			Status:      api.ArtifactSetStatusReady,
 			Changed:     true,
-			LeftError:   ptr("exited 1: Error: page.goto: net::ERR_CONNECTION_REFUSED at http://localhost:3000/dashboard\n  at /app/scripts/screenshots/take-screenshots.ts:88:14"),
+			LeftError:   ptr("exited 1: Error: page.goto: net::ERR_CONNECTION_REFUSED at http://localhost:3000/dashboard\n  at /app/web/scripts/screenshots/take-screenshots.ts:88:14"),
 			LeftLogUrl:  ptr(simLogURL("dashboard", "error/left")),
 			RightLogUrl: ptr(simLogURL("dashboard", "commit/a1b2c3d")),
 			Files: []api.ArtifactFile{

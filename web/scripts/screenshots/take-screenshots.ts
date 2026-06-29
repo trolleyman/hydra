@@ -18,7 +18,7 @@
 // internal/artifacts readTagsSidecar). Every shot is tagged with its theme,
 // viewport, and UI section as scoped "category::value" labels.
 //
-// Run with: bun take-screenshots.ts  (from scripts/screenshots/)
+// Run with: bun scripts/screenshots/take-screenshots.ts  (from web/)
 //
 // Progress: each major step emits a one-line "::hydra:progress::" marker (build
 // phases and, during capture, "<name>.png <n>/<total>"). Hydra strips the prefix
@@ -56,9 +56,9 @@ const MARKDOWN_DEMO_PROMPT =
   'A fenced block renders as its own code chip:\n```ts\nconst seg = parseInline(text)\nrenderMarkdown(seg) // code/bold/italic\n```'
 
 const OUT = required('HYDRA_ARTIFACT_OUTPUT')
-// HYDRA_ARTIFACT_SOURCE is the checkout root. Fall back to the repo root two
-// levels up from this script so it also works when run by hand.
-const SRC = process.env.HYDRA_ARTIFACT_SOURCE || join(import.meta.dir, '..', '..')
+// HYDRA_ARTIFACT_SOURCE is the checkout root. Fall back to the repo root three
+// levels up from this script (web/scripts/screenshots/) so it also works by hand.
+const SRC = process.env.HYDRA_ARTIFACT_SOURCE || join(import.meta.dir, '..', '..', '..')
 const REF = process.env.HYDRA_ARTIFACT_REF || '(unknown)'
 
 function required(name: string): string {
