@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, useCallback, type ReactNo
 import { PanelLeftOpen, MoreHorizontal } from 'lucide-react'
 import { useSidebarStore } from '../lib/sidebar'
 import { useFinePointer } from '../lib/useFinePointer'
+import { IconButton } from './IconButton'
 
 // Visual treatment for an action button. 'primary' is a filled accent button
 // (the merge call-to-action); 'segment' members are borderless and render inside
@@ -346,15 +347,15 @@ export function AgentTopBar({
     // sticky "Changes" header.
     <div className="shrink-0 h-12 px-3 sm:px-4 flex items-center gap-2 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
       {collapsed && (
-        <button
-          type="button"
+        <IconButton
+          variant="panel"
           aria-label="Show sidebar"
           title="Show sidebar (Ctrl+.)"
           onClick={toggle}
-          className="shrink-0 -ml-1 w-9 h-9 flex items-center justify-center rounded-lg text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors cursor-pointer"
+          className="shrink-0 -ml-1"
         >
           <PanelLeftOpen className="w-5 h-5" />
-        </button>
+        </IconButton>
       )}
 
       {/* Title + adaptive actions share this row; the title flexes/truncates so

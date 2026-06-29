@@ -17,6 +17,7 @@ import { DiffViewer } from '../DiffViewer'
 import { formatStartedAgo, agentStatusBadge, archivedEndStateBadge, agentDotClass, agentTypePill } from './AgentComponents'
 import { LoaderCircle, Merge, Trash2, Tag, RotateCcw, Pencil, TerminalSquare, Mail, ShieldAlert, ShieldCheck, ShieldOff } from 'lucide-react'
 import { Tooltip } from './Tooltip'
+import { Badge } from './Badge'
 import { AgentTypeIcon, type AgentTypeIconName } from './AgentTypeIcon'
 import { renderMarkdown } from '../lib/markdown'
 
@@ -156,13 +157,14 @@ function ArchivedAgentDetail({ agent, projectId, onPurged }: { agent: AgentRespo
         <div className="mb-6">
           {/* Metadata row */}
           <SeparatedRow className="flex items-center gap-3 flex-wrap">
-            <span className={`inline-flex items-center gap-1 text-xs px-2.5 py-0.5 rounded-full font-medium ${agentTypeClass}`}>
-              <AgentTypeIcon name={agent.agent_type as AgentTypeIconName} className="w-3 h-3 shrink-0" />
+            <Badge
+              variant="pill"
+              className={agentTypeClass}
+              icon={<AgentTypeIcon name={agent.agent_type as AgentTypeIconName} className="w-3 h-3 shrink-0" />}
+            >
               {agent.agent_type}
-            </span>
-            <span className={`text-xs px-2 py-0.5 rounded font-medium ${endBadge.className}`}>
-              {endBadge.label}
-            </span>
+            </Badge>
+            <Badge className={endBadge.className}>{endBadge.label}</Badge>
             {agent.branch_name && (
               <span className="text-xs font-mono text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
                 <Tag className="w-3.5 h-3.5" />
@@ -252,10 +254,9 @@ function NetworkEnforcementBadge({ mode }: { mode?: string }) {
   if (!c) return null
   return (
     <Tooltip content={c.tip}>
-      <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded font-medium ${c.className}`}>
-        <c.Icon className="w-3 h-3 shrink-0" />
+      <Badge className={c.className} icon={<c.Icon className="w-3 h-3 shrink-0" />}>
         {c.label}
-      </span>
+      </Badge>
     </Tooltip>
   )
 }
@@ -799,14 +800,17 @@ export function AgentDetail({
         <div className="mb-6">
           {/* Metadata row */}
           <SeparatedRow className="flex items-center gap-x-3 gap-y-1 flex-wrap">
-            <span className={`inline-flex items-center gap-1 text-xs px-2.5 py-0.5 rounded-full font-medium ${agentTypeClass}`}>
-              <AgentTypeIcon name={agent.agent_type as AgentTypeIconName} className="w-3 h-3 shrink-0" />
+            <Badge
+              variant="pill"
+              className={agentTypeClass}
+              icon={<AgentTypeIcon name={agent.agent_type as AgentTypeIconName} className="w-3 h-3 shrink-0" />}
+            >
               {agent.agent_type}
-            </span>
+            </Badge>
             {agent.agent_status && (
-              <span className={`text-xs px-2 py-0.5 rounded font-medium ${agentStatusBadge(agent.agent_status.status).className}`}>
+              <Badge className={agentStatusBadge(agent.agent_status.status).className}>
                 {agentStatusBadge(agent.agent_status.status).label}
-              </span>
+              </Badge>
             )}
             {agent.network_enforcement && <NetworkEnforcementBadge mode={agent.network_enforcement} />}
             {agent.branch_name && (
