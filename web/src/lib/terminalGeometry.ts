@@ -10,7 +10,7 @@
 
 import { useEffect } from 'react'
 import { create } from 'zustand'
-import { StorageKeys, readLocal, writeLocal } from './storage'
+import { StorageKeys, readLocal, writeLocal, readJSON, writeJSON } from './storage'
 
 // Fallback height (rows) when the user hasn't chosen one and no last-height
 // geometry exists yet — a comfortable default for a typical browser panel.
@@ -27,19 +27,17 @@ export interface TerminalGeometry {
 
 // The last geometry a live terminal measured and sent, or null if none yet.
 export function loadLastGeometry(): TerminalGeometry | null {
-  const raw = readLocal(StorageKeys.terminalGeometry)
-  if (!raw) return null
-  try {
-    const g = JSON.parse(raw) as { cols?: unknown; rows?: unknown }
-    if (typeof g.cols === 'number' && typeof g.rows === 'number' && g.cols > 0 && g.rows > 0) {
+  return readJSON(StorageKeys.terminalGeometry, (v) => {
+    const g = v as { cols?: unknown; rows?: unknown }
+    if (g && typeof g.cols === 'number' && typeof g.rows === 'number' && g.cols > 0 && g.rows > 0) {
       return { cols: g.cols, rows: g.rows }
     }
-  } catch { /* ignore malformed value */ }
-  return null
+    return null
+  })
 }
 
 export function saveLastGeometry(cols: number, rows: number) {
-  writeLocal(StorageKeys.terminalGeometry, JSON.stringify({ cols, rows }))
+  writeJSON(StorageKeys.terminalGeometry, { cols, rows })
 }
 
 // The user-chosen default spawn height (rows), or null when unset (use the
