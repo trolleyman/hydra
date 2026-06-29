@@ -11,7 +11,7 @@ import { ArtifactFilterBar, TagBadge } from './ArtifactFilterBar'
 import { stripAnsi } from '../lib/ansi'
 import { type ArtifactSpans, BASE_ARTIFACT_COLUMNS, defaultSpanForAspect } from '../lib/artifactColumns'
 import { VideoDiffView, isVideoArtifact, VIDEO_MIN_TILE_PX } from './VideoDiffView'
-import { ImageDiffView, type ImageDiffMode } from './ArtifactImageDiff'
+import { ImageDiffView, SegmentedToggle, ABControlsContext, type ImageDiffMode, type ArtifactABControls } from './ArtifactImageDiff'
 import { LiveLogPanes, PersistedLogView } from './ArtifactLogView'
 
 const CHANGE_LABEL: Record<string, string> = {
@@ -44,6 +44,15 @@ function ArtifactChangeIcon({ type, className = 'w-3.5 h-3.5' }: { type: string;
 // BASE_MIN_COL_PX wide. MASONRY_GAP is the inter-column gutter.
 const BASE_MIN_COL_PX = 140
 const MASONRY_GAP = 12
+
+// Tile reflow animation. An easeOutBack curve (the >1 control point) overshoots
+// slightly before settling — the gentle "boing" when a tile snaps to its new column
+// span, and the cue that tiles can be moved as siblings ease out of the way. Width
+// settles a touch slower than position so the snap reads as deliberate, not abrupt.
+// Suppressed on the tile being actively dragged (it tracks the pointer 1:1) and for
+// the first beat after mount (so the initial bulk layout doesn't animate in).
+const TILE_EASE = 'cubic-bezier(0.34, 1.56, 0.64, 1)'
+const TILE_TRANSITION = `left 220ms ${TILE_EASE}, top 220ms ${TILE_EASE}, width 280ms ${TILE_EASE}`
 
 function FileRow({ file, mode, changeThreshold = 0 }: { file: ArtifactFile; mode: ImageDiffMode; changeThreshold?: number }) {
   // The badge reflects the *effective* change type, so a modified file gated below
@@ -169,12 +178,15 @@ export function useMediaDims(
 // is too narrow). Each tile's span comes from its `aspect` via defaultSpanForAspect
 // (scaled by `spanScale` — 2 for side-by-side, whose before/after pair needs the
 // room), unless the user has dragged its edge to set an explicit span in `spans`.
-export function MasonryGrid({ items, spanScale = 1, spans, onSpanChange, scope }: {
+export function MasonryGrid({ items, spanScale = 1, scale = 1, spans, onSpanChange, scope }: {
   // bodyResizable defaults to true; set false for tiles whose media owns horizontal
   // drag (the before/after slider, video scrubbing) — those resize via the edge
   // handle only, so the two gestures don't fight.
   items: { key: string; node: React.ReactNode; aspect?: number; pxWidth?: number; minWidthPx?: number; bodyResizable?: boolean }[]
   spanScale?: number
+  // User's global size multiplier (diff settings size slider): scales every tile's
+  // auto span up/down. 1 = the aspect-ratio default. Explicit drag overrides ignore it.
+  scale?: number
   spans: ArtifactSpans
   onSpanChange?: (key: string, span: number | null) => void
   // Namespace for persisted span overrides: an item's identity key (its file name,
@@ -193,6 +205,17 @@ export function MasonryGrid({ items, spanScale = 1, spans, onSpanChange, scope }
   const [width, setWidth] = useState(0)
   // Measured tile heights, keyed by item key. Updated by the ResizeObserver below.
   const [heights, setHeights] = useState<Record<string, number>>({})
+  // The tile currently being edge/body-dragged: its live (continuous, pixel) width
+  // so it tracks the pointer instead of jumping column-by-column. The column span is
+  // only committed (and siblings only reflow) on release — see startResize.
+  const [drag, setDrag] = useState<{ key: string; width: number } | null>(null)
+  // Gate the reflow transition off for the first beat so the initial bulk layout (and
+  // its first height-measure pass) snaps into place rather than animating in.
+  const [ready, setReady] = useState(false)
+  useEffect(() => {
+    const id = setTimeout(() => setReady(true), 200)
+    return () => clearTimeout(id)
+  }, [])
 
   // One ResizeObserver for every tile, created lazily the first time a tile ref
   // attaches (in the commit phase, not during render). Tiles tag themselves with
@@ -272,11 +295,13 @@ export function MasonryGrid({ items, spanScale = 1, spans, onSpanChange, scope }
   const spanOf = useCallback((it: { key: string; aspect?: number; pxWidth?: number; minWidthPx?: number }): number => {
     let req = spans[spanKey(it.key)]
     if (req == null) {
-      req = defaultSpanForAspect(it.aspect) * spanScale
+      req = defaultSpanForAspect(it.aspect) * spanScale * scale
       const unit = layout.colW + layout.gap
       if (it.pxWidth && layout.colW > 0) {
         const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1
-        const budgetCss = (it.pxWidth / dpr) * spanScale
+        // Scale the no-upscale budget by the same `scale`: a user who turns the size
+        // slider up is opting into some upscaling, so the cap loosens with them.
+        const budgetCss = (it.pxWidth / dpr) * spanScale * scale
         // tileW(s) = s*colW + (s-1)*gap ≤ budgetCss  ⇒  s ≤ (budgetCss + gap)/(colW + gap)
         const maxSpan = Math.max(1, Math.floor((budgetCss + layout.gap) / unit))
         req = Math.min(req, maxSpan)
@@ -292,7 +317,7 @@ export function MasonryGrid({ items, spanScale = 1, spans, onSpanChange, scope }
       }
     }
     return Math.max(1, Math.min(Math.round(req), layout.cols))
-  }, [spans, spanScale, layout.cols, layout.colW, layout.gap, spanKey])
+  }, [spans, spanScale, scale, layout.cols, layout.colW, layout.gap, spanKey])
 
   // Place each tile into the run of `span` columns whose tallest column is currently
   // shortest (ties resolve leftmost, preserving reading order). Each tile fills its
@@ -327,27 +352,46 @@ export function MasonryGrid({ items, spanScale = 1, spans, onSpanChange, scope }
   // swallowed before the media reacts to it. Holds the key of the tile being dragged.
   const draggedKeyRef = useRef<string | null>(null)
 
-  // Resize a tile to `next` columns, clamped to what's available. `key` is the tile's
-  // file name; the override is persisted under its scoped key (see spanKey).
-  const applySpan = (key: string, startSpan: number, deltaPx: number) => {
+  // Start a live resize from `startSpan`, anchored at pointer `startX`. The tile's
+  // width follows the pointer continuously (so it grows *before* it would tip into
+  // the next column — it overlaps its neighbours, lifted above them); the span is
+  // only quantised and committed on release, when the persisted override updates and
+  // the siblings reflow + ease out of the way. Returns move/finish, or null if the
+  // grid can't resize right now. `key` is the tile's file name; the override persists
+  // under its scoped key (see spanKey).
+  const startResize = (key: string, startSpan: number, startX: number) => {
     const unit = layout.colW + layout.gap
-    if (unit <= 0 || !onSpanChange) return
-    const delta = Math.round(deltaPx / unit)
-    onSpanChange(spanKey(key), Math.max(1, Math.min(layout.cols, startSpan + delta)))
+    if (unit <= 0 || !onSpanChange) return null
+    const startWidth = startSpan * layout.colW + (startSpan - 1) * layout.gap
+    const minW = layout.colW
+    const maxW = layout.cols * layout.colW + (layout.cols - 1) * layout.gap
+    let finalSpan = startSpan
+    const move = (clientX: number) => {
+      const w = Math.max(minW, Math.min(maxW, startWidth + (clientX - startX)))
+      finalSpan = Math.max(1, Math.min(layout.cols, Math.round((w + layout.gap) / unit)))
+      setDrag({ key, width: w })
+    }
+    const finish = () => {
+      setDrag(null)
+      onSpanChange(spanKey(key), finalSpan)
+    }
+    return { move, finish }
   }
 
   // Edge-handle resize: drag the thin handle in the right gutter to grow/shrink the
-  // span one column at a time. stopPropagation so it doesn't also trigger the body
-  // drag below; double-click clears the override (back to the aspect-ratio default).
+  // tile. stopPropagation so it doesn't also trigger the body drag below; double-click
+  // clears the override (back to the aspect-ratio default).
   const startEdgeResize = (key: string, startSpan: number) => (e: React.PointerEvent) => {
     if (e.button !== 0 || !onSpanChange) return
     e.preventDefault()
     e.stopPropagation()
-    const startX = e.clientX
-    const onMove = (ev: PointerEvent) => applySpan(key, startSpan, ev.clientX - startX)
+    const ctl = startResize(key, startSpan, e.clientX)
+    if (!ctl) return
+    const onMove = (ev: PointerEvent) => ctl.move(ev.clientX)
     const onUp = () => {
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
+      ctl.finish()
     }
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
@@ -368,21 +412,25 @@ export function MasonryGrid({ items, spanScale = 1, spans, onSpanChange, scope }
     draggedKeyRef.current = null // reset any stale value from a drag that produced no click
     const startX = e.clientX
     const startY = e.clientY
-    let active = false
+    let ctl: ReturnType<typeof startResize> = null
     const onMove = (ev: PointerEvent) => {
       const dx = ev.clientX - startX
-      if (!active) {
+      if (!ctl) {
         // Require a decisive horizontal move so taps and vertical scrolls pass through.
         if (Math.abs(dx) < 6 || Math.abs(dx) <= Math.abs(ev.clientY - startY)) return
-        active = true
+        // Anchor the live width to the gesture origin so the tile grows by the full
+        // drag distance (not just from the activation point).
+        ctl = startResize(key, startSpan, startX)
+        if (!ctl) return
         draggedKeyRef.current = key
       }
       ev.preventDefault()
-      applySpan(key, startSpan, dx)
+      ctl.move(ev.clientX)
     }
     const onUp = () => {
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
+      ctl?.finish()
     }
     window.addEventListener('pointermove', onMove, { passive: false })
     window.addEventListener('pointerup', onUp)
@@ -403,13 +451,24 @@ export function MasonryGrid({ items, spanScale = 1, spans, onSpanChange, scope }
       {items.map((it) => {
         const p = placement.pos[it.key] ?? { left: 0, top: 0, width: 0, span: 1 }
         const bodyResize = canResize && it.bodyResizable !== false
+        const dragging = drag?.key === it.key
         return (
           <div
             key={it.key}
             ref={observeTile}
             data-mkey={it.key}
             className={`absolute group/tile ${bodyResize ? 'touch-pan-y' : ''}`}
-            style={{ left: p.left, top: p.top, width: p.width }}
+            style={{
+              left: p.left,
+              top: p.top,
+              // While dragging this tile, render its live pointer-tracked width and
+              // lift it above its neighbours (it overflows its column run); otherwise
+              // its placed span width. The transition eases the snap-back + sibling
+              // reflow once released — off during the drag so it tracks the pointer.
+              width: dragging ? (drag as { width: number }).width : p.width,
+              zIndex: dragging ? 20 : undefined,
+              transition: ready && !dragging ? TILE_TRANSITION : undefined,
+            }}
             onPointerDown={bodyResize ? startBodyResize(it.key, p.span) : undefined}
             onClickCapture={bodyResize ? swallowDragClick(it.key) : undefined}
           >
@@ -440,9 +499,11 @@ export function MasonryGrid({ items, spanScale = 1, spans, onSpanChange, scope }
 // right. Each tile auto-spans by aspect ratio (a wide desktop shot takes more
 // columns than a tall phone shot); side-by-side doubles the span so the before/after
 // pair has room. Drag a tile's edge to override its span.
-function FileGrid({ files, mode, spans, onSpanChange, scope, changeThreshold = 0 }: {
+function FileGrid({ files, mode, scale = 1, spans, onSpanChange, scope, changeThreshold = 0 }: {
   files: ArtifactFile[]
   mode: ImageDiffMode
+  // Global tile-size multiplier from the diff settings size slider (see MasonryGrid).
+  scale?: number
   spans: ArtifactSpans
   onSpanChange?: (key: string, span: number | null) => void
   scope?: string
@@ -481,7 +542,7 @@ function FileGrid({ files, mode, spans, onSpanChange, scope, changeThreshold = 0
   // pt-3 so the gap above the first row matches the card body's px-3 left inset.
   return (
     <div className="pt-3">
-      <MasonryGrid items={items} spanScale={spanScale} spans={spans} onSpanChange={onSpanChange} scope={scope} />
+      <MasonryGrid items={items} spanScale={spanScale} scale={scale} spans={spans} onSpanChange={onSpanChange} scope={scope} />
     </div>
   )
 }
@@ -515,7 +576,7 @@ export function ElapsedTime({ startedAt }: { startedAt: number }) {
 // sides on top.
 const MELT_BTN = 'border border-transparent text-gray-400 dark:text-gray-500 group-hover:border-gray-200 dark:group-hover:border-gray-600 group-hover:bg-white dark:group-hover:bg-gray-700 group-hover:text-gray-500 dark:group-hover:text-gray-300 transition-colors cursor-pointer'
 
-function ArtifactSetCard({ set, mode, spans, onSpanChange, filter, search, onRefresh, projectId, agentId }: { set: ArtifactSet; mode: ImageDiffMode; spans: ArtifactSpans; onSpanChange: (key: string, span: number | null) => void; filter: ArtifactTagFilter; search: string; onRefresh: (name: string, side?: ArtifactSide) => void; projectId: string | null; agentId: string }) {
+function ArtifactSetCard({ set, mode, scale, spans, onSpanChange, filter, search, onRefresh, projectId, agentId }: { set: ArtifactSet; mode: ImageDiffMode; scale: number; spans: ArtifactSpans; onSpanChange: (key: string, span: number | null) => void; filter: ArtifactTagFilter; search: string; onRefresh: (name: string, side?: ArtifactSide) => void; projectId: string | null; agentId: string }) {
   const status = set.status as string
   // Apply the (shared) tag filter and the search query to this card's files. The
   // grid shows only matches — ranked by search score when searching; the header
@@ -801,7 +862,7 @@ function ArtifactSetCard({ set, mode, spans, onSpanChange, filter, search, onRef
                     : `No files match ${searching ? 'your search' : 'the current filters'}.`}
                 </div>
               ) : (
-                <FileGrid files={visibleFiles} mode={mode} spans={spans} onSpanChange={onSpanChange} scope={`${agentId}/${set.name}`} changeThreshold={changeThreshold} />
+                <FileGrid files={visibleFiles} mode={mode} scale={scale} spans={spans} onSpanChange={onSpanChange} scope={`${agentId}/${set.name}`} changeThreshold={changeThreshold} />
               )}
             </>
           )}
@@ -834,7 +895,7 @@ function artifactsWsUrl(projectId: string | null, agentId: string, baseRef?: str
   return `${protocol}//${host}/ws/projects/${pid}/agents/${encodeURIComponent(agentId)}/artifacts${qs}`
 }
 
-export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUncommitted, refreshKey, imageDiffMode, artifactSpans, onArtifactSpanChange }: {
+export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUncommitted, refreshKey, imageDiffMode, artifactScale, artifactView, onArtifactViewChange, artifactHighlight, onArtifactHighlightChange, artifactSpans, onArtifactSpanChange }: {
   projectId: string | null
   agentId: string
   baseRef?: string
@@ -842,6 +903,14 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
   includeUncommitted?: boolean
   refreshKey: number
   imageDiffMode: ImageDiffMode
+  // Global tile-size multiplier (diff settings size slider), forwarded to every card.
+  artifactScale: number
+  // Global before/after view + "highlight" for A/B tiles, owned by the diff viewer so
+  // they persist and so the header controls + B/H keyboard shortcuts drive every tile.
+  artifactView: 'before' | 'after'
+  onArtifactViewChange: (v: 'before' | 'after') => void
+  artifactHighlight: boolean
+  onArtifactHighlightChange: (v: boolean) => void
   artifactSpans: ArtifactSpans
   onArtifactSpanChange: (key: string, span: number | null) => void
 }) {
@@ -871,6 +940,32 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
     setTagFilter(f)
     saveTagFilter(projectId, agentId, f)
   }, [projectId, agentId])
+
+  // Global before/after + highlight for the A/B tiles, handed down via context so every
+  // tile flips/highlights together instead of each carrying its own pill. Only the 'ab'
+  // mode routes to those tiles, so the header controls + shortcuts below gate on it.
+  const abControls = useMemo<ArtifactABControls>(() => ({
+    view: artifactView,
+    highlight: artifactHighlight,
+    toggleView: () => onArtifactViewChange(artifactView === 'before' ? 'after' : 'before'),
+  }), [artifactView, artifactHighlight, onArtifactViewChange])
+
+  // Keyboard: B flips before/after, H toggles highlight — only in A/B mode, and never
+  // while typing in a field. Plain single keys (no modifiers) so they don't collide
+  // with browser chords like Ctrl+H.
+  useEffect(() => {
+    if (imageDiffMode !== 'ab') return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey || e.altKey) return
+      const t = e.target as HTMLElement | null
+      if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return
+      const k = e.key.toLowerCase()
+      if (k === 'b') { e.preventDefault(); onArtifactViewChange(artifactView === 'before' ? 'after' : 'before') }
+      else if (k === 'h') { e.preventDefault(); onArtifactHighlightChange(!artifactHighlight) }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [imageDiffMode, artifactView, artifactHighlight, onArtifactViewChange, onArtifactHighlightChange])
 
   // Apply a server→client WS message to local state.
   const applyMessage = useCallback((msg: ArtifactWSMessage) => {
@@ -1025,19 +1120,46 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
           <p>The header shows each side's latest <code className="text-blue-300">stdout</code> line as live progress. To surface a cleaner message, print a line prefixed with <code className="text-blue-300">::hydra:progress::</code> (e.g. <code className="text-blue-300">echo "::hydra:progress:: capturing home 3/24"</code>) — Hydra strips the prefix, shows the rest as the progress line, and from then on ignores ordinary <code className="text-blue-300">stdout</code> for the header, so a noisy build can't hijack it. The full output still lands in the build log.</p>
           <p><strong>Tags &amp; filter.</strong> Alongside an image <code className="text-blue-300">home.png</code> the script can write a JSON sidecar <code className="text-blue-300">home.png.meta</code> like <code className="text-blue-300">{'{'}"tags": ["theme::dark", "viewport::phone"]{'}'}</code>. Tags show as labels on each file and as a filter on this bar. A <code className="text-blue-300">category::value</code> tag is a <em>scoped</em> label — only one value per category is kept on a file (the last wins), and each category gets a filter button listing its values. Every value starts <em>on</em>; uncheck one to hide the files carrying it, or use <strong>all</strong> / <strong>clear</strong> (top of the menu) to toggle them in bulk. Shift-click a value to isolate it (hide everything else). Each value also shows a dimmed count on the right — how many items carry it under your current filters (ignoring this scope itself). Plain tags work the same way under a "tags" button. Handy when a script emits many shots (light/dark, phone/desktop) and you want to see just one slice. Two built-in filters are always present: a <strong>type</strong> filter (image / video, from each file's extension) and a <strong>changes</strong> filter (added / removed / modified / unchanged, from each file's diff state) — the latter always offers all four kinds even when none are present, and hides unchanged files by default, so use it to reveal them or to focus on one kind of change.</p>
         </InfoTooltip>
-        {/* The shared filter bar: a search box and one dropdown per tag scope
-            (the user-defined categories, the free-form "tags" group, plus the
-            built-in type and changes scopes). ml-auto floats it to the right. */}
-        <ArtifactFilterBar
-          files={allFiles}
-          pendingTags={pendingTags}
-          filter={tagFilter}
-          onFilterChange={updateTagFilter}
-          search={search}
-          onSearchChange={setSearch}
-          showChangeFilter
-          className="ml-auto"
-        />
+        {/* Right cluster: the global A/B before/after + highlight controls (only
+            meaningful in A/B mode, where each tile shows one side at a time), then
+            the shared filter bar. ml-auto floats the whole cluster to the right. */}
+        <div className="ml-auto flex flex-wrap items-center gap-2">
+          {imageDiffMode === 'ab' && (
+            <div className="flex items-center gap-1.5">
+              <span title="Show every tile's before / after — shortcut: B">
+                <SegmentedToggle
+                  value={artifactView}
+                  onChange={onArtifactViewChange}
+                  options={[{ value: 'before', label: 'Before' }, { value: 'after', label: 'After' }]}
+                />
+              </span>
+              <label
+                title="Highlight changed pixels in magenta on every tile — shortcut: H"
+                className="flex items-center gap-1 text-[10px] font-medium tracking-wide text-gray-500 dark:text-gray-400 cursor-pointer select-none"
+              >
+                <input
+                  type="checkbox"
+                  checked={artifactHighlight}
+                  onChange={(e) => onArtifactHighlightChange(e.target.checked)}
+                  className="accent-blue-500 cursor-pointer"
+                />
+                Highlight
+              </label>
+            </div>
+          )}
+          {/* The shared filter bar: a search box and one dropdown per tag scope (the
+              user-defined categories, the free-form "tags" group, plus the built-in
+              type and changes scopes). */}
+          <ArtifactFilterBar
+            files={allFiles}
+            pendingTags={pendingTags}
+            filter={tagFilter}
+            onFilterChange={updateTagFilter}
+            search={search}
+            onSearchChange={setSearch}
+            showChangeFilter
+          />
+        </div>
       </div>
       <div className="flex flex-col gap-2">
         {/* Key by project+agent+name (not just name): switching agents reuses
@@ -1049,7 +1171,9 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
             removing cards: a card with no match stays put and shows its
             "no files match" empty state when expanded (with its header count
             reflecting the narrowing), rather than vanishing from the list. */}
-        {sets.map((s) => <ArtifactSetCard key={`${projectId ?? '_'}-${agentId}-${s.name}`} set={s} mode={imageDiffMode} spans={artifactSpans} onSpanChange={onArtifactSpanChange} filter={tagFilter} search={search} onRefresh={requestRefresh} projectId={projectId} agentId={agentId} />)}
+        <ABControlsContext.Provider value={abControls}>
+          {sets.map((s) => <ArtifactSetCard key={`${projectId ?? '_'}-${agentId}-${s.name}`} set={s} mode={imageDiffMode} scale={artifactScale} spans={artifactSpans} onSpanChange={onArtifactSpanChange} filter={tagFilter} search={search} onRefresh={requestRefresh} projectId={projectId} agentId={agentId} />)}
+        </ABControlsContext.Provider>
       </div>
     </div>
   )
