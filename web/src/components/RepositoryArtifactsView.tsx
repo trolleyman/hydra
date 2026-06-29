@@ -10,6 +10,7 @@ import { isVideoArtifact, VIDEO_MIN_TILE_PX } from './VideoDiffView'
 import { ElapsedTime, MasonryGrid, useMediaDims } from './ArtifactsPanel'
 import { LogView } from './ArtifactLogView'
 import { useImageLightbox } from '../stores/imageLightboxStore'
+import type { LightboxImage } from './ImageLightbox'
 import { ArtifactFilterBar, TagBadge } from './ArtifactFilterBar'
 import { computeVisibleFiles } from '../lib/artifactFilter'
 import { loadTagFilter, saveTagFilter, type ArtifactTagFilter } from '../lib/artifactPrefs'
@@ -26,8 +27,11 @@ const POLL_MS = 2500
 
 // MediaCell shows one generated file: its name, tags, and the image (click-to-open)
 // or video. Mirrors the diff viewer's FileRow, minus the before/after comparison
-// machinery; width-driven (w-full) so it fills its masonry column.
-function MediaCell({ file }: { file: RepositoryArtifactFile }) {
+// machinery; width-driven (w-full) so it fills its masonry column. `gallery` is the
+// full list of the grid's image files (videos excluded — the lightbox is images
+// only); clicking opens the lightbox at this file's place in it, so ←/→ walk the
+// whole grid rather than being stuck on the one image.
+function MediaCell({ file, gallery }: { file: RepositoryArtifactFile; gallery: LightboxImage[] }) {
   const url = file.url ?? undefined
   const openImage = useImageLightbox()
   return (
@@ -64,7 +68,10 @@ function MediaCell({ file }: { file: RepositoryArtifactFile }) {
           // column width.
           <button
             type="button"
-            onClick={() => openImage([{ url, filename: file.name, size: 0 }])}
+            onClick={() => {
+              const i = gallery.findIndex((g) => g.url === url)
+              openImage(gallery, i >= 0 ? i : 0)
+            }}
             className="block w-full cursor-zoom-in"
           >
             <img
@@ -172,6 +179,15 @@ export function RepositoryArtifactsView({
   // still measured over every file (keyed by name) so a re-show needs no remeasure.
   const allFiles = useMemo(() => data?.files ?? [], [data?.files])
   const visibleFiles = useMemo(() => computeVisibleFiles(allFiles, filter, search), [allFiles, filter, search])
+  // The lightbox gallery: every visible image (videos play inline, so they're
+  // excluded), in display order, so ←/→ steps through the grid. Built once and
+  // shared by every MediaCell, which opens it at its own image's index.
+  const gallery = useMemo<LightboxImage[]>(
+    () => visibleFiles
+      .filter((f) => f.url && !isVideoArtifact(f.name))
+      .map((f) => ({ url: f.url as string, filename: f.name, size: 0 })),
+    [visibleFiles],
+  )
 
   useEffect(() => {
     let cancelled = false
@@ -288,7 +304,7 @@ export function RepositoryArtifactsView({
             <MasonryGrid
               items={visibleFiles.map((f) => ({
                 key: f.name,
-                node: <MediaCell file={f} />,
+                node: <MediaCell file={f} gallery={gallery} />,
                 aspect: dims[f.name]?.aspect,
                 pxWidth: dims[f.name]?.pxWidth,
                 // Videos need a minimum tile width for their transport controls.

@@ -76,6 +76,51 @@ describe('MasonryGrid body-drag resize', () => {
     expect(onSpanChange).not.toHaveBeenCalled()
   })
 
+  it('does NOT resize when the drag starts on the onion-skin opacity slider (an <input>)', () => {
+    // Regression: the onion slider lives inside the data-tile-drag media region, so a
+    // horizontal drag on it used to be hijacked by the tile resize. It owns its own
+    // drag, so startBodyResize must leave <input> controls alone.
+    const onSpanChange = vi.fn()
+    render(
+      <MasonryGrid
+        items={[{
+          key: 'onion.png',
+          node: (
+            <div data-tile-drag>
+              <input data-testid="opacity" type="range" min={0} max={100} defaultValue={50} />
+            </div>
+          ),
+          aspect: 1.6,
+        }]}
+        spans={{}}
+        onSpanChange={onSpanChange}
+      />,
+    )
+    dragHorizontally(screen.getByTestId('opacity'))
+    expect(onSpanChange).not.toHaveBeenCalled()
+  })
+
+  it('does NOT resize when the drag starts on a data-no-tile-drag control', () => {
+    const onSpanChange = vi.fn()
+    render(
+      <MasonryGrid
+        items={[{
+          key: 'guarded.png',
+          node: (
+            <div data-tile-drag>
+              <div data-no-tile-drag><span data-testid="guarded">controls</span></div>
+            </div>
+          ),
+          aspect: 1.6,
+        }]}
+        spans={{}}
+        onSpanChange={onSpanChange}
+      />,
+    )
+    dragHorizontally(screen.getByTestId('guarded'))
+    expect(onSpanChange).not.toHaveBeenCalled()
+  })
+
   it('does not start a resize for a near-vertical drag on the media (lets the page scroll)', () => {
     const onSpanChange = vi.fn()
     renderGrid(onSpanChange)
