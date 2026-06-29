@@ -2,6 +2,7 @@ import React, { useEffect, type ReactNode } from 'react'
 import { AlertCircle, AlertTriangle, ArrowRight, Info, HelpCircle, Merge, Trash2, X } from 'lucide-react'
 import { useDialogStore } from '../stores/dialogStore'
 import { IconButton } from './IconButton'
+import { DialogIconTile, DialogCancelButton, DialogConfirmButton, type DialogTone } from './dialogPrimitives'
 import type { DialogDetails } from '../stores/dialogStore'
 
 export const Dialog: React.FC = () => {
@@ -102,25 +103,13 @@ export const Dialog: React.FC = () => {
             </p>
           </div>
 
-          <div className="px-6 py-4 bg-gray-50 dark:bg-gray-800/50 flex justify-end gap-3">
+          <div className="px-6 py-4 bg-gray-50 dark:bg-gray-800/50 flex justify-end gap-2.5 border-t border-gray-100 dark:border-gray-700">
             {(showCancel || type === 'confirm') && (
-              <button
-                onClick={handleCancel}
-                className="px-4 py-2 rounded-lg text-sm font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors cursor-pointer"
-              >
-                Cancel
-              </button>
+              <DialogCancelButton onClick={handleCancel}>Cancel</DialogCancelButton>
             )}
-            <button
-              onClick={handleConfirm}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
-                type === 'error'
-                  ? 'bg-red-600 hover:bg-red-700 text-white'
-                  : 'bg-blue-600 hover:bg-blue-700 text-white'
-              }`}
-            >
+            <DialogConfirmButton tone={type === 'error' ? 'red' : 'blue'} onClick={handleConfirm}>
               {type === 'confirm' ? 'Confirm' : 'OK'}
-            </button>
+            </DialogConfirmButton>
           </div>
         </div>
       )}
@@ -143,7 +132,7 @@ function RichConfirmPanel({
   onCancel,
   children,
 }: {
-  tone: 'emerald' | 'red'
+  tone: DialogTone
   icon: ReactNode
   title: string
   description: string
@@ -153,14 +142,6 @@ function RichConfirmPanel({
   onCancel: () => void
   children: ReactNode
 }) {
-  const tile =
-    tone === 'emerald'
-      ? 'bg-emerald-100 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400'
-      : 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400'
-  const confirm =
-    tone === 'emerald'
-      ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm'
-      : 'bg-red-600 hover:bg-red-700 text-white shadow-sm'
   return (
     <div
       className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-[470px] overflow-hidden animate-in zoom-in-95 duration-200"
@@ -170,7 +151,7 @@ function RichConfirmPanel({
     >
       <div className="px-5 pt-5 pb-4 flex flex-col gap-4">
         <div className="flex items-start gap-3.5">
-          <span className={`w-10 h-10 shrink-0 rounded-xl flex items-center justify-center ${tile}`}>{icon}</span>
+          <DialogIconTile tone={tone}>{icon}</DialogIconTile>
           <div className="flex flex-col gap-1 min-w-0 pt-0.5">
             <h3 id="dialog-title" className="text-[16px] font-bold leading-tight text-gray-900 dark:text-gray-100">
               {title}
@@ -181,19 +162,10 @@ function RichConfirmPanel({
         {children}
       </div>
       <div className="flex justify-end gap-2.5 px-5 py-3.5 border-t border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/40">
-        <button
-          onClick={onCancel}
-          className="px-4 py-2 rounded-lg text-sm font-semibold bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:border-gray-300 dark:hover:bg-gray-700 transition-colors cursor-pointer"
-        >
-          Cancel
-        </button>
-        <button
-          onClick={onConfirm}
-          className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold transition-colors cursor-pointer ${confirm}`}
-        >
-          {confirmIcon}
+        <DialogCancelButton onClick={onCancel}>Cancel</DialogCancelButton>
+        <DialogConfirmButton tone={tone} icon={confirmIcon} onClick={onConfirm}>
           {confirmLabel}
-        </button>
+        </DialogConfirmButton>
       </div>
     </div>
   )

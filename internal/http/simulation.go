@@ -999,9 +999,17 @@ func (s *SimulationServer) GetAgentDiff(w http.ResponseWriter, r *http.Request, 
 		//   - web/src/{index.ts,components/…}  `web` folds into `src`, but `src`
 		//                                      holds a file AND a folder so the
 		//                                      chain stops there (no over-merging).
+		// agent-3 also conflicts with its base branch, so its diff carries the
+		// merge-conflict flag + the offending file. This surfaces the redesigned
+		// merge-conflict panel (DiffViewer.tsx → MergeConflictButton) in the Changes
+		// toolbar and is captured by the `merge-conflict-dialog` screenshot.
+		mergeConflict := true
+		conflictFiles := []string{"internal/app/services/billing/stripe/webhook.go"}
 		resp := api.DiffResponse{
-			BaseRef: "main",
-			HeadRef: "hydra/feat-3",
+			BaseRef:       "main",
+			HeadRef:       "hydra/feat-3",
+			MergeConflict: &mergeConflict,
+			ConflictFiles: &conflictFiles,
 			Files: []api.DiffFile{
 				simFile("README.md", api.DiffFileChangeTypeModified, 3, 0,
 					"@@ -1,2 +1,5 @@", 1, 1,
