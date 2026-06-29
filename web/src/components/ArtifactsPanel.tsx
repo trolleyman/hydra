@@ -1387,10 +1387,11 @@ function ArtifactSetCard({ set, mode, spans, onSpanChange, filter, search, onRef
                   className="fixed z-[9999] w-52 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-lg py-1 text-xs"
                   style={{ left: regenCoords.left, top: regenCoords.top }}
                 >
+                  {/* The main button already regenerates both sides; the menu is
+                      just the per-side shortcuts. */}
                   {([
-                    { side: undefined as ArtifactSide | undefined, label: 'Regenerate both sides' },
-                    { side: 'left' as ArtifactSide, label: 'Regenerate before (left)' },
-                    { side: 'right' as ArtifactSide, label: 'Regenerate after (right)' },
+                    { side: 'left' as ArtifactSide, label: 'Regenerate before' },
+                    { side: 'right' as ArtifactSide, label: 'Regenerate after' },
                   ]).map(({ side, label }) => (
                     <button
                       key={label}
