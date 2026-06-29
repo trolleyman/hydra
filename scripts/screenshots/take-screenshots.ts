@@ -884,6 +884,42 @@ try {
         imageDiffMode: 'side-by-side',
         expandArtifact: 'components',
       },
+      // A wholly-failed artifact card expanded: both sides failed, so instead of a
+      // separate red error box the card surfaces the build log as two red-bordered
+      // terminals (the script's stderr is the failure detail). agent-1's
+      // "storybook" set is the error one (internal/http/simulation.go); the build
+      // log auto-opens on failure, so no extra click is needed.
+      {
+        name: 'artifact-failure',
+        path: '/project/sim-project/agent/agent-1',
+        scrollTo: 'Changes',
+        viewport: { width: 1280, height: 1280 },
+        imageDiffMode: 'side-by-side',
+        expandArtifact: 'storybook',
+      },
+      // A partially-failed card expanded: the before (left) side died but the after
+      // side rendered, so the card stays "ready" — the before terminal is
+      // red-bordered while the after terminal and the surviving side's images still
+      // show below. agent-1's "dashboard" set is the partial-failure one.
+      {
+        name: 'artifact-partial-failure',
+        path: '/project/sim-project/agent/agent-1',
+        scrollTo: 'Changes',
+        viewport: { width: 1280, height: 1400 },
+        imageDiffMode: 'side-by-side',
+        expandArtifact: 'dashboard',
+      },
+      // The split regenerate button's dropdown open, documenting per-side
+      // regeneration (regenerate both / before only / after only). Opened on the
+      // always-present "screenshots" card's header.
+      {
+        name: 'artifact-regen-menu',
+        path: '/project/sim-project/agent/agent-1',
+        scrollTo: 'Changes',
+        viewport: { width: 1280, height: 900 },
+        imageDiffMode: 'side-by-side',
+        click: 'div.rounded-lg:has-text("screenshots") button[aria-label="Regenerate options"]',
+      },
       // The video diff viewer (VideoDiffView) shown directly: agent-1's
       // "screenshots" set carries a .webm artifact (loader-animation.webm) the
       // panel routes to the video viewer instead of the image one. It otherwise
