@@ -369,7 +369,7 @@
     - [ ] a) A `runWithToast`/`useApiAction` helper for the repeated `setBusy(true)` → `try`/`await` → `catch`→toast → `finally setBusy(false)` shape (~12 sites: AgentDetail decide/kill/merge/title, RepositoryView, `__root` handleSync/handleAddProject).
     - [ ] b) Replace `catch (err: any)` with `instanceof ApiError`, and type `format_error.ts`'s error body to drop the `(err.body as any).details` cast.
 
-62. [ ] **[Web refactor]** **Unify the two tooltip implementations.** `Tooltip.tsx` (hover-delay, top/bottom) and `InfoTooltip.tsx` (click/hover, off-screen clamping) are independent implementations of the same portal + `getBoundingClientRect` placement math — consolidate into one configurable component.
+62. [x] **[Web refactor]** **Unify the two tooltip implementations.** `Tooltip.tsx` (hover-delay, top/bottom) and `InfoTooltip.tsx` (click/hover, off-screen clamping) are independent implementations of the same portal + `getBoundingClientRect` placement math — consolidated into one configurable `Tooltip` (`variant="dark" | "card"`); `InfoTooltip` is now a thin preset wrapper over it so its call sites are unchanged. (`DiffViewer.tsx`'s local `CustomTooltip` — global single-active dedup + left/right sides — was left as-is; out of scope.)
 
 63. [ ] **[Web refactor]** **Split oversized components.**
 
