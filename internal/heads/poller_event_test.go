@@ -43,6 +43,17 @@ func hadAgentsEvent(sub *events.Subscription) bool {
 	return false
 }
 
+// drainSet drains the subscription once and returns the set of event types seen,
+// for tests that assert on more than one type from a single poll (Drain clears
+// everything, so they cannot call hadAgentsEvent twice).
+func drainSet(sub *events.Subscription) map[events.Type]bool {
+	m := map[events.Type]bool{}
+	for _, ty := range sub.Drain() {
+		m[ty] = true
+	}
+	return m
+}
+
 // TestPollerEventsOnlyOnRenderedChange locks in the traffic fix: while an agent
 // stays "running" and merely rewrites status.json (advancing the timestamp on
 // every tool call), the poller must persist the timestamp but NOT emit
@@ -104,6 +115,116 @@ func TestPollerEventsOnlyOnRenderedChange(t *testing.T) {
 	pollJSONStatusOnce(store, root, deb, hub)
 	if !hadAgentsEvent(sub) {
 		t.Fatal("running→needs_input transition did not emit agents_changed")
+	}
+}
+
+// TestPollerRaisesUnreadOnSessionExit locks in the fix for an agent that finishes
+// and then exits before the grace window elapses: the deferred unread flag, armed
+// on running→finished, would otherwise be dropped when the next poll sees the
+// session gone. The session ending is definitive proof of a real finish (a
+// subagent blip keeps the same session alive), so the flag must be raised — and
+// because it moves the cross-project unread total, a broadcast projects_changed
+// must fire alongside the in-project agents_changed.
+func TestPollerRaisesUnreadOnSessionExit(t *testing.T) {
+	root := t.TempDir()
+	store, err := db.Open(root)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	const id = "agent1"
+	if err := store.UpsertAgent(&db.Agent{ID: id, ProjectPath: root, AgentType: "claude", SessionStatus: "running"}); err != nil {
+		t.Fatalf("upsert agent: %v", err)
+	}
+
+	hub := events.NewHub()
+	sub := hub.Subscribe(root)
+	t.Cleanup(sub.Close)
+	deb := newUnreadDebouncer()
+	base := time.Date(2026, 6, 24, 18, 0, 0, 0, time.UTC)
+
+	// Establish the running baseline, then running→finished arms the deferred
+	// unread without raising it yet.
+	writeAgentStatusJSON(t, root, id, api.Running, "PostToolUse", base.Format(time.RFC3339Nano))
+	pollJSONStatusOnce(store, root, deb, hub)
+	sub.Drain()
+	writeAgentStatusJSON(t, root, id, api.Finished, "Stop", base.Add(time.Second).Format(time.RFC3339Nano))
+	pollJSONStatusOnce(store, root, deb, hub)
+	if agents, err := store.ListAgents(root); err != nil {
+		t.Fatalf("list agents: %v", err)
+	} else if agents[0].HasUnreadChanges {
+		t.Fatal("unread raised immediately on running→finished; it should defer for the grace window")
+	}
+	sub.Drain()
+
+	// The agent process exits before graceUnread elapses: its session stops. The
+	// next poll must raise the pending unread rather than forget it.
+	if err := store.UpdateSessionInfo(id, 0, "stopped"); err != nil {
+		t.Fatalf("mark session stopped: %v", err)
+	}
+	pollJSONStatusOnce(store, root, deb, hub)
+
+	agents, err := store.ListAgents(root)
+	if err != nil {
+		t.Fatalf("list agents: %v", err)
+	}
+	if !agents[0].HasUnreadChanges {
+		t.Fatal("unread not raised when the session exited with a deferred finish pending")
+	}
+	ev := drainSet(sub)
+	if !ev[events.AgentsChanged] {
+		t.Error("no agents_changed after raising unread on session exit")
+	}
+	if !ev[events.ProjectsChanged] {
+		t.Error("no projects_changed broadcast after raising unread (the cross-project total moved)")
+	}
+}
+
+// TestPollerBroadcastsProjectsChangedOnlyOnUnread verifies the cross-project push
+// is scoped to unread raises: a timestamp-only advance (the hot path) emits
+// neither event, while a running→needs_input transition that raises the unread
+// flag emits both the in-project agents_changed and the broadcast projects_changed
+// that updates other-project unread totals (and the browser-tab dot).
+func TestPollerBroadcastsProjectsChangedOnlyOnUnread(t *testing.T) {
+	root := t.TempDir()
+	store, err := db.Open(root)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	const id = "agent1"
+	if err := store.UpsertAgent(&db.Agent{ID: id, ProjectPath: root, AgentType: "claude", SessionStatus: "running"}); err != nil {
+		t.Fatalf("upsert agent: %v", err)
+	}
+
+	hub := events.NewHub()
+	sub := hub.Subscribe(root)
+	t.Cleanup(sub.Close)
+	deb := newUnreadDebouncer()
+	base := time.Date(2026, 6, 24, 18, 0, 0, 0, time.UTC)
+
+	writeAgentStatusJSON(t, root, id, api.Running, "SessionStart", base.Format(time.RFC3339Nano))
+	pollJSONStatusOnce(store, root, deb, hub)
+	sub.Drain()
+
+	// Timestamp-only advance while still running: no broadcast on the hot path.
+	writeAgentStatusJSON(t, root, id, api.Running, "polling", base.Add(time.Second).Format(time.RFC3339Nano))
+	pollJSONStatusOnce(store, root, deb, hub)
+	if ev := drainSet(sub); ev[events.ProjectsChanged] {
+		t.Error("timestamp-only advance broadcast projects_changed; it must stay off the cross-project path")
+	}
+
+	// running→needs_input raises the unread flag → both events fire.
+	writeAgentStatusJSON(t, root, id, api.NeedsInput, "PermissionRequest", base.Add(2*time.Second).Format(time.RFC3339Nano))
+	pollJSONStatusOnce(store, root, deb, hub)
+	ev := drainSet(sub)
+	if !ev[events.AgentsChanged] {
+		t.Error("needs_input did not emit agents_changed")
+	}
+	if !ev[events.ProjectsChanged] {
+		t.Error("needs_input raised unread but did not broadcast projects_changed")
 	}
 }
 
