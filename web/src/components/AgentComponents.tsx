@@ -68,7 +68,7 @@ export function agentDotAnimate(agent: AgentResponse): string {
   }
   // No agent status yet — fall back to the raw session state so a live session
   // still pulses while it reports in.
-  return normalizeContainerState(agent.session_status) === 'running' ? 'animate-status-pulse' : ''
+  return agent.session_status === 'running' ? 'animate-status-pulse' : ''
 }
 
 export function formatStartedAgo(createdAt: number): string {
