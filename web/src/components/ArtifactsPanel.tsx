@@ -77,11 +77,16 @@ function FileRow({ file, mode, changeThreshold = 0 }: { file: ArtifactFile; mode
           {(file.tags ?? []).map((t) => <TagBadge key={t} tag={t} />)}
         </div>
       )}
-      {isVideoArtifact(file.name) ? (
-        <VideoDiffView left={file.left_url} right={file.right_url} mode={mode} fps={file.fps} />
-      ) : (
-        <ImageDiffView left={file.left_url} right={file.right_url} mode={mode} name={file.name} />
-      )}
+      {/* data-tile-drag marks the resize surface: only a horizontal drag that starts
+          here grows the tile (see MasonryGrid.startBodyResize), so dragging on the
+          header above just selects the file name. */}
+      <div data-tile-drag>
+        {isVideoArtifact(file.name) ? (
+          <VideoDiffView left={file.left_url} right={file.right_url} mode={mode} fps={file.fps} />
+        ) : (
+          <ImageDiffView left={file.left_url} right={file.right_url} mode={mode} name={file.name} />
+        )}
+      </div>
     </div>
   )
 }
@@ -348,13 +353,18 @@ export function MasonryGrid({ items, spanScale = 1, spans, onSpanChange, scope }
     window.addEventListener('pointerup', onUp)
   }
 
-  // Body resize: drag horizontally anywhere on a tile (the image included) to grow or
-  // shrink its span. A plain click/tap falls through to the media's own gesture (flip,
-  // open) — we only take over once the pointer moves decisively horizontally past a
-  // small threshold, then swallow the trailing click so the media doesn't also react.
-  // Touch keeps vertical panning (touch-action: pan-y on the tile) so the page scrolls.
+  // Body resize: drag horizontally on a tile's media (the region the node marks with
+  // data-tile-drag) to grow or shrink its span. Starting on the card chrome — the file
+  // name, badges, padding — does nothing, so click-dragging to select the name no
+  // longer enlarges the tile. A plain click/tap on the media falls through to its own
+  // gesture (flip, open) — we only take over once the pointer moves decisively
+  // horizontally past a small threshold, then swallow the trailing click so the media
+  // doesn't also react. Touch keeps vertical panning (touch-action: pan-y) so the page
+  // scrolls.
   const startBodyResize = (key: string, startSpan: number) => (e: React.PointerEvent) => {
     if (e.button !== 0 || !onSpanChange) return
+    // Only the media drags; the card header/padding is left alone (text-selectable).
+    if (!(e.target instanceof Element) || !e.target.closest('[data-tile-drag]')) return
     draggedKeyRef.current = null // reset any stale value from a drag that produced no click
     const startX = e.clientX
     const startY = e.clientY
@@ -407,7 +417,7 @@ export function MasonryGrid({ items, spanScale = 1, spans, onSpanChange, scope }
             {canResize && (
               // A grab handle on the tile's right edge (sitting in the gutter); the
               // blue rule appears on hover so the resize affordance stays subtle at
-              // rest. The whole tile is also draggable (startBodyResize); this handle
+              // rest. The tile's media is also draggable (startBodyResize); this handle
               // gives a visible cue and a double-click target to auto-size.
               <div
                 onPointerDown={startEdgeResize(it.key, p.span)}
@@ -461,8 +471,9 @@ function FileGrid({ files, mode, spans, onSpanChange, scope, changeThreshold = 0
       // Videos need a minimum tile width for their transport controls (see
       // VIDEO_MIN_TILE_PX); images have no such chrome.
       minWidthPx: isVideoArtifact(f.name) ? VIDEO_MIN_TILE_PX : undefined,
-      // The slider mode and video both use horizontal drag on the media, so let
-      // those resize via the edge handle only — see MasonryGrid's bodyResizable.
+      // The slider mode and video both use horizontal drag on the media for their own
+      // gesture, so let those resize via the edge handle only — see MasonryGrid's
+      // bodyResizable. Other images resize by dragging the media (data-tile-drag).
       bodyResizable: mode !== 'slider' && !isVideoArtifact(f.name),
     })),
     [files, mode, dims, changeThreshold],
