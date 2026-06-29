@@ -805,6 +805,12 @@ try {
       // the shared dialog-button styling. scrollTo brings the toolbar into view for
       // the click; the panel itself is a fixed, centered overlay.
       { name: 'merge-conflict-dialog', path: '/project/sim-project/agent/agent-3', viewportOnly: true, scrollTo: 'Changes', click: 'button:has-text("conflict")' },
+      // The redesigned update-from-base confirmation: agent-2's diff trails its
+      // base (behind_count) so the Changes toolbar shows an amber "N behind"
+      // button; clicking it opens the rich panel — amber icon tile, a base→branch
+      // chip with the behind count, and (because agent-2 also has uncommitted
+      // changes) the amber caution note. scrollTo reveals the toolbar for the click.
+      { name: 'agent-update-base-dialog', path: '/project/sim-project/agent/agent-2', viewportOnly: true, scrollTo: 'Changes', click: 'button:has-text("behind")' },
       // The agent-detail prompt block rendering the upload paths a prompt carries
       // as attachment chips instead of raw links: three image thumbnails (served a
       // fixed stub PNG) and one non-image file shown with a generic icon, the

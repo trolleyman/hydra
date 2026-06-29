@@ -553,11 +553,16 @@ func (s *SimulationServer) GetAgentCommits(w http.ResponseWriter, r *http.Reques
 
 func (s *SimulationServer) GetAgentDiff(w http.ResponseWriter, r *http.Request, projectId string, id string, params api.GetAgentDiffParams) {
 	if id == "agent-2" {
-		// Mock uncommitted changes
+		// Mock uncommitted changes + a branch that trails its base, so agent-2's
+		// Changes toolbar shows the "behind" button and the redesigned
+		// update-from-base dialog (captured by `agent-update-base-dialog`). With
+		// uncommitted changes present, that dialog also surfaces its caution note.
 		uncommitted := true
+		behind := 3
 		resp := api.DiffResponse{
 			BaseRef:            "main",
 			HeadRef:            "hydra/feat-2",
+			BehindCount:        &behind,
 			UncommittedChanges: &uncommitted,
 			UncommittedSummary: &api.UncommittedSummary{
 				TrackedCount:   2,

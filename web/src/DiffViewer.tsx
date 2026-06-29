@@ -1420,15 +1420,22 @@ function BehindBaseButton({ diff, agent, projectId, onUpdated }: {
   const hasUncommitted = diff?.uncommitted_changes ?? false
 
   const handleClick = () => {
-    const warnings: string[] = []
-    if (running) warnings.push("⚠️ An agent session is currently running — merging now may collide with work in progress.")
-    if (hasUncommitted) warnings.push("⚠️ This branch has uncommitted changes — the merge may fail or conflict until they're committed.")
-    const warnText = warnings.length ? '\n\n' + warnings.join('\n') : ''
+    // A running session is the headline caution (merging shifts files under
+    // active work); it takes precedence over the uncommitted-changes note, the
+    // way the merge dialog prioritises its parent-running warning.
+    const note = running
+      ? 'An agent session is running — merging now may collide with work in progress.'
+      : hasUncommitted
+        ? "This branch has uncommitted changes — the merge may fail or conflict until they're committed."
+        : undefined
 
     useDialogStore.getState().show({
-      title: 'Update from base',
-      message: `"${agent.branch_name}" is ${behind} commit${behind !== 1 ? 's' : ''} behind "${baseBranch}".\n\nMerge "${baseBranch}" into your branch to bring it up to date? This also re-baselines diff artifacts (e.g. screenshots) against the latest base.${warnText}`,
-      type: warnings.length ? 'warning' : 'confirm',
+      title: `Update from ${baseBranch}?`,
+      message: `Merges ${baseBranch} into this branch to bring it up to date, and re-baselines diff artifacts (e.g. screenshots) against the latest base.`,
+      type: note ? 'warning' : 'confirm',
+      variant: 'updateBase',
+      confirmLabel: 'Update branch',
+      details: { fromBranch: baseBranch ?? '—', toBranch: agent.branch_name ?? '—', behind, note },
       onConfirm: async () => {
         setUpdating(true)
         try {

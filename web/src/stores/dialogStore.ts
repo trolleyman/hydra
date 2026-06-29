@@ -3,20 +3,23 @@ import { create } from 'zustand'
 export type DialogType = 'info' | 'error' | 'warning' | 'confirm'
 
 // Confirmation layout. 'generic' is the default text dialog (icon + title +
-// message). 'merge' and 'kill' render bespoke panels (an icon tile, a stacked
-// title/description and a details chip) matching the agent-action redesign. They
-// flow through the same store so the single mounted <Dialog/> and every
-// `isOpen` guard around the app keep working unchanged.
-export type DialogVariant = 'generic' | 'merge' | 'kill'
+// message). 'merge', 'kill' and 'updateBase' render bespoke panels (an icon
+// tile, a stacked title/description and a details chip) matching the
+// agent-action redesign. They flow through the same store so the single mounted
+// <Dialog/> and every `isOpen` guard around the app keep working unchanged.
+export type DialogVariant = 'generic' | 'merge' | 'kill' | 'updateBase'
 
 // Extra structured content for the rich variants, filled in (and patched in
 // asynchronously via `update`) by the merge/kill handlers.
 export interface DialogDetails {
-  // merge: the branch chip + its diff stat counts.
+  // merge / updateBase: the branch chip endpoints. For merge it's branch → base;
+  // for updateBase it's base → branch (the base merged into the agent's branch).
   fromBranch?: string
   toBranch?: string
   additions?: number
   deletions?: number
+  // updateBase: how many commits the branch is behind its base.
+  behind?: number
   // kill: how many unmerged files the worktree deletion will discard.
   lostFiles?: number
   // shared: a secondary caution line (e.g. a running-parent warning), plus a

@@ -1,5 +1,5 @@
 import React, { useEffect, type ReactNode } from 'react'
-import { AlertCircle, AlertTriangle, ArrowRight, Info, HelpCircle, Merge, Trash2, X } from 'lucide-react'
+import { AlertCircle, AlertTriangle, ArrowRight, Info, HelpCircle, Merge, Trash2, FolderSync, X } from 'lucide-react'
 import { useDialogStore } from '../stores/dialogStore'
 import { IconButton } from './IconButton'
 import { DialogIconTile, DialogCancelButton, DialogConfirmButton, type DialogTone } from './dialogPrimitives'
@@ -77,6 +77,19 @@ export const Dialog: React.FC = () => {
           onCancel={handleCancel}
         >
           <KillDetails details={details} />
+        </RichConfirmPanel>
+      ) : variant === 'updateBase' ? (
+        <RichConfirmPanel
+          tone="amber"
+          icon={<FolderSync className="w-5 h-5" />}
+          title={title}
+          description={message}
+          confirmLabel={confirmLabel ?? 'Update branch'}
+          confirmIcon={<FolderSync className="w-4 h-4" />}
+          onConfirm={handleConfirm}
+          onCancel={handleCancel}
+        >
+          <UpdateBaseDetails details={details} />
         </RichConfirmPanel>
       ) : (
         <div
@@ -182,27 +195,70 @@ function CautionNote({ note }: { note: string }) {
   )
 }
 
+// The `from → to` branch chip shared by the merge / update-from-base panels.
+// Only `from` truncates (the agent branch is long); `to` is the base branch —
+// usually short like `main`, so it keeps its own width and only ellipsizes once
+// it would eat more than ~40% of the row. `right` holds the trailing stats.
+function BranchChip({
+  from,
+  to,
+  right,
+  arrowClass = 'text-emerald-600 dark:text-emerald-400',
+}: {
+  from: string
+  to: string
+  right: ReactNode
+  arrowClass?: string
+}) {
+  return (
+    <div className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl bg-gray-50 dark:bg-gray-900/40 border border-gray-200 dark:border-gray-700 text-xs font-mono">
+      <span className="text-gray-700 dark:text-gray-300 truncate min-w-0" title={from}>{from}</span>
+      <ArrowRight className={`w-3.5 h-3.5 shrink-0 ${arrowClass}`} />
+      <span className="text-gray-700 dark:text-gray-300 shrink-0 truncate max-w-[40%]" title={to}>{to}</span>
+      <span className="ml-auto flex items-center gap-2.5 shrink-0 pl-1">{right}</span>
+    </div>
+  )
+}
+
 function MergeDetails({ details }: { details?: DialogDetails }) {
   const from = details?.fromBranch || '—'
   const to = details?.toBranch || '—'
   const loading = details?.loading ?? false
   return (
     <>
-      <div className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl bg-gray-50 dark:bg-gray-900/40 border border-gray-200 dark:border-gray-700 text-xs font-mono">
-        <span className="text-gray-700 dark:text-gray-300 truncate">{from}</span>
-        <ArrowRight className="w-3.5 h-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
-        <span className="text-gray-700 dark:text-gray-300 truncate">{to}</span>
-        <span className="ml-auto flex items-center gap-2.5 shrink-0">
-          {loading ? (
+      <BranchChip
+        from={from}
+        to={to}
+        right={
+          loading ? (
             <span className="text-gray-400 dark:text-gray-500">…</span>
           ) : (
             <>
               <span className="text-emerald-600 dark:text-emerald-400">+{details?.additions ?? 0}</span>
               <span className="text-red-500 dark:text-red-400">−{details?.deletions ?? 0}</span>
             </>
-          )}
-        </span>
-      </div>
+          )
+        }
+      />
+      {details?.note && <CautionNote note={details.note} />}
+    </>
+  )
+}
+
+function UpdateBaseDetails({ details }: { details?: DialogDetails }) {
+  // base → this branch: the base is merged *into* the agent's branch, so the
+  // arrow points from base to branch (the reverse of MergeDetails).
+  const base = details?.fromBranch || '—'
+  const branch = details?.toBranch || '—'
+  const behind = details?.behind ?? 0
+  return (
+    <>
+      <BranchChip
+        from={base}
+        to={branch}
+        arrowClass="text-amber-600 dark:text-amber-400"
+        right={<span className="text-amber-600 dark:text-amber-400">{behind} behind</span>}
+      />
       {details?.note && <CautionNote note={details.note} />}
     </>
   )
