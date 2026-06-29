@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { api } from '../stores/apiClient'
+import { useServerData } from '../lib/useServerData'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from '../lib/agentViewPrefs'
 import { formatError } from '../api/format_error'
 import type { AgentResponse, RepositoryBranch, ApprovalRequest } from '../api'
@@ -266,7 +267,6 @@ function NetworkEnforcementBadge({ mode }: { mode?: string }) {
 // lets the user allow once / always allow / deny. "Always allow" persists the
 // MCP server or WebFetch host to the trusted config for future launches.
 function ApprovalCard({ agent, projectId, onRefresh }: { agent: AgentResponse; projectId: string | null; onRefresh?: () => void }) {
-  const [approvals, setApprovals] = useState<ApprovalRequest[]>([])
   const [busyId, setBusyId] = useState<string | null>(null)
 
   const isApprovalWait = agent.agent_status?.notification_type === 'policy_approval'
@@ -274,24 +274,13 @@ function ApprovalCard({ agent, projectId, onRefresh }: { agent: AgentResponse; p
   // so a freshly parked call appears and a resolved one disappears promptly.
   const statusStamp = agent.agent_status?.timestamp
 
-  useEffect(() => {
-    if (!projectId || !isApprovalWait) {
-      setApprovals([])
-      return
-    }
-    let cancelled = false
-    api.default
-      .listAgentApprovals(projectId, agent.id)
-      .then((res) => {
-        if (!cancelled) setApprovals(res.approvals ?? [])
-      })
-      .catch(() => {
-        if (!cancelled) setApprovals([])
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [projectId, agent.id, isApprovalWait, statusStamp])
+  // No poll: the gate's status-timestamp bumps (a dep) drive every re-fetch. The
+  // key is null unless we're in a policy_approval wait, so it stays idle otherwise.
+  const { data: approvals, setData: setApprovals } = useServerData<ApprovalRequest[]>(
+    projectId && isApprovalWait ? projectId : null,
+    async (pid) => (await api.default.listAgentApprovals(pid, agent.id)).approvals ?? [],
+    { initial: [], resetOnError: true, deps: [agent.id, statusStamp] },
+  )
 
   if (approvals.length === 0) return null
 
