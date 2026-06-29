@@ -9,8 +9,9 @@
 
 import { useEffect, useState } from 'react'
 import { create } from 'zustand'
+import { persist } from 'zustand/middleware'
 import { Sun, Moon, Monitor } from 'lucide-react'
-import { StorageKeys, readLocal, writeLocal } from './storage'
+import { StorageKeys, readLocal, writeLocal, singleFieldStorage } from './storage'
 
 // An explicit light/dark choice, or `system` to follow the OS
 // `prefers-color-scheme` and react to changes while the app is open.
@@ -47,13 +48,25 @@ interface ThemeState {
   setMode: (mode: ThemeMode) => void
 }
 
-export const useThemeStore = create<ThemeState>((set) => ({
-  mode: loadThemeMode(),
-  setMode: (mode) => {
-    writeLocal(StorageKeys.themeMode, mode)
-    set({ mode })
-  },
-}))
+// persist owns the read-on-init (via the store's storage adapter) and the
+// write-on-set, so setMode just updates state. singleFieldStorage keeps the
+// stored value as the bare mode string under the existing themeMode key (rather
+// than persist's default JSON envelope), reusing loadThemeMode's validation.
+export const useThemeStore = create<ThemeState>()(
+  persist(
+    (set) => ({
+      mode: loadThemeMode(),
+      setMode: (mode) => set({ mode }),
+    }),
+    {
+      name: StorageKeys.themeMode,
+      storage: singleFieldStorage('mode', loadThemeMode, (mode) =>
+        writeLocal(StorageKeys.themeMode, mode),
+      ),
+      partialize: (s) => ({ mode: s.mode }),
+    },
+  ),
+)
 
 // Mount once at the app root: toggles the `dark` class on <html> from the stored
 // mode, and — in `system` mode — keeps tracking the OS preference live.

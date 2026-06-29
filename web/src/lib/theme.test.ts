@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { loadThemeMode } from './theme'
-import { StorageKeys } from './storage'
+import { loadThemeMode, useThemeStore } from './theme'
+import { StorageKeys, readLocal } from './storage'
 
 describe('loadThemeMode', () => {
   beforeEach(() => localStorage.clear())
@@ -33,5 +33,30 @@ describe('loadThemeMode', () => {
     localStorage.setItem('hydra-dark-mode', 'true')
     localStorage.setItem(StorageKeys.themeMode, 'light')
     expect(loadThemeMode()).toBe('light')
+  })
+})
+
+// The store adopts zustand persist via singleFieldStorage, so setMode writes the
+// bare mode string (not persist's JSON envelope) and rehydrate reads it back.
+describe('useThemeStore persistence', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    useThemeStore.persist.rehydrate()
+  })
+
+  it('setMode persists the bare mode string under the themeMode key', () => {
+    useThemeStore.getState().setMode('dark')
+    expect(useThemeStore.getState().mode).toBe('dark')
+    expect(readLocal(StorageKeys.themeMode)).toBe('dark')
+  })
+
+  it('rehydrates a stored mode through loadThemeMode validation', () => {
+    localStorage.setItem(StorageKeys.themeMode, 'light')
+    useThemeStore.persist.rehydrate()
+    expect(useThemeStore.getState().mode).toBe('light')
+
+    localStorage.setItem(StorageKeys.themeMode, 'chartreuse')
+    useThemeStore.persist.rehydrate()
+    expect(useThemeStore.getState().mode).toBe('system')
   })
 })

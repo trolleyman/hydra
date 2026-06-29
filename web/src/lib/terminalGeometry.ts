@@ -10,7 +10,8 @@
 
 import { useEffect } from 'react'
 import { create } from 'zustand'
-import { StorageKeys, readLocal, writeLocal, readJSON, writeJSON } from './storage'
+import { persist } from 'zustand/middleware'
+import { StorageKeys, readLocal, writeLocal, readJSON, writeJSON, singleFieldStorage } from './storage'
 
 // Fallback height (rows) when the user hasn't chosen one and no last-height
 // geometry exists yet — a comfortable default for a typical browser panel.
@@ -66,22 +67,31 @@ export function spawnGeometry(): { cols?: number; rows: number } {
 // A tiny store so the settings control and any future reader stay in sync. The
 // control writes the store (which persists to localStorage); the spawn form reads
 // localStorage directly at spawn time, so it always sees the saved value.
+//
+// persist owns the read-on-init + write-on-set; singleFieldStorage keeps the
+// stored value as the bare rows string under the existing key, reusing
+// loadDefaultRows' validation/clamping — so loadDefaultRows/spawnGeometry can
+// keep reading the raw value directly at spawn time, outside the store.
 interface DefaultRowsState {
   rows: number | null
   setRows: (rows: number | null) => void
 }
 
-export const useDefaultRowsStore = create<DefaultRowsState>((set) => ({
-  rows: loadDefaultRows(),
-  setRows: (rows) => {
-    if (rows === null) {
-      writeLocal(StorageKeys.terminalDefaultRows, null)
-    } else {
-      writeLocal(StorageKeys.terminalDefaultRows, String(rows))
-    }
-    set({ rows })
-  },
-}))
+export const useDefaultRowsStore = create<DefaultRowsState>()(
+  persist(
+    (set) => ({
+      rows: loadDefaultRows(),
+      setRows: (rows) => set({ rows }),
+    }),
+    {
+      name: StorageKeys.terminalDefaultRows,
+      storage: singleFieldStorage('rows', loadDefaultRows, (rows) =>
+        writeLocal(StorageKeys.terminalDefaultRows, rows === null ? null : String(rows)),
+      ),
+      partialize: (s) => ({ rows: s.rows }),
+    },
+  ),
+)
 
 // Convenience hook for the settings control: current value + setter.
 export function useDefaultTerminalRows(): [number | null, (rows: number | null) => void] {

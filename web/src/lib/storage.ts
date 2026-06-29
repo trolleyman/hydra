@@ -221,6 +221,41 @@ export function createShardedStore<T extends object>(
   }
 }
 
+// ── zustand persist glue for global singletons ───────────────────────────────
+// The global preference stores (theme, sidebar, terminal default rows) adopt the
+// zustand `persist` middleware so the store owns read-on-init + write-on-set
+// instead of each setter hand-rolling a writeLocal. But persist's default
+// storage wraps the value in a {state, version} JSON envelope, which would break
+// the human-readable keys and the non-React callers that read the same key
+// directly (e.g. spawnGeometry → loadDefaultRows reads the raw rows at spawn
+// time, outside React). singleFieldStorage bridges the gap: it persists exactly
+// ONE field of the store as a raw, unwrapped value, reusing the module's existing
+// validated reader/writer. So the storage format is unchanged and persist just
+// replaces the manual init/set plumbing.
+
+import type { PersistStorage } from 'zustand/middleware'
+
+// K (the field name) and V (its type) are inferred from the field literal and
+// the read/write pair, so callers pass `partialize: (s) => ({ [field]: s[field] })`
+// to match the persisted slice.
+export function singleFieldStorage<K extends string, V>(
+  field: K,
+  // Current value, with the module's own default applied when nothing is stored.
+  read: () => V,
+  // Persist the value (and clear the key per its own null/default rules).
+  write: (value: V) => void,
+): PersistStorage<{ [P in K]: V }> {
+  return {
+    // Always returns a state (read() supplies the default), so persist rehydrates
+    // the field on boot. version is left unset — there's no envelope to migrate.
+    getItem: () => ({ state: { [field]: read() } as { [P in K]: V } }),
+    setItem: (_name, value) => write(value.state[field]),
+    // The singletons never call persist.clearStorage(); the key's lifecycle is
+    // owned by write() (which removes it for a null/default value).
+    removeItem: () => {},
+  }
+}
+
 // ── Trusted projects ─────────────────────────────────────────────────────────
 // Trust is purely client-side: which projects the user has reviewed and accepted
 // is remembered here, never on the server.
