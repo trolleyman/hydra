@@ -30,10 +30,12 @@ type artifactWSMessage struct {
 }
 
 // artifactClientMessage is a client→server message. Only "refresh" (regenerate
-// one script, like the HTTP refresh param) is supported.
+// one script, like the HTTP refresh param) is supported. An optional side
+// ("left"/"right") regenerates just that side, leaving the other side cached.
 type artifactClientMessage struct {
 	Type   string `json:"type"`
 	Script string `json:"script"`
+	Side   string `json:"side,omitempty"`
 }
 
 // HandleArtifactsWS streams artifact set updates over a WebSocket so the diff
@@ -168,8 +170,9 @@ func (s *Server) streamArtifacts(ctx context.Context, conn *safeConn, projectRoo
 				continue
 			}
 			// Drop the cached result and rebuild — this restarts the generation,
-			// and its progress streams back via the subscription.
-			plan.invalidate(msg.Script)
+			// and its progress streams back via the subscription. An optional side
+			// ("left"/"right") restarts just that side, keeping the other cached.
+			plan.invalidateSide(msg.Script, msg.Side)
 			set := plan.buildSet(s, projectID, msg.Script)
 			_ = writeMsg(artifactWSMessage{Type: "set", Set: &set})
 		}

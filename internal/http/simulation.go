@@ -1303,6 +1303,48 @@ func simArtifactLog() []api.ArtifactLogLine {
 	}
 }
 
+// simArtifactFailedLog is a believable failing build log for the error / partial-
+// failure sets, so the diff viewer documents the new "failure shows the red-
+// bordered terminal" treatment (the script's stderr is the error detail). The
+// tail differs per script so the two failure cases read distinctly.
+func simArtifactFailedLog(script string) []api.ArtifactLogLine {
+	out := func(t string) api.ArtifactLogLine { return api.ArtifactLogLine{Text: t, Stream: api.Stdout} }
+	errLine := func(t string) api.ArtifactLogLine { return api.ArtifactLogLine{Text: t, Stream: api.Stderr} }
+	lines := []api.ArtifactLogLine{
+		out("Rendering Hydra UI for ref a1b2c3d from /checkout"),
+		out("building frontend"),
+		out("+ (/checkout/web) bun install"),
+		out("bun install v1.1.34"),
+		out("120 packages installed [2.31s]"),
+	}
+	switch script {
+	case "dashboard":
+		lines = append(lines,
+			out("booting simulation server"),
+			out("capturing screenshots"),
+			errLine("Error: page.goto: net::ERR_CONNECTION_REFUSED"),
+			errLine("    at http://localhost:3000/dashboard"),
+			errLine("    at /app/scripts/screenshots/take-screenshots.ts:88:14"),
+			errLine("exited 1"),
+		)
+	default:
+		lines = append(lines,
+			out("+ (/checkout) bun x take-screenshots.ts"),
+			errLine("error: Cannot find module 'playwright'"),
+			errLine("    at file:///app/scripts/screenshots/take-screenshots.ts:21:1"),
+			errLine("exited 1"),
+		)
+	}
+	return lines
+}
+
+// simLogURL builds a persisted-log URL for the simulated diff sets. The key is
+// opaque to the real server; here HandleArtifactLog inspects it ("error" → failed
+// log) so the failure sets resolve to a believable red-bordered terminal.
+func simLogURL(script, key string) string {
+	return "/artifacts/projects/sim-project/log?script=" + script + "&key=" + key
+}
+
 // simArtifactSets returns the mock artifact sets for the simulated agent, shared
 // by the HTTP poll handler and the streaming WS handler.
 func simArtifactSets(id string) []api.ArtifactSet {
@@ -1329,22 +1371,29 @@ func simArtifactSets(id string) []api.ArtifactSet {
 			RightLog:      &rightLog,
 			Files:         []api.ArtifactFile{},
 		},
-		// Failure: the error (script stderr tail) renders monospaced; refresh retries.
+		// Failure: both sides failed, so the card surfaces the build log as two
+		// red-bordered terminals (the script's stderr is the error) instead of a
+		// separate error box. refresh retries.
 		{
-			Name:   "storybook",
-			Status: api.ArtifactSetStatusError,
-			Error:  ptr("exited 1: error: Cannot find module 'playwright'\n  at file:///app/scripts/screenshots/take-screenshots.ts:21:1"),
-			Files:  []api.ArtifactFile{},
+			Name:       "storybook",
+			Status:     api.ArtifactSetStatusError,
+			Error:      ptr("exited 1: error: Cannot find module 'playwright'\n  at file:///app/scripts/screenshots/take-screenshots.ts:21:1"),
+			LeftLogUrl: ptr(simLogURL("storybook", "error/left")),
+			RightLogUrl: ptr(simLogURL("storybook", "error/right")),
+			Files:      []api.ArtifactFile{},
 		},
 		// Partial failure: the LEFT (before) side died, but the RIGHT (after) side
-		// rendered, so the card stays "ready" and shows an amber warning plus the
-		// surviving side's images (here surfacing as "added") instead of hiding
-		// everything behind a whole-set error.
+		// rendered, so the card stays "ready" and shows the surviving side's images
+		// (here surfacing as "added"). The build log auto-opens with the before
+		// terminal red-bordered (its stderr is the failure detail) instead of a
+		// separate amber error box.
 		{
-			Name:      "dashboard",
-			Status:    api.ArtifactSetStatusReady,
-			Changed:   true,
-			LeftError: ptr("exited 1: Error: page.goto: net::ERR_CONNECTION_REFUSED at http://localhost:3000/dashboard\n  at /app/scripts/screenshots/take-screenshots.ts:88:14"),
+			Name:        "dashboard",
+			Status:      api.ArtifactSetStatusReady,
+			Changed:     true,
+			LeftError:   ptr("exited 1: Error: page.goto: net::ERR_CONNECTION_REFUSED at http://localhost:3000/dashboard\n  at /app/scripts/screenshots/take-screenshots.ts:88:14"),
+			LeftLogUrl:  ptr(simLogURL("dashboard", "error/left")),
+			RightLogUrl: ptr(simLogURL("dashboard", "commit/a1b2c3d")),
 			Files: []api.ArtifactFile{
 				{
 					Name:       "overview.png",
@@ -1991,9 +2040,16 @@ func (s *SimulationServer) GetRepositoryArtifact(w http.ResponseWriter, r *http.
 // It's addressed by an opaque (script, key) URL the set hands out, so any request
 // just returns the canned generation log.
 func (s *SimulationServer) HandleArtifactLog(w http.ResponseWriter, r *http.Request) {
+	// The key is opaque on the real server; here it lets the failure sets
+	// (storybook / dashboard before) resolve to a believable failing log so the
+	// red-bordered terminal treatment is documented.
+	lines := simArtifactLog()
+	if strings.Contains(r.URL.Query().Get("key"), "error") {
+		lines = simArtifactFailedLog(r.URL.Query().Get("script"))
+	}
 	api.WriteJSON(w, http.StatusOK, struct {
 		Lines []api.ArtifactLogLine `json:"lines"`
-	}{Lines: simArtifactLog()})
+	}{Lines: lines})
 }
 
 func (s *SimulationServer) GetConfig(w http.ResponseWriter, r *http.Request, projectId string, params api.GetConfigParams) {

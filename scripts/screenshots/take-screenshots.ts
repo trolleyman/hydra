@@ -292,6 +292,12 @@ try {
       // Expands the named artifact card (clicks its header) after load — used to
       // document the in-flight card's live, scrollable generation log.
       expandArtifact?: string
+      // Types a query into the artifacts panel's search box after load — used to
+      // document that search narrows like the tag filter (cards stay put, their
+      // header counts reflect the narrowing) rather than removing non-matching
+      // cards or auto-expanding them. Only meaningful on the artifacts (agent-1)
+      // page; pair with imageDiffMode.
+      searchArtifacts?: string
       // Expands the ready "screenshots" card and pins it to the top, then eager-loads
       // every tile image and waits for the masonry to settle — so the capture shows
       // the actual before/after artifacts (the card defaults to collapsed, which
@@ -304,6 +310,13 @@ try {
       // with imageDiffMode 'ab' + showArtifacts — the AB switch and its Highlight
       // toggle only render in that mode, once the masonry tiles exist.
       highlightArtifacts?: boolean
+      // Clicks the first before/after artifact image (after showArtifacts has
+      // expanded the card and decoded the tiles) to open it in the fullscreen
+      // lightbox — documents that clicking an artifact image now opens it semi-
+      // fullscreen (the spawn box's ImageLightbox) instead of in a new tab.
+      // Captures the viewport (the lightbox is a fixed overlay). Pair with
+      // showArtifacts + imageDiffMode 'side-by-side' (a plain, single-image tile).
+      openArtifactImage?: boolean
       // Eager-loads every masonry tile image and waits for the layout to settle
       // before capturing — for the repository artifacts view, whose masonry is shown
       // without an expand step. Keeps the width-driven layout byte-reproducible
@@ -761,6 +774,22 @@ try {
         imageDiffMode: 'side-by-side',
         showArtifacts: true,
       },
+      // Clicking a before/after artifact image opens it in the same Slack-style
+      // fullscreen lightbox the spawn box uses (blurred backdrop, the filename +
+      // pixel dimensions in the caption) rather than a new browser tab. showArtifacts
+      // expands the "screenshots" card and decodes its tiles; openArtifactImage then
+      // clicks the first image to open the overlay. Side-by-side mode so the clicked
+      // tile is a single plain image (left-click), and a viewport capture (the
+      // lightbox is a fixed overlay covering the screen).
+      {
+        name: 'artifact-image-lightbox',
+        path: '/project/sim-project/agent/agent-1',
+        scrollTo: 'Changes',
+        viewport: { width: 1280, height: 1280 },
+        imageDiffMode: 'side-by-side',
+        showArtifacts: true,
+        openArtifactImage: true,
+      },
       // The collapsed artifacts panel: each set is a single header row ("N changed",
       // a spinner while generating, etc.) until clicked open — the default, opt-in
       // state. Documents the at-a-glance overview before any card is expanded.
@@ -880,6 +909,18 @@ try {
         viewport: { width: 1280, height: 1800 },
         imageDiffMode: 'side-by-side',
       },
+      // Search narrows like the tag filter: a query that matches nothing leaves
+      // every card in place (each header count reflecting the narrowing, e.g.
+      // "0/N changed") rather than removing non-matching cards or auto-expanding
+      // them. Documents that the search box and the tag filter behave alike.
+      {
+        name: 'artifact-search-empty',
+        path: '/project/sim-project/agent/agent-1',
+        scrollTo: 'Changes',
+        viewport: { width: 1280, height: 900 },
+        imageDiffMode: 'side-by-side',
+        searchArtifacts: 'zzzznomatch',
+      },
       // The in-flight artifact card expanded to reveal its live generation logs:
       // the two sides (Before / After) build in parallel, each a scrollable,
       // monospaced stdout+stderr stream (stderr in red), with the header showing
@@ -892,6 +933,42 @@ try {
         viewport: { width: 1280, height: 1280 },
         imageDiffMode: 'side-by-side',
         expandArtifact: 'components',
+      },
+      // A wholly-failed artifact card expanded: both sides failed, so instead of a
+      // separate red error box the card surfaces the build log as two red-bordered
+      // terminals (the script's stderr is the failure detail). agent-1's
+      // "storybook" set is the error one (internal/http/simulation.go); the build
+      // log auto-opens on failure, so no extra click is needed.
+      {
+        name: 'artifact-failure',
+        path: '/project/sim-project/agent/agent-1',
+        scrollTo: 'Changes',
+        viewport: { width: 1280, height: 1280 },
+        imageDiffMode: 'side-by-side',
+        expandArtifact: 'storybook',
+      },
+      // A partially-failed card expanded: the before (left) side died but the after
+      // side rendered, so the card stays "ready" — the before terminal is
+      // red-bordered while the after terminal and the surviving side's images still
+      // show below. agent-1's "dashboard" set is the partial-failure one.
+      {
+        name: 'artifact-partial-failure',
+        path: '/project/sim-project/agent/agent-1',
+        scrollTo: 'Changes',
+        viewport: { width: 1280, height: 1400 },
+        imageDiffMode: 'side-by-side',
+        expandArtifact: 'dashboard',
+      },
+      // The split regenerate button's dropdown open, documenting per-side
+      // regeneration (regenerate both / before only / after only). Opened on the
+      // always-present "screenshots" card's header.
+      {
+        name: 'artifact-regen-menu',
+        path: '/project/sim-project/agent/agent-1',
+        scrollTo: 'Changes',
+        viewport: { width: 1280, height: 900 },
+        imageDiffMode: 'side-by-side',
+        click: 'div.rounded-lg:has-text("screenshots") button[aria-label="Regenerate options"]',
       },
       // The video diff viewer (VideoDiffView) shown directly: agent-1's
       // "screenshots" set carries a .webm artifact (loader-animation.webm) the
@@ -1335,6 +1412,15 @@ try {
           }, pg.expandArtifact)
           await settle(page)
         }
+        if (pg.searchArtifacts) {
+          // Type a query into the artifacts panel's search box (the panel exists
+          // once the WS snapshot has populated the "screenshots" card).
+          await page.waitForFunction(() =>
+            Array.from(document.querySelectorAll('button')).some((b) => b.textContent?.includes('screenshots')),
+          )
+          await page.fill('input[placeholder="search"]', pg.searchArtifacts)
+          await settle(page)
+        }
         if (pg.click) {
           // Open a popover (e.g. the branch selector) so the capture documents it.
           await page.click(pg.click)
@@ -1519,6 +1605,22 @@ try {
           })
           await settle(page)
         }
+        if (pg.openArtifactImage) {
+          // Click the first before/after artifact image to open it in the
+          // fullscreen lightbox. showArtifacts has expanded the card and decoded
+          // its tiles, so the masonry images exist; in side-by-side mode each tile
+          // is a plain <img> inside a click-to-open button, so a plain click (no
+          // drag) opens the overlay. Only real images carry an <img> (absent sides
+          // render a placeholder div), so the first match is always openable.
+          await page.click('[data-mkey] img')
+          // Wait for the lightbox caption to show the pixel dimensions ("W × H"),
+          // which only render after the lightbox image's onLoad fires — so the
+          // capture always includes them (same guard as the spawn-box lightbox).
+          await page.waitForFunction(() =>
+            !!document.querySelector('figure figcaption')?.textContent?.includes('×'),
+          )
+          await settle(page)
+        }
         if (pg.highlightArtifacts) {
           // Tick the "Highlight" checkbox on every before/after image tile so the
           // magenta pixel-diff overlay (DiffCanvas) is painted over each changed
@@ -1617,10 +1719,11 @@ try {
           await settle(page)
         }
         const out = join(OUT, `${pg.name}${suffix}.png`)
-        // Scrolled pages, the lightbox (a fixed, viewport-filling overlay),
+        // Scrolled pages, the lightbox (a fixed, viewport-filling overlay) from
+        // either the spawn box (attachImages) or an artifact tile (openArtifactImage),
         // header-focused shots and the hovered info tooltip (a fixed portal)
         // capture the viewport; others capture the full page.
-        await captureWithRetry(page, { path: out, fullPage: !pg.scrollTo && !pg.attachImages && !pg.viewportOnly && !pg.artifactInfo && !pg.videoDiff && !pg.revealSelector })
+        await captureWithRetry(page, { path: out, fullPage: !pg.scrollTo && !pg.attachImages && !pg.openArtifactImage && !pg.viewportOnly && !pg.artifactInfo && !pg.videoDiff && !pg.revealSelector })
         // Emit the tag sidecar (<file>.png.meta, {"tags":[...]}) that the diff
         // viewer reads (internal/artifacts readTagsSidecar). theme + viewport +
         // section are scoped "category::value" labels — the viewer keeps one
