@@ -129,19 +129,107 @@ export function writeLocal(key: string, value: string | null): void {
   } catch { /* ignore */ }
 }
 
+// ── JSON accessors ───────────────────────────────────────────────────────────
+// Most stored values are JSON. readJSON/writeJSON fold the parse/try-catch and
+// the stringify/remove dance into one place so callers stop hand-rolling it.
+
+// Read and JSON-parse a stored value. `validate` refines the parsed value to T —
+// return null to reject malformed or unexpected data. Returns null on a missing
+// key, a parse error, or a rejected value, so callers never need their own
+// try/catch around JSON.parse.
+export function readJSON<T>(key: string, validate: (value: unknown) => T | null): T | null {
+  const raw = readLocal(key)
+  if (raw == null) return null
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return null
+  }
+  return validate(parsed)
+}
+
+// JSON-stringify and store a value, removing the key when value is null/undefined.
+export function writeJSON(key: string, value: unknown): void {
+  writeLocal(key, value == null ? null : JSON.stringify(value))
+}
+
+// ── Per-id (sharded) TTL stores ──────────────────────────────────────────────
+// agentViewPrefs and artifactPrefs each persist one entry per id under a shared
+// prefix, every entry stamped with a last-touched timestamp so a single boot-time
+// pass can prune everything stale. (A single combined blob is deliberately
+// avoided — it would grow unbounded and lose this per-id TTL/prune.) The
+// load/save/patch/prune boilerplate is identical between them, so it lives here;
+// callers supply the value shape T and keep their own typed wrappers around it.
+
+export interface ShardedStore<T extends object> {
+  // The parsed entry (with its `t` stamp), or null if missing, corrupt, or
+  // expired. Relevance checks beyond the TTL (e.g. a saved-under status) are the
+  // caller's job, done on the returned value.
+  load(key: string): (T & { t: number }) | null
+  // Overwrite the entry, refreshing its timestamp.
+  save(key: string, value: T): void
+  // Merge a partial update into the existing entry, refreshing its timestamp.
+  // Read-modify-write so independent writers each touch only their own field
+  // without clobbering the others.
+  patch(key: string, patch: Partial<T>): void
+  // Drop expired or corrupt entries under the prefix. Cheap to call once on boot;
+  // iterating localStorage is fine given the few keys Hydra writes.
+  prune(): void
+}
+
+export function createShardedStore<T extends object>(
+  prefix: string,
+  ttlMs: number,
+  // skipPrefix: a longer prefix that shares `prefix` but holds a different shape
+  // (no timestamp) and so must be left untouched by prune — e.g. the artifact
+  // tag filter, which sits under the artifact prefix.
+  opts: { skipPrefix?: string } = {},
+): ShardedStore<T> {
+  type Stored = T & { t: number }
+  const parse = (key: string): Stored | null =>
+    readJSON<Stored>(key, (v) =>
+      v && typeof v === 'object' && typeof (v as { t?: unknown }).t === 'number' ? (v as Stored) : null,
+    )
+  const fresh = (s: Stored): boolean => Date.now() - s.t <= ttlMs
+  return {
+    load(key) {
+      const s = parse(key)
+      return s && fresh(s) ? s : null
+    },
+    save(key, value) {
+      writeJSON(key, { ...value, t: Date.now() })
+    },
+    patch(key, patch) {
+      // Merge onto whatever is stored (expired or not — the write refreshes `t`).
+      const current = parse(key)
+      writeJSON(key, { ...current, ...patch, t: Date.now() })
+    },
+    prune() {
+      try {
+        const stale: string[] = []
+        for (let i = 0; i < localStorage.length; i++) {
+          const k = localStorage.key(i)
+          if (!k || !k.startsWith(prefix)) continue
+          if (opts.skipPrefix && k.startsWith(opts.skipPrefix)) continue
+          const s = parse(k)
+          if (!s || !fresh(s)) stale.push(k)
+        }
+        for (const k of stale) localStorage.removeItem(k)
+      } catch { /* ignore */ }
+    },
+  }
+}
+
 // ── Trusted projects ─────────────────────────────────────────────────────────
 // Trust is purely client-side: which projects the user has reviewed and accepted
 // is remembered here, never on the server.
 
 export function readTrustedProjects(): Set<string> {
-  const raw = readLocal(StorageKeys.trustedProjects)
-  if (!raw) return new Set()
-  try {
-    const ids = JSON.parse(raw)
-    return Array.isArray(ids) ? new Set(ids.filter((x): x is string => typeof x === 'string')) : new Set()
-  } catch {
-    return new Set()
-  }
+  const ids = readJSON(StorageKeys.trustedProjects, (v) =>
+    Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : null,
+  )
+  return new Set(ids ?? [])
 }
 
 export function isProjectTrusted(projectId: string): boolean {
@@ -152,5 +240,5 @@ export function trustProject(projectId: string): void {
   const ids = readTrustedProjects()
   if (ids.has(projectId)) return
   ids.add(projectId)
-  writeLocal(StorageKeys.trustedProjects, JSON.stringify([...ids]))
+  writeJSON(StorageKeys.trustedProjects, [...ids])
 }
