@@ -6,6 +6,7 @@
 // leak persisted state into each other.
 import '@testing-library/jest-dom/vitest'
 import { afterEach } from 'vitest'
+import { cleanup } from '@testing-library/react'
 
 class MemoryStorage implements Storage {
   private store = new Map<string, string>()
@@ -23,5 +24,9 @@ for (const target of new Set<object>([globalThis, globalThis.window])) {
 }
 
 afterEach(() => {
+  // Unmount anything @testing-library/react rendered (auto-cleanup is off with
+  // vitest globals disabled, so component renders would otherwise pile up in the
+  // shared document.body and trip "multiple elements found" across tests).
+  cleanup()
   localStorage.clear()
 })
