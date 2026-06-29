@@ -69,6 +69,32 @@ test('opening an unread agent clears its unread-changes dot', async ({ page }) =
   await expect(page.getByLabel('unread changes')).toHaveCount(0)
 })
 
+test('a failed API mutation surfaces an error toast', async ({ page }) => {
+  // Exercises the standardized error path (PLAN #61): the rename handler runs
+  // through runWithToast, so a failing updateAgent must raise an error toast
+  // prefixed "Failed to rename agent". The simulation server returns 501 for
+  // updateAgent (UpdateAgent → WriteError "Not implemented in simulation mode"),
+  // so any real rename attempt fails — exactly the case we want to assert on.
+  await page.goto(PROJECT)
+  await agentRow(page, 'Add renameable agent titles').click()
+  await expect(page).toHaveURL(/\/project\/sim-project\/agent\/agent-1\b/)
+
+  // The title is an always-mounted input (AgentTopBar) — read-only until focused.
+  // Clicking enters edit mode; changing the text and pressing Enter calls
+  // saveTitle → updateAgent (→ 501). Located by its stable aria-label (the
+  // "Rename" tooltip drops off once editing starts).
+  const titleInput = page.getByRole('textbox', { name: 'Agent title' })
+  await expect(titleInput).toBeVisible()
+  await titleInput.click()
+  await titleInput.fill('Renamed during an e2e test')
+  await titleInput.press('Enter')
+
+  // The toast (Toaster renders each as role="status") carries the errorPrefix
+  // from runWithToast, regardless of how the underlying message is formatted.
+  const toast = page.getByRole('status').filter({ hasText: 'Failed to rename agent' })
+  await expect(toast).toBeVisible()
+})
+
 test('the project switcher opens and lists the projects', async ({ page }) => {
   await page.goto(PROJECT)
 
