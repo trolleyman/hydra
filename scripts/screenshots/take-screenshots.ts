@@ -304,6 +304,13 @@ try {
       // with imageDiffMode 'ab' + showArtifacts — the AB switch and its Highlight
       // toggle only render in that mode, once the masonry tiles exist.
       highlightArtifacts?: boolean
+      // Clicks the first before/after artifact image (after showArtifacts has
+      // expanded the card and decoded the tiles) to open it in the fullscreen
+      // lightbox — documents that clicking an artifact image now opens it semi-
+      // fullscreen (the spawn box's ImageLightbox) instead of in a new tab.
+      // Captures the viewport (the lightbox is a fixed overlay). Pair with
+      // showArtifacts + imageDiffMode 'side-by-side' (a plain, single-image tile).
+      openArtifactImage?: boolean
       // Eager-loads every masonry tile image and waits for the layout to settle
       // before capturing — for the repository artifacts view, whose masonry is shown
       // without an expand step. Keeps the width-driven layout byte-reproducible
@@ -754,6 +761,22 @@ try {
         viewport: { width: 1280, height: 1280 },
         imageDiffMode: 'side-by-side',
         showArtifacts: true,
+      },
+      // Clicking a before/after artifact image opens it in the same Slack-style
+      // fullscreen lightbox the spawn box uses (blurred backdrop, the filename +
+      // pixel dimensions in the caption) rather than a new browser tab. showArtifacts
+      // expands the "screenshots" card and decodes its tiles; openArtifactImage then
+      // clicks the first image to open the overlay. Side-by-side mode so the clicked
+      // tile is a single plain image (left-click), and a viewport capture (the
+      // lightbox is a fixed overlay covering the screen).
+      {
+        name: 'artifact-image-lightbox',
+        path: '/project/sim-project/agent/agent-1',
+        scrollTo: 'Changes',
+        viewport: { width: 1280, height: 1280 },
+        imageDiffMode: 'side-by-side',
+        showArtifacts: true,
+        openArtifactImage: true,
       },
       // The collapsed artifacts panel: each set is a single header row ("N changed",
       // a spinner while generating, etc.) until clicked open — the default, opt-in
@@ -1513,6 +1536,22 @@ try {
           })
           await settle(page)
         }
+        if (pg.openArtifactImage) {
+          // Click the first before/after artifact image to open it in the
+          // fullscreen lightbox. showArtifacts has expanded the card and decoded
+          // its tiles, so the masonry images exist; in side-by-side mode each tile
+          // is a plain <img> inside a click-to-open button, so a plain click (no
+          // drag) opens the overlay. Only real images carry an <img> (absent sides
+          // render a placeholder div), so the first match is always openable.
+          await page.click('[data-mkey] img')
+          // Wait for the lightbox caption to show the pixel dimensions ("W × H"),
+          // which only render after the lightbox image's onLoad fires — so the
+          // capture always includes them (same guard as the spawn-box lightbox).
+          await page.waitForFunction(() =>
+            !!document.querySelector('figure figcaption')?.textContent?.includes('×'),
+          )
+          await settle(page)
+        }
         if (pg.highlightArtifacts) {
           // Tick the "Highlight" checkbox on every before/after image tile so the
           // magenta pixel-diff overlay (DiffCanvas) is painted over each changed
@@ -1611,10 +1650,11 @@ try {
           await settle(page)
         }
         const out = join(OUT, `${pg.name}${suffix}.png`)
-        // Scrolled pages, the lightbox (a fixed, viewport-filling overlay),
+        // Scrolled pages, the lightbox (a fixed, viewport-filling overlay) from
+        // either the spawn box (attachImages) or an artifact tile (openArtifactImage),
         // header-focused shots and the hovered info tooltip (a fixed portal)
         // capture the viewport; others capture the full page.
-        await captureWithRetry(page, { path: out, fullPage: !pg.scrollTo && !pg.attachImages && !pg.viewportOnly && !pg.artifactInfo && !pg.videoDiff && !pg.revealSelector })
+        await captureWithRetry(page, { path: out, fullPage: !pg.scrollTo && !pg.attachImages && !pg.openArtifactImage && !pg.viewportOnly && !pg.artifactInfo && !pg.videoDiff && !pg.revealSelector })
         // Emit the tag sidecar (<file>.png.meta, {"tags":[...]}) that the diff
         // viewer reads (internal/artifacts readTagsSidecar). theme + viewport +
         // section are scoped "category::value" labels — the viewer keeps one
