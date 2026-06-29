@@ -4,14 +4,14 @@ import { api } from '../stores/apiClient'
 import { useProjectStore } from '../stores/projectStore'
 import { useAgentStore, ARCHIVED_PAGE_SIZE } from '../stores/agentStore'
 import { usePageActive } from '../lib/usePageActive'
-import { startVisibilityPolling } from '../lib/visibilityPolling'
+import { useServerData } from '../lib/useServerData'
 import { useEventStream } from '../lib/useEventStream'
 
 // Fallback poll interval used as a safety net behind the events WebSocket: pushes
 // drive refetches immediately, but a slow periodic poll still recovers if the
 // socket is briefly down or an event is missed. Much lighter than the old 5–10s.
 const EVENT_FALLBACK_MS = 30_000
-import type { ProjectInfo, AgentResponse, RepositoryPushStatus } from '../api'
+import type { ProjectInfo, AgentResponse, RepositoryPushStatus, StatusResponse } from '../api'
 import { ApiError, ErrorResponse } from '../api'
 import { formatError } from '../api/format_error'
 import { ChevronDown, ChevronRight, Folder, FolderGit2, FolderOpen, Plus, Settings, Check, X, LoaderCircle, AlertTriangle, PanelLeftClose, PanelLeftOpen, RotateCw, ArrowUp, ArrowDown, RefreshCw } from 'lucide-react'
@@ -90,35 +90,17 @@ function forwardSidebarWheelToMain(e: WheelEvent<HTMLDivElement>) {
 // the project name) when any supervised service has failed. Tooltip lists them.
 
 function ServiceHealthWarning({ projectId }: { projectId: string | null }) {
-  const [failed, setFailed] = useState<string[]>([])
-  const refetchRef = useRef<() => void>(() => {})
-
-  useEffect(() => {
-    setFailed([])
-    if (!projectId) {
-      refetchRef.current = () => {}
-      return
-    }
-    let active = true
-    const tick = async () => {
-      try {
-        const resp = await api.default.getServices(projectId)
-        if (active) setFailed(resp.services.filter((s) => s.state === 'failed').map((s) => s.name))
-      } catch {
-        // best-effort
-      }
-    }
-    refetchRef.current = () => void tick()
-    const stop = startVisibilityPolling(() => void tick(), EVENT_FALLBACK_MS)
-    return () => {
-      active = false
-      refetchRef.current = () => {}
-      stop()
-    }
-  }, [projectId])
+  const { data: failed, refetch } = useServerData<string[]>(
+    projectId,
+    async (id) => {
+      const resp = await api.default.getServices(id)
+      return resp.services.filter((s) => s.state === 'failed').map((s) => s.name)
+    },
+    { intervalMs: EVENT_FALLBACK_MS, initial: [] },
+  )
 
   // Refresh the failed-service indicator the instant a service's state changes.
-  useEventStream(projectId, { onServicesChanged: () => refetchRef.current() })
+  useEventStream(projectId, { onServicesChanged: refetch })
 
   if (failed.length === 0) return null
   return (
@@ -601,37 +583,17 @@ function RootLayout() {
   useApplyTheme()
 
   // Agent list for the selected project: refreshed by the events stream (below),
-  // with a slow visibility-gated poll as a fallback. refetchAgentsRef lets the
-  // event handler trigger a fetch without restarting this effect.
-  const refetchAgentsRef = useRef<() => void>(() => {})
-  useEffect(() => {
-    if (!currentProjectId) {
-      setAgents([])
-      refetchAgentsRef.current = () => {}
-      return
-    }
+  // with a slow visibility-gated poll as a fallback. The data lands in the agent
+  // store (onData) rather than local state; `refetchAgents` is wired into the
+  // events stream so a push triggers a fetch without restarting the hook.
+  const { refetch: refetchAgents } = useServerData<AgentResponse[]>(
+    currentProjectId,
+    (id) => api.default.listAgents(id),
+    { intervalMs: EVENT_FALLBACK_MS, initial: [], onData: setAgents },
+  )
 
-    let cancelled = false
-
-    async function fetchAgents() {
-      try {
-        const result = await api.default.listAgents(currentProjectId!)
-        if (!cancelled) setAgents(result)
-      } catch {
-        // ignore silently
-      }
-    }
-
-    refetchAgentsRef.current = () => void fetchAgents()
-    const stop = startVisibilityPolling(fetchAgents, EVENT_FALLBACK_MS)
-    return () => {
-      cancelled = true
-      refetchAgentsRef.current = () => {}
-      stop()
-    }
-  }, [currentProjectId, setAgents])
-
-  // Clear agents when project deselected
+  // Clear agents when project deselected (useServerData resets only its own local
+  // copy; the live list lives in the store, so it's cleared here).
   useEffect(() => {
     if (!currentProjectId) setAgents([])
   }, [currentProjectId, setAgents])
@@ -639,42 +601,19 @@ function RootLayout() {
   // Push/pull status for the project's current branch: drives the sidebar Sync
   // button, which shows how far ahead/behind the remote the branch is and, when
   // clicked, pulls then pushes. Refreshed on the same slow poll as the agent
-  // list, plus on demand after a sync or when the events stream reports a change.
-  // refetchPushStatusRef lets those triggers fire a fetch without restarting it.
-  const [pushStatus, setPushStatus] = useState<RepositoryPushStatus | null>(null)
+  // list, plus on demand after a sync or when the events stream reports a change
+  // (via the hook's stable `refetchPushStatus`).
   // Track which projects have an in-flight sync, keyed by project id, so the
   // spinner/disabled state stays tied to the project the sync was started for
   // rather than bleeding onto whatever project/tab the sidebar shows next.
   const [syncingProjects, setSyncingProjects] = useState<ReadonlySet<string>>(() => new Set())
   const syncing = currentProjectId ? syncingProjects.has(currentProjectId) : false
-  const refetchPushStatusRef = useRef<() => void>(() => {})
-  useEffect(() => {
-    if (!currentProjectId) {
-      setPushStatus(null)
-      refetchPushStatusRef.current = () => {}
-      return
-    }
-
-    let cancelled = false
-    const projectId = currentProjectId
-
-    async function fetchPushStatus() {
-      try {
-        const result = await api.default.getRepositoryPushStatus(projectId)
-        if (!cancelled) setPushStatus(result)
-      } catch {
-        if (!cancelled) setPushStatus(null)
-      }
-    }
-
-    refetchPushStatusRef.current = () => void fetchPushStatus()
-    const stop = startVisibilityPolling(fetchPushStatus, EVENT_FALLBACK_MS)
-    return () => {
-      cancelled = true
-      refetchPushStatusRef.current = () => {}
-      stop()
-    }
-  }, [currentProjectId])
+  const { data: pushStatus, setData: setPushStatus, refetch: refetchPushStatus } =
+    useServerData<RepositoryPushStatus | null>(
+      currentProjectId,
+      (id) => api.default.getRepositoryPushStatus(id),
+      { intervalMs: EVENT_FALLBACK_MS, initial: null, resetOnError: true },
+    )
 
   const handleSync = useCallback(async () => {
     if (!currentProjectId || syncingProjects.has(currentProjectId)) return
@@ -707,9 +646,9 @@ function RootLayout() {
         next.delete(projectId)
         return next
       })
-      refetchPushStatusRef.current()
+      refetchPushStatus()
     }
-  }, [currentProjectId, syncingProjects])
+  }, [currentProjectId, syncingProjects, refetchPushStatus])
 
   // Archived (killed/merged) history list. Loaded lazily and paginated for
   // infinite scroll — it is historical, so unlike the live list it is not
@@ -805,76 +744,65 @@ function RootLayout() {
   }, [anyUnread, titleProjectName, titleAgentName, onRepository])
 
   // System status + project list: refreshed by the events stream, with a slow
-  // visibility-gated fallback poll. refetchStatusRef lets the event handler
-  // trigger a refresh without restarting the effect (which owns the uptime ticker).
-  const refetchStatusRef = useRef<() => void>(() => {})
-  useEffect(() => {
-    let cancelled = false
-    let ticker: ReturnType<typeof setInterval> | null = null
-
-    async function fetchStatus() {
-      try {
-        const status = await api.default.getStatus()
-        if (cancelled) return
-        setSystemStatus(status)
-        setDevelopment(status.development ?? false)
-        if (status.uptime_seconds != null) {
-          if (spawnedAt.current === null) {
-            spawnedAt.current = Date.now() - status.uptime_seconds * 1000
-            setTick((n) => n + 1)
-          }
-          if (ticker === null) {
-            ticker = setInterval(() => setTick((n) => n + 1), 1000)
-          }
-        }
-        try {
-          const ps = await api.default.listProjects()
-          if (cancelled) return
-          setProjects(ps)
-          const currentId = useProjectStore.getState().selectedProjectId
-          if (currentId == null || !ps.some((p) => p.id === currentId)) {
-            let newId: string | null = null
-            if (status.default_project_id != null && ps.some((p) => p.id === status.default_project_id)) {
-              newId = status.default_project_id
-            } else if (ps.length > 0) {
-              newId = ps[0].id
-            }
-            if (newId != null) {
-              // Just record the selection; the redirect effect below moves the
-              // UI onto the project's page if we're sitting on the root route.
-              setSelectedProjectId(newId)
-            }
-          }
-        } catch {
-          // ignore project fetch errors silently
-        }
-      } catch {
-        // ignore errors silently
+  // visibility-gated fallback poll. The fetch lands the status in the store and,
+  // chained off it, refreshes the project list + auto-selects a project on a cold
+  // load. The once-armed uptime ticker is a separate effect below.
+  const [uptimeTracking, setUptimeTracking] = useState(false)
+  const handleStatus = useCallback((status: StatusResponse) => {
+    setSystemStatus(status)
+    setDevelopment(status.development ?? false)
+    if (status.uptime_seconds != null) {
+      if (spawnedAt.current === null) {
+        spawnedAt.current = Date.now() - status.uptime_seconds * 1000
+        setTick((n) => n + 1)
       }
+      setUptimeTracking(true)
     }
+    api.default.listProjects().then((ps) => {
+      setProjects(ps)
+      const currentId = useProjectStore.getState().selectedProjectId
+      if (currentId == null || !ps.some((p) => p.id === currentId)) {
+        let newId: string | null = null
+        if (status.default_project_id != null && ps.some((p) => p.id === status.default_project_id)) {
+          newId = status.default_project_id
+        } else if (ps.length > 0) {
+          newId = ps[0].id
+        }
+        // Just record the selection; the redirect effect below moves the UI onto
+        // the project's page if we're sitting on the root route.
+        if (newId != null) setSelectedProjectId(newId)
+      }
+    }).catch(() => {
+      // ignore project fetch errors silently
+    })
+  }, [setProjects, setSelectedProjectId, setSystemStatus])
 
-    refetchStatusRef.current = () => void fetchStatus()
-    const stop = startVisibilityPolling(fetchStatus, EVENT_FALLBACK_MS)
-    return () => {
-      cancelled = true
-      refetchStatusRef.current = () => {}
-      stop()
-      if (ticker !== null) clearInterval(ticker)
-    }
-  }, [setProjects, setSelectedProjectId])
+  const { refetch: refetchStatus } = useServerData<StatusResponse>(
+    'system-status',
+    () => api.default.getStatus(),
+    { intervalMs: EVENT_FALLBACK_MS, onData: handleStatus },
+  )
+
+  // Uptime ticker: once the server reports an uptime, re-render every second so
+  // the "up N minutes" label advances. Armed once and runs until unmount.
+  useEffect(() => {
+    if (!uptimeTracking) return
+    const ticker = setInterval(() => setTick((n) => n + 1), 1000)
+    return () => clearInterval(ticker)
+  }, [uptimeTracking])
 
   // Server-push: refetch agents / projects the moment the daemon signals a change,
   // instead of relying on the (now slow) fallback polls above. The stream also
   // fires once on connect, so selecting a project loads it immediately.
   useEventStream(currentProjectId, {
     onAgentsChanged: () => {
-      refetchAgentsRef.current()
+      refetchAgents()
       // A merge advances the project's branch, changing what's left to push.
-      refetchPushStatusRef.current()
+      refetchPushStatus()
     },
-    onProjectsChanged: () => refetchStatusRef.current(),
+    onProjectsChanged: () => refetchStatus(),
     // A background fetch found the branch's ahead/behind changed.
-    onPushStatusChanged: () => refetchPushStatusRef.current(),
+    onPushStatusChanged: () => refetchPushStatus(),
   })
 
   // When the app lands on the bare root path ("/") but a project is already

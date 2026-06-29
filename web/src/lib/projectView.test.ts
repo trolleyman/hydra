@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { loadProjectView, saveProjectView, type ProjectView } from './projectView'
-import { projectViewKey, selectedAgentKey, readLocal } from './storage'
+import { projectViewKey } from './storage'
 
 describe('projectView', () => {
   beforeEach(() => {
@@ -54,50 +54,14 @@ describe('projectView', () => {
     })
   })
 
-  describe('legacy selected-agent migration', () => {
-    it('migrates the legacy key to an agent view on load', () => {
-      localStorage.setItem(selectedAgentKey('proj-legacy'), 'legacy-agent-id')
-
-      expect(loadProjectView('proj-legacy')).toEqual({
-        kind: 'agent',
-        agentId: 'legacy-agent-id',
-      })
-    })
-
-    it('writes the migrated view under the new key and clears the legacy key', () => {
-      localStorage.setItem(selectedAgentKey('proj-legacy'), 'legacy-agent-id')
-
-      loadProjectView('proj-legacy')
-
-      // New key now holds the migrated agent view.
-      expect(JSON.parse(readLocal(projectViewKey('proj-legacy'))!)).toEqual({
-        kind: 'agent',
-        agentId: 'legacy-agent-id',
-      })
-      // Legacy key has been removed.
-      expect(readLocal(selectedAgentKey('proj-legacy'))).toBeNull()
-    })
-
-    it('a current view takes precedence over the legacy key', () => {
-      saveProjectView('proj-legacy', { kind: 'repository', path: 'feature' })
-      localStorage.setItem(selectedAgentKey('proj-legacy'), 'legacy-agent-id')
-
-      expect(loadProjectView('proj-legacy')).toEqual({
-        kind: 'repository',
-        path: 'feature',
-      })
-      // Legacy key is left untouched since no migration ran.
-      expect(readLocal(selectedAgentKey('proj-legacy'))).toBe('legacy-agent-id')
-    })
-
-    it('the migration persists so a subsequent load returns the same view', () => {
-      localStorage.setItem(selectedAgentKey('proj-legacy'), 'legacy-agent-id')
-
-      loadProjectView('proj-legacy')
-      expect(loadProjectView('proj-legacy')).toEqual({
-        kind: 'agent',
-        agentId: 'legacy-agent-id',
-      })
+  // Regression guard for PLAN #64c: the legacy `hydra-selected-agent-<id>` key
+  // used to be migrated into a project-view entry on first read. That migration
+  // window has passed and the code is gone, so a lingering legacy key must now be
+  // ignored entirely — no migration, no resurrection of the old selection.
+  describe('legacy selected-agent key is no longer migrated', () => {
+    it('ignores a lingering legacy key and returns the default view', () => {
+      localStorage.setItem('hydra-selected-agent-proj-legacy', 'legacy-agent-id')
+      expect(loadProjectView('proj-legacy')).toEqual({ kind: 'project' })
     })
   })
 
@@ -131,15 +95,6 @@ describe('projectView', () => {
     it('returns the default for a repository view with a non-string path', () => {
       localStorage.setItem(projectViewKey('proj-bad'), JSON.stringify({ kind: 'repository', path: 5 }))
       expect(loadProjectView('proj-bad')).toEqual({ kind: 'project' })
-    })
-
-    it('falls back to a legacy migration when the stored view is garbage', () => {
-      localStorage.setItem(projectViewKey('proj-bad'), 'not json')
-      localStorage.setItem(selectedAgentKey('proj-bad'), 'legacy-agent-id')
-      expect(loadProjectView('proj-bad')).toEqual({
-        kind: 'agent',
-        agentId: 'legacy-agent-id',
-      })
     })
   })
 })
