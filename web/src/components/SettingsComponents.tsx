@@ -273,6 +273,9 @@ export function ConfigForm({
   const sandbox: SandboxConfig = value.sandbox ?? {}
   const network: NetworkConfig = sandbox.network ?? {}
   const networkEnabled = network.enabled !== false // default on
+  // Mirrors the backend's inference: filtering is on when explicitly enabled, or
+  // (when the toggle is unset) whenever an allow-list is present.
+  const filterEnabled = network.filter_enabled ?? (network.allowed_hosts?.length ?? 0) > 0
 
   function updateSandbox(patch: Partial<SandboxConfig>) {
     const next: SandboxConfig = { ...sandbox, ...patch }
@@ -380,8 +383,7 @@ export function ConfigForm({
                 Network Access
               </label>
               <InfoTooltip title="Network Access">
-                <p>When off, the agent runs with no network at all. When on, all hosts are reachable.</p>
-                <p className="mt-1.5 text-gray-400 italic">Per-host filtering via "allowed hosts" is reserved but not yet enforced.</p>
+                <p>When off, the agent runs with no network at all. When on, outbound access is allowed — unrestricted by default, or limited to an allow-list if you enable host filtering below.</p>
               </InfoTooltip>
             </div>
             <label className="relative inline-flex items-center cursor-pointer">
@@ -395,16 +397,40 @@ export function ConfigForm({
             </label>
           </div>
           {networkEnabled && (
-            <div className="space-y-1">
-              <p className="text-[11px] text-gray-400 dark:text-gray-500 ml-0.5">
-                Allowed hosts <span className="italic">(reserved — not yet enforced)</span>
-              </p>
-              <PathListEditor
-                paths={network.allowed_hosts ?? []}
-                onChange={(allowed_hosts) => updateNetwork({ allowed_hosts })}
-                placeholder="e.g. api.anthropic.com"
-                addLabel="Add Host"
-              />
+            <div className="space-y-2 ml-0.5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5">
+                  <label className="text-[11px] font-semibold text-gray-400 dark:text-gray-500">Filter outbound hosts</label>
+                  <InfoTooltip title="Filter outbound hosts">
+                    <p>When on, only the hosts you list below are reachable (an empty list blocks all egress) — a deny-by-default allow-list enforced by a per-head egress proxy. When off, every host is reachable.</p>
+                    <p className="mt-1.5 text-gray-400 italic">Enforcement is a hard network-namespace boundary where the host supports it (pasta + nft), otherwise advisory proxy filtering. The running head shows which mode is active.</p>
+                  </InfoTooltip>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="sr-only peer"
+                    checked={filterEnabled}
+                    onChange={(e) => updateNetwork({ filter_enabled: e.target.checked })}
+                  />
+                  <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
+                </label>
+              </div>
+              {filterEnabled ? (
+                <div className="space-y-1">
+                  <p className="text-[11px] text-gray-400 dark:text-gray-500">
+                    Allowed hosts {(network.allowed_hosts?.length ?? 0) === 0 && <span className="italic text-amber-600 dark:text-amber-400">(empty — all egress blocked)</span>}
+                  </p>
+                  <PathListEditor
+                    paths={network.allowed_hosts ?? []}
+                    onChange={(allowed_hosts) => updateNetwork({ allowed_hosts })}
+                    placeholder="e.g. api.anthropic.com"
+                    addLabel="Add Host"
+                  />
+                </div>
+              ) : (
+                <p className="text-[11px] text-gray-400 dark:text-gray-500 italic">All hosts reachable.</p>
+              )}
             </div>
           )}
         </div>

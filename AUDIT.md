@@ -63,9 +63,13 @@ watch; (2) add an MCP allow-list the user controls; (3) get real egress control
   the agent authenticates from them, and `~/.config/gh` is **restored read-only**
   (GitHub OAuth token).
 - **Network:** defaults to **enabled** (`ResolveSandboxOptions`,
-  `config.go:587`). `AllowedHosts` is parsed from config but **never enforced** —
-  `sandbox.go:36` calls it "reserved for a future proxy-based host allow-list,"
-  and neither `linux.go` nor `darwin.go` reads it. So network is all-or-nothing.
+  `config.go:587`). `AllowedHosts` was parsed from config but **never enforced** at
+  audit time — `sandbox.go:36` called it "reserved for a future proxy-based host
+  allow-list," and neither `linux.go` nor `darwin.go` read it, so network was
+  all-or-nothing. *(Now fixed: `internal/egress` enforces `AllowedHosts` via a
+  per-head filtering proxy — hard netns boundary where pasta+nft are available,
+  advisory proxy otherwise. See the implementation-status callout under
+  "Recommendations.")*
 - **MCP:** not handled anywhere. No code references MCP. Whatever the seeded
   `~/.claude.json` or a branch's `.mcp.json` declares is loaded, and under
   skip-permissions it is auto-trusted.

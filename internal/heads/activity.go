@@ -33,6 +33,16 @@ func enrichAgentStatus(projectRoot, id string, info *api.AgentStatusInfo) {
 		return
 	}
 
+	// The security gate writes notification_type=policy_approval into status.json
+	// when it parks a tool call (so the UI shows the approval card). The JSON
+	// status poller persists only the status string, not this side channel, so
+	// computeAgentStatus loses it — recover it straight from status.json here.
+	if info.NotificationType == nil {
+		if s := ReadAgentStatus(projectRoot, id); s != nil && s.NotificationType != nil {
+			info.NotificationType = s.NotificationType
+		}
+	}
+
 	activity, lastMessage, lastMessageIsQuestion := readStatusLogTail(projectRoot, id)
 	if info.Status == api.Running && activity != "" {
 		info.Activity = &activity

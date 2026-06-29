@@ -8,7 +8,11 @@ export type NetworkConfig = {
      */
     enabled?: boolean | null;
     /**
-     * Reserved for a future proxy-based host allow-list (not yet enforced)
+     * Whether the allowed_hosts list is enforced (deny-by-default egress). Null/unset = inferred (on when allowed_hosts is non-empty); true = only allowed_hosts reachable (empty list blocks all egress); false = allow every host.
+     */
+    filter_enabled?: boolean | null;
+    /**
+     * Outbound host allow-list (exact host or *.suffix), enforced by the egress proxy when filter_enabled is on.
      */
     allowed_hosts?: Array<string> | null;
 };

@@ -71,6 +71,23 @@ func TestEnrichAgentStatusRunning(t *testing.T) {
 	}
 }
 
+func TestEnrichAgentStatusRecoversNotificationType(t *testing.T) {
+	root := t.TempDir()
+	id := "abc"
+	nt := "policy_approval"
+	// The gate writes status.json with notification_type=policy_approval; the JSON
+	// poller persists only the status string, so enrichAgentStatus must recover the
+	// side channel from status.json for the UI approval card to render.
+	if err := WriteAgentStatus(root, id, &api.AgentStatusInfo{Status: api.NeedsInput, NotificationType: &nt, Timestamp: "t"}); err != nil {
+		t.Fatal(err)
+	}
+	info := &api.AgentStatusInfo{Status: api.NeedsInput}
+	enrichAgentStatus(root, id, info)
+	if info.NotificationType == nil || *info.NotificationType != "policy_approval" {
+		t.Fatalf("notification_type = %v, want policy_approval", info.NotificationType)
+	}
+}
+
 func TestEnrichAgentStatusStoppedSkipped(t *testing.T) {
 	root := t.TempDir()
 	id := "abc"

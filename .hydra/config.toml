@@ -16,6 +16,9 @@ writable_paths = ["~/.cache/go", "~/.bun/install/cache", "~/.cache/goimports", "
 ## extra paths hidden in the sandbox (added to the built-in defaults).
 # masked_paths = ["~/.ssh", "~/.aws", "~/.azure", "~/.gnupg", "~/.docker", "~/.kube", "~/.password-store", "~/.config", "~/.netrc", "~/.git-credentials", "~/.npmrc", "~/.pypirc", "~/.zsh_history", "~/.bash_history", "~/.sh_history", "~/.config/mise/config.local.toml", "~/.dotfiles/mise/config.local.toml"]
 ## paths re-exposed read-only after a masked parent (added to the built-in defaults).
+# ~/.config/go holds `go env -w` settings (GOMODCACHE=~/.cache/go/pkg/mod,
+# GOCACHE=~/.cache/go/build, GOPATH=~/.local/share/go); ~/.config is masked by
+# default, so re-expose it or the sandboxed `go` falls back to ~/go/pkg/mod (not writable).
 restore_ro = ["~/.config/go"]
 ## worktree-relative paths mounted copy-on-write from the project root (read source, writes kept per-head; e.g. large gitignored build dirs).
 # cow_paths = []
@@ -27,7 +30,9 @@ restore_ro = ["~/.config/go"]
 [sandbox.network]
 ## allow outbound network access from the sandbox (default true).
 # enabled = true
-## outbound host allow-list enforced by the egress proxy when set (exact host or *.suffix); empty = all hosts (subject to network.enabled).
+## enforce the allowed_hosts list (deny-by-default egress). Unset = on when allowed_hosts is non-empty; true = only allowed_hosts reachable (empty list blocks all egress); false = allow every host.
+# filter_enabled = false
+## outbound host allow-list (exact host or *.suffix), enforced by the egress proxy when filter_enabled is on. Empty + filtering on = block all egress; filtering off = all hosts reachable.
 # allowed_hosts = []
 
 [policy]

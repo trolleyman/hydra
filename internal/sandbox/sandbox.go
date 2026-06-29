@@ -33,8 +33,14 @@ type NetworkPolicy struct {
 	// Enabled allows outbound network access when true. When false the agent
 	// runs with no network at all.
 	Enabled bool
-	// AllowedHosts is reserved for a future proxy-based host allow-list. It is
-	// not enforced yet; an empty list with Enabled=true means "all hosts".
+	// FilterHosts, when true, enforces AllowedHosts as a deny-by-default allow-list
+	// (only listed hosts are reachable; an empty list blocks all egress). When
+	// false, every host is reachable (subject to Enabled). Resolved from the
+	// network config's filter_enabled toggle, defaulting to "on when AllowedHosts
+	// is non-empty".
+	FilterHosts bool
+	// AllowedHosts is the outbound host allow-list enforced by the egress proxy
+	// when FilterHosts is true (exact host or *.suffix wildcard).
 	AllowedHosts []string
 }
 

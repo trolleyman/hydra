@@ -2073,6 +2073,13 @@ func (s *SimulationServer) GetConfig(w http.ResponseWriter, r *http.Request, pro
 		resp.Defaults.Sandbox = &api.SandboxConfig{
 			PreSpawnScript: ptr("#!/bin/bash\nset -euo pipefail\ncp -r \"$HYDRA_PROJECT_ROOT/pipeline/out\" \"$HYDRA_WORKTREE/pipeline/out\"\n"),
 			PreExitScript:  ptr("source \"$HYDRA_WORKTREE/.hydra/emu.env\" 2>/dev/null && scripts/emu-claim-slot.sh release\n"),
+			// Host filtering on with a few allow-listed hosts — drives the
+			// settings-host-filter screenshot (the deny-by-default egress toggle +
+			// the allow-list editor populated).
+			Network: &api.NetworkConfig{
+				FilterEnabled: ptr(true),
+				AllowedHosts:  ptr([]string{"api.anthropic.com", "github.com", "*.githubusercontent.com", "registry.npmjs.org"}),
+			},
 		}
 		resp.Artifacts = &[]api.ArtifactScript{
 			{Name: "screenshots", Command: "bun run screenshots.ts", TimeoutSec: ptr(900)},
