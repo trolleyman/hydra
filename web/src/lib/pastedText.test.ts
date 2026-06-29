@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest'
-import { countLines, detectCodeLanguage, fenceCode, getClipboardText } from './pastedText'
+import {
+  countLines,
+  detectCodeLanguage,
+  fenceCode,
+  getClipboardText,
+  isLargePaste,
+  PASTE_CHAR_THRESHOLD,
+} from './pastedText'
 
 // A throwaway DataTransfer stand-in backed by a type→string map.
 function fakeDt(data: Record<string, string>): DataTransfer {
@@ -18,6 +25,24 @@ describe('countLines', () => {
   })
   it('ignores a single trailing newline', () => {
     expect(countLines('a\nb\n')).toBe(2)
+  })
+})
+
+describe('isLargePaste', () => {
+  it('is false for a short, narrow paste', () => {
+    expect(isLargePaste('one\ntwo\nthree')).toBe(false)
+  })
+  it('is false at exactly the line threshold (8 lines)', () => {
+    expect(isLargePaste('1\n2\n3\n4\n5\n6\n7\n8')).toBe(false)
+  })
+  it('is true just over the line threshold (9 lines)', () => {
+    expect(isLargePaste('1\n2\n3\n4\n5\n6\n7\n8\n9')).toBe(true)
+  })
+  it('is true for a dense few-line blob over the char threshold', () => {
+    expect(isLargePaste('x'.repeat(PASTE_CHAR_THRESHOLD + 1))).toBe(true)
+  })
+  it('is false for a single line at the char threshold', () => {
+    expect(isLargePaste('x'.repeat(PASTE_CHAR_THRESHOLD))).toBe(false)
   })
 })
 

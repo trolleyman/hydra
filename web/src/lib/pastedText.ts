@@ -1,14 +1,26 @@
 // Helpers for the spawn composer's "attach large text pastes" behavior.
 //
-// A paste taller than PASTE_LINE_THRESHOLD lines is turned into a file
-// attachment rather than dumped into the textarea (it would otherwise bury the
-// task description). Pasting the SAME block again is read as "no, I really want
-// it inline" and the text is inserted for real — wrapped in a fenced code block
-// when the clipboard says it's code (see detectCodeLanguage). SpawnForm owns
-// that state machine; this module just provides the pure clipboard helpers.
+// A paste over PASTE_LINE_THRESHOLD lines or PASTE_CHAR_THRESHOLD characters
+// (see isLargePaste) is turned into a file attachment rather than dumped into
+// the textarea (it would otherwise bury the task description). Pasting the SAME
+// block again is read as "no, I really want it inline" and the text is inserted
+// for real — wrapped in a fenced code block when the clipboard says it's code
+// (see detectCodeLanguage). A Shift-held paste (Ctrl/Cmd+Shift+V) bypasses all
+// of this and inserts literally. SpawnForm owns that state machine; this module
+// just provides the pure clipboard helpers.
 
 // Pastes with MORE than this many lines are attached instead of inlined.
 export const PASTE_LINE_THRESHOLD = 8
+
+// …or more than this many characters, so a dense few-line blob (a minified
+// bundle, a long token, a wide single line) is lifted out of the box too.
+export const PASTE_CHAR_THRESHOLD = 1000
+
+// Whether a paste is big enough to attach rather than inline: over the line OR
+// the character threshold.
+export function isLargePaste(text: string): boolean {
+  return countLines(text) > PASTE_LINE_THRESHOLD || text.length > PASTE_CHAR_THRESHOLD
+}
 
 // The plain-text representation of a clipboard/drag payload, '' if none.
 export function getClipboardText(dt: DataTransfer | null): string {

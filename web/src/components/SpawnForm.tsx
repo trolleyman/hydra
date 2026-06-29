@@ -13,7 +13,7 @@ import { StorageKeys, promptDraftKey, promptScrollKey, imageCounterKey, readLoca
 import { HighlightedTextarea } from '../lib/markdown'
 import { spawnGeometry } from '../lib/terminalGeometry'
 import { type Attachment, spawnDraftKey, loadAttachments, saveAttachments, nextAttachmentId } from '../lib/spawnDrafts'
-import { PASTE_LINE_THRESHOLD, getClipboardText, countLines, detectCodeLanguage, fenceCode } from '../lib/pastedText'
+import { getClipboardText, isLargePaste, detectCodeLanguage, fenceCode } from '../lib/pastedText'
 
 type AgentTypeOption = 'claude' | 'gemini' | 'copilot' | 'codex'
 
@@ -185,6 +185,11 @@ export function SpawnForm({
   // fenced when `lang` is set. Cleared on a different paste, spawn, or project
   // switch so a stale block can't be "re-pasted" later.
   const lastPasteRef = useRef<{ text: string; attachmentId: number; lang: string | null } | null>(null)
+  // Set by a Ctrl/Cmd+Shift+V keystroke (the "paste as plain text" gesture, see
+  // handleKeyDown) so the paste it triggers inserts literally instead of being
+  // attached. Read-and-cleared by the next handlePaste; a timer clears it too in
+  // case no paste follows (e.g. an empty clipboard), so it can't go stale.
+  const literalPasteRef = useRef(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   // Mirrors `attachments` into a ref so the project-switch effect can stash the
   // outgoing project's attachments without depending on (and re-running for)
@@ -449,6 +454,11 @@ export function SpawnForm({
   }
 
   function handlePaste(e: React.ClipboardEvent) {
+    // Consume the "paste literally" flag a Ctrl/Cmd+Shift+V keystroke set, so
+    // it never lingers for a later paste.
+    const literal = literalPasteRef.current
+    literalPasteRef.current = false
+
     // Pasted files (screenshots, copied files) keep their upload behavior.
     const files = extractFiles(e.clipboardData)
     if (files.length > 0) {
@@ -457,9 +467,13 @@ export function SpawnForm({
       return
     }
 
-    // Short text pastes go straight into the box like normal.
+    // A Shift-held paste means "paste for real" — let the browser insert the
+    // text as-is, never attaching it.
+    if (literal) return
+
+    // Small pastes go straight into the box like normal.
     const text = getClipboardText(e.clipboardData)
-    if (countLines(text) <= PASTE_LINE_THRESHOLD) return
+    if (!isLargePaste(text)) return
 
     const last = lastPasteRef.current
     if (last && last.text === text) {
@@ -590,6 +604,14 @@ export function SpawnForm({
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
       e.preventDefault()
       handleSubmit(e as unknown as React.FormEvent)
+    }
+    // Ctrl/Cmd+Shift+V ("paste as plain text") should paste for real, not
+    // attach. The paste event carries no modifier state, so flag it here on the
+    // keystroke that triggers it (the flag is consumed by the paste that
+    // follows; a timer clears it if none does, so it can't go stale).
+    if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === 'v' || e.key === 'V')) {
+      literalPasteRef.current = true
+      setTimeout(() => { literalPasteRef.current = false }, 1000)
     }
   }
 
