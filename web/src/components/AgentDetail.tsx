@@ -179,7 +179,7 @@ function ArchivedAgentDetail({ agent, projectId, onPurged }: { agent: AgentRespo
         </div>
 
         {/* Prompt */}
-        {agent.prompt && <PromptBlock key={agent.id} prompt={agent.prompt} projectId={projectId} />}
+        {agent.prompt && <PromptBlock prompt={agent.prompt} projectId={projectId} />}
 
         {/* Grayed-out terminal placeholder with a (not-yet-wired) Resume button. */}
         <div className="rounded-lg border border-dashed border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 p-8 flex flex-col items-center justify-center text-center gap-3">
@@ -831,7 +831,7 @@ export function AgentDetail({
         </div>
 
         {/* Prompt */}
-        {agent.prompt && <PromptBlock key={agent.id} prompt={agent.prompt} projectId={projectId} />}
+        {agent.prompt && <PromptBlock prompt={agent.prompt} projectId={projectId} />}
 
         {/* Security-gate approvals (a parked tool call awaiting allow/deny) */}
         <ApprovalCard agent={agent} projectId={projectId} onRefresh={onRefresh} />

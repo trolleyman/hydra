@@ -563,39 +563,14 @@ export function AgentTerminal({ agentId, projectId, onRefresh, onStatusUpdate, o
     setDims(prev => (prev.cols === m.cols && prev.rows === m.rows ? prev : { cols: m.cols, rows: m.rows }))
   }, [])
 
-  // The live terminal (xterm instance + WebSocket) is torn down and rebuilt on
-  // every agent switch — see the effect above, keyed on agentId, which disposes
-  // the term and closes the socket in cleanup; the backend replays scrollback on
-  // reattach, so the switch still looks seamless. What does NOT reset is this
-  // React component itself: the route doesn't key it by agentId, so the same
-  // instance is reused across agents and its state (height, tabs, …) carries
-  // over unless we reset it by hand. Reload the height when the agent changes,
-  // during render per React's "adjust state when a prop changes" guidance, so
-  // the right height paints immediately.
-  const heightAgentRef = useRef(agentId)
-  if (heightAgentRef.current !== agentId) {
-    heightAgentRef.current = agentId
-    const h = loadAgentViewPrefs(projectId, agentId).terminalHeight ?? DEFAULT_TERMINAL_HEIGHT
-    lastHeightRef.current = h
-    setHeight(h)
-  }
-
-  // Likewise reload the per-agent bash tabs during render when the agent changes,
-  // so we never carry the previous agent's shells over (or persist them onto the
-  // new agent). Keep the active tab if it still exists, else fall back to the
-  // agent terminal.
-  const tabsAgentRef = useRef(agentId)
-  if (tabsAgentRef.current !== agentId) {
-    tabsAgentRef.current = agentId
-    const restored = tabsFromPrefs(projectId, agentId)
-    const savedActive = loadAgentViewPrefs(projectId, agentId).activeTabId
-    setTabs(restored)
-    setActiveTabId(savedActive && restored.some((t) => t.id === savedActive) ? savedActive : 'terminal')
-  }
+  // The whole AgentDetail subtree (this component included) is remounted on every
+  // agent switch — the route keys it by project+agent — so each agent's terminal
+  // mounts fresh with its own height, tabs and a brand-new xterm/WebSocket; the
+  // backend replays scrollback on attach so the switch still looks seamless. No
+  // hand-reset of height/tabs on an agent-id change is needed: this instance only
+  // ever serves one agent.
 
   // Persist the bash tabs (and active tab) for this agent whenever they change.
-  // Runs after the agent-switch reset above commits, so it always writes the
-  // current agent's tabs to that agent's key.
   useEffect(() => {
     patchAgentViewPrefs(projectId, agentId, {
       bashTabs: tabs.filter((t) => t.shell).map((t) => ({ id: t.id, label: t.label, sandboxed: t.sandboxed })),
