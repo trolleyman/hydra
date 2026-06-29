@@ -20,7 +20,7 @@ import { Tooltip } from './Tooltip'
 import { AgentTypeIcon, type AgentTypeIconName } from './AgentTypeIcon'
 import { renderMarkdown } from '../lib/markdown'
 
-import { useDialogStore } from '../stores/dialogStore'
+import { useDialogStore, type DialogDetails } from '../stores/dialogStore'
 import { useToastStore } from '../stores/toastStore'
 import { useAgentStore } from '../stores/agentStore'
 import { useShortcutsStore } from '../stores/shortcutsStore'
@@ -458,9 +458,12 @@ export function AgentDetail({
 
   async function handleKill() {
     useDialogStore.getState().show({
-      title: 'Kill Agent',
-      message: `Are you sure you want to kill agent "${agent.id}"?\n\nThis will permanently stop the sandbox session, remove the git worktree, and delete the branch.`,
+      title: 'Kill this agent?',
+      message: 'Stops the running session and deletes its sandbox worktree. This can’t be undone.',
       type: 'confirm',
+      variant: 'kill',
+      confirmLabel: 'Kill agent',
+      details: { loading: true },
       onConfirm: async () => {
         setKilling(true)
         try {
@@ -482,6 +485,19 @@ export function AgentDetail({
         }
       }
     })
+
+    // Background: count the unmerged files the worktree deletion will discard,
+    // folded into the open dialog when the query returns (kill destroys the whole
+    // branch + worktree, so every changed file — committed or not — is "lost").
+    void (async () => {
+      let lostFiles: number | undefined
+      try {
+        const d = await api.default.getAgentDiffFiles(projectId ?? '', agent.id, undefined, undefined, true)
+        lostFiles = d.files?.length ?? 0
+      } catch { /* ignore — show the dialog without a count */ }
+      const dialog = useDialogStore.getState()
+      if (dialog.isOpen && dialog.variant === 'kill') dialog.update({ details: { lostFiles, loading: false } })
+    })()
   }
 
   function handleMerge() {
@@ -490,20 +506,27 @@ export function AgentDetail({
     // and warn when the parent is still running since its working files will
     // shift underneath it.
     const parent = useAgentStore.getState().agents.find((a) => a.branch_name === agent.base_branch)
-    const target = parent ? `agent "${parent.id}"'s branch (${agent.base_branch})` : `the base branch (${agent.base_branch})`
-    const baseMessage = `Are you sure you want to merge agent "${agent.id}"?`
+    const fromBranch = agent.branch_name || `hydra/${agent.id}`
+    const toBranch = agent.base_branch || 'base'
+    // A running parent is the headline caution (merging shifts its working files
+    // mid-flight); it takes precedence over the uncommitted-loss note below.
     const parentWarning = parent && parent.session_status === 'running'
-      ? `\n\n⚠️ Parent agent "${parent.id}" is currently running — merging will change its working files while it works.`
-      : ''
-    const tail = `\n\nThis will merge the agent's branch into ${target}, then stop the sandbox session and clean up.`
+      ? `Parent agent "${parent.id}" is running — merging will change its working files.`
+      : undefined
+    const targetNote = parent
+      ? `Advances agent "${parent.id}"'s branch (${toBranch}) with this agent’s work and closes the session.`
+      : 'Fast-forwards the base branch with this agent’s work and closes the session.'
 
     // Show the dialog immediately so it never lags behind a slow git query.
-    // The uncommitted-changes check runs in the background and folds its
-    // warning into the open dialog when it returns.
+    // The diff stats + uncommitted-changes check run in the background and fold
+    // into the open dialog when they return.
     useDialogStore.getState().show({
-      title: 'Merge Agent',
-      message: baseMessage + parentWarning + tail,
+      title: `Merge into ${toBranch}?`,
+      message: targetNote,
       type: parentWarning ? 'warning' : 'confirm',
+      variant: 'merge',
+      confirmLabel: 'Merge branch',
+      details: { fromBranch, toBranch, note: parentWarning, loading: true },
       onConfirm: async () => {
         setMerging(true)
         // A persistent toast keeps the merge visible even after the dialog
@@ -558,21 +581,26 @@ export function AgentDetail({
       }
     })
 
-    // Background: warn about uncommitted changes that the merge would discard,
-    // patched into the dialog if it's still open by the time the query returns.
+    // Background: fill in the diff stats (+/−) and, when there are uncommitted
+    // changes the merge would discard, the caution note — patched into the dialog
+    // if it's still open by the time the query returns. A running-parent warning
+    // (set above) outranks the uncommitted note.
     void (async () => {
+      let patch: Partial<DialogDetails> = { loading: false }
       try {
         const d = await api.default.getAgentDiffFiles(projectId ?? '', agent.id, undefined, undefined, true)
-        if (!d.uncommitted_changes) return
-        const tracked = d.uncommitted_summary?.tracked_count ?? 0
-        const untracked = d.uncommitted_summary?.untracked_count ?? 0
-        const total = tracked + untracked
-        const warning = `\n\n⚠️ This agent has ${total} uncommitted file change${total !== 1 ? 's' : ''} that will be lost when merging.`
-        const dialog = useDialogStore.getState()
-        if (dialog.title === 'Merge Agent') {
-          dialog.update({ message: baseMessage + parentWarning + warning + tail, type: 'warning' })
+        const additions = d.files.reduce((s, f) => s + (f.additions ?? 0), 0)
+        const deletions = d.files.reduce((s, f) => s + (f.deletions ?? 0), 0)
+        patch = { ...patch, additions, deletions }
+        if (!parentWarning && d.uncommitted_changes) {
+          const total = (d.uncommitted_summary?.tracked_count ?? 0) + (d.uncommitted_summary?.untracked_count ?? 0)
+          patch.note = `${total} uncommitted file change${total !== 1 ? 's' : ''} will be lost when merging.`
         }
-      } catch { /* ignore — proceed without warning */ }
+      } catch { /* ignore — show the dialog without stats */ }
+      const dialog = useDialogStore.getState()
+      if (dialog.isOpen && dialog.variant === 'merge') {
+        dialog.update({ details: { ...dialog.details, ...patch }, type: patch.note || parentWarning ? 'warning' : 'confirm' })
+      }
     })()
   }
 
@@ -747,12 +775,13 @@ export function AgentDetail({
             label: 'Merge',
             icon: merging ? <LoaderCircle className="w-4 h-4 animate-spin" /> : <Merge className="w-4 h-4" />,
             onClick: handleMerge,
+            variant: 'primary',
             disabled: merging || killing,
             shortcut: SHORTCUT_MERGE,
           },
-          { label: 'Mark as unread', icon: <Mail className="w-4 h-4" />, onClick: handleMarkUnread, shortcut: SHORTCUT_MARK_UNREAD },
-          { label: 'Rename', icon: <Pencil className="w-4 h-4" />, onClick: startEditingTitle, shortcut: SHORTCUT_RENAME },
-          { label: 'Kill', icon: <Trash2 className="w-4 h-4" />, onClick: handleKill, danger: true, disabled: merging || killing, shortcut: SHORTCUT_KILL },
+          { label: 'Mark as unread', icon: <Mail className="w-4 h-4" />, onClick: handleMarkUnread, variant: 'segment', shortcut: SHORTCUT_MARK_UNREAD },
+          { label: 'Rename', icon: <Pencil className="w-4 h-4" />, onClick: startEditingTitle, variant: 'segment', shortcut: SHORTCUT_RENAME },
+          { label: 'Kill', icon: <Trash2 className="w-4 h-4" />, onClick: handleKill, variant: 'danger', disabled: merging || killing, shortcut: SHORTCUT_KILL },
         ]}
       />
       {/* pt-4 (16px) above the metadata row matches the effective gap below it

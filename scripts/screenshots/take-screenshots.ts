@@ -708,6 +708,15 @@ try {
       // (AgentTopBar actionTitle/useFinePointer), so a title="Rename" match no
       // longer works.
       { name: 'agent-rename', path: '/project/sim-project/agent/agent-1', viewportOnly: true, click: 'button[aria-label="Rename"]' },
+      // The redesigned merge confirmation: clicking Merge opens a rich modal with
+      // an icon tile, the from→to branch chip and its +/− diff stats (fetched in
+      // the background from the agent's diff). A fixed, viewport-filling overlay,
+      // so a viewport capture frames it.
+      { name: 'agent-merge-dialog', path: '/project/sim-project/agent/agent-1', viewportOnly: true, click: 'button[aria-label="Merge"]' },
+      // The redesigned kill confirmation: clicking Kill opens the destructive
+      // variant — red icon tile + a warning chip naming how many unmerged files
+      // the worktree deletion will discard (count fetched in the background).
+      { name: 'agent-kill-dialog', path: '/project/sim-project/agent/agent-1', viewportOnly: true, click: 'button[aria-label="Kill"]' },
       // The agent-detail prompt block rendering the upload paths a prompt carries
       // as attachment chips instead of raw links: three image thumbnails (served a
       // fixed stub PNG) and one non-image file shown with a generic icon, the
