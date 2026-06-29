@@ -563,9 +563,15 @@ export function AgentTerminal({ agentId, projectId, onRefresh, onStatusUpdate, o
     setDims(prev => (prev.cols === m.cols && prev.rows === m.rows ? prev : { cols: m.cols, rows: m.rows }))
   }, [])
 
-  // This component is reused (not remounted) when switching agents, so reload
-  // the height when the agent changes. Done during render per React's "adjust
-  // state when a prop changes" guidance, so the right height paints immediately.
+  // The live terminal (xterm instance + WebSocket) is torn down and rebuilt on
+  // every agent switch — see the effect above, keyed on agentId, which disposes
+  // the term and closes the socket in cleanup; the backend replays scrollback on
+  // reattach, so the switch still looks seamless. What does NOT reset is this
+  // React component itself: the route doesn't key it by agentId, so the same
+  // instance is reused across agents and its state (height, tabs, …) carries
+  // over unless we reset it by hand. Reload the height when the agent changes,
+  // during render per React's "adjust state when a prop changes" guidance, so
+  // the right height paints immediately.
   const heightAgentRef = useRef(agentId)
   if (heightAgentRef.current !== agentId) {
     heightAgentRef.current = agentId
