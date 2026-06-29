@@ -38,10 +38,11 @@ type seedResult struct {
 	WritablePaths []string
 	// Env are extra environment variables (HYDRA_STATUS_PATH etc.).
 	Env []string
-	// TmpfsDirs are paths overlaid with a fresh writable tmpfs inside the sandbox
-	// (applied before Binds) so per-head files can be bound into otherwise
-	// read-only system locations — e.g. /etc/claude-code for managed-settings.json.
-	TmpfsDirs []string
+	// ROOverlays expose per-head files under otherwise read-only system dirs via a
+	// read-only overlay — e.g. /etc/claude-code/managed-settings.json under /etc.
+	// See sandbox.ROOverlay (a tmpfs mountpoint can't be created under the
+	// read-only root, so an overlay over the parent dir is used instead).
+	ROOverlays []sandbox.ROOverlay
 }
 
 // seedHead generates the per-head agent configuration (hook settings, trust,
@@ -117,15 +118,25 @@ func seedHead(projectRoot, id string, agentType sandbox.AgentType, worktreePath,
 		if err != nil {
 			return nil, errtrace.Wrap(err)
 		}
-		managedHost := filepath.Join(cacheDir, "claude-managed-settings.json")
-		if err := os.WriteFile(managedHost, managed, 0644); err != nil {
+		// Claude reads tamper-proof managed settings only from the fixed system path
+		// /etc/claude-code/managed-settings.json (not relocatable). That dir doesn't
+		// exist on the host and lives under the read-only `/` bind, so bwrap can't
+		// mkdir a tmpfs mountpoint there. Instead expose it via a read-only overlay
+		// over /etc: write the file into a per-head upper layer that mirrors /etc's
+		// layout and union it on top of the real /etc (see sandbox.ROOverlay).
+		etcUpper := filepath.Join(cacheDir, "claude-etc-overlay", id)
+		mirrorDir := filepath.Join(etcUpper, filepath.Base(sandbox.ClaudeManagedSettingsDir))
+		if err := os.MkdirAll(mirrorDir, 0o755); err != nil {
 			return nil, errtrace.Wrap(err)
 		}
-		// The managed dir doesn't exist on the host and lives under the read-only
-		// root, so overlay it with a fresh tmpfs (applied before binds) and bind our
-		// file into it read-only.
-		res.TmpfsDirs = append(res.TmpfsDirs, sandbox.ClaudeManagedSettingsDir)
-		res.Binds = append(res.Binds, sandbox.Bind{Source: managedHost, Target: sandbox.ClaudeManagedSettingsPath, ReadOnly: true})
+		managedFile := filepath.Join(mirrorDir, filepath.Base(sandbox.ClaudeManagedSettingsPath))
+		if err := os.WriteFile(managedFile, managed, 0644); err != nil {
+			return nil, errtrace.Wrap(err)
+		}
+		res.ROOverlays = append(res.ROOverlays, sandbox.ROOverlay{
+			Dir:   filepath.Dir(sandbox.ClaudeManagedSettingsDir),
+			Upper: etcUpper,
+		})
 
 		claudeJSONHost := filepath.Join(cacheDir, "claude.json")
 		cfg, err := sandbox.BuildClaudeConfig(readHostFile(filepath.Join(home, ".claude.json")), worktreePath, policy.MCPAllowed)

@@ -159,6 +159,32 @@ func BuildSpec(opts Options) (*Spec, error) {
 		}
 	}
 
+	// Read-only overlays expose per-head files under otherwise read-only system
+	// dirs (e.g. /etc/claude-code/managed-settings.json under /etc) without needing
+	// to mkdir a mountpoint beneath the read-only `/` bind. Each overlay unions the
+	// real Dir (lower) with the per-head Upper layer (also a lower, so the result is
+	// read-only) and mounts it back over the already-existing Dir. Needs overlay
+	// support; without it the injected files are skipped (the caller degrades — e.g.
+	// Claude's managed gate hooks won't load), logged so the cause is diagnosable.
+	for _, o := range opts.ROOverlays {
+		if o.Dir == "" || o.Upper == "" {
+			continue
+		}
+		if _, err := os.Stat(o.Upper); err != nil {
+			continue
+		}
+		if !overlayOK {
+			log.Printf("sandbox: bwrap %s lacks overlay support; skipping read-only overlay on %s — per-head files under it will be absent. "+
+				"Point HYDRA_BWRAP at an overlay-capable bwrap to restore them.", bwrap, o.Dir)
+			continue
+		}
+		args = append(args,
+			"--overlay-src", o.Upper,
+			"--overlay-src", o.Dir,
+			"--ro-overlay", o.Dir,
+		)
+	}
+
 	// Mask credential/secret locations (dirs -> empty tmpfs, files -> /dev/null).
 	for _, p := range expandAll(opts.MaskedPaths, home) {
 		info, err := os.Stat(p)

@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -128,9 +129,12 @@ func launchNamespaceHost(projectRoot, id string, base sandbox.Options) (*nsHost,
 	cmd.Env = spec.Env
 	cmd.Dir = spec.Dir
 	cmd.ExtraFiles = spec.ExtraFiles
-	// The supervisor isn't PTY-attached; fold its logs into the daemon's.
+	// The supervisor isn't PTY-attached; fold its logs into the daemon's, while
+	// also keeping the tail so a startup failure (e.g. a bad bwrap mount) can be
+	// folded into the error below instead of vanishing into "socket never appeared".
+	var errTail capWriter
 	cmd.Stdout = os.Stderr
-	cmd.Stderr = os.Stderr
+	cmd.Stderr = io.MultiWriter(os.Stderr, &errTail)
 	if err := cmd.Start(); err != nil {
 		spec.Cleanup()
 		return nil, errtrace.Wrap(fmt.Errorf("start supervisor: %w", err))
@@ -140,6 +144,9 @@ func launchNamespaceHost(projectRoot, id string, base sandbox.Options) (*nsHost,
 		_ = cmd.Process.Kill()
 		_, _ = cmd.Process.Wait()
 		spec.Cleanup()
+		if tail := strings.TrimSpace(errTail.String()); tail != "" {
+			return nil, errtrace.Wrap(fmt.Errorf("%w; supervisor output: %s", err, tail))
+		}
 		return nil, errtrace.Wrap(err)
 	}
 
@@ -242,4 +249,30 @@ func runPreExitInNamespace(ctx context.Context, host *nsHost, worktree string, e
 		_ = sp.Close()
 		return out, errtrace.Wrap(fmt.Errorf("pre_exit_script timed out after %s", preExitTimeout))
 	}
+}
+
+// capWriter is an io.Writer that retains only the last capWriterMax bytes written
+// to it — a tiny ring used to keep the supervisor's final stderr lines so a
+// launch failure can fold them into its error without buffering unbounded output.
+type capWriter struct {
+	mu  sync.Mutex
+	buf []byte
+}
+
+const capWriterMax = 4096
+
+func (w *capWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.buf = append(w.buf, p...)
+	if len(w.buf) > capWriterMax {
+		w.buf = w.buf[len(w.buf)-capWriterMax:]
+	}
+	return len(p), nil
+}
+
+func (w *capWriter) String() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return string(w.buf)
 }

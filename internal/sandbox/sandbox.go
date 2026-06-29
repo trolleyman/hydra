@@ -65,6 +65,25 @@ type CowMount struct {
 	Dest  string // mountpoint inside the sandbox, under the worktree
 }
 
+// ROOverlay mounts a read-only overlayfs at Dir, unioning the host's real Dir
+// (lower layer) with a per-head Upper layer (a host dir mirroring Dir's layout)
+// on top. It exists to expose files that belong under an otherwise read-only
+// system directory which does NOT exist on the host — e.g. Claude Code's
+// tamper-proof managed settings at /etc/claude-code/managed-settings.json (the
+// path is fixed and not relocatable). A plain `--tmpfs /etc/claude-code` cannot
+// work there: bwrap must mkdir the mountpoint under the read-only `/` bind, which
+// fails with EROFS. Overlaying the already-existing parent Dir sidesteps that.
+//
+// Linux only, and requires an overlay-capable bwrap (same constraint as
+// CowMount). Without one the overlay is skipped with a warning and the injected
+// files are simply absent, so callers must degrade gracefully (for Claude this
+// means the managed gate/status hooks won't load). The overlay is read-only, so
+// a sandboxed agent cannot tamper with the injected files.
+type ROOverlay struct {
+	Dir   string // existing system dir to overlay (also the mountpoint), e.g. "/etc"
+	Upper string // per-head host dir merged on top, mirroring Dir's layout
+}
+
 // Options describes a sandbox launch request. Paths use the host's real
 // filesystem layout; "~" and "$VAR" are expanded against Home/the environment.
 type Options struct {
@@ -96,6 +115,10 @@ type Options struct {
 	// CowMounts expose read-only host dirs at worktree paths with copy-on-write
 	// semantics (overlayfs on Linux, APFS clone on macOS). See CowMount.
 	CowMounts []CowMount
+	// ROOverlays expose per-head files under otherwise read-only system dirs via a
+	// read-only overlayfs (e.g. /etc/claude-code/managed-settings.json under /etc).
+	// Linux only; requires an overlay-capable bwrap (skipped + warned otherwise).
+	ROOverlays []ROOverlay
 
 	// Env is the environment for the sandboxed process.
 	Env []string

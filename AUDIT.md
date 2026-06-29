@@ -189,10 +189,14 @@ in the loop.
 >   PreToolUse hook driven by a read-only, trusted `policy.json` that can deny
 >   (policy-file writes, credential reads, non-allow-listed MCP, global installs)
 >   or park-for-approval (unknown MCP/WebFetch host, `git push`). The hooks live
->   in **managed settings** (`/etc/claude-code/managed-settings.json`, bound
->   read-only) — the only scope whose hooks survive a `disableAllHooks` write, so
->   the gate is tamper-proof, not merely read-only (F4). (`--settings` was
->   considered and rejected: it is defeatable by a writable project settings.json.)
+>   in **managed settings** (`/etc/claude-code/managed-settings.json`) — the only
+>   scope whose hooks survive a `disableAllHooks` write, so the gate is
+>   tamper-proof, not merely read-only (F4). (`--settings` was considered and
+>   rejected: it is defeatable by a writable project settings.json.) That path is
+>   fixed and lives under the read-only `/` bind, so it is exposed via a **read-only
+>   overlay over `/etc`** (a `--tmpfs` mountpoint can't be created there — EROFS);
+>   this needs an overlay-capable bwrap, and degrades (managed hooks absent, logged)
+>   if one isn't available, same as the Rec 3 fallback.
 > - **Rec 2 (MCP):** pre-launch stripping of non-allow-listed `mcpServers` from the
 >   seeded `~/.claude.json` + `enabledMcpjsonServers`/`enableAllProjectMcpServers`,
 >   runtime gate backstop, and a web approval card (allow / always-allow / deny)
