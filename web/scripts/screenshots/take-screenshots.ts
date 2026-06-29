@@ -66,6 +66,47 @@ const MARKDOWN_DEMO_PROMPT =
   'Note: a literal `$ run-this-command --now` in the prompt is just code, not a command — that override is activity-only.\n\n' +
   'A fenced block renders as its own code chip:\n```ts\nconst seg = parseInline(text)\nrenderMarkdown(seg) // code/bold/italic\n```'
 
+// A short instruction typed into the spawn box, paired with PASTED_LOG_DEMO
+// below: the demo shows the user describing a task and then pasting a big log,
+// which lands as an attachment chip rather than swamping the instruction.
+const PASTED_TEXT_INSTRUCTION = 'The CI build started failing on main — here is the full log, figure out which step broke and why:'
+
+// A long plain-text block (a CI log) pasted into the spawn box to demo the
+// "large paste becomes an attachment" behavior. Well over the 8-line threshold,
+// so the first paste is captured as a pasted-text-1.txt chip instead of being
+// dumped into the textarea.
+const PASTED_LOG_DEMO = [
+  '$ go build ./...',
+  '# github.com/trolleyman/hydra/internal/heads',
+  'internal/heads/heads.go:212:14: undefined: resumeHeadOnBoot',
+  'internal/heads/heads.go:233:9: cannot use sess (variable of type *session.Session)',
+  '\tas session.Registry value in argument to reg.Adopt',
+  'note: module requires Go 1.22',
+  '$ go test ./internal/heads/...',
+  'FAIL\tgithub.com/trolleyman/hydra/internal/heads [build failed]',
+  'FAIL\tgithub.com/trolleyman/hydra/internal/session [build failed]',
+  'make: *** [Makefile:14: test] Error 2',
+  'Error: Process completed with exit code 2.',
+].join('\n')
+
+// A multi-line HTML snippet "copied from an editor" (the clipboard carries a
+// `html` language via vscode-editor-data). Pasting it once attaches it; pasting
+// it a second time inlines it for real, wrapped in a ```html fence — the
+// code-paste path. Over the 8-line threshold so the first paste attaches.
+const PASTED_HTML_DEMO = [
+  '<section class="hero">',
+  '  <h1>Spawn an Agent</h1>',
+  '  <p>Describe what you need — and consider it done.</p>',
+  '  <form class="spawn">',
+  '    <label for="task">Task</label>',
+  '    <textarea id="task" placeholder="Describe a task…"></textarea>',
+  '    <div class="actions">',
+  '      <button type="submit">Spawn</button>',
+  '    </div>',
+  '  </form>',
+  '</section>',
+].join('\n')
+
 const OUT = required('HYDRA_ARTIFACT_OUTPUT')
 // HYDRA_ARTIFACT_SOURCE is the checkout root. Fall back to the repo root three
 // levels up from this script (web/scripts/screenshots/) so it also works by hand.
@@ -369,6 +410,16 @@ try {
       // document the live inline-markdown highlighting (and its line-wrapping)
       // in the textarea overlay without driving keystrokes.
       seedPrompt?: string
+      // Dispatches a real paste of `text` into the full-page spawn textarea
+      // (with the upload endpoint stubbed so the chip settles instantly), to
+      // document the large-text-paste behavior: a paste over the line threshold
+      // is attached as a pasted-text-N.txt chip rather than dumped into the box.
+      // `vscodeMode` adds the VS Code clipboard language tag so the paste reads
+      // as code; `again` fires the paste twice so the second one inlines the
+      // block for real — fenced as ```<vscodeMode> when it's code. Pairs with
+      // tallSpawn (to show a tall inlined block) and seedPrompt (a typed task
+      // above the chip).
+      pasteText?: { text: string; vscodeMode?: string; again?: boolean }
       // Screenshot-only: enlarge BOTH spawn boxes (the compact sidebar box and
       // the full-page main box) so a seeded markdown draft reads in full rather
       // than scrolled, and widen the sidebar so the compact box has room. Purely
@@ -469,6 +520,18 @@ try {
       // the highlighted rows, proving the inline-block code block stays glyph-aligned
       // with the textarea. tallSpawn shows the whole draft (block included) unscrolled.
       { name: 'spawn-markdown-selected', path: '/project/sim-project/', seedPrompt: MARKDOWN_DEMO_PROMPT, tallSpawn: true, selectSpawnText: true },
+      // A large text paste turned into an attachment. Pasting a block over the
+      // line threshold (a CI log here) doesn't fill the textarea — it lands as a
+      // pasted-text-1.txt chip below it, the same chip the file uploads use, so
+      // the typed task above stays readable. Documents the
+      // attach-pasted-text-instead-of-inlining behavior on the full-page form.
+      { name: 'spawn-pasted-text', path: '/project/sim-project/', seedPrompt: PASTED_TEXT_INSTRUCTION, pasteText: { text: PASTED_LOG_DEMO } },
+      // The code-paste path: pasting an HTML snippet copied from an editor
+      // attaches it on the first paste, and pasting it AGAIN inlines it for real
+      // — wrapped in a ```html fence (the clipboard's language tag) so it renders
+      // as a fenced code block in the highlight overlay. `again` fires both
+      // pastes; tallSpawn enlarges the box so the whole fenced block shows.
+      { name: 'spawn-pasted-code', path: '/project/sim-project/', pasteText: { text: PASTED_HTML_DEMO, vscodeMode: 'html', again: true }, tallSpawn: true },
       // The agent-detail prompt block rendering the same markdown: code/bold/
       // italic, an inline-code span that wraps, the tightened gap under the
       // metadata row, and the soft bottom fade as the tall prompt scrolls out of
@@ -1365,6 +1428,53 @@ try {
               ta.setSelectionRange(0, ta.value.length)
             }
           })
+          await settle(page)
+        }
+        if (pg.pasteText) {
+          // Stub the upload endpoint so the pasted-text chip leaves its
+          // "uploading" state at a fixed point (the response path/filename are
+          // unused for the chip label — the form names it pasted-text-N.txt).
+          await page.route('**/uploads/**', (route) =>
+            route.fulfill({
+              status: 200,
+              contentType: 'application/json',
+              body: JSON.stringify({ path: '/sim/.hydra/local/uploads/pasted-text-1.txt', filename: 'pasted-text-1.txt' }),
+            }),
+          )
+          // Fire a real paste (a populated DataTransfer on a 'paste' event) into
+          // the full-page spawn textarea, so the form's onPaste runs exactly as
+          // it does for a user. `again` fires it twice to exercise the re-paste
+          // (inline) path; `vscodeMode` tags the clipboard as code.
+          await page.evaluate(({ text, vscodeMode, again }) => {
+            const ta = document.querySelector('.max-w-4xl textarea') as HTMLTextAreaElement | null
+            if (!ta) return
+            ta.focus()
+            const fire = () => {
+              const dt = new DataTransfer()
+              dt.setData('text/plain', text)
+              if (vscodeMode) dt.setData('vscode-editor-data', JSON.stringify({ mode: vscodeMode }))
+              ta.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }))
+            }
+            fire()
+            if (again) fire()
+          }, pg.pasteText)
+          if (pg.pasteText.again) {
+            // The second paste inlines the block into the textarea (fenced when
+            // it's code) — wait until the fence has landed in the box.
+            await page.waitForFunction(() =>
+              ((document.querySelector('.max-w-4xl textarea') as HTMLTextAreaElement | null)?.value ?? '').includes('```'),
+            )
+          } else {
+            // The first paste attaches it — wait until the chip has rendered and
+            // its upload spinner has cleared (scoped to the full-page form so a
+            // stray spinner elsewhere can't satisfy it early).
+            await page.waitForFunction(() => {
+              const form = document.querySelector('.max-w-4xl')
+              if (!form) return false
+              const hasChip = Array.from(form.querySelectorAll('span')).some((s) => s.textContent === 'pasted-text-1.txt')
+              return hasChip && !form.querySelector('svg.lucide-loader-circle')
+            })
+          }
           await settle(page)
         }
         if (pg.attachImages) {

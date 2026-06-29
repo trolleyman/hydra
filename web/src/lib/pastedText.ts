@@ -8,7 +8,7 @@
 // that state machine; this module just provides the pure clipboard helpers.
 
 // Pastes with MORE than this many lines are attached instead of inlined.
-export const PASTE_LINE_THRESHOLD = 10
+export const PASTE_LINE_THRESHOLD = 8
 
 // The plain-text representation of a clipboard/drag payload, '' if none.
 export function getClipboardText(dt: DataTransfer | null): string {
