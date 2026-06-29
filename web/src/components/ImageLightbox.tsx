@@ -1,6 +1,8 @@
 import { Fragment, useCallback, useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { X, ChevronLeft, ChevronRight } from 'lucide-react'
+import type { ImageDiffMode } from './ArtifactImageDiff'
+import { LightboxDiff } from './LightboxDiff'
 
 export interface LightboxImage {
   url: string
@@ -8,6 +10,10 @@ export interface LightboxImage {
   /** File size in bytes, shown in the caption. Omit/0 when unknown (e.g. an
    *  image referenced only by path), in which case the size is left out. */
   size: number
+  /** When set, the lightbox renders a fullscreen before/after comparator (with mode
+   *  controls — toggle, slider, onion) for this entry instead of a single image. The
+   *  diff viewer supplies this; `url` is still used for the edge previews and caption. */
+  diff?: { left?: string | null; right?: string | null; mode: ImageDiffMode }
 }
 
 function formatBytes(n: number): string {
@@ -129,22 +135,35 @@ export function ImageLightbox({
         </button>
       )}
 
-      {/* Image + caption (clicks here don't close) */}
+      {/* Image (or diff comparator) + caption (clicks here don't close) */}
       <figure
-        className={`flex flex-col items-center gap-3 ${figureWidth} max-h-[90vh] animate-in zoom-in-95 duration-150`}
+        className={`flex flex-col items-center gap-3 ${current.diff ? 'max-w-[94vw]' : figureWidth} max-h-[90vh] animate-in zoom-in-95 duration-150`}
         onClick={(e) => e.stopPropagation()}
       >
-        <img
-          src={current.url}
-          alt={current.filename}
-          onLoad={(e) => setDims({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })}
-          // Checkerboard behind the image so transparent PNGs (e.g. an icon)
-          // read as transparent rather than blending into the dark backdrop. The
-          // <img> sizes to the image's own aspect ratio, so this sits exactly
-          // behind the picture; opaque images simply cover it.
-          style={{ background: CHECKER }}
-          className={`max-h-[85vh] ${figureWidth} object-contain rounded-lg shadow-2xl`}
-        />
+        {current.diff ? (
+          // A before/after pair: render the fullscreen comparator (its own mode
+          // controls live inside) keyed on the entry so switching files resets it.
+          <LightboxDiff
+            key={current.url}
+            left={current.diff.left}
+            right={current.diff.right}
+            name={current.filename}
+            initialMode={current.diff.mode}
+            onDims={setDims}
+          />
+        ) : (
+          <img
+            src={current.url}
+            alt={current.filename}
+            onLoad={(e) => setDims({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })}
+            // Checkerboard behind the image so transparent PNGs (e.g. an icon)
+            // read as transparent rather than blending into the dark backdrop. The
+            // <img> sizes to the image's own aspect ratio, so this sits exactly
+            // behind the picture; opaque images simply cover it.
+            style={{ background: CHECKER }}
+            className={`max-h-[85vh] ${figureWidth} object-contain rounded-lg shadow-2xl`}
+          />
+        )}
         <figcaption className="flex items-center gap-2 text-xs font-mono">
           {[
             <span key="name" className="text-white/70">{current.filename}</span>,

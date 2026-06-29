@@ -28,33 +28,33 @@ function lightboxImage(url: string, name: string): LightboxImage {
 
 type OpenLightbox = (images: LightboxImage[], index?: number) => void
 
-// Open `url` in the lightbox. When the grid threaded down its same-side gallery
-// (`siblings` + this tile's `index`), open that whole list at this image's spot so
-// ←/→ step through every tile's matching side; otherwise fall back to just this one
-// image (e.g. the unit tests, or any caller that doesn't supply a gallery).
-function openInGallery(
+// Open this tile's entry in the lightbox. When the grid threaded down its `gallery`
+// (one entry per visible image file, carrying the before/after pair + mode) and this
+// tile's `index`, open the whole gallery there — so ←/→ step between files and the
+// lightbox shows the diff comparison. Otherwise fall back to just this one image
+// (e.g. the unit tests, or any caller that doesn't supply a gallery).
+function openGalleryAt(
   open: OpenLightbox,
-  siblings: LightboxImage[] | undefined,
+  gallery: LightboxImage[] | undefined,
   index: number | undefined,
-  url: string,
+  fallbackUrl: string,
   name: string,
 ) {
-  if (siblings && index != null) {
-    const i = siblings.findIndex((s) => s.url === url)
-    open(siblings, i >= 0 ? i : index)
-  } else {
-    open([lightboxImage(url, name)])
-  }
+  if (gallery && index != null) open(gallery, index)
+  else open([lightboxImage(fallbackUrl, name)])
 }
 
-function ImageCell({ url, label, name, gallery, index }: {
+function ImageCell({ url, label, name, gallery, index, disableOpen }: {
   url?: string | null
   label: string
   name: string
-  // This cell's side gallery (befores or afters) + this tile's index in it, so a
-  // click walks the same side across tiles. Omitted → opens just this image.
+  // The grid's diff gallery + this tile's index in it, so a click opens the lightbox
+  // there and ←/→ walk the files. Omitted → opens just this image.
   gallery?: LightboxImage[]
   index?: number
+  // Set when this view is *already* inside the lightbox, so a click shouldn't open a
+  // (nested) lightbox — it just stays a static image.
+  disableOpen?: boolean
 }) {
   const openImage = useImageLightbox()
   return (
@@ -67,8 +67,8 @@ function ImageCell({ url, label, name, gallery, index }: {
         // the cell width (w-full) and its height follows the aspect ratio.
         <button
           type="button"
-          onClick={() => openInGallery(openImage, gallery, index, url, name)}
-          className="block w-full cursor-zoom-in"
+          onClick={disableOpen ? undefined : () => openGalleryAt(openImage, gallery, index, url, name)}
+          className={`block w-full ${disableOpen ? 'cursor-default' : 'cursor-zoom-in'}`}
         >
           <img
             src={url}
@@ -148,9 +148,9 @@ export function SegmentedToggle<T extends string>({ value, onChange, options }: 
 // exists (an added/removed file — there's nothing to diff). A missing side shows
 // the "No image" placeholder; middle-click opens the currently-shown image in the
 // fullscreen lightbox.
-function ABSwitch({ left, right, name, before, after, index }: {
+function ABSwitch({ left, right, name, gallery, index, disableOpen }: {
   left?: string | null; right?: string | null; name: string
-  before?: LightboxImage[]; after?: LightboxImage[]; index?: number
+  gallery?: LightboxImage[]; index?: number; disableOpen?: boolean
 }) {
   const openImage = useImageLightbox()
   const canDiff = !!left && !!right
@@ -189,9 +189,9 @@ function ABSwitch({ left, right, name, before, after, index }: {
       <div
         className="relative w-full cursor-pointer select-none"
         onClick={() => setView((v) => (v === 'before' ? 'after' : 'before'))}
-        onAuxClick={makeAuxOpen(
+        onAuxClick={disableOpen ? undefined : makeAuxOpen(
           () => (view === 'before' ? left : right) || sizer,
-          (url) => openInGallery(openImage, view === 'before' ? before : after, index, url, name),
+          (url) => openGalleryAt(openImage, gallery, index, url, name),
         )}
       >
         <img src={sizer} style={{ visibility: 'hidden' }} className={`${IMG_CLASS} block`} draggable={false} />
@@ -207,9 +207,9 @@ function ABSwitch({ left, right, name, before, after, index }: {
 // the region left of the draggable handle, giving a sharp (hard-cut) boundary. A
 // missing side shows the "No image" placeholder in its slot. Middle-click opens
 // whichever side is currently visible under the cursor in the fullscreen lightbox.
-function SliderCompare({ left, right, name, before, after, index }: {
+function SliderCompare({ left, right, name, gallery, index, disableOpen }: {
   left?: string | null; right?: string | null; name: string
-  before?: LightboxImage[]; after?: LightboxImage[]; index?: number
+  gallery?: LightboxImage[]; index?: number; disableOpen?: boolean
 }) {
   const openImage = useImageLightbox()
   const [pos, setPos] = useState(50)
@@ -246,13 +246,13 @@ function SliderCompare({ left, right, name, before, after, index }: {
         setDragging(true)
         update(e.clientX)
       }}
-      onAuxClick={makeAuxOpen((e) => {
+      onAuxClick={disableOpen ? undefined : makeAuxOpen((e) => {
         const el = ref.current
         if (!el) return sizer
         const r = el.getBoundingClientRect()
         const x = ((e.clientX - r.left) / r.width) * 100
         return (x < pos ? left : right) || sizer
-      }, (url) => openInGallery(openImage, url === right ? after : before, index, url, name))}
+      }, (url) => openGalleryAt(openImage, gallery, index, url, name))}
     >
       <span className={`${TAG_CLASS} left-1`}>Before</span>
       <span className={`${TAG_CLASS} right-1`}>After</span>
@@ -270,9 +270,9 @@ function SliderCompare({ left, right, name, before, after, index }: {
 // slider controls the opacity of the "after" image (0 = before, 1 = after). A
 // missing side shows the "No image" placeholder in its slot. Middle-click opens
 // the side currently weighted by the blend in the fullscreen lightbox.
-function OnionCompare({ left, right, name, before, after, index }: {
+function OnionCompare({ left, right, name, gallery, index, disableOpen }: {
   left?: string | null; right?: string | null; name: string
-  before?: LightboxImage[]; after?: LightboxImage[]; index?: number
+  gallery?: LightboxImage[]; index?: number; disableOpen?: boolean
 }) {
   const openImage = useImageLightbox()
   const [opacity, setOpacity] = useState(50)
@@ -281,9 +281,9 @@ function OnionCompare({ left, right, name, before, after, index }: {
     <div className="min-w-0">
       <div
         className="relative w-full select-none"
-        onAuxClick={makeAuxOpen(
+        onAuxClick={disableOpen ? undefined : makeAuxOpen(
           () => (opacity >= 50 ? right : left) || sizer,
-          (url) => openInGallery(openImage, opacity >= 50 ? after : before, index, url, name),
+          (url) => openGalleryAt(openImage, gallery, index, url, name),
         )}
       >
         <img src={sizer} style={{ visibility: 'hidden' }} className={`${IMG_CLASS} block`} draggable={false} />
@@ -398,14 +398,14 @@ function DiffCanvas({ left, right }: { left: string; right: string }) {
 
 // The side-by-side pair: before and after fill half the tile width each (the cards
 // span two masonry columns in this mode, so there's room — see FileGrid).
-function SideBySide({ left, right, name, before, after, index }: {
+function SideBySide({ left, right, name, gallery, index, disableOpen }: {
   left?: string | null; right?: string | null; name: string
-  before?: LightboxImage[]; after?: LightboxImage[]; index?: number
+  gallery?: LightboxImage[]; index?: number; disableOpen?: boolean
 }) {
   return (
     <div className="flex gap-3 w-full">
-      <ImageCell url={left} label="Before" name={name} gallery={before} index={index} />
-      <ImageCell url={right} label="After" name={name} gallery={after} index={index} />
+      <ImageCell url={left} label="Before" name={name} gallery={gallery} index={index} disableOpen={disableOpen} />
+      <ImageCell url={right} label="After" name={name} gallery={gallery} index={index} disableOpen={disableOpen} />
     </div>
   )
 }
@@ -414,18 +414,22 @@ function SideBySide({ left, right, name, before, after, index }: {
 // modes keep their own layout even when one side is missing (added/removed file),
 // substituting a "No image" placeholder; we only fall back to the side-by-side
 // pair for that mode itself, or the degenerate case of no images at all.
-// `before`/`after` are the grid's same-side galleries (one entry per visible image
-// file, in display order) and `index` is this file's spot in them, so opening any
-// image lets ←/→ walk that side across the whole grid. They're optional: callers
-// that don't supply them (e.g. unit tests) just open the single clicked image.
-export function ImageDiffView({ left, right, mode, name, before, after, index }: {
+// `gallery` is the grid's diff gallery — one entry per visible image file (in display
+// order), each carrying the before/after pair + mode — and `index` is this file's
+// spot in it, so opening any image lets ←/→ walk the files and the lightbox shows the
+// diff comparison. Both are optional: callers that don't supply them (e.g. unit tests)
+// just open the single clicked image.
+export function ImageDiffView({ left, right, mode, name, gallery, index, disableOpen }: {
   left?: string | null; right?: string | null; mode: ImageDiffMode; name: string
-  before?: LightboxImage[]; after?: LightboxImage[]; index?: number
+  gallery?: LightboxImage[]; index?: number
+  // Set when rendered inside the lightbox itself, so the click/middle-click "open in
+  // lightbox" affordances are suppressed (you're already in it).
+  disableOpen?: boolean
 }) {
   if (mode === 'side-by-side' || (!left && !right)) {
-    return <SideBySide left={left} right={right} name={name} before={before} after={after} index={index} />
+    return <SideBySide left={left} right={right} name={name} gallery={gallery} index={index} disableOpen={disableOpen} />
   }
-  if (mode === 'ab') return <ABSwitch left={left} right={right} name={name} before={before} after={after} index={index} />
-  if (mode === 'slider') return <SliderCompare left={left} right={right} name={name} before={before} after={after} index={index} />
-  return <OnionCompare left={left} right={right} name={name} before={before} after={after} index={index} />
+  if (mode === 'ab') return <ABSwitch left={left} right={right} name={name} gallery={gallery} index={index} disableOpen={disableOpen} />
+  if (mode === 'slider') return <SliderCompare left={left} right={right} name={name} gallery={gallery} index={index} disableOpen={disableOpen} />
+  return <OnionCompare left={left} right={right} name={name} gallery={gallery} index={index} disableOpen={disableOpen} />
 }

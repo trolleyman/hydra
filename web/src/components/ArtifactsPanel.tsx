@@ -46,11 +46,11 @@ function ArtifactChangeIcon({ type, className = 'w-3.5 h-3.5' }: { type: string;
 const BASE_MIN_COL_PX = 140
 const MASONRY_GAP = 12
 
-function FileRow({ file, mode, changeThreshold = 0, before, after, index }: {
+function FileRow({ file, mode, changeThreshold = 0, gallery, index }: {
   file: ArtifactFile; mode: ImageDiffMode; changeThreshold?: number
-  // The grid's same-side galleries + this file's index in them, so opening an image
-  // lets ←/→ walk that side across the grid (see ImageDiffView). Images only.
-  before?: LightboxImage[]; after?: LightboxImage[]; index?: number
+  // The grid's diff gallery + this file's index in it, so opening an image lets ←/→
+  // walk the files and the lightbox shows the comparison (see ImageDiffView). Images only.
+  gallery?: LightboxImage[]; index?: number
 }) {
   // The badge reflects the *effective* change type, so a modified file gated below
   // the "% changed" threshold shows as unchanged (no badge) — matching how it's
@@ -90,7 +90,7 @@ function FileRow({ file, mode, changeThreshold = 0, before, after, index }: {
         {isVideoArtifact(file.name) ? (
           <VideoDiffView left={file.left_url} right={file.right_url} mode={mode} fps={file.fps} />
         ) : (
-          <ImageDiffView left={file.left_url} right={file.right_url} mode={mode} name={file.name} before={before} after={after} index={index} />
+          <ImageDiffView left={file.left_url} right={file.right_url} mode={mode} name={file.name} gallery={gallery} index={index} />
         )}
       </div>
     </div>
@@ -473,22 +473,24 @@ function FileGrid({ files, mode, spans, onSpanChange, scope, changeThreshold = 0
     [files],
   )
   const dims = useMediaDims(sources)
-  // The lightbox galleries: each visible image file (videos play inline, so they're
-  // excluded) contributes one entry per side, in display order. before/after stay in
-  // lockstep (same files, same order) so a file's index is the same in both — letting
-  // ←/→ walk whichever side you opened. A file with no image at all is skipped, so it
-  // simply has no index and falls back to opening the single clicked image.
+  // The lightbox diff gallery: each visible image file (videos play inline, so they're
+  // excluded) contributes one entry, in display order, carrying its before/after pair
+  // and the current comparison mode — so opening any image lets ←/→ walk the files and
+  // the lightbox shows the same comparison. A file with no image at all is skipped, so
+  // it has no index and falls back to opening the single clicked image. `url` is the
+  // representative side, used for the lightbox's edge previews.
   const imageFiles = useMemo(
     () => files.filter((f) => !isVideoArtifact(f.name) && (f.left_url || f.right_url)),
     [files],
   )
-  const beforeGallery = useMemo<LightboxImage[]>(
-    () => imageFiles.map((f) => ({ url: (f.left_url ?? f.right_url) as string, filename: f.name, size: 0 })),
-    [imageFiles],
-  )
-  const afterGallery = useMemo<LightboxImage[]>(
-    () => imageFiles.map((f) => ({ url: (f.right_url ?? f.left_url) as string, filename: f.name, size: 0 })),
-    [imageFiles],
+  const diffGallery = useMemo<LightboxImage[]>(
+    () => imageFiles.map((f) => ({
+      url: (f.right_url ?? f.left_url) as string,
+      filename: f.name,
+      size: 0,
+      diff: { left: f.left_url, right: f.right_url, mode },
+    })),
+    [imageFiles, mode],
   )
   const galleryIndex = useMemo(() => {
     const m = new Map<string, number>()
@@ -498,7 +500,7 @@ function FileGrid({ files, mode, spans, onSpanChange, scope, changeThreshold = 0
   const items = useMemo(
     () => files.map((f) => ({
       key: f.name,
-      node: <FileRow file={f} mode={mode} changeThreshold={changeThreshold} before={beforeGallery} after={afterGallery} index={galleryIndex.get(f.name)} />,
+      node: <FileRow file={f} mode={mode} changeThreshold={changeThreshold} gallery={diffGallery} index={galleryIndex.get(f.name)} />,
       aspect: dims[f.name]?.aspect,
       pxWidth: dims[f.name]?.pxWidth,
       // Videos need a minimum tile width for their transport controls (see
@@ -509,7 +511,7 @@ function FileGrid({ files, mode, spans, onSpanChange, scope, changeThreshold = 0
       // bodyResizable. Other images resize by dragging the media (data-tile-drag).
       bodyResizable: mode !== 'slider' && !isVideoArtifact(f.name),
     })),
-    [files, mode, dims, changeThreshold, beforeGallery, afterGallery, galleryIndex],
+    [files, mode, dims, changeThreshold, diffGallery, galleryIndex],
   )
   // pt-3 so the gap above the first row matches the card body's px-3 left inset.
   return (
