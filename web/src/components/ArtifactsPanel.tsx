@@ -3,8 +3,9 @@ import { createPortal } from 'react-dom'
 import { api } from '../stores/apiClient'
 import type { ArtifactSet, ArtifactFile, ArtifactLogLine } from '../api'
 import { ArtifactFile as ArtifactFileNS } from '../api'
-import { LoaderCircle, Image as ImageIcon, ChevronDown, ChevronRight, TriangleAlert, RefreshCw, ScrollText, SquarePlus, SquareMinus, SquareDot } from 'lucide-react'
+import { LoaderCircle, Image as ImageIcon, ChevronDown, TriangleAlert, RefreshCw, ScrollText, SquarePlus, SquareMinus, SquareDot } from 'lucide-react'
 import { InfoTooltip } from './InfoTooltip'
+import { CollapsibleCard, MELT_BTN } from './CollapsibleCard'
 import { loadArtifactPrefs, saveArtifactPrefs, loadTagFilter, saveTagFilter, clampChangeThreshold, type ArtifactTagFilter } from '../lib/artifactPrefs'
 import { computeVisibleFiles, filterIsActive, effectiveChangeType } from '../lib/artifactFilter'
 import { ArtifactFilterBar, TagBadge } from './ArtifactFilterBar'
@@ -613,14 +614,6 @@ export function ElapsedTime({ startedAt }: { startedAt: number }) {
   return <>{formatElapsed(Math.max(0, Math.floor(now / 1000 - startedAt)))}</>
 }
 
-// The card header's action buttons (build log + regenerate) sit as faint icons at
-// rest and brighten ONLY the icon the pointer is actually over — a per-button
-// `hover:` (not a shared `group-hover:`), with no border or background. So hovering
-// one button no longer lights up its neighbour or boxes the whole cluster; it just
-// darkens that one icon. MELT_BTN is the shared resting+hover skin; per-button
-// classes add the rounding/layout on top.
-const MELT_BTN = 'text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 transition-colors cursor-pointer'
-
 function ArtifactSetCard({ set, mode, scale, spans, onSpanChange, filter, search, onRefresh, projectId, agentId }: { set: ArtifactSet; mode: ImageDiffMode; scale: number; spans: ArtifactSpans; onSpanChange: (key: string, span: number | null) => void; filter: ArtifactTagFilter; search: string; onRefresh: (name: string, side?: ArtifactSide) => void; projectId: string | null; agentId: string }) {
   const status = set.status as string
   // Apply the (shared) tag filter and the search query to this card's files. The
@@ -744,20 +737,9 @@ function ArtifactSetCard({ set, mode, scale, spans, onSpanChange, filter, search
   // a "·" (the two builds run in parallel), e.g. "building frontend · home 7/24".
   const progressText = [set.left_progress, set.right_progress].filter(Boolean).join(' · ')
 
-  return (
-    <div className="border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 overflow-hidden">
-      {/* Give the header a resting tint that's distinct from the card body
-          (bg-white / dark:bg-gray-800) on its own, not only on hover — a 60%
-          gray-800 over a gray-800 body was indistinguishable at rest. */}
-      <div className="flex items-stretch bg-gray-100 dark:bg-gray-700/40">
-        <button
-          onClick={() => setCollapsed((c) => !c)}
-          className="flex-1 min-w-0 flex items-center gap-2 px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors cursor-pointer text-left"
-        >
-          {collapsed ? <ChevronRight className="w-3.5 h-3.5 text-gray-400 shrink-0" /> : <ChevronDown className="w-3.5 h-3.5 text-gray-400 shrink-0" />}
-          <ImageIcon className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400 shrink-0" />
-          <span className="text-sm font-medium text-gray-700 dark:text-gray-300 truncate shrink-0">{set.name}</span>
-          {status === 'generating' && (
+  const statusChips = (
+    <>
+      {status === 'generating' && (
             // Live header: spinner, the latest stdout line as progress (truncated so
             // it can't push the refresh button off the row), then how long the job
             // has been running, separated by a "·". Expand the card for the full log.
@@ -783,19 +765,19 @@ function ArtifactSetCard({ set, mode, scale, spans, onSpanChange, filter, search
               // filter hides some, the label reads "shown/total changed".
               <span className="text-xs font-medium text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-900/40 rounded-full px-2 py-0.5 shrink-0">{changedLabel}</span>
             ))}
-          {status === 'ready' && failedSide && (
+      {status === 'ready' && failedSide && (
             // One side failed to render; flag it in the header so it's visible
             // even while the card is collapsed (the images shown are one-sided).
             <span className="flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400 shrink-0">
               <TriangleAlert className="w-3 h-3" /> {failedSide === 'left' ? 'before' : 'after'} failed
             </span>
           )}
-        </button>
-        {/* Faint icon buttons, vertically centred in the stretch-height header.
-            Each brightens only on its own hover (see MELT_BTN) — no shared group
-            hover, so they don't light up together. */}
-        <div className="shrink-0 flex items-center gap-1.5 pl-1 pr-2">
-          {/* Show/hide the build log. Opening it also expands the card (the log
+    </>
+  )
+
+  const actionButtons = (
+    <>
+      {/* Show/hide the build log. Opening it also expands the card (the log
               renders in the body). Only for settled cards with a log. The open
               state stays tinted blue even at rest so "log is showing" is legible,
               brightening a touch on its own hover; the resting affordance otherwise
@@ -866,11 +848,18 @@ function ArtifactSetCard({ set, mode, scale, spans, onSpanChange, filter, search
               document.body,
             )}
           </div>
-        </div>
-      </div>
+    </>
+  )
 
-      {!collapsed && (
-        <div className="px-3 pb-2">
+  return (
+    <CollapsibleCard
+      icon={<ImageIcon className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400 shrink-0" />}
+      name={set.name}
+      status={statusChips}
+      actions={actionButtons}
+      collapsed={collapsed}
+      onToggleCollapsed={() => setCollapsed((c) => !c)}
+    >
           {/* While generating, stream both builds' live logs side by side; a side
               that finishes first shows its final log instead of "waiting". */}
           {status === 'generating' && <LiveLogPanes set={set} />}
@@ -920,9 +909,7 @@ function ArtifactSetCard({ set, mode, scale, spans, onSpanChange, filter, search
               )}
             </>
           )}
-        </div>
-      )}
-    </div>
+    </CollapsibleCard>
   )
 }
 

@@ -17,9 +17,8 @@ import { uploadBlobUrl } from '../api/uploads'
 import type { Attachment } from '../lib/spawnDrafts'
 import { DiffViewer } from '../DiffViewer'
 import { formatStartedAgo, agentStatusBadge, archivedEndStateBadge, agentDotClass, agentDotAnimate, agentTypePill } from './AgentComponents'
-import { LoaderCircle, Merge, Trash2, Tag, RotateCcw, Pencil, TerminalSquare, Mail, ShieldAlert, ShieldCheck, ShieldOff, AlertTriangle, Clock, FlaskConical } from 'lucide-react'
+import { LoaderCircle, Merge, Trash2, Tag, RotateCcw, Pencil, TerminalSquare, Mail, ShieldAlert, ShieldCheck, ShieldOff, AlertTriangle, Clock } from 'lucide-react'
 import { TestVerdictChip } from './TestVerdict'
-import { TestsPanel } from './TestsPanel'
 import { Tooltip } from './Tooltip'
 import { Badge } from './Badge'
 import { AgentTypeIcon, type AgentTypeIconName } from './AgentTypeIcon'
@@ -368,7 +367,6 @@ export function AgentDetail({
 }) {
   const [killing, setKilling] = useState(false)
   const [merging, setMerging] = useState(false)
-  const [showTests, setShowTests] = useState(false)
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleDraft, setTitleDraft] = useState('')
   const [savingTitle, setSavingTitle] = useState(false)
@@ -855,11 +853,10 @@ export function AgentDetail({
                 {agentStatusBadge(agent.agent_status.status).label}
               </Badge>
             )}
-            {/* Test verdict chip (PLAN #68): click to open the tests panel. */}
+            {/* Test verdict chip (PLAN #68): an at-a-glance verdict. The full
+                tests panel lives in the diff viewer, below the Changes header. */}
             {agent.tests && agent.tests.status !== 'none' && (
-              <button onClick={() => setShowTests((s) => !s)} className="inline-flex" title="Show test results">
-                <TestVerdictChip tests={agent.tests} variant="sm" />
-              </button>
+              <TestVerdictChip tests={agent.tests} variant="sm" />
             )}
             {armed && (
               <Badge tone="green" variant="sm" icon={<Clock className="w-3 h-3" />} title="Auto-merge armed — merges when tests pass">
@@ -901,19 +898,6 @@ export function AgentDetail({
           </SeparatedRow>
 
         </div>
-
-        {/* Tests panel (PLAN #68): toggled by the verdict chip. Single-sided,
-            failing-first, with a live log while running. */}
-        {showTests && projectId && (
-          <div className="mb-6 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
-            <div className="flex items-center gap-2 px-3 py-2 bg-gray-50 dark:bg-gray-800/40 border-b border-gray-100 dark:border-gray-800">
-              <FlaskConical className="w-4 h-4 text-gray-400" />
-              <span className="text-sm font-medium">Tests</span>
-              <button onClick={() => setShowTests(false)} className="ml-auto text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">Hide</button>
-            </div>
-            <TestsPanel projectId={projectId} agentId={agent.id} />
-          </div>
-        )}
 
         {/* Prompt */}
         {agent.prompt && <PromptBlock prompt={agent.prompt} projectId={projectId} />}

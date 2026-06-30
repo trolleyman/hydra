@@ -547,14 +547,15 @@ try {
       // view. Viewport-only to focus on the header + prompt (agent-md's seeded
       // prompt overflows the block's max height, so the fade is visible).
       { name: 'agent-markdown', path: '/project/sim-project/agent/agent-md', viewportOnly: true },
-      // The test gate (PLAN #68): click the failing verdict chip on agent-2 to
-      // open the single-sided, failing-first tests panel (assertion messages +
-      // collapsed passing/skipped rows). agent-2's fixtures (simTestRunners) are a
-      // regression — two failing cases — so the panel shows the gate's headline.
-      { name: 'tests-panel', path: '/project/sim-project/agent/agent-2', viewportOnly: true, click: 'button[title="Show test results"]' },
+      // The tests panel (PLAN #68), now styled like the artifacts panel and living
+      // in the diff viewer just below the "Changes" header. Pin Changes to the top,
+      // then expand agent-2's single (failing) runner card by clicking its header —
+      // its fixtures (simTestRunners) are a regression with two failing cases, so
+      // the card shows the assertion messages failing-first.
+      { name: 'tests-panel', path: '/project/sim-project/agent/agent-2', scrollTo: 'Changes', clicks: ['button:has(svg.lucide-flask-conical)'] },
       // The same surface mid-run (agent-md is seeded as a running verdict): the
-      // live log tail + progress bar + partial counts.
-      { name: 'tests-panel-running', path: '/project/sim-project/agent/agent-md', viewportOnly: true, click: 'button[title="Show test results"]' },
+      // expanded card's live xterm build-log tail + progress bar + partial counts.
+      { name: 'tests-panel-running', path: '/project/sim-project/agent/agent-md', scrollTo: 'Changes', clicks: ['button:has(svg.lucide-flask-conical)'] },
       // The merge gate in the header: agent-2's failing verdict turns the primary
       // action into "Force merge" and shows the red failing chip in the metadata
       // row (the soft gate — force is always reachable).
