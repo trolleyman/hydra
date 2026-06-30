@@ -2839,6 +2839,17 @@ components:
           description: >-
             Max test-runner generations that run at once (test_concurrency in
             config.toml). 0 = unlimited; null/absent uses the built-in default.
+        test_prefetch:
+          type: boolean
+          nullable: true
+          description: >-
+            Whether the daemon proactively re-runs a head's test suites in the
+            background when its branch-tip verdict is missing or stale (a cached
+            result computed for an older commit), so the verdict is ready before
+            the tests panel is opened or the merge gate runs (test_prefetch in
+            config.toml). When false, tests run only on open / at merge;
+            foreground runs and test_concurrency still apply. null/absent uses
+            the built-in default (enabled).
         artifact_concurrency:
           type: integer
           nullable: true
