@@ -224,7 +224,7 @@ export function AgentSidebarItem({
           />
         ) : null}
       </div>
-      <div className="flex items-center gap-1.5 mt-0.5 ml-4">
+      <div className="flex items-center gap-1.5 mt-0.5 ml-4 min-w-0 overflow-hidden">
         <span className={`flex items-center gap-1 text-xs ${agentTypeColor(agent.agent_type)}`}>
           <AgentTypeIcon name={agent.agent_type as AgentTypeIconName} className="w-3 h-3 shrink-0" />
           {agent.agent_type || 'unknown'}
