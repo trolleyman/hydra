@@ -614,6 +614,14 @@ func (s *Server) GetConfig(_ context.Context, request api.GetConfigRequestObject
 		resp.Services = &svcs
 	}
 
+	if len(cfg.Tests) > 0 {
+		tests := make([]api.TestScript, len(cfg.Tests))
+		for i, t := range cfg.Tests {
+			tests[i] = toAPITestScript(t)
+		}
+		resp.Tests = &tests
+	}
+
 	// Surface the configured value when set (nil = unset → the client shows the
 	// default; 0 = unlimited). Copy so the response doesn't alias cfg's pointer.
 	if cfg.ArtifactConcurrency != nil {
@@ -625,6 +633,15 @@ func (s *Server) GetConfig(_ context.Context, request api.GetConfigRequestObject
 	if cfg.ArtifactPrefetch != nil {
 		b := *cfg.ArtifactPrefetch
 		resp.ArtifactPrefetch = &b
+	}
+	// Test concurrency + prefetch mirror their artifact counterparts above.
+	if cfg.TestConcurrency != nil {
+		n := *cfg.TestConcurrency
+		resp.TestConcurrency = &n
+	}
+	if cfg.TestPrefetch != nil {
+		b := *cfg.TestPrefetch
+		resp.TestPrefetch = &b
 	}
 
 	return api.GetConfig200JSONResponse(resp), nil
@@ -661,6 +678,41 @@ func fromAPIArtifactScript(a api.ArtifactScript) config.ArtifactScript {
 	}
 	out.Strict = a.Strict
 	out.Enabled = a.Enabled
+	return out
+}
+
+// toAPITestScript converts an internal TestScript to the API representation. The
+// fields mirror ArtifactScript, so this mirrors toAPIArtifactScript.
+func toAPITestScript(t config.TestScript) api.TestScript {
+	out := api.TestScript{Name: t.Name, Command: t.Command}
+	if t.TimeoutSec != 0 {
+		out.TimeoutSec = &t.TimeoutSec
+	}
+	if t.UnsafeHost {
+		out.UnsafeHost = &t.UnsafeHost
+	}
+	if t.CleanIgnored {
+		out.CleanIgnored = &t.CleanIgnored
+	}
+	out.Strict = t.Strict
+	out.Enabled = t.Enabled
+	return out
+}
+
+// fromAPITestScript converts an API TestScript to the internal representation.
+func fromAPITestScript(t api.TestScript) config.TestScript {
+	out := config.TestScript{Name: t.Name, Command: t.Command}
+	if t.TimeoutSec != nil {
+		out.TimeoutSec = *t.TimeoutSec
+	}
+	if t.UnsafeHost != nil {
+		out.UnsafeHost = *t.UnsafeHost
+	}
+	if t.CleanIgnored != nil {
+		out.CleanIgnored = *t.CleanIgnored
+	}
+	out.Strict = t.Strict
+	out.Enabled = t.Enabled
 	return out
 }
 
@@ -777,6 +829,15 @@ func (s *Server) SaveConfig(_ context.Context, request api.SaveConfigRequestObje
 			newCfg.Services = append(newCfg.Services, fromAPIServiceScript(svc))
 		}
 	}
+	// A non-nil tests list (even empty) is authoritative, mirroring artifacts; a nil
+	// list (older clients / defaults-only saves) leaves the existing [[tests]] blocks
+	// untouched.
+	if request.Body.Tests != nil {
+		newCfg.Tests = make([]config.TestScript, 0, len(*request.Body.Tests))
+		for _, t := range *request.Body.Tests {
+			newCfg.Tests = append(newCfg.Tests, fromAPITestScript(t))
+		}
+	}
 	// Artifact concurrency: a set value (0 = unlimited, N>0 = at most N) is
 	// applied authoritatively; nil/absent clears it so it resets to the built-in
 	// default. Negatives are coerced to 0 (unlimited), matching the API minimum.
@@ -792,6 +853,18 @@ func (s *Server) SaveConfig(_ context.Context, request api.SaveConfigRequestObje
 	if request.Body.ArtifactPrefetch != nil {
 		b := *request.Body.ArtifactPrefetch
 		newCfg.ArtifactPrefetch = &b
+	}
+	// Test concurrency + prefetch mirror their artifact counterparts above.
+	if request.Body.TestConcurrency != nil {
+		n := *request.Body.TestConcurrency
+		if n < 0 {
+			n = 0
+		}
+		newCfg.TestConcurrency = &n
+	}
+	if request.Body.TestPrefetch != nil {
+		b := *request.Body.TestPrefetch
+		newCfg.TestPrefetch = &b
 	}
 
 	scope := api.SaveConfigParamsScopeProject

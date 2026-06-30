@@ -9,6 +9,7 @@ import { ThemeSection } from './ThemeSection'
 import { TerminalSection } from './TerminalSection'
 import { ConfigForm } from './ConfigForm'
 import { ArtifactsEditor } from './ArtifactsEditor'
+import { TestsEditor } from './TestsEditor'
 import { ServicesEditor } from './ServicesEditor'
 
 // The agent-type selector (replaces the old tab bar) — brand icon + label per
@@ -171,6 +172,17 @@ export function SettingsContent({
           onConcurrencyChange={(n) => setConfig({ ...config, artifact_concurrency: n })}
           prefetch={config.artifact_prefetch}
           onPrefetchChange={(v) => setConfig({ ...config, artifact_prefetch: v })}
+        />
+      </div>
+
+      <div className="mt-6">
+        <TestsEditor
+          tests={config.tests ?? []}
+          onChange={(tests) => setConfig({ ...config, tests })}
+          concurrency={config.test_concurrency}
+          onConcurrencyChange={(n) => setConfig({ ...config, test_concurrency: n })}
+          prefetch={config.test_prefetch}
+          onPrefetchChange={(v) => setConfig({ ...config, test_prefetch: v })}
         />
       </div>
 
