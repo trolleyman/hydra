@@ -2300,7 +2300,7 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
       {/* -top-4 cancels the scroll container's pt-4 (AgentDetail) so the stuck
           header docks flush under the top bar — no overlap (was -top-6) and no
           gap for the artifacts filter bar to peek through (was top-0). */}
-      <div ref={changesBarRef} className="flex items-center gap-3 mb-4 flex-wrap sticky -top-4 z-30 bg-gray-50 dark:bg-gray-900 py-2 border-b border-gray-200 dark:border-gray-800 shadow-sm -mx-1 px-1">
+      <div ref={changesBarRef} className="flex items-center gap-3 mb-4 flex-wrap sticky -top-4 z-30 bg-gray-50 dark:bg-gray-900 py-2 border-b border-gray-200 dark:border-gray-800 shadow-sm -mx-1.5 sm:-mx-3 px-1.5 sm:px-3">
         <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Changes</h2>
         {diff && (
           <div className="flex items-center gap-1.5">
