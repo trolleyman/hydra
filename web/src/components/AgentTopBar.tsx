@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, useCallback, type ReactNode } from 'react'
-import { PanelLeftOpen, MoreHorizontal } from 'lucide-react'
+import { PanelLeftOpen, MoreHorizontal, ChevronDown } from 'lucide-react'
 import { useSidebarStore } from '../lib/sidebar'
 import { useFinePointer } from '../lib/useFinePointer'
 import { IconButton } from './IconButton'
@@ -9,6 +9,17 @@ import { IconButton } from './IconButton'
 // a shared pill container; 'danger' is the red-outlined destructive button.
 // Omitted → a neutral outlined button. `danger` (legacy) maps to 'danger'.
 export type AgentTopBarVariant = 'primary' | 'segment' | 'danger'
+
+// One row of a split action's attached dropdown (the merge button's Force / Queue
+// options). Rendered both in the split chevron's popover and, if the action ever
+// folds into the overflow "⋯" menu, as indented sub-rows beneath it.
+export interface AgentTopBarMenuItem {
+  label: string
+  icon?: ReactNode
+  onClick: () => void
+  danger?: boolean
+  disabled?: boolean
+}
 
 export interface AgentTopBarAction {
   label: string
@@ -21,6 +32,11 @@ export interface AgentTopBarAction {
   // overflow menu and folded into a button's tooltip — only on devices with a
   // physical keyboard (see useFinePointer).
   shortcut?: string
+  // When set, the action renders as a split button: its main button plus a chevron
+  // that opens this dropdown (e.g. the merge button's Force merge / Queue merge).
+  // `menuNote` is an optional banner above the items — a failing-tests warning.
+  menu?: AgentTopBarMenuItem[]
+  menuNote?: ReactNode
 }
 
 // Inline-rename wiring for the title. When provided, clicking the title text (or
@@ -93,8 +109,101 @@ function ActionButton({ a, mode, showShortcut }: { a: AgentTopBarAction; mode: '
   )
 }
 
+// The chevron half of a split button: it mirrors the main button's variant skin
+// but rounds on the right and drops its left border so the two read as one control.
+function chevBtnClass(v: AgentTopBarVariant | undefined): string {
+  const base = 'shrink-0 h-8 px-1 inline-flex items-center justify-center rounded-r-lg border border-l-0 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed'
+  if (v === 'primary') return `${base} bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-700/40`
+  if (v === 'danger') return `${base} bg-white dark:bg-gray-800 border-red-300 dark:border-red-800/60 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20`
+  return `${base} bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700`
+}
+
+function menuItemClass(danger?: boolean): string {
+  return `w-full flex items-center gap-2.5 px-3 py-2 text-sm text-left transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer ${
+    danger
+      ? 'text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20'
+      : 'text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700'
+  }`
+}
+
+// A split action button: the main button (the action's onClick) butted against a
+// chevron that opens the action's `menu` dropdown — used for the merge button's
+// Force merge / Queue merge options, with an optional warning note on top.
+function SplitActionButton({ a, mode, showShortcut }: { a: AgentTopBarAction; mode: 'labels' | 'icons'; showShortcut: boolean }) {
+  const [open, setOpen] = useState(false)
+  const wrapRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false)
+    }
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onEsc)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onEsc)
+    }
+  }, [open])
+  const v = actionVariant(a)
+  // Reuse the action skin but square off the main button's right edge so it meets
+  // the chevron seamlessly.
+  const mainCls = actionBtnClass(mode, a).replace('rounded-lg', 'rounded-l-lg rounded-r-none')
+  return (
+    <div ref={wrapRef} className="relative inline-flex shrink-0">
+      <button
+        type="button"
+        disabled={a.disabled}
+        onClick={a.onClick}
+        aria-label={a.label}
+        title={actionTitle(a, showShortcut)}
+        className={mainCls}
+      >
+        {a.icon}
+        {mode === 'labels' && <span className="whitespace-nowrap">{a.label}</span>}
+      </button>
+      <button
+        type="button"
+        disabled={a.disabled}
+        aria-label={`${a.label} options`}
+        aria-haspopup="true"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+        className={chevBtnClass(v)}
+      >
+        <ChevronDown className="w-3.5 h-3.5" />
+      </button>
+      {open && a.menu && (
+        <div className="absolute right-0 top-full mt-1 w-max min-w-[13rem] max-w-[20rem] bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50 py-1">
+          {a.menuNote && (
+            <div className="px-3 py-2 mb-1 text-xs border-b border-gray-100 dark:border-gray-700">{a.menuNote}</div>
+          )}
+          {a.menu.map((m) => (
+            <button
+              key={m.label}
+              type="button"
+              disabled={m.disabled}
+              onClick={() => {
+                setOpen(false)
+                m.onClick()
+              }}
+              className={menuItemClass(m.danger)}
+            >
+              {m.icon && <span className="shrink-0">{m.icon}</span>}
+              {m.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // Walk a visible action list, wrapping each contiguous run of 'segment' actions
-// in the shared pill while standalone actions render bare.
+// in the shared pill while standalone actions render bare. An action with a `menu`
+// renders as a split button.
 function renderActions(list: AgentTopBarAction[], mode: 'labels' | 'icons', showShortcut: boolean): ReactNode[] {
   const out: ReactNode[] = []
   for (let i = 0; i < list.length; ) {
@@ -108,6 +217,9 @@ function renderActions(list: AgentTopBarAction[], mode: 'labels' | 'icons', show
           ))}
         </div>,
       )
+    } else if (list[i].menu) {
+      out.push(<SplitActionButton key={list[i].label} a={list[i]} mode={mode} showShortcut={showShortcut} />)
+      i++
     } else {
       out.push(<ActionButton key={list[i].label} a={list[i]} mode={mode} showShortcut={showShortcut} />)
       i++
@@ -247,28 +359,51 @@ function AdaptiveActions({
           {menuOpen && (
             <div className="absolute right-0 top-full mt-1 w-max bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50 py-1">
               {hidden.map((a) => (
-                <button
-                  key={a.label}
-                  type="button"
-                  disabled={a.disabled}
-                  onClick={() => {
-                    setMenuOpen(false)
-                    a.onClick()
-                  }}
-                  className={`w-full flex items-center gap-2.5 px-3 py-2 text-sm text-left transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer ${
-                    actionVariant(a) === 'danger'
-                      ? 'text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20'
-                      : actionVariant(a) === 'primary'
-                        ? 'text-emerald-700 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/20'
-                        : 'text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700'
-                  }`}
-                >
-                  <span className="shrink-0">{a.icon}</span>
-                  {a.label}
-                  {showShortcut && a.shortcut && (
-                    <span className="ml-auto pl-6 text-[11px] font-medium text-gray-400 dark:text-gray-500">{a.shortcut}</span>
-                  )}
-                </button>
+                <div key={a.label}>
+                  <button
+                    type="button"
+                    disabled={a.disabled}
+                    onClick={() => {
+                      setMenuOpen(false)
+                      a.onClick()
+                    }}
+                    className={`w-full flex items-center gap-2.5 px-3 py-2 text-sm text-left transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer ${
+                      actionVariant(a) === 'danger'
+                        ? 'text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20'
+                        : actionVariant(a) === 'primary'
+                          ? 'text-emerald-700 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/20'
+                          : 'text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700'
+                    }`}
+                  >
+                    <span className="shrink-0">{a.icon}</span>
+                    {a.label}
+                    {showShortcut && a.shortcut && (
+                      <span className="ml-auto pl-6 text-[11px] font-medium text-gray-400 dark:text-gray-500">{a.shortcut}</span>
+                    )}
+                  </button>
+                  {/* A split action that folded into the overflow menu keeps its
+                      dropdown options as indented sub-rows so Force / Queue stay
+                      reachable on a narrow viewport. */}
+                  {a.menu?.map((m) => (
+                    <button
+                      key={m.label}
+                      type="button"
+                      disabled={m.disabled}
+                      onClick={() => {
+                        setMenuOpen(false)
+                        m.onClick()
+                      }}
+                      className={`w-full flex items-center gap-2.5 pl-8 pr-3 py-2 text-sm text-left transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer ${
+                        m.danger
+                          ? 'text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20'
+                          : 'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
+                      }`}
+                    >
+                      {m.icon && <span className="shrink-0">{m.icon}</span>}
+                      {m.label}
+                    </button>
+                  ))}
+                </div>
               ))}
             </div>
           )}
@@ -284,11 +419,14 @@ function AdaptiveActions({
           <button key={`l-${a.label}`} ref={(el) => { labeledRefs.current[i] = el }} className={actionBtnClass('labels', a)} tabIndex={-1}>
             {a.icon}
             <span className="whitespace-nowrap">{a.label}</span>
+            {/* Reserve the split chevron's width so the fit calc accounts for it. */}
+            {a.menu && <span className="inline-block w-7" />}
           </button>
         ))}
         {actions.map((a, i) => (
           <button key={`i-${a.label}`} ref={(el) => { iconRefs.current[i] = el }} className={actionBtnClass('icons', a)} tabIndex={-1}>
             {a.icon}
+            {a.menu && <span className="inline-block w-7" />}
           </button>
         ))}
         <button ref={moreRef} className={moreBtnClass} tabIndex={-1}>

@@ -10,14 +10,14 @@ import { ApprovalDecisionRequest } from '../api'
 import { AgentTerminal } from './AgentTerminal'
 import { BranchSelector } from './BranchSelector'
 import { SeparatedRow } from './SeparatedRow'
-import { AgentTopBar } from './AgentTopBar'
+import { AgentTopBar, type AgentTopBarAction, type AgentTopBarMenuItem } from './AgentTopBar'
 import { AttachmentChips } from './AttachmentChips'
 import { ImageLightbox } from './ImageLightbox'
 import { uploadBlobUrl } from '../api/uploads'
 import type { Attachment } from '../lib/spawnDrafts'
 import { DiffViewer } from '../DiffViewer'
 import { formatStartedAgo, agentStatusBadge, archivedEndStateBadge, agentDotClass, agentDotAnimate, agentTypePill } from './AgentComponents'
-import { LoaderCircle, Merge, Trash2, Tag, RotateCcw, Pencil, TerminalSquare, Mail, ShieldAlert, ShieldCheck, ShieldOff, AlertTriangle, Clock } from 'lucide-react'
+import { LoaderCircle, Merge, Trash2, Tag, RotateCcw, Pencil, TerminalSquare, Mail, ShieldAlert, ShieldCheck, ShieldOff, AlertTriangle, Clock, X } from 'lucide-react'
 import { TestVerdictChip } from './TestVerdict'
 import { Tooltip } from './Tooltip'
 import { Badge } from './Badge'
@@ -571,14 +571,21 @@ export function AgentDetail({
     }
   }
 
-  // handleMerge is the primary merge action; it adapts to the head's test verdict
-  // (PLAN #68): failing → force confirm, errored → merge-anyway confirm, running →
-  // arm auto-merge, otherwise the normal merge confirm below.
+  // handleMerge is the primary merge button + Ctrl+M action. The button always
+  // reads "Merge" now (PLAN #68): a click runs the normal, gated merge regardless
+  // of verdict — the soft test gate is enforced server-side (a failing verdict
+  // 409s and the catch offers a force-merge follow-up), and the explicit Force
+  // merge / Queue merge overrides live in the button's dropdown. While armed
+  // ("merge when green"), the button toggles the queue off instead.
   function handleMerge() {
-    const verdict = agent.tests?.status
-    if (verdict === 'failing') return confirmForceMerge('failing')
-    if (verdict === 'errored') return confirmForceMerge('errored')
-    if (verdict === 'running') return void armMerge()
+    if (agent.merge_when_green === true) return void cancelMerge()
+    return confirmNormalMerge()
+  }
+
+  // confirmNormalMerge shows the standard merge confirm (no gate override). Split
+  // out from handleMerge so the dropdown's Force/Queue options and the main button
+  // can each route to exactly the flow they mean.
+  function confirmNormalMerge() {
     // If this agent is stacked on another agent (its base branch is another
     // agent's branch), the merge advances that parent agent's branch — name it,
     // and warn when the parent is still running since its working files will
@@ -778,33 +785,52 @@ export function AgentDetail({
     return <ArchivedAgentDetail agent={agent} projectId={projectId} onPurged={onKilled} />
   }
 
-  // The primary merge action adapts to the test verdict + auto-merge state
-  // (PLAN #68): armed → cancel; failing → force; errored → merge anyway; running
-  // → arm "merge when green"; otherwise plain Merge.
+  // The merge button (PLAN #68): the main button is ALWAYS "Merge" (a plain gated
+  // merge) — except while merging, and while armed, when it becomes the
+  // "merge when green" queue toggle. The verdict-specific overrides (Force merge,
+  // Queue merge) move into a split-button dropdown beside it, with a warning note
+  // heading the menu when tests are failing (the gate is soft — override is always
+  // reachable).
   const verdict = agent.tests?.status
   const armed = agent.merge_when_green === true
-  const mergeAction = armed
-    ? { label: 'Cancel auto-merge', icon: <Clock className="w-4 h-4" />, onClick: () => void cancelMerge(), variant: 'primary' as const, disabled: merging || killing, shortcut: SHORTCUT_MERGE }
-    : {
-        label: verdict === 'failing' ? 'Force merge' : verdict === 'errored' ? 'Merge anyway' : verdict === 'running' ? 'Merge when green' : 'Merge',
-        icon: merging ? (
-          <LoaderCircle className="w-4 h-4 animate-spin" />
-        ) : verdict === 'failing' || verdict === 'errored' ? (
-          <AlertTriangle className="w-4 h-4" />
-        ) : verdict === 'running' ? (
-          <Clock className="w-4 h-4" />
-        ) : (
-          <Merge className="w-4 h-4" />
-        ),
-        onClick: handleMerge,
-        variant: 'primary' as const,
-        disabled: merging || killing,
+  const busy = merging || killing
+  // Force routes to the right confirm copy: a failing verdict names the failing
+  // count; anything else (errored / no verdict / still running) is "merge anyway".
+  const forceMerge = () => confirmForceMerge(verdict === 'failing' ? 'failing' : 'errored')
+
+  const mergeAction: AgentTopBarAction = armed
+    ? {
+        label: 'Queued — merge when green',
+        icon: <Clock className="w-4 h-4" />,
+        onClick: () => void cancelMerge(),
+        variant: 'primary',
+        disabled: busy,
         shortcut: SHORTCUT_MERGE,
+        menu: [
+          { label: 'Force merge now', icon: <AlertTriangle className="w-4 h-4" />, onClick: forceMerge, danger: true, disabled: busy },
+          { label: 'Cancel queued merge', icon: <X className="w-4 h-4" />, onClick: () => void cancelMerge(), disabled: busy },
+        ],
       }
-  // While tests run, also offer an immediate force-merge ("don't wait").
-  const mergeNowAction = verdict === 'running' && !armed
-    ? [{ label: 'Merge now (don’t wait)', icon: <Merge className="w-4 h-4" />, onClick: () => confirmForceMerge('errored'), variant: 'segment' as const, disabled: merging || killing }]
-    : []
+    : {
+        label: 'Merge',
+        icon: merging ? <LoaderCircle className="w-4 h-4 animate-spin" /> : <Merge className="w-4 h-4" />,
+        onClick: handleMerge,
+        variant: 'primary',
+        disabled: busy,
+        shortcut: SHORTCUT_MERGE,
+        menu: ([
+          { label: 'Force merge', icon: <AlertTriangle className="w-4 h-4" />, onClick: forceMerge, danger: verdict === 'failing', disabled: busy },
+          { label: 'Queue merge — merge when green', icon: <Clock className="w-4 h-4" />, onClick: () => void armMerge(), disabled: busy },
+        ] as AgentTopBarMenuItem[]),
+        menuNote: verdict === 'failing'
+          ? (
+            <span className="flex items-start gap-1.5 text-amber-700 dark:text-amber-300">
+              <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-px" />
+              <span>Tests are failing — merging is soft-gated. Force to override now, or queue to merge once they pass.</span>
+            </span>
+          )
+          : undefined,
+      }
 
   return (
     <div className="flex-1 flex flex-col min-w-0 min-h-0">
@@ -827,7 +853,6 @@ export function AgentDetail({
         }}
         actions={[
           mergeAction,
-          ...mergeNowAction,
           { label: 'Mark as unread', icon: <Mail className="w-4 h-4" />, onClick: handleMarkUnread, variant: 'segment', shortcut: SHORTCUT_MARK_UNREAD },
           { label: 'Rename', icon: <Pencil className="w-4 h-4" />, onClick: startEditingTitle, variant: 'segment', shortcut: SHORTCUT_RENAME },
           { label: 'Kill', icon: <Trash2 className="w-4 h-4" />, onClick: handleKill, variant: 'danger', disabled: merging || killing, shortcut: SHORTCUT_KILL },

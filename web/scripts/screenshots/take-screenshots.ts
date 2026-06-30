@@ -556,14 +556,15 @@ try {
       // The same surface mid-run (agent-md is seeded as a running verdict): the
       // expanded card's live xterm build-log tail + progress bar + partial counts.
       { name: 'tests-panel-running', path: '/project/sim-project/agent/agent-md', scrollTo: 'Changes', clicks: ['button:has(svg.lucide-flask-conical)'] },
-      // The merge gate in the header: agent-2's failing verdict turns the primary
-      // action into "Force merge" and shows the red failing chip in the metadata
-      // row (the soft gate — force is always reachable).
-      { name: 'tests-merge-gate', path: '/project/sim-project/agent/agent-2', viewportOnly: true },
-      // The force-merge confirm that names exactly what's being overridden.
-      { name: 'tests-force-merge-confirm', path: '/project/sim-project/agent/agent-2', viewportOnly: true, click: 'button:has-text("Force merge")' },
+      // The merge gate in the header (PLAN #68): the primary button always reads
+      // "Merge" now; opening its split-button dropdown on agent-2's failing verdict
+      // reveals the soft-gate warning plus the Force merge / Queue merge overrides.
+      { name: 'tests-merge-gate', path: '/project/sim-project/agent/agent-2', viewportOnly: true, click: 'button[aria-label="Merge options"]' },
+      // The force-merge confirm that names exactly what's being overridden — reached
+      // by opening the merge dropdown and choosing Force merge.
+      { name: 'tests-force-merge-confirm', path: '/project/sim-project/agent/agent-2', viewportOnly: true, clicks: ['button[aria-label="Merge options"]', 'button:has-text("Force merge")'] },
       // Auto-merge armed: agent-md (running + merge_when_green) shows the green
-      // "merges when green" chip and a "Cancel auto-merge" primary action.
+      // "merges when green" chip and a "Queued — merge when green" primary action.
       { name: 'tests-merge-when-green', path: '/project/sim-project/agent/agent-md', viewportOnly: true },
       // The agent-type picker dropdown, opened on the compact ("mini") spawn box
       // in the sidebar. The picker is an icon-only trigger (the active agent's
