@@ -278,7 +278,7 @@ function NetworkEnforcementBadge({ mode }: { mode?: string }) {
   const c = cfg[mode]
   if (!c) return null
   return (
-    <Tooltip content={c.tip}>
+    <Tooltip variant="card" title="Network access" content={c.tip}>
       <Badge className={c.className} icon={<c.Icon className="w-3 h-3 shrink-0" />}>
         {c.label}
       </Badge>

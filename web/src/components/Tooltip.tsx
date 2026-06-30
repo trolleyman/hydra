@@ -71,18 +71,25 @@ export function Tooltip({
     if (!el) return null
     const rect = el.getBoundingClientRect()
     const padding = 8
-    // The box is capped at this width (matching the width/max-w below) and wraps,
-    // so half of it is the worst-case horizontal overhang to keep on screen.
+    // Clamp by the box's REAL width when we have it. The dark hint sizes to its
+    // text, so clamping by the 320px cap shoves a short tip (e.g. "Settings")
+    // ~160px sideways near a screen edge — box adrift, arrow stretched to reach.
+    // On the first paint the box isn't in the DOM yet, so fall back to the cap;
+    // the useLayoutEffect below re-runs this with the measured width before paint.
     const maxWidth = card ? width : DARK_MAX_WIDTH
     const clampPad = card ? 16 : 8
+    const halfWidth = (boxRef.current?.offsetWidth ?? maxWidth) / 2
 
     // Clamp horizontally so the box never spills off-screen, then shift the arrow
     // back by the same offset so it still points at the trigger.
     const centerX = rect.left + rect.width / 2
     let left = centerX
-    if (left - maxWidth / 2 < clampPad) left = maxWidth / 2 + clampPad
-    else if (left + maxWidth / 2 > window.innerWidth - clampPad)
-      left = window.innerWidth - maxWidth / 2 - clampPad
+    if (left - halfWidth < clampPad) left = halfWidth + clampPad
+    else if (left + halfWidth > window.innerWidth - clampPad)
+      left = window.innerWidth - halfWidth - clampPad
+
+    // Keep the arrow within the bubble so it can't detach in extreme corners.
+    const arrowOffset = Math.max(-(halfWidth - 10), Math.min(halfWidth - 10, centerX - left))
 
     // Choose a vertical side. Measure the rendered box (falls back to a guess on
     // the first paint, before it exists) and open on whichever side has room,
@@ -101,7 +108,7 @@ export function Tooltip({
       top: placement === 'top' ? rect.top - padding : rect.bottom + padding,
       left,
       placement,
-      arrowX: `calc(50% + ${centerX - left}px)`,
+      arrowX: `calc(50% + ${arrowOffset}px)`,
     }
   }, [card, side, width])
 
