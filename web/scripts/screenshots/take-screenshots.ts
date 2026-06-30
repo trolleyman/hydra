@@ -378,6 +378,12 @@ try {
       // before/after, onion, etc. working inside the lightbox. Only meaningful with
       // openArtifactImage.
       lightboxMode?: string
+      // After openArtifactImage (+ any lightboxMode), magnify the lightbox comparator
+      // with the scroll-wheel so the zoom/pan chrome — the bottom-right minimap and
+      // "Reset view (N×)" button — is on screen, documenting the lightbox zoom feature.
+      // The zoom is a pure function of the (fixed) wheel amount, so the shot stays
+      // reproducible. Only meaningful with openArtifactImage.
+      lightboxZoom?: boolean
       // Eager-loads every masonry tile image and waits for the layout to settle
       // before capturing — for the repository artifacts view, whose masonry is shown
       // without an expand step. Keeps the width-driven layout byte-reproducible
@@ -936,6 +942,20 @@ try {
         showArtifacts: true,
         openArtifactImage: true,
         lightboxMode: 'Onion skin',
+      },
+      // The lightbox magnified: a screenshot too small to read at fit can be zoomed
+      // (scroll-wheel) and panned, with a bottom-right minimap + "Reset view (N×)"
+      // button. lightboxZoom wheels in after switching to the single-image A/B view.
+      {
+        name: 'artifact-lightbox-zoom',
+        path: '/project/sim-project/agent/agent-1',
+        scrollTo: 'Changes',
+        viewport: { width: 1280, height: 1280 },
+        imageDiffMode: 'side-by-side',
+        showArtifacts: true,
+        openArtifactImage: true,
+        lightboxMode: 'Before · After',
+        lightboxZoom: true,
       },
       // The collapsed artifacts panel: each set is a single header row ("N changed",
       // a spinner while generating, etc.) until clicked open — the default, opt-in
@@ -1867,6 +1887,20 @@ try {
             await page.click(`figure button:text-is("${pg.lightboxMode}")`)
             await settle(page)
           }
+          if (pg.lightboxZoom) {
+            // Magnify the comparator (ZoomPan) so the minimap + "Reset view" chrome
+            // is visible. Hover the frame centre and wheel in; the zoom is toward the
+            // cursor, so a fixed wheel amount over a fixed-layout frame is reproducible.
+            const frame = await page.locator('figure .overflow-hidden').first().boundingBox()
+            if (!frame) throw new Error('lightbox zoom frame not found')
+            await page.mouse.move(frame.x + frame.width / 2, frame.y + frame.height / 2)
+            for (let i = 0; i < 6; i++) await page.mouse.wheel(0, -180)
+            // The minimap + Reset only mount once magnified; wait for the Reset button.
+            await page.waitForFunction(() =>
+              Array.from(document.querySelectorAll('button')).some((b) => b.textContent?.includes('Reset view')),
+            )
+            await settle(page)
+          }
         }
         if (pg.highlightArtifacts) {
           // Turn on the artifacts panel's global "Highlight" toggle (in the header,
@@ -2186,6 +2220,146 @@ try {
     }
     progress('recording status-dot video')
     for (const theme of themes) await recordStatusDot(theme)
+
+    // Record the artifact-grid resize gesture: click-and-drag the first tile's image
+    // sideways and watch it snap a column at a time while the tiles beneath reflow. The
+    // tile renders at its quantised span width (MasonryGrid startResize), so it holds
+    // its size as the pointer crosses the deadband and then flips to the next column —
+    // hence runs of identical frames punctuated by a jump, not a smooth glide. This
+    // documents the masonry resize behaviour (the moving twin of the static artifacts
+    // shots) and gives the video diff viewer a third, interaction-driven clip.
+    //
+    // Determinism: the drag is driven by an explicit pointer x per frame, so each
+    // frame's layout is a pure function of the drag offset — NOT of wall-clock time.
+    // The one time-based element is the sibling-reflow easing (TILE_TRANSITION), which
+    // would otherwise leave tiles caught mid-animation at a clock-dependent position;
+    // we kill all CSS transition/animation (as the other recorders do) so every frame
+    // is the settled layout for its drag offset. The dragged tile's own height is
+    // frozen during the drag (MasonryGrid resizeKeyRef), so nothing else churns. Same
+    // bitexact/lossless ffmpeg encode as the clips above.
+    const RESIZE_FPS = 24
+    const recordResize = async (theme: (typeof themes)[number]) => {
+      const ctx = await browser.newContext({ viewport: { width: 1280, height: 1120 }, deviceScaleFactor: 1, colorScheme: theme })
+      await ctx.clock.setFixedTime(SIM_NOW)
+      await ctx.addInitScript(({ key, mode }) => { try { localStorage.setItem(key, mode) } catch { /* ignore */ } }, { key: StorageKeys.themeMode, mode: theme })
+      await ctx.addInitScript(({ key, value }) => { try { window.localStorage.setItem(key, value) } catch { /* ignore */ } }, { key: StorageKeys.trustedProjects, value: JSON.stringify([SIM_PROJECT]) })
+      // A/B mode: each image tile is a single picture whose media is body-draggable
+      // (side-by-side/slider/video disable the body drag — see FileGrid bodyResizable).
+      await ctx.addInitScript(({ key, mode }) => { try { localStorage.setItem(key, mode) } catch { /* ignore */ } }, { key: StorageKeys.diffImageMode, mode: 'ab' })
+      // Start from the aspect-ratio default spans (no persisted overrides) so the grid
+      // — and therefore every drag frame — is reproducible regardless of prior state.
+      await ctx.addInitScript(({ key }) => { try { localStorage.setItem(key, '{}') } catch { /* ignore */ } }, { key: StorageKeys.diffArtifactSpans })
+      const page = await ctx.newPage()
+      try {
+        await page.goto(base + '/project/sim-project/agent/agent-1', { waitUntil: 'domcontentloaded' })
+        // Reveal + expand the "screenshots" card, then eager-load and settle its
+        // masonry exactly like the showArtifacts capture path, so the grid is laid out
+        // on final image heights before we touch it.
+        await page.waitForFunction(() =>
+          Array.from(document.querySelectorAll('button')).some((b) => b.textContent?.includes('screenshots')),
+        )
+        await page.evaluate(() => {
+          const btn = Array.from(document.querySelectorAll('button')).find((b) => b.textContent?.includes('screenshots'))
+          btn?.click()
+        })
+        await settle(page)
+        await page.evaluate(() => { document.querySelectorAll<HTMLImageElement>('[data-mkey] img').forEach((i) => { i.loading = 'eager' }) })
+        await page.waitForFunction(() => {
+          const imgs = Array.from(document.querySelectorAll<HTMLImageElement>('[data-mkey] img'))
+          return imgs.length > 0 && imgs.every((i) => i.complete && i.naturalHeight > 0)
+        })
+        await page.waitForTimeout(500)
+        await settle(page)
+        await page.evaluate(async () => { if (document.fonts && document.fonts.ready) await document.fonts.ready })
+        // Kill every CSS animation/transition so each frame is the settled layout for
+        // its drag offset (the reflow easing is the only time-based element) — see note.
+        await page.addStyleTag({ content: '*,*::before,*::after{animation:none!important;transition:none!important}' })
+        // Pin the card's grid to the top of the scroll container so the dragged tile and
+        // the tiles beneath it are all in frame.
+        await page.evaluate(() => {
+          const btn = Array.from(document.querySelectorAll('button')).find((b) => b.textContent?.includes('screenshots'))
+          const card = btn?.closest('div.rounded-lg') as HTMLElement | null | undefined
+          const cont = card?.closest('.overflow-auto') as HTMLElement | null | undefined
+          if (card && cont) {
+            const offset = card.getBoundingClientRect().top - cont.getBoundingClientRect().top + cont.scrollTop
+            cont.scrollTop = offset - 16
+          }
+        })
+        await settle(page)
+        // The masonry container (parent of the absolutely-positioned [data-mkey] tiles)
+        // gives the grid's on-screen box; the first tile's [data-tile-drag] media is the
+        // surface we grab and drag.
+        const geom = await page.evaluate(() => {
+          const tile = document.querySelector('[data-mkey]')
+          const cont = tile?.parentElement
+          const media = document.querySelector('[data-mkey] [data-tile-drag]')
+          if (!cont || !media) return null
+          const c = cont.getBoundingClientRect()
+          const m = media.getBoundingClientRect()
+          return {
+            grid: { x: c.x, y: c.y, width: c.width, height: c.height },
+            media: { x: m.x, y: m.y, width: m.width, height: m.height },
+          }
+        })
+        if (!geom) throw new Error('artifact grid/tile not found for resize recording')
+        // Clip to the grid, capped to the viewport and an even-sided box (ffmpeg needs
+        // even dimensions for yuv).
+        const vw = 1280, vh = 1120
+        const clipX = Math.max(0, Math.round(geom.grid.x))
+        const clipY = Math.max(0, Math.round(geom.grid.y))
+        const clip = {
+          x: clipX,
+          y: clipY,
+          width: Math.floor(Math.min(geom.grid.width, vw - clipX) / 2) * 2,
+          height: Math.floor(Math.min(760, geom.grid.height, vh - clipY) / 2) * 2,
+        }
+        // Grab the media near its top-centre (inside the clip even for a tall shot) and
+        // drag it rightward toward the grid's right edge, growing it from its default
+        // span to (near) the full width, then back — a clean loop (first frame == last).
+        const startX = Math.round(geom.media.x + geom.media.width / 2)
+        const startY = Math.round(geom.media.y + Math.min(geom.media.height / 2, 70))
+        const maxX = Math.round(geom.grid.x + geom.grid.width - 24)
+        const maxDx = Math.max(0, maxX - startX)
+        const UP = 28, HOLD = 4
+        const xs: number[] = []
+        for (let i = 1; i <= UP; i++) xs.push(startX + Math.round((maxDx * i) / UP))
+        for (let i = 0; i < HOLD; i++) xs.push(startX + maxDx)
+        for (let i = UP - 1; i >= 0; i--) xs.push(startX + Math.round((maxDx * i) / UP))
+
+        const tmp = mkdtempSync(join(tmpdir(), 'hydra-resize-'))
+        let frame = 0
+        const shoot = async () => {
+          // Commit any pending React state + paint (two rAFs, like settle) before the shot.
+          await page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))))
+          await page.screenshot({ path: join(tmp, `f${String(frame++).padStart(3, '0')}.png`), clip })
+        }
+        // Frame 0: the grid at rest, before the grab.
+        await shoot()
+        await page.mouse.move(startX, startY)
+        await page.mouse.down()
+        for (const x of xs) {
+          await page.mouse.move(x, startY)
+          await shoot()
+        }
+        await page.mouse.up()
+        const out = join(OUT, `artifact-resize-${theme}.webm`)
+        const r = spawnSync(ffmpegBin, [
+          '-y', '-nostdin', '-loglevel', 'error',
+          '-framerate', String(RESIZE_FPS), '-i', join(tmp, 'f%03d.png'),
+          '-c:v', 'libvpx-vp9', '-lossless', '1', '-pix_fmt', 'yuv444p',
+          '-g', String(RESIZE_FPS), '-threads', '1', '-an',
+          '-flags', '+bitexact', '-fflags', '+bitexact',
+          out,
+        ], { encoding: 'utf8' })
+        if (r.status !== 0) throw new Error(`ffmpeg failed (${r.status}): ${r.stderr}`)
+        writeFileSync(`${out}.meta`, JSON.stringify({ tags: [`theme::${theme}`, 'section::agent'] }))
+        console.log(`wrote ${out}`)
+      } finally {
+        await ctx.close()
+      }
+    }
+    progress('recording resize video')
+    for (const theme of themes) await recordResize(theme)
 
     // Summarise any per-page failures. We exit 0 as long as at least one shot
     // rendered, so the artifacts panel still shows everything that worked (a

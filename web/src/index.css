@@ -74,6 +74,23 @@ body {
   .animate-status-pulse { animation: none; }
 }
 
+/* Image lightbox: when you step to the next/previous image, the new media slides
+   in from the side you're heading toward (--lb-from, set per navigation) and fades
+   up, so a gallery reads as a strip you move along rather than the picture blinking
+   in place. The wrapper is keyed by index so this replays on every step. */
+@keyframes lightbox-slide-in {
+  from { opacity: 0; transform: translateX(var(--lb-from, 0)); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+.lightbox-slide {
+  animation: lightbox-slide-in 240ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lightbox-slide { animation: none; }
+}
+
 /* highlight.js v11's github theme sets `code.hljs { padding: 3px 5px }`. The
    repository file view renders one `<code class="hljs">` per line, so that
    vertical padding pushed each line below its line-number gutter (numbers looked
