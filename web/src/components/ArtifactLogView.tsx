@@ -47,9 +47,10 @@ const LOG_THEME_LIGHT = {
 // formatLogLine turns one captured line into the bytes written to xterm. The
 // line's own ANSI is preserved (rendered as real colour); a stderr line with no
 // colour of its own is tinted red, with a trailing reset so it can't bleed into
-// the next line.
+// the next line. No newline is emitted here — the caller joins lines with CRLF
+// as a SEPARATOR (not a terminator), so the log never ends on a blank line.
 function formatLogLine(l: ArtifactLogLine): string {
-  return (l.stream as string) === 'stderr' ? `\x1b[31m${l.text}\x1b[0m\r\n` : `${l.text}\r\n`
+  return (l.stream as string) === 'stderr' ? `\x1b[31m${l.text}\x1b[0m` : l.text
 }
 
 // LogView streams a build's stdout+stderr into an xterm.js terminal. It writes
@@ -137,7 +138,12 @@ export function LogView({ log, emptyText = 'Waiting for output…', failed = fal
       from = 0
     }
     if (log.length > from) {
-      term.write(log.slice(from).map(formatLogLine).join(''))
+      // Join the new lines with CRLF as a separator. A continuation of an
+      // already-written log (from > 0) opens with a leading CRLF to break onto a
+      // fresh line; a fresh draw (from === 0) doesn't — so the terminal never
+      // carries a blank trailing line after the last write.
+      const body = log.slice(from).map(formatLogLine).join('\r\n')
+      term.write(from > 0 ? `\r\n${body}` : body)
     }
     writtenRef.current = log.length
     lastLineRef.current = log.length > 0 ? log[log.length - 1] : null
