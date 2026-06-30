@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
 import { Check, X, AlertTriangle, LoaderCircle, RefreshCw, ScrollText, ChevronRight, ChevronDown, SkipForward, FlaskConical } from 'lucide-react'
 import { api } from '../stores/apiClient'
 import type { TestRunResult } from '../api/models/TestRunResult'
@@ -6,7 +6,7 @@ import type { TestCase } from '../api/models/TestCase'
 import type { ArtifactLogLine } from '../api'
 import { verdictTone } from './TestVerdict'
 import { TONE_BADGE } from './Badge'
-import { CollapsibleCard, MELT_BTN } from './CollapsibleCard'
+import { CollapsibleCard, MELT_BTN, useMeasuredHeight } from './CollapsibleCard'
 import { LogView } from './ArtifactLogView'
 import { InfoTooltip } from './InfoTooltip'
 
@@ -65,6 +65,11 @@ export function TestsPanel({ projectId, agentId, headRef, includeUncommitted, re
     }
   }, [runners, load])
 
+  // Sticky "Tests" header height, published as the shared --sticky-section-h so the
+  // runner card headers dock flush beneath it — the same mechanism the artifacts
+  // panel uses (see useMeasuredHeight + CollapsibleCard's sticky option).
+  const [testsHeaderRef, testsHeaderH] = useMeasuredHeight(41)
+
   // Nothing configured (or not loaded yet) → render nothing, like the artifacts
   // panel, so the diff viewer doesn't reserve empty space for an absent feature.
   if (loading || runners.length === 0) return null
@@ -72,10 +77,19 @@ export function TestsPanel({ projectId, agentId, headRef, includeUncommitted, re
   const runningCount = runners.filter((r) => r.status === 'running').length
 
   return (
-    <div className="mb-4">
-      {/* Reserve the row height so the header doesn't jump when the running
-          progress chip appears/disappears. */}
-      <div className="flex flex-wrap items-center gap-2 mb-2 min-h-[1.625rem]">
+    <div className="mb-4" style={{ '--sticky-section-h': `${testsHeaderH}px` } as CSSProperties}>
+      {/* The "Tests" header docks flush below the Changes bar (sticky) while the
+          runner cards scroll under it — mirroring the artifacts filter bar. The `top`
+          is the measured Changes-bar height minus the scroll container's pt-4. z-20
+          sits below the Changes bar but above the cards (whose headers stick at z-10);
+          an opaque bg lets cards scroll cleanly underneath, and -mx-1/px-1 bleeds it
+          to the Changes bar's width. min-h reserves the row height so the running
+          progress chip can't jump the layout. */}
+      <div
+        ref={testsHeaderRef}
+        style={{ top: 'calc(var(--sticky-changes-h, 45px) - 16px)' }}
+        className="sticky z-20 flex flex-wrap items-center gap-2 mb-2 min-h-[1.625rem] bg-gray-50 dark:bg-gray-900 -mx-1 px-1 py-1.5 border-b border-gray-200 dark:border-gray-800 shadow-sm"
+      >
         <FlaskConical className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400" />
         <h3 className="text-xs font-semibold tracking-wide text-gray-500 dark:text-gray-400">Tests</h3>
         {runningCount > 0 && (
@@ -199,6 +213,7 @@ function TestRunnerCard({ runner, onRefresh, refreshing }: { runner: TestRunResu
 
   return (
     <CollapsibleCard
+      sticky
       icon={<FlaskConical className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400 shrink-0" />}
       name={runner.name}
       status={status}

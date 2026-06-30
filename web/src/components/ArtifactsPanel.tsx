@@ -1,11 +1,11 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, useCallback } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useCallback, type CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
 import { api } from '../stores/apiClient'
 import type { ArtifactSet, ArtifactFile, ArtifactLogLine } from '../api'
 import { ArtifactFile as ArtifactFileNS } from '../api'
 import { LoaderCircle, Image as ImageIcon, ChevronDown, TriangleAlert, RefreshCw, ScrollText, SquarePlus, SquareMinus, SquareDot } from 'lucide-react'
 import { InfoTooltip } from './InfoTooltip'
-import { CollapsibleCard, MELT_BTN } from './CollapsibleCard'
+import { CollapsibleCard, MELT_BTN, useMeasuredHeight } from './CollapsibleCard'
 import { loadArtifactPrefs, saveArtifactPrefs, loadTagFilter, saveTagFilter, loadArtifactChrome, saveArtifactChrome, clampChangeThreshold, type ArtifactTagFilter, type ArtifactChrome } from '../lib/artifactPrefs'
 import { computeVisibleFiles, filterIsActive, effectiveChangeType } from '../lib/artifactFilter'
 import { ArtifactFilterBar, TagBadge } from './ArtifactFilterBar'
@@ -944,6 +944,7 @@ function ArtifactSetCard({ set, mode, scale, spans, onSpanChange, filter, search
 
   return (
     <CollapsibleCard
+      sticky
       icon={<ImageIcon className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400 shrink-0" />}
       name={set.name}
       status={statusChips}
@@ -1056,6 +1057,13 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
   // instead): stash the script name and bump the nonce to re-run the poll effect.
   const [refreshNonce, setRefreshNonce] = useState(0)
   const refreshScriptRef = useRef<{ name: string; side?: ArtifactSide } | null>(null)
+
+  // Measured height of the sticky Artifacts filter bar, published as the shared
+  // --sticky-section-h so each card header can dock flush beneath it. The bar grows
+  // when it wraps to two rows on narrow widths, so a fixed offset would gap/overlap —
+  // measure it instead (see useMeasuredHeight; the same hook gives the tests panel's
+  // header the same treatment). Defaults to the unwrapped height meanwhile.
+  const [filterBarRef, filterBarH] = useMeasuredHeight(41)
 
   // Tag filter, shared across every card for this agent. Reload it when the
   // project/agent changes; persist it only on an explicit user change (a save
@@ -1279,11 +1287,26 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
   const settledCount = displaySets.length - generatingCount
 
   return (
-    <div className="mb-4">
+    // Publish the measured filter-bar height so card headers can dock flush beneath
+    // it (the Changes-bar height arrives via --sticky-changes-h from DiffViewer).
+    <div className="mb-4" style={{ '--sticky-section-h': `${filterBarH}px` } as CSSProperties}>
       {/* Reserve the filter bar's height (its segmented controls / chips are
           taller than the bare title) so the header stays the same height whether
           or not tags are present — the filter loading in must not jump the layout. */}
-      <div className="flex flex-wrap items-center gap-2 mb-2 min-h-[1.625rem]">
+      {/* Sticky: dock this Artifacts header + filters flush just below the Changes
+          bar (which sticks at the top) while the cards scroll under it, then release
+          once the whole panel scrolls past into the file diffs. The `top` is the
+          measured Changes-bar height minus the scroll container's pt-4 (which the
+          Changes bar cancels with -top-4), so the two bars sit exactly edge-to-edge
+          — no seam, and the bar's py-1.5 reads symmetric above/below its controls.
+          z-20 sits below the Changes bar but above the cards (whose headers stick at
+          z-10). Needs an opaque bg (matching the page) so cards scroll cleanly
+          underneath, and -mx-1/px-1 bleeds it to the same width as the Changes bar. */}
+      <div
+        ref={filterBarRef}
+        style={{ top: 'calc(var(--sticky-changes-h, 45px) - 16px)' }}
+        className="sticky z-20 flex flex-wrap items-center gap-2 mb-2 min-h-[1.625rem] bg-gray-50 dark:bg-gray-900 -mx-1 px-1 py-1.5 border-b border-gray-200 dark:border-gray-800 shadow-sm"
+      >
         <ImageIcon className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400" />
         <h3 className="text-xs font-semibold tracking-wide text-gray-500 dark:text-gray-400">Artifacts</h3>
         {generatingCount > 0 && (

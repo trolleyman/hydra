@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback, Fragment, useMemo, memo } from 'react'
+import { useEffect, useRef, useState, useCallback, Fragment, useMemo, memo, type CSSProperties } from 'react'
 import { highlightLines } from './lib/highlightCore'
 import { highlightSides } from './lib/highlightClient'
 import { api } from './stores/apiClient'
@@ -1978,6 +1978,24 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
   // Root container, used to scope the active-selection check below to this diff.
   const rootRef = useRef<HTMLDivElement>(null)
 
+  // The Changes toolbar sticks to the top of the scroll area; the artifacts filter
+  // bar and each artifact-card header stack flush beneath it (see ArtifactsPanel).
+  // Their sticky `top` offsets need the toolbar's CURRENT height, which grows when
+  // it wraps to multiple rows on narrow widths — so measure it and publish it as a
+  // CSS var (--sticky-changes-h) that those descendants read in their top: calc(...).
+  // Defaults to the unwrapped height until the first measure lands.
+  const changesBarRef = useRef<HTMLDivElement>(null)
+  const [changesBarH, setChangesBarH] = useState(45)
+  useEffect(() => {
+    const el = changesBarRef.current
+    if (!el) return
+    const measure = () => setChangesBarH(el.offsetHeight)
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    measure()
+    return () => ro.disconnect()
+  }, [])
+
   // True when the user currently has a non-collapsed text selection inside the diff.
   // Applying a background refresh in this state would replace the DOM nodes the
   // selection is anchored to and wipe it, so we defer the refresh until it clears.
@@ -2274,12 +2292,15 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
   if (!agent.branch_name) return null
 
   return (
-    <div ref={rootRef} className="mt-4">
+    // --sticky-changes-h (the measured Changes-toolbar height) is published here so
+    // the artifacts filter bar and card headers below can dock flush beneath it even
+    // when the toolbar wraps. See the ResizeObserver above.
+    <div ref={rootRef} className="mt-4" style={{ '--sticky-changes-h': `${changesBarH}px` } as CSSProperties}>
       {/* Section header */}
       {/* -top-4 cancels the scroll container's pt-4 (AgentDetail) so the stuck
           header docks flush under the top bar — no overlap (was -top-6) and no
           gap for the artifacts filter bar to peek through (was top-0). */}
-      <div className="flex items-center gap-3 mb-4 flex-wrap sticky -top-4 z-30 bg-gray-50 dark:bg-gray-900 py-2 border-b border-gray-200 dark:border-gray-800 shadow-sm -mx-1 px-1">
+      <div ref={changesBarRef} className="flex items-center gap-3 mb-4 flex-wrap sticky -top-4 z-30 bg-gray-50 dark:bg-gray-900 py-2 border-b border-gray-200 dark:border-gray-800 shadow-sm -mx-1 px-1">
         <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Changes</h2>
         {diff && (
           <div className="flex items-center gap-1.5">
