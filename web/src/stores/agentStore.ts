@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type { AgentResponse } from '../api'
 import { AgentStatus } from '../api'
+import { useToastStore } from './toastStore'
 
 // Default lifetime of an optimistic status override. Comfortably longer than
 // the agent-list poll interval (5s) plus the hook → status-poller latency, so
@@ -30,6 +31,10 @@ export const ARCHIVED_PAGE_SIZE = 20
 
 interface AgentState {
   agents: AgentResponse[]
+  // Project the current live `agents` list belongs to. Tracked so setAgents can
+  // tell a same-project refresh (where a vanished agent means it finished) apart
+  // from a project switch (where the whole list is replaced wholesale).
+  agentsProjectId: string | null
   loading: boolean
   error: string | null
   // Archived (killed/merged) history, loaded lazily in pages as the user scrolls
@@ -50,7 +55,10 @@ interface AgentState {
   // agent's has_unread_changes is forced true on top of polled data so the
   // unread dot lights instantly when the user marks the agent unread.
   unreadUntil: Record<string, number>
-  setAgents: (agents: AgentResponse[]) => void
+  // Replace the live agent list. Pass the project the list belongs to so a
+  // background merge completing (an armed agent that vanishes on a same-project
+  // refresh) can be detected and toasted; omit it to skip that detection.
+  setAgents: (agents: AgentResponse[], projectId?: string | null) => void
   setLoading: (loading: boolean) => void
   setError: (error: string | null) => void
   addAgent: (agent: AgentResponse) => void
@@ -112,8 +120,28 @@ function applyOverrides<O>(
   return { agents: merged, overrides: next }
 }
 
+// notifyBackgroundMerges fires a "merged" toast for each agent that was armed for
+// auto-merge (merge_when_green) on the previous list and has since left the live
+// list — i.e. the daemon merged it in the background once its tests went green.
+// Only call this for a same-project refresh; on a project switch the old agents
+// also "vanish" but haven't merged. The synchronous merge path removes the agent
+// via removeAgent (not setAgents) and shows its own toast, so it won't fire here.
+function notifyBackgroundMerges(prev: AgentResponse[], next: AgentResponse[]) {
+  if (prev.length === 0) return
+  const nextIds = new Set(next.map((a) => a.id))
+  for (const agent of prev) {
+    if (agent.merge_when_green && !nextIds.has(agent.id)) {
+      useToastStore.getState().show({
+        message: `Agent "${agent.id}" merged into ${agent.base_branch || 'its base branch'}`,
+        type: 'success',
+      })
+    }
+  }
+}
+
 export const useAgentStore = create<AgentState>((set) => ({
   agents: [],
+  agentsProjectId: null,
   loading: true,
   error: null,
   archived: [],
@@ -122,7 +150,13 @@ export const useAgentStore = create<AgentState>((set) => ({
   optimistic: {},
   readUntil: {},
   unreadUntil: {},
-  setAgents: (agents) => set((state) => {
+  setAgents: (agents, projectId) => set((state) => {
+    // Detect background merges before applying overrides: an armed agent that has
+    // left the list on a same-project refresh was merged by the daemon. Skip on a
+    // project switch (projectId differs), which also drops the previous agents.
+    if (projectId !== undefined && projectId === state.agentsProjectId) {
+      notifyBackgroundMerges(state.agents, agents)
+    }
     // Status: drop the override once the backend reports the optimistic status.
     const opt = applyOverrides(
       agents, state.optimistic,
@@ -144,7 +178,15 @@ export const useAgentStore = create<AgentState>((set) => ({
       (a) => !!a.has_unread_changes,
       (a) => ({ ...a, has_unread_changes: true }),
     )
-    return { agents: ur.agents, optimistic: opt.overrides, readUntil: rd.overrides, unreadUntil: ur.overrides, loading: false, error: null }
+    return {
+      agents: ur.agents,
+      agentsProjectId: projectId === undefined ? state.agentsProjectId : projectId,
+      optimistic: opt.overrides,
+      readUntil: rd.overrides,
+      unreadUntil: ur.overrides,
+      loading: false,
+      error: null,
+    }
   }),
   setLoading: (loading) => set({ loading }),
   setError: (error) => set({ error, loading: false }),

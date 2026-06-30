@@ -91,6 +91,46 @@ body {
   .lightbox-slide { animation: none; }
 }
 
+/* Toasts (bottom-right notifications). They slide up + in from the right and fade
+   on enter, and reverse on exit (the store keeps a toast around for one exit
+   animation before removing it). A thin countdown bar at the bottom drains over
+   the toast's lifetime so you can see when it's about to expire. */
+@keyframes toast-in {
+  from { opacity: 0; transform: translateX(0.75rem) translateY(0.25rem) scale(0.97); }
+  to   { opacity: 1; transform: translateX(0) translateY(0) scale(1); }
+}
+
+@keyframes toast-out {
+  from { opacity: 1; transform: translateX(0) scale(1); }
+  to   { opacity: 0; transform: translateX(0.75rem) scale(0.97); }
+}
+
+@keyframes toast-progress {
+  from { transform: scaleX(1); }
+  to   { transform: scaleX(0); }
+}
+
+.animate-toast-in {
+  animation: toast-in 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.animate-toast-out {
+  animation: toast-out 0.22s cubic-bezier(0.4, 0, 1, 1) forwards;
+}
+
+/* Drains left-to-right; the renderer sets animation-duration to the toast's
+   lifetime so the bar empties exactly as the toast expires. */
+.toast-progress-bar {
+  transform-origin: left center;
+  animation: toast-progress linear forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-toast-in,
+  .animate-toast-out,
+  .toast-progress-bar { animation: none; }
+}
+
 /* highlight.js v11's github theme sets `code.hljs { padding: 3px 5px }`. The
    repository file view renders one `<code class="hljs">` per line, so that
    vertical padding pushed each line below its line-number gutter (numbers looked
