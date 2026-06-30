@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ComponentType } from 'react'
 import { createPortal } from 'react-dom'
-import { Bot, GitBranch, ChevronDown, Check, LoaderCircle } from 'lucide-react'
+import { Bot, GitBranch, ChevronDown, Check } from 'lucide-react'
 import type { RepositoryBranch } from '../api'
 
 // shortSha collapses a full/long commit SHA to a readable prefix, leaving
@@ -17,7 +17,7 @@ export function shortSha(ref: string): string {
 export function BranchSelector({
   branches, activeRef, isKnownBranch, onSelect, title = 'Switch branch',
   triggerIcon: TriggerIcon, triggerActive = false, flexible = false,
-  onOpen, refreshing = false,
+  onOpen,
 }: {
   branches: RepositoryBranch[]
   activeRef: string
@@ -29,9 +29,6 @@ export function BranchSelector({
   // branch) appear without reloading the page. The cached `branches` stay
   // visible while the refresh is in flight.
   onOpen?: () => void
-  // When true, a subtle "Updating…" row is shown at the top of the open menu
-  // while a background refresh triggered by `onOpen` is running.
-  refreshing?: boolean
   // When set, the trigger renders as a single icon button (no branch label),
   // used by the repository diff view to start a comparison. `triggerActive`
   // paints it in the active/selected state even while closed.
@@ -166,12 +163,6 @@ export function BranchSelector({
           className="fixed w-64 max-h-80 overflow-y-auto bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-[9999] py-1"
           style={{ left: coords.left, top: coords.top, bottom: coords.bottom }}
         >
-          {refreshing && (
-            <div className="px-2 py-1.5 text-[10px] text-gray-400 dark:text-gray-500 flex items-center gap-1.5">
-              <LoaderCircle className="w-3 h-3 shrink-0 animate-spin" />
-              <span>Updating…</span>
-            </div>
-          )}
           {!isKnownBranch && activeRef && (
             <div className="px-2 py-1.5 text-xs text-gray-500 dark:text-gray-400 border-b border-gray-100 dark:border-gray-700 flex items-center gap-2">
               <Check className="w-3.5 h-3.5 shrink-0 text-blue-500" />

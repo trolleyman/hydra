@@ -26,6 +26,10 @@ export type ConfigResponse = {
      */
     test_concurrency?: number | null;
     /**
+     * Whether the daemon proactively re-runs a head's test suites in the background when its branch-tip verdict is missing or stale (a cached result computed for an older commit), so the verdict is ready before the tests panel is opened or the merge gate runs (test_prefetch in config.toml). When false, tests run only on open / at merge; foreground runs and test_concurrency still apply. null/absent uses the built-in default (enabled).
+     */
+    test_prefetch?: boolean | null;
+    /**
      * Max visual-artifact generations that run at once, across foreground (a user viewing a diff) and background (proactive pre-generation) work (artifact_concurrency in config.toml). Generations can be heavy (a full build per ref, RAM-hungry tooling like emulators), so this caps parallelism — lower it for memory-hungry generators. Foreground requests are served before queued background ones; a running generation is never preempted. 0 means unlimited (no cap); null/absent uses the built-in default.
      */
     artifact_concurrency?: number | null;

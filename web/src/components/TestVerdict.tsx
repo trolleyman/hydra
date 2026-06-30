@@ -69,7 +69,7 @@ function verdictLabel(t: TestSummary): string {
     case 'errored':
       return "couldn't run"
     case 'stale':
-      return `${t.passed ?? 0} · stale`
+      return 'stale'
     default:
       return ''
   }
@@ -91,7 +91,7 @@ export function TestVerdictChip({ tests, variant = 'xs' }: { tests?: TestSummary
       // min-w-0 lets the chip shrink within a tight sidebar row so its text can
       // ellipsize instead of overrunning the date / the sidebar edge.
       containerClassName="min-w-0"
-      className={stale ? 'inline-flex items-center gap-1 min-w-0 text-gray-500 dark:text-gray-400 border border-dashed border-gray-400 dark:border-gray-600 rounded px-1 py-0.5' : undefined}
+      className={stale ? 'min-w-0 text-gray-500 dark:text-gray-400 border border-dashed border-gray-400 dark:border-gray-600' : undefined}
     >
       {/* whitespace-nowrap so a label like "2 failed" never breaks onto two lines
           inside the chip when the sidebar row is tight — the chip wraps as a whole.

@@ -174,6 +174,11 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 			}
 			mgr.CleanCheckouts()
 		}
+		// Tests reuse the same slot-pool machinery, so wipe any test checkouts a
+		// crash mid-run left behind, the same way as for artifacts above.
+		if _, err := os.Stat(paths.GetTestsDirFromProjectRoot(root)); err == nil {
+			testReg.Manager(root).CleanCheckouts()
+		}
 	}
 
 	// Immediate first poller cycles before accepting requests.
@@ -188,6 +193,9 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 	// Proactively pre-generate artifacts for settled heads so they're ready
 	// before a user clicks in, instead of starting the work only on view.
 	go server.RunArtifactPrefetcher(ctx, roots)
+	// Likewise re-run heads' test suites in the background when their verdict goes
+	// stale (a new commit landed), so the verdict is fresh before it's looked at.
+	go server.RunTestPrefetcher(ctx, roots)
 	// Watch heads with auto-merge armed and merge them once their tests pass.
 	go server.RunAutoMergeWatcher(ctx)
 

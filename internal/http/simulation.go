@@ -582,6 +582,11 @@ func simTestSummary(id string) *api.TestSummary {
 		// Running but NOT armed (unlike agent-md), so its Merge button opens the
 		// "tests still running" merge-gate dialog (Merge now / Queue merge).
 		return &api.TestSummary{Status: api.TestStatusRunning, Total: ptr(142), Passed: ptr(82), Failed: ptr(0), Progress: ptr("84/142")}
+	case "agent-approval":
+		// A cached verdict that predates the current commit → the gray dashed
+		// "stale" chip. Gives the sidebar coverage of the stale state (its chip
+		// height must match the other verdict/status chips in the row).
+		return &api.TestSummary{Status: api.TestStatusStale, Total: ptr(142), Passed: ptr(140), Skipped: ptr(2), DurationMs: ptr(int64(3900))}
 	default:
 		return nil
 	}

@@ -52,10 +52,18 @@ export const TONE_BADGE: Record<Tone, string> = {
 // denser sidebar chip; `pill` is the fully-rounded brand/type pill (slightly more
 // horizontal padding). Each preset bundles its own padding so callers never
 // stack conflicting `px-*` utilities.
+//
+// `xs` additionally pins a fixed height and centers its content (`inline-flex
+// items-center h-[18px]`) so every chip in the sidebar badge row is the SAME
+// height regardless of whether it carries a 12px icon (the test-verdict chips), a
+// 1px dashed border (the stale chip — box-border keeps it inside the 18px), or is
+// plain text (the status badge). Without this the row's `items-center` grew to the
+// tallest child, so the layout jumped as a head's verdict changed. The fixed
+// height replaces vertical padding (hence no `py-*` on `xs`).
 type BadgeVariant = 'xs' | 'sm' | 'pill'
 
 const VARIANT_CLASS: Record<BadgeVariant, string> = {
-  xs: 'text-[10px] px-1 py-0.5 rounded',
+  xs: 'inline-flex items-center box-border h-[18px] text-[10px] leading-none px-1 rounded',
   sm: 'text-xs px-2 py-0.5 rounded',
   pill: 'text-xs px-2.5 py-0.5 rounded-full',
 }

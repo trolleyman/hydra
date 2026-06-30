@@ -465,6 +465,12 @@ try {
       // opening tooltip room. Captures the viewport (the tooltip is a fixed
       // portal). Only meaningful on the artifacts (agent-1) page.
       artifactInfo?: boolean
+      // Hovers the tests panel's info (i) icon with the "Tests" heading pinned
+      // near the TOP of the viewport, so there's no room for the card above it
+      // and it has to flip downward instead of being clipped off-screen — the
+      // regression shot for the tooltip flip fix. Captures the viewport (the
+      // card is a fixed portal). Only meaningful on a tests-panel agent page.
+      testsInfo?: boolean
       // Expands the "screenshots" card, seeks its loader-animation.webm pair to
       // the given time (paused), and pins that row to the top — so the capture
       // shows the video diff viewer (VideoDiffView) directly rather than buried
@@ -562,6 +568,13 @@ try {
       // The same surface mid-run (agent-md is seeded as a running verdict): the
       // expanded card's live xterm build-log tail + progress bar + partial counts.
       { name: 'tests-panel-running', path: '/project/sim-project/agent/agent-md', scrollTo: 'Changes', clicks: ['button:has(svg.lucide-flask-conical)'] },
+      // The tests panel's info (i) card hovered with its heading pinned near the
+      // top of the viewport: the tall card has no room above, so it opens DOWNWARD
+      // with its arrow pointing up — the regression shot for the tooltip flip fix
+      // (it used to be hard-coded to open upward and clipped off the top here). The
+      // short viewport scrolls the terminal away so the Tests icon sits high on
+      // screen, the condition that triggered the clip; testsInfo does the pin+hover.
+      { name: 'tests-info-tooltip', path: '/project/sim-project/agent/agent-2', testsInfo: true, viewport: { width: 1280, height: 460 } },
       // The merge gate in the header (PLAN #68): the primary button always reads
       // "Merge" now; opening its split-button dropdown on agent-2's failing verdict
       // reveals the soft-gate warning plus the Force merge / Queue merge overrides.
@@ -1305,7 +1318,12 @@ try {
     // The clamp still bounds peak memory and avoids starving renders of CPU; the
     // captured pixels are per-context deterministic regardless of how many run in
     // parallel, so this doesn't affect the diff-hash reproducibility.
-    const tasks = pages.flatMap((pg) => themes.map((theme) => ({ pg, theme })))
+    // HYDRA_SHOT_ONLY (comma-separated page names) narrows the run to a few shots
+    // while iterating locally — the full set is slow to capture. Unset ⇒ all pages.
+    const only = process.env.HYDRA_SHOT_ONLY?.split(',').map((s) => s.trim()).filter(Boolean)
+    const tasks = pages
+      .filter((pg) => !only || only.includes(pg.name))
+      .flatMap((pg) => themes.map((theme) => ({ pg, theme })))
     const totalShots = tasks.length
     const cpuCount = (typeof availableParallelism === 'function' ? availableParallelism() : cpus().length) || 8
     const defaultConcurrency = Math.min(Math.max(cpuCount, 6), 16)
@@ -1971,6 +1989,33 @@ try {
             .hover()
           await settle(page)
         }
+        if (pg.testsInfo) {
+          // Pin the "Tests" heading near the TOP of its scroll container so the
+          // (i) icon has almost no room above it: the card must flip downward
+          // rather than open up and clip off-screen. (The sticky "Changes"
+          // toolbar sits just above, so a small offset keeps the heading visible
+          // under it near the viewport top.)
+          await page.waitForFunction(() =>
+            Array.from(document.querySelectorAll('h3')).some((h) => h.textContent?.trim() === 'Tests'),
+          )
+          await page.evaluate(() => {
+            const h3 = Array.from(document.querySelectorAll('h3')).find((e) => e.textContent?.trim() === 'Tests')
+            const cont = h3?.closest('.overflow-auto') as HTMLElement | null | undefined
+            if (h3 && cont) {
+              const offset = h3.getBoundingClientRect().top - cont.getBoundingClientRect().top + cont.scrollTop
+              // Leave just ~56px above the heading (room for the sticky Changes
+              // toolbar), so the icon ends up high in the viewport.
+              cont.scrollTop = offset - 56
+            }
+          })
+          await settle(page)
+          // Hover the info icon next to the "Tests" heading (its InfoTooltip Info
+          // svg carries cursor-help) so React's onMouseEnter opens the card.
+          await page
+            .locator('xpath=//h3[normalize-space()="Tests"]/parent::*//*[name()="svg" and contains(@class,"cursor-help")]')
+            .hover()
+          await settle(page)
+        }
         if (pg.openFilter) {
           // Open the named tag-filter dropdown so the capture documents the menu.
           // Its trigger is a button whose lowercase <span> holds the scope label
@@ -2022,7 +2067,7 @@ try {
         // either the spawn box (attachImages) or an artifact tile (openArtifactImage),
         // header-focused shots and the hovered info tooltip (a fixed portal)
         // capture the viewport; others capture the full page.
-        await captureWithRetry(page, { path: out, fullPage: !pg.scrollTo && !pg.attachImages && !pg.openArtifactImage && !pg.viewportOnly && !pg.artifactInfo && !pg.videoDiff && !pg.revealSelector })
+        await captureWithRetry(page, { path: out, fullPage: !pg.scrollTo && !pg.attachImages && !pg.openArtifactImage && !pg.viewportOnly && !pg.artifactInfo && !pg.testsInfo && !pg.videoDiff && !pg.revealSelector })
         // Emit the tag sidecar (<file>.png.meta, {"tags":[...]}) that the diff
         // viewer reads (internal/artifacts readTagsSidecar). theme + viewport +
         // section are scoped "category::value" labels — the viewer keeps one

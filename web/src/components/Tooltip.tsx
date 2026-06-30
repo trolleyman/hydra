@@ -57,6 +57,9 @@ export function Tooltip({
   const [visible, setVisible] = useState(false)
   const [pos, setPos] = useState<Position | null>(null)
   const wrapperRef = useRef<HTMLSpanElement>(null)
+  // The rendered tooltip box, so computePos can measure its real height and flip
+  // sides when it wouldn't fit, instead of guessing a fixed height.
+  const boxRef = useRef<HTMLDivElement>(null)
   const showTimer = useRef<number | null>(null)
   const hideTimer = useRef<number | null>(null)
   // Card tooltips are interactive: track whether the pointer is over the box so
@@ -68,28 +71,32 @@ export function Tooltip({
     if (!el) return null
     const rect = el.getBoundingClientRect()
     const padding = 8
-    if (card) {
-      // Clamp horizontally so a wide card never spills off-screen, then shift
-      // the arrow back by the same offset so it still points at the trigger.
-      const centerX = rect.left + rect.width / 2
-      const clampPad = 16
-      let left = centerX
-      if (left - width / 2 < clampPad) left = width / 2 + clampPad
-      else if (left + width / 2 > window.innerWidth - clampPad) left = window.innerWidth - width / 2 - clampPad
-      return { top: rect.top - padding, left, placement: 'top', arrowX: `calc(50% + ${centerX - left}px)` }
-    }
-    const tooltipHeight = 36
-    const placement = side ?? (rect.top < tooltipHeight + padding ? 'bottom' : 'top')
-    // Clamp horizontally so a long dark hint never spills off-screen, then shift
-    // the arrow back so it still points at the trigger. The box is capped at
-    // DARK_MAX_WIDTH (matching max-w below) and wraps, so half that width is the
-    // worst-case overhang to keep on screen.
+    // The box is capped at this width (matching the width/max-w below) and wraps,
+    // so half of it is the worst-case horizontal overhang to keep on screen.
+    const maxWidth = card ? width : DARK_MAX_WIDTH
+    const clampPad = card ? 16 : 8
+
+    // Clamp horizontally so the box never spills off-screen, then shift the arrow
+    // back by the same offset so it still points at the trigger.
     const centerX = rect.left + rect.width / 2
-    const clampPad = 8
     let left = centerX
-    if (left - DARK_MAX_WIDTH / 2 < clampPad) left = DARK_MAX_WIDTH / 2 + clampPad
-    else if (left + DARK_MAX_WIDTH / 2 > window.innerWidth - clampPad)
-      left = window.innerWidth - DARK_MAX_WIDTH / 2 - clampPad
+    if (left - maxWidth / 2 < clampPad) left = maxWidth / 2 + clampPad
+    else if (left + maxWidth / 2 > window.innerWidth - clampPad)
+      left = window.innerWidth - maxWidth / 2 - clampPad
+
+    // Choose a vertical side. Measure the rendered box (falls back to a guess on
+    // the first paint, before it exists) and open on whichever side has room,
+    // preferring above. This is what stops a box near the top of the viewport
+    // from opening upward and getting clipped off-screen.
+    const boxHeight = boxRef.current?.offsetHeight ?? (card ? 0 : 36)
+    const spaceAbove = rect.top - padding
+    const spaceBelow = window.innerHeight - rect.bottom - padding
+    let placement: Placement
+    if (side) placement = side
+    else if (boxHeight <= spaceAbove) placement = 'top'
+    else if (boxHeight <= spaceBelow) placement = 'bottom'
+    else placement = spaceBelow > spaceAbove ? 'bottom' : 'top'
+
     return {
       top: placement === 'top' ? rect.top - padding : rect.bottom + padding,
       left,
@@ -135,21 +142,23 @@ export function Tooltip({
     }
   }, [clearTimers, card])
 
-  // The position is captured on show, so it goes stale when the page scrolls or
-  // resizes. The interactive card lives long enough to care; reposition it.
+  // show()'s computePos runs before the box is in the DOM, so it can't measure
+  // the real height to pick a side. Re-run once now that it's rendered (synchronous
+  // before paint, so no flicker), and keep it fresh on scroll/resize.
   useLayoutEffect(() => {
-    if (!card || !visible) return
+    if (!visible) return
     const update = () => {
       const p = computePos()
       if (p) setPos(p)
     }
+    update()
     window.addEventListener('scroll', update, true)
     window.addEventListener('resize', update)
     return () => {
       window.removeEventListener('scroll', update, true)
       window.removeEventListener('resize', update)
     }
-  }, [card, visible, computePos])
+  }, [visible, computePos])
 
   useEffect(() => () => clearTimers(), [clearTimers])
 
@@ -164,7 +173,10 @@ export function Tooltip({
       {visible && pos && content && createPortal(
         card ? (
           <div
-            className="fixed z-[9999] -translate-x-1/2 -translate-y-full p-3 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100 text-[11px] rounded-lg shadow-xl animate-in fade-in zoom-in-95 duration-100 border border-gray-200 dark:border-gray-700"
+            ref={boxRef}
+            className={`fixed z-[9999] -translate-x-1/2 p-3 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100 text-[11px] rounded-lg shadow-xl animate-in fade-in zoom-in-95 duration-100 border border-gray-200 dark:border-gray-700 ${
+              pos.placement === 'top' ? '-translate-y-full' : ''
+            }`}
             style={{ width, top: pos.top, left: pos.left }}
             onMouseEnter={() => {
               clearTimers()
@@ -183,14 +195,20 @@ export function Tooltip({
             <div className="text-gray-600 dark:text-gray-300 space-y-2 [&_code]:text-blue-700 dark:[&_code]:text-blue-300">
               {content}
             </div>
-            {/* Arrow */}
+            {/* Arrow — points down at the trigger when the card is above it, up
+                when the card sits below it. */}
             <div
-              className="absolute top-full -translate-x-1/2 border-8 border-transparent border-t-white dark:border-t-gray-800"
+              className={`absolute -translate-x-1/2 border-8 border-transparent ${
+                pos.placement === 'top'
+                  ? 'top-full border-t-white dark:border-t-gray-800'
+                  : 'bottom-full border-b-white dark:border-b-gray-800'
+              }`}
               style={{ left: pos.arrowX }}
             />
           </div>
         ) : (
           <div
+            ref={boxRef}
             className={`fixed z-[9999] -translate-x-1/2 pointer-events-none px-2 py-1 bg-gray-900 dark:bg-gray-700 text-white text-[11px] rounded shadow-lg max-w-[320px] break-words border border-gray-700 dark:border-gray-600 ${
               pos.placement === 'top' ? '-translate-y-full' : ''
             }`}

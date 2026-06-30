@@ -1,6 +1,7 @@
-import type { ReactNode } from 'react'
+import { useEffect, type ReactNode } from 'react'
 import type { AgentResponse, ConfigResponse, ProjectInfo } from '../../api'
 import { X, Terminal, AlertCircle, Save } from 'lucide-react'
+import { isTypingTarget } from '../../lib/shortcuts'
 import { AgentTerminal } from '../AgentTerminal'
 import { AgentTypeIcon, AGENT_ACCENT, type AgentTypeIconName } from '../AgentTypeIcon'
 import { SettingSection, type SettingsSection } from './shared'
@@ -8,6 +9,7 @@ import { ThemeSection } from './ThemeSection'
 import { TerminalSection } from './TerminalSection'
 import { ConfigForm } from './ConfigForm'
 import { ArtifactsEditor } from './ArtifactsEditor'
+import { TestsEditor } from './TestsEditor'
 import { ServicesEditor } from './ServicesEditor'
 
 // The agent-type selector (replaces the old tab bar) — brand icon + label per
@@ -109,6 +111,17 @@ export function SettingsContent({
   // Supplied by the project settings page; the global page passes nothing.
   scopeSelector?: ReactNode
 }) {
+  // Escape closes the test console, matching the X button. We defer to the
+  // embedded terminal: when focus is in the xterm (or any field) Esc belongs to
+  // it, so we only close when the keystroke isn't aimed at a typing surface.
+  useEffect(() => {
+    if (!testAgent) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !isTypingTarget(e.target)) onCloseTestAgent()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [testAgent, onCloseTestAgent])
 
   return (
     <>
@@ -159,6 +172,17 @@ export function SettingsContent({
           onConcurrencyChange={(n) => setConfig({ ...config, artifact_concurrency: n })}
           prefetch={config.artifact_prefetch}
           onPrefetchChange={(v) => setConfig({ ...config, artifact_prefetch: v })}
+        />
+      </div>
+
+      <div className="mt-6">
+        <TestsEditor
+          tests={config.tests ?? []}
+          onChange={(tests) => setConfig({ ...config, tests })}
+          concurrency={config.test_concurrency}
+          onConcurrencyChange={(n) => setConfig({ ...config, test_concurrency: n })}
+          prefetch={config.test_prefetch}
+          onPrefetchChange={(v) => setConfig({ ...config, test_prefetch: v })}
         />
       </div>
 
