@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { X, ChevronLeft, ChevronRight } from 'lucide-react'
 import type { ImageDiffMode } from './ArtifactImageDiff'
 import { LightboxDiff } from './LightboxDiff'
+import { makeAuxOpen } from './artifactDiffShared'
 
 export interface LightboxImage {
   url: string
@@ -178,6 +179,8 @@ export function ImageLightbox({
               src={current.url}
               alt={current.filename}
               onLoad={(e) => setDims({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })}
+              // Middle-click opens the raw image file in a new browser tab.
+              onAuxClick={makeAuxOpen(() => current.url)}
               // Checkerboard behind the image so transparent PNGs (e.g. an icon)
               // read as transparent rather than blending into the dark backdrop. The
               // <img> sizes to the image's own aspect ratio, so this sits exactly

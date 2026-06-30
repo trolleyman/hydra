@@ -76,11 +76,13 @@ function ImageCell({ url, label, name, gallery, index, disableOpen }: {
     <div className="flex-1 min-w-0">
       <div className="text-[10px] font-semibold tracking-wide text-gray-400 dark:text-gray-500 mb-1">{label}</div>
       {url ? (
-        // A plain click opens the image in the fullscreen lightbox. The image fills
-        // the cell width (w-full) and its height follows the aspect ratio.
+        // A plain click opens the image in the fullscreen lightbox; a middle click
+        // opens its raw image file in a new browser tab. The image fills the cell
+        // width (w-full) and its height follows the aspect ratio.
         <button
           type="button"
           onClick={disableOpen ? undefined : () => openGalleryAt(openImage, gallery, index, url, name)}
+          onAuxClick={makeAuxOpen(() => url)}
           className={`block w-full ${disableOpen ? 'cursor-default' : 'cursor-zoom-in'}`}
         >
           <img
@@ -213,14 +215,12 @@ function ABSwitch({ left, right, name, gallery, index, disableOpen }: {
       {/* In the grid a click opens the fullscreen lightbox at this file (←/→ walks the
           gallery, and the lightbox shows the comparison); flipping Before↔After is
           reserved for the panel's Before/After control + the B key. Inside the lightbox
-          (disableOpen) there's nothing to open, so a click flips instead. */}
+          (disableOpen) there's nothing to open, so a click flips instead. A middle
+          click opens the currently-shown side's raw image file in a new browser tab. */}
       <div
         className={`relative w-full select-none ${disableOpen ? 'cursor-pointer' : 'cursor-zoom-in'}`}
         onClick={disableOpen ? flip : () => openGalleryAt(openImage, gallery, index, (view === 'before' ? left : right) || sizer, name)}
-        onAuxClick={disableOpen ? undefined : makeAuxOpen(
-          () => (view === 'before' ? left : right) || sizer,
-          (url) => openGalleryAt(openImage, gallery, index, url, name),
-        )}
+        onAuxClick={makeAuxOpen(() => (view === 'before' ? left : right) || sizer)}
       >
         <img src={sizer} style={{ visibility: 'hidden' }} className={`${IMG_CLASS} block`} draggable={false} />
         <LayerNode url={right} style={{ visibility: view === 'before' ? 'hidden' : 'visible' }} />
@@ -234,12 +234,11 @@ function ABSwitch({ left, right, name, gallery, index, disableOpen }: {
 // Before/after slider: "after" is the base layer; "before" sits on top, clipped to
 // the region left of the draggable handle, giving a sharp (hard-cut) boundary. A
 // missing side shows the "No image" placeholder in its slot. Middle-click opens
-// whichever side is currently visible under the cursor in the fullscreen lightbox.
-function SliderCompare({ left, right, name, gallery, index, disableOpen }: {
+// whichever side is currently visible under the cursor's raw image file in a new tab.
+function SliderCompare({ left, right }: {
   left?: string | null; right?: string | null; name: string
   gallery?: LightboxImage[]; index?: number; disableOpen?: boolean
 }) {
-  const openImage = useImageLightbox()
   const [pos, setPos] = useState(50)
   const [dragging, setDragging] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -274,13 +273,13 @@ function SliderCompare({ left, right, name, gallery, index, disableOpen }: {
         setDragging(true)
         update(e.clientX)
       }}
-      onAuxClick={disableOpen ? undefined : makeAuxOpen((e) => {
+      onAuxClick={makeAuxOpen((e) => {
         const el = ref.current
         if (!el) return sizer
         const r = el.getBoundingClientRect()
         const x = ((e.clientX - r.left) / r.width) * 100
         return (x < pos ? left : right) || sizer
-      }, (url) => openGalleryAt(openImage, gallery, index, url, name))}
+      })}
     >
       <span className={`${TAG_CLASS} left-1`}>Before</span>
       <span className={`${TAG_CLASS} right-1`}>After</span>
@@ -297,22 +296,18 @@ function SliderCompare({ left, right, name, gallery, index, disableOpen }: {
 // Onion skin: "before" is the base layer with "after" blended over it; the range
 // slider controls the opacity of the "after" image (0 = before, 1 = after). A
 // missing side shows the "No image" placeholder in its slot. Middle-click opens
-// the side currently weighted by the blend in the fullscreen lightbox.
-function OnionCompare({ left, right, name, gallery, index, disableOpen }: {
+// the side currently weighted by the blend's raw image file in a new tab.
+function OnionCompare({ left, right }: {
   left?: string | null; right?: string | null; name: string
   gallery?: LightboxImage[]; index?: number; disableOpen?: boolean
 }) {
-  const openImage = useImageLightbox()
   const [opacity, setOpacity] = useState(50)
   const sizer = (right ?? left) as string
   return (
     <div className="min-w-0">
       <div
         className="relative w-full select-none"
-        onAuxClick={disableOpen ? undefined : makeAuxOpen(
-          () => (opacity >= 50 ? right : left) || sizer,
-          (url) => openGalleryAt(openImage, gallery, index, url, name),
-        )}
+        onAuxClick={makeAuxOpen(() => (opacity >= 50 ? right : left) || sizer)}
       >
         <img src={sizer} style={{ visibility: 'hidden' }} className={`${IMG_CLASS} block`} draggable={false} />
         <LayerNode url={left} />

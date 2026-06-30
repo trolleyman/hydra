@@ -69,8 +69,8 @@ export function LightboxDiff({ left, right, name, initialMode, onDims }: {
   }, [])
 
   // Provide the before/after view + highlight to the inner ImageDiffView so its A/B
-  // tile reads them (and hides its own per-tile pill) — the lightbox toolbar below is
-  // the single control instead.
+  // tile reads them (and hides its own per-tile pill) — the control row above the
+  // image (see below) is the single control instead.
   const ab = useMemo<ArtifactABControls>(
     () => ({ view, highlight, toggleView: () => setView((v) => (v === 'before' ? 'after' : 'before')) }),
     [view, highlight],
@@ -88,37 +88,39 @@ export function LightboxDiff({ left, right, name, initialMode, onDims }: {
   return (
     <ABControlsContext.Provider value={ab}>
       <div className="dark flex flex-col items-center gap-3">
+        {/* In A/B mode the Before/After toggle + Highlight sit ABOVE the image — on the
+            tile, where the grid keeps them — rather than down in the toolbar (also B / H
+            on the keyboard). Width-matched to the image so they line up over it. */}
+        {mode === 'ab' && (
+          <div style={{ width }} className="max-w-[94vw] flex flex-wrap items-center gap-2">
+            <SegmentedToggle
+              value={view}
+              onChange={setView}
+              options={[{ value: 'before', label: 'Before' }, { value: 'after', label: 'After' }]}
+            />
+            <label
+              title={canDiff ? 'Highlight changed pixels in magenta (H)' : 'Needs both a before and after image'}
+              className={`ml-auto flex items-center gap-1 text-[10px] font-medium tracking-wide select-none ${
+                canDiff ? 'cursor-pointer text-gray-500 dark:text-gray-400' : 'opacity-40 cursor-not-allowed text-gray-400 dark:text-gray-500'
+              }`}
+            >
+              <input
+                type="checkbox"
+                checked={highlight && canDiff}
+                disabled={!canDiff}
+                onChange={(e) => setHighlight(e.target.checked)}
+                className="accent-blue-500 cursor-pointer disabled:cursor-not-allowed"
+              />
+              Highlight
+            </label>
+          </div>
+        )}
         <div style={{ width }} className="max-w-[94vw]">
           <ImageDiffView left={left} right={right} mode={mode} name={name} disableOpen />
         </div>
-        {/* Switch comparison modes — and, in A/B mode, flip Before/After or toggle the
-            magenta highlight (also B / H on the keyboard) — without leaving the lightbox. */}
+        {/* Switch comparison modes without leaving the lightbox. */}
         <div className="flex flex-wrap items-center justify-center gap-2">
           <SegmentedToggle value={mode} onChange={setMode} options={IMAGE_DIFF_MODES} />
-          {mode === 'ab' && (
-            <>
-              <SegmentedToggle
-                value={view}
-                onChange={setView}
-                options={[{ value: 'before', label: 'Before' }, { value: 'after', label: 'After' }]}
-              />
-              <label
-                title={canDiff ? 'Highlight changed pixels in magenta (H)' : 'Needs both a before and after image'}
-                className={`flex items-center gap-1 text-[10px] font-medium tracking-wide select-none ${
-                  canDiff ? 'cursor-pointer text-gray-500 dark:text-gray-400' : 'opacity-40 cursor-not-allowed text-gray-400 dark:text-gray-500'
-                }`}
-              >
-                <input
-                  type="checkbox"
-                  checked={highlight && canDiff}
-                  disabled={!canDiff}
-                  onChange={(e) => setHighlight(e.target.checked)}
-                  className="accent-blue-500 cursor-pointer disabled:cursor-not-allowed"
-                />
-                Highlight
-              </label>
-            </>
-          )}
         </div>
       </div>
     </ABControlsContext.Provider>

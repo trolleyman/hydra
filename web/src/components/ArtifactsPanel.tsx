@@ -409,16 +409,16 @@ export function MasonryGrid({ items, spanScale = 1, scale = 1, spans, onSpanChan
   // swallowed before the media reacts to it. Holds the key of the tile being dragged.
   const draggedKeyRef = useRef<string | null>(null)
 
-  // Start a live resize from `startSpan`, anchored at pointer `startX`. The tile's
-  // width follows the pointer continuously (so it grows *before* it would tip into
-  // the next column — it overlaps its neighbours, lifted above them). The column span
-  // is quantised with stickiness (see RESIZE_STICK) and committed the instant it
-  // snaps to a new column — live, as you drag past each boundary, not deferred to
-  // release — so the siblings reflow and ease out of the way only at those snap
-  // points. Between snaps nothing rearranges (the dragged tile's height is frozen too;
-  // see resizeKeyRef). Returns move/finish, or null if the grid can't resize right
-  // now. `key` is the tile's file name; the override persists under its scoped key
-  // (see spanKey).
+  // Start a live resize from `startSpan`, anchored at pointer `startX`. The column span
+  // is quantised with stickiness (see RESIZE_STICK) and committed the instant it snaps
+  // to a new column — live, as you drag past each boundary, not deferred to release.
+  // The dragged tile itself renders at that snapped span width (not the raw pointer
+  // position), so it holds its size through the deadband and flips a whole column at a
+  // time: it resists, then snaps, rather than scaling smoothly under the cursor. The
+  // siblings reflow at those same snap points, and nothing rearranges between them (the
+  // dragged tile's height is frozen too; see resizeKeyRef). Returns move/finish, or null
+  // if the grid can't resize right now. `key` is the tile's file name; the override
+  // persists under its scoped key (see spanKey).
   const startResize = (key: string, startSpan: number, startX: number) => {
     const unit = layout.colW + layout.gap
     if (unit <= 0 || !onSpanChange) return null
@@ -434,7 +434,6 @@ export function MasonryGrid({ items, spanScale = 1, scale = 1, spans, onSpanChan
     let liveSpan = startSpan
     const move = (clientX: number) => {
       const w = Math.max(minW, Math.min(maxW, startWidth + (clientX - startX)))
-      setDrag({ key, width: w, col: startCol })
       // Quantise the live width to a column span with hysteresis: hold `liveSpan`
       // until the pointer is dragged clearly past the midpoint toward the next or
       // previous column (a RESIZE_STICK-wide deadband around each boundary), so a
@@ -448,10 +447,17 @@ export function MasonryGrid({ items, spanScale = 1, scale = 1, spans, onSpanChan
       target = Math.max(1, Math.min(layout.cols, target))
       if (target !== liveSpan) {
         // Snap: commit the new span now so the grid rearranges into the new column
-        // layout as you reach it, while the dragged tile keeps tracking the pointer.
+        // layout the moment the tile reaches it.
         liveSpan = target
         onSpanChange(spanKey(key), liveSpan)
       }
+      // Render the tile at its current *quantised* span width — not the raw pointer
+      // width — so it holds its size through the deadband and snaps a whole column at
+      // a time when the pointer crosses the midpoint. The tile visibly resists, then
+      // flips to the next size (the width transition eases the flip), rather than
+      // scaling continuously under the cursor.
+      const snapW = liveSpan * layout.colW + (liveSpan - 1) * layout.gap
+      setDrag({ key, width: snapW, col: startCol })
     }
     const finish = () => {
       resizeKeyRef.current = null
@@ -551,14 +557,15 @@ export function MasonryGrid({ items, spanScale = 1, scale = 1, spans, onSpanChan
             style={{
               left: p.left,
               top: p.top,
-              // While dragging this tile, render its live pointer-tracked width and
-              // lift it above its neighbours (it overflows its column run); otherwise
-              // its placed span width. The transition eases the snap-back to the
-              // placed width on release and the sibling reflow at each live snap — off
-              // on the dragged tile itself so it tracks the pointer 1:1.
+              // While dragging this tile, render its current *snapped* span width (a
+              // whole number of columns, quantised with hysteresis — see
+              // startResize.move) and lift it above its neighbours; otherwise its
+              // placed span width. The width transition stays on so each snap eases
+              // into the next size — the tile holds, then visibly flips a column at a
+              // time rather than scaling smoothly under the cursor.
               width: dragging ? (drag as { width: number }).width : p.width,
               zIndex: dragging ? 20 : undefined,
-              transition: ready && !dragging ? TILE_TRANSITION : undefined,
+              transition: ready ? TILE_TRANSITION : undefined,
             }}
             onPointerDown={bodyResize ? startBodyResize(it.key, p.span) : undefined}
             onClickCapture={bodyResize ? swallowDragClick(it.key) : undefined}

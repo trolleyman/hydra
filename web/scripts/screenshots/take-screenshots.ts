@@ -2188,7 +2188,10 @@ try {
     for (const theme of themes) await recordStatusDot(theme)
 
     // Record the artifact-grid resize gesture: click-and-drag the first tile's image
-    // sideways and watch it grow column-by-column while the tiles beneath reflow. This
+    // sideways and watch it snap a column at a time while the tiles beneath reflow. The
+    // tile renders at its quantised span width (MasonryGrid startResize), so it holds
+    // its size as the pointer crosses the deadband and then flips to the next column —
+    // hence runs of identical frames punctuated by a jump, not a smooth glide. This
     // documents the masonry resize behaviour (the moving twin of the static artifacts
     // shots) and gives the video diff viewer a third, interaction-driven clip.
     //
