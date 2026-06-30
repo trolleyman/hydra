@@ -80,6 +80,9 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 	// polling. A supervised service's state transition pushes services_changed.
 	eventHub := events.NewHub()
 	svcMgr.SetOnChange(eventHub.ServicesChanged)
+	// A finished test run settling pushes agents_changed so the sidebar/header
+	// verdict chips refresh instantly instead of lagging behind the detail panel.
+	testReg.SetOnSettle(eventHub.AgentsChanged)
 
 	server := &httppkg.Server{
 		WorktreesDir:    worktreesDir,
@@ -273,6 +276,7 @@ func buildMux(server *httppkg.Server, auth *httppkg.Authenticator) *http.ServeMu
 	mux.Handle("/health", apiHandler)
 	mux.HandleFunc("/ws/projects/{project_id}/agents/{id}/terminal", server.HandleTerminalWS)
 	mux.HandleFunc("/ws/projects/{project_id}/agents/{id}/artifacts", server.HandleArtifactsWS)
+	mux.HandleFunc("/ws/projects/{project_id}/agents/{id}/tests", server.HandleTestsWS)
 	mux.HandleFunc("/ws/projects/{project_id}/events", server.HandleEventsWS)
 	mux.HandleFunc("POST /shells/projects/{project_id}/agents/{id}/close", server.HandleShellClose)
 	mux.HandleFunc("/artifacts/projects/{project_id}/blob", server.HandleArtifactBlob)

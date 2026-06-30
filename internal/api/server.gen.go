@@ -1080,6 +1080,8 @@ type TestStatus string
 
 // TestSummary Compact per-head test verdict for the head's current commit, shown as the sidebar/header chip without opening the tests panel (PLAN #68). Computed from the cached report without triggering a run.
 type TestSummary struct {
+	// AtBase True when the head's branch tip is still the base branch commit, so this verdict is inherited from the base rather than the agent's own work. The ambient sidebar chip hides it in this case; the agent detail view still shows it.
+	AtBase     *bool  `json:"at_base"`
 	DurationMs *int64 `json:"duration_ms"`
 	Failed     *int   `json:"failed,omitempty"`
 	Passed     *int   `json:"passed,omitempty"`

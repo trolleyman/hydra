@@ -21,5 +21,9 @@ export type TestSummary = {
      * The resolved commit SHA the verdict was computed for.
      */
     ref?: string | null;
+    /**
+     * True when the head's branch tip is still the base branch commit, so this verdict is inherited from the base rather than the agent's own work. The ambient sidebar chip hides it in this case; the agent detail view still shows it.
+     */
+    at_base?: boolean | null;
 };
 

@@ -10,12 +10,32 @@ import { CollapsibleCard, MELT_BTN, useMeasuredHeight } from './CollapsibleCard'
 import { LogView } from './ArtifactLogView'
 import { InfoTooltip } from './InfoTooltip'
 
+// Server→client message on the tests WebSocket. Mirrors internal/http/tests_ws.go.
+// Single-sided (no before/after), so a runner is addressed by name alone.
+type TestWSMessage =
+  | { type: 'snapshot'; runners: TestRunResult[] }
+  | { type: 'runner'; runner: TestRunResult }
+  | { type: 'log'; name: string; line: ArtifactLogLine }
+  | { type: 'progress'; name: string; progress: string }
+
+function testsWsUrl(projectId: string, agentId: string, headRef?: string, includeUncommitted?: boolean): string {
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  const host = window.location.host
+  const pid = projectId ? encodeURIComponent(projectId) : '_'
+  const params = new URLSearchParams()
+  if (headRef) params.set('head_ref', headRef)
+  if (includeUncommitted) params.set('include_uncommitted', 'true')
+  const qs = params.toString() ? `?${params.toString()}` : ''
+  return `${protocol}//${host}/ws/projects/${pid}/agents/${encodeURIComponent(agentId)}/tests${qs}`
+}
+
 // TestsPanel renders the head's test-runner verdicts (PLAN #68), styled to match
 // the artifacts panel: a "Tests (i)" header over one collapsible card per
 // [[tests]] runner. Single-sided — there is no before/after comparison; it reports
 // the verdict for whatever the diff viewer has selected as the "after" side (a
-// commit, or the uncommitted working tree), defaulting to the branch tip. Polls
-// while any runner is still running so the live log + counts advance.
+// commit, or the uncommitted working tree), defaulting to the branch tip. Streams
+// updates over a WebSocket so progress / the live log / the settled verdict land
+// instantly, falling back to polling if the socket can't connect or drops.
 export function TestsPanel({ projectId, agentId, headRef, includeUncommitted, refreshKey }: {
   projectId: string
   agentId: string
@@ -27,43 +47,104 @@ export function TestsPanel({ projectId, agentId, headRef, includeUncommitted, re
   // Bumped by the diff viewer's refresh control to force a fresh fetch.
   refreshKey?: number
 }) {
-  const [runners, setRunners] = useState<TestRunResult[]>([])
-  const [loading, setLoading] = useState(true)
-  const [refreshing, setRefreshing] = useState<string | null>(null)
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // null = not yet loaded (render nothing); [] = loaded, nothing configured.
+  const [runners, setRunners] = useState<TestRunResult[] | null>(null)
+  // Connection mode: WS while live, polling if the socket can't connect or drops.
+  const [mode, setMode] = useState<'connecting' | 'ws' | 'poll'>('connecting')
+  const wsRef = useRef<WebSocket | null>(null)
+  const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Manual-refresh state for the polling fallback (the WS path sends a message
+  // instead): stash the runner name and bump the nonce to re-run the poll effect.
+  const [refreshNonce, setRefreshNonce] = useState(0)
+  const refreshRunnerRef = useRef<string | null>(null)
 
-  const load = useCallback(
-    async (refresh?: string) => {
+  // Apply a server→client WS message to local state.
+  const applyMessage = useCallback((msg: TestWSMessage) => {
+    if (msg.type === 'snapshot') {
+      setRunners(msg.runners ?? [])
+    } else if (msg.type === 'runner') {
+      setRunners((prev) => (prev ? prev.map((r) => (r.name === msg.runner.name ? msg.runner : r)) : [msg.runner]))
+    } else if (msg.type === 'log') {
+      setRunners((prev) => prev?.map((r) => (r.name === msg.name ? { ...r, log: [...(r.log ?? []), msg.line] } : r)) ?? prev)
+    } else if (msg.type === 'progress') {
+      setRunners((prev) => prev?.map((r) => (r.name === msg.name ? { ...r, progress: msg.progress } : r)) ?? prev)
+    }
+  }, [])
+
+  // Primary path: stream updates over a WebSocket so progress/log/verdict update
+  // instantly. Falls back to polling (below) if the socket fails to open or drops.
+  useEffect(() => {
+    let cancelled = false
+    setMode('connecting')
+    let ws: WebSocket
+    try {
+      ws = new WebSocket(testsWsUrl(projectId, agentId, headRef, includeUncommitted))
+    } catch {
+      setMode('poll')
+      return
+    }
+    wsRef.current = ws
+    ws.onopen = () => { if (!cancelled) setMode('ws') }
+    ws.onmessage = (e) => {
+      if (cancelled) return
+      try { applyMessage(JSON.parse(e.data) as TestWSMessage) } catch { /* ignore malformed frames */ }
+    }
+    ws.onclose = () => {
+      wsRef.current = null
+      // Fall back to polling on any non-deliberate close (initial-connect failure
+      // or a mid-session drop, e.g. the daemon restarting).
+      if (!cancelled) setMode('poll')
+    }
+    return () => {
+      cancelled = true
+      ws.onclose = null
+      ws.close()
+      if (wsRef.current === ws) wsRef.current = null
+    }
+  }, [projectId, agentId, headRef, includeUncommitted, refreshKey, applyMessage])
+
+  // Fallback path: poll the HTTP endpoint while the WS is unavailable, re-fetching
+  // every 1.5s while any runner is still running so the live log + counts advance.
+  useEffect(() => {
+    if (mode !== 'poll') return
+    let cancelled = false
+    const clear = () => { if (pollTimerRef.current) { clearTimeout(pollTimerRef.current); pollTimerRef.current = null } }
+    const refreshRunner = refreshRunnerRef.current
+    refreshRunnerRef.current = null
+
+    const tick = async (first: boolean) => {
       try {
-        const resp = await api.default.getAgentTests(projectId, agentId, headRef, includeUncommitted, refresh)
+        const resp = await api.default.getAgentTests(projectId, agentId, headRef, includeUncommitted, first ? refreshRunner ?? undefined : undefined)
+        if (cancelled) return
         setRunners(resp.runners)
+        if (resp.runners.some((r) => r.status === 'running')) {
+          pollTimerRef.current = setTimeout(() => tick(false), 1500)
+        }
       } catch {
         // leave previous state; a transient error shouldn't blank the panel
-      } finally {
-        setLoading(false)
-        setRefreshing(null)
       }
-    },
-    [projectId, agentId, headRef, includeUncommitted],
-  )
-
-  // Fetch on mount and whenever the selected ref / refresh trigger changes.
-  useEffect(() => {
-    void load()
-    return () => {
-      if (timer.current) clearTimeout(timer.current)
     }
-  }, [load, refreshKey])
+    clear()
+    void tick(true)
+    return () => { cancelled = true; clear() }
+  }, [mode, projectId, agentId, headRef, includeUncommitted, refreshKey, refreshNonce])
 
-  // Poll while any runner is still running, so the live log + counts advance.
-  useEffect(() => {
-    const anyRunning = runners.some((r) => r.status === 'running')
-    if (!anyRunning) return
-    timer.current = setTimeout(() => void load(), 1500)
-    return () => {
-      if (timer.current) clearTimeout(timer.current)
+  // Re-run one runner: discard its cached verdict and run it again. Optimistically
+  // flip the card to "running" (cleared log/cases) so the spinner shows at once.
+  const requestRefresh = useCallback((name: string) => {
+    setRunners((prev) => prev?.map((r) => (r.name === name
+      ? { ...r, status: 'running' as TestRunResult['status'], cases: [], log: [], log_url: null, error: null, progress: null }
+      : r)) ?? prev)
+    const ws = wsRef.current
+    if (mode === 'ws' && ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'refresh', name }))
+    } else {
+      // Polling fallback: forward the name to the next poll so the backend discards
+      // the cached (possibly errored) result and regenerates.
+      refreshRunnerRef.current = name
+      setRefreshNonce((n) => n + 1)
     }
-  }, [runners, load])
+  }, [mode])
 
   // Sticky "Tests" header height, published as the shared --sticky-section-h so the
   // runner card headers dock flush beneath it — the same mechanism the artifacts
@@ -72,7 +153,7 @@ export function TestsPanel({ projectId, agentId, headRef, includeUncommitted, re
 
   // Nothing configured (or not loaded yet) → render nothing, like the artifacts
   // panel, so the diff viewer doesn't reserve empty space for an absent feature.
-  if (loading || runners.length === 0) return null
+  if (!runners || runners.length === 0) return null
 
   const runningCount = runners.filter((r) => r.status === 'running').length
 
@@ -109,11 +190,7 @@ export function TestsPanel({ projectId, agentId, headRef, includeUncommitted, re
           <TestRunnerCard
             key={r.name}
             runner={r}
-            refreshing={refreshing === r.name}
-            onRefresh={() => {
-              setRefreshing(r.name)
-              void load(r.name)
-            }}
+            onRefresh={() => requestRefresh(r.name)}
           />
         ))}
       </div>
@@ -138,7 +215,7 @@ function StatusIcon({ status }: { status: TestRunResult['status'] }) {
 // out identically to an artifact set card: the runner name + verdict chip +
 // summary on the left, the build-log toggle and Re-run melt buttons on the right,
 // and the failing-first case list / live log behind the collapse toggle.
-function TestRunnerCard({ runner, onRefresh, refreshing }: { runner: TestRunResult; onRefresh: () => void; refreshing: boolean }) {
+function TestRunnerCard({ runner, onRefresh }: { runner: TestRunResult; onRefresh: () => void }) {
   const cases = runner.cases ?? []
   const running = runner.status === 'running'
   const errored = runner.status === 'errored'
@@ -208,12 +285,14 @@ function TestRunnerCard({ runner, onRefresh, refreshing }: { runner: TestRunResu
           there's no before/after side to re-run separately). */}
       <button
         onClick={onRefresh}
-        disabled={refreshing || running}
+        disabled={running}
         title="Re-run this test runner"
         aria-label="Re-run this test runner"
         className={`h-7 px-2 inline-flex items-center justify-center rounded-md disabled:opacity-50 ${MELT_BTN}`}
       >
-        <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin' : ''}`} />
+        {/* Spins while the run is in flight (a fresh re-run flips the card to
+            running immediately via the optimistic update). */}
+        <RefreshCw className={`w-3.5 h-3.5 ${running ? 'animate-spin' : ''}`} />
       </button>
     </>
   )

@@ -19,10 +19,10 @@ pre_prompt = """
 writable_paths = ["~/.cache/go", "~/.bun/install/cache", "~/.cache/goimports", "~/.magefile"]
 ## extra paths hidden in the sandbox (added to the built-in defaults).
 # masked_paths = ["~/.ssh", "~/.aws", "~/.azure", "~/.gnupg", "~/.docker", "~/.kube", "~/.password-store", "~/.config", "~/.netrc", "~/.git-credentials", "~/.npmrc", "~/.pypirc", "~/.zsh_history", "~/.bash_history", "~/.sh_history", "~/.config/mise/config.local.toml", "~/.dotfiles/mise/config.local.toml"]
-## paths re-exposed read-only after a masked parent (added to the built-in defaults).
 # ~/.config/go holds `go env -w` settings (GOMODCACHE=~/.cache/go/pkg/mod,
 # GOCACHE=~/.cache/go/build, GOPATH=~/.local/share/go); ~/.config is masked by
 # default, so re-expose it or the sandboxed `go` falls back to ~/go/pkg/mod (not writable).
+## paths re-exposed read-only after a masked parent (added to the built-in defaults).
 restore_ro = ["~/.config/go"]
 ## worktree-relative paths mounted copy-on-write from the project root (read source, writes kept per-head; e.g. large gitignored build dirs).
 # cow_paths = []
@@ -89,6 +89,11 @@ restore_ro = ["~/.config/go"]
 ## like {"tags": ["theme::dark", "viewport::phone"]}. The diff viewer shows these as
 ## labels and offers a filter. A "category::value" tag is a scoped label: only one
 ## value per category is kept (the last one wins); plain tags are free-form.
+## The sidecar may also carry an optional dpi — the device-scale factor the shot was
+## captured at, e.g. {"tags": [...], "dpi": 2} — so the grid sizes a tile by its
+## logical width (pixels / dpi): a 2x shot lays out like a 1x one, only sharper.
+## For a video, an optional fps (e.g. {"fps": 60}) sets the frame rate the diff
+## viewer's frame-step buttons use (HTML5 video exposes no frame rate of its own).
 [[artifacts]]
 # Diff-viewer artifact generator (PLAN.md #17): renders Hydra's own web UI to
 # PNGs so visual changes show up side-by-side in the diff viewer. The script
@@ -122,25 +127,45 @@ timeout_sec = 900
 # host = true
 # max_restarts = 3
 
-## [[tests]]: per-project test-runner commands (PLAN.md #68). Hydra runs each
-## against a head's branch, parses the report it writes into $HYDRA_TEST_OUTPUT
-## (JUnit XML or Hydra-JSON), and surfaces a pass/fail verdict that soft-gates the
-## merge button. See the docs the Settings editor regenerates for every field.
+## [[tests]]: per-project test-runner commands. Hydra runs each against a head's
+## branch and parses the report into a pass/fail verdict that gates the merge
+## button (failing/errored soft-block merge; force always available). Fields:
+##   name         unique label, also used as the cache directory (required).
+##   command      shell command run via `bash -c` in the checkout directory (required).
+##   timeout_sec  max seconds the command may run (0 = built-in default).
+##   unsafe_host  run on the host with NO sandbox — runs the diffed ref's test code;
+##                only for trusted refs (default false).
+##   clean_ignored  also delete git-ignored files before each run (default false).
+##   strict       run the command under `set -eo pipefail` (default true). Note: a
+##                runner exiting non-zero because tests FAILED is a valid verdict,
+##                not a strict abort — strict only governs the shell pipeline.
+##   enabled      set false to skip this runner (default true).
+## The command writes a report into $HYDRA_TEST_OUTPUT: JUnit XML (*.xml — go test
+## via gotestsum, pytest, jest/vitest, cargo-nextest, …) or a Hydra-native *.json
+## ({total,passed,failed,skipped,duration_ms,cases:[{name,status,duration_ms,message}]}).
+## If it writes no report, the exit code alone becomes a red/green verdict.
+## It is also given HYDRA_TEST_SOURCE (the checkout dir) and HYDRA_TEST_REF (the
+## resolved ref).
+# [[services]]
+# name = "emu-pool"
+# command = "scripts/emu-pool.sh up 3 --foreground"
+# host = true
+# max_restarts = 3
 [[tests]]
 # Go test suite. Uses gotestsum to emit JUnit (per-case detail in the panel) when
 # it's installed, otherwise falls back to plain `go test` (still red/green from the
 # exit code). The whole module is slow, so allow a generous timeout.
-name = "go"
 # Go test suite. Uses gotestsum to emit JUnit (per-case detail in the panel) when
 # it's installed, otherwise falls back to plain `go test` (still red/green from the
 # exit code). The whole module is slow, so allow a generous timeout. (web/dist is
 # kept present in every checkout via a committed web/dist/.gitkeep, so the
 # //go:embed all:dist in web/embed.go compiles without building the frontend.)
-command = 'if command -v gotestsum >/dev/null 2>&1; then gotestsum --junitfile "$HYDRA_TEST_OUTPUT/go.xml" -- ./...; else go test ./...; fi'
+name = "go"
+command = "if command -v gotestsum >/dev/null 2>&1; then gotestsum --junitfile \"$HYDRA_TEST_OUTPUT/go.xml\" -- ./...; else go test ./...; fi"
 timeout_sec = 900
 
 [[tests]]
 # Frontend vitest suite, emitting JUnit so failing specs show their assertion.
 name = "web"
-command = 'cd web && bun install && bun x vitest run --reporter=junit --outputFile="$HYDRA_TEST_OUTPUT/web.xml"'
+command = "cd web && bun install && bun x vitest run --reporter=junit --outputFile=\"$HYDRA_TEST_OUTPUT/web.xml\""
 timeout_sec = 600

@@ -77,17 +77,7 @@ func (s *Server) GetAgentTests(ctx context.Context, request api.GetAgentTestsReq
 		_ = mgr.Invalidate(*request.Params.Refresh, v)
 	}
 
-	out := make([]api.TestRunResult, 0, len(runners))
-	for _, r := range runners {
-		rep, err := mgr.Get(r, v)
-		if err != nil {
-			// Surface a resolution failure as an errored runner rather than 500ing
-			// the whole panel.
-			out = append(out, api.TestRunResult{Name: r.Name, Status: api.TestStatusErrored, Error: ptr(err.Error())})
-			continue
-		}
-		out = append(out, buildTestRunResult(request.ProjectId, mgr, rep))
-	}
+	out := s.buildTestRunners(request.ProjectId, mgr, runners, v)
 	return api.GetAgentTests200JSONResponse(api.TestsResponse{Runners: out}), nil
 }
 
@@ -180,17 +170,19 @@ func (s *Server) testSummaryFor(projectRoot string, h heads.Head) *api.TestSumma
 	if len(runners) == 0 {
 		return &api.TestSummary{Status: api.TestStatusNone}
 	}
-	// No verdict when the head has done no work: if its branch tip is still the
-	// base branch commit, any cached verdict belongs to the base, not the agent —
-	// showing a green "passed" chip there is misleading (the agent hasn't run
-	// anything of its own). Treat it as "none" so the sidebar/header chip is
-	// hidden until the head actually commits something. Best-effort: if either ref
-	// fails to resolve we fall through to the normal computation.
+	// Detect whether the head has done no work yet: if its branch tip is still
+	// the base branch commit, any cached verdict belongs to the base, not the
+	// agent. We still surface the real verdict — the agent detail view (header
+	// chip + Tests panel) shows it — but flag it so the ambient sidebar chip can
+	// hide it, where a green "passed" inherited from base would just be
+	// misleading noise. Best-effort: if either ref fails to resolve we leave the
+	// flag unset and fall through to the normal computation.
+	atBase := false
 	if h.BaseBranch != "" {
 		headSHA, errHead := git.ResolveRef(projectRoot, *h.Branch)
 		baseSHA, errBase := git.ResolveRef(projectRoot, h.BaseBranch)
 		if errHead == nil && errBase == nil && headSHA == baseSHA {
-			return &api.TestSummary{Status: api.TestStatusNone}
+			atBase = true
 		}
 	}
 	mgr := s.Tests.Manager(projectRoot)
@@ -266,6 +258,9 @@ func (s *Server) testSummaryFor(projectRoot string, h heads.Head) *api.TestSumma
 	}
 	if ref != "" {
 		sum.Ref = &ref
+	}
+	if atBase {
+		sum.AtBase = &atBase
 	}
 	return sum
 }
