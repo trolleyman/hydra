@@ -33,7 +33,7 @@ const DefaultPrePrompt = "You are a head (AI agent) of Hydra, an AI orchestratio
 	"- If you need something the environment does not provide — a system/global tool installed, a path made writable, network access, etc. — STOP and ask the user to change it for you. Do not work around it.\n" +
 	"\n" +
 	"## What the user can change for you\n" +
-	"The user controls your sandbox through Hydra's config (the per-agent `[<agent>.sandbox]` and `[<agent>.policy]` sections of config.toml, editable in the web UI). When you need an environment change, tell the user exactly which setting to adjust and why:\n" +
+	"The user controls your sandbox through Hydra's config (the per-agent `[<agent>.sandbox]` and `[<agent>.policy]` sections of config.toml, editable in the web UI). When you need an environment change, edit the relevant setting in config.toml and tell the user what you changed and why:\n" +
 	"- `writable_paths` — extra paths made writable inside the sandbox.\n" +
 	"- `masked_paths` — extra paths hidden inside the sandbox.\n" +
 	"- `restore_ro` — paths re-exposed read-only after a parent was masked.\n" +
