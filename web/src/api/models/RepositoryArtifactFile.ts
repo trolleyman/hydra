@@ -27,5 +27,9 @@ export type RepositoryArtifactFile = {
      * Natural pixel height of the media; see width. Null/absent when undetermined.
      */
     height?: number | null;
+    /**
+     * Pixel density (device-scale factor) the media was captured at, from its sidecar ({"dpi": 2}); the grid sizes tiles by logical width (width / dpi). Null/absent → 1.
+     */
+    dpi?: number | null;
 };
 

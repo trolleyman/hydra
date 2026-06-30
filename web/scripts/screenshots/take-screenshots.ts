@@ -14,9 +14,12 @@
 //   HYDRA_ARTIFACT_REF     the resolved ref being rendered (informational)
 //
 // Tags: alongside each <name>.png we write a <name>.png.meta JSON sidecar
-// ({"tags": [...]}) that the diff viewer surfaces as labels + filters (see
-// internal/artifacts readTagsSidecar). Every shot is tagged with its theme,
-// viewport, and UI section as scoped "category::value" labels.
+// ({"tags": [...], "dpi": 2}) that the diff viewer surfaces as labels + filters (see
+// internal/artifacts readSidecar). Every shot is tagged with its theme, viewport, and
+// UI section as scoped "category::value" labels. The optional "dpi" records the
+// device-scale factor the shot was captured at (phone shots use 2 for crispness); the
+// grid sizes a tile by its logical width (physical px ÷ dpi), so dpi 2 lays out the
+// same as dpi 1, only sharper. Absent ⇒ 1.
 //
 // Run with: bun scripts/screenshots/take-screenshots.ts  (from web/)
 //
@@ -29,7 +32,7 @@
 
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import { createServer } from 'node:net'
-import { mkdtempSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, existsSync, readFileSync, writeFileSync, rmSync } from 'node:fs'
 import { availableParallelism, cpus, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chromium } from 'playwright'
@@ -1260,9 +1263,17 @@ try {
 
     const captureShot = async (pg: (typeof pages)[number], theme: (typeof themes)[number]) => {
         const suffix = theme === 'dark' ? '-dark' : '-light'
+        // Capture phone shots at 2x so they stay crisp when the diff grid gives them a
+        // generous (logical) width; desktop shots stay at 1x (they're already wide
+        // enough). The dpi is written into the .meta sidecar (below) so the grid sizes
+        // a tile by its LOGICAL width (physical px ÷ dpi) — a 2x phone shot lays out the
+        // same as a 1x one, just sharper. "Mobile" matches the viewport tag derived
+        // below: an explicit mobile* viewportTag, else a narrow capture width.
+        const isMobile = pg.viewportTag ? pg.viewportTag.startsWith('mobile') : (pg.viewport?.width ?? 1280) < 700
+        const dpi = isMobile ? 2 : 1
         const ctx = await browser.newContext({
           viewport: pg.viewport ?? { width: 1280, height: 800 },
-          deviceScaleFactor: 1,
+          deviceScaleFactor: dpi,
           colorScheme: theme,
         })
         // Pin Date/now to a fixed instant (matching the server's simNow) so the
@@ -1833,15 +1844,18 @@ try {
           }
         }
         if (pg.highlightArtifacts) {
-          // Tick the "Highlight" checkbox on every before/after image tile so the
-          // magenta pixel-diff overlay (DiffCanvas) is painted over each changed
-          // image. Each AB tile owns its own Highlight checkbox (local state) and
-          // it's the only checkbox the tile renders, so click every enabled one
-          // (single-sided added/removed tiles have nothing to diff → disabled).
+          // Turn on the artifacts panel's global "Highlight" toggle (in the header,
+          // shown in A/B mode) so the magenta pixel-diff overlay (DiffCanvas) is
+          // painted over every changed image tile. Highlight is a single panel-wide
+          // control now — driving all tiles via context — not a per-tile checkbox, so
+          // there's one labelled "Highlight" checkbox to tick rather than one per tile.
+          await page.waitForFunction(() =>
+            Array.from(document.querySelectorAll('label')).some((l) => l.textContent?.trim() === 'Highlight'),
+          )
           await page.evaluate(() => {
-            document.querySelectorAll<HTMLInputElement>('[data-mkey] input[type=checkbox]').forEach((c) => {
-              if (!c.disabled && !c.checked) c.click()
-            })
+            const label = Array.from(document.querySelectorAll('label')).find((l) => l.textContent?.trim() === 'Highlight')
+            const cb = label?.querySelector<HTMLInputElement>('input[type=checkbox]')
+            if (cb && !cb.checked) cb.click()
           })
           // Each ticked tile mounts a DiffCanvas that loads both images and paints
           // its overlay asynchronously, clearing the canvas's opacity-0 once ready.
@@ -1946,7 +1960,9 @@ try {
         // desktop.
         const viewport = pg.viewportTag ?? ((pg.viewport?.width ?? 1280) < 700 ? 'mobile' : 'desktop')
         const tags = [`theme::${theme}`, `viewport::${viewport}`, `section::${sectionFor(pg.name)}`]
-        writeFileSync(`${out}.meta`, JSON.stringify({ tags }))
+        // Record dpi only when non-default (the 2x phone shots) — Hydra treats an
+        // absent dpi as 1, so desktop sidecars stay byte-identical to before.
+        writeFileSync(`${out}.meta`, JSON.stringify(dpi !== 1 ? { tags, dpi } : { tags }))
         console.log(`wrote ${out}`)
         await ctx.close()
         done++
@@ -2134,6 +2150,11 @@ try {
   }
 } finally {
   server.kill('SIGTERM')
+  // Remove the throwaway binary dir (hydra-shot-*). Without this every artifact
+  // run leaks a ~30MB dir into the host's /tmp — they pile up fast since this
+  // runs on both sides of every screenshot comparison. Safe to unlink even
+  // though the server still holds the binary open (Linux/macOS unlink-on-use).
+  rmSync(binDir, { recursive: true, force: true })
 }
 
 progress('done')

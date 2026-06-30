@@ -170,6 +170,12 @@ type FileMeta struct {
 	// case the client falls back to measuring the bytes itself.
 	Width  int `json:"width,omitempty"`
 	Height int `json:"height,omitempty"`
+	// Dpi is the media's pixel density (device-scale factor) from the same sidecar
+	// ({"dpi": 2}) — physical pixels per logical pixel at capture time. It lets the
+	// web grid size a tile by the image's *logical* width (Width / Dpi) rather than
+	// its raw pixel count, so a phone shot captured at 2x doesn't lay out twice as
+	// wide as the same shot at 1x. Zero/absent → treated as 1 (logical == physical).
+	Dpi float64 `json:"dpi,omitempty"`
 }
 
 // Meta is the persisted (and returned) description of one cache entry.
@@ -241,6 +247,9 @@ type FileDelta struct {
 	// sides — see FileMeta.Width.
 	Width  int
 	Height int
+	// Dpi is the media's pixel density (device-scale factor), head-preferred like
+	// Width/Height. Zero when neither side declares it (treated as 1). See FileMeta.Dpi.
+	Dpi float64
 }
 
 // Compare matches files by name across two versions' file lists and classifies
@@ -285,6 +294,12 @@ func Compare(left, right []FileMeta) []FileDelta {
 			d.Width, d.Height = rf.Width, rf.Height
 		} else {
 			d.Width, d.Height = lf.Width, lf.Height
+		}
+		// Dpi: head-preferred, falling back to the base side.
+		if rf.Dpi > 0 {
+			d.Dpi = rf.Dpi
+		} else {
+			d.Dpi = lf.Dpi
 		}
 		switch {
 		case inLeft && !inRight:
@@ -1471,12 +1486,12 @@ func scanOutputs(dir string) ([]FileMeta, []string, error) {
 		}
 		rel, _ := filepath.Rel(dir, p)
 		name := filepath.ToSlash(rel)
-		tags, fps, warns := readSidecar(p)
+		tags, fps, dpi, warns := readSidecar(p)
 		for _, w := range warns {
 			warnings = append(warnings, name+": "+w)
 		}
 		width, height := mediaPixelSize(p, name)
-		out = append(out, FileMeta{Name: name, Size: size, Hash: hash, Tags: tags, Fps: fps, Width: width, Height: height})
+		out = append(out, FileMeta{Name: name, Size: size, Hash: hash, Tags: tags, Fps: fps, Width: width, Height: height, Dpi: dpi})
 		return nil
 	})
 	if err != nil {
@@ -1493,17 +1508,18 @@ func scanOutputs(dir string) ([]FileMeta, []string, error) {
 // nothing and no warnings (the common case); malformed JSON yields a warning (and
 // no metadata). fps is reported only when present and positive — a non-positive
 // value is ignored (zero, the caller's "unset", with a warning).
-func readSidecar(filePath string) (tags []string, fps float64, warnings []string) {
+func readSidecar(filePath string) (tags []string, fps float64, dpi float64, warnings []string) {
 	data, err := os.ReadFile(filePath + ".meta")
 	if err != nil {
-		return nil, 0, nil // no sidecar → no metadata (the common case)
+		return nil, 0, 0, nil // no sidecar → no metadata (the common case)
 	}
 	var sc struct {
 		Tags []string `json:"tags"`
 		Fps  float64  `json:"fps"`
+		Dpi  float64  `json:"dpi"`
 	}
 	if err := json.Unmarshal(data, &sc); err != nil {
-		return nil, 0, []string{fmt.Sprintf("ignoring malformed sidecar %s.meta: %v", filepath.Base(filePath), err)}
+		return nil, 0, 0, []string{fmt.Sprintf("ignoring malformed sidecar %s.meta: %v", filepath.Base(filePath), err)}
 	}
 	tags, warnings = normalizeTags(sc.Tags)
 	if sc.Fps < 0 {
@@ -1511,7 +1527,12 @@ func readSidecar(filePath string) (tags []string, fps float64, warnings []string
 	} else {
 		fps = sc.Fps
 	}
-	return tags, fps, warnings
+	if sc.Dpi < 0 {
+		warnings = append(warnings, fmt.Sprintf("dpi: ignoring non-positive value %g in sidecar %s.meta", sc.Dpi, filepath.Base(filePath)))
+	} else {
+		dpi = sc.Dpi
+	}
+	return tags, fps, dpi, warnings
 }
 
 // normalizeTags cleans a raw tag list and enforces GitLab-style scoped labels.

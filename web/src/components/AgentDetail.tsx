@@ -240,7 +240,7 @@ function NetworkEnforcementBadge({ mode }: { mode?: string }) {
       tip: 'Outbound traffic is filtered via HTTP(S)_PROXY, so every well-behaved client is restricted to the allow-list — but this is NOT an inescapable boundary: a process that ignores the proxy can still reach the network. Install/upgrade passt (pasta with --map-host-loopback) for a hard boundary, or set network.enabled = false to block egress entirely.',
     },
     unrestricted: {
-      label: 'egress unrestricted',
+      label: 'unrestricted network access',
       className: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300',
       Icon: ShieldAlert,
       tip: 'Host filtering is off, so this head can reach any host on the network — a full outbound channel with the provider/GitHub tokens in reach. Set [sandbox.network] filter_enabled = true with an allowed_hosts list to restrict it, or network.enabled = false to block egress entirely.',

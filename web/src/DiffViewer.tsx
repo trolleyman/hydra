@@ -1625,12 +1625,13 @@ export function TreeNodeView({ node, depth, collapsedFolders, toggleFolder, onFi
 
 function SettingsPopup({ fileView, onFileViewChange, sideBySide, onSideBySideChange,
   ignoreWhitespace, onIgnoreWhitespaceChange, singleFile, onSingleFileChange,
-  imageDiffMode, onImageDiffModeChange }: {
+  imageDiffMode, onImageDiffModeChange, artifactScale, onArtifactScaleChange }: {
     fileView: FileView; onFileViewChange: (v: FileView) => void
     sideBySide: boolean; onSideBySideChange: (v: boolean) => void
     ignoreWhitespace: boolean; onIgnoreWhitespaceChange: (v: boolean) => void
     singleFile: boolean; onSingleFileChange: (v: boolean) => void
     imageDiffMode: ImageDiffMode; onImageDiffModeChange: (v: ImageDiffMode) => void
+    artifactScale: number; onArtifactScaleChange: (v: number) => void
   }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -1700,10 +1701,20 @@ function SettingsPopup({ fileView, onFileViewChange, sideBySide, onSideBySideCha
             ))}
           </div>
           {/* The artifact grid sizes each tile automatically by aspect ratio (a
-              wide desktop shot spans more columns than a tall phone shot); drag a
-              tile (or its edge) to override its width, double-click the edge to
-              auto-size. */}
-          <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-2 leading-snug">Tiles auto-size by shape — drag a tile to resize it.</p>
+              wide desktop shot spans more columns than a tall phone shot); this
+              slider scales every tile up or down from there, drag a tile (or its
+              edge) to override one, double-click the edge to auto-size. */}
+          <div className="mt-3 flex items-center gap-2">
+            <span className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 tracking-wide shrink-0">Size</span>
+            <input
+              type="range" min={0.5} max={2} step={0.25} value={artifactScale}
+              onChange={(e) => onArtifactScaleChange(Number(e.target.value))}
+              className="flex-1 accent-blue-500 cursor-pointer"
+              title="Scale every artifact tile up or down"
+            />
+            <span className="text-[10px] tabular-nums text-gray-400 dark:text-gray-500 w-8 text-right shrink-0">{Math.round(artifactScale * 100)}%</span>
+          </div>
+          <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-1 leading-snug">Tiles auto-size by shape — drag a tile to resize it.</p>
         </div>
       )}
     </div>
@@ -1739,6 +1750,16 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
     if (stored === 'side-by-side' || stored === 'ab' || stored === 'slider' || stored === 'onion') return stored
     return 'ab'
   })
+  // Global artifact-tile size multiplier (the diff settings size slider). Clamped to
+  // [0.5, 2]; 1 = the aspect-ratio default. Scales every tile's auto span at once.
+  const [artifactScale, setArtifactScale] = useState<number>(() => {
+    const stored = Number(readLocal(StorageKeys.diffArtifactScale))
+    return Number.isFinite(stored) && stored > 0 ? Math.min(2, Math.max(0.5, stored)) : 1
+  })
+  // Global before/after view + "highlight changed pixels", shared across every A/B
+  // tile so they all flip / highlight together (keyboard B / H — see ArtifactsPanel).
+  const [artifactView, setArtifactView] = useState<'before' | 'after'>(() => (readLocal(StorageKeys.diffArtifactView) === 'before' ? 'before' : 'after'))
+  const [artifactHighlight, setArtifactHighlight] = useState<boolean>(() => readLocal(StorageKeys.diffArtifactHighlight) === 'true')
   // Artifact masonry layout — per-tile span overrides (dragging a tile's edge);
   // tiles without an override auto-span by aspect ratio. One set of overrides shared
   // across the artifacts panel and the repository artifacts view; persisted (see
@@ -1768,6 +1789,9 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
   useEffect(() => { writeLocal(StorageKeys.diffFileView, fileView) }, [fileView])
   useEffect(() => { writeLocal(StorageKeys.diffSidebarWidth, String(sidebarWidth)) }, [sidebarWidth])
   useEffect(() => { writeLocal(StorageKeys.diffImageMode, imageDiffMode) }, [imageDiffMode])
+  useEffect(() => { writeLocal(StorageKeys.diffArtifactScale, String(artifactScale)) }, [artifactScale])
+  useEffect(() => { writeLocal(StorageKeys.diffArtifactView, artifactView) }, [artifactView])
+  useEffect(() => { writeLocal(StorageKeys.diffArtifactHighlight, String(artifactHighlight)) }, [artifactHighlight])
 
   // DiffViewer is remounted on every agent switch (the route keys the whole
   // AgentDetail subtree by project+agent), so the collapsed-file set and the
@@ -2310,6 +2334,7 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
             ignoreWhitespace={ignoreWhitespace} onIgnoreWhitespaceChange={setIgnoreWhitespace}
             singleFile={singleFile} onSingleFileChange={handleSingleFileChange}
             imageDiffMode={imageDiffMode} onImageDiffModeChange={setImageDiffMode}
+            artifactScale={artifactScale} onArtifactScaleChange={setArtifactScale}
           />
         </div>
       </div>
@@ -2339,6 +2364,11 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
           // flash a loading spinner and reset the user's selection).
           refreshKey={refreshKey + (externalArtifactRefresh ?? 0)}
           imageDiffMode={imageDiffMode}
+          artifactScale={artifactScale}
+          artifactView={artifactView}
+          onArtifactViewChange={setArtifactView}
+          artifactHighlight={artifactHighlight}
+          onArtifactHighlightChange={setArtifactHighlight}
           artifactSpans={artifactSpans}
           onArtifactSpanChange={setArtifactSpanOverride}
         />

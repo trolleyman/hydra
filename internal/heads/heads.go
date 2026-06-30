@@ -465,6 +465,7 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 		WorktreePath:   worktreePath,
 		GitCommonDir:   gitCommonDir(projectRoot),
 		Home:           home,
+		TmpDir:         ensureHeadTmpDir(projectRoot, opts.ID),
 		WritablePaths:  append(writable, seed.WritablePaths...),
 		MaskedPaths:    masked,
 		RestoreRO:      restore,
@@ -679,6 +680,7 @@ func StartShellSession(reg *session.Registry, projectRoot string, head Head, row
 			WorktreePath:  worktreePath,
 			GitCommonDir:  gitCommonDir(projectRoot),
 			Home:          home,
+			TmpDir:        ensureHeadTmpDir(projectRoot, head.ID),
 			WritablePaths: append(writable, seed.WritablePaths...),
 			MaskedPaths:   masked,
 			RestoreRO:     restore,
@@ -768,6 +770,7 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 		WorktreePath:   worktreePath,
 		GitCommonDir:   gitCommonDir(projectRoot),
 		Home:           home,
+		TmpDir:         ensureHeadTmpDir(projectRoot, head.ID),
 		WritablePaths:  append(writable, seed.WritablePaths...),
 		MaskedPaths:    masked,
 		RestoreRO:      restore,
@@ -1001,6 +1004,7 @@ func KillHeadNoLock(ctx context.Context, reg *session.Registry, store *db.Store,
 
 		RemoveAgentStatusFiles(head.ProjectPath, head.ID)
 		removeCowDir(head.ProjectPath, head.ID)
+		removeHeadTmpDir(head.ProjectPath, head.ID)
 	}
 
 	if store != nil {
@@ -1082,6 +1086,7 @@ func runPreExitScript(ctx context.Context, head Head, endState string) {
 		WorktreePath:  worktree,
 		GitCommonDir:  gitCommonDir(head.ProjectPath),
 		Home:          home,
+		TmpDir:        ensureHeadTmpDir(head.ProjectPath, head.ID),
 		WritablePaths: writable,
 		MaskedPaths:   masked,
 		RestoreRO:     restore,

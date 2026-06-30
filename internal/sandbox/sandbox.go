@@ -104,6 +104,15 @@ type Options struct {
 	// Home is the HOME directory the agent should see.
 	Home string
 
+	// TmpDir is a host-backed scratch directory bound over /tmp inside the
+	// sandbox (Linux only). When set, the agent's temp files — Claude's
+	// scratchpad, test-framework extractions, build junk — are isolated per
+	// head and reclaimed when the head is torn down, instead of accumulating on
+	// the host's shared /tmp. Empty leaves /tmp as the fresh tmpfs from the base
+	// args (used by tests and one-off sandboxes). Ignored on macOS, where /tmp
+	// stays host-shared via the static profile.
+	TmpDir string
+
 	// WritablePaths, MaskedPaths and RestoreRO come from config + baked-in
 	// defaults (see DefaultSandboxConfig). Masks are applied before restores.
 	WritablePaths []string

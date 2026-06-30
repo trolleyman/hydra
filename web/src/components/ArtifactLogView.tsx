@@ -225,9 +225,18 @@ function SideLogPane({ label, url, log, loading, error, failed, succeeded }: {
 // still be building, so the set as a whole stays "generating". Rather than revert
 // the finished side to "Waiting for output…", fetch its persisted log and keep
 // showing the final output until the whole set settles.
-function LiveLogColumn({ label, log, logUrl }: { label: string; log: ArtifactLogLine[]; logUrl?: string | null }) {
+//
+// A side that settles while the other is still generating also takes on its
+// outcome colour right away — green border for a clean finish, red for a failure
+// (`error` set) — matching the settled-card panes, so a done side reads as done
+// at a glance instead of staying neutral grey until the whole set finishes.
+function LiveLogColumn({ label, log, logUrl, error }: { label: string; log: ArtifactLogLine[]; logUrl?: string | null; error?: string | null }) {
   // This side has finished if it has no live lines left but a persisted log URL.
   const settled = log.length === 0 && !!logUrl
+  // A failed side is red; a settled side that didn't error is green. A still-
+  // generating side stays neutral (succeeded needs settled; failed needs error).
+  const failed = !!error
+  const succeeded = settled && !failed
   const [settledLog, setSettledLog] = useState<ArtifactLogLine[] | null>(null)
 
   useEffect(() => {
@@ -248,9 +257,9 @@ function LiveLogColumn({ label, log, logUrl }: { label: string; log: ArtifactLog
   return (
     <LogColumnFrame label={label}>
       {settled ? (
-        <LogView log={settledLog ?? []} emptyText="Loading…" />
+        <LogView log={settledLog ?? []} emptyText="Loading…" failed={failed} succeeded={succeeded} />
       ) : (
-        <LogView log={log} />
+        <LogView log={log} failed={failed} succeeded={succeeded} />
       )}
     </LogColumnFrame>
   )
@@ -261,8 +270,8 @@ function LiveLogColumn({ label, log, logUrl }: { label: string; log: ArtifactLog
 export function LiveLogPanes({ set }: { set: ArtifactSet }) {
   return (
     <div className="flex gap-2 my-2">
-      <LiveLogColumn label="Before" log={set.left_log ?? []} logUrl={set.left_log_url} />
-      <LiveLogColumn label="After" log={set.right_log ?? []} logUrl={set.right_log_url} />
+      <LiveLogColumn label="Before" log={set.left_log ?? []} logUrl={set.left_log_url} error={set.left_error} />
+      <LiveLogColumn label="After" log={set.right_log ?? []} logUrl={set.right_log_url} error={set.right_error} />
     </div>
   )
 }

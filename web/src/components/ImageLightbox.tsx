@@ -14,6 +14,9 @@ export interface LightboxImage {
    *  controls — toggle, slider, onion) for this entry instead of a single image. The
    *  diff viewer supplies this; `url` is still used for the edge previews and caption. */
   diff?: { left?: string | null; right?: string | null; mode: ImageDiffMode }
+  /** Pixel density (device-scale factor) the media was captured at, surfaced in the
+   *  caption next to the dimensions (e.g. "780 × 1688 @2×"). Omit/1 → not shown. */
+  dpi?: number
 }
 
 function formatBytes(n: number): string {
@@ -167,7 +170,7 @@ export function ImageLightbox({
         <figcaption className="flex items-center gap-2 text-xs font-mono">
           {[
             <span key="name" className="text-white/70">{current.filename}</span>,
-            dims && <span key="dims" className="text-white/40">{dims.w} × {dims.h}</span>,
+            dims && <span key="dims" className="text-white/40">{dims.w} × {dims.h}{current.dpi && current.dpi > 1 ? ` @${current.dpi}×` : ''}</span>,
             current.size > 0 && <span key="size" className="text-white/40">{formatBytes(current.size)}</span>,
             count > 1 && <span key="count" className="text-white/40">{index + 1} / {count}</span>,
           ]
