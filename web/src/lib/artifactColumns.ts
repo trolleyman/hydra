@@ -56,12 +56,18 @@ export function useArtifactSpans() {
 
 // defaultSpanForAspect picks how many columns a tile spans from its media aspect
 // ratio (width / height): wide landscape (desktop) spans several columns, tall
-// portrait (phone) just one. Returns the raw bucket (1..4); the grid scales it for
-// side-by-side and clamps it to the rendered column count. `aspect` is undefined
-// until the media is measured, when we assume a middling 2-column tile.
+// portrait (phone) fewer. Returns the raw bucket (2..4); the grid scales it for
+// side-by-side, by the user's global size multiplier, and clamps it to the rendered
+// column count. `aspect` is undefined until the media is measured, when we assume a
+// middling tile.
+//
+// In a 6-column grid these put a phone shot at a third width and a desktop shot at
+// half — a deliberately generous default (phones were a sixth before, which read as
+// too small); the global size slider in the diff settings nudges the whole grid up
+// or down from here, and dragging a tile overrides one tile.
 export function defaultSpanForAspect(aspect: number | undefined): number {
   if (aspect == null) return 2
-  if (aspect < 0.8) return 1   // portrait / phone
+  if (aspect < 0.8) return 2   // portrait / phone
   if (aspect < 1.3) return 2   // square-ish / tablet
   if (aspect < 2.2) return 3   // landscape / desktop
   return 4                     // ultra-wide

@@ -40,6 +40,10 @@ export type ArtifactFile = {
      * Natural pixel height of the media; see width. Null/absent when undetermined.
      */
     height?: number | null;
+    /**
+     * Pixel density (device-scale factor) the media was captured at, read from its sidecar (<file>.meta, {"dpi": 2}). The grid sizes a tile by the media's logical width (width / dpi) so a shot captured at 2x lays out the same as the same shot at 1x — only crisper. Null/absent → 1.
+     */
+    dpi?: number | null;
 };
 export namespace ArtifactFile {
     export enum change_type {

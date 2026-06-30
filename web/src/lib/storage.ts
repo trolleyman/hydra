@@ -28,6 +28,16 @@ export const StorageKeys = {
   // dragging a tile's edge. Tiles without an entry auto-span by aspect ratio.
   // Shared across every artifact card (one layout for the whole panel).
   diffArtifactSpans: 'hydra-diff-artifact-spans',
+  // Global artifact-tile size multiplier (a string float, e.g. '1.5'), set by the
+  // size slider in the diff settings popup. Scales every tile's auto column span up
+  // or down so the whole grid can be enlarged/shrunk without per-tile drags.
+  diffArtifactScale: 'hydra-diff-artifact-scale',
+  // Global before/after view ('before' | 'after') for the A/B compare mode, shared
+  // across every artifact tile (flip them all at once; keyboard "B").
+  diffArtifactView: 'hydra-diff-artifact-view',
+  // Global "highlight changed pixels" toggle ('true'/'false') for the A/B compare
+  // mode, shared across every tile (keyboard "H").
+  diffArtifactHighlight: 'hydra-diff-artifact-highlight',
 
   // Last terminal geometry the client successfully sent (JSON {cols, rows}). Seeds
   // the initial PTY size on the next connection so a fresh/resumed agent renders

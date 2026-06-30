@@ -810,6 +810,9 @@ func (s *Server) buildRepositoryArtifact(projectID, name string, mgr *artifacts.
 			af.Width = ptr(f.Width)
 			af.Height = ptr(f.Height)
 		}
+		if f.Dpi > 0 {
+			af.Dpi = ptr(f.Dpi)
+		}
 		resp.Files = append(resp.Files, af)
 	}
 	return resp
