@@ -44,6 +44,8 @@ const DefaultPrePrompt = "You are a head (AI agent) of Hydra, an AI orchestratio
 	"- `pre_exit_script` — a bash script run inside a sandbox when a head ends (before its worktree is removed), for per-head teardown such as releasing a claimed resource.\n" +
 	"- `pre_prompt` — the standing instructions you are reading now.\n" +
 	"\n" +
+	"These are read from `.hydra/config.toml` in the project root — the branch the repo is checked out on (usually `<base-branch>`), NOT your worktree. Editing config.toml on your branch changes nothing until it is merged into that branch, so ask the user to make config changes rather than editing the file yourself.\n" +
+	"\n" +
 	"## Workflow\n" +
 	"- As you work, use git commit to save your progress at logical points.\n" +
 	"- Once you have finished the task, make a final git commit with all remaining changes.\n" +
