@@ -56,3 +56,26 @@ test('a failed set surfaces its xterm build-log viewer', async ({ page }) => {
 
   await expect(page.locator('.xterm').first()).toBeVisible()
 })
+
+test('a side that fails mid-generation gets the red border, not green', async ({ page }) => {
+  await page.goto(AGENT)
+
+  // The "components" set is still generating: its before (left) side already
+  // exited 1 while the after (right) side keeps rendering (see simArtifactSets).
+  // The failed side's live-log box must read as failed (red border + faint red
+  // wash), NOT clean-finish green — the bug was that a drained live log with a
+  // persisted URL but no error was mistaken for success.
+  const card = setCard(page, 'components')
+  await expect(card).toBeVisible()
+  await card.click()
+
+  // Only the expanded components card renders log boxes (collapsed cards render no
+  // body), so the two LogView terminals (max-h-64) are its Before/After panes in
+  // order. The failed before side is red; the still-generating after side stays
+  // neutral grey (not green — it hasn't finished).
+  const boxes = page.locator('div.max-h-64')
+  await expect(boxes).toHaveCount(2)
+  await expect(boxes.nth(0)).toHaveClass(/border-red-/)
+  await expect(boxes.nth(0)).not.toHaveClass(/border-green-/)
+  await expect(boxes.nth(1)).not.toHaveClass(/border-(red|green)-/)
+})

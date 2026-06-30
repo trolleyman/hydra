@@ -1472,23 +1472,25 @@ func simArtifactSets(id string) []api.ArtifactSet {
 	if id != "agent-1" {
 		return []api.ArtifactSet{}
 	}
-	leftProgress := "building frontend"
 	rightProgress := "artifacts-ab-dark.png 7/12"
 	startedAt := simNow().Add(-8 * time.Second).Unix()
-	leftLog := simArtifactLog()
 	rightLog := simArtifactLog()
 	return []api.ArtifactSet{
 		simReadyChangedSet(),
-		// In-flight generation: the header shows a spinner, both sides' progress
-		// lines joined by "·", and how long it has been running; expanding the card
-		// reveals the two side-by-side stdout+stderr logs (stderr in red).
+		// In-flight generation where one side has already FAILED while the other is
+		// still building: the LEFT (before) side exited non-zero (empty live log +
+		// persisted log URL + left_error), the RIGHT (after) side is still rendering.
+		// The whole set stays "generating", but the failed side's live log gets the
+		// red error border immediately — it must NOT read as a clean (green) finish
+		// just because its live log drained. The still-generating side stays neutral.
 		{
 			Name:          "components",
 			Status:        api.ArtifactSetStatusGenerating,
-			LeftProgress:  &leftProgress,
 			RightProgress: &rightProgress,
 			StartedAt:     &startedAt,
-			LeftLog:       &leftLog,
+			LeftLog:       &[]api.ArtifactLogLine{},
+			LeftLogUrl:    ptr(simLogURL("components", "error/left")),
+			LeftError:     ptr("exited 1: error: Cannot find module 'playwright'\n  at file:///app/web/scripts/screenshots/take-screenshots.ts:21:1"),
 			RightLog:      &rightLog,
 			Files:         []api.ArtifactFile{},
 		},

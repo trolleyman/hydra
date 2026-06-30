@@ -41,6 +41,27 @@ function ArtifactChangeIcon({ type, className = 'w-3.5 h-3.5' }: { type: string;
   }
 }
 
+// partialFailedSide reports which single side of a set failed while the other
+// rendered (a partial failure). A whole-set "error" (both sides failed) returns
+// null — there's no surviving side to reconcile. Mirrors the backend: status
+// stays "ready"/"generating" with just one side's error set.
+function partialFailedSide(set: ArtifactSet): 'left' | 'right' | null {
+  if ((set.status as string) === 'error') return null
+  return set.left_error ? 'left' : set.right_error ? 'right' : null
+}
+
+// presentedFiles is a set's files as the panel actually shows them. A partial
+// failure has no real diff — the surviving side's files would each read as
+// added/removed against an absent counterpart — so they're presented as unchanged,
+// hidden by the change filter's default. Both the per-card grid (cardFiles) and the
+// panel-wide filter counts run through this, so the "changes" dropdown's per-type
+// counts agree with the card body (no "538 added" while the card says "unchanged").
+function presentedFiles(set: ArtifactSet): ArtifactFile[] {
+  return partialFailedSide(set)
+    ? set.files.map((f) => ({ ...f, change_type: ArtifactFileNS.change_type.UNCHANGED }))
+    : set.files
+}
+
 // Masonry layout constants. The grid always works in BASE_ARTIFACT_COLUMNS columns
 // (shared with the repository artifacts view, see lib/artifactColumns), but renders
 // fewer when the container is too narrow to keep each base column at least
@@ -728,18 +749,15 @@ function ArtifactSetCard({ set, mode, scale, spans, onSpanChange, filter, search
   const leftSucceeded = !leftFailed && !!set.left_log_url
   const rightSucceeded = !rightFailed && !!set.right_log_url
   // One side failed while the other rendered (status stays "ready").
-  const failedSide: 'left' | 'right' | null = status !== 'error' && set.left_error ? 'left' : status !== 'error' && set.right_error ? 'right' : null
+  const failedSide = partialFailedSide(set)
 
   // When one side failed, the surviving side's files would each surface as
   // added/removed (the failed side contributes none), exploding the card into a
   // pile of one-sided "changes" for a comparison we never actually made. Present
-  // them as unchanged instead, so the default change filter hides them and the
-  // card stays calm — the failure is already surfaced by the red-bordered
-  // build-log terminal and the header chip, not a flood of fake diffs.
-  const cardFiles = useMemo(
-    () => (failedSide ? set.files.map((f) => ({ ...f, change_type: ArtifactFileNS.change_type.UNCHANGED })) : set.files),
-    [set.files, failedSide],
-  )
+  // them as unchanged instead (see presentedFiles), so the default change filter
+  // hides them and the card stays calm — the failure is already surfaced by the
+  // red-bordered build-log terminal and the header chip, not a flood of fake diffs.
+  const cardFiles = useMemo(() => presentedFiles(set), [set])
 
   const visibleFiles = computeVisibleFiles(cardFiles, filter, search)
   // "changed" counts honour the change-type threshold, so a sub-threshold tweak
@@ -1255,8 +1273,11 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
   const isSkeleton = sets === null && displaySets !== null
 
   // Every file across all sets, flattened — fed to the filter bar so it can derive
-  // the offered tags/types and per-value counts itself (see ArtifactFilterBar).
-  const allFiles = useMemo(() => (displaySets ?? []).flatMap((s) => s.files), [displaySets])
+  // the offered tags/types and per-value counts itself (see ArtifactFilterBar). Run
+  // through presentedFiles so a partial-failure set's surviving files count as
+  // unchanged here too, matching how each card presents them (no "538 added" in the
+  // changes dropdown while the card body calls the same files unchanged).
+  const allFiles = useMemo(() => (displaySets ?? []).flatMap(presentedFiles), [displaySets])
   // Tags to offer before files are present: a side's pending_tags once live, plus
   // — while anything is still generating (incl. the skeleton) — the cached chrome
   // tags, so the filter set only grows then settles to the live file tags once
