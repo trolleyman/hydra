@@ -744,12 +744,22 @@ function ArtifactSetCard({ set, mode, scale, spans, onSpanChange, filter, search
   // a "·" (the two builds run in parallel), e.g. "building frontend · home 7/24".
   const progressText = [set.left_progress, set.right_progress].filter(Boolean).join(' · ')
 
+  // No overflow-hidden on the card root: a clipping ancestor would break the
+  // sticky header below (it'd be trapped in the card instead of pinning to the
+  // page). The header carries its own overflow-hidden + rounding so the corners
+  // still read as one rounded card; the body's corners are the root's own rounded bg.
   return (
-    <div className="border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 overflow-hidden">
+    <div className="border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800">
       {/* Give the header a resting tint that's distinct from the card body
-          (bg-white / dark:bg-gray-800) on its own, not only on hover — a 60%
-          gray-800 over a gray-800 body was indistinguishable at rest. */}
-      <div className="flex items-stretch bg-gray-100 dark:bg-gray-700/40">
+          (bg-white / dark:bg-gray-800) on its own, not only on hover. Solid (not a
+          translucent gray-700/40) so it stays opaque when stuck — the card's images
+          scroll underneath it. Sticky: pin this header just below the Artifacts
+          filter bar while the card's grid scrolls, releasing when the card ends.
+          top-15 tucks a few px behind the filter bar's bottom edge (its z-20 covers
+          the overlap) so the bars read as flush with no content peeking between.
+          z-10 sits below the filter bar (z-20). rounded-b-lg only while collapsed,
+          when the header IS the whole (rounded) card. */}
+      <div className={`sticky top-15 z-10 flex items-stretch overflow-hidden bg-gray-100 dark:bg-gray-700 rounded-t-lg ${collapsed ? 'rounded-b-lg' : ''}`}>
         <button
           onClick={() => setCollapsed((c) => !c)}
           className="flex-1 min-w-0 flex items-center gap-2 px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors cursor-pointer text-left"
@@ -1156,7 +1166,16 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
       {/* Reserve the filter bar's height (its segmented controls / chips are
           taller than the bare title) so the header stays the same height whether
           or not tags are present — the filter loading in must not jump the layout. */}
-      <div className="flex flex-wrap items-center gap-2 mb-2 min-h-[1.625rem]">
+      {/* Sticky: dock this Artifacts header + filters just below the Changes bar
+          (which sticks at the top) while the cards scroll under it, then release
+          once the whole panel scrolls past into the file diffs. top-6 sits a few px
+          under the stuck Changes bar's bottom edge — slightly tucked behind it (the
+          Changes bar's z-30 covers the overlap) so there's no seam of scrolling
+          content peeking between the two bars. z-20 sits below the Changes bar but
+          above the cards (whose headers stick at z-10). Needs an opaque bg (matching
+          the page) so cards scroll cleanly underneath, and -mx-1/px-1 bleeds it to
+          the same width as the Changes bar. */}
+      <div className="sticky top-6 z-20 flex flex-wrap items-center gap-2 mb-2 min-h-[1.625rem] bg-gray-50 dark:bg-gray-900 -mx-1 px-1 py-1.5 border-b border-gray-200 dark:border-gray-800 shadow-sm">
         <ImageIcon className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400" />
         <h3 className="text-xs font-semibold tracking-wide text-gray-500 dark:text-gray-400">Artifacts</h3>
         {generatingCount > 0 && (
