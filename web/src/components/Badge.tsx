@@ -74,6 +74,7 @@ const VARIANT_CLASS: Record<BadgeVariant, string> = {
 export function Badge({
   tone,
   className,
+  containerClassName,
   variant = 'sm',
   icon,
   title,
@@ -82,6 +83,13 @@ export function Badge({
   tone?: Tone
   /** Explicit color classes; overrides `tone`. Use for non-status palettes. */
   className?: string
+  /**
+   * Extra layout classes appended to the chip's outer span (always, alongside
+   * the tone/`className` color). Use for sizing/overflow concerns like
+   * `min-w-0` so a chip can shrink and truncate within a tight row — kept
+   * separate from `className` so it doesn't clobber the tone color.
+   */
+  containerClassName?: string
   variant?: BadgeVariant
   icon?: ReactNode
   title?: string
@@ -92,7 +100,7 @@ export function Badge({
   // chip stays a plain inline span so its box matches the historical badges.
   const layout = icon ? 'inline-flex items-center gap-1 ' : ''
   return (
-    <span title={title} className={`${layout}font-medium ${VARIANT_CLASS[variant]} ${color}`}>
+    <span title={title} className={`${layout}font-medium ${VARIANT_CLASS[variant]} ${color}${containerClassName ? ` ${containerClassName}` : ''}`}>
       {icon}
       {children}
     </span>
