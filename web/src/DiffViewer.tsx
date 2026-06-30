@@ -1285,6 +1285,16 @@ function MergeConflictButton({ diff, agent, projectId }: {
   const [open, setOpen] = useState(false)
   const [sending, setSending] = useState(false)
 
+  // Escape closes the panel, matching the backdrop click and close button.
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [open])
+
   if (!diff?.merge_conflict) return null
 
   const conflictFiles = diff.conflict_files ?? []

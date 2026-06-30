@@ -26,6 +26,16 @@ export function TrustProjectModal({
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
+  // Escape backs out (same as "Don't trust"). The modal is only mounted while
+  // the prompt is showing, so the listener is live exactly when it should be.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onCancel()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onCancel])
+
   useEffect(() => {
     let cancelled = false
     setLoading(true)

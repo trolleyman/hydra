@@ -69,7 +69,7 @@ function verdictLabel(t: TestSummary): string {
     case 'errored':
       return "couldn't run"
     case 'stale':
-      return `${t.passed ?? 0} · stale`
+      return 'stale'
     default:
       return ''
   }
@@ -88,7 +88,7 @@ export function TestVerdictChip({ tests, variant = 'xs' }: { tests?: TestSummary
       variant={variant}
       icon={<VerdictIcon status={tests.status} className="w-3 h-3" />}
       title={verdictTitle(tests)}
-      className={stale ? 'inline-flex items-center gap-1 text-gray-500 dark:text-gray-400 border border-dashed border-gray-400 dark:border-gray-600 rounded px-1 py-0.5' : undefined}
+      className={stale ? 'text-gray-500 dark:text-gray-400 border border-dashed border-gray-400 dark:border-gray-600' : undefined}
     >
       {/* whitespace-nowrap so a label like "2 failed" never breaks onto two lines
           inside the chip when the sidebar row is tight — the chip wraps as a whole. */}

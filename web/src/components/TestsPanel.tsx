@@ -140,9 +140,6 @@ function StatusIcon({ status }: { status: TestRunResult['status'] }) {
 // and the failing-first case list / live log behind the collapse toggle.
 function TestRunnerCard({ runner, onRefresh, refreshing }: { runner: TestRunResult; onRefresh: () => void; refreshing: boolean }) {
   const cases = runner.cases ?? []
-  const failing = cases.filter((c) => c.status === 'failed')
-  const passing = cases.filter((c) => c.status === 'passed')
-  const skipped = cases.filter((c) => c.status === 'skipped')
   const running = runner.status === 'running'
   const errored = runner.status === 'errored'
   // A failing or errored runner reads as a failure: its log gets a red border and
@@ -163,6 +160,16 @@ function TestRunnerCard({ runner, onRefresh, refreshing }: { runner: TestRunResu
   // runner that captured no log (e.g. a JUnit report with no stdout) shows its
   // cases instead of an empty "No output" terminal.
   const logVisible = hasLog && (buildLogOpen || running || failed)
+  // An `exit`-format runner has no structured test report: its "cases" are a
+  // single synthetic "(command exited 0/non-zero)" derived from the exit code,
+  // whose message is just the tail of the build log. When that log is on screen
+  // the case box is a pure duplicate of it, so suppress the case list and let the
+  // xterm log be the only surface — the header verdict already carries the
+  // pass/fail count. Keep the cases as a fallback only when there's no log to show.
+  const syntheticOnly = runner.format === 'exit' && logVisible
+  const failing = syntheticOnly ? [] : cases.filter((c) => c.status === 'failed')
+  const passing = syntheticOnly ? [] : cases.filter((c) => c.status === 'passed')
+  const skipped = syntheticOnly ? [] : cases.filter((c) => c.status === 'skipped')
   const toggleBuildLog = () =>
     setBuildLogOpen((o) => {
       const next = !o

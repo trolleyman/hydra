@@ -372,6 +372,15 @@ type Config struct {
 	// TestConcurrency caps how many test-runner generations run at once, like
 	// ArtifactConcurrency. nil/absent = DefaultTestConcurrency; 0 = unlimited.
 	TestConcurrency *int `toml:"test_concurrency"`
+	// TestPrefetch toggles the daemon's proactive background re-running of a head's
+	// test suites once its branch tip has a verdict that is missing or stale (a
+	// cached result computed for an older commit). It mirrors ArtifactPrefetch (see
+	// internal/http/tests_prefetch.go). When on (the default) a head's verdict is
+	// kept fresh in the background so it is ready the instant the user opens the
+	// tests panel or the merge gate runs. Turn it off for a project whose suites are
+	// too heavy to run speculatively: foreground runs (on open / at merge) and the
+	// concurrency cap above still apply. nil/absent = enabled.
+	TestPrefetch *bool `toml:"test_prefetch"`
 }
 
 // DefaultTestConcurrency is the test-runner parallelism used when the config
@@ -387,6 +396,13 @@ func (c Config) ResolveTestConcurrency() int {
 		return DefaultTestConcurrency
 	}
 	return *c.TestConcurrency
+}
+
+// IsTestPrefetchEnabled reports whether the daemon should proactively re-run a
+// head's test suites in the background when its verdict is missing/stale. Absent
+// (nil) means enabled, mirroring IsArtifactPrefetchEnabled.
+func (c Config) IsTestPrefetchEnabled() bool {
+	return c.TestPrefetch == nil || *c.TestPrefetch
 }
 
 // DefaultArtifactConcurrency is the artifact-generation parallelism used when
@@ -442,6 +458,7 @@ type rawConfig struct {
 	ArtifactConcurrency *int             `toml:"artifact_concurrency"`
 	ArtifactPrefetch    *bool            `toml:"artifact_prefetch"`
 	TestConcurrency     *int             `toml:"test_concurrency"`
+	TestPrefetch        *bool            `toml:"test_prefetch"`
 }
 
 // reservedTopLevel are the top-level TOML names that are NOT agent tables. Any
@@ -454,6 +471,7 @@ var reservedTopLevel = map[string]bool{
 	"pre_prompt": true, "sandbox": true, "policy": true, "artifacts": true, "services": true,
 	"tests":         true,
 	"resume_prompt": true, "artifact_concurrency": true, "artifact_prefetch": true, "test_concurrency": true,
+	"test_prefetch": true,
 }
 
 // GetUserConfigPath returns the path to the global user configuration file.
@@ -541,6 +559,7 @@ func decodeConfig(data []byte) (Config, error) {
 	cfg.ArtifactConcurrency = raw.ArtifactConcurrency
 	cfg.ArtifactPrefetch = raw.ArtifactPrefetch
 	cfg.TestConcurrency = raw.TestConcurrency
+	cfg.TestPrefetch = raw.TestPrefetch
 
 	// Defaults: legacy [defaults] first, then the new top-level fields win.
 	if raw.Defaults != nil {
@@ -623,6 +642,11 @@ func (c *Config) Merge(other Config) {
 	// Test concurrency is overridden only when the other config sets it (non-nil).
 	if other.TestConcurrency != nil {
 		c.TestConcurrency = other.TestConcurrency
+	}
+	// Test prefetch toggle: overridden only when the other config sets it (non-nil);
+	// a nil pointer means "unset", so it inherits.
+	if other.TestPrefetch != nil {
+		c.TestPrefetch = other.TestPrefetch
 	}
 	// Artifact concurrency is overridden only when the other config sets it
 	// (non-nil); a nil pointer means "unset", so it inherits. 0 is a real value
@@ -1116,6 +1140,9 @@ func managedKeySet() map[string]bool {
 	// test_concurrency is Config-level (emitTestConcurrency); its regenerated
 	// "# test_concurrency = N" default line is recognised and dropped too.
 	m["test_concurrency"] = true
+	// test_prefetch is Config-level (emitTestPrefetch); its regenerated
+	// "# test_prefetch = true" default line is recognised and dropped too.
+	m["test_prefetch"] = true
 	// fullscreen is rendered specially under [claude] (emitClaudeAgent), not via
 	// the spec, but is likewise managed so its regenerated "# fullscreen = false"
 	// default line is recognised and replaced rather than kept as a user comment.
@@ -1710,6 +1737,14 @@ func renderConfig(existing []byte, cfg Config) string {
 			artifactPrefetch = prev.ArtifactPrefetch
 		}
 	}
+	// test_prefetch mirrors artifact_prefetch: authoritative from cfg when the
+	// editor sends it, otherwise preserve the file's existing hand-edited value.
+	testPrefetch := cfg.TestPrefetch
+	if testPrefetch == nil {
+		if prev, err := decodeConfig(existing); err == nil {
+			testPrefetch = prev.TestPrefetch
+		}
+	}
 
 	var out []string
 	spec := defaultsSpec()
@@ -1723,6 +1758,7 @@ func renderConfig(existing []byte, cfg Config) string {
 	emitArtifactConcurrency(&out, artifactConcurrency, keyComments)
 	emitArtifactPrefetch(&out, artifactPrefetch, keyComments)
 	emitTestConcurrency(&out, testConcurrency, keyComments)
+	emitTestPrefetch(&out, testPrefetch, keyComments)
 	emitSpecTable(&out, spec, "sandbox", "[sandbox]", cfg.Defaults, keyComments, tableComments)
 	emitSpecTable(&out, spec, "sandbox.network", "[sandbox.network]", cfg.Defaults, keyComments, tableComments)
 	emitSpecTable(&out, spec, "policy", "[policy]", cfg.Defaults, keyComments, tableComments)
@@ -1902,6 +1938,21 @@ func emitTestConcurrency(out *[]string, concurrency *int, keyComments map[string
 		*out = append(*out, fmt.Sprintf("test_concurrency = %d", *concurrency))
 	} else {
 		*out = append(*out, fmt.Sprintf("# test_concurrency = %d", DefaultTestConcurrency))
+	}
+}
+
+// emitTestPrefetch renders the top-level test_prefetch key (a Config-level
+// boolean, like artifact_prefetch): preserved user comment, Hydra doc line, then
+// the value (commented-out showing the default when unset).
+func emitTestPrefetch(out *[]string, prefetch *bool, keyComments map[string][]string) {
+	if uc := keyComments["\x00test_prefetch"]; len(uc) > 0 {
+		*out = append(*out, uc...)
+	}
+	*out = append(*out, docPrefix+` re-run a head's test suites in the background when its branch-tip verdict is missing or stale, so it's ready before you open the panel; set false to run only on open / at merge — foreground runs and the concurrency cap still apply (default true).`)
+	if prefetch != nil {
+		*out = append(*out, fmt.Sprintf("test_prefetch = %t", *prefetch))
+	} else {
+		*out = append(*out, "# test_prefetch = true")
 	}
 }
 

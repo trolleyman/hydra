@@ -16,13 +16,20 @@ export function useAgentPolling(currentProjectId: string | null): { refetchAgent
   const { refetch: refetchAgents } = useServerData<AgentResponse[]>(
     currentProjectId,
     (id) => api.default.listAgents(id),
-    { intervalMs: EVENT_FALLBACK_MS, initial: [], onData: setAgents },
+    {
+      intervalMs: EVENT_FALLBACK_MS,
+      initial: [],
+      // Tag each list with its project so the store can spot a background merge
+      // (an armed agent vanishing on a same-project refresh) without mistaking a
+      // project switch for one.
+      onData: (agents) => setAgents(agents, currentProjectId),
+    },
   )
 
   // Clear agents when project deselected (useServerData resets only its own local
   // copy; the live list lives in the store, so it's cleared here).
   useEffect(() => {
-    if (!currentProjectId) setAgents([])
+    if (!currentProjectId) setAgents([], null)
   }, [currentProjectId, setAgents])
 
   return { refetchAgents }
