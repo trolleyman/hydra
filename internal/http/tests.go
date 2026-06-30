@@ -11,6 +11,7 @@ import (
 
 	"github.com/trolleyman/hydra/internal/api"
 	"github.com/trolleyman/hydra/internal/config"
+	"github.com/trolleyman/hydra/internal/git"
 	"github.com/trolleyman/hydra/internal/heads"
 	hydratests "github.com/trolleyman/hydra/internal/tests"
 )
@@ -178,6 +179,19 @@ func (s *Server) testSummaryFor(projectRoot string, h heads.Head) *api.TestSumma
 	runners := enabledTestRunners(projectRoot)
 	if len(runners) == 0 {
 		return &api.TestSummary{Status: api.TestStatusNone}
+	}
+	// No verdict when the head has done no work: if its branch tip is still the
+	// base branch commit, any cached verdict belongs to the base, not the agent —
+	// showing a green "passed" chip there is misleading (the agent hasn't run
+	// anything of its own). Treat it as "none" so the sidebar/header chip is
+	// hidden until the head actually commits something. Best-effort: if either ref
+	// fails to resolve we fall through to the normal computation.
+	if h.BaseBranch != "" {
+		headSHA, errHead := git.ResolveRef(projectRoot, *h.Branch)
+		baseSHA, errBase := git.ResolveRef(projectRoot, h.BaseBranch)
+		if errHead == nil && errBase == nil && headSHA == baseSHA {
+			return &api.TestSummary{Status: api.TestStatusNone}
+		}
 	}
 	mgr := s.Tests.Manager(projectRoot)
 	v := hydratests.Version{Ref: *h.Branch}

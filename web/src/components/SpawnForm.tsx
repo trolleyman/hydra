@@ -166,7 +166,6 @@ export function SpawnForm({
   // current branch; can be pointed at another agent's hydra/<id> branch to stack
   // agents on top of one another. `branches` is null until the list loads.
   const [branches, setBranches] = useState<RepositoryBranch[] | null>(null)
-  const [branchesRefreshing, setBranchesRefreshing] = useState(false)
   const [baseBranch, setBaseBranch] = useState('')
   // Undo/redo for the composer spans the typed prompt AND the attachment chips:
   // a paste that becomes a chip calls preventDefault, so native textarea undo
@@ -236,7 +235,6 @@ export function SpawnForm({
       setBaseBranch('')
       return
     }
-    setBranchesRefreshing(true)
     try {
       const res = await api.default.getRepositoryBranches(projectId)
       if (branchReqProjectRef.current !== projectId) return
@@ -244,8 +242,6 @@ export function SpawnForm({
       if (defaultSelection) setBaseBranch(res.current || res.branches[0]?.name || '')
     } catch {
       if (branchReqProjectRef.current === projectId && defaultSelection) setBranches(null)
-    } finally {
-      if (branchReqProjectRef.current === projectId) setBranchesRefreshing(false)
     }
   }, [projectId])
 
@@ -625,7 +621,6 @@ export function SpawnForm({
         isKnownBranch={branches.some((b) => b.name === baseBranch)}
         onSelect={setBaseBranch}
         onOpen={() => void refreshBranches(false)}
-        refreshing={branchesRefreshing}
         title="Base branch to create the agent from (pick an agent branch to stack on it)"
         flexible={compactSel}
       />

@@ -394,7 +394,6 @@ export function AgentDetail({
   const [savingTitle, setSavingTitle] = useState(false)
   const [savingBase, setSavingBase] = useState(false)
   const [branches, setBranches] = useState<RepositoryBranch[] | null>(null)
-  const [branchesRefreshing, setBranchesRefreshing] = useState(false)
   const updateAgentInStore = useAgentStore((s) => s.updateAgent)
   const navigate = useNavigate()
   const [, setTick] = useState(0)
@@ -418,7 +417,6 @@ export function AgentDetail({
   // newly-spawned agent branch shows up as a base option without a page reload.
   const refreshBranches = useCallback(async () => {
     if (!projectId) return
-    setBranchesRefreshing(true)
     try {
       const r = await api.default.getRepositoryBranches(projectId)
       setBranches(r.branches)
@@ -426,8 +424,6 @@ export function AgentDetail({
       // Keep any previously-cached list on failure; only seed an empty list so
       // the selector can render at all on the very first (failed) load.
       setBranches((prev) => prev ?? [])
-    } finally {
-      setBranchesRefreshing(false)
     }
   }, [projectId])
 
@@ -983,7 +979,6 @@ export function AgentDetail({
                   isKnownBranch={branches.some((b) => b.name === agent.base_branch)}
                   onSelect={(name) => void saveBase(name)}
                   onOpen={() => void refreshBranches()}
-                  refreshing={branchesRefreshing}
                   title="Change base branch (metadata only — does not rebase commits)"
                 />
               ) : (
