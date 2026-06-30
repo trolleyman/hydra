@@ -52,7 +52,7 @@ export function DialogCancelButton({
   return (
     <button
       {...props}
-      className={`inline-flex items-center justify-center px-4 py-2 rounded-lg text-sm font-semibold bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:border-gray-300 dark:hover:bg-gray-700 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${className}`}
+      className={`inline-flex items-center justify-center px-4 py-2 rounded-lg text-sm font-semibold bg-white dark:bg-[#1c2330] border border-gray-200 dark:border-[#2e3747] text-gray-600 dark:text-[#cbd2de] hover:border-gray-300 dark:hover:bg-[#252d3b] transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${className}`}
     >
       {children}
     </button>
