@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { ImageDiffView, SegmentedToggle, IMAGE_DIFF_MODES, type ImageDiffMode } from './ArtifactImageDiff'
+import { useEffect, useMemo, useState } from 'react'
+import { ABControlsContext, ImageDiffView, SegmentedToggle, IMAGE_DIFF_MODES, type ArtifactABControls, type ImageDiffMode } from './ArtifactImageDiff'
 
 // LightboxDiff renders a before/after artifact pair fullscreen inside the image
 // lightbox: the same comparison modes as the diff grid (before/after toggle, slider,
@@ -12,6 +12,11 @@ import { ImageDiffView, SegmentedToggle, IMAGE_DIFF_MODES, type ImageDiffMode } 
 // re-opening a (nested) lightbox. The whole thing is forced to the dark theme (`dark`)
 // so its controls read clearly against the lightbox's black backdrop regardless of
 // the app's current theme.
+//
+// Before/After + Highlight are owned here (not by the grid): a local ABControlsContext
+// provider feeds the inner ImageDiffView, and the B / H keys flip/highlight it — scoped
+// to the lightbox, so they DON'T also switch the diff grid in the background (that grid's
+// identical shortcut bails while the lightbox is open; see ArtifactsPanel).
 export function LightboxDiff({ left, right, name, initialMode, onDims }: {
   left?: string | null
   right?: string | null
@@ -23,6 +28,11 @@ export function LightboxDiff({ left, right, name, initialMode, onDims }: {
 }) {
   const [mode, setMode] = useState<ImageDiffMode>(initialMode)
   const [aspect, setAspect] = useState<number | null>(null)
+  // Before/After view + magenta highlight for this fullscreen comparator. Highlight
+  // needs both sides to diff; with only one (added/removed file) it's disabled.
+  const [view, setView] = useState<'before' | 'after'>('after')
+  const [highlight, setHighlight] = useState(false)
+  const canDiff = !!left && !!right
 
   // Measure the pair's aspect ratio (from whichever side exists) so the comparator can
   // be sized to the displayed image and capped to the viewport height — and report the
@@ -41,6 +51,31 @@ export function LightboxDiff({ left, right, name, initialMode, onDims }: {
     return () => { cancelled = true }
   }, [left, right, onDims])
 
+  // B flips Before/After, H toggles Highlight — only when not typing in a field, and
+  // plain single keys (no modifiers) so they don't collide with browser chords. These
+  // drive only this lightbox comparator (via the context below); the grid's matching
+  // shortcut is suppressed while the lightbox is open, so the background diff stays put.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey || e.altKey) return
+      const t = e.target as HTMLElement | null
+      if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return
+      const k = e.key.toLowerCase()
+      if (k === 'b') { e.preventDefault(); setView((v) => (v === 'before' ? 'after' : 'before')) }
+      else if (k === 'h') { e.preventDefault(); setHighlight((h) => !h) }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  // Provide the before/after view + highlight to the inner ImageDiffView so its A/B
+  // tile reads them (and hides its own per-tile pill) — the lightbox toolbar below is
+  // the single control instead.
+  const ab = useMemo<ArtifactABControls>(
+    () => ({ view, highlight, toggleView: () => setView((v) => (v === 'before' ? 'after' : 'before')) }),
+    [view, highlight],
+  )
+
   // Width drives the layout; folding the 78vh height cap through the aspect ratio keeps
   // a wide shot from overflowing vertically. Side-by-side shows two images in the row,
   // so it gets twice the width budget. Until the aspect loads, fall back to a plain cap.
@@ -51,12 +86,41 @@ export function LightboxDiff({ left, right, name, initialMode, onDims }: {
     : maxW
 
   return (
-    <div className="dark flex flex-col items-center gap-3">
-      <div style={{ width }} className="max-w-[94vw]">
-        <ImageDiffView left={left} right={right} mode={mode} name={name} disableOpen />
+    <ABControlsContext.Provider value={ab}>
+      <div className="dark flex flex-col items-center gap-3">
+        <div style={{ width }} className="max-w-[94vw]">
+          <ImageDiffView left={left} right={right} mode={mode} name={name} disableOpen />
+        </div>
+        {/* Switch comparison modes — and, in A/B mode, flip Before/After or toggle the
+            magenta highlight (also B / H on the keyboard) — without leaving the lightbox. */}
+        <div className="flex flex-wrap items-center justify-center gap-2">
+          <SegmentedToggle value={mode} onChange={setMode} options={IMAGE_DIFF_MODES} />
+          {mode === 'ab' && (
+            <>
+              <SegmentedToggle
+                value={view}
+                onChange={setView}
+                options={[{ value: 'before', label: 'Before' }, { value: 'after', label: 'After' }]}
+              />
+              <label
+                title={canDiff ? 'Highlight changed pixels in magenta (H)' : 'Needs both a before and after image'}
+                className={`flex items-center gap-1 text-[10px] font-medium tracking-wide select-none ${
+                  canDiff ? 'cursor-pointer text-gray-500 dark:text-gray-400' : 'opacity-40 cursor-not-allowed text-gray-400 dark:text-gray-500'
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  checked={highlight && canDiff}
+                  disabled={!canDiff}
+                  onChange={(e) => setHighlight(e.target.checked)}
+                  className="accent-blue-500 cursor-pointer disabled:cursor-not-allowed"
+                />
+                Highlight
+              </label>
+            </>
+          )}
+        </div>
       </div>
-      {/* Switch comparison modes without leaving the lightbox. */}
-      <SegmentedToggle value={mode} onChange={setMode} options={IMAGE_DIFF_MODES} />
-    </div>
+    </ABControlsContext.Provider>
   )
 }
