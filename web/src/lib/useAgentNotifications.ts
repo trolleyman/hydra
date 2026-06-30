@@ -71,7 +71,7 @@ export function useAgentNotifications(currentProjectId: string | null) {
       const name = agent.title || agent.id
       if (status === 'needs_input' && notifType !== 'policy_approval') {
         toast.show({
-          message: `"${name}" needs your input`,
+          message: `"${name}" needs input`,
           type: 'warning',
           duration: NEEDS_INPUT_TOAST_MS,
           actions: [
@@ -226,12 +226,12 @@ export function useAgentNotifications(currentProjectId: string | null) {
         // A dedup key so a project whose count keeps climbing reuses one toast
         // rather than stacking a new one on every bump.
         key: `project-needs-input:${p.id}`,
-        message: `Another project — "${name}" has ${count === 1 ? 'an agent that needs' : `${count} agents that need`} your input`,
+        message: `Project "${name}" has ${count === 1 ? 'an agent that needs' : `${count} agents that need`} input`,
         type: 'warning',
         duration: NEEDS_INPUT_TOAST_MS,
         actions: [
           {
-            label: 'View project',
+            label: 'View',
             variant: 'primary',
             onClick: (toastId) => {
               useProjectStore.getState().setSelectedProjectId(p.id)

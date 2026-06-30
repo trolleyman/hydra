@@ -612,7 +612,7 @@ try {
         name: 'toast-needs-input',
         path: '/settings',
         toast: {
-          message: '"Migrate auth providers to OAuth" needs your input',
+          message: '"Migrate auth providers to OAuth" needs input',
           type: 'warning',
           actions: [{ label: 'View', variant: 'primary' }],
         },
@@ -643,15 +643,15 @@ try {
         },
       },
       // 4. A *background* project's needs-input count rose — names the project and
-      // offers a "View project" switch (the only cross-project toast we can do,
-      // since agent-level detail isn't loaded for non-selected projects).
+      // offers a "View" switch (the only cross-project toast we can do, since
+      // agent-level detail isn't loaded for non-selected projects).
       {
         name: 'toast-cross-project',
         path: '/settings',
         toast: {
-          message: 'Another project — "hydra-web" has an agent that needs your input',
+          message: 'Project "hydra" has an agent that needs input',
           type: 'warning',
-          actions: [{ label: 'View project', variant: 'primary' }],
+          actions: [{ label: 'View', variant: 'primary' }],
         },
       },
       // The keyboard-shortcuts help overlay, opened the way a user does — by
