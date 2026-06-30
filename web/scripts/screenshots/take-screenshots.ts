@@ -1571,17 +1571,18 @@ try {
             })),
           )
           // Wait until every chip has rendered (its View label is present) and
-          // none is still uploading (no spinner), so the layout is stable. Scoped
-          // to the full-page spawn form so a stray spinner elsewhere (e.g. a
-          // running test-verdict chip in the sidebar) can't keep it from settling.
+          // none is still uploading. The "still uploading" marker is an
+          // AttachmentChips LoaderCircle; check only within the chips' shared
+          // container (the View buttons' grandparent) so an unrelated spinner
+          // elsewhere on the page — e.g. a running test-verdict chip in the
+          // sidebar — can't keep it from settling. (The chips render outside the
+          // .max-w-4xl form wrapper, so a form-scoped check would never see them.)
           await page.waitForFunction(
             (n) => {
-              const form = document.querySelector('.max-w-4xl')
-              if (!form) return false
-              return (
-                form.querySelectorAll('[aria-label^="View "]').length === n &&
-                !form.querySelector('svg.lucide-loader-circle')
-              )
+              const views = Array.from(document.querySelectorAll('[aria-label^="View "]'))
+              if (views.length !== n) return false
+              const row = views[0]?.parentElement?.parentElement ?? document.body
+              return !row.querySelector('svg.lucide-loader-circle')
             },
             pg.attachImages.length,
           )
@@ -1998,10 +1999,26 @@ try {
 
     // Worker pool: each worker pulls the next task index until the list drains.
     // JS is single-threaded between awaits, so nextTask++/done++ never race.
+    //
+    // A single failing shot must NOT abort the whole run: this command is a
+    // diff-viewer artifact, and a thrown error exits non-zero, which Hydra caches
+    // as a failed generation — so ONE flaky page would blank the entire artifacts
+    // panel for the head. Instead we catch per-page, record the failure, and keep
+    // going so every other shot still renders; the run only fails hard (rethrows)
+    // if EVERY shot failed (a real, total breakage). Failures are logged loudly
+    // and summarised at the end so a broken page is still obvious in the build log.
+    const failures: string[] = []
     const worker = async () => {
       while (nextTask < tasks.length) {
         const { pg, theme } = tasks[nextTask++]
-        await captureShot(pg, theme)
+        const suffix = theme === 'dark' ? '-dark' : '-light'
+        try {
+          await captureShot(pg, theme)
+        } catch (err) {
+          const msg = err instanceof Error ? err.message.split('\n')[0] : String(err)
+          failures.push(`${pg.name}${suffix}: ${msg}`)
+          console.error(`✗ screenshot failed: ${pg.name}${suffix}: ${msg}`)
+        }
       }
     }
     progress(`capturing ${totalShots} screenshots (${concurrency} at a time)`)
@@ -2169,6 +2186,17 @@ try {
     }
     progress('recording status-dot video')
     for (const theme of themes) await recordStatusDot(theme)
+
+    // Summarise any per-page failures. We exit 0 as long as at least one shot
+    // rendered, so the artifacts panel still shows everything that worked (a
+    // failed run is cached as an error and would otherwise show nothing); only a
+    // total wipe-out (every shot failed) is treated as a hard failure.
+    if (failures.length > 0) {
+      console.error(`\n${failures.length} screenshot(s) failed:`)
+      for (const f of failures) console.error(`  ✗ ${f}`)
+      if (done === 0) throw new Error('every screenshot failed to render')
+      console.error(`(continuing — ${done} shot(s) rendered; the artifacts panel shows those)`)
+    }
   } finally {
     await browser.close()
   }
