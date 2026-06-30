@@ -1051,6 +1051,17 @@ func (m *Manager) generate(parent context.Context, spec config.ArtifactScript, v
 	}
 	var stderrBuf bytes.Buffer
 	var stderrMu sync.Mutex
+	// Track the most recent non-blank stdout line so a silent failure (a strict-mode
+	// errexit or a SIGKILL timeout that writes nothing to stderr) can still hint at
+	// where the script stopped; guarded by its own mutex since the stdout and stderr
+	// scanners run concurrently.
+	var lastStdout string
+	var lastStdoutMu sync.Mutex
+	setLastStdout := func(s string) {
+		lastStdoutMu.Lock()
+		lastStdout = s
+		lastStdoutMu.Unlock()
+	}
 	scan := func(r io.Reader, stream string) {
 		sc := bufio.NewScanner(r)
 		// Allow long lines (build tools can emit verbose single lines).
@@ -1068,12 +1079,16 @@ func (m *Manager) generate(parent context.Context, spec config.ArtifactScript, v
 			if stream == StreamStdout {
 				if rest, ok := strings.CutPrefix(strings.TrimSpace(line), ProgressMarker); ok {
 					if text := strings.TrimSpace(rest); text != "" {
+						setLastStdout(text)
 						m.appendLog(dir, text, stream, true)
 					}
 					continue
 				}
 			}
 			if strings.TrimSpace(line) != "" {
+				if stream == StreamStdout {
+					setLastStdout(strings.TrimSpace(line))
+				}
 				m.appendLog(dir, line, stream, false)
 			}
 		}
@@ -1111,6 +1126,16 @@ func (m *Manager) generate(parent context.Context, spec config.ArtifactScript, v
 		msg := summary
 		if tail != "" {
 			msg += ": " + lastLines(tail, 15)
+		} else {
+			// No stderr to explain the exit (a strict-mode abort or a SIGKILL'd
+			// timeout often prints nothing): fall back to the last stdout line so
+			// the chip points at where the script stopped instead of a bare code.
+			lastStdoutMu.Lock()
+			last := lastStdout
+			lastStdoutMu.Unlock()
+			if last != "" {
+				msg += " (last output: " + last + ")"
+			}
 		}
 		meta.Status, meta.Error = StatusError, msg
 		return meta
