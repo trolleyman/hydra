@@ -1,5 +1,5 @@
-import { useCallback, useRef, useState, type ReactNode } from 'react'
-import { ChevronDown, ChevronRight } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { ChevronDown } from 'lucide-react'
 
 // The card header's action buttons (build log / regenerate / re-run) sit as faint
 // icons at rest and brighten ONLY the icon the pointer is actually over — a
@@ -35,6 +35,10 @@ export function useMeasuredHeight(initial: number): [(el: HTMLElement | null) =>
 // cancels the scroll container's pt-4 (which the Changes bar offsets with -top-4).
 export const STICKY_CARD_TOP = 'calc(var(--sticky-changes-h, 45px) + var(--sticky-section-h, 41px) - 16px)'
 
+// How long the expand/collapse height glide (and the chevron's quarter-turn) runs.
+// Kept in JS too so the unmount-after-collapse timer matches the CSS duration.
+const COLLAPSE_MS = 200
+
 // CollapsibleCard is the shared bordered card used by both the artifacts panel and
 // the tests panel (PLAN #68): a header row whose left half is a click-to-collapse
 // button (chevron + icon + name + an inline `status` slot) and whose right half
@@ -48,6 +52,14 @@ export const STICKY_CARD_TOP = 'calc(var(--sticky-changes-h, 45px) + var(--stick
 // The header then needs its own overflow-hidden + rounding (the root drops its
 // overflow-hidden, which would otherwise trap the sticky header inside the card),
 // and an opaque resting tint so the scrolling body doesn't show through.
+//
+// Expand/collapse is animated: the chevron rotates a quarter-turn and the body
+// glides between 0 and its measured height. Because the height tracks the live
+// content height (a ResizeObserver via useMeasuredHeight), in-place content swaps
+// while open — toggling the build log, a grid collapsing to "No files match …" —
+// glide too instead of snapping. The body stays MOUNTED only while open (plus the
+// brief collapse animation), so a collapsed card never pays to render its heavy
+// children (xterm logs, image grids); see `mounted` below.
 export function CollapsibleCard({ icon, name, status, actions, collapsed, onToggleCollapsed, children, sticky = false }: {
   icon: ReactNode
   name: ReactNode
@@ -61,6 +73,20 @@ export function CollapsibleCard({ icon, name, status, actions, collapsed, onTogg
   // Pin the header beneath the panel's section bar while the body scrolls.
   sticky?: boolean
 }) {
+  const [bodyRef, bodyH] = useMeasuredHeight(0)
+  // `mounted` keeps the body in the tree while open and for the length of a collapse
+  // animation, then drops it so a collapsed card stays cheap. Expanding mounts at
+  // once (in an effect, after a paint at height 0) so the 0→height glide can play.
+  const [mounted, setMounted] = useState(!collapsed)
+  useEffect(() => {
+    if (!collapsed) {
+      setMounted(true)
+      return
+    }
+    const t = setTimeout(() => setMounted(false), COLLAPSE_MS)
+    return () => clearTimeout(t)
+  }, [collapsed])
+  const open = !collapsed && mounted
   return (
     <div className={`border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 ${sticky ? '' : 'overflow-hidden'}`}>
       <div
@@ -75,7 +101,7 @@ export function CollapsibleCard({ icon, name, status, actions, collapsed, onTogg
           onClick={onToggleCollapsed}
           className="flex-1 min-w-0 flex items-center gap-2 px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors cursor-pointer text-left"
         >
-          {collapsed ? <ChevronRight className="w-3.5 h-3.5 text-gray-400 shrink-0" /> : <ChevronDown className="w-3.5 h-3.5 text-gray-400 shrink-0" />}
+          <ChevronDown className={`w-3.5 h-3.5 text-gray-400 shrink-0 transition-transform duration-200 ease-out motion-reduce:transition-none ${collapsed ? '-rotate-90' : ''}`} />
           {icon}
           <span className="text-sm font-medium text-gray-700 dark:text-gray-300 truncate shrink-0">{name}</span>
           {status}
@@ -84,7 +110,15 @@ export function CollapsibleCard({ icon, name, status, actions, collapsed, onTogg
             Each brightens only on its own hover (see MELT_BTN). */}
         {actions && <div className="shrink-0 flex items-center gap-1.5 pl-1 pr-2">{actions}</div>}
       </div>
-      {!collapsed && <div className="px-3 pb-2">{children}</div>}
+      {/* Height tracks the measured content so both expand/collapse and in-place
+          content swaps glide; overflow-hidden clips the body as it grows/shrinks. */}
+      <div
+        className="overflow-hidden transition-[height] duration-200 ease-out motion-reduce:transition-none"
+        style={{ height: open ? bodyH : 0 }}
+        aria-hidden={!open}
+      >
+        {mounted && <div ref={bodyRef} className="px-3 pb-2">{children}</div>}
+      </div>
     </div>
   )
 }
