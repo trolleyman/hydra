@@ -1420,9 +1420,11 @@ try {
     // server — so we run several at once rather than serially. Wall-clock is
     // dominated by per-shot navigation + networkidle + settle waits, so a larger
     // pool cuts it roughly N-fold. The default scales with the host's CPU count
-    // (one context per core, clamped) rather than a flat cap, so a beefy machine
-    // gets more parallelism out of the box; override with HYDRA_SHOT_CONCURRENCY.
-    // The clamp still bounds peak memory and avoids starving renders of CPU; the
+    // but stays a modest fraction of it (roughly a quarter of the cores, clamped
+    // to a small range) so capturing the set doesn't saturate the machine — each
+    // headless context is a full Chromium render and a context-per-core pool
+    // pegs every CPU. Override with HYDRA_SHOT_CONCURRENCY to trade CPU for speed.
+    // The clamp bounds peak memory and avoids starving renders of CPU; the
     // captured pixels are per-context deterministic regardless of how many run in
     // parallel, so this doesn't affect the diff-hash reproducibility.
     // HYDRA_SHOT_ONLY (comma-separated page names) narrows the run to a few shots
@@ -1433,7 +1435,7 @@ try {
       .flatMap((pg) => themes.map((theme) => ({ pg, theme })))
     const totalShots = tasks.length
     const cpuCount = (typeof availableParallelism === 'function' ? availableParallelism() : cpus().length) || 8
-    const defaultConcurrency = Math.min(Math.max(cpuCount, 6), 16)
+    const defaultConcurrency = Math.min(Math.max(Math.floor(cpuCount / 4), 2), 4)
     const concurrency = Math.max(1, Math.min(Number(process.env.HYDRA_SHOT_CONCURRENCY) || defaultConcurrency, totalShots))
     let done = 0
     let nextTask = 0
