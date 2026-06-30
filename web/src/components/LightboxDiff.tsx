@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ABControlsContext, ImageDiffView, SegmentedToggle, IMAGE_DIFF_MODES, type ArtifactABControls, type ImageDiffMode } from './ArtifactImageDiff'
+import { ZoomPan } from './ZoomPan'
 
 // LightboxDiff renders a before/after artifact pair fullscreen inside the image
 // lightbox: the same comparison modes as the diff grid (before/after toggle, slider,
@@ -115,9 +116,13 @@ export function LightboxDiff({ left, right, name, initialMode, onDims }: {
             </label>
           </div>
         )}
-        <div style={{ width }} className="max-w-[94vw]">
+        {/* ZoomPan magnifies the comparator past fit (wheel), pans it (drag once
+            zoomed), and gives a corner minimap — at fit the inner view keeps its own
+            click/slider/onion gestures; pan only takes over above 1×. The minimap
+            thumbnail uses the "after" side (or whichever exists). */}
+        <ZoomPan minimapSrc={right ?? left} style={{ width }} className="max-w-[94vw]">
           <ImageDiffView left={left} right={right} mode={mode} name={name} disableOpen />
-        </div>
+        </ZoomPan>
         {/* Switch comparison modes without leaving the lightbox. */}
         <div className="flex flex-wrap items-center justify-center gap-2">
           <SegmentedToggle value={mode} onChange={setMode} options={IMAGE_DIFF_MODES} />

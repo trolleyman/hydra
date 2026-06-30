@@ -4,6 +4,7 @@ import { X, ChevronLeft, ChevronRight } from 'lucide-react'
 import type { ImageDiffMode } from './ArtifactImageDiff'
 import { LightboxDiff } from './LightboxDiff'
 import { makeAuxOpen } from './artifactDiffShared'
+import { ZoomPan } from './ZoomPan'
 
 export interface LightboxImage {
   url: string
@@ -175,19 +176,26 @@ export function ImageLightbox({
               onDims={setDims}
             />
           ) : (
-            <img
-              src={current.url}
-              alt={current.filename}
-              onLoad={(e) => setDims({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })}
-              // Middle-click opens the raw image file in a new browser tab.
-              onAuxClick={makeAuxOpen(() => current.url)}
-              // Checkerboard behind the image so transparent PNGs (e.g. an icon)
-              // read as transparent rather than blending into the dark backdrop. The
-              // <img> sizes to the image's own aspect ratio, so this sits exactly
-              // behind the picture; opaque images simply cover it.
-              style={{ background: CHECKER }}
-              className={`max-h-[85vh] ${figureWidth} object-contain rounded-lg shadow-2xl`}
-            />
+            // Wrapped in ZoomPan so the image can be magnified past fit (wheel),
+            // panned (drag once zoomed), and navigated with the corner minimap —
+            // useful when a shot is too small to read at fit. The wrapper keys off
+            // the parent's index remount, so zoom resets on navigation.
+            <ZoomPan minimapSrc={current.url} className="rounded-lg shadow-2xl">
+              <img
+                src={current.url}
+                alt={current.filename}
+                onLoad={(e) => setDims({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })}
+                // Middle-click opens the raw image file in a new browser tab.
+                onAuxClick={makeAuxOpen(() => current.url)}
+                draggable={false}
+                // Checkerboard behind the image so transparent PNGs (e.g. an icon)
+                // read as transparent rather than blending into the dark backdrop. The
+                // <img> sizes to the image's own aspect ratio, so this sits exactly
+                // behind the picture; opaque images simply cover it.
+                style={{ background: CHECKER }}
+                className={`max-h-[85vh] ${figureWidth} object-contain block`}
+              />
+            </ZoomPan>
           )}
         </div>
         <figcaption className="flex items-center gap-2 text-xs font-mono">
