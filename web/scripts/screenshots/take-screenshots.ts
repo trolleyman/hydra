@@ -144,6 +144,7 @@ function sectionFor(name: string): string {
   if (name.startsWith('spawn')) return 'spawn'
   if (name.startsWith('settings') || name === 'services-warning') return 'settings'
   if (name.startsWith('diff') || name === 'nested-folders') return 'diff'
+  if (name.startsWith('toast')) return 'toast'
   return 'overview'
 }
 
@@ -495,6 +496,17 @@ try {
       // artifacts panel (WS-populated, untracked by networkidle) first so the
       // file's measured offset is stable. Only meaningful on an agent diff page.
       stickFile?: string
+      // Drives the toast store (via the window.__hydraToast harness) to render a
+      // single toast deterministically, then captures the viewport so the fixed
+      // bottom-right toast is in frame. Used to document the notification toasts
+      // (needs-input / finished / security-gate approval / cross-project), which
+      // are transient and never fire from the static simulation. reset() clears
+      // any toasts the app popped on load first, so the canvas shows just this one.
+      toast?: {
+        message: string
+        type?: 'info' | 'success' | 'error' | 'warning'
+        actions?: { label: string; variant?: 'primary' | 'danger' }[]
+      }
     }[] = [
       { name: 'home', path: '/' },
       // The unread-changes indicator: the agent sidebar shows an amber dot on the
@@ -504,6 +516,58 @@ try {
       // when other projects have updates waiting (see simulation.go ListProjects /
       // ListAgents and AgentSidebarItem).
       { name: 'unread-indicator', path: '/', click: 'button[aria-label="Select project"]' },
+      // Notification toasts (web/src/lib/useAgentNotifications.ts). These fire on
+      // live status transitions / security-gate parks that the static simulation
+      // never produces, so they're rendered deterministically via the toast
+      // harness over the settings page (a route that loads no project agents, so
+      // nothing else pops a toast). Messages mirror the real ones the hook emits.
+      // 1. An agent crossed into needs_input — a "View" jumps to it; lingers 12s.
+      {
+        name: 'toast-needs-input',
+        path: '/settings',
+        toast: {
+          message: '"Migrate auth providers to OAuth" needs your input',
+          type: 'warning',
+          actions: [{ label: 'View', variant: 'primary' }],
+        },
+      },
+      // 2. An agent finished — also a "View" button; auto-dismisses at 8s.
+      {
+        name: 'toast-finished',
+        path: '/settings',
+        toast: {
+          message: '"Add renameable agent titles" finished',
+          type: 'success',
+          actions: [{ label: 'View', variant: 'primary' }],
+        },
+      },
+      // 3. A security-gate parked tool call (MCP/WebFetch): persistent, with
+      // Allow once / Always allow / Deny; dismissing the toast denies it.
+      {
+        name: 'toast-approval',
+        path: '/settings',
+        toast: {
+          message: 'Security gate — "Wire up the GitHub MCP server" wants to use MCP server "linear" (MCP server "linear" is not on the allow-list)',
+          type: 'warning',
+          actions: [
+            { label: 'Allow once', variant: 'primary' },
+            { label: 'Always allow', variant: 'primary' },
+            { label: 'Deny', variant: 'danger' },
+          ],
+        },
+      },
+      // 4. A *background* project's needs-input count rose — names the project and
+      // offers a "View project" switch (the only cross-project toast we can do,
+      // since agent-level detail isn't loaded for non-selected projects).
+      {
+        name: 'toast-cross-project',
+        path: '/settings',
+        toast: {
+          message: 'Another project — "hydra-web" has an agent that needs your input',
+          type: 'warning',
+          actions: [{ label: 'View project', variant: 'primary' }],
+        },
+      },
       // The keyboard-shortcuts help overlay, opened the way a user does — by
       // pressing `?` (no on-screen button; the overlay is the discovery surface).
       // It lists every shortcut (General + Agent) from the central registry
@@ -1473,6 +1537,9 @@ try {
           // every click/scroll the capture flow performs. Trust is client-side
           // localStorage keyed by project id (the shared StorageKeys.trustedProjects).
           try { window.localStorage.setItem(opts.trustedKey, opts.trustedValue) } catch { /* ignore */ }
+          // Enable the toast harness (window.__hydraToast) so the `toast` page
+          // option can drive the toast store. Dormant in the app unless set.
+          try { window.localStorage.setItem(opts.harnessKey, '1') } catch { /* ignore */ }
           // Deterministic shuffle (spawn-form placeholder order).
           ;(Math as unknown as { random: () => number }).random = () => 0.5
           // Freeze short-lived timers (the typewriter placeholder animation runs
@@ -1489,7 +1556,7 @@ try {
           // any shot containing the video row flap between "modified"/"unchanged".
           // Frame 0 is identical across renders, keeping those captures stable.
           ;(HTMLMediaElement.prototype as unknown as { play: () => Promise<void> }).play = () => Promise.resolve()
-        }, { trustedKey: StorageKeys.trustedProjects, trustedValue: JSON.stringify([SIM_PROJECT, SIM_PROJECT_MOBILE]) })
+        }, { trustedKey: StorageKeys.trustedProjects, trustedValue: JSON.stringify([SIM_PROJECT, SIM_PROJECT_MOBILE]), harnessKey: StorageKeys.toastHarness })
         const page = await ctx.newPage()
         if (pg.holdRequest) {
           // Hold the matching request open (never continued/fulfilled) so the
@@ -2111,12 +2178,24 @@ try {
           }, pg.revealSelector)
           await settle(page)
         }
+        if (pg.toast) {
+          // Clear any toast the app popped on load, then render exactly this one,
+          // and wait for it to paint before capturing. Persistent (duration 0) so
+          // it can't expire mid-capture.
+          await page.evaluate((spec) => {
+            const h = (window as unknown as { __hydraToast: { reset: () => void; show: (s: unknown) => void } }).__hydraToast
+            h.reset()
+            h.show(spec)
+          }, pg.toast)
+          await page.waitForSelector('[role="status"]')
+          await settle(page)
+        }
         const out = join(OUT, `${pg.name}${suffix}.png`)
         // Scrolled pages, the lightbox (a fixed, viewport-filling overlay) from
         // either the spawn box (attachImages) or an artifact tile (openArtifactImage),
         // header-focused shots and the hovered info tooltip (a fixed portal)
         // capture the viewport; others capture the full page.
-        await captureWithRetry(page, { path: out, fullPage: !pg.scrollTo && !pg.attachImages && !pg.openArtifactImage && !pg.viewportOnly && !pg.artifactInfo && !pg.testsInfo && !pg.videoDiff && !pg.revealSelector })
+        await captureWithRetry(page, { path: out, fullPage: !pg.scrollTo && !pg.attachImages && !pg.openArtifactImage && !pg.viewportOnly && !pg.artifactInfo && !pg.testsInfo && !pg.videoDiff && !pg.revealSelector && !pg.toast })
         // Emit the tag sidecar (<file>.png.meta, {"tags":[...]}) that the diff
         // viewer reads (internal/artifacts readTagsSidecar). theme + viewport +
         // section are scoped "category::value" labels — the viewer keeps one

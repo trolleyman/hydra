@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { useAgentStore } from '../stores/agentStore'
+import { useProjectStore } from '../stores/projectStore'
 import { useToastStore } from '../stores/toastStore'
 import { api } from '../stores/apiClient'
 import { runWithToast } from './apiAction'
@@ -15,7 +16,7 @@ const NEEDS_INPUT_TOAST_MS = 12_000
 const FINISHED_TOAST_MS = 8_000
 
 // useAgentNotifications watches the live agent list for the current project and
-// surfaces two kinds of toasts:
+// surfaces three kinds of toasts:
 //
 //   1. State-transition toasts — when an agent crosses into `needs_input` (and
 //      isn't a security-gate wait, which gets its own toast below) or `finished`,
@@ -23,6 +24,10 @@ const FINISHED_TOAST_MS = 8_000
 //   2. Security-gate approval toasts — for each parked tool call (MCP / WebFetch
 //      / bash), a persistent toast with Allow / Deny actions. Dismissing the
 //      toast (X) denies the call; "Allow" tears it down silently.
+//   3. Cross-project needs-input toasts — agent-level detail is only loaded for
+//      the selected project, but the daemon broadcasts every project's
+//      `needs_input_count`. When a *background* project's count rises, a toast
+//      names that project and offers a "View project" button that switches to it.
 //
 // Transitions are detected by diffing each agent's status against the previous
 // poll; a first-seen agent never toasts (so a page load / project switch where
@@ -31,6 +36,10 @@ export function useAgentNotifications(currentProjectId: string | null) {
   const navigate = useNavigate()
   const agents = useAgentStore((s) => s.agents)
   const agentsProjectId = useAgentStore((s) => s.agentsProjectId)
+  const projects = useProjectStore((s) => s.projects)
+
+  // projectId → last-observed needs_input_count, for cross-project rise detection.
+  const lastNeedsInput = useRef<Map<string, number>>(new Map())
 
   // agentId → last-observed status, for transition detection.
   const lastStatus = useRef<Map<string, string>>(new Map())
@@ -196,4 +205,43 @@ export function useAgentNotifications(currentProjectId: string | null) {
       })()
     }
   }, [agents, agentsProjectId, currentProjectId, navigate])
+
+  // Cross-project needs-input toasts. We only have per-project counts for
+  // background projects (no agent-level detail), so we diff each project's
+  // needs_input_count and toast when a *non-current* project's count rises. The
+  // current project is handled agent-by-agent above, so it's recorded but never
+  // toasted here. First-seen counts are recorded silently (no toast on load).
+  useEffect(() => {
+    const toast = useToastStore.getState()
+    const prev = lastNeedsInput.current
+    const next = new Map<string, number>()
+    for (const p of projects) {
+      const count = p.needs_input_count ?? 0
+      next.set(p.id, count)
+      const before = prev.get(p.id)
+      if (p.id === currentProjectId) continue
+      if (before === undefined || count <= before) continue
+      const name = p.name || p.path || p.id
+      toast.show({
+        // A dedup key so a project whose count keeps climbing reuses one toast
+        // rather than stacking a new one on every bump.
+        key: `project-needs-input:${p.id}`,
+        message: `Another project — "${name}" has ${count === 1 ? 'an agent that needs' : `${count} agents that need`} your input`,
+        type: 'warning',
+        duration: NEEDS_INPUT_TOAST_MS,
+        actions: [
+          {
+            label: 'View project',
+            variant: 'primary',
+            onClick: (toastId) => {
+              useProjectStore.getState().setSelectedProjectId(p.id)
+              navigate({ to: '/project/$projectId', params: { projectId: p.id } })
+              toast.dismiss(toastId)
+            },
+          },
+        ],
+      })
+    }
+    lastNeedsInput.current = next
+  }, [projects, currentProjectId, navigate])
 }
