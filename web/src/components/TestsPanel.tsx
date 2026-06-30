@@ -144,7 +144,11 @@ function TestRunnerCard({ runner, onRefresh, refreshing }: { runner: TestRunResu
   // detail); otherwise it's behind the header toggle.
   const hasLog = running || !!runner.log_url
   const [buildLogOpen, setBuildLogOpen] = useState(false)
-  const logVisible = buildLogOpen || running || failed
+  // Only show the log when there's actually one to show: live while running,
+  // force-shown on failure (the error surface), else behind the toggle. A failing
+  // runner that captured no log (e.g. a JUnit report with no stdout) shows its
+  // cases instead of an empty "No output" terminal.
+  const logVisible = hasLog && (buildLogOpen || running || failed)
   const toggleBuildLog = () =>
     setBuildLogOpen((o) => {
       const next = !o
