@@ -70,7 +70,7 @@ export function DialogConfirmButton({
   return (
     <button
       {...props}
-      className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed ${CONFIRM_TONE[tone]} ${className}`}
+      className={`inline-flex items-center gap-1.5 whitespace-nowrap px-4 py-2 rounded-lg text-sm font-semibold transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed ${CONFIRM_TONE[tone]} ${className}`}
     >
       {icon}
       {children}

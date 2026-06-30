@@ -1,5 +1,5 @@
 import React, { useEffect, type ReactNode } from 'react'
-import { AlertCircle, AlertTriangle, ArrowRight, Info, HelpCircle, Merge, Trash2, FolderSync, X, Clock } from 'lucide-react'
+import { AlertCircle, AlertTriangle, ArrowRight, Info, HelpCircle, Merge, Trash2, FolderSync, X, Clock, LoaderCircle } from 'lucide-react'
 import { useDialogStore } from '../stores/dialogStore'
 import { IconButton } from './IconButton'
 import { DialogIconTile, DialogCancelButton, DialogConfirmButton, type DialogTone } from './dialogPrimitives'
@@ -96,7 +96,7 @@ export const Dialog: React.FC = () => {
           title={title}
           description={message}
           details={details}
-          confirmLabel={confirmLabel ?? 'Queue merge when tests pass'}
+          confirmLabel={confirmLabel ?? 'Queue merge'}
           secondaryLabel={secondaryLabel ?? 'Force merge'}
           onConfirm={handleConfirm}
           onSecondary={handleSecondary}
@@ -221,11 +221,12 @@ function MergeGatePanel({
 }) {
   const status = details?.testStatus
   const failed = details?.testFailed ?? 0
+  const running = status === 'running'
   const chip =
     status === 'failing'
       ? { cls: 'text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800/50', label: `${failed || ''} failing`.trim() }
-      : status === 'running'
-        ? { cls: 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800/50', label: 'running' }
+      : running
+        ? { cls: 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800/50', label: details?.testProgress || 'running' }
         : { cls: 'text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800/50', label: 'no verdict' }
   return (
     <div
@@ -236,8 +237,9 @@ function MergeGatePanel({
     >
       <div className="px-5 pt-5 pb-4 flex flex-col gap-4">
         <div className="flex items-start gap-3.5">
-          <DialogIconTile tone="amber">
-            <AlertTriangle className="w-5 h-5" />
+          {/* Blue spinner while tests are still running; amber warning otherwise. */}
+          <DialogIconTile tone={running ? 'blue' : 'amber'}>
+            {running ? <LoaderCircle className="w-5 h-5 animate-spin" /> : <AlertTriangle className="w-5 h-5" />}
           </DialogIconTile>
           <div className="flex flex-col gap-1 min-w-0 pt-0.5">
             <h3 id="dialog-title" className="text-[16px] font-bold leading-tight text-gray-900 dark:text-[#eef1f6]">
@@ -251,7 +253,8 @@ function MergeGatePanel({
           to={details?.toBranch || '—'}
           arrowClass="text-amber-600 dark:text-amber-400"
           right={
-            <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium ${chip.cls}`}>
+            <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium ${chip.cls}`}>
+              {running && <LoaderCircle className="w-3 h-3 animate-spin" />}
               {chip.label}
             </span>
           }

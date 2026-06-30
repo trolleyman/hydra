@@ -28,8 +28,10 @@ export interface DialogDetails {
   loading?: boolean
   // mergeGate: the head's test verdict + failing count, so the gate dialog can
   // render an explanatory status chip alongside the Force / Queue choice.
+  // testProgress is the running run's "done/total" (e.g. "84/142").
   testStatus?: 'failing' | 'errored' | 'running'
   testFailed?: number
+  testProgress?: string
 }
 
 interface DialogState {

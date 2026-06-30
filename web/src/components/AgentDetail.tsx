@@ -559,27 +559,31 @@ export function AgentDetail({
   function confirmMergeGate(kind: 'failing' | 'errored' | 'running', n: number) {
     const toBranch = agent.base_branch || 'base'
     const fromBranch = agent.branch_name || `hydra/${agent.id}`
+    const progress = agent.tests?.progress ?? undefined // e.g. "84/142"
+    const doneOf = progress && progress.includes('/') ? `${progress.split('/')[0]} of ${progress.split('/')[1]} done. ` : ''
     const title =
       kind === 'failing'
         ? `${n || 'Some'} test${n === 1 ? '' : 's'} failing`
         : kind === 'running'
-          ? 'Tests are still running'
+          ? 'Tests still running'
           : "Tests couldn't run"
     const message =
       kind === 'failing'
         ? `Merging is soft-gated while tests fail. Force the merge to land the failures on ${toBranch} now, or queue it to merge automatically once the tests pass.`
         : kind === 'running'
-          ? `There's no verdict for this commit yet. Queue the merge to land it the moment tests pass, or force it through now without waiting.`
+          ? `${doneOf}Merge now without waiting on the result, or queue it to merge automatically the moment they pass.`
           : `The runner errored (or produced no verdict) for this commit — that's not a pass. Force the merge into ${toBranch} anyway, or queue it to merge once tests pass.`
     useDialogStore.getState().show({
       title,
       message,
       type: 'warning',
       variant: 'mergeGate',
-      details: { fromBranch, toBranch, testStatus: kind, testFailed: n },
-      confirmLabel: 'Queue merge when tests pass',
+      details: { fromBranch, toBranch, testStatus: kind, testFailed: n, testProgress: progress },
+      confirmLabel: 'Queue merge',
       onConfirm: () => void armMerge(),
-      secondaryLabel: 'Force merge',
+      // While running there's no failure to "force" past — it's just "merge now,
+      // don't wait" — but it's the same override action + button styling.
+      secondaryLabel: kind === 'running' ? 'Merge now' : 'Force merge',
       onSecondary: () => void executeMerge(true),
     })
   }
