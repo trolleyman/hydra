@@ -14,6 +14,7 @@ import { HighlightedTextarea } from '../lib/markdown'
 import { spawnGeometry } from '../lib/terminalGeometry'
 import { type Attachment, spawnDraftKey, loadAttachments, saveAttachments, nextAttachmentId } from '../lib/spawnDrafts'
 import { getClipboardText, isLargePaste, detectCodeLanguage, fenceCode } from '../lib/pastedText'
+import { useComposerHistory, makeSnapshot } from '../lib/composerHistory'
 
 type AgentTypeOption = 'claude' | 'gemini' | 'copilot' | 'codex'
 
@@ -150,7 +151,6 @@ export function SpawnForm({
   compact?: boolean
   disabled?: boolean
 }) {
-  const [prompt, setPrompt] = useState('')
   const [agentId, setAgentId] = useState('')
   const [idManuallyEdited, setIdManuallyEdited] = useState(false)
   const [agentType, setAgentType] = useState<AgentTypeOption>(() => {
@@ -167,8 +167,22 @@ export function SpawnForm({
   // agents on top of one another. `branches` is null until the list loads.
   const [branches, setBranches] = useState<RepositoryBranch[] | null>(null)
   const [baseBranch, setBaseBranch] = useState('')
-  const [attachments, setAttachments] = useState<Attachment[]>([])
+  // Undo/redo for the composer spans the typed prompt AND the attachment chips:
+  // a paste that becomes a chip calls preventDefault, so native textarea undo
+  // never sees it. `present` is the live composer state; `commit`/`undo`/`redo`/
+  // `reconcile`/`resetHistory` drive the snapshot stack (see composerHistory).
+  const { present, commit, reconcile, reset: resetHistory, undo, redo } = useComposerHistory(
+    makeSnapshot('', [], 0, 0),
+  )
+  const prompt = present.prompt
+  const attachments = present.attachments
   const [dragOver, setDragOver] = useState(false)
+  // Every preview object URL minted this session. We can't revoke on remove (an
+  // undo can bring the chip back) or on unmount (the attachments are stashed to
+  // the cache and restored on return), so URLs live until a spawn consumes the
+  // prompt — then we revoke them all at once (and otherwise until reload, like
+  // the cache itself).
+  const objectUrlsRef = useRef<Set<string>>(new Set())
   // Index into the image-only attachment list while the lightbox is open; null
   // when closed.
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
@@ -315,17 +329,12 @@ export function SpawnForm({
   const draftKey = projectId ? promptDraftKey(projectId, compact) : null
   const scrollKey = projectId ? promptScrollKey(projectId, compact) : null
 
-  // Load the saved draft on mount and whenever the project changes, clearing the
-  // box when the new project has no draft, then restore that project's saved
-  // scroll position. The scroll offset is restored in a rAF because the
-  // textarea's scrollable range only exists after the setPrompt above commits
+  // Restore the project's saved scroll position on mount / project change. The
+  // draft text itself is loaded alongside the attachments (and the history
+  // baseline reset) in the effect below. The scroll offset is restored in a rAF
+  // because the textarea's scrollable range only exists after that load commits
   // the new text to the DOM.
   useEffect(() => {
-    if (!draftKey) {
-      setPrompt('')
-      return
-    }
-    setPrompt(readLocal(draftKey) ?? '')
     const saved = scrollKey ? Number(readLocal(scrollKey)) || 0 : 0
     const raf = requestAnimationFrame(() => {
       if (textareaRef.current) textareaRef.current.scrollTop = saved
@@ -333,10 +342,15 @@ export function SpawnForm({
     return () => cancelAnimationFrame(raf)
   }, [draftKey, scrollKey])
 
+  // Apply a typed edit: one coalesced undo step per typing burst. Captures the
+  // post-edit caret so undo/redo can restore it, and mirrors the draft to
+  // localStorage like before.
   function handlePromptChange(value: string) {
-    setPrompt(value)
-    if (!draftKey) return
-    writeLocal(draftKey, value || null)
+    const ta = textareaRef.current
+    const selStart = ta?.selectionStart ?? value.length
+    const selEnd = ta?.selectionEnd ?? value.length
+    commit((prev) => makeSnapshot(value, prev.attachments, selStart, selEnd), true)
+    if (draftKey) writeLocal(draftKey, value || null)
   }
 
   // Persist the textarea's scroll offset so it travels with the draft when
@@ -358,18 +372,20 @@ export function SpawnForm({
     if (prev === storeKey) return
     // Stash the outgoing project's attachments before loading the new one's.
     if (prev) saveAttachments(prev, attachmentsRef.current)
-    // A pasted block stashed for one box can't be "re-pasted" into another.
+    // A pasted block stashed for one box can't be "re-pasted" into another, and
+    // undo history doesn't carry across a project switch.
     lastPasteRef.current = null
     pastedTextCounterRef.current = 0
+    const loadedPrompt = draftKey ? (readLocal(draftKey) ?? '') : ''
     if (storeKey) {
-      setAttachments(loadAttachments(storeKey))
+      resetHistory(makeSnapshot(loadedPrompt, loadAttachments(storeKey), 0, 0))
       imageCounterRef.current = Number(readLocal(counterKey!)) || 0
     } else {
-      setAttachments([])
+      resetHistory(makeSnapshot(loadedPrompt, [], 0, 0))
       imageCounterRef.current = 0
     }
     prevStoreKeyRef.current = storeKey
-  }, [storeKey, counterKey])
+  }, [storeKey, counterKey, draftKey, resetHistory])
 
   // Persist the current box's attachments to the cache on unmount (the
   // full-page form remounts when navigating between projects).
@@ -406,14 +422,16 @@ export function SpawnForm({
   function uploadAttachment(file: File): number {
     const id = nextAttachmentId()
     const previewUrl = isImageFile(file) ? URL.createObjectURL(file) : undefined
-    setAttachments((prev) => [...prev, { id, filename: file.name || 'pasted-image', path: null, previewUrl, size: file.size, uploading: true }])
+    if (previewUrl) objectUrlsRef.current.add(previewUrl)
+    const chip: Attachment = { id, filename: file.name || 'pasted-image', path: null, previewUrl, size: file.size, uploading: true }
+    // Adding a chip is its own undo step.
+    commit((prev) => makeSnapshot(prev.prompt, [...prev.attachments, chip], prev.selStart, prev.selEnd), false)
+    // The upload resolving isn't a user action, so patch this chip across the
+    // whole timeline (reconcile) instead of pushing a new undo step — undoing to
+    // an earlier snapshot still sees the settled path, not a stale "uploading…".
     uploadFile(projectId, file)
-      .then((res) => {
-        setAttachments((prev) => prev.map((a) => (a.id === id ? { ...a, path: res.path, uploading: false } : a)))
-      })
-      .catch((err) => {
-        setAttachments((prev) => prev.map((a) => (a.id === id ? { ...a, uploading: false, error: formatError(err) } : a)))
-      })
+      .then((res) => reconcile(id, { path: res.path, uploading: false }))
+      .catch((err) => reconcile(id, { uploading: false, error: formatError(err) }))
     return id
   }
 
@@ -429,28 +447,13 @@ export function SpawnForm({
     return uploadAttachment(new File([text], `pasted-text-${n}.txt`, { type: 'text/plain' }))
   }
 
-  // Splice text into the textarea at the caret (or appended if it isn't focused)
-  // and leave the caret just after it. Used when a re-paste inlines a block.
-  function insertAtCursor(text: string) {
-    const ta = textareaRef.current
-    const start = ta?.selectionStart ?? prompt.length
-    const end = ta?.selectionEnd ?? prompt.length
-    const next = prompt.slice(0, start) + text + prompt.slice(end)
-    handlePromptChange(next)
-    const caret = start + text.length
-    requestAnimationFrame(() => {
-      if (!ta) return
-      ta.focus()
-      ta.selectionStart = ta.selectionEnd = caret
-    })
-  }
-
   function removeAttachment(id: number) {
-    setAttachments((prev) => {
-      const found = prev.find((a) => a.id === id)
-      if (found?.previewUrl) URL.revokeObjectURL(found.previewUrl)
-      return prev.filter((a) => a.id !== id)
-    })
+    // Don't revoke the preview URL here — an undo can bring this chip back. URLs
+    // are freed in bulk once a spawn consumes the prompt (see objectUrlsRef).
+    commit(
+      (prev) => makeSnapshot(prev.prompt, prev.attachments.filter((a) => a.id !== id), prev.selStart, prev.selEnd),
+      false,
+    )
   }
 
   function handlePaste(e: React.ClipboardEvent) {
@@ -477,11 +480,32 @@ export function SpawnForm({
 
     const last = lastPasteRef.current
     if (last && last.text === text) {
-      // Second paste of the same block: the user wants it inline after all —
-      // drop the chip and insert the text for real (fenced if it's code).
+      // Second paste of the same block: the user wants it inline after all. Drop
+      // the chip AND splice the text in (fenced if it's code) as ONE undo step,
+      // so a single Ctrl+Z reverses the inline — putting the block back in a chip.
       e.preventDefault()
-      removeAttachment(last.attachmentId)
-      insertAtCursor(last.lang ? fenceCode(text, last.lang) : text)
+      const insert = last.lang ? fenceCode(text, last.lang) : text
+      const ta = textareaRef.current
+      const start = ta?.selectionStart ?? prompt.length
+      const end = ta?.selectionEnd ?? prompt.length
+      const caret = start + insert.length
+      const nextPrompt = prompt.slice(0, start) + insert + prompt.slice(end)
+      commit(
+        (prev) =>
+          makeSnapshot(
+            prev.prompt.slice(0, start) + insert + prev.prompt.slice(end),
+            prev.attachments.filter((a) => a.id !== last.attachmentId),
+            caret,
+            caret,
+          ),
+        false,
+      )
+      if (draftKey) writeLocal(draftKey, nextPrompt || null)
+      requestAnimationFrame(() => {
+        if (!ta) return
+        ta.focus()
+        ta.selectionStart = ta.selectionEnd = caret
+      })
       lastPasteRef.current = null
       return
     }
@@ -539,13 +563,15 @@ export function SpawnForm({
         rows: geom.rows,
       }
       const agent = await api.default.spawnAgent(projectId ?? '', req)
-      setPrompt('')
       if (draftKey) writeLocal(draftKey, null)
       if (scrollKey) writeLocal(scrollKey, null)
       setAgentId('')
       setIdManuallyEdited(false)
-      attachments.forEach((a) => a.previewUrl && URL.revokeObjectURL(a.previewUrl))
-      setAttachments([])
+      // The prompt is sent — free every preview URL minted this session (including
+      // ones only reachable via undo history) and clear the composer.
+      objectUrlsRef.current.forEach((url) => URL.revokeObjectURL(url))
+      objectUrlsRef.current.clear()
+      resetHistory(makeSnapshot('', [], 0, 0))
       if (storeKey) saveAttachments(storeKey, [])
       setLightboxIndex(null)
       imageCounterRef.current = 0
@@ -600,10 +626,44 @@ export function SpawnForm({
     )
   }
 
+  // Restore a snapshot returned by undo/redo: re-mirror the draft and put the
+  // caret back where it was when that snapshot was current (after the controlled
+  // value commits to the DOM, hence the rAF).
+  function restoreSnapshot(snap: ReturnType<typeof undo>) {
+    if (!snap) return
+    if (draftKey) writeLocal(draftKey, snap.prompt || null)
+    const ta = textareaRef.current
+    requestAnimationFrame(() => {
+      if (!ta) return
+      ta.focus()
+      ta.selectionStart = snap.selStart
+      ta.selectionEnd = snap.selEnd
+    })
+  }
+
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement | HTMLInputElement>) {
-    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+    const mod = e.metaKey || e.ctrlKey
+    if (mod && e.key === 'Enter') {
       e.preventDefault()
       handleSubmit(e as unknown as React.FormEvent)
+    }
+    // Undo/redo over the composer's own history (text + attachments). Only on the
+    // prompt textarea — the agent-id field keeps its native per-field undo. Our
+    // stack drives these because pastes-turned-chips call preventDefault, so the
+    // browser's textarea undo never recorded them. Cmd/Ctrl+Z undo, +Shift redo,
+    // and Ctrl+Y redo (Windows convention).
+    if (e.currentTarget === textareaRef.current && mod && !e.altKey) {
+      const key = e.key.toLowerCase()
+      if (key === 'z') {
+        e.preventDefault()
+        restoreSnapshot(e.shiftKey ? redo() : undo())
+        return
+      }
+      if (key === 'y' && !e.shiftKey) {
+        e.preventDefault()
+        restoreSnapshot(redo())
+        return
+      }
     }
     // Ctrl/Cmd+Shift+V ("paste as plain text") should paste for real, not
     // attach. The paste event carries no modifier state, so flag it here on the
