@@ -657,10 +657,12 @@ function FileGrid({ files, mode, scale = 1, spans, onSpanChange, scope, changeTh
       // Videos need a minimum tile width for their transport controls (see
       // VIDEO_MIN_TILE_PX); images have no such chrome.
       minWidthPx: isVideoArtifact(f.name) ? VIDEO_MIN_TILE_PX : undefined,
-      // The slider mode and video both use horizontal drag on the media for their own
-      // gesture, so let those resize via the edge handle only — see MasonryGrid's
-      // bodyResizable. Other images resize by dragging the media (data-tile-drag).
-      bodyResizable: mode !== 'slider' && !isVideoArtifact(f.name),
+      // Only video reserves horizontal body drag for its own transport, so it resizes
+      // via the edge handle only (see MasonryGrid bodyResizable). Every image mode —
+      // including the slider, whose drag now lives solely on the divider line — resizes
+      // by dragging the media (data-tile-drag); the slider divider and onion opacity
+      // control opt out with data-no-tile-drag so they're never hijacked.
+      bodyResizable: !isVideoArtifact(f.name),
     })),
     [files, mode, dims, changeThreshold, diffGallery, galleryIndex],
   )

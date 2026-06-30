@@ -15,9 +15,9 @@ import { ZoomPan } from './ZoomPan'
 // the app's current theme.
 //
 // Before/After + Highlight are owned here (not by the grid): a local ABControlsContext
-// provider feeds the inner ImageDiffView, and the B / H keys flip/highlight it — scoped
-// to the lightbox, so they DON'T also switch the diff grid in the background (that grid's
-// identical shortcut bails while the lightbox is open; see ArtifactsPanel).
+// provider feeds the inner ImageDiffView, and the keyboard (X flip, B/A jump to a side,
+// H highlight) drives it — scoped to the lightbox, so the diff grid in the background
+// is untouched.
 export function LightboxDiff({ left, right, name, initialMode, onDims }: {
   left?: string | null
   right?: string | null
@@ -52,17 +52,20 @@ export function LightboxDiff({ left, right, name, initialMode, onDims }: {
     return () => { cancelled = true }
   }, [left, right, onDims])
 
-  // B flips Before/After, H toggles Highlight — only when not typing in a field, and
-  // plain single keys (no modifiers) so they don't collide with browser chords. These
-  // drive only this lightbox comparator (via the context below); the grid's matching
-  // shortcut is suppressed while the lightbox is open, so the background diff stays put.
+  // Keyboard, scoped to this lightbox comparator: X flips Before/After, B/A jump
+  // straight to Before/After, H toggles Highlight. Only when not typing in a field,
+  // and plain single keys (no modifiers) so they don't collide with browser chords.
+  // These drive only this comparator (via the context below); the grid has no matching
+  // shortcut, so nothing changes underneath.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.ctrlKey || e.metaKey || e.altKey) return
       const t = e.target as HTMLElement | null
       if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return
       const k = e.key.toLowerCase()
-      if (k === 'b') { e.preventDefault(); setView((v) => (v === 'before' ? 'after' : 'before')) }
+      if (k === 'x') { e.preventDefault(); setView((v) => (v === 'before' ? 'after' : 'before')) }
+      else if (k === 'b') { e.preventDefault(); setView('before') }
+      else if (k === 'a') { e.preventDefault(); setView('after') }
       else if (k === 'h') { e.preventDefault(); setHighlight((h) => !h) }
     }
     window.addEventListener('keydown', onKey)
@@ -90,15 +93,17 @@ export function LightboxDiff({ left, right, name, initialMode, onDims }: {
     <ABControlsContext.Provider value={ab}>
       <div className="dark flex flex-col items-center gap-3">
         {/* In A/B mode the Before/After toggle + Highlight sit ABOVE the image — on the
-            tile, where the grid keeps them — rather than down in the toolbar (also B / H
-            on the keyboard). Width-matched to the image so they line up over it. */}
+            tile, where the grid keeps them — rather than down in the toolbar (also on the
+            keyboard: X flips, B/A jump). Width-matched to the image so they line up. */}
         {mode === 'ab' && (
           <div style={{ width }} className="max-w-[94vw] flex flex-wrap items-center gap-2">
-            <SegmentedToggle
-              value={view}
-              onChange={setView}
-              options={[{ value: 'before', label: 'Before' }, { value: 'after', label: 'After' }]}
-            />
+            <span title="X flips · B = Before · A = After">
+              <SegmentedToggle
+                value={view}
+                onChange={setView}
+                options={[{ value: 'before', label: 'Before' }, { value: 'after', label: 'After' }]}
+              />
+            </span>
             <label
               title={canDiff ? 'Highlight changed pixels in magenta (H)' : 'Needs both a before and after image'}
               className={`ml-auto flex items-center gap-1 text-[10px] font-medium tracking-wide select-none ${

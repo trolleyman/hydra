@@ -102,7 +102,10 @@ export function ZoomPan({ children, minimapSrc, className, style }: {
   // minimap / reset chrome (data-zoompan-ui) keep their own handlers.
   const onPointerDownCapture = (e: React.PointerEvent) => {
     if (e.button !== 0 || !zoomed) return
-    if ((e.target as Element).closest('[data-zoompan-ui]')) return
+    // Let controls that own their own horizontal drag through even while zoomed — the
+    // before/after slider divider and the onion opacity range (both data-no-tile-drag /
+    // <input>) keep working; only "empty" image area pans. Plus our own minimap chrome.
+    if ((e.target as Element).closest('[data-zoompan-ui], input, [data-no-tile-drag]')) return
     e.preventDefault()
     e.stopPropagation()
     movedRef.current = false
