@@ -170,19 +170,25 @@ func (s *Server) testSummaryFor(projectRoot string, h heads.Head) *api.TestSumma
 	if len(runners) == 0 {
 		return &api.TestSummary{Status: api.TestStatusNone}
 	}
-	// Detect whether the head has done no work yet: if its branch tip is still
-	// the base branch commit, any cached verdict belongs to the base, not the
-	// agent. We still surface the real verdict — the agent detail view (header
-	// chip + Tests panel) shows it — but flag it so the ambient sidebar chip can
-	// hide it, where a green "passed" inherited from base would just be
-	// misleading noise. Best-effort: if either ref fails to resolve we leave the
-	// flag unset and fall through to the normal computation.
+	// Detect whether the head has done no work of its own yet: if its branch tip
+	// is a reachable ancestor of the base branch — i.e. the head can fast-forward
+	// to base, with no commits the base doesn't already have — then any cached
+	// verdict belongs to the base, not the agent. (Plain tip == base is the
+	// special case; this also covers the base moving on ahead of an idle head, so
+	// committing to base no longer un-hides the chip.) We still surface the real
+	// verdict — the agent detail view (header chip + Tests panel) shows it — but
+	// flag it so the ambient sidebar chip can hide it, where a green "passed"
+	// inherited from base would just be misleading noise. Best-effort: if either
+	// ref fails to resolve, or the ancestry check errors, we leave the flag unset
+	// and fall through to the normal computation.
 	atBase := false
 	if h.BaseBranch != "" {
 		headSHA, errHead := git.ResolveRef(projectRoot, *h.Branch)
 		baseSHA, errBase := git.ResolveRef(projectRoot, h.BaseBranch)
-		if errHead == nil && errBase == nil && headSHA == baseSHA {
-			atBase = true
+		if errHead == nil && errBase == nil {
+			if ff, err := git.IsAncestor(projectRoot, headSHA, baseSHA); err == nil && ff {
+				atBase = true
+			}
 		}
 	}
 	mgr := s.Tests.Manager(projectRoot)
