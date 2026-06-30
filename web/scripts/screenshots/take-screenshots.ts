@@ -228,6 +228,92 @@ async function captureWithRetry(page: import('playwright').Page, opts: Parameter
   }
 }
 
+// Fixed seek time (seconds) for the simulated loader clips — shared by the
+// dedicated videoDiff shots and the showArtifacts grid so every webm tile across
+// every shot decodes the identical, reproducible frame. Must be an absolute
+// timestamp, not duration-relative (see ensureVideosPainted).
+const VIDEO_SEEK = 1.2
+
+// ensureVideosPainted forces every <video> on the page to decode and present a
+// stable, deterministic frame so its diff tile actually paints pixels instead of
+// showing through to the transparent checkerboard backdrop (checkerStyle). This
+// is the flaky "loader-animation.webm renders transparent" symptom: play() is
+// no-op'd by the init script, so nothing advances the video on its own, and a
+// bare 'seeked' event can fire BEFORE the frame is really decodable — so the
+// capture races the first-frame decode and intermittently grabs an empty tile.
+//
+// Robustness comes from verifying an actual decoded frame exists (a 16×16 canvas
+// read-back: drawImage of an undecoded video yields all-transparent pixels) and
+// retrying the seek until it does. Timing is driven by requestVideoFrameCallback
+// (fires exactly when a frame is composited) with a requestAnimationFrame fallback
+// — both deliberately, because the init script collapses every setTimeout under
+// 4000ms to 0, so a short setTimeout-based wait would resolve before any decode.
+//
+// `seek` pins an explicit absolute time. ALWAYS pass one for the simulated
+// loader clips: they're MediaRecorder-produced webm with no duration in the
+// header, so v.duration is *estimated from buffering* and drifts run-to-run —
+// deriving the target from it (e.g. duration * 0.6) lands on a different frame
+// each run (the bottom-of-frame webm sliver was exactly this flap). A fixed
+// timestamp decodes the same frame every time. The duration-based fallback below
+// exists only for hypothetical future clips that carry a real duration.
+async function ensureVideosPainted(page: import('playwright').Page, seek?: number) {
+  await page.evaluate(async (fixedSeek) => {
+    const raf = () => new Promise<void>((r) => requestAnimationFrame(() => r()))
+    const probe = document.createElement('canvas')
+    probe.width = probe.height = 16
+    const pctx = probe.getContext('2d', { willReadFrequently: true })
+    // True once the video holds a decoded, non-transparent current frame — i.e.
+    // the tile (and any Highlight DiffCanvas drawn from it) will paint real pixels
+    // rather than the checkerboard. drawImage works on hidden videos too, so this
+    // also covers the Highlight modes that keep the <video>s off-screen.
+    const hasFrame = (v: HTMLVideoElement) => {
+      if (!pctx || !v.videoWidth || !v.videoHeight) return false
+      try {
+        pctx.clearRect(0, 0, 16, 16)
+        pctx.drawImage(v, 0, 0, 16, 16)
+        const d = pctx.getImageData(0, 0, 16, 16).data
+        for (let i = 3; i < d.length; i += 4) if (d[i] !== 0) return true
+      } catch { /* not decodable yet (or briefly tainted mid-seek) */ }
+      return false
+    }
+    const paint = async (v: HTMLVideoElement) => {
+      v.pause()
+      // Fully buffer the clip before seeking. This is the crux of the fix: a webm
+      // below the fold loads under preload="auto" but stays PARTIALLY buffered, and
+      // VP9 decode off a partial buffer is nondeterministic — the seeked frame
+      // lands a frame off (light theme's moving progress bar) or simply decodes
+      // with slight pixel noise (dark theme), so the tile flapped run to run while
+      // the fully-buffered dedicated shots stayed stable. Kick one load() (NOT one
+      // per tick — repeated load() restarts buffering and never converges) then
+      // wait for HAVE_ENOUGH_DATA. These clips are tiny (~9KB / 2s) so it's quick.
+      try { v.load() } catch { /* ignore */ }
+      for (let frame = 0; frame < 600 && v.readyState < 4 /* HAVE_ENOUGH_DATA */; frame++) await raf()
+      const target = fixedSeek != null
+        ? fixedSeek
+        : (Number.isFinite(v.duration) && v.duration > 0 ? v.duration * 0.6 : 0.05)
+      // Exit only when the seek has fully SETTLED on a decoded frame: a non-
+      // transparent frame (hasFrame) is necessary but not sufficient, because
+      // mid-seek the element can briefly paint an intermediate frame. Gate on
+      // !v.seeking so we wait for the seek to complete; once it has, currentTime
+      // holds the deterministic snapped-to-nearest frame and a paused clip (play()
+      // is no-op'd) stays there. Re-issue the seek only if it clearly never took
+      // (idle but > 0.5s off target — a frame-boundary snap is far smaller).
+      for (let frame = 0; frame < 360; frame++) {
+        if (!v.seeking) {
+          if (Math.abs(v.currentTime - target) > 0.5) {
+            try { v.currentTime = target } catch { /* not seekable yet */ }
+          } else if (hasFrame(v)) break
+        }
+        await Promise.race([
+          new Promise<void>((r) => v.requestVideoFrameCallback ? v.requestVideoFrameCallback(() => r()) : r()),
+          raf(),
+        ])
+      }
+    }
+    await Promise.all(Array.from(document.querySelectorAll('video')).map(paint))
+  }, seek ?? null)
+}
+
 console.log(`Rendering Hydra UI for ref ${REF} from ${SRC}`)
 
 // 1. Build the frontend. The Go binary embeds web/dist (web/embed.go), so this
@@ -1265,14 +1351,14 @@ try {
         path: '/project/sim-project/agent/agent-1',
         viewport: { width: 1280, height: 1000 },
         imageDiffMode: 'side-by-side',
-        videoDiff: { seek: 1.2 },
+        videoDiff: { seek: VIDEO_SEEK },
       },
       {
         name: 'artifact-video-diff',
         path: '/project/sim-project/agent/agent-1',
         viewport: { width: 1280, height: 1000 },
         imageDiffMode: 'ab',
-        videoDiff: { seek: 1.2, highlight: true },
+        videoDiff: { seek: VIDEO_SEEK, highlight: true },
       },
       // ── Mobile / small-screen layout (MOBILE_PLAN.md Phase 1) ───────────────
       // The same UI captured at phone width (390×844) to document the responsive
@@ -1895,22 +1981,10 @@ try {
           // time out there.
           await page.waitForSelector('video', { state: 'attached' })
           await settle(page)
-          // Seek every video to the shared time and wait for the frame to land.
-          // play() is a no-op (init script), so the pair stays paused on the
-          // seeked frame, which is identical across renders (byte-stable). The
-          // fallback timeout must exceed 4000ms — the init script collapses
-          // shorter timers to 0, which would resolve before the seek completes.
-          await page.evaluate(async (t) => {
-            const vids = Array.from(document.querySelectorAll('video'))
-            await Promise.all(vids.map((v) => new Promise<void>((res) => {
-              v.pause()
-              if (Math.abs(v.currentTime - t) < 0.001) return res()
-              const done = () => { v.removeEventListener('seeked', done); res() }
-              v.addEventListener('seeked', done)
-              try { v.currentTime = t } catch { res() }
-              setTimeout(res, 5000)
-            })))
-          }, pg.videoDiff.seek)
+          // Seek every video to the shared time and wait for a real decoded frame
+          // to land. play() is a no-op (init script), so the pair stays paused on
+          // the seeked frame, which is identical across renders (byte-stable).
+          await ensureVideosPainted(page, pg.videoDiff.seek)
           // Pin the .webm file row to the top of the scroll container (same
           // sticky-aware offset technique as scrollTo/expandArtifact).
           await page.evaluate(() => {
@@ -1971,36 +2045,15 @@ try {
           // layout is deterministic, so a fixed wait past it stays byte-stable.
           await page.waitForTimeout(500)
           await settle(page)
-          // Force every .webm tile to decode + paint a frame. Each video sits on a
-          // transparent checkerboard backdrop (checkerStyle), so if it hasn't
-          // decoded a frame by capture time the tile shows through as a bare
-          // checkerboard — a flaky, environment-dependent render. play() is no-op'd
-          // by the init script, so autoplay can't advance the video; only the
-          // browser's own first-frame decode would paint it, and that races the
-          // screenshot. Seeking pins a frame deterministically (same trick the
-          // videoDiff shots use): once metadata is in we seek a little past the
-          // midpoint so the tile shows a representative, mid-animation frame — and
-          // for an overlay mode (onion/slider) before/after actually differ there,
-          // unlike the identical frame 0. The 'seeked' event then confirms the
-          // decode, so the tile reliably paints instead of rendering transparent.
-          await page.evaluate(async () => {
-            const vids = Array.from(document.querySelectorAll('video'))
-            await Promise.all(vids.map((v) => new Promise<void>((res) => {
-              const seekToMid = () => {
-                // 60% of the run lands mid-animation for any clip length; fall back
-                // to a tiny non-zero time when duration isn't known yet (which still
-                // forces a first-frame decode).
-                const t = Number.isFinite(v.duration) && v.duration > 0 ? v.duration * 0.6 : 0.05
-                const done = () => { v.removeEventListener('seeked', done); res() }
-                v.addEventListener('seeked', done)
-                try { v.currentTime = t } catch { res() }
-              }
-              v.pause()
-              if (v.readyState >= 1 /* HAVE_METADATA */) seekToMid()
-              else v.addEventListener('loadedmetadata', seekToMid, { once: true })
-              setTimeout(res, 5000) // fallback must exceed 4000ms (init script zeroes shorter timers)
-            })))
-          })
+          // Force every .webm tile to decode + paint a stable frame (else the tile
+          // shows through to its transparent checkerboard backdrop, or — the bug
+          // that named this branch — lands a frame off run to run). Same fixed
+          // VIDEO_SEEK as the dedicated shots so every webm tile across the suite
+          // shows the identical frame; ensureVideosPainted fully buffers first,
+          // which is what makes this below-the-fold row's seek reproducible. A
+          // mid-clip frame (not 0) keeps the slider/onion before/after visibly
+          // different, which is the whole point of those overlay-mode shots.
+          await ensureVideosPainted(page, VIDEO_SEEK)
           await settle(page)
           // Pin the "screenshots" card to the top of the scroll container so its
           // expanded grid is the focus (same sticky-aware offset as expandArtifact).

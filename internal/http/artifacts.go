@@ -360,9 +360,25 @@ func (s *Server) buildArtifactSet(projectID, name string, leftSpec, rightSpec *c
 	leftErrored := leftMeta.Status == artifacts.StatusError
 	rightErrored := rightMeta.Status == artifacts.StatusError
 
+	// Surface a single side's error as soon as it fails — BEFORE the status switch
+	// below, so a partial failure is reported even while the other side is still
+	// generating. Otherwise a side that failed mid-set carries its persisted log
+	// URL (set above) but no error, and the live log column mistakes its drained
+	// live log + URL for a clean finish and paints it the green "succeeded" border.
+	// When BOTH sides fail the whole set is "error" and set.Error carries the
+	// combined message instead (the per-side fields stay null then, per the API
+	// contract — see left_error/right_error docs).
+	bothFailed := leftErrored && rightErrored
+	if leftErrored && !bothFailed {
+		set.LeftError = nonEmptyPtr(leftMeta.Error)
+	}
+	if rightErrored && !bothFailed {
+		set.RightError = nonEmptyPtr(rightMeta.Error)
+	}
+
 	// Overall status: generating dominates; then a whole-set error only when
 	// BOTH sides failed (nothing to show); otherwise ready. A single side's
-	// failure is surfaced per-side (below) while the other side's images still
+	// failure is surfaced per-side (above) while the other side's images still
 	// render, so a broken "before" build doesn't hide the "after" screenshots.
 	switch {
 	case leftMeta.Status == artifacts.StatusGenerating || rightMeta.Status == artifacts.StatusGenerating:
@@ -383,16 +399,9 @@ func (s *Server) buildArtifactSet(projectID, name string, leftSpec, rightSpec *c
 		set.Status = api.ArtifactSetStatusReady
 	}
 
-	// One side failed but the other rendered: report that side's error so the
-	// panel can warn, and fall through to Compare — the errored side carries no
-	// files, so the surviving side's artifacts surface as added/removed.
-	if leftErrored {
-		set.LeftError = nonEmptyPtr(leftMeta.Error)
-	}
-	if rightErrored {
-		set.RightError = nonEmptyPtr(rightMeta.Error)
-	}
-
+	// One side failed but the other rendered: fall through to Compare — the
+	// errored side carries no files, so the surviving side's artifacts surface as
+	// added/removed (the per-side error was set above so the panel can warn).
 	deltas := mgr.Compare(leftMeta, rightMeta)
 	set.Changed = artifacts.AnyChanged(deltas)
 	for _, d := range deltas {
