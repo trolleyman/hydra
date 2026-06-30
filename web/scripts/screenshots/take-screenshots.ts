@@ -277,20 +277,31 @@ async function ensureVideosPainted(page: import('playwright').Page, seek?: numbe
     }
     const paint = async (v: HTMLVideoElement) => {
       v.pause()
-      // Wait for metadata so the clip is seekable before we set currentTime
-      // (a seek issued before the seekable range is known is silently dropped).
-      for (let frame = 0; frame < 360 && v.readyState < 1 /* HAVE_METADATA */; frame++) {
-        try { v.load() } catch { /* ignore */ }
-        await raf()
-      }
+      // Fully buffer the clip before seeking. This is the crux of the fix: a webm
+      // below the fold loads under preload="auto" but stays PARTIALLY buffered, and
+      // VP9 decode off a partial buffer is nondeterministic — the seeked frame
+      // lands a frame off (light theme's moving progress bar) or simply decodes
+      // with slight pixel noise (dark theme), so the tile flapped run to run while
+      // the fully-buffered dedicated shots stayed stable. Kick one load() (NOT one
+      // per tick — repeated load() restarts buffering and never converges) then
+      // wait for HAVE_ENOUGH_DATA. These clips are tiny (~9KB / 2s) so it's quick.
+      try { v.load() } catch { /* ignore */ }
+      for (let frame = 0; frame < 600 && v.readyState < 4 /* HAVE_ENOUGH_DATA */; frame++) await raf()
       const target = fixedSeek != null
         ? fixedSeek
         : (Number.isFinite(v.duration) && v.duration > 0 ? v.duration * 0.6 : 0.05)
-      // ~6s budget at 60fps. Re-apply the seek each tick until a real frame
-      // lands, so a lost decode race self-heals instead of leaving an empty tile.
-      for (let frame = 0; frame < 360 && !hasFrame(v); frame++) {
-        if (Math.abs(v.currentTime - target) > 0.001) {
-          try { v.currentTime = target } catch { /* not seekable yet */ }
+      // Exit only when the seek has fully SETTLED on a decoded frame: a non-
+      // transparent frame (hasFrame) is necessary but not sufficient, because
+      // mid-seek the element can briefly paint an intermediate frame. Gate on
+      // !v.seeking so we wait for the seek to complete; once it has, currentTime
+      // holds the deterministic snapped-to-nearest frame and a paused clip (play()
+      // is no-op'd) stays there. Re-issue the seek only if it clearly never took
+      // (idle but > 0.5s off target — a frame-boundary snap is far smaller).
+      for (let frame = 0; frame < 360; frame++) {
+        if (!v.seeking) {
+          if (Math.abs(v.currentTime - target) > 0.5) {
+            try { v.currentTime = target } catch { /* not seekable yet */ }
+          } else if (hasFrame(v)) break
         }
         await Promise.race([
           new Promise<void>((r) => v.requestVideoFrameCallback ? v.requestVideoFrameCallback(() => r()) : r()),
@@ -1965,14 +1976,14 @@ try {
           // layout is deterministic, so a fixed wait past it stays byte-stable.
           await page.waitForTimeout(500)
           await settle(page)
-          // Force every .webm tile to decode + paint a frame. Each video sits on a
-          // transparent checkerboard backdrop (checkerStyle), so if it hasn't
-          // decoded a frame by capture time the tile shows through as a bare
-          // checkerboard — a flaky, environment-dependent render. Seek to the same
-          // fixed frame the dedicated artifact-video shots use (NOT a duration-
-          // relative one — see ensureVideosPainted: these clips' duration drifts),
-          // so the webm tile decodes the identical frame every run; the before/
-          // after differ there (distinct clips), unlike the shared frame 0.
+          // Force every .webm tile to decode + paint a stable frame (else the tile
+          // shows through to its transparent checkerboard backdrop, or — the bug
+          // that named this branch — lands a frame off run to run). Same fixed
+          // VIDEO_SEEK as the dedicated shots so every webm tile across the suite
+          // shows the identical frame; ensureVideosPainted fully buffers first,
+          // which is what makes this below-the-fold row's seek reproducible. A
+          // mid-clip frame (not 0) keeps the slider/onion before/after visibly
+          // different, which is the whole point of those overlay-mode shots.
           await ensureVideosPainted(page, VIDEO_SEEK)
           await settle(page)
           // Pin the "screenshots" card to the top of the scroll container so its
