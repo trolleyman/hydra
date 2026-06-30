@@ -21,6 +21,12 @@ function AgentPage() {
 
   const isMounted = useRef(true)
   const agentIdRef = useRef(agentId)
+  // Whether this agent was last seen live AND armed for auto-merge. Used to spot a
+  // background merge completing: an armed agent we were watching that then drops
+  // out of the live list was merged by the daemon, so we redirect straight to the
+  // project view rather than briefly resolving it as an archived record (which
+  // leaves the user on a loading spinner mid-fetch). Reset when the agent changes.
+  const wasLiveArmedRef = useRef(false)
 
   useEffect(() => {
     isMounted.current = true
@@ -31,17 +37,37 @@ function AgentPage() {
 
   useEffect(() => {
     agentIdRef.current = agentId
+    wasLiveArmedRef.current = false
   }, [agentId])
 
   // Live agents come from the polled list; archived (killed/merged) agents from
   // the lazily-loaded history list. On a cold load / hard refresh to an archived
   // agent's URL, neither is populated, so we fall back to a one-shot getAgent
   // (which returns archived records too) before declaring the agent missing.
-  const agent = agents.find((a) => a.id === agentId) ?? archived.find((a) => a.id === agentId)
+  const liveAgent = agents.find((a) => a.id === agentId)
+  const agent = liveAgent ?? archived.find((a) => a.id === agentId)
 
   const project = projects.find((p) => p.id === projectId)
   const agentsLoaded =
     project != null && !loading && agents.every((a) => a.project_path === project.path)
+
+  // Track whether the live agent is armed for auto-merge so a later disappearance
+  // can be recognised as a background merge (see the redirect effect below).
+  useEffect(() => {
+    if (liveAgent) wasLiveArmedRef.current = !!liveAgent.merge_when_green
+  }, [liveAgent])
+
+  // When an agent we were watching live was armed for auto-merge and has since
+  // left the live list (same-project refresh), the daemon merged it in the
+  // background. Redirect to the project view to deselect it, rather than letting
+  // the archived-fetch path below leave the user staring at a loading spinner.
+  // notifyBackgroundMerges (agentStore) shows the "merged" toast on the same poll.
+  useEffect(() => {
+    if (liveAgent || !agentsLoaded || !wasLiveArmedRef.current) return
+    if (!isMounted.current || agentId !== agentIdRef.current) return
+    saveProjectView(projectId, { kind: 'project' })
+    navigate({ to: '/project/$projectId', params: { projectId } })
+  }, [liveAgent, agentsLoaded, projectId, agentId, navigate])
 
   const [archivedFetch, setArchivedFetch] = useState<'idle' | 'loading' | 'missing'>('idle')
   useEffect(() => { setArchivedFetch('idle') }, [agentId])
