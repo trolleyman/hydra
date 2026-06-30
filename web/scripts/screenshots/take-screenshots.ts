@@ -564,8 +564,17 @@ try {
       // by opening the merge dropdown and choosing Force merge.
       { name: 'tests-force-merge-confirm', path: '/project/sim-project/agent/agent-2', viewportOnly: true, clicks: ['button[aria-label="Merge options"]', 'button:has-text("Force merge")'] },
       // Auto-merge armed: agent-md (running + merge_when_green) shows the green
-      // "merges when green" chip and a "Queued — merge when green" primary action.
+      // "merges when green" chip and a de-emphasised "Cancel merge" action with a
+      // spinner (the queue is waiting on the tests).
       { name: 'tests-merge-when-green', path: '/project/sim-project/agent/agent-md', viewportOnly: true },
+      // The merge-gate dialog (PLAN #68): clicking the plain "Merge" button on
+      // agent-2's failing verdict opens the Force-merge / Queue-merge choice with an
+      // explanation of the soft gate, instead of bouncing off a server 409.
+      { name: 'tests-merge-gate-dialog', path: '/project/sim-project/agent/agent-2', viewportOnly: true, click: 'button[aria-label="Merge"]' },
+      // A fully-expanded tests runner card: agent-2's card opened with its "passing"
+      // roll-up also expanded, so the failing cases, the passing case and the
+      // skipped row are all visible together below the Changes header.
+      { name: 'tests-card-expanded', path: '/project/sim-project/agent/agent-2', scrollTo: 'Changes', clicks: ['button:has(svg.lucide-flask-conical)', 'button:has-text("1 passing")'] },
       // The agent-type picker dropdown, opened on the compact ("mini") spawn box
       // in the sidebar. The picker is an icon-only trigger (the active agent's
       // brand mark) that opens a menu listing every agent type as its canonical

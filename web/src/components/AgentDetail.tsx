@@ -17,7 +17,7 @@ import { uploadBlobUrl } from '../api/uploads'
 import type { Attachment } from '../lib/spawnDrafts'
 import { DiffViewer } from '../DiffViewer'
 import { formatStartedAgo, agentStatusBadge, archivedEndStateBadge, agentDotClass, agentDotAnimate, agentTypePill } from './AgentComponents'
-import { LoaderCircle, Merge, Trash2, Tag, RotateCcw, Pencil, TerminalSquare, Mail, ShieldAlert, ShieldCheck, ShieldOff, AlertTriangle, Clock, X } from 'lucide-react'
+import { LoaderCircle, Merge, Trash2, Tag, RotateCcw, Pencil, TerminalSquare, Mail, ShieldAlert, ShieldCheck, ShieldOff, AlertTriangle, Clock } from 'lucide-react'
 import { TestVerdictChip } from './TestVerdict'
 import { Tooltip } from './Tooltip'
 import { Badge } from './Badge'
@@ -514,18 +514,10 @@ export function AgentDetail({
         const fileList = files.length ? `\n\n${files.map((f) => `• ${f}`).join('\n')}` : ''
         useDialogStore.getState().show({ title: 'Uncommitted Changes in Target', message: `Can't merge: the merge target (${agent.base_branch}) has uncommitted changes that the merge would overwrite. Commit or stash them, then try again.${fileList}`, type: 'warning' })
       } else if (body?.error === 'tests_failing' || body?.error === 'tests_errored') {
-        // The test gate blocked it (the verdict moved since the chip rendered).
+        // The soft gate blocked it (the verdict moved since the button rendered).
+        // Surface the same Force / Queue choice dialog the button opens proactively.
         const n = (body as { failing_tests?: number }).failing_tests ?? 0
-        const failing = body.error === 'tests_failing'
-        useDialogStore.getState().show({
-          title: failing ? `Force merge with ${n} failing test${n !== 1 ? 's' : ''}?` : 'Merge with no test verdict?',
-          message: failing
-            ? `${n || 'Some'} test${n === 1 ? '' : 's'} failing on this commit — their failures will land on ${agent.base_branch}.`
-            : `Tests couldn't run (or are still running) on this commit — there's no verdict, not a pass. Merge into ${agent.base_branch} anyway?`,
-          type: 'warning',
-          confirmLabel: failing ? 'Force merge' : 'Merge anyway',
-          onConfirm: () => void executeMerge(true),
-        })
+        confirmMergeGate(body.error === 'tests_failing' ? 'failing' : 'errored', n)
       } else if (body?.error === 'merge_conflict') {
         useDialogStore.getState().show({ title: 'Merge Conflict', message: `CONFLICT: Merge failed due to git conflicts. Please resolve them manually or update from base.`, type: 'warning' })
       } else {
@@ -535,6 +527,39 @@ export function AgentDetail({
       useToastStore.getState().dismiss(toastId)
       setMerging(false)
     }
+  }
+
+  // confirmMergeGate opens the rich merge-gate dialog (PLAN #68): it explains why
+  // the merge is gated (tests failing / still running / no verdict) and offers
+  // Force merge now vs Queue merge when green, so the choice is explicit rather
+  // than a bare error. Used both proactively (the Merge button when the verdict is
+  // known un-green) and reactively (a soft-gate 409 when the verdict moved).
+  function confirmMergeGate(kind: 'failing' | 'errored' | 'running', n: number) {
+    const toBranch = agent.base_branch || 'base'
+    const fromBranch = agent.branch_name || `hydra/${agent.id}`
+    const title =
+      kind === 'failing'
+        ? `${n || 'Some'} test${n === 1 ? '' : 's'} failing`
+        : kind === 'running'
+          ? 'Tests are still running'
+          : "Tests couldn't run"
+    const message =
+      kind === 'failing'
+        ? `Merging is soft-gated while tests fail. Force the merge to land the failures on ${toBranch} now, or queue it to merge automatically once the tests pass.`
+        : kind === 'running'
+          ? `There's no verdict for this commit yet. Queue the merge to land it the moment tests pass, or force it through now without waiting.`
+          : `The runner errored (or produced no verdict) for this commit — that's not a pass. Force the merge into ${toBranch} anyway, or queue it to merge once tests pass.`
+    useDialogStore.getState().show({
+      title,
+      message,
+      type: 'warning',
+      variant: 'mergeGate',
+      details: { fromBranch, toBranch, testStatus: kind, testFailed: n },
+      confirmLabel: 'Queue merge when green',
+      onConfirm: () => void armMerge(),
+      secondaryLabel: 'Force merge',
+      onSecondary: () => void executeMerge(true),
+    })
   }
 
   // confirmForceMerge shows the override confirm for a failing/errored verdict,
@@ -579,6 +604,13 @@ export function AgentDetail({
   // ("merge when green"), the button toggles the queue off instead.
   function handleMerge() {
     if (agent.merge_when_green === true) return void cancelMerge()
+    // Don't wait for the server to 409: when the verdict is already known to be
+    // un-green, open the merge-gate dialog (Force / Queue + explanation) directly.
+    const verdict = agent.tests?.status
+    const n = agent.tests?.failed ?? 0
+    if (verdict === 'failing') return confirmMergeGate('failing', n)
+    if (verdict === 'errored') return confirmMergeGate('errored', n)
+    if (verdict === 'running') return confirmMergeGate('running', n)
     return confirmNormalMerge()
   }
 
@@ -800,16 +832,16 @@ export function AgentDetail({
 
   const mergeAction: AgentTopBarAction = armed
     ? {
-        label: 'Queued — merge when green',
-        icon: <Clock className="w-4 h-4" />,
+        // Queued to auto-merge when tests pass: a quieter, de-emphasised button
+        // (neutral, not the emerald CTA) with a spinner to read as "waiting", whose
+        // click cancels the queue. Force-merge-now stays in its dropdown.
+        label: 'Cancel merge',
+        icon: <LoaderCircle className="w-4 h-4 animate-spin" />,
         onClick: () => void cancelMerge(),
-        variant: 'primary',
+        variant: undefined,
         disabled: busy,
         shortcut: SHORTCUT_MERGE,
-        menu: [
-          { label: 'Force merge now', icon: <AlertTriangle className="w-4 h-4" />, onClick: forceMerge, danger: true, disabled: busy },
-          { label: 'Cancel queued merge', icon: <X className="w-4 h-4" />, onClick: () => void cancelMerge(), disabled: busy },
-        ],
+        menu: [{ label: 'Force merge now', icon: <AlertTriangle className="w-4 h-4" />, onClick: forceMerge, danger: true, disabled: busy }],
       }
     : {
         label: 'Merge',
