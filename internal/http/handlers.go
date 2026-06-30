@@ -1330,6 +1330,10 @@ func (s *Server) UpdateAgentFromBase(ctx context.Context, request api.UpdateAgen
 		}), nil
 	}
 
+	// The merge advanced the branch tip, so the cached test verdict is now
+	// stale. Broadcast so the sidebar/agent detail refetch and reflect the new
+	// status immediately, the same way MergeAgent does above.
+	s.notifyAgentsChanged(projectRoot, false)
 	return api.UpdateAgentFromBase204Response{}, nil
 }
 
