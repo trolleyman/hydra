@@ -127,7 +127,12 @@ timeout_sec = 900
 # it's installed, otherwise falls back to plain `go test` (still red/green from the
 # exit code). The whole module is slow, so allow a generous timeout.
 name = "go"
-command = 'if command -v gotestsum >/dev/null 2>&1; then gotestsum --junitfile "$HYDRA_TEST_OUTPUT/go.xml" -- ./...; else go test ./...; fi'
+# `web/embed.go` has `//go:embed all:dist`, so the `web` package (and everything
+# importing it) won't compile unless web/dist exists. A fresh test checkout hasn't
+# built the frontend, so seed a placeholder to satisfy the embed — the Go tests
+# don't exercise the embedded assets, so a stub is enough and avoids a slow `bun`
+# build on every run (the `web` runner below covers the real frontend).
+command = 'mkdir -p web/dist && touch web/dist/.gitkeep && if command -v gotestsum >/dev/null 2>&1; then gotestsum --junitfile "$HYDRA_TEST_OUTPUT/go.xml" -- ./...; else go test ./...; fi'
 timeout_sec = 900
 
 [[tests]]
