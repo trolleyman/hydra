@@ -9,6 +9,10 @@ pre_prompt = """
 # artifact_concurrency = 2
 ## pre-generate a head's artifacts in the background once it settles, so a diff is ready before you open it; set false to generate only when viewing — foreground generation and the concurrency cap still apply (default true).
 # artifact_prefetch = true
+## max test-runner generations run at once; lower it for heavy suites, or 0 for unlimited (default 1).
+# test_concurrency = 1
+## re-run a head's test suites in the background when its branch-tip verdict is missing or stale, so it's ready before you open the panel; set false to run only on open / at merge — foreground runs and the concurrency cap still apply (default true).
+# test_prefetch = true
 
 [sandbox]
 ## extra paths made writable in the sandbox (added to the built-in defaults).
