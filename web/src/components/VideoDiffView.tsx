@@ -245,16 +245,17 @@ function VideoLayer({ url, attach, style }: {
 // A hidden in-flow video that gives the overlay box its intrinsic size (the
 // absolute layers can't), mirroring the image modes' hidden <img> sizer. Metadata
 // is enough to know the dimensions, so it doesn't autoplay or fully buffer.
-function VideoSizer({ url }: { url: string }) {
-  return <video src={url} muted preload="metadata" className={`${IMG_CLASS} block`} style={{ visibility: 'hidden' }} />
+function VideoSizer({ url, aspect }: { url: string; aspect?: number }) {
+  return <video src={url} muted preload="metadata" className={`${IMG_CLASS} block`} style={{ visibility: 'hidden', aspectRatio: aspect }} />
 }
 
 // Side-by-side cell, the video twin of ImageCell. flex-1 so the pair splits the
 // tile width evenly and each width-driven (w-full) frame fills its half.
-function VideoCell({ url, attach, label }: {
+function VideoCell({ url, attach, label, aspect }: {
   url?: string | null
   attach: (el: HTMLVideoElement | null) => void
   label: string
+  aspect?: number
 }) {
   return (
     <div className="flex-1 min-w-0">
@@ -263,7 +264,7 @@ function VideoCell({ url, attach, label }: {
         // A plain click opens the .webm in a new tab via the <a>; the frame fills
         // the cell width and its height follows the aspect ratio.
         <a href={url} target="_blank" rel="noreferrer" className="block">
-          <VideoNode url={url} attach={attach} className={IMG_CLASS} style={checkerStyle} />
+          <VideoNode url={url} attach={attach} className={IMG_CLASS} style={{ ...checkerStyle, aspectRatio: aspect }} />
         </a>
       ) : (
         <NoVideo className="w-full h-32 rounded-md border border-gray-200 dark:border-gray-700" />
@@ -272,11 +273,11 @@ function VideoCell({ url, attach, label }: {
   )
 }
 
-function VideoSideBySide({ controller, left, right }: { controller: Controller; left?: string | null; right?: string | null }) {
+function VideoSideBySide({ controller, left, right, aspect }: { controller: Controller; left?: string | null; right?: string | null; aspect?: number }) {
   return (
     <div className="flex gap-3 w-full">
-      <VideoCell url={left} attach={controller.attachLeft} label="Before" />
-      <VideoCell url={right} attach={controller.attachRight} label="After" />
+      <VideoCell url={left} attach={controller.attachLeft} label="Before" aspect={aspect} />
+      <VideoCell url={right} attach={controller.attachRight} label="After" aspect={aspect} />
     </div>
   )
 }
@@ -288,7 +289,7 @@ function VideoSideBySide({ controller, left, right }: { controller: Controller; 
 // recomputed continuously as the synced pair plays/scrubs, on top of whichever side
 // is shown — so the changes stay marked as you flip Before↔After. Highlight is
 // disabled when only one side exists (an added/removed file — nothing to diff).
-function VideoAB({ controller, left, right }: { controller: Controller; left?: string | null; right?: string | null }) {
+function VideoAB({ controller, left, right, aspect }: { controller: Controller; left?: string | null; right?: string | null; aspect?: number }) {
   const canDiff = !!left && !!right
   // Panel-wide controls (diff viewer) win when present; else this tile's own toggles
   // (repository browser). Mirrors the image ABSwitch — see ABControlsContext.
@@ -387,7 +388,7 @@ function VideoAB({ controller, left, right }: { controller: Controller; left?: s
         onClick={flip}
         onAuxClick={makeAuxOpen(() => (view === 'before' ? left : right) || sizer)}
       >
-        <VideoSizer url={sizer} />
+        <VideoSizer url={sizer} aspect={aspect} />
         <VideoLayer url={right} attach={controller.attachRight} style={{ visibility: view === 'before' ? 'hidden' : 'visible' }} />
         <VideoLayer url={left} attach={controller.attachLeft} style={{ visibility: view === 'before' ? 'visible' : 'hidden' }} />
         {showHighlight && <canvas ref={canvasRef} className={`${OVERLAY_CLASS} pointer-events-none border-0`} />}
@@ -398,7 +399,7 @@ function VideoAB({ controller, left, right }: { controller: Controller; left?: s
 
 // Before/after wipe (twin of SliderCompare): "after" is the base, "before" sits on
 // top clipped to the region left of the handle.
-function VideoSlider({ controller, left, right }: { controller: Controller; left?: string | null; right?: string | null }) {
+function VideoSlider({ controller, left, right, aspect }: { controller: Controller; left?: string | null; right?: string | null; aspect?: number }) {
   const [pos, setPos] = useState(50)
   const [dragging, setDragging] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -443,7 +444,7 @@ function VideoSlider({ controller, left, right }: { controller: Controller; left
     >
       <span className={`${TAG_CLASS} left-1`}>Before</span>
       <span className={`${TAG_CLASS} right-1`}>After</span>
-      <VideoSizer url={sizer} />
+      <VideoSizer url={sizer} aspect={aspect} />
       <VideoLayer url={right} attach={controller.attachRight} />
       <VideoLayer url={left} attach={controller.attachLeft} style={{ clipPath: `inset(0 ${100 - pos}% 0 0)` }} />
       <div className="absolute inset-y-0 w-0.5 bg-white shadow-[0_0_0_1px_rgba(0,0,0,0.4)] pointer-events-none" style={{ left: `${pos}%` }}>
@@ -455,7 +456,7 @@ function VideoSlider({ controller, left, right }: { controller: Controller; left
 
 // Onion skin (twin of OnionCompare): "before" base with "after" blended over it at
 // a slider-controlled opacity.
-function VideoOnion({ controller, left, right }: { controller: Controller; left?: string | null; right?: string | null }) {
+function VideoOnion({ controller, left, right, aspect }: { controller: Controller; left?: string | null; right?: string | null; aspect?: number }) {
   const [opacity, setOpacity] = useState(50)
   const sizer = (right ?? left) as string
   return (
@@ -464,7 +465,7 @@ function VideoOnion({ controller, left, right }: { controller: Controller; left?
         className="relative w-full select-none"
         onAuxClick={makeAuxOpen(() => (opacity >= 50 ? right : left) || sizer)}
       >
-        <VideoSizer url={sizer} />
+        <VideoSizer url={sizer} aspect={aspect} />
         <VideoLayer url={left} attach={controller.attachLeft} />
         <VideoLayer url={right} attach={controller.attachRight} style={{ opacity: opacity / 100 }} />
       </div>
@@ -537,13 +538,13 @@ function VideoTransport({ controller }: { controller: Controller }) {
 // shared transport. The mode set mirrors the image viewer so a .webm artifact honours
 // the same diff-viewer setting; the controller (one per file row) keeps the pair in
 // lockstep across whichever mode is showing.
-export function VideoDiffView({ left, right, mode, fps }: { left?: string | null; right?: string | null; mode: ImageDiffMode; fps?: number | null }) {
+export function VideoDiffView({ left, right, mode, fps, aspect }: { left?: string | null; right?: string | null; mode: ImageDiffMode; fps?: number | null; aspect?: number }) {
   const controller = useVideoSync(fps)
   let body: React.ReactNode
-  if (mode === 'side-by-side' || (!left && !right)) body = <VideoSideBySide controller={controller} left={left} right={right} />
-  else if (mode === 'ab') body = <VideoAB controller={controller} left={left} right={right} />
-  else if (mode === 'slider') body = <VideoSlider controller={controller} left={left} right={right} />
-  else body = <VideoOnion controller={controller} left={left} right={right} />
+  if (mode === 'side-by-side' || (!left && !right)) body = <VideoSideBySide controller={controller} left={left} right={right} aspect={aspect} />
+  else if (mode === 'ab') body = <VideoAB controller={controller} left={left} right={right} aspect={aspect} />
+  else if (mode === 'slider') body = <VideoSlider controller={controller} left={left} right={right} aspect={aspect} />
+  else body = <VideoOnion controller={controller} left={left} right={right} aspect={aspect} />
   return (
     <div className="min-w-0">
       {body}
