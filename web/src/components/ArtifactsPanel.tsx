@@ -6,7 +6,7 @@ import { ArtifactFile as ArtifactFileNS } from '../api'
 import { LoaderCircle, Image as ImageIcon, ChevronDown, TriangleAlert, RefreshCw, ScrollText, SquarePlus, SquareMinus, SquareDot } from 'lucide-react'
 import { InfoTooltip } from './InfoTooltip'
 import { CollapsibleCard, MELT_BTN } from './CollapsibleCard'
-import { loadArtifactPrefs, saveArtifactPrefs, loadTagFilter, saveTagFilter, clampChangeThreshold, type ArtifactTagFilter } from '../lib/artifactPrefs'
+import { loadArtifactPrefs, saveArtifactPrefs, loadTagFilter, saveTagFilter, loadArtifactChrome, saveArtifactChrome, clampChangeThreshold, type ArtifactTagFilter, type ArtifactChrome } from '../lib/artifactPrefs'
 import { computeVisibleFiles, filterIsActive, effectiveChangeType } from '../lib/artifactFilter'
 import { ArtifactFilterBar, TagBadge } from './ArtifactFilterBar'
 import { stripAnsi } from '../lib/ansi'
@@ -14,6 +14,7 @@ import { type ArtifactSpans, BASE_ARTIFACT_COLUMNS, defaultSpanForAspect } from 
 import { VideoDiffView, isVideoArtifact, VIDEO_MIN_TILE_PX } from './VideoDiffView'
 import { ImageDiffView, SegmentedToggle, ABControlsContext, type ImageDiffMode, type ArtifactABControls } from './ArtifactImageDiff'
 import type { LightboxImage } from './ImageLightbox'
+import { useImageLightboxStore } from '../stores/imageLightboxStore'
 import { LiveLogPanes, PersistedLogView } from './ArtifactLogView'
 
 const CHANGE_LABEL: Record<string, string> = {
@@ -55,6 +56,23 @@ const MASONRY_GAP = 12
 // the first beat after mount (so the initial bulk layout doesn't animate in).
 const TILE_EASE = 'cubic-bezier(0.34, 1.56, 0.64, 1)'
 const TILE_TRANSITION = `left 220ms ${TILE_EASE}, top 220ms ${TILE_EASE}, width 280ms ${TILE_EASE}`
+
+// Resize "stickiness": the extra fraction of a column you must drag past the halfway
+// point before a tile's span snaps to the next/previous column. It's a hysteresis
+// deadband centred on each column boundary, so a tile whose width sits right on a
+// boundary holds its current span instead of flip-flopping as the pointer jitters —
+// the size feels sticky to where it is, and only commits to a new column once you've
+// clearly committed to it. 0.3 ≈ a third of a column of slack on each side.
+const RESIZE_STICK = 0.3
+
+// mediaAspect returns a file's aspect ratio (width / height) from the artifact
+// metadata, or undefined when the server didn't record dimensions. Passed to the
+// differ to reserve the media box height via CSS aspect-ratio, so a tile lays out
+// at its final size before the image downloads (no reflow on load). dpi cancels
+// out of a ratio, so it isn't needed here.
+function mediaAspect(file: ArtifactFile): number | undefined {
+  return file.width && file.height ? file.width / file.height : undefined
+}
 
 function FileRow({ file, mode, changeThreshold = 0, gallery, index }: {
   file: ArtifactFile; mode: ImageDiffMode; changeThreshold?: number
@@ -98,9 +116,9 @@ function FileRow({ file, mode, changeThreshold = 0, gallery, index }: {
           header above just selects the file name. */}
       <div data-tile-drag>
         {isVideoArtifact(file.name) ? (
-          <VideoDiffView left={file.left_url} right={file.right_url} mode={mode} fps={file.fps} />
+          <VideoDiffView left={file.left_url} right={file.right_url} mode={mode} fps={file.fps} aspect={mediaAspect(file)} />
         ) : (
-          <ImageDiffView left={file.left_url} right={file.right_url} mode={mode} name={file.name} gallery={gallery} index={index} />
+          <ImageDiffView left={file.left_url} right={file.right_url} mode={mode} name={file.name} aspect={mediaAspect(file)} gallery={gallery} index={index} />
         )}
       </div>
     </div>
@@ -218,8 +236,21 @@ export function MasonryGrid({ items, spanScale = 1, scale = 1, spans, onSpanChan
   const [heights, setHeights] = useState<Record<string, number>>({})
   // The tile currently being edge/body-dragged: its live (continuous, pixel) width
   // so it tracks the pointer instead of jumping column-by-column. The column span is
-  // only committed (and siblings only reflow) on release — see startResize.
-  const [drag, setDrag] = useState<{ key: string; width: number } | null>(null)
+  // committed live as the width crosses a column boundary (with stickiness), and the
+  // siblings reflow at each snap — see startResize.
+  // `col` is the column the dragged tile started in: the live span commits below
+  // would otherwise let the masonry packer re-home the dragged tile to a different
+  // start column the moment it snaps wider, making it jump out from under the pointer.
+  // Pinning it to its start column (see placement) keeps it anchored — it grows
+  // rightward from a fixed left edge while the siblings reflow around it.
+  const [drag, setDrag] = useState<{ key: string; width: number; col: number } | null>(null)
+  // The key of the tile currently being resized, read by the ResizeObserver below to
+  // freeze that tile's measured height for the duration of the drag. A tile grows
+  // taller as it widens (its media is w-full with a fixed aspect ratio), and letting
+  // that live height feed back into placement would shove the tiles beneath it around
+  // continuously as you drag. Holding the height constant means siblings only move
+  // when the span actually snaps to a new column count — not while the pointer moves.
+  const resizeKeyRef = useRef<string | null>(null)
   // Gate the reflow transition off for the first beat so the initial bulk layout (and
   // its first height-measure pass) snaps into place rather than animating in.
   const [ready, setReady] = useState(false)
@@ -241,6 +272,11 @@ export function MasonryGrid({ items, spanScale = 1, scale = 1, spans, onSpanChan
             const el = e.target as HTMLElement
             const key = el.dataset.mkey
             if (!key) continue
+            // Skip the tile that's actively being resized: its width (and so its
+            // height) is changing continuously under the pointer, and folding that
+            // live height back into the layout would jitter every tile beneath it.
+            // It re-measures naturally once the drag ends (resizeKeyRef cleared).
+            if (key === resizeKeyRef.current) continue
             const h = el.offsetHeight
             if (next[key] !== h) {
               if (next === prev) next = { ...prev }
@@ -344,8 +380,23 @@ export function MasonryGrid({ items, spanScale = 1, scale = 1, spans, onSpanChan
     for (const it of items) {
       const h = heights[it.key] ?? FALLBACK_H
       const s = spanOf(it)
-      // Best start column: minimise the tallest of the columns this tile would cover.
       let bestC = 0
+      if (drag && drag.key === it.key) {
+        // The tile being dragged is pinned to its start column (clamped so a wider
+        // span can't run off the right edge) rather than re-packed, so a live span
+        // snap grows it in place instead of teleporting it under the pointer. Its top
+        // still comes from the columns it now covers, which is stable since the tiles
+        // placed before it are unaffected.
+        bestC = Math.max(0, Math.min(drag.col, cols - s))
+        let top = 0
+        for (let k = bestC; k < bestC + s; k++) top = Math.max(top, bottoms[k])
+        const left = bestC * (colW + gap)
+        const tileW = s * colW + (s - 1) * gap
+        pos[it.key] = { left, top, width: tileW, span: s }
+        for (let k = bestC; k < bestC + s; k++) bottoms[k] = top + h + gap
+        continue
+      }
+      // Best start column: minimise the tallest of the columns this tile would cover.
       let bestTop = Infinity
       for (let c = 0; c + s <= cols; c++) {
         let top = 0
@@ -360,34 +411,70 @@ export function MasonryGrid({ items, spanScale = 1, scale = 1, spans, onSpanChan
     }
     const height = bottoms.length ? Math.max(...bottoms) - gap : 0
     return { pos, height: Math.max(0, height) }
-  }, [items, heights, layout, spanOf])
+    // drag.key/drag.col (not the whole drag object) so a width-only change while
+    // dragging doesn't re-pack the grid — only a start/end or a span snap does.
+  }, [items, heights, layout, spanOf, drag?.key, drag?.col])
 
   // Set while a body drag (below) is resizing a tile, so the trailing click can be
   // swallowed before the media reacts to it. Holds the key of the tile being dragged.
   const draggedKeyRef = useRef<string | null>(null)
 
-  // Start a live resize from `startSpan`, anchored at pointer `startX`. The tile's
-  // width follows the pointer continuously (so it grows *before* it would tip into
-  // the next column — it overlaps its neighbours, lifted above them); the span is
-  // only quantised and committed on release, when the persisted override updates and
-  // the siblings reflow + ease out of the way. Returns move/finish, or null if the
-  // grid can't resize right now. `key` is the tile's file name; the override persists
-  // under its scoped key (see spanKey).
+  // Start a live resize from `startSpan`, anchored at pointer `startX`. The column span
+  // is quantised with stickiness (see RESIZE_STICK) and committed the instant it snaps
+  // to a new column — live, as you drag past each boundary, not deferred to release.
+  // The dragged tile itself renders at that snapped span width (not the raw pointer
+  // position), so it holds its size through the deadband and flips a whole column at a
+  // time: it resists, then snaps, rather than scaling smoothly under the cursor. The
+  // siblings reflow at those same snap points, and nothing rearranges between them (the
+  // dragged tile's height is frozen too; see resizeKeyRef). Returns move/finish, or null
+  // if the grid can't resize right now. `key` is the tile's file name; the override
+  // persists under its scoped key (see spanKey).
   const startResize = (key: string, startSpan: number, startX: number) => {
     const unit = layout.colW + layout.gap
     if (unit <= 0 || !onSpanChange) return null
     const startWidth = startSpan * layout.colW + (startSpan - 1) * layout.gap
     const minW = layout.colW
     const maxW = layout.cols * layout.colW + (layout.cols - 1) * layout.gap
-    let finalSpan = startSpan
+    // Freeze this tile's measured height for the drag's duration so its siblings hold
+    // still as it widens — they only move when its span snaps below.
+    resizeKeyRef.current = key
+    // The column the tile currently sits in, so placement can pin it there (a snap to
+    // a wider span must not let the packer relocate it under the pointer).
+    const startCol = unit > 0 ? Math.round((placement.pos[key]?.left ?? 0) / unit) : 0
+    let liveSpan = startSpan
     const move = (clientX: number) => {
       const w = Math.max(minW, Math.min(maxW, startWidth + (clientX - startX)))
-      finalSpan = Math.max(1, Math.min(layout.cols, Math.round((w + layout.gap) / unit)))
-      setDrag({ key, width: w })
+      // Quantise the live width to a column span with hysteresis: hold `liveSpan`
+      // until the pointer is dragged clearly past the midpoint toward the next or
+      // previous column (a RESIZE_STICK-wide deadband around each boundary), so a
+      // tile resting near a column edge doesn't flip-flop. A fast drag that overshoots
+      // a whole column still jumps straight there — the deadband only catches the ±1
+      // neighbour right at the boundary.
+      const spanFloat = (w + layout.gap) / unit
+      let target = Math.round(spanFloat)
+      if (target > liveSpan && spanFloat < liveSpan + 0.5 + RESIZE_STICK) target = liveSpan
+      else if (target < liveSpan && spanFloat > liveSpan - 0.5 - RESIZE_STICK) target = liveSpan
+      target = Math.max(1, Math.min(layout.cols, target))
+      if (target !== liveSpan) {
+        // Snap: commit the new span now so the grid rearranges into the new column
+        // layout the moment the tile reaches it.
+        liveSpan = target
+        onSpanChange(spanKey(key), liveSpan)
+      }
+      // Render the tile at its current *quantised* span width — not the raw pointer
+      // width — so it holds its size through the deadband and snaps a whole column at
+      // a time when the pointer crosses the midpoint. The tile visibly resists, then
+      // flips to the next size (the width transition eases the flip), rather than
+      // scaling continuously under the cursor.
+      const snapW = liveSpan * layout.colW + (liveSpan - 1) * layout.gap
+      setDrag({ key, width: snapW, col: startCol })
     }
     const finish = () => {
+      resizeKeyRef.current = null
       setDrag(null)
-      onSpanChange(spanKey(key), finalSpan)
+      // The span was already committed at the last snap; this just ensures the final
+      // value is persisted (a no-op if unchanged — onSpanChange dedupes).
+      onSpanChange(spanKey(key), liveSpan)
     }
     return { move, finish }
   }
@@ -480,13 +567,15 @@ export function MasonryGrid({ items, spanScale = 1, scale = 1, spans, onSpanChan
             style={{
               left: p.left,
               top: p.top,
-              // While dragging this tile, render its live pointer-tracked width and
-              // lift it above its neighbours (it overflows its column run); otherwise
-              // its placed span width. The transition eases the snap-back + sibling
-              // reflow once released — off during the drag so it tracks the pointer.
+              // While dragging this tile, render its current *snapped* span width (a
+              // whole number of columns, quantised with hysteresis — see
+              // startResize.move) and lift it above its neighbours; otherwise its
+              // placed span width. The width transition stays on so each snap eases
+              // into the next size — the tile holds, then visibly flips a column at a
+              // time rather than scaling smoothly under the cursor.
               width: dragging ? (drag as { width: number }).width : p.width,
               zIndex: dragging ? 20 : undefined,
-              transition: ready && !dragging ? TILE_TRANSITION : undefined,
+              transition: ready ? TILE_TRANSITION : undefined,
             }}
             onPointerDown={bodyResize ? startBodyResize(it.key, p.span) : undefined}
             onClickCapture={bodyResize ? swallowDragClick(it.key) : undefined}
@@ -578,10 +667,12 @@ function FileGrid({ files, mode, scale = 1, spans, onSpanChange, scope, changeTh
       // Videos need a minimum tile width for their transport controls (see
       // VIDEO_MIN_TILE_PX); images have no such chrome.
       minWidthPx: isVideoArtifact(f.name) ? VIDEO_MIN_TILE_PX : undefined,
-      // The slider mode and video both use horizontal drag on the media for their own
-      // gesture, so let those resize via the edge handle only — see MasonryGrid's
-      // bodyResizable. Other images resize by dragging the media (data-tile-drag).
-      bodyResizable: mode !== 'slider' && !isVideoArtifact(f.name),
+      // Only video reserves horizontal body drag for its own transport, so it resizes
+      // via the edge handle only (see MasonryGrid bodyResizable). Every image mode —
+      // including the slider, whose drag now lives solely on the divider line — resizes
+      // by dragging the media (data-tile-drag); the slider divider and onion opacity
+      // control opt out with data-no-tile-drag so they're never hijacked.
+      bodyResizable: !isVideoArtifact(f.name),
     })),
     [files, mode, dims, changeThreshold, diffGallery, galleryIndex],
   )
@@ -977,6 +1068,25 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
   // project/agent changes since this panel is reused across agents.
   const [search, setSearch] = useState('')
   useEffect(() => { setSearch('') }, [projectId, agentId])
+
+  // Lightweight "chrome" (script names + available tags) read from localStorage —
+  // a previous render of this agent (or, as a fallback, any agent in this project)
+  // — so the header, tag filter and collapsed card headers paint immediately, with
+  // NO network round-trip, before the WS snapshot arrives. Re-read when the
+  // project/agent changes (the panel is reused across agents). Saved back below
+  // once a live comparison settles.
+  const [chrome, setChrome] = useState<ArtifactChrome | null>(() => loadArtifactChrome(projectId, agentId))
+  useEffect(() => { setChrome(loadArtifactChrome(projectId, agentId)) }, [projectId, agentId])
+  // Persist the chrome once every script has settled, so the next open of this
+  // agent (or a sibling) renders it instantly. Skipped while anything is still
+  // generating so a partial tag set isn't cached as complete.
+  useEffect(() => {
+    if (!sets || sets.length === 0) return
+    if (sets.some((s) => (s.status as string) === 'generating')) return
+    const names = [...new Set(sets.map((s) => s.name))].sort()
+    const tags = [...new Set(sets.flatMap((s) => s.files.flatMap((f) => f.tags ?? [])))].sort()
+    saveArtifactChrome(projectId, agentId, { names, tags })
+  }, [sets, projectId, agentId])
   const updateTagFilter = useCallback((f: ArtifactTagFilter) => {
     setTagFilter(f)
     saveTagFilter(projectId, agentId, f)
@@ -993,11 +1103,14 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
 
   // Keyboard: B flips before/after, H toggles highlight — only in A/B mode, and never
   // while typing in a field. Plain single keys (no modifiers) so they don't collide
-  // with browser chords like Ctrl+H.
+  // with browser chords like Ctrl+H. Suppressed while the image lightbox is open: the
+  // lightbox has its own B / H (scoped to its fullscreen comparator, see LightboxDiff),
+  // and a single key must not flip both the lightbox and the grid behind it at once.
   useEffect(() => {
     if (imageDiffMode !== 'ab') return
     const onKey = (e: KeyboardEvent) => {
       if (e.ctrlKey || e.metaKey || e.altKey) return
+      if (useImageLightboxStore.getState().images) return
       const t = e.target as HTMLElement | null
       if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return
       const k = e.key.toLowerCase()
@@ -1115,12 +1228,37 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
     }
   }, [mode])
 
+  // What to render: the live sets once they arrive, otherwise a skeleton built
+  // from the cached chrome (one collapsed, "generating" card per script name) so
+  // the chrome is up before the snapshot. Cards key by name, so each skeleton
+  // header is reused by its live card with no remount/jump when sets land.
+  const displaySets = useMemo<ArtifactSet[] | null>(() => {
+    if (sets) return sets
+    if (chrome && chrome.names.length > 0) {
+      return chrome.names.map((name) => ({
+        name,
+        status: 'generating' as unknown as ArtifactSet['status'],
+        changed: false,
+        files: [],
+      }))
+    }
+    return null
+  }, [sets, chrome])
+  const isSkeleton = sets === null && displaySets !== null
+
   // Every file across all sets, flattened — fed to the filter bar so it can derive
   // the offered tags/types and per-value counts itself (see ArtifactFilterBar).
-  const allFiles = useMemo(() => (sets ?? []).flatMap((s) => s.files), [sets])
-  // Tags a side exposes before its set finishes (pending_tags), so the filter
-  // appears as soon as we know what tags there are likely to be.
-  const pendingTags = useMemo(() => (sets ?? []).flatMap((s) => s.pending_tags ?? []), [sets])
+  const allFiles = useMemo(() => (displaySets ?? []).flatMap((s) => s.files), [displaySets])
+  // Tags to offer before files are present: a side's pending_tags once live, plus
+  // — while anything is still generating (incl. the skeleton) — the cached chrome
+  // tags, so the filter set only grows then settles to the live file tags once
+  // everything is ready (a stale cached tag can't linger past settle).
+  const anyGenerating = (displaySets ?? []).some((s) => (s.status as string) === 'generating')
+  const pendingTags = useMemo(() => {
+    const live = (sets ?? []).flatMap((s) => s.pending_tags ?? [])
+    const cached = anyGenerating ? (chrome?.tags ?? []) : []
+    return Array.from(new Set([...live, ...cached]))
+  }, [sets, chrome, anyGenerating])
 
   if (error) {
     return (
@@ -1129,14 +1267,16 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
       </div>
     )
   }
-  // Render nothing until we know there are configured scripts.
-  if (!sets || sets.length === 0) return null
+  // Render nothing until we know there are configured scripts — either from the
+  // live snapshot or the cached summary skeleton.
+  if (!displaySets || displaySets.length === 0) return null
 
   // Generation progress (#38): how many artifact scripts have settled (ready or
   // failed) versus how many are still generating. Shown only while work is in
-  // flight; WS pushes (or the poll above) keep it ticking until everything settles.
-  const generatingCount = sets.filter((s) => (s.status as string) === 'generating').length
-  const settledCount = sets.length - generatingCount
+  // flight; WS pushes (or the poll above) keep it ticking until everything
+  // settles. The skeleton has no real counts yet, so it just shows the spinner.
+  const generatingCount = displaySets.filter((s) => (s.status as string) === 'generating').length
+  const settledCount = displaySets.length - generatingCount
 
   return (
     <div className="mb-4">
@@ -1149,7 +1289,7 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
         {generatingCount > 0 && (
           <span className="flex items-center gap-1.5 text-[11px] font-normal text-gray-400 dark:text-gray-500">
             <LoaderCircle className="w-3 h-3 animate-spin" />
-            Generating {settledCount}/{sets.length}
+            {isSkeleton ? 'Loading' : `Generating ${settledCount}/${displaySets.length}`}
           </span>
         )}
         <InfoTooltip title="Artifacts" width={560}>
@@ -1213,7 +1353,7 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
             "no files match" empty state when expanded (with its header count
             reflecting the narrowing), rather than vanishing from the list. */}
         <ABControlsContext.Provider value={abControls}>
-          {sets.map((s) => <ArtifactSetCard key={`${projectId ?? '_'}-${agentId}-${s.name}`} set={s} mode={imageDiffMode} scale={artifactScale} spans={artifactSpans} onSpanChange={onArtifactSpanChange} filter={tagFilter} search={search} onRefresh={requestRefresh} projectId={projectId} agentId={agentId} />)}
+          {displaySets.map((s) => <ArtifactSetCard key={`${projectId ?? '_'}-${agentId}-${s.name}`} set={s} mode={imageDiffMode} scale={artifactScale} spans={artifactSpans} onSpanChange={onArtifactSpanChange} filter={tagFilter} search={search} onRefresh={requestRefresh} projectId={projectId} agentId={agentId} />)}
         </ABControlsContext.Provider>
       </div>
     </div>

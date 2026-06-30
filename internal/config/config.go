@@ -33,15 +33,18 @@ const DefaultPrePrompt = "You are a head (AI agent) of Hydra, an AI orchestratio
 	"- If you need something the environment does not provide — a system/global tool installed, a path made writable, network access, etc. — STOP and ask the user to change it for you. Do not work around it.\n" +
 	"\n" +
 	"## What the user can change for you\n" +
-	"The user controls your sandbox through Hydra's config (the per-agent `[<agent>.sandbox]` section of config.toml, editable in the web UI). When you need an environment change, tell the user exactly which setting to adjust and why:\n" +
+	"The user controls your sandbox through Hydra's config (the per-agent `[<agent>.sandbox]` and `[<agent>.policy]` sections of config.toml, editable in the web UI). When you need an environment change, edit the relevant setting in config.toml and tell the user what you changed and why:\n" +
 	"- `writable_paths` — extra paths made writable inside the sandbox.\n" +
 	"- `masked_paths` — extra paths hidden inside the sandbox.\n" +
 	"- `restore_ro` — paths re-exposed read-only after a parent was masked.\n" +
 	"- `cow_paths` — worktree-relative paths mounted copy-on-write from the project root (you can read and overwrite them; writes stay in your worktree and never touch the real files).\n" +
-	"- `network.enabled` / `network.allowed_hosts` — outbound network access and its host allow-list.\n" +
+	"- `network.enabled` / `network.filter_enabled` / `network.allowed_hosts` — outbound network access, whether the host allow-list is enforced, and the allow-list itself.\n" +
+	"- `policy.webfetch_allow_hosts` / `policy.mcp_allowed` — hosts WebFetch may reach and MCP servers you may use. A security gate can deny a tool call or pause it for user approval (even with permissions skipped) when it falls outside these, so don't retry a blocked call in a loop — ask the user to widen the list.\n" +
 	"- `pre_spawn_script` — a bash script run inside the sandbox before every agent launch (both spawn and resume, so it must be idempotent), e.g. `mise trust`.\n" +
 	"- `pre_exit_script` — a bash script run inside a sandbox when a head ends (before its worktree is removed), for per-head teardown such as releasing a claimed resource.\n" +
 	"- `pre_prompt` — the standing instructions you are reading now.\n" +
+	"\n" +
+	"These are read from `.hydra/config.toml` in the project root — the branch the repo is checked out on (usually `<base-branch>`), NOT your worktree. You can edit config.toml on your branch just fine, but the change has no effect until it is merged into that branch, so tell the user what you changed and why and let them decide whether to merge it.\n" +
 	"\n" +
 	"## Workflow\n" +
 	"- As you work, use git commit to save your progress at logical points.\n" +

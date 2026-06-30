@@ -3,6 +3,8 @@ import { createPortal } from 'react-dom'
 import { X, ChevronLeft, ChevronRight } from 'lucide-react'
 import type { ImageDiffMode } from './ArtifactImageDiff'
 import { LightboxDiff } from './LightboxDiff'
+import { makeAuxOpen } from './artifactDiffShared'
+import { ZoomPan } from './ZoomPan'
 
 export interface LightboxImage {
   url: string
@@ -44,12 +46,51 @@ export function ImageLightbox({
   onClose: () => void
 }) {
   const count = images.length
-  const prev = useCallback(() => onIndexChange((index - 1 + count) % count), [index, count, onIndexChange])
-  const next = useCallback(() => onIndexChange((index + 1) % count), [index, count, onIndexChange])
+  // Navigation has a hard start and end — it does NOT wrap around. At the first image
+  // there's no previous, at the last there's no next (the arrows/previews for those
+  // directions are hidden below), so a gallery reads as a finite strip rather than an
+  // endless carousel.
+  const hasPrev = index > 0
+  const hasNext = index < count - 1
+  // The direction of the last navigation (+1 next, -1 prev, 0 on open), so the new
+  // image can slide in from the matching side — see the keyed wrapper below.
+  const [dir, setDir] = useState(0)
+  const prev = useCallback(() => { if (index > 0) { setDir(-1); onIndexChange(index - 1) } }, [index, onIndexChange])
+  const next = useCallback(() => { if (index < count - 1) { setDir(1); onIndexChange(index + 1) } }, [index, count, onIndexChange])
   // Natural pixel dimensions of the current image, read once it loads. Cleared
   // on navigation so a stale size never flashes against the next image.
   const [dims, setDims] = useState<{ w: number; h: number } | null>(null)
   useEffect(() => { setDims(null) }, [index])
+
+  // Comparison mode + before/after view + highlight for diff entries, held HERE (not in
+  // LightboxDiff, which remounts per index) so they PERSIST as you navigate ←/→ between
+  // images — pick a side or a mode and the next entry keeps it rather than resetting.
+  // The mode seeds from whichever entry the lightbox was opened on (the grid's current
+  // mode); view/highlight start fresh each opening. (Zoom still resets per image — its
+  // state lives in the per-index ZoomPan remount.)
+  const [diffMode, setDiffMode] = useState<ImageDiffMode>(() => images[index]?.diff?.mode ?? 'ab')
+  const [abView, setAbView] = useState<'before' | 'after'>('after')
+  const [highlight, setHighlight] = useState(false)
+
+  // X/B/A/H drive a diff entry's before/after view + highlight. Held here (with the
+  // state above) so they persist across navigation; non-diff (plain image) entries
+  // ignore them. Skipped while typing in a field; plain single keys (no modifiers) so
+  // they don't clash with browser chords.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey || e.altKey) return
+      if (!images[index]?.diff) return
+      const t = e.target as HTMLElement | null
+      if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return
+      const k = e.key.toLowerCase()
+      if (k === 'x') { e.preventDefault(); setAbView((v) => (v === 'before' ? 'after' : 'before')) }
+      else if (k === 'b') { e.preventDefault(); setAbView('before') }
+      else if (k === 'a') { e.preventDefault(); setAbView('after') }
+      else if (k === 'h') { e.preventDefault(); setHighlight((h) => !h) }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [index, images])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -72,7 +113,9 @@ export function ImageLightbox({
   const hasSiblings = count > 1
   const figureWidth = hasSiblings ? 'max-w-[90vw] lg:max-w-[80vw]' : 'max-w-[90vw]'
   const sidePreview = (dir: 'prev' | 'next') => {
-    const i = dir === 'prev' ? (index - 1 + count) % count : (index + 1) % count
+    // Only rendered when a sibling exists in that direction (no wrap), so the index
+    // is always in range.
+    const i = dir === 'prev' ? index - 1 : index + 1
     const onClick = dir === 'prev' ? prev : next
     // Translate the whole button (not just the image) so its click area travels
     // off-screen with it — only the visible sliver stays clickable, rather than a
@@ -121,11 +164,11 @@ export function ImageLightbox({
         <X className="w-5 h-5" />
       </button>
 
-      {/* Previous image preview (large screens only) */}
-      {hasSiblings && sidePreview('prev')}
+      {/* Previous image preview (large screens only) — hidden at the start */}
+      {hasPrev && sidePreview('prev')}
 
-      {/* Previous arrow */}
-      {count > 1 && (
+      {/* Previous arrow — hidden at the start (no wrap-around) */}
+      {hasPrev && (
         <button
           type="button"
           onClick={(e) => { e.stopPropagation(); prev() }}
@@ -143,30 +186,53 @@ export function ImageLightbox({
         className={`flex flex-col items-center gap-3 ${current.diff ? 'max-w-[94vw]' : figureWidth} max-h-[90vh] animate-in zoom-in-95 duration-150`}
         onClick={(e) => e.stopPropagation()}
       >
-        {current.diff ? (
-          // A before/after pair: render the fullscreen comparator (its own mode
-          // controls live inside) keyed on the entry so switching files resets it.
-          <LightboxDiff
-            key={current.url}
-            left={current.diff.left}
-            right={current.diff.right}
-            name={current.filename}
-            initialMode={current.diff.mode}
-            onDims={setDims}
-          />
-        ) : (
-          <img
-            src={current.url}
-            alt={current.filename}
-            onLoad={(e) => setDims({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })}
-            // Checkerboard behind the image so transparent PNGs (e.g. an icon)
-            // read as transparent rather than blending into the dark backdrop. The
-            // <img> sizes to the image's own aspect ratio, so this sits exactly
-            // behind the picture; opaque images simply cover it.
-            style={{ background: CHECKER }}
-            className={`max-h-[85vh] ${figureWidth} object-contain rounded-lg shadow-2xl`}
-          />
-        )}
+        {/* Keyed by index so the media remounts on each navigation and replays the
+            directional slide+fade (lightbox-slide; defined in index.css). The CSS var
+            sets which side it enters from — the side you're heading toward — so ←/→
+            feel like moving through a strip rather than the picture blinking in place. */}
+        <div
+          key={index}
+          className="lightbox-slide flex justify-center items-center w-full min-h-0"
+          style={{ ['--lb-from' as string]: dir < 0 ? '-2rem' : dir > 0 ? '2rem' : '0rem' }}
+        >
+          {current.diff ? (
+            // A before/after pair: render the fullscreen comparator (its own mode
+            // controls live inside). The wrapper key already remounts it per entry.
+            <LightboxDiff
+              left={current.diff.left}
+              right={current.diff.right}
+              name={current.filename}
+              mode={diffMode}
+              onModeChange={setDiffMode}
+              view={abView}
+              onViewChange={setAbView}
+              highlight={highlight}
+              onHighlightChange={setHighlight}
+              onDims={setDims}
+            />
+          ) : (
+            // Wrapped in ZoomPan so the image can be magnified past fit (wheel),
+            // panned (drag once zoomed), and navigated with the corner minimap —
+            // useful when a shot is too small to read at fit. The wrapper keys off
+            // the parent's index remount, so zoom resets on navigation.
+            <ZoomPan minimapSrc={current.url} className="rounded-lg shadow-2xl">
+              <img
+                src={current.url}
+                alt={current.filename}
+                onLoad={(e) => setDims({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })}
+                // Middle-click opens the raw image file in a new browser tab.
+                onAuxClick={makeAuxOpen(() => current.url)}
+                draggable={false}
+                // Checkerboard behind the image so transparent PNGs (e.g. an icon)
+                // read as transparent rather than blending into the dark backdrop. The
+                // <img> sizes to the image's own aspect ratio, so this sits exactly
+                // behind the picture; opaque images simply cover it.
+                style={{ background: CHECKER }}
+                className={`max-h-[85vh] ${figureWidth} object-contain block`}
+              />
+            </ZoomPan>
+          )}
+        </div>
         <figcaption className="flex items-center gap-2 text-xs font-mono">
           {[
             <span key="name" className="text-white/70">{current.filename}</span>,
@@ -184,8 +250,8 @@ export function ImageLightbox({
         </figcaption>
       </figure>
 
-      {/* Next arrow */}
-      {count > 1 && (
+      {/* Next arrow — hidden at the end (no wrap-around) */}
+      {hasNext && (
         <button
           type="button"
           onClick={(e) => { e.stopPropagation(); next() }}
@@ -196,8 +262,8 @@ export function ImageLightbox({
         </button>
       )}
 
-      {/* Next image preview (large screens only) */}
-      {hasSiblings && sidePreview('next')}
+      {/* Next image preview (large screens only) — hidden at the end */}
+      {hasNext && sidePreview('next')}
     </div>,
     document.body,
   )
