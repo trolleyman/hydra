@@ -172,12 +172,19 @@ export function Tooltip({
       {children}
       {visible && pos && content && createPortal(
         card ? (
+          // Outer wrapper owns the positional transform only (centre + flip) and
+          // never animates, so the box snaps to its final spot instantly. The
+          // enter animation lives on the inner card below — keeping it off this
+          // element is what stops the "rise then settle" slide: tailwindcss-animate's
+          // `enter` keyframe rebuilds `transform` from just its own offsets, so if it
+          // shared this element it would interpolate away the -translate-y-full and
+          // visibly drift into place.
           <div
             ref={boxRef}
-            className={`fixed z-[9999] -translate-x-1/2 p-3 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100 text-[11px] rounded-lg shadow-xl animate-in fade-in zoom-in-95 duration-100 border border-gray-200 dark:border-gray-700 ${
+            className={`fixed z-[9999] -translate-x-1/2 ${
               pos.placement === 'top' ? '-translate-y-full' : ''
             }`}
-            style={{ width, top: pos.top, left: pos.left }}
+            style={{ top: pos.top, left: pos.left }}
             onMouseEnter={() => {
               clearTimers()
               overTooltip.current = true
@@ -187,24 +194,29 @@ export function Tooltip({
               setVisible(false)
             }}
           >
-            {title && <p className="font-bold mb-1.5 border-b border-gray-200 dark:border-gray-700 pb-1">{title}</p>}
-            {/* Body text + code spans. Callers tag <code> with text-blue-300 (sized
-                for a dark tooltip); re-tint to a darker blue in light mode here so it
-                stays readable on the white surface (descendant selector wins on
-                specificity, no caller changes needed). */}
-            <div className="text-gray-600 dark:text-gray-300 space-y-2 [&_code]:text-blue-700 dark:[&_code]:text-blue-300">
-              {content}
-            </div>
-            {/* Arrow — points down at the trigger when the card is above it, up
-                when the card sits below it. */}
             <div
-              className={`absolute -translate-x-1/2 border-8 border-transparent ${
-                pos.placement === 'top'
-                  ? 'top-full border-t-white dark:border-t-gray-800'
-                  : 'bottom-full border-b-white dark:border-b-gray-800'
-              }`}
-              style={{ left: pos.arrowX }}
-            />
+              className="relative p-3 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100 text-[11px] rounded-lg shadow-xl animate-in fade-in zoom-in-95 duration-100 border border-gray-200 dark:border-gray-700"
+              style={{ width }}
+            >
+              {title && <p className="font-bold mb-1.5 border-b border-gray-200 dark:border-gray-700 pb-1">{title}</p>}
+              {/* Body text + code spans. Callers tag <code> with text-blue-300 (sized
+                  for a dark tooltip); re-tint to a darker blue in light mode here so it
+                  stays readable on the white surface (descendant selector wins on
+                  specificity, no caller changes needed). */}
+              <div className="text-gray-600 dark:text-gray-300 space-y-2 [&_code]:text-blue-700 dark:[&_code]:text-blue-300">
+                {content}
+              </div>
+              {/* Arrow — points down at the trigger when the card is above it, up
+                  when the card sits below it. */}
+              <div
+                className={`absolute -translate-x-1/2 border-8 border-transparent ${
+                  pos.placement === 'top'
+                    ? 'top-full border-t-white dark:border-t-gray-800'
+                    : 'bottom-full border-b-white dark:border-b-gray-800'
+                }`}
+                style={{ left: pos.arrowX }}
+              />
+            </div>
           </div>
         ) : (
           <div
