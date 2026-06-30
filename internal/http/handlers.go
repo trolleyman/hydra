@@ -1029,6 +1029,16 @@ func (s *Server) UpdateAgent(ctx context.Context, request api.UpdateAgentRequest
 	}
 
 	if baseBranch != "" {
+		// A head can't be based on its own branch: diffs and update-from-base
+		// would compare it against itself. The UI already filters this out; reject
+		// it here too so the invalid state can't be reached via the API.
+		if head.Branch != nil && baseBranch == *head.Branch {
+			return api.UpdateAgent400JSONResponse{
+				Code:    400,
+				Error:   api.ErrorResponseErrorBadRequest,
+				Details: "base branch must differ from the agent's own branch",
+			}, nil
+		}
 		// Validate the new base resolves to a real commit before persisting, so
 		// update-from-base and diffs don't later fail against a bogus ref.
 		if _, err := git.ResolveRef(projectRoot, baseBranch); err != nil {

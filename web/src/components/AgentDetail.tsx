@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from 'react'
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { api } from '../stores/apiClient'
 import { useServerData } from '../lib/useServerData'
@@ -374,6 +374,7 @@ export function AgentDetail({
   const [savingTitle, setSavingTitle] = useState(false)
   const [savingBase, setSavingBase] = useState(false)
   const [branches, setBranches] = useState<RepositoryBranch[] | null>(null)
+  const [branchesRefreshing, setBranchesRefreshing] = useState(false)
   const updateAgentInStore = useAgentStore((s) => s.updateAgent)
   const navigate = useNavigate()
   const [, setTick] = useState(0)
@@ -392,15 +393,28 @@ export function AgentDetail({
 
   // Load the repo's branch list for the base-branch selector. Cheap (`git
   // branch`); failures just leave the selector showing the current base as
-  // static text.
-  useEffect(() => {
+  // static text. The cached list is shown immediately and refreshed in the
+  // background each time the dropdown opens (see BranchSelector `onOpen`), so a
+  // newly-spawned agent branch shows up as a base option without a page reload.
+  const refreshBranches = useCallback(async () => {
     if (!projectId) return
-    let cancelled = false
-    api.default.getRepositoryBranches(projectId)
-      .then((r) => { if (!cancelled) setBranches(r.branches) })
-      .catch(() => { if (!cancelled) setBranches([]) })
-    return () => { cancelled = true }
+    setBranchesRefreshing(true)
+    try {
+      const r = await api.default.getRepositoryBranches(projectId)
+      setBranches(r.branches)
+    } catch {
+      // Keep any previously-cached list on failure; only seed an empty list so
+      // the selector can render at all on the very first (failed) load.
+      setBranches((prev) => prev ?? [])
+    } finally {
+      setBranchesRefreshing(false)
+    }
   }, [projectId])
+
+  useEffect(() => {
+    setBranches(null)
+    void refreshBranches()
+  }, [refreshBranches])
 
   // Restore & persist the page scroll position per agent, so each agent's detail
   // page behaves like its own page. Content below the fold (terminal, diff)
@@ -761,6 +775,10 @@ export function AgentDetail({
   // the ref exists and returns a 400 we surface as a toast.
   async function saveBase(next: string) {
     if (!next || next === (agent.base_branch || '')) return
+    // An agent can't be based on its own branch (diffs/update-from-base would
+    // compare it against itself). The dropdown already filters this out; this is
+    // a defensive guard in case it's ever reachable.
+    if (next === agent.branch_name) return
     setSavingBase(true)
     const res = await runWithToast(
       () => api.default.updateAgent(projectId ?? '', agent.id, { base_branch: next }),
@@ -880,10 +898,14 @@ export function AgentDetail({
               <span className="font-sans text-gray-400 dark:text-gray-500">base</span>
               {branches !== null && !savingBase ? (
                 <BranchSelector
-                  branches={branches}
+                  // An agent can't be its own base, so drop its own branch from
+                  // the options (the backend lists every branch agent-agnostically).
+                  branches={branches.filter((b) => b.name !== agent.branch_name)}
                   activeRef={agent.base_branch || ''}
                   isKnownBranch={branches.some((b) => b.name === agent.base_branch)}
                   onSelect={(name) => void saveBase(name)}
+                  onOpen={() => void refreshBranches()}
+                  refreshing={branchesRefreshing}
                   title="Change base branch (metadata only — does not rebase commits)"
                 />
               ) : (

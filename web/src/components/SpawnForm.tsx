@@ -166,6 +166,7 @@ export function SpawnForm({
   // current branch; can be pointed at another agent's hydra/<id> branch to stack
   // agents on top of one another. `branches` is null until the list loads.
   const [branches, setBranches] = useState<RepositoryBranch[] | null>(null)
+  const [branchesRefreshing, setBranchesRefreshing] = useState(false)
   const [baseBranch, setBaseBranch] = useState('')
   // Undo/redo for the composer spans the typed prompt AND the attachment chips:
   // a paste that becomes a chip calls preventDefault, so native textarea undo
@@ -218,27 +219,39 @@ export function SpawnForm({
     writeLocal(StorageKeys.defaultAgentType, agentType)
   }, [agentType])
 
-  // Load the project's branches for the base-branch selector and default the
-  // selection to the current branch. Re-runs (and resets) when the project
-  // changes; ignores the result if the project switched mid-flight.
-  useEffect(() => {
+  // Load the project's branches for the base-branch selector. `defaultSelection`
+  // also resets the chosen base to the current branch — done on the initial load
+  // for a project, but NOT on the background refresh that fires when the dropdown
+  // is opened (which must preserve whatever the user picked). The background
+  // refresh keeps the cached list visible and just swaps in fresh branches, so a
+  // newly-spawned agent branch becomes stackable without a page reload.
+  // Guards against a slow request for an old project resolving after the user
+  // switched projects: each call captures the project it was issued for and only
+  // applies its result if that's still the active project.
+  const branchReqProjectRef = useRef<string | null | undefined>(undefined)
+  const refreshBranches = useCallback(async (defaultSelection: boolean) => {
+    branchReqProjectRef.current = projectId
     if (!projectId) {
       setBranches(null)
       setBaseBranch('')
       return
     }
-    let cancelled = false
-    api.default.getRepositoryBranches(projectId)
-      .then((res) => {
-        if (cancelled) return
-        setBranches(res.branches)
-        setBaseBranch(res.current || res.branches[0]?.name || '')
-      })
-      .catch(() => {
-        if (!cancelled) setBranches(null)
-      })
-    return () => { cancelled = true }
+    setBranchesRefreshing(true)
+    try {
+      const res = await api.default.getRepositoryBranches(projectId)
+      if (branchReqProjectRef.current !== projectId) return
+      setBranches(res.branches)
+      if (defaultSelection) setBaseBranch(res.current || res.branches[0]?.name || '')
+    } catch {
+      if (branchReqProjectRef.current === projectId && defaultSelection) setBranches(null)
+    } finally {
+      if (branchReqProjectRef.current === projectId) setBranchesRefreshing(false)
+    }
   }, [projectId])
+
+  useEffect(() => {
+    void refreshBranches(true)
+  }, [refreshBranches])
 
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   // The resizable element is the whole card (textarea + footer), so the drag
@@ -611,6 +624,8 @@ export function SpawnForm({
         activeRef={baseBranch}
         isKnownBranch={branches.some((b) => b.name === baseBranch)}
         onSelect={setBaseBranch}
+        onOpen={() => void refreshBranches(false)}
+        refreshing={branchesRefreshing}
         title="Base branch to create the agent from (pick an agent branch to stack on it)"
         flexible={compactSel}
       />
