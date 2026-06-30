@@ -24,7 +24,7 @@ export function verdictTone(status: TestStatus): Tone {
   }
 }
 
-function VerdictIcon({ status, className = 'w-3 h-3' }: { status: TestStatus; className?: string }) {
+function VerdictIcon({ status, className = 'w-3 h-3 shrink-0' }: { status: TestStatus; className?: string }) {
   switch (status) {
     case 'passing':
       return <Check className={className} strokeWidth={3} />
@@ -86,14 +86,24 @@ export function TestVerdictChip({ tests, variant = 'xs' }: { tests?: TestSummary
     <Badge
       tone={tone}
       variant={variant}
-      icon={<VerdictIcon status={tests.status} className="w-3 h-3" />}
+      icon={<VerdictIcon status={tests.status} className="w-3 h-3 shrink-0" />}
       title={verdictTitle(tests)}
-      className={stale ? 'text-gray-500 dark:text-gray-400 border border-dashed border-gray-400 dark:border-gray-600' : undefined}
+      // min-w-0 lets the chip shrink within a tight sidebar row so its text can
+      // ellipsize instead of overrunning the date / the sidebar edge.
+      containerClassName="min-w-0"
+      className={stale ? 'min-w-0 text-gray-500 dark:text-gray-400 border border-dashed border-gray-400 dark:border-gray-600' : undefined}
     >
       {/* whitespace-nowrap so a label like "2 failed" never breaks onto two lines
-          inside the chip when the sidebar row is tight — the chip wraps as a whole. */}
-      <span className="inline-flex items-center whitespace-nowrap">
-        {verdictLabel(tests)}
+          inside the chip when the sidebar row is tight — the chip wraps as a whole.
+          The running label is an arbitrary agent-supplied progress string (e.g.
+          "JUNIT report written to /home/…"), so cap + truncate it with an ellipsis
+          — otherwise the chip grows unbounded and clips over the date and the whole
+          sidebar. min-w-0 (here + on the Badge container) lets it shrink below its
+          content so the date stays visible even on a narrow sidebar; max-w caps it
+          on a wide one. The full text stays available via the chip's `title`.
+          xs (sidebar) gets a tighter cap than sm (agent header, which has room). */}
+      <span className="inline-flex items-center min-w-0 whitespace-nowrap">
+        <span className={`truncate min-w-0 ${variant === 'sm' ? 'max-w-[16rem]' : 'max-w-[7rem]'}`}>{verdictLabel(tests)}</span>
         {showSkips ? <SkippedCount n={tests.skipped ?? 0} /> : null}
       </span>
     </Badge>

@@ -224,7 +224,7 @@ export function AgentSidebarItem({
           />
         ) : null}
       </div>
-      <div className="flex items-center gap-1.5 mt-0.5 ml-4">
+      <div className="flex items-center gap-1.5 mt-0.5 ml-4 min-w-0 overflow-hidden">
         <span className={`flex items-center gap-1 text-xs ${agentTypeColor(agent.agent_type)}`}>
           <AgentTypeIcon name={agent.agent_type as AgentTypeIconName} className="w-3 h-3 shrink-0" />
           {agent.agent_type || 'unknown'}
@@ -243,37 +243,41 @@ export function AgentSidebarItem({
         {!archived && agent.merge_when_green ? (
           <Clock className="w-3 h-3 text-green-600 dark:text-green-400 shrink-0" aria-label="auto-merge armed" />
         ) : null}
-        {agent.created_at ? (
-          // Non-intrusive relative timestamp (when the agent was created), pushed
-          // to the right edge of the badge row. Hover shows the absolute time.
-          <span
-            className="ml-auto shrink-0 text-[10px] text-gray-300 dark:text-gray-600 tabular-nums"
-            title={`created ${new Date(agent.created_at * 1000).toLocaleString()}`}
-          >
-            {formatStartedAgo(agent.created_at)}
-          </span>
-        ) : null}
       </div>
-      {!archived && agent.agent_status && (
-        // Reserve a fixed-height line for the live activity / last message so the
-        // row keeps a constant height as the text appears, disappears, or changes
-        // between status transitions — otherwise the whole sidebar jumps around.
+      {((!archived && agent.agent_status) || agent.created_at) && (
+        // Bottom line: live activity / last message on the left, with the relative
+        // created-at timestamp pinned to the bottom-right. The timestamp lives here
+        // (rather than on the badge row above) so the badge row keeps its full width
+        // for the type/status/test chips instead of squeezing them against the date.
         //
-        // The height MUST NOT be driven by the rendered content's line box: an
-        // inline monospace `code` chip (shell-command activity) and plain
-        // proportional status text are baseline-aligned but have different font
-        // metrics, so even at an identical `line-height` their inline boxes
-        // distribute that height differently around the baseline and the line
-        // box's union can exceed it — making a code line taller than a plain one.
-        // Pinning line-height (the previous fix) wasn't enough for that reason.
-        // Instead lock a fixed `h-4` and center the content (`flex items-center`),
-        // clipping any overflow, so the row is exactly 1rem tall whichever font
-        // the activity uses. The inner span carries `truncate` (+ `min-w-0` so it
-        // can shrink inside the flex row) for the horizontal ellipsis.
-        <div className="mt-0.5 ml-4 h-4 flex items-center overflow-hidden text-[11px] text-gray-400 dark:text-gray-500">
-          <span className="min-w-0 truncate">
-            {renderMarkdown(agentStatusDetail(agent), { dollarCommand: true, singleLine: true })}
+        // Reserve a fixed-height line so the row keeps a constant height as the
+        // activity text appears, disappears, or changes between status transitions —
+        // otherwise the whole sidebar jumps around. The height MUST NOT be driven by
+        // the rendered content's line box: an inline monospace `code` chip
+        // (shell-command activity) and plain proportional status text are
+        // baseline-aligned but have different font metrics, so even at an identical
+        // `line-height` their inline boxes distribute that height differently around
+        // the baseline and the line box's union can exceed it — making a code line
+        // taller than a plain one. Pinning line-height (a previous fix) wasn't enough
+        // for that reason. Instead lock a fixed `h-4` and center the content
+        // (`flex items-center`), clipping any overflow, so the row is exactly 1rem
+        // tall whichever font the activity uses. The activity span carries `truncate`
+        // (+ `min-w-0` so it can shrink inside the flex row) for the horizontal
+        // ellipsis; the timestamp is `shrink-0` so it always stays fully visible.
+        <div className="mt-0.5 ml-4 h-4 flex items-center gap-2 overflow-hidden text-[11px] text-gray-400 dark:text-gray-500">
+          <span className="min-w-0 flex-1 truncate">
+            {!archived && agent.agent_status
+              ? renderMarkdown(agentStatusDetail(agent), { dollarCommand: true, singleLine: true })
+              : null}
           </span>
+          {agent.created_at ? (
+            <span
+              className="shrink-0 text-[10px] text-gray-300 dark:text-gray-600 tabular-nums"
+              title={`created ${new Date(agent.created_at * 1000).toLocaleString()}`}
+            >
+              {formatStartedAgo(agent.created_at)}
+            </span>
+          ) : null}
         </div>
       )}
     </button>
