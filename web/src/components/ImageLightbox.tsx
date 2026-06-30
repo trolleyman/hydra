@@ -62,6 +62,36 @@ export function ImageLightbox({
   const [dims, setDims] = useState<{ w: number; h: number } | null>(null)
   useEffect(() => { setDims(null) }, [index])
 
+  // Comparison mode + before/after view + highlight for diff entries, held HERE (not in
+  // LightboxDiff, which remounts per index) so they PERSIST as you navigate ←/→ between
+  // images — pick a side or a mode and the next entry keeps it rather than resetting.
+  // The mode seeds from whichever entry the lightbox was opened on (the grid's current
+  // mode); view/highlight start fresh each opening. (Zoom still resets per image — its
+  // state lives in the per-index ZoomPan remount.)
+  const [diffMode, setDiffMode] = useState<ImageDiffMode>(() => images[index]?.diff?.mode ?? 'ab')
+  const [abView, setAbView] = useState<'before' | 'after'>('after')
+  const [highlight, setHighlight] = useState(false)
+
+  // X/B/A/H drive a diff entry's before/after view + highlight. Held here (with the
+  // state above) so they persist across navigation; non-diff (plain image) entries
+  // ignore them. Skipped while typing in a field; plain single keys (no modifiers) so
+  // they don't clash with browser chords.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey || e.altKey) return
+      if (!images[index]?.diff) return
+      const t = e.target as HTMLElement | null
+      if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return
+      const k = e.key.toLowerCase()
+      if (k === 'x') { e.preventDefault(); setAbView((v) => (v === 'before' ? 'after' : 'before')) }
+      else if (k === 'b') { e.preventDefault(); setAbView('before') }
+      else if (k === 'a') { e.preventDefault(); setAbView('after') }
+      else if (k === 'h') { e.preventDefault(); setHighlight((h) => !h) }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [index, images])
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose()
@@ -172,7 +202,12 @@ export function ImageLightbox({
               left={current.diff.left}
               right={current.diff.right}
               name={current.filename}
-              initialMode={current.diff.mode}
+              mode={diffMode}
+              onModeChange={setDiffMode}
+              view={abView}
+              onViewChange={setAbView}
+              highlight={highlight}
+              onHighlightChange={setHighlight}
               onDims={setDims}
             />
           ) : (

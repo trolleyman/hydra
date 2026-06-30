@@ -378,6 +378,12 @@ try {
       // before/after, onion, etc. working inside the lightbox. Only meaningful with
       // openArtifactImage.
       lightboxMode?: string
+      // After openArtifactImage (+ any lightboxMode), magnify the lightbox comparator
+      // with the scroll-wheel so the zoom/pan chrome — the bottom-right minimap and
+      // "Reset view (N×)" button — is on screen, documenting the lightbox zoom feature.
+      // The zoom is a pure function of the (fixed) wheel amount, so the shot stays
+      // reproducible. Only meaningful with openArtifactImage.
+      lightboxZoom?: boolean
       // Eager-loads every masonry tile image and waits for the layout to settle
       // before capturing — for the repository artifacts view, whose masonry is shown
       // without an expand step. Keeps the width-driven layout byte-reproducible
@@ -936,6 +942,20 @@ try {
         showArtifacts: true,
         openArtifactImage: true,
         lightboxMode: 'Onion skin',
+      },
+      // The lightbox magnified: a screenshot too small to read at fit can be zoomed
+      // (scroll-wheel) and panned, with a bottom-right minimap + "Reset view (N×)"
+      // button. lightboxZoom wheels in after switching to the single-image A/B view.
+      {
+        name: 'artifact-lightbox-zoom',
+        path: '/project/sim-project/agent/agent-1',
+        scrollTo: 'Changes',
+        viewport: { width: 1280, height: 1280 },
+        imageDiffMode: 'side-by-side',
+        showArtifacts: true,
+        openArtifactImage: true,
+        lightboxMode: 'Before · After',
+        lightboxZoom: true,
       },
       // The collapsed artifacts panel: each set is a single header row ("N changed",
       // a spinner while generating, etc.) until clicked open — the default, opt-in
@@ -1865,6 +1885,20 @@ try {
             // Switch the in-lightbox comparator to another mode via its selector
             // (button text === the mode label), then let the new layers decode.
             await page.click(`figure button:text-is("${pg.lightboxMode}")`)
+            await settle(page)
+          }
+          if (pg.lightboxZoom) {
+            // Magnify the comparator (ZoomPan) so the minimap + "Reset view" chrome
+            // is visible. Hover the frame centre and wheel in; the zoom is toward the
+            // cursor, so a fixed wheel amount over a fixed-layout frame is reproducible.
+            const frame = await page.locator('figure .overflow-hidden').first().boundingBox()
+            if (!frame) throw new Error('lightbox zoom frame not found')
+            await page.mouse.move(frame.x + frame.width / 2, frame.y + frame.height / 2)
+            for (let i = 0; i < 6; i++) await page.mouse.wheel(0, -180)
+            // The minimap + Reset only mount once magnified; wait for the Reset button.
+            await page.waitForFunction(() =>
+              Array.from(document.querySelectorAll('button')).some((b) => b.textContent?.includes('Reset view')),
+            )
             await settle(page)
           }
         }
