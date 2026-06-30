@@ -555,7 +555,7 @@ export function AgentDetail({
       type: 'warning',
       variant: 'mergeGate',
       details: { fromBranch, toBranch, testStatus: kind, testFailed: n },
-      confirmLabel: 'Queue merge when green',
+      confirmLabel: 'Queue merge when tests pass',
       onConfirm: () => void armMerge(),
       secondaryLabel: 'Force merge',
       onSecondary: () => void executeMerge(true),
@@ -852,7 +852,7 @@ export function AgentDetail({
         shortcut: SHORTCUT_MERGE,
         menu: ([
           { label: 'Force merge', icon: <AlertTriangle className="w-4 h-4" />, onClick: forceMerge, danger: verdict === 'failing', disabled: busy },
-          { label: 'Queue merge — merge when green', icon: <Clock className="w-4 h-4" />, onClick: () => void armMerge(), disabled: busy },
+          { label: 'Queue merge when tests pass', icon: <Clock className="w-4 h-4" />, onClick: () => void armMerge(), disabled: busy },
         ] as AgentTopBarMenuItem[]),
         menuNote: verdict === 'failing'
           ? (
@@ -917,7 +917,7 @@ export function AgentDetail({
             )}
             {armed && (
               <Badge tone="green" variant="sm" icon={<Clock className="w-3 h-3" />} title="Auto-merge armed — merges when tests pass">
-                merges when green
+                merges when tests pass
               </Badge>
             )}
             {agent.network_enforcement && <NetworkEnforcementBadge mode={agent.network_enforcement} />}

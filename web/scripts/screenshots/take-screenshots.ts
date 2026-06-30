@@ -564,7 +564,7 @@ try {
       // by opening the merge dropdown and choosing Force merge.
       { name: 'tests-force-merge-confirm', path: '/project/sim-project/agent/agent-2', viewportOnly: true, clicks: ['button[aria-label="Merge options"]', 'button:has-text("Force merge")'] },
       // Auto-merge armed: agent-md (running + merge_when_green) shows the green
-      // "merges when green" chip and a de-emphasised "Cancel merge" action with a
+      // "merges when tests pass" chip and a de-emphasised "Cancel merge" action with a
       // spinner (the queue is waiting on the tests).
       { name: 'tests-merge-when-green', path: '/project/sim-project/agent/agent-md', viewportOnly: true },
       // The merge-gate dialog (PLAN #68): clicking the plain "Merge" button on

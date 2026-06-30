@@ -96,7 +96,7 @@ export const Dialog: React.FC = () => {
           title={title}
           description={message}
           details={details}
-          confirmLabel={confirmLabel ?? 'Queue merge when green'}
+          confirmLabel={confirmLabel ?? 'Queue merge when tests pass'}
           secondaryLabel={secondaryLabel ?? 'Force merge'}
           onConfirm={handleConfirm}
           onSecondary={handleSecondary}
@@ -257,8 +257,8 @@ function MergeGatePanel({
           }
         />
         <p className="text-[11.5px] leading-snug text-gray-400 dark:text-gray-500">
-          The test gate is a soft gate — it never blocks you, it just asks first. Queueing arms “merge when green”: the
-          merge runs automatically the moment the tests pass (and disarms, with a notification, if they settle red).
+          The test gate is a soft gate — it never blocks you, it just asks first. Queueing runs the merge
+          automatically the moment the tests pass (and disarms, with a notification, if they settle failing).
         </p>
       </div>
       <div className="flex justify-end gap-2.5 px-5 py-3.5 border-t border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/40">
