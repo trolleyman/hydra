@@ -22,6 +22,7 @@ import (
 	"github.com/trolleyman/hydra/internal/sandbox"
 	"github.com/trolleyman/hydra/internal/services"
 	"github.com/trolleyman/hydra/internal/session"
+	hydratests "github.com/trolleyman/hydra/internal/tests"
 )
 
 // runtime bundles the long-lived server state shared by `hydra server` and the
@@ -69,6 +70,9 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 	// One artifacts Manager per registered project, created lazily on first use.
 	artifactReg := artifacts.NewRegistry()
 
+	// One test-runner Manager per registered project (PLAN #68).
+	testReg := hydratests.NewRegistry()
+
 	// Supervises each project's [[services]] (e.g. a host-side emulator pool).
 	svcMgr := services.NewManager()
 
@@ -87,6 +91,7 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 		StartTime:       time.Now(),
 		Development:     os.Getenv("HYDRA_DEV_RESTART") == "1",
 		Artifacts:       artifactReg,
+		Tests:           testReg,
 		Services:        svcMgr,
 		Events:          eventHub,
 		BackgroundCtx:   ctx,
@@ -183,6 +188,8 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 	// Proactively pre-generate artifacts for settled heads so they're ready
 	// before a user clicks in, instead of starting the work only on view.
 	go server.RunArtifactPrefetcher(ctx, roots)
+	// Watch heads with auto-merge armed and merge them once their tests pass.
+	go server.RunAutoMergeWatcher(ctx)
 
 	// Start each registered project's [[services]]. Done after the pollers so a
 	// slow service launch never delays request serving; StopAll on shutdown.
@@ -262,6 +269,7 @@ func buildMux(server *httppkg.Server, auth *httppkg.Authenticator) *http.ServeMu
 	mux.HandleFunc("POST /shells/projects/{project_id}/agents/{id}/close", server.HandleShellClose)
 	mux.HandleFunc("/artifacts/projects/{project_id}/blob", server.HandleArtifactBlob)
 	mux.HandleFunc("/artifacts/projects/{project_id}/log", server.HandleArtifactLog)
+	mux.HandleFunc("/tests/projects/{project_id}/log", server.HandleTestLog)
 	mux.HandleFunc("/repository/projects/{project_id}/blob", server.HandleRepositoryBlob)
 	mux.HandleFunc("/repository/projects/{project_id}/agents/{id}/blob", server.HandleAgentBlob)
 	mux.HandleFunc("GET /uploads/projects/{project_id}/blob", server.HandleUploadBlob)

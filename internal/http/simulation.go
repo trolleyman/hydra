@@ -285,6 +285,14 @@ func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, pr
 			},
 		},
 	}
+	// Attach test-verdict chips (PLAN #68) so the sidebar shows passing/failing/
+	// running states; agent-md is also shown with auto-merge armed.
+	for i := range resp {
+		resp[i].Tests = simTestSummary(resp[i].Id)
+		if resp[i].Id == "agent-md" {
+			resp[i].MergeWhenGreen = ptr(true)
+		}
+	}
 	api.WriteJSON(w, http.StatusOK, resp)
 }
 
@@ -396,6 +404,8 @@ func (s *SimulationServer) GetAgent(w http.ResponseWriter, r *http.Request, proj
 				Timestamp: simNow().Format(time.RFC3339),
 				Activity:  ptr("Wrapping `renderMarkdown()` over the **prompt** & *activity*"),
 			},
+			Tests:          simTestSummary("agent-md"),
+			MergeWhenGreen: ptr(true),
 		})
 		return
 	}
@@ -463,6 +473,7 @@ func (s *SimulationServer) GetAgent(w http.ResponseWriter, r *http.Request, proj
 				Timestamp:   simNow().Format(time.RFC3339),
 				LastMessage: ptr("Should I store refresh tokens or re-auth on expiry?"),
 			},
+			Tests: simTestSummary("agent-2"),
 		})
 		return
 	}
@@ -489,8 +500,73 @@ func (s *SimulationServer) RestartAgent(w http.ResponseWriter, r *http.Request, 
 	api.WriteError(w, http.StatusNotImplemented, "Not implemented in simulation mode")
 }
 
-func (s *SimulationServer) MergeAgent(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+func (s *SimulationServer) MergeAgent(w http.ResponseWriter, r *http.Request, projectId string, id string, params api.MergeAgentParams) {
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *SimulationServer) ArmMergeWhenGreen(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *SimulationServer) DisarmMergeWhenGreen(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *SimulationServer) GetAgentTests(w http.ResponseWriter, r *http.Request, projectId string, id string, params api.GetAgentTestsParams) {
+	api.WriteJSON(w, http.StatusOK, api.TestsResponse{Runners: simTestRunners(id)})
+}
+
+// simTestRunners returns fixture test verdicts so --simulation and the
+// tests-panel screenshot exercise both a clean run and a regression (PLAN #68).
+func simTestRunners(id string) []api.TestRunResult {
+	passing := api.TestRunResult{
+		Name: "go", Status: api.TestStatusPassing,
+		Total: ptr(142), Passed: ptr(142), Failed: ptr(0), Skipped: ptr(3),
+		DurationMs: ptr(int64(4200)), Format: ptr("junit"), Ref: ptr("a1b2c3d"),
+	}
+	if id == "agent-2" {
+		// A runner with a regression: two failing cases shown first.
+		return []api.TestRunResult{{
+			Name: "vitest", Status: api.TestStatusFailing,
+			Total: ptr(147), Passed: ptr(142), Failed: ptr(2), Skipped: ptr(3),
+			DurationMs: ptr(int64(4200)), Format: ptr("junit"), Ref: ptr("a1b2c3d"),
+			Cases: &[]api.TestCase{
+				{Name: "auth/rotation.test.ts › rotates signing key on expiry", Status: api.TestCaseFailed, DurationMs: ptr(int64(38)), Message: ptr("AssertionError: expected 'kid-2' to be 'kid-3'\n  at rotation.test.ts:48:24")},
+				{Name: "auth/rotation.test.ts › keeps old sessions valid in grace window", Status: api.TestCaseFailed, DurationMs: ptr(int64(12)), Message: ptr("TypeError: currentKid is not a function\n  at token-service.ts:21:14")},
+				{Name: "diff/onion.test.ts › blends frames", Status: api.TestCasePassed, DurationMs: ptr(int64(5))},
+				{Name: "heads/heads.test.ts › resumes on boot", Status: api.TestCaseSkipped, Message: ptr("it.skip")},
+			},
+		}}
+	}
+	if id == "agent-md" {
+		// A run in flight, for the running-state screenshot.
+		return []api.TestRunResult{{
+			Name: "go", Status: api.TestStatusRunning,
+			Total: ptr(0), Passed: ptr(82), Failed: ptr(2), Skipped: ptr(0),
+			StartedAt: ptr(simNow().Add(-12 * time.Second).Unix()), Progress: ptr("84/142"),
+			Log: &[]api.ArtifactLogLine{
+				{Text: "$ vitest run --reporter=dot", Stream: "stdout"},
+				{Text: "✓ internal/heads/heads.test.ts (31)", Stream: "stdout"},
+				{Text: "✗ auth/rotation.test.ts (2 failed)", Stream: "stderr"},
+			},
+		}}
+	}
+	return []api.TestRunResult{passing}
+}
+
+// simTestSummary returns the compact chip verdict for a sim agent, matching
+// simTestRunners so the sidebar chip and the panel agree.
+func simTestSummary(id string) *api.TestSummary {
+	switch id {
+	case "agent-2":
+		return &api.TestSummary{Status: api.TestStatusFailing, Total: ptr(147), Passed: ptr(142), Failed: ptr(2), Skipped: ptr(3), DurationMs: ptr(int64(4200))}
+	case "agent-md":
+		return &api.TestSummary{Status: api.TestStatusRunning, Passed: ptr(82), Failed: ptr(2), Progress: ptr("84/142")}
+	case "agent-1":
+		return &api.TestSummary{Status: api.TestStatusPassing, Total: ptr(142), Passed: ptr(142), Skipped: ptr(3), DurationMs: ptr(int64(4200))}
+	default:
+		return nil
+	}
 }
 
 func (s *SimulationServer) MarkAgentRead(w http.ResponseWriter, r *http.Request, projectId string, id string) {

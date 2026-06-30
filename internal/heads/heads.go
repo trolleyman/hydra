@@ -55,6 +55,8 @@ type Head struct {
 	// read-only. EndState records how it ended ("killed" | "merged").
 	Archived bool
 	EndState string
+	// MergeWhenGreen is true when auto-merge is armed for this head (PLAN #68).
+	MergeWhenGreen bool
 }
 
 // ListHeads returns all Hydra heads from the DB, cross-referenced with live
@@ -109,6 +111,7 @@ func ListHeads(ctx context.Context, reg *session.Registry, store *db.Store, proj
 			CreatedAt:        a.CreatedAt.Unix(),
 			AgentStatus:      computeAgentStatus(&a),
 			HasUnreadChanges: a.HasUnreadChanges,
+			MergeWhenGreen:   a.MergeWhenGreen,
 		}
 		enrichAgentStatus(a.ProjectPath, a.ID, h.AgentStatus)
 		result = append(result, h)

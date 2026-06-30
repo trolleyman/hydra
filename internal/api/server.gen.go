@@ -89,6 +89,8 @@ const (
 const (
 	MergeConflictErrorErrorConflict           MergeConflictErrorError = "conflict"
 	MergeConflictErrorErrorMergeConflict      MergeConflictErrorError = "merge_conflict"
+	MergeConflictErrorErrorTestsErrored       MergeConflictErrorError = "tests_errored"
+	MergeConflictErrorErrorTestsFailing       MergeConflictErrorError = "tests_failing"
 	MergeConflictErrorErrorUncommittedChanges MergeConflictErrorError = "uncommitted_changes"
 )
 
@@ -145,6 +147,23 @@ const (
 	DiffRefresh TerminalStatusEventType = "diff_refresh"
 	Size        TerminalStatusEventType = "size"
 	Status      TerminalStatusEventType = "status"
+)
+
+// Defines values for TestCaseStatus.
+const (
+	TestCaseFailed  TestCaseStatus = "failed"
+	TestCasePassed  TestCaseStatus = "passed"
+	TestCaseSkipped TestCaseStatus = "skipped"
+)
+
+// Defines values for TestStatus.
+const (
+	TestStatusErrored TestStatus = "errored"
+	TestStatusFailing TestStatus = "failing"
+	TestStatusNone    TestStatus = "none"
+	TestStatusPassing TestStatus = "passing"
+	TestStatusRunning TestStatus = "running"
+	TestStatusStale   TestStatus = "stale"
 )
 
 // Defines values for GetAgentArtifactsParamsRefreshSide.
@@ -216,6 +235,9 @@ type AgentResponse struct {
 	HasUnreadChanges *bool  `json:"has_unread_changes,omitempty"`
 	Id               string `json:"id"`
 
+	// MergeWhenGreen True when auto-merge is armed (the head will merge once its tests settle passing). See PLAN
+	MergeWhenGreen *bool `json:"merge_when_green,omitempty"`
+
 	// NetworkEnforcement Network egress posture for a live head: "off" (no network), "unrestricted" (network on, host filtering off → every host reachable), "filtered-hard" (allow-list enforced in a pasta netns + nft lock — an inescapable boundary), "filtered-advisory" (allow-list enforced by the proxy via HTTP(S)_PROXY only; a determined process can bypass it), or absent/empty (the head isn't live).
 	NetworkEnforcement *string `json:"network_enforcement,omitempty"`
 	PrePrompt          string  `json:"pre_prompt"`
@@ -227,6 +249,9 @@ type AgentResponse struct {
 
 	// SessionStatus Sandbox session status (pending|starting|running|stopped)
 	SessionStatus string `json:"session_status"`
+
+	// Tests Compact per-head test verdict for the head's current commit, shown as the sidebar/header chip without opening the tests panel (PLAN #68). Computed from the cached report without triggering a run.
+	Tests *TestSummary `json:"tests,omitempty"`
 
 	// Title Mutable, user-facing display name. May be empty before it is seeded; clients should fall back to id.
 	Title        *string `json:"title,omitempty"`
@@ -499,6 +524,12 @@ type ConfigResponse struct {
 
 	// Services Per-project long-running supervised commands ([[services]] in config.toml)
 	Services *[]ServiceScript `json:"services"`
+
+	// TestConcurrency Max test-runner generations that run at once (test_concurrency in config.toml). 0 = unlimited; null/absent uses the built-in default.
+	TestConcurrency *int `json:"test_concurrency"`
+
+	// Tests Per-project test-runner commands whose verdict gates merge ([[tests]] in config.toml)
+	Tests *[]TestScript `json:"tests"`
 }
 
 // ConfigTomlResponse defines model for ConfigTomlResponse.
@@ -622,6 +653,9 @@ type MergeConflictError struct {
 	// Details Human-readable error description
 	Details string                  `json:"details"`
 	Error   MergeConflictErrorError `json:"error"`
+
+	// FailingTests For tests_failing, how many test cases are failing on the head's commit (so the force-merge confirm can name the count).
+	FailingTests *int `json:"failing_tests"`
 }
 
 // MergeConflictErrorError defines model for MergeConflictError.Error.
@@ -963,6 +997,107 @@ type TerminalStatusEvent struct {
 // TerminalStatusEventType defines model for TerminalStatusEvent.Type.
 type TerminalStatusEventType string
 
+// TestCase defines model for TestCase.
+type TestCase struct {
+	DurationMs *int64 `json:"duration_ms,omitempty"`
+
+	// Message Failure/assertion text for a failed case (or skip reason for a skipped one)
+	Message *string        `json:"message"`
+	Name    string         `json:"name"`
+	Status  TestCaseStatus `json:"status"`
+}
+
+// TestCaseStatus defines model for TestCaseStatus.
+type TestCaseStatus string
+
+// TestRunResult One test runner's parsed result for a single ref (single-sided; no comparison)
+type TestRunResult struct {
+	// Cases Parsed test cases (failing first when the UI orders them).
+	Cases      *[]TestCase `json:"cases,omitempty"`
+	DurationMs *int64      `json:"duration_ms"`
+
+	// Error Set when status is "errored" — the command couldn't produce a verdict.
+	Error  *string `json:"error"`
+	Failed *int    `json:"failed,omitempty"`
+
+	// Format Report format parsed (junit | hydra | exit).
+	Format *string `json:"format"`
+
+	// Log Captured stdout+stderr lines of the in-flight run. Only while running; once settled fetch log_url.
+	Log *[]ArtifactLogLine `json:"log"`
+
+	// LogUrl URL to fetch the persisted build log once the run has settled.
+	LogUrl *string `json:"log_url"`
+
+	// Name The configured test runner name
+	Name   string `json:"name"`
+	Passed *int   `json:"passed,omitempty"`
+
+	// Progress Latest progress line of the in-flight run (from ::hydra:progress:: markers, else latest stdout). Only set while running.
+	Progress *string `json:"progress"`
+
+	// Ref Resolved commit SHA the run was computed for.
+	Ref     *string `json:"ref"`
+	Skipped *int    `json:"skipped,omitempty"`
+
+	// StartedAt Unix time (seconds) the in-flight run started. Only set while running.
+	StartedAt *int64 `json:"started_at"`
+
+	// Status running = a run is in flight; passing/failing/errored = settled verdict; stale = a cached verdict exists but predates the current commit; none = no tests configured or never run. (A per-runner TestRunResult only ever uses running/passing/failing/errored; stale/none are head-summary states.)
+	Status TestStatus `json:"status"`
+	Total  *int       `json:"total,omitempty"`
+}
+
+// TestScript A per-project test-runner command whose pass/fail verdict gates the merge button ([[tests]] in config.toml, PLAN
+type TestScript struct {
+	// CleanIgnored Also delete git-ignored files before each run (git clean -fdx instead of -fd); slower (default false)
+	CleanIgnored *bool `json:"clean_ignored,omitempty"`
+
+	// Command Shell command run via `bash -c` in the checkout directory; writes a JUnit-XML or Hydra-JSON report into $HYDRA_TEST_OUTPUT
+	Command string `json:"command"`
+
+	// Enabled Whether the test gate runs this command (absent/null or true = enabled; false = skipped)
+	Enabled *bool `json:"enabled"`
+
+	// Name Unique label, also used as the cache directory
+	Name string `json:"name"`
+
+	// Strict Run the command under `set -eo pipefail` (absent/null or true = strict; false = run exactly as written). The verdict still comes from the parsed report, not the exit code.
+	Strict *bool `json:"strict"`
+
+	// TimeoutSec Max seconds the command may run (0 = built-in default)
+	TimeoutSec *int `json:"timeout_sec,omitempty"`
+
+	// UnsafeHost Run on the host with NO sandbox — runs the diffed ref's test code; only for trusted refs (default false)
+	UnsafeHost *bool `json:"unsafe_host,omitempty"`
+}
+
+// TestStatus running = a run is in flight; passing/failing/errored = settled verdict; stale = a cached verdict exists but predates the current commit; none = no tests configured or never run. (A per-runner TestRunResult only ever uses running/passing/failing/errored; stale/none are head-summary states.)
+type TestStatus string
+
+// TestSummary Compact per-head test verdict for the head's current commit, shown as the sidebar/header chip without opening the tests panel (PLAN #68). Computed from the cached report without triggering a run.
+type TestSummary struct {
+	DurationMs *int64 `json:"duration_ms"`
+	Failed     *int   `json:"failed,omitempty"`
+	Passed     *int   `json:"passed,omitempty"`
+
+	// Progress Latest progress line while status is "running" (e.g. "84/142").
+	Progress *string `json:"progress"`
+
+	// Ref The resolved commit SHA the verdict was computed for.
+	Ref     *string `json:"ref"`
+	Skipped *int    `json:"skipped,omitempty"`
+
+	// Status running = a run is in flight; passing/failing/errored = settled verdict; stale = a cached verdict exists but predates the current commit; none = no tests configured or never run. (A per-runner TestRunResult only ever uses running/passing/failing/errored; stale/none are head-summary states.)
+	Status TestStatus `json:"status"`
+	Total  *int       `json:"total,omitempty"`
+}
+
+// TestsResponse defines model for TestsResponse.
+type TestsResponse struct {
+	Runners []TestRunResult `json:"runners"`
+}
+
 // UncommittedSummary defines model for UncommittedSummary.
 type UncommittedSummary struct {
 	// TrackedCount Number of tracked files with staged or unstaged changes
@@ -1051,6 +1186,24 @@ type GetAgentDiffFilesParams struct {
 
 	// IncludeUncommitted Include uncommitted changes in the worktree
 	IncludeUncommitted *bool `form:"include_uncommitted,omitempty" json:"include_uncommitted,omitempty"`
+}
+
+// MergeAgentParams defines parameters for MergeAgent.
+type MergeAgentParams struct {
+	// Force Bypass the test gate (PLAN #68). Without it, a merge is soft-blocked with 409 tests_failing / tests_errored when the head's configured tests are failing, errored, or still running. force=true merges anyway — covering both "don't wait" (tests still running) and "override" (tests red). Merge-conflict and operation-in-progress checks still apply.
+	Force *bool `form:"force,omitempty" json:"force,omitempty"`
+}
+
+// GetAgentTestsParams defines parameters for GetAgentTests.
+type GetAgentTestsParams struct {
+	// HeadRef Commit SHA or ref to test. Defaults to the agent's branch tip.
+	HeadRef *string `form:"head_ref,omitempty" json:"head_ref,omitempty"`
+
+	// IncludeUncommitted Test the agent's uncommitted working tree instead of a commit.
+	IncludeUncommitted *bool `form:"include_uncommitted,omitempty" json:"include_uncommitted,omitempty"`
+
+	// Refresh Name of a single test runner whose cached result (including a cached failure) should be discarded and re-run before responding.
+	Refresh *string `form:"refresh,omitempty" json:"refresh,omitempty"`
 }
 
 // GetConfigParams defines parameters for GetConfig.
@@ -1210,7 +1363,13 @@ type ServerInterface interface {
 	SendAgentInput(w http.ResponseWriter, r *http.Request, projectId string, id string)
 	// Merge a Hydra agent's branch into its base branch and kill it
 	// (POST /api/projects/{project_id}/agents/{id}/merge)
-	MergeAgent(w http.ResponseWriter, r *http.Request, projectId string, id string)
+	MergeAgent(w http.ResponseWriter, r *http.Request, projectId string, id string, params MergeAgentParams)
+	// Disarm auto-merge for a head
+	// (DELETE /api/projects/{project_id}/agents/{id}/merge-when-green)
+	DisarmMergeWhenGreen(w http.ResponseWriter, r *http.Request, projectId string, id string)
+	// Arm auto-merge — merge this head when its tests settle passing
+	// (POST /api/projects/{project_id}/agents/{id}/merge-when-green)
+	ArmMergeWhenGreen(w http.ResponseWriter, r *http.Request, projectId string, id string)
 	// Permanently delete an agent (kill it and erase every record, including its Claude session history)
 	// (DELETE /api/projects/{project_id}/agents/{id}/purge)
 	PurgeAgent(w http.ResponseWriter, r *http.Request, projectId string, id string)
@@ -1220,6 +1379,9 @@ type ServerInterface interface {
 	// Restart a Hydra agent (kill and respawn with the same prompt)
 	// (POST /api/projects/{project_id}/agents/{id}/restart)
 	RestartAgent(w http.ResponseWriter, r *http.Request, projectId string, id string)
+	// Get the test-runner verdict(s) for a head's branch
+	// (GET /api/projects/{project_id}/agents/{id}/tests)
+	GetAgentTests(w http.ResponseWriter, r *http.Request, projectId string, id string, params GetAgentTestsParams)
 	// Mark an agent as unread, raising its unread-changes flag
 	// (POST /api/projects/{project_id}/agents/{id}/unread)
 	MarkAgentUnread(w http.ResponseWriter, r *http.Request, projectId string, id string)
@@ -1980,8 +2142,87 @@ func (siw *ServerInterfaceWrapper) MergeAgent(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params MergeAgentParams
+
+	// ------------- Optional query parameter "force" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "force", r.URL.Query(), &params.Force)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "force", Err: err})
+		return
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.MergeAgent(w, r, projectId, id)
+		siw.Handler.MergeAgent(w, r, projectId, id, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DisarmMergeWhenGreen operation middleware
+func (siw *ServerInterfaceWrapper) DisarmMergeWhenGreen(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DisarmMergeWhenGreen(w, r, projectId, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ArmMergeWhenGreen operation middleware
+func (siw *ServerInterfaceWrapper) ArmMergeWhenGreen(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ArmMergeWhenGreen(w, r, projectId, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2084,6 +2325,67 @@ func (siw *ServerInterfaceWrapper) RestartAgent(w http.ResponseWriter, r *http.R
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.RestartAgent(w, r, projectId, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetAgentTests operation middleware
+func (siw *ServerInterfaceWrapper) GetAgentTests(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetAgentTestsParams
+
+	// ------------- Optional query parameter "head_ref" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "head_ref", r.URL.Query(), &params.HeadRef)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "head_ref", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "include_uncommitted" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "include_uncommitted", r.URL.Query(), &params.IncludeUncommitted)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "include_uncommitted", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "refresh" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "refresh", r.URL.Query(), &params.Refresh)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "refresh", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetAgentTests(w, r, projectId, id, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2884,9 +3186,12 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/diff-files", wrapper.GetAgentDiffFiles)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/input", wrapper.SendAgentInput)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/merge", wrapper.MergeAgent)
+	m.HandleFunc("DELETE "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/merge-when-green", wrapper.DisarmMergeWhenGreen)
+	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/merge-when-green", wrapper.ArmMergeWhenGreen)
 	m.HandleFunc("DELETE "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/purge", wrapper.PurgeAgent)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/read", wrapper.MarkAgentRead)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/restart", wrapper.RestartAgent)
+	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/tests", wrapper.GetAgentTests)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/unread", wrapper.MarkAgentUnread)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/update-from-base", wrapper.UpdateAgentFromBase)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/config", wrapper.GetConfig)
@@ -3559,6 +3864,7 @@ func (response SendAgentInput500JSONResponse) VisitSendAgentInputResponse(w http
 type MergeAgentRequestObject struct {
 	ProjectId string `json:"project_id"`
 	Id        string `json:"id"`
+	Params    MergeAgentParams
 }
 
 type MergeAgentResponseObject interface {
@@ -3603,6 +3909,76 @@ func (response MergeAgent409JSONResponse) VisitMergeAgentResponse(w http.Respons
 type MergeAgent500JSONResponse ErrorResponse
 
 func (response MergeAgent500JSONResponse) VisitMergeAgentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type DisarmMergeWhenGreenRequestObject struct {
+	ProjectId string `json:"project_id"`
+	Id        string `json:"id"`
+}
+
+type DisarmMergeWhenGreenResponseObject interface {
+	VisitDisarmMergeWhenGreenResponse(w http.ResponseWriter) error
+}
+
+type DisarmMergeWhenGreen204Response struct {
+}
+
+func (response DisarmMergeWhenGreen204Response) VisitDisarmMergeWhenGreenResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DisarmMergeWhenGreen404JSONResponse ErrorResponse
+
+func (response DisarmMergeWhenGreen404JSONResponse) VisitDisarmMergeWhenGreenResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type DisarmMergeWhenGreen500JSONResponse ErrorResponse
+
+func (response DisarmMergeWhenGreen500JSONResponse) VisitDisarmMergeWhenGreenResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ArmMergeWhenGreenRequestObject struct {
+	ProjectId string `json:"project_id"`
+	Id        string `json:"id"`
+}
+
+type ArmMergeWhenGreenResponseObject interface {
+	VisitArmMergeWhenGreenResponse(w http.ResponseWriter) error
+}
+
+type ArmMergeWhenGreen204Response struct {
+}
+
+func (response ArmMergeWhenGreen204Response) VisitArmMergeWhenGreenResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type ArmMergeWhenGreen404JSONResponse ErrorResponse
+
+func (response ArmMergeWhenGreen404JSONResponse) VisitArmMergeWhenGreenResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ArmMergeWhenGreen500JSONResponse ErrorResponse
+
+func (response ArmMergeWhenGreen500JSONResponse) VisitArmMergeWhenGreenResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(500)
 
@@ -3727,6 +4103,43 @@ func (response RestartAgent409JSONResponse) VisitRestartAgentResponse(w http.Res
 type RestartAgent500JSONResponse ErrorResponse
 
 func (response RestartAgent500JSONResponse) VisitRestartAgentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetAgentTestsRequestObject struct {
+	ProjectId string `json:"project_id"`
+	Id        string `json:"id"`
+	Params    GetAgentTestsParams
+}
+
+type GetAgentTestsResponseObject interface {
+	VisitGetAgentTestsResponse(w http.ResponseWriter) error
+}
+
+type GetAgentTests200JSONResponse TestsResponse
+
+func (response GetAgentTests200JSONResponse) VisitGetAgentTestsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetAgentTests404JSONResponse ErrorResponse
+
+func (response GetAgentTests404JSONResponse) VisitGetAgentTestsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetAgentTests500JSONResponse ErrorResponse
+
+func (response GetAgentTests500JSONResponse) VisitGetAgentTestsResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(500)
 
@@ -4446,6 +4859,12 @@ type StrictServerInterface interface {
 	// Merge a Hydra agent's branch into its base branch and kill it
 	// (POST /api/projects/{project_id}/agents/{id}/merge)
 	MergeAgent(ctx context.Context, request MergeAgentRequestObject) (MergeAgentResponseObject, error)
+	// Disarm auto-merge for a head
+	// (DELETE /api/projects/{project_id}/agents/{id}/merge-when-green)
+	DisarmMergeWhenGreen(ctx context.Context, request DisarmMergeWhenGreenRequestObject) (DisarmMergeWhenGreenResponseObject, error)
+	// Arm auto-merge — merge this head when its tests settle passing
+	// (POST /api/projects/{project_id}/agents/{id}/merge-when-green)
+	ArmMergeWhenGreen(ctx context.Context, request ArmMergeWhenGreenRequestObject) (ArmMergeWhenGreenResponseObject, error)
 	// Permanently delete an agent (kill it and erase every record, including its Claude session history)
 	// (DELETE /api/projects/{project_id}/agents/{id}/purge)
 	PurgeAgent(ctx context.Context, request PurgeAgentRequestObject) (PurgeAgentResponseObject, error)
@@ -4455,6 +4874,9 @@ type StrictServerInterface interface {
 	// Restart a Hydra agent (kill and respawn with the same prompt)
 	// (POST /api/projects/{project_id}/agents/{id}/restart)
 	RestartAgent(ctx context.Context, request RestartAgentRequestObject) (RestartAgentResponseObject, error)
+	// Get the test-runner verdict(s) for a head's branch
+	// (GET /api/projects/{project_id}/agents/{id}/tests)
+	GetAgentTests(ctx context.Context, request GetAgentTestsRequestObject) (GetAgentTestsResponseObject, error)
 	// Mark an agent as unread, raising its unread-changes flag
 	// (POST /api/projects/{project_id}/agents/{id}/unread)
 	MarkAgentUnread(ctx context.Context, request MarkAgentUnreadRequestObject) (MarkAgentUnreadResponseObject, error)
@@ -5054,11 +5476,12 @@ func (sh *strictHandler) SendAgentInput(w http.ResponseWriter, r *http.Request, 
 }
 
 // MergeAgent operation middleware
-func (sh *strictHandler) MergeAgent(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+func (sh *strictHandler) MergeAgent(w http.ResponseWriter, r *http.Request, projectId string, id string, params MergeAgentParams) {
 	var request MergeAgentRequestObject
 
 	request.ProjectId = projectId
 	request.Id = id
+	request.Params = params
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.MergeAgent(ctx, request.(MergeAgentRequestObject))
@@ -5073,6 +5496,60 @@ func (sh *strictHandler) MergeAgent(w http.ResponseWriter, r *http.Request, proj
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(MergeAgentResponseObject); ok {
 		if err := validResponse.VisitMergeAgentResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DisarmMergeWhenGreen operation middleware
+func (sh *strictHandler) DisarmMergeWhenGreen(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+	var request DisarmMergeWhenGreenRequestObject
+
+	request.ProjectId = projectId
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DisarmMergeWhenGreen(ctx, request.(DisarmMergeWhenGreenRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DisarmMergeWhenGreen")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DisarmMergeWhenGreenResponseObject); ok {
+		if err := validResponse.VisitDisarmMergeWhenGreenResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ArmMergeWhenGreen operation middleware
+func (sh *strictHandler) ArmMergeWhenGreen(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+	var request ArmMergeWhenGreenRequestObject
+
+	request.ProjectId = projectId
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ArmMergeWhenGreen(ctx, request.(ArmMergeWhenGreenRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ArmMergeWhenGreen")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ArmMergeWhenGreenResponseObject); ok {
+		if err := validResponse.VisitArmMergeWhenGreenResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -5154,6 +5631,34 @@ func (sh *strictHandler) RestartAgent(w http.ResponseWriter, r *http.Request, pr
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(RestartAgentResponseObject); ok {
 		if err := validResponse.VisitRestartAgentResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetAgentTests operation middleware
+func (sh *strictHandler) GetAgentTests(w http.ResponseWriter, r *http.Request, projectId string, id string, params GetAgentTestsParams) {
+	var request GetAgentTestsRequestObject
+
+	request.ProjectId = projectId
+	request.Id = id
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetAgentTests(ctx, request.(GetAgentTestsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetAgentTests")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetAgentTestsResponseObject); ok {
+		if err := validResponse.VisitGetAgentTestsResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

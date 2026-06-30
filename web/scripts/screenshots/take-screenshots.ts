@@ -547,6 +547,23 @@ try {
       // view. Viewport-only to focus on the header + prompt (agent-md's seeded
       // prompt overflows the block's max height, so the fade is visible).
       { name: 'agent-markdown', path: '/project/sim-project/agent/agent-md', viewportOnly: true },
+      // The test gate (PLAN #68): click the failing verdict chip on agent-2 to
+      // open the single-sided, failing-first tests panel (assertion messages +
+      // collapsed passing/skipped rows). agent-2's fixtures (simTestRunners) are a
+      // regression — two failing cases — so the panel shows the gate's headline.
+      { name: 'tests-panel', path: '/project/sim-project/agent/agent-2', viewportOnly: true, click: 'button[title="Show test results"]' },
+      // The same surface mid-run (agent-md is seeded as a running verdict): the
+      // live log tail + progress bar + partial counts.
+      { name: 'tests-panel-running', path: '/project/sim-project/agent/agent-md', viewportOnly: true, click: 'button[title="Show test results"]' },
+      // The merge gate in the header: agent-2's failing verdict turns the primary
+      // action into "Force merge" and shows the red failing chip in the metadata
+      // row (the soft gate — force is always reachable).
+      { name: 'tests-merge-gate', path: '/project/sim-project/agent/agent-2', viewportOnly: true },
+      // The force-merge confirm that names exactly what's being overridden.
+      { name: 'tests-force-merge-confirm', path: '/project/sim-project/agent/agent-2', viewportOnly: true, click: 'button:has-text("Force merge")' },
+      // Auto-merge armed: agent-md (running + merge_when_green) shows the green
+      // "merges when green" chip and a "Cancel auto-merge" primary action.
+      { name: 'tests-merge-when-green', path: '/project/sim-project/agent/agent-md', viewportOnly: true },
       // The agent-type picker dropdown, opened on the compact ("mini") spawn box
       // in the sidebar. The picker is an icon-only trigger (the active agent's
       // brand mark) that opens a menu listing every agent type as its canonical
@@ -1554,11 +1571,19 @@ try {
             })),
           )
           // Wait until every chip has rendered (its View label is present) and
-          // none is still uploading (no spinner), so the layout is stable.
+          // none is still uploading. The "still uploading" marker is an
+          // AttachmentChips LoaderCircle; check only within the chips' shared
+          // container (the View buttons' grandparent) so an unrelated spinner
+          // elsewhere on the page — e.g. a running test-verdict chip in the
+          // sidebar — can't keep it from settling. (The chips render outside the
+          // .max-w-4xl form wrapper, so a form-scoped check would never see them.)
           await page.waitForFunction(
-            (n) =>
-              document.querySelectorAll('[aria-label^="View "]').length === n &&
-              !document.querySelector('svg.lucide-loader-circle'),
+            (n) => {
+              const views = Array.from(document.querySelectorAll('[aria-label^="View "]'))
+              if (views.length !== n) return false
+              const row = views[0]?.parentElement?.parentElement ?? document.body
+              return !row.querySelector('svg.lucide-loader-circle')
+            },
             pg.attachImages.length,
           )
           // Open the lightbox on the first image.
@@ -1974,10 +1999,26 @@ try {
 
     // Worker pool: each worker pulls the next task index until the list drains.
     // JS is single-threaded between awaits, so nextTask++/done++ never race.
+    //
+    // A single failing shot must NOT abort the whole run: this command is a
+    // diff-viewer artifact, and a thrown error exits non-zero, which Hydra caches
+    // as a failed generation — so ONE flaky page would blank the entire artifacts
+    // panel for the head. Instead we catch per-page, record the failure, and keep
+    // going so every other shot still renders; the run only fails hard (rethrows)
+    // if EVERY shot failed (a real, total breakage). Failures are logged loudly
+    // and summarised at the end so a broken page is still obvious in the build log.
+    const failures: string[] = []
     const worker = async () => {
       while (nextTask < tasks.length) {
         const { pg, theme } = tasks[nextTask++]
-        await captureShot(pg, theme)
+        const suffix = theme === 'dark' ? '-dark' : '-light'
+        try {
+          await captureShot(pg, theme)
+        } catch (err) {
+          const msg = err instanceof Error ? err.message.split('\n')[0] : String(err)
+          failures.push(`${pg.name}${suffix}: ${msg}`)
+          console.error(`✗ screenshot failed: ${pg.name}${suffix}: ${msg}`)
+        }
       }
     }
     progress(`capturing ${totalShots} screenshots (${concurrency} at a time)`)
@@ -2145,6 +2186,17 @@ try {
     }
     progress('recording status-dot video')
     for (const theme of themes) await recordStatusDot(theme)
+
+    // Summarise any per-page failures. We exit 0 as long as at least one shot
+    // rendered, so the artifacts panel still shows everything that worked (a
+    // failed run is cached as an error and would otherwise show nothing); only a
+    // total wipe-out (every shot failed) is treated as a hard failure.
+    if (failures.length > 0) {
+      console.error(`\n${failures.length} screenshot(s) failed:`)
+      for (const f of failures) console.error(`  ✗ ${f}`)
+      if (done === 0) throw new Error('every screenshot failed to render')
+      console.error(`(continuing — ${done} shot(s) rendered; the artifacts panel shows those)`)
+    }
   } finally {
     await browser.close()
   }

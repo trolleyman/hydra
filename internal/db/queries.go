@@ -233,6 +233,26 @@ func (s *Store) UpdateAgentBaseBranch(id, baseBranch string) error {
 	return errtrace.Wrap(result.Error)
 }
 
+// SetMergeWhenGreen arms or disarms auto-merge for a head (PLAN #68). When
+// arming, armedAt records the RFC3339 time; disarming clears it.
+func (s *Store) SetMergeWhenGreen(id string, armed bool, armedAt string) error {
+	updates := map[string]any{"merge_when_green": armed, "merge_when_green_at": armedAt}
+	if !armed {
+		updates["merge_when_green_at"] = ""
+	}
+	result := s.db.Model(&Agent{}).Where("id = ?", id).Updates(updates)
+	return errtrace.Wrap(result.Error)
+}
+
+// ArmedMergeWhenGreen returns the active heads with auto-merge armed, across all
+// projects. Used by the daemon's auto-merge watcher to find candidates when a
+// test run settles.
+func (s *Store) ArmedMergeWhenGreen() ([]Agent, error) {
+	var agents []Agent
+	result := s.reader().Where("merge_when_green = ?", true).Find(&agents)
+	return agents, errtrace.Wrap(result.Error)
+}
+
 // SoftDeleteAgent soft-deletes the agent with the given ID.
 func (s *Store) SoftDeleteAgent(id string) error {
 	result := s.db.Delete(&Agent{}, "id = ?", id)

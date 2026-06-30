@@ -117,3 +117,21 @@ timeout_sec = 900
 # command = "scripts/emu-pool.sh up 3 --foreground"
 # host = true
 # max_restarts = 3
+
+## [[tests]]: per-project test-runner commands (PLAN.md #68). Hydra runs each
+## against a head's branch, parses the report it writes into $HYDRA_TEST_OUTPUT
+## (JUnit XML or Hydra-JSON), and surfaces a pass/fail verdict that soft-gates the
+## merge button. See the docs the Settings editor regenerates for every field.
+[[tests]]
+# Go test suite. Uses gotestsum to emit JUnit (per-case detail in the panel) when
+# it's installed, otherwise falls back to plain `go test` (still red/green from the
+# exit code). The whole module is slow, so allow a generous timeout.
+name = "go"
+command = 'if command -v gotestsum >/dev/null 2>&1; then gotestsum --junitfile "$HYDRA_TEST_OUTPUT/go.xml" -- ./...; else go test ./...; fi'
+timeout_sec = 900
+
+[[tests]]
+# Frontend vitest suite, emitting JUnit so failing specs show their assertion.
+name = "web"
+command = 'cd web && bun install && bun x vitest run --reporter=junit --outputFile="$HYDRA_TEST_OUTPUT/web.xml"'
+timeout_sec = 600

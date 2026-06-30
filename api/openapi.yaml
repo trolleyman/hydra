@@ -386,6 +386,18 @@ paths:
           required: true
           schema:
             type: string
+        - in: query
+          name: force
+          required: false
+          schema:
+            type: boolean
+          description: >-
+            Bypass the test gate (PLAN #68). Without it, a merge is soft-blocked
+            with 409 tests_failing / tests_errored when the head's configured
+            tests are failing, errored, or still running. force=true merges
+            anyway — covering both "don't wait" (tests still running) and
+            "override" (tests red). Merge-conflict and operation-in-progress
+            checks still apply.
       responses:
         '204':
           description: No Content (Agent merged and killed)
@@ -715,6 +727,136 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ArtifactsResponse'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/projects/{project_id}/agents/{id}/tests:
+    get:
+      summary: Get the test-runner verdict(s) for a head's branch
+      description: >
+        Returns, per configured [[tests]] runner, the parsed pass/fail verdict
+        for the head's current commit (or working tree). Generation runs in the
+        background and is cached per commit SHA; a runner with status "running"
+        should be polled. Returns an empty list when the project configures no
+        test runners. Single-sided — there is no before/after comparison (PLAN
+        #68).
+      operationId: getAgentTests
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            type: string
+          description: Project ID
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: head_ref
+          required: false
+          schema:
+            type: string
+          description: Commit SHA or ref to test. Defaults to the agent's branch tip.
+        - in: query
+          name: include_uncommitted
+          required: false
+          schema:
+            type: boolean
+          description: Test the agent's uncommitted working tree instead of a commit.
+        - in: query
+          name: refresh
+          required: false
+          schema:
+            type: string
+          description: >-
+            Name of a single test runner whose cached result (including a cached
+            failure) should be discarded and re-run before responding.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TestsResponse'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/projects/{project_id}/agents/{id}/merge-when-green:
+    post:
+      summary: Arm auto-merge — merge this head when its tests settle passing
+      description: >
+        Arms "merge when green" (PLAN #68): the daemon merges this head as soon
+        as its tests settle passing, and disarms it (with a notification) if they
+        settle failing/errored. Arming kicks a fresh test run if none is in
+        flight. Idempotent.
+      operationId: armMergeWhenGreen
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            type: string
+          description: Project ID
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: No Content (auto-merge armed)
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    delete:
+      summary: Disarm auto-merge for a head
+      operationId: disarmMergeWhenGreen
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            type: string
+          description: Project ID
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: No Content (auto-merge disarmed)
         '404':
           description: Not Found
           content:
@@ -1656,7 +1798,10 @@ components:
               # uncommitted_changes: the destination has uncommitted local changes
               #   the merge would overwrite (see conflicting_files); commit or stash.
               # conflict: the operation is already in progress.
-              enum: [merge_conflict, uncommitted_changes, conflict]
+              # tests_failing: the head's tests are failing (soft gate; pass force=true).
+              # tests_errored: the head's tests couldn't run / are still running
+              #   (soft gate; pass force=true). See failing_tests for the count.
+              enum: [merge_conflict, uncommitted_changes, conflict, tests_failing, tests_errored]
             conflicting_files:
               type: array
               items:
@@ -1664,6 +1809,12 @@ components:
               description: >-
                 For uncommitted_changes, the destination files with uncommitted
                 local changes that the merge would overwrite.
+            failing_tests:
+              type: integer
+              nullable: true
+              description: >-
+                For tests_failing, how many test cases are failing on the head's
+                commit (so the force-merge confirm can name the count).
 
     StatusResponse:
       type: object
@@ -1933,6 +2084,42 @@ components:
           type: string
           nullable: true
           description: How an archived agent ended ("killed" | "merged"); null/absent for active agents.
+        tests:
+          $ref: '#/components/schemas/TestSummary'
+        merge_when_green:
+          type: boolean
+          description: True when auto-merge is armed (the head will merge once its tests settle passing). See PLAN #68.
+
+    TestSummary:
+      type: object
+      required: [status]
+      description: >-
+        Compact per-head test verdict for the head's current commit, shown as the
+        sidebar/header chip without opening the tests panel (PLAN #68). Computed
+        from the cached report without triggering a run.
+      properties:
+        status:
+          $ref: '#/components/schemas/TestStatus'
+        total:
+          type: integer
+        passed:
+          type: integer
+        failed:
+          type: integer
+        skipped:
+          type: integer
+        duration_ms:
+          type: integer
+          format: int64
+          nullable: true
+        progress:
+          type: string
+          nullable: true
+          description: Latest progress line while status is "running" (e.g. "84/142").
+        ref:
+          type: string
+          nullable: true
+          description: The resolved commit SHA the verdict was computed for.
 
     CommitInfo:
       type: object
@@ -2489,6 +2676,134 @@ components:
           nullable: true
           description: Whether the daemon supervises this service (absent/null or true = enabled; false = skipped)
 
+    TestScript:
+      type: object
+      required: [name, command]
+      description: A per-project test-runner command whose pass/fail verdict gates the merge button ([[tests]] in config.toml, PLAN #68)
+      properties:
+        name:
+          type: string
+          description: Unique label, also used as the cache directory
+        command:
+          type: string
+          description: Shell command run via `bash -c` in the checkout directory; writes a JUnit-XML or Hydra-JSON report into $HYDRA_TEST_OUTPUT
+        timeout_sec:
+          type: integer
+          description: Max seconds the command may run (0 = built-in default)
+        unsafe_host:
+          type: boolean
+          description: Run on the host with NO sandbox — runs the diffed ref's test code; only for trusted refs (default false)
+        clean_ignored:
+          type: boolean
+          description: Also delete git-ignored files before each run (git clean -fdx instead of -fd); slower (default false)
+        strict:
+          type: boolean
+          nullable: true
+          description: Run the command under `set -eo pipefail` (absent/null or true = strict; false = run exactly as written). The verdict still comes from the parsed report, not the exit code.
+        enabled:
+          type: boolean
+          nullable: true
+          description: Whether the test gate runs this command (absent/null or true = enabled; false = skipped)
+
+    TestStatus:
+      type: string
+      enum: [running, passing, failing, errored, stale, none]
+      x-enum-varnames: [TestStatusRunning, TestStatusPassing, TestStatusFailing, TestStatusErrored, TestStatusStale, TestStatusNone]
+      description: >-
+        running = a run is in flight; passing/failing/errored = settled verdict;
+        stale = a cached verdict exists but predates the current commit; none = no
+        tests configured or never run. (A per-runner TestRunResult only ever uses
+        running/passing/failing/errored; stale/none are head-summary states.)
+
+    TestCaseStatus:
+      type: string
+      enum: [passed, failed, skipped]
+      x-enum-varnames: [TestCasePassed, TestCaseFailed, TestCaseSkipped]
+
+    TestCase:
+      type: object
+      required: [name, status]
+      properties:
+        name:
+          type: string
+        status:
+          $ref: '#/components/schemas/TestCaseStatus'
+        duration_ms:
+          type: integer
+          format: int64
+        message:
+          type: string
+          nullable: true
+          description: Failure/assertion text for a failed case (or skip reason for a skipped one)
+
+    TestRunResult:
+      type: object
+      required: [name, status]
+      description: One test runner's parsed result for a single ref (single-sided; no comparison)
+      properties:
+        name:
+          type: string
+          description: The configured test runner name
+        status:
+          $ref: '#/components/schemas/TestStatus'
+        total:
+          type: integer
+        passed:
+          type: integer
+        failed:
+          type: integer
+        skipped:
+          type: integer
+        duration_ms:
+          type: integer
+          format: int64
+          nullable: true
+        error:
+          type: string
+          nullable: true
+          description: Set when status is "errored" — the command couldn't produce a verdict.
+        ref:
+          type: string
+          nullable: true
+          description: Resolved commit SHA the run was computed for.
+        format:
+          type: string
+          nullable: true
+          description: Report format parsed (junit | hydra | exit).
+        started_at:
+          type: integer
+          format: int64
+          nullable: true
+          description: Unix time (seconds) the in-flight run started. Only set while running.
+        progress:
+          type: string
+          nullable: true
+          description: "Latest progress line of the in-flight run (from ::hydra:progress:: markers, else latest stdout). Only set while running."
+        log:
+          type: array
+          nullable: true
+          description: Captured stdout+stderr lines of the in-flight run. Only while running; once settled fetch log_url.
+          items:
+            $ref: '#/components/schemas/ArtifactLogLine'
+        log_url:
+          type: string
+          nullable: true
+          description: URL to fetch the persisted build log once the run has settled.
+        cases:
+          type: array
+          description: Parsed test cases (failing first when the UI orders them).
+          items:
+            $ref: '#/components/schemas/TestCase'
+
+    TestsResponse:
+      type: object
+      required: [runners]
+      properties:
+        runners:
+          type: array
+          items:
+            $ref: '#/components/schemas/TestRunResult'
+
     ConfigResponse:
       type: object
       required: [defaults, agents]
@@ -2511,6 +2826,19 @@ components:
             $ref: '#/components/schemas/ServiceScript'
           nullable: true
           description: Per-project long-running supervised commands ([[services]] in config.toml)
+        tests:
+          type: array
+          items:
+            $ref: '#/components/schemas/TestScript'
+          nullable: true
+          description: Per-project test-runner commands whose verdict gates merge ([[tests]] in config.toml)
+        test_concurrency:
+          type: integer
+          nullable: true
+          minimum: 0
+          description: >-
+            Max test-runner generations that run at once (test_concurrency in
+            config.toml). 0 = unlimited; null/absent uses the built-in default.
         artifact_concurrency:
           type: integer
           nullable: true

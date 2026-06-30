@@ -3,6 +3,7 @@
 /* tslint:disable */
 /* eslint-disable */
 import type { AgentStatusInfo } from './AgentStatusInfo';
+import type { TestSummary } from './TestSummary';
 export type AgentResponse = {
     id: string;
     /**
@@ -49,5 +50,10 @@ export type AgentResponse = {
      * How an archived agent ended ("killed" | "merged"); null/absent for active agents.
      */
     end_state?: string | null;
+    tests?: TestSummary;
+    /**
+     * True when auto-merge is armed (the head will merge once its tests settle passing). See PLAN
+     */
+    merge_when_green?: boolean;
 };
 

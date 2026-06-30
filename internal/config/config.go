@@ -281,6 +281,57 @@ func (a ArtifactScript) IsEnabled() bool { return a.Enabled == nil || *a.Enabled
 // flag (nil) means strict, so a failing step surfaces rather than being swallowed.
 func (a ArtifactScript) IsStrict() bool { return a.Strict == nil || *a.Strict }
 
+// TestScript describes a per-project command that runs a test suite against a
+// checkout of the repository and writes a machine-readable report. Hydra parses
+// the report into a pass/fail verdict surfaced as a merge gate on the head's
+// branch (see internal/tests and PLAN #68). It deliberately mirrors
+// ArtifactScript field-for-field — the generation/cache/sandbox machinery is
+// shared — differing only in the env contract and that the post-run step parses
+// a report instead of scanning images.
+//
+// Contract: the command runs with the checkout directory as its working
+// directory and these environment variables set:
+//   - HYDRA_TEST_OUTPUT: directory the command must write a results file into
+//     (JUnit XML *.xml or a Hydra-native *.json; see internal/tests for the shape)
+//   - HYDRA_TEST_SOURCE: the checkout directory (same as cwd)
+//   - HYDRA_TEST_REF:    the resolved git ref/sha being tested (best-effort)
+type TestScript struct {
+	// Name uniquely identifies the runner; used as the UI label and cache dir.
+	Name string `toml:"name"`
+	// Command is the shell command run (via `bash -c`) in the checkout directory.
+	// It should write a JUnit-XML or Hydra-JSON report into $HYDRA_TEST_OUTPUT; if
+	// it writes none, the exit code alone becomes a degenerate red/green verdict.
+	Command string `toml:"command"`
+	// TimeoutSec bounds how long the command may run (0 = default, see internal/tests).
+	TimeoutSec int `toml:"timeout_sec"`
+	// UnsafeHost, when true, runs the command directly on the host with NO sandbox.
+	// Same loud caveat as ArtifactScript.UnsafeHost: a [[tests]] command runs the
+	// *diffed ref's* code (its test files, its bun install/go test), so leave it
+	// off unless every ref you will ever test is trusted. Default false.
+	UnsafeHost bool `toml:"unsafe_host"`
+	// CleanIgnored, when true, also removes git-ignored files (dependency/build
+	// caches) before each run — `git clean -fdx` instead of the default `-fd`.
+	// Leave false to keep caches warm between runs. Default false.
+	CleanIgnored bool `toml:"clean_ignored"`
+	// Enabled gates whether the test gate runs this command. nil or true means
+	// active; false skips it entirely. nil is the default for backward compat.
+	Enabled *bool `toml:"enabled"`
+	// Strict runs the command under `set -eo pipefail`. nil or true = strict;
+	// false runs the command exactly as written. Note: a test runner exiting
+	// non-zero because tests FAILED is a valid (cacheable) result, not a strict
+	// abort — strict only governs the shell pipeline, the verdict comes from the
+	// parsed report. nil is the default.
+	Strict *bool `toml:"strict"`
+}
+
+// IsEnabled reports whether the test runner should run. An absent flag (nil)
+// means enabled, for backward compatibility with pre-flag configs.
+func (t TestScript) IsEnabled() bool { return t.Enabled == nil || *t.Enabled }
+
+// IsStrict reports whether the command runs under `set -eo pipefail`. An absent
+// flag (nil) means strict.
+func (t TestScript) IsStrict() bool { return t.Strict == nil || *t.Strict }
+
 type Config struct {
 	// Defaults for all agents.
 	Defaults AgentConfig `toml:"defaults"`
@@ -290,6 +341,9 @@ type Config struct {
 	Artifacts []ArtifactScript `toml:"artifacts"`
 	// Services are per-project long-running commands the daemon supervises.
 	Services []ServiceScript `toml:"services"`
+	// Tests are per-project test-runner commands whose pass/fail verdict gates a
+	// head's merge button (see internal/tests, PLAN #68).
+	Tests []TestScript `toml:"tests"`
 	// ResumePrompt is the message typed into an agent that was actively working
 	// when the daemon was restarted, so it picks up where it left off instead of
 	// sitting idle after its conversation is restored (see DefaultResumePrompt).
@@ -312,6 +366,24 @@ type Config struct {
 	// speculatively: foreground generation (on open) and the concurrency cap above
 	// still apply. nil/absent = enabled.
 	ArtifactPrefetch *bool `toml:"artifact_prefetch"`
+	// TestConcurrency caps how many test-runner generations run at once, like
+	// ArtifactConcurrency. nil/absent = DefaultTestConcurrency; 0 = unlimited.
+	TestConcurrency *int `toml:"test_concurrency"`
+}
+
+// DefaultTestConcurrency is the test-runner parallelism used when the config
+// does not set test_concurrency. Test suites are typically heavier and more
+// resource-hungry than artifact renders (and a head usually has just one), so it
+// defaults lower than DefaultArtifactConcurrency.
+const DefaultTestConcurrency = 1
+
+// ResolveTestConcurrency returns the effective test-runner concurrency: the
+// configured value when set (0 = unlimited), or DefaultTestConcurrency when unset.
+func (c Config) ResolveTestConcurrency() int {
+	if c.TestConcurrency == nil {
+		return DefaultTestConcurrency
+	}
+	return *c.TestConcurrency
 }
 
 // DefaultArtifactConcurrency is the artifact-generation parallelism used when
@@ -362,9 +434,11 @@ type rawConfig struct {
 	// Shared.
 	Artifacts           []ArtifactScript `toml:"artifacts"`
 	Services            []ServiceScript  `toml:"services"`
+	Tests               []TestScript     `toml:"tests"`
 	ResumePrompt        *string          `toml:"resume_prompt"`
 	ArtifactConcurrency *int             `toml:"artifact_concurrency"`
 	ArtifactPrefetch    *bool            `toml:"artifact_prefetch"`
+	TestConcurrency     *int             `toml:"test_concurrency"`
 }
 
 // reservedTopLevel are the top-level TOML names that are NOT agent tables. Any
@@ -375,7 +449,8 @@ type rawConfig struct {
 var reservedTopLevel = map[string]bool{
 	"defaults": true, "agents": true,
 	"pre_prompt": true, "sandbox": true, "policy": true, "artifacts": true, "services": true,
-	"resume_prompt": true, "artifact_concurrency": true, "artifact_prefetch": true,
+	"tests":         true,
+	"resume_prompt": true, "artifact_concurrency": true, "artifact_prefetch": true, "test_concurrency": true,
 }
 
 // GetUserConfigPath returns the path to the global user configuration file.
@@ -458,9 +533,11 @@ func decodeConfig(data []byte) (Config, error) {
 
 	cfg.Artifacts = raw.Artifacts
 	cfg.Services = raw.Services
+	cfg.Tests = raw.Tests
 	cfg.ResumePrompt = raw.ResumePrompt
 	cfg.ArtifactConcurrency = raw.ArtifactConcurrency
 	cfg.ArtifactPrefetch = raw.ArtifactPrefetch
+	cfg.TestConcurrency = raw.TestConcurrency
 
 	// Defaults: legacy [defaults] first, then the new top-level fields win.
 	if raw.Defaults != nil {
@@ -535,6 +612,14 @@ func (c *Config) Merge(other Config) {
 	// Service scripts are replaced wholesale when the other config sets any.
 	if other.Services != nil {
 		c.Services = other.Services
+	}
+	// Test scripts are replaced wholesale when the other config sets any.
+	if other.Tests != nil {
+		c.Tests = other.Tests
+	}
+	// Test concurrency is overridden only when the other config sets it (non-nil).
+	if other.TestConcurrency != nil {
+		c.TestConcurrency = other.TestConcurrency
 	}
 	// Artifact concurrency is overridden only when the other config sets it
 	// (non-nil); a nil pointer means "unset", so it inherits. 0 is a real value
@@ -681,6 +766,25 @@ func ArtifactsAtProjectTOML(content []byte) ([]ArtifactScript, error) {
 	cfg.Merge(projectCfg)
 
 	return cfg.Artifacts, nil
+}
+
+// TestsAtProjectTOML resolves the [[tests]] scripts that apply when the project's
+// .hydra/config.toml holds the given content, mirroring Load's merge order (and
+// ArtifactsAtProjectTOML). Trusted-by-where-it's-read: the live merged config is
+// authoritative, never the checked-out ref's own config (see PLAN #26 red flag).
+func TestsAtProjectTOML(content []byte) ([]TestScript, error) {
+	cfg := LoadInternalDefaults()
+	if userPath, err := GetUserConfigPath(); err == nil {
+		if userCfg, err := LoadFile(userPath); err == nil && userCfg != nil {
+			cfg.Merge(*userCfg)
+		}
+	}
+	projectCfg, err := decodeConfig(content)
+	if err != nil {
+		return nil, errtrace.Wrap(fmt.Errorf("parse project config: %w", err))
+	}
+	cfg.Merge(projectCfg)
+	return cfg.Tests, nil
 }
 
 // GetResolvedConfig returns the fully resolved AgentConfig for a specific agent type.
@@ -1006,6 +1110,9 @@ func managedKeySet() map[string]bool {
 	// artifact_prefetch is Config-level too (emitArtifactPrefetch); its regenerated
 	// "# artifact_prefetch = true" default line is likewise recognised and dropped.
 	m["artifact_prefetch"] = true
+	// test_concurrency is Config-level (emitTestConcurrency); its regenerated
+	// "# test_concurrency = N" default line is recognised and dropped too.
+	m["test_concurrency"] = true
 	// fullscreen is rendered specially under [claude] (emitClaudeAgent), not via
 	// the spec, but is likewise managed so its regenerated "# fullscreen = false"
 	// default line is recognised and replaced rather than kept as a user comment.
@@ -1197,6 +1304,89 @@ func emitServicesAuthoritative(out *[]string, svcs []ServiceScript, meta map[str
 	}
 }
 
+// testsDocLines is the Hydra-owned documentation block emitted before the
+// [[tests]] section.
+func testsDocLines() []string {
+	return []string{
+		docPrefix + " [[tests]]: per-project test-runner commands. Hydra runs each against a head's",
+		docPrefix + " branch and parses the report into a pass/fail verdict that gates the merge",
+		docPrefix + " button (failing/errored soft-block merge; force always available). Fields:",
+		docPrefix + "   name         unique label, also used as the cache directory (required).",
+		docPrefix + "   command      shell command run via `bash -c` in the checkout directory (required).",
+		docPrefix + "   timeout_sec  max seconds the command may run (0 = built-in default).",
+		docPrefix + "   unsafe_host  run on the host with NO sandbox — runs the diffed ref's test code;",
+		docPrefix + "                only for trusted refs (default false).",
+		docPrefix + "   clean_ignored  also delete git-ignored files before each run (default false).",
+		docPrefix + "   strict       run the command under `set -eo pipefail` (default true). Note: a",
+		docPrefix + "                runner exiting non-zero because tests FAILED is a valid verdict,",
+		docPrefix + "                not a strict abort — strict only governs the shell pipeline.",
+		docPrefix + "   enabled      set false to skip this runner (default true).",
+		docPrefix + " The command writes a report into $HYDRA_TEST_OUTPUT: JUnit XML (*.xml — go test",
+		docPrefix + " via gotestsum, pytest, jest/vitest, cargo-nextest, …) or a Hydra-native *.json",
+		docPrefix + ` ({total,passed,failed,skipped,duration_ms,cases:[{name,status,duration_ms,message}]}).`,
+		docPrefix + " If it writes no report, the exit code alone becomes a red/green verdict.",
+		docPrefix + " It is also given HYDRA_TEST_SOURCE (the checkout dir) and HYDRA_TEST_REF (the",
+		docPrefix + " resolved ref).",
+	}
+}
+
+// testsExampleLines is a commented-out example shown when no tests exist.
+func testsExampleLines() []string {
+	return []string{
+		"# [[tests]]",
+		`# name = "go"`,
+		`# command = "gotestsum --junitfile $HYDRA_TEST_OUTPUT/go.xml ./..."`,
+		"# timeout_sec = 600",
+	}
+}
+
+// testFieldLines renders the field assignments of one test runner.
+func testFieldLines(t TestScript) []string {
+	out := []string{
+		"name = " + tomlStringValue(t.Name),
+		"command = " + tomlStringValue(t.Command),
+	}
+	if t.TimeoutSec > 0 {
+		out = append(out, fmt.Sprintf("timeout_sec = %d", t.TimeoutSec))
+	}
+	if t.UnsafeHost {
+		out = append(out, "unsafe_host = true")
+	}
+	if t.CleanIgnored {
+		out = append(out, "clean_ignored = true")
+	}
+	if t.Strict != nil && !*t.Strict {
+		out = append(out, "strict = false")
+	}
+	if t.Enabled != nil && !*t.Enabled {
+		out = append(out, "enabled = false")
+	}
+	return out
+}
+
+// emitTestsAuthoritative renders tests as the source of truth, preserving any
+// hand-written comments matched to an existing runner by name.
+func emitTestsAuthoritative(out *[]string, tests []TestScript, meta map[string]artifactComments) {
+	rendered := 0
+	for _, t := range tests {
+		if t.Name == "" && t.Command == "" {
+			continue
+		}
+		if rendered > 0 {
+			*out = append(*out, "")
+		}
+		rendered++
+		m := meta[t.Name]
+		*out = append(*out, m.leading...)
+		*out = append(*out, "[[tests]]")
+		*out = append(*out, m.interior...)
+		*out = append(*out, testFieldLines(t)...)
+	}
+	if rendered == 0 {
+		*out = append(*out, testsExampleLines()...)
+	}
+}
+
 // existingAnalysis captures everything renderConfig needs to read from a prior
 // config file: the user comments attached to managed tables and keys, and the
 // existing [[artifacts]] blocks with their preserved comments. It is derived
@@ -1210,6 +1400,8 @@ type existingAnalysis struct {
 	artifactMeta   map[string]artifactComments // artifact name -> preserved comments
 	serviceBlocks  [][]string                  // verbatim [[services]] blocks, in source order
 	serviceMeta    map[string]artifactComments // service name -> preserved comments
+	testBlocks     [][]string                  // verbatim [[tests]] blocks, in source order
+	testMeta       map[string]artifactComments // test runner name -> preserved comments
 }
 
 // tomlItem is one top-level TOML expression (a table header or a key/value),
@@ -1318,6 +1510,7 @@ func analyzeExisting(data []byte, keys map[string]bool) *existingAnalysis {
 		keyComments:   map[string][]string{},
 		artifactMeta:  map[string]artifactComments{},
 		serviceMeta:   map[string]artifactComments{},
+		testMeta:      map[string]artifactComments{},
 	}
 	if len(data) == 0 {
 		return res
@@ -1362,12 +1555,18 @@ func analyzeExisting(data []byte, keys map[string]bool) *existingAnalysis {
 		block := append([]string{}, userComments(artLeading, keys)...)
 		block = append(block, lines[artHeaderLine:artLastLine+1]...)
 		meta := artifactComments{leading: userComments(artLeading, keys), interior: artInterior}
-		if curArray == "services" {
+		switch curArray {
+		case "services":
 			res.serviceBlocks = append(res.serviceBlocks, block)
 			if artName != "" {
 				res.serviceMeta[artName] = meta
 			}
-		} else {
+		case "tests":
+			res.testBlocks = append(res.testBlocks, block)
+			if artName != "" {
+				res.testMeta[artName] = meta
+			}
+		default:
 			res.artifactBlocks = append(res.artifactBlocks, block)
 			if artName != "" {
 				res.artifactMeta[artName] = meta
@@ -1479,6 +1678,8 @@ func renderConfig(existing []byte, cfg Config) string {
 	artifactMeta := prior.artifactMeta // name -> preserved comments
 	serviceBlocks := prior.serviceBlocks
 	serviceMeta := prior.serviceMeta // name -> preserved comments
+	testBlocks := prior.testBlocks
+	testMeta := prior.testMeta // name -> preserved comments
 
 	// resume_prompt is not part of the structured save payload (the Settings UI
 	// doesn't send it), so a save that doesn't carry it must preserve whatever the
@@ -1495,6 +1696,8 @@ func renderConfig(existing []byte, cfg Config) string {
 	// renders the commented default instead of preserving the existing file's
 	// value — so clearing the field in the UI actually resets it to the default.
 	artifactConcurrency := cfg.ArtifactConcurrency
+	// test_concurrency is authoritative from cfg like artifact_concurrency.
+	testConcurrency := cfg.TestConcurrency
 	// artifact_prefetch isn't in the Settings editor, so (like resume_prompt) a save
 	// that doesn't carry it preserves the file's existing value rather than dropping
 	// a hand-edited toggle. An explicit cfg value still wins.
@@ -1516,6 +1719,7 @@ func renderConfig(existing []byte, cfg Config) string {
 	emitResumePrompt(&out, resumePrompt, keyComments)
 	emitArtifactConcurrency(&out, artifactConcurrency, keyComments)
 	emitArtifactPrefetch(&out, artifactPrefetch, keyComments)
+	emitTestConcurrency(&out, testConcurrency, keyComments)
 	emitSpecTable(&out, spec, "sandbox", "[sandbox]", cfg.Defaults, keyComments, tableComments)
 	emitSpecTable(&out, spec, "sandbox.network", "[sandbox.network]", cfg.Defaults, keyComments, tableComments)
 	emitSpecTable(&out, spec, "policy", "[policy]", cfg.Defaults, keyComments, tableComments)
@@ -1584,6 +1788,22 @@ func renderConfig(existing []byte, cfg Config) string {
 		out = append(out, servicesExampleLines()...)
 	} else {
 		for i, block := range serviceBlocks {
+			if i > 0 {
+				out = append(out, "")
+			}
+			out = append(out, block...)
+		}
+	}
+
+	// Tests: documentation block, then the test tables. Mirrors artifacts/services.
+	out = appendBlank(out)
+	out = append(out, testsDocLines()...)
+	if cfg.Tests != nil {
+		emitTestsAuthoritative(&out, cfg.Tests, testMeta)
+	} else if len(testBlocks) == 0 {
+		out = append(out, testsExampleLines()...)
+	} else {
+		for i, block := range testBlocks {
 			if i > 0 {
 				out = append(out, "")
 			}
@@ -1664,6 +1884,21 @@ func emitArtifactConcurrency(out *[]string, concurrency *int, keyComments map[st
 		*out = append(*out, fmt.Sprintf("artifact_concurrency = %d", *concurrency))
 	} else {
 		*out = append(*out, fmt.Sprintf("# artifact_concurrency = %d", DefaultArtifactConcurrency))
+	}
+}
+
+// emitTestConcurrency renders the top-level test_concurrency key (a Config-level
+// setting, like artifact_concurrency). Preserved user comment, Hydra doc line,
+// then the value (commented-out showing the default when unset).
+func emitTestConcurrency(out *[]string, concurrency *int, keyComments map[string][]string) {
+	if uc := keyComments["\x00test_concurrency"]; len(uc) > 0 {
+		*out = append(*out, uc...)
+	}
+	*out = append(*out, docPrefix+fmt.Sprintf(` max test-runner generations run at once; lower it for heavy suites, or 0 for unlimited (default %d).`, DefaultTestConcurrency))
+	if concurrency != nil {
+		*out = append(*out, fmt.Sprintf("test_concurrency = %d", *concurrency))
+	} else {
+		*out = append(*out, fmt.Sprintf("# test_concurrency = %d", DefaultTestConcurrency))
 	}
 }
 

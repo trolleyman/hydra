@@ -5,6 +5,7 @@
 import type { AgentConfig } from './AgentConfig';
 import type { ArtifactScript } from './ArtifactScript';
 import type { ServiceScript } from './ServiceScript';
+import type { TestScript } from './TestScript';
 export type ConfigResponse = {
     defaults: AgentConfig;
     agents: Record<string, AgentConfig>;
@@ -16,6 +17,14 @@ export type ConfigResponse = {
      * Per-project long-running supervised commands ([[services]] in config.toml)
      */
     services?: Array<ServiceScript> | null;
+    /**
+     * Per-project test-runner commands whose verdict gates merge ([[tests]] in config.toml)
+     */
+    tests?: Array<TestScript> | null;
+    /**
+     * Max test-runner generations that run at once (test_concurrency in config.toml). 0 = unlimited; null/absent uses the built-in default.
+     */
+    test_concurrency?: number | null;
     /**
      * Max visual-artifact generations that run at once, across foreground (a user viewing a diff) and background (proactive pre-generation) work (artifact_concurrency in config.toml). Generations can be heavy (a full build per ref, RAM-hungry tooling like emulators), so this caps parallelism — lower it for memory-hungry generators. Foreground requests are served before queued background ones; a running generation is never preempted. 0 means unlimited (no cap); null/absent uses the built-in default.
      */

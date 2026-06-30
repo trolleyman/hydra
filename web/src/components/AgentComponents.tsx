@@ -1,7 +1,9 @@
+import { Clock } from 'lucide-react'
 import type { AgentResponse } from '../api'
 import { renderMarkdown } from '../lib/markdown'
 import { AgentTypeIcon, AGENT_ACCENT, type AgentTypeIconName } from './AgentTypeIcon'
 import { Badge, type Tone, TONE_DOT, TONE_BADGE } from './Badge'
+import { TestVerdictChip } from './TestVerdict'
 
 // Single source of truth for agent status colors + labels. Every status maps to
 // a `badge` tone (used by agentStatusBadge) and an optional `dot` tone (used by
@@ -236,6 +238,11 @@ export function AgentSidebarItem({
             {agentStatusBadge(agent.agent_status.status).label}
           </Badge>
         )}
+        {/* Test verdict chip (PLAN #68): passing/failing/running/errored/stale. */}
+        {!archived && <TestVerdictChip tests={agent.tests} variant="xs" />}
+        {!archived && agent.merge_when_green ? (
+          <Clock className="w-3 h-3 text-green-600 dark:text-green-400 shrink-0" aria-label="auto-merge armed" />
+        ) : null}
         {agent.created_at ? (
           // Non-intrusive relative timestamp (when the agent was created), pushed
           // to the right edge of the badge row. Hover shows the absolute time.

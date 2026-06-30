@@ -17,7 +17,9 @@ import { uploadBlobUrl } from '../api/uploads'
 import type { Attachment } from '../lib/spawnDrafts'
 import { DiffViewer } from '../DiffViewer'
 import { formatStartedAgo, agentStatusBadge, archivedEndStateBadge, agentDotClass, agentDotAnimate, agentTypePill } from './AgentComponents'
-import { LoaderCircle, Merge, Trash2, Tag, RotateCcw, Pencil, TerminalSquare, Mail, ShieldAlert, ShieldCheck, ShieldOff } from 'lucide-react'
+import { LoaderCircle, Merge, Trash2, Tag, RotateCcw, Pencil, TerminalSquare, Mail, ShieldAlert, ShieldCheck, ShieldOff, AlertTriangle, Clock, FlaskConical } from 'lucide-react'
+import { TestVerdictChip } from './TestVerdict'
+import { TestsPanel } from './TestsPanel'
 import { Tooltip } from './Tooltip'
 import { Badge } from './Badge'
 import { AgentTypeIcon, type AgentTypeIconName } from './AgentTypeIcon'
@@ -366,6 +368,7 @@ export function AgentDetail({
 }) {
   const [killing, setKilling] = useState(false)
   const [merging, setMerging] = useState(false)
+  const [showTests, setShowTests] = useState(false)
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleDraft, setTitleDraft] = useState('')
   const [savingTitle, setSavingTitle] = useState(false)
@@ -494,7 +497,90 @@ export function AgentDetail({
     })()
   }
 
+  // executeMerge runs the actual merge POST (optionally force, bypassing the test
+  // gate — PLAN #68). On a tests_failing/tests_errored 409 from a non-force merge
+  // (e.g. a stale verdict that re-ran red), it offers a force-merge follow-up.
+  async function executeMerge(force: boolean) {
+    setMerging(true)
+    const toastId = useToastStore.getState().show({ message: `Merging agent "${agent.id}"…`, type: 'info', duration: 0 })
+    try {
+      await api.default.mergeAgent(projectId ?? '', agent.id, force || undefined)
+      useToastStore.getState().dismiss(toastId)
+      useToastStore.getState().show({ message: `Agent "${agent.id}" merged into ${agent.base_branch}`, type: 'success' })
+      useAgentStore.getState().upsertArchived({ ...agent, archived: true, end_state: 'merged', session_status: 'stopped', session_pid: 0 })
+      onKilled(agent.id)
+    } catch (err) {
+      const body = apiErrorBody(err)
+      if (body?.error === 'uncommitted_changes') {
+        const files = body.conflicting_files ?? []
+        const fileList = files.length ? `\n\n${files.map((f) => `• ${f}`).join('\n')}` : ''
+        useDialogStore.getState().show({ title: 'Uncommitted Changes in Target', message: `Can't merge: the merge target (${agent.base_branch}) has uncommitted changes that the merge would overwrite. Commit or stash them, then try again.${fileList}`, type: 'warning' })
+      } else if (body?.error === 'tests_failing' || body?.error === 'tests_errored') {
+        // The test gate blocked it (the verdict moved since the chip rendered).
+        const n = (body as { failing_tests?: number }).failing_tests ?? 0
+        const failing = body.error === 'tests_failing'
+        useDialogStore.getState().show({
+          title: failing ? `Force merge with ${n} failing test${n !== 1 ? 's' : ''}?` : 'Merge with no test verdict?',
+          message: failing
+            ? `${n || 'Some'} test${n === 1 ? '' : 's'} failing on this commit — their failures will land on ${agent.base_branch}.`
+            : `Tests couldn't run (or are still running) on this commit — there's no verdict, not a pass. Merge into ${agent.base_branch} anyway?`,
+          type: 'warning',
+          confirmLabel: failing ? 'Force merge' : 'Merge anyway',
+          onConfirm: () => void executeMerge(true),
+        })
+      } else if (body?.error === 'merge_conflict') {
+        useDialogStore.getState().show({ title: 'Merge Conflict', message: `CONFLICT: Merge failed due to git conflicts. Please resolve them manually or update from base.`, type: 'warning' })
+      } else {
+        useDialogStore.getState().show({ title: 'Merge Failed', message: `Failed to merge agent: ${formatError(err)}`, type: 'error' })
+      }
+    } finally {
+      useToastStore.getState().dismiss(toastId)
+      setMerging(false)
+    }
+  }
+
+  // confirmForceMerge shows the override confirm for a failing/errored verdict,
+  // with copy that names exactly what's being overridden (PLAN #68 design).
+  function confirmForceMerge(kind: 'failing' | 'errored') {
+    const toBranch = agent.base_branch || 'base'
+    const n = agent.tests?.failed ?? 0
+    useDialogStore.getState().show({
+      title: kind === 'failing' ? `Force merge with ${n} failing test${n !== 1 ? 's' : ''}?` : 'Merge with no test verdict?',
+      message: kind === 'failing'
+        ? `${n || 'Some'} test${n === 1 ? '' : 's'} failing on this commit — their failures will land on ${toBranch}.`
+        : `Tests couldn't run on this commit — there's no verdict, not a pass. Merge into ${toBranch} anyway?`,
+      type: 'warning',
+      confirmLabel: kind === 'failing' ? 'Force merge' : 'Merge anyway',
+      onConfirm: () => void executeMerge(true),
+    })
+  }
+
+  // armMerge / cancelMerge toggle "merge when green" (auto-merge).
+  async function armMerge() {
+    try {
+      await api.default.armMergeWhenGreen(projectId ?? '', agent.id)
+      useToastStore.getState().show({ message: `Will merge "${agent.id}" when its tests pass`, type: 'info' })
+    } catch (err) {
+      useToastStore.getState().show({ message: `Couldn't arm auto-merge: ${formatError(err)}`, type: 'error' })
+    }
+  }
+  async function cancelMerge() {
+    try {
+      await api.default.disarmMergeWhenGreen(projectId ?? '', agent.id)
+      useToastStore.getState().show({ message: 'Auto-merge cancelled', type: 'info' })
+    } catch (err) {
+      useToastStore.getState().show({ message: `Couldn't cancel auto-merge: ${formatError(err)}`, type: 'error' })
+    }
+  }
+
+  // handleMerge is the primary merge action; it adapts to the head's test verdict
+  // (PLAN #68): failing → force confirm, errored → merge-anyway confirm, running →
+  // arm auto-merge, otherwise the normal merge confirm below.
   function handleMerge() {
+    const verdict = agent.tests?.status
+    if (verdict === 'failing') return confirmForceMerge('failing')
+    if (verdict === 'errored') return confirmForceMerge('errored')
+    if (verdict === 'running') return void armMerge()
     // If this agent is stacked on another agent (its base branch is another
     // agent's branch), the merge advances that parent agent's branch — name it,
     // and warn when the parent is still running since its working files will
@@ -521,58 +607,7 @@ export function AgentDetail({
       variant: 'merge',
       confirmLabel: 'Merge branch',
       details: { fromBranch, toBranch, note: parentWarning, loading: true },
-      onConfirm: async () => {
-        setMerging(true)
-        // A persistent toast keeps the merge visible even after the dialog
-        // closes and the agent is moved into the archived history.
-        const toastId = useToastStore.getState().show({
-          message: `Merging agent "${agent.id}"…`,
-          type: 'info',
-          duration: 0,
-        })
-        try {
-          await api.default.mergeAgent(projectId ?? '', agent.id)
-          useToastStore.getState().dismiss(toastId)
-          useToastStore.getState().show({
-            message: `Agent "${agent.id}" merged into ${agent.base_branch}`,
-            type: 'success',
-          })
-          // Optimistically move the agent into the archived history so it appears
-          // in the sidebar immediately, rather than vanishing until the next
-          // archived-list refetch (which only happens on a project switch).
-          useAgentStore.getState().upsertArchived({ ...agent, archived: true, end_state: 'merged', session_status: 'stopped', session_pid: 0 })
-          onKilled(agent.id)
-        } catch (err) {
-          const body = apiErrorBody(err)
-          if (body?.error === 'uncommitted_changes') {
-            // The merge target (the base branch's checkout) has uncommitted local
-            // changes the merge would overwrite — distinct from a content conflict
-            // between the branches. Name the files and tell the user to commit/stash.
-            const files = body.conflicting_files ?? []
-            const fileList = files.length ? `\n\n${files.map((f) => `• ${f}`).join('\n')}` : ''
-            useDialogStore.getState().show({
-              title: 'Uncommitted Changes in Target',
-              message: `Can't merge: the merge target (${agent.base_branch}) has uncommitted changes that the merge would overwrite. Commit or stash them, then try again.${fileList}`,
-              type: 'warning'
-            })
-          } else if (body?.error === 'merge_conflict') {
-            useDialogStore.getState().show({
-              title: 'Merge Conflict',
-              message: `CONFLICT: Merge failed due to git conflicts. Please resolve them manually or update from base.`,
-              type: 'warning'
-            })
-          } else {
-            useDialogStore.getState().show({
-              title: 'Merge Failed',
-              message: `Failed to merge agent: ${formatError(err)}`,
-              type: 'error'
-            })
-          }
-        } finally {
-          useToastStore.getState().dismiss(toastId)
-          setMerging(false)
-        }
-      }
+      onConfirm: () => void executeMerge(false),
     })
 
     // Background: fill in the diff stats (+/−) and, when there are uncommitted
@@ -745,6 +780,34 @@ export function AgentDetail({
     return <ArchivedAgentDetail agent={agent} projectId={projectId} onPurged={onKilled} />
   }
 
+  // The primary merge action adapts to the test verdict + auto-merge state
+  // (PLAN #68): armed → cancel; failing → force; errored → merge anyway; running
+  // → arm "merge when green"; otherwise plain Merge.
+  const verdict = agent.tests?.status
+  const armed = agent.merge_when_green === true
+  const mergeAction = armed
+    ? { label: 'Cancel auto-merge', icon: <Clock className="w-4 h-4" />, onClick: () => void cancelMerge(), variant: 'primary' as const, disabled: merging || killing, shortcut: SHORTCUT_MERGE }
+    : {
+        label: verdict === 'failing' ? 'Force merge' : verdict === 'errored' ? 'Merge anyway' : verdict === 'running' ? 'Merge when green' : 'Merge',
+        icon: merging ? (
+          <LoaderCircle className="w-4 h-4 animate-spin" />
+        ) : verdict === 'failing' || verdict === 'errored' ? (
+          <AlertTriangle className="w-4 h-4" />
+        ) : verdict === 'running' ? (
+          <Clock className="w-4 h-4" />
+        ) : (
+          <Merge className="w-4 h-4" />
+        ),
+        onClick: handleMerge,
+        variant: 'primary' as const,
+        disabled: merging || killing,
+        shortcut: SHORTCUT_MERGE,
+      }
+  // While tests run, also offer an immediate force-merge ("don't wait").
+  const mergeNowAction = verdict === 'running' && !armed
+    ? [{ label: 'Merge now (don’t wait)', icon: <Merge className="w-4 h-4" />, onClick: () => confirmForceMerge('errored'), variant: 'segment' as const, disabled: merging || killing }]
+    : []
+
   return (
     <div className="flex-1 flex flex-col min-w-0 min-h-0">
       {/* The agent header is a single header bar (no separate H1): the name with
@@ -765,14 +828,8 @@ export function AgentDetail({
           onCancel: () => setEditingTitle(false),
         }}
         actions={[
-          {
-            label: 'Merge',
-            icon: merging ? <LoaderCircle className="w-4 h-4 animate-spin" /> : <Merge className="w-4 h-4" />,
-            onClick: handleMerge,
-            variant: 'primary',
-            disabled: merging || killing,
-            shortcut: SHORTCUT_MERGE,
-          },
+          mergeAction,
+          ...mergeNowAction,
           { label: 'Mark as unread', icon: <Mail className="w-4 h-4" />, onClick: handleMarkUnread, variant: 'segment', shortcut: SHORTCUT_MARK_UNREAD },
           { label: 'Rename', icon: <Pencil className="w-4 h-4" />, onClick: startEditingTitle, variant: 'segment', shortcut: SHORTCUT_RENAME },
           { label: 'Kill', icon: <Trash2 className="w-4 h-4" />, onClick: handleKill, variant: 'danger', disabled: merging || killing, shortcut: SHORTCUT_KILL },
@@ -796,6 +853,17 @@ export function AgentDetail({
             {agent.agent_status && (
               <Badge className={agentStatusBadge(agent.agent_status.status).className}>
                 {agentStatusBadge(agent.agent_status.status).label}
+              </Badge>
+            )}
+            {/* Test verdict chip (PLAN #68): click to open the tests panel. */}
+            {agent.tests && agent.tests.status !== 'none' && (
+              <button onClick={() => setShowTests((s) => !s)} className="inline-flex" title="Show test results">
+                <TestVerdictChip tests={agent.tests} variant="sm" />
+              </button>
+            )}
+            {armed && (
+              <Badge tone="green" variant="sm" icon={<Clock className="w-3 h-3" />} title="Auto-merge armed — merges when tests pass">
+                merges when green
               </Badge>
             )}
             {agent.network_enforcement && <NetworkEnforcementBadge mode={agent.network_enforcement} />}
@@ -833,6 +901,19 @@ export function AgentDetail({
           </SeparatedRow>
 
         </div>
+
+        {/* Tests panel (PLAN #68): toggled by the verdict chip. Single-sided,
+            failing-first, with a live log while running. */}
+        {showTests && projectId && (
+          <div className="mb-6 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+            <div className="flex items-center gap-2 px-3 py-2 bg-gray-50 dark:bg-gray-800/40 border-b border-gray-100 dark:border-gray-800">
+              <FlaskConical className="w-4 h-4 text-gray-400" />
+              <span className="text-sm font-medium">Tests</span>
+              <button onClick={() => setShowTests(false)} className="ml-auto text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">Hide</button>
+            </div>
+            <TestsPanel projectId={projectId} agentId={agent.id} />
+          </div>
+        )}
 
         {/* Prompt */}
         {agent.prompt && <PromptBlock prompt={agent.prompt} projectId={projectId} />}

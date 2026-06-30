@@ -28,6 +28,7 @@ import (
 	"github.com/trolleyman/hydra/internal/sandbox"
 	"github.com/trolleyman/hydra/internal/services"
 	"github.com/trolleyman/hydra/internal/session"
+	hydratests "github.com/trolleyman/hydra/internal/tests"
 	"github.com/trolleyman/hydra/internal/usage"
 )
 
@@ -62,6 +63,10 @@ type Server struct {
 	// Artifacts generates/caches diff artifacts (screenshots etc.), one Manager
 	// per registered project (resolved per request). nil disables the feature.
 	Artifacts *artifacts.Registry
+
+	// Tests runs/caches the per-project [[tests]] commands whose verdict gates a
+	// head's merge button (PLAN #68), one Manager per project. nil disables it.
+	Tests *hydratests.Registry
 
 	// Services supervises each project's [[services]] (long-running host/sandbox
 	// commands, e.g. an emulator pool). nil disables the feature (e.g. in tests).
@@ -412,6 +417,7 @@ func agentResponse(h heads.Head) api.AgentResponse {
 		HasUnreadChanges:   &h.HasUnreadChanges,
 		Archived:           &archived,
 		EndState:           endState,
+		MergeWhenGreen:     &h.MergeWhenGreen,
 	}
 }
 
@@ -431,6 +437,7 @@ func (s *Server) ListAgents(ctx context.Context, request api.ListAgentsRequestOb
 	resp := make(api.ListAgents200JSONResponse, len(headList))
 	for i, h := range headList {
 		resp[i] = agentResponse(h)
+		resp[i].Tests = s.testSummaryFor(projectRoot, h)
 	}
 	return resp, nil
 }
@@ -1143,6 +1150,50 @@ func (s *Server) MergeAgent(ctx context.Context, request api.MergeAgentRequestOb
 		return nil, &apiError{Code: 400, Type: api.ErrorResponseErrorBadRequest, Err: err} //errtrace:skip
 	}
 
+	// Test gate (PLAN #68): soft-block the merge when the head's configured tests
+	// are failing, errored, or still running — unless force=true (which covers both
+	// "don't wait" and "override"). Checked after the CAS claim so a concurrent
+	// merge still 409s first, and before any worktree work so a blocked merge is
+	// cheap. force always bypasses it.
+	force := request.Params.Force != nil && *request.Params.Force
+	if !force {
+		if code, failing, blocked := s.testGateVerdict(projectRoot, *head); blocked {
+			errMsg := "merge blocked: the head's tests are not passing (pass force=true to override)"
+			if s.DB != nil {
+				_ = s.DB.ClearHeadStatus(head.ID, &errMsg)
+			}
+			resp := api.MergeConflictError{Error: code, Code: 409, Details: errMsg}
+			if code == api.MergeConflictErrorErrorTestsFailing {
+				resp.FailingTests = &failing
+			}
+			return api.MergeAgent409JSONResponse(resp), nil
+		}
+	}
+
+	conflict, err := s.performClaimedMerge(ctx, projectRoot, *head)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	if conflict != nil {
+		return api.MergeAgent409JSONResponse(*conflict), nil
+	}
+	return api.MergeAgent204Response{}, nil
+}
+
+// performClaimedMerge runs the actual branch merge for a head whose head_status
+// has ALREADY been CAS-claimed as "merging" (by the MergeAgent handler or the
+// auto-merge watcher). It validates the base ref, merges the head's branch into
+// it, reparents stacked children, and tears the head down as "merged". On a
+// recoverable failure it resets head_status and returns a non-nil
+// *MergeConflictError (the caller maps it to a 409 or logs it); a nil error +
+// nil conflict means the merge succeeded. The gate (PLAN #68) is the caller's
+// responsibility — this assumes the decision to merge is already made.
+func (s *Server) performClaimedMerge(ctx context.Context, projectRoot string, head heads.Head) (*api.MergeConflictError, error) {
+	if head.Branch == nil {
+		return &api.MergeConflictError{Error: api.MergeConflictErrorErrorMergeConflict, Code: 409, Details: "agent has no git branch to merge"}, nil
+	}
+	branchName := *head.Branch
+
 	// Merge the agent's branch INTO its base branch (which may be another agent's
 	// hydra/<id> branch for stacked agents), not into whatever the project root
 	// happens to have checked out. ResolveMergeDir gives us a worktree where the
@@ -1153,11 +1204,7 @@ func (s *Server) MergeAgent(ctx context.Context, request api.MergeAgentRequestOb
 		if s.DB != nil {
 			_ = s.DB.ClearHeadStatus(head.ID, &errMsg)
 		}
-		return api.MergeAgent409JSONResponse(api.MergeConflictError{
-			Error:   api.MergeConflictErrorErrorMergeConflict,
-			Code:    409,
-			Details: errMsg,
-		}), nil
+		return &api.MergeConflictError{Error: api.MergeConflictErrorErrorMergeConflict, Code: 409, Details: errMsg}, nil
 	}
 
 	mergeDir, cleanup, err := heads.ResolveMergeDir(projectRoot, target)
@@ -1166,11 +1213,7 @@ func (s *Server) MergeAgent(ctx context.Context, request api.MergeAgentRequestOb
 		if s.DB != nil {
 			_ = s.DB.ClearHeadStatus(head.ID, &errMsg)
 		}
-		return api.MergeAgent409JSONResponse(api.MergeConflictError{
-			Error:   api.MergeConflictErrorErrorMergeConflict,
-			Code:    409,
-			Details: errMsg,
-		}), nil
+		return &api.MergeConflictError{Error: api.MergeConflictErrorErrorMergeConflict, Code: 409, Details: errMsg}, nil
 	}
 	defer cleanup()
 
@@ -1189,18 +1232,9 @@ func (s *Server) MergeAgent(ctx context.Context, request api.MergeAgentRequestOb
 		var dirty *git.DirtyMergeError
 		if errors.As(err, &dirty) {
 			files := dirty.Files
-			return api.MergeAgent409JSONResponse(api.MergeConflictError{
-				Error:            api.MergeConflictErrorErrorUncommittedChanges,
-				Code:             409,
-				Details:          errMsg,
-				ConflictingFiles: &files,
-			}), nil
+			return &api.MergeConflictError{Error: api.MergeConflictErrorErrorUncommittedChanges, Code: 409, Details: errMsg, ConflictingFiles: &files}, nil
 		}
-		return api.MergeAgent409JSONResponse(api.MergeConflictError{
-			Error:   api.MergeConflictErrorErrorMergeConflict,
-			Code:    409,
-			Details: errMsg,
-		}), nil
+		return &api.MergeConflictError{Error: api.MergeConflictErrorErrorMergeConflict, Code: 409, Details: errMsg}, nil
 	}
 
 	// Reparent stacked children: any agent based on this agent's branch is moved
@@ -1219,12 +1253,12 @@ func (s *Server) MergeAgent(ctx context.Context, request api.MergeAgentRequestOb
 	}
 
 	// Kill cleanup without re-doing the CAS (already in "merging" state).
-	if err := heads.KillHeadNoLock(ctx, s.Sessions, s.DB, *head, "merged"); err != nil {
+	if err := heads.KillHeadNoLock(ctx, s.Sessions, s.DB, head, "merged"); err != nil {
 		return nil, errtrace.Wrap(err)
 	}
 
 	s.notifyAgentsChanged(projectRoot, true)
-	return api.MergeAgent204Response{}, nil
+	return nil, nil
 }
 
 func (s *Server) UpdateAgentFromBase(ctx context.Context, request api.UpdateAgentFromBaseRequestObject) (api.UpdateAgentFromBaseResponseObject, error) {
