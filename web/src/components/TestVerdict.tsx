@@ -90,7 +90,9 @@ export function TestVerdictChip({ tests, variant = 'xs' }: { tests?: TestSummary
       title={verdictTitle(tests)}
       className={stale ? 'inline-flex items-center gap-1 text-gray-500 dark:text-gray-400 border border-dashed border-gray-400 dark:border-gray-600 rounded px-1 py-0.5' : undefined}
     >
-      <span className="inline-flex items-center">
+      {/* whitespace-nowrap so a label like "2 failed" never breaks onto two lines
+          inside the chip when the sidebar row is tight — the chip wraps as a whole. */}
+      <span className="inline-flex items-center whitespace-nowrap">
         {verdictLabel(tests)}
         {showSkips ? <SkippedCount n={tests.skipped ?? 0} /> : null}
       </span>

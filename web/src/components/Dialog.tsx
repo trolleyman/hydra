@@ -228,6 +228,13 @@ function MergeGatePanel({
       : running
         ? { cls: 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800/50', label: details?.testProgress || 'running' }
         : { cls: 'text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800/50', label: 'no verdict' }
+  // Explains what the two buttons do, in this commit's terms.
+  const gateHelp =
+    status === 'failing'
+      ? 'You can force the merge now, landing the failing tests on the branch — or queue it to merge automatically once they pass.'
+      : running
+        ? 'You can force the merge now, but the branch may carry issues the tests would catch — or queue it to merge automatically once they pass.'
+        : 'You can force the merge now without a passing verdict — or queue it to merge automatically once the tests pass.'
   return (
     <div
       className="bg-white dark:bg-[#141a26] dark:border dark:border-[#252d3b] rounded-2xl shadow-2xl w-full max-w-[470px] overflow-hidden animate-in zoom-in-95 duration-200"
@@ -259,10 +266,7 @@ function MergeGatePanel({
             </span>
           }
         />
-        <p className="text-[11.5px] leading-snug text-gray-400 dark:text-gray-500">
-          The test gate is a soft gate — it never blocks you, it just asks first. Queueing runs the merge
-          automatically the moment the tests pass (and disarms, with a notification, if they settle failing).
-        </p>
+        <p className="text-[11.5px] leading-snug text-gray-400 dark:text-gray-500">{gateHelp}</p>
       </div>
       <div className="flex justify-end gap-2.5 px-5 py-3.5 border-t border-gray-100 dark:border-[#232b3a] bg-gray-50 dark:bg-[#0f141d]">
         <DialogCancelButton onClick={onCancel}>Cancel</DialogCancelButton>

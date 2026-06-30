@@ -560,7 +560,8 @@ export function AgentDetail({
     const toBranch = agent.base_branch || 'base'
     const fromBranch = agent.branch_name || `hydra/${agent.id}`
     const progress = agent.tests?.progress ?? undefined // e.g. "84/142"
-    const doneOf = progress && progress.includes('/') ? `${progress.split('/')[0]} of ${progress.split('/')[1]} done. ` : ''
+    // The heading + a brief situational line; the dialog's under-branch copy (see
+    // MergeGatePanel) explains what the two buttons do.
     const title =
       kind === 'failing'
         ? `${n || 'Some'} test${n === 1 ? '' : 's'} failing`
@@ -569,10 +570,10 @@ export function AgentDetail({
           : "Tests couldn't run"
     const message =
       kind === 'failing'
-        ? `Merging is soft-gated while tests fail. Force the merge to land the failures on ${toBranch} now, or queue it to merge automatically once the tests pass.`
+        ? `Some tests are failing on this commit.`
         : kind === 'running'
-          ? `${doneOf}Merge now without waiting on the result, or queue it to merge automatically the moment they pass.`
-          : `The runner errored (or produced no verdict) for this commit — that's not a pass. Force the merge into ${toBranch} anyway, or queue it to merge once tests pass.`
+          ? `Tests haven't finished on this commit yet.`
+          : `The runner errored, or produced no verdict, for this commit.`
     useDialogStore.getState().show({
       title,
       message,
@@ -581,9 +582,7 @@ export function AgentDetail({
       details: { fromBranch, toBranch, testStatus: kind, testFailed: n, testProgress: progress },
       confirmLabel: 'Queue merge',
       onConfirm: () => void armMerge(),
-      // While running there's no failure to "force" past — it's just "merge now,
-      // don't wait" — but it's the same override action + button styling.
-      secondaryLabel: kind === 'running' ? 'Merge now' : 'Force merge',
+      secondaryLabel: 'Force merge',
       onSecondary: () => void executeMerge(true),
     })
   }
@@ -593,14 +592,13 @@ export function AgentDetail({
   function confirmForceMerge(kind: 'failing' | 'errored') {
     const toBranch = agent.base_branch || 'base'
     const n = agent.tests?.failed ?? 0
-    useDialogStore.getState().show({
-      title: kind === 'failing' ? `Force merge with ${n} failing test${n !== 1 ? 's' : ''}?` : 'Merge with no test verdict?',
-      message: kind === 'failing'
-        ? `${n || 'Some'} test${n === 1 ? '' : 's'} failing on this commit — their failures will land on ${toBranch}.`
-        : `Tests couldn't run on this commit — there's no verdict, not a pass. Merge into ${toBranch} anyway?`,
-      type: 'warning',
-      confirmLabel: kind === 'failing' ? 'Force merge' : 'Merge anyway',
-      onConfirm: () => void executeMerge(true),
+    showMergeConfirm({
+      force: true,
+      title: `Force merge into ${toBranch}?`,
+      confirmLabel: 'Force merge',
+      caution: kind === 'failing'
+        ? `${n || 'Some'} failing test${n === 1 ? '' : 's'} will land on ${toBranch}.`
+        : `No passing test verdict for this commit — merging anyway.`,
     })
   }
 
@@ -640,10 +638,16 @@ export function AgentDetail({
     return confirmNormalMerge()
   }
 
-  // confirmNormalMerge shows the standard merge confirm (no gate override). Split
-  // out from handleMerge so the dropdown's Force/Queue options and the main button
-  // can each route to exactly the flow they mean.
   function confirmNormalMerge() {
+    showMergeConfirm({})
+  }
+
+  // showMergeConfirm renders the rich merge dialog (branch chip + diff stats + an
+  // optional caution line) — shared by the normal merge and the force-merge override
+  // so they look identical bar the title/label/caution. `force` bypasses the soft
+  // test gate server-side.
+  function showMergeConfirm(opts: { force?: boolean; title?: string; confirmLabel?: string; caution?: string }) {
+    const force = opts.force ?? false
     // If this agent is stacked on another agent (its base branch is another
     // agent's branch), the merge advances that parent agent's branch — name it,
     // and warn when the parent is still running since its working files will
@@ -651,32 +655,29 @@ export function AgentDetail({
     const parent = useAgentStore.getState().agents.find((a) => a.branch_name === agent.base_branch)
     const fromBranch = agent.branch_name || `hydra/${agent.id}`
     const toBranch = agent.base_branch || 'base'
-    // A running parent is the headline caution (merging shifts its working files
-    // mid-flight); it takes precedence over the uncommitted-loss note below.
     const parentWarning = parent && parent.session_status === 'running'
       ? `Parent agent "${parent.id}" is running — merging will change its working files.`
       : undefined
-    const targetNote = parent
-      ? `Advances agent "${parent.id}"'s branch (${toBranch}) with this agent’s work and closes the session.`
-      : 'Fast-forwards the base branch with this agent’s work and closes the session.'
+    const lead = parent
+      ? `Merges this agent’s work into agent "${parent.id}"'s branch (${toBranch}) and closes the session.`
+      : `Merges this agent’s work into ${toBranch} and closes the session.`
+    // A caller-supplied caution (e.g. failing tests for a force merge) wins over the
+    // uncommitted-changes note the background check would otherwise add.
+    const caution = opts.caution ?? parentWarning
 
     // Show the dialog immediately so it never lags behind a slow git query.
     // The diff stats + uncommitted-changes check run in the background and fold
     // into the open dialog when they return.
     useDialogStore.getState().show({
-      title: `Merge into ${toBranch}?`,
-      message: targetNote,
-      type: parentWarning ? 'warning' : 'confirm',
+      title: opts.title ?? `Merge into ${toBranch}?`,
+      message: lead,
+      type: caution ? 'warning' : 'confirm',
       variant: 'merge',
-      confirmLabel: 'Merge branch',
-      details: { fromBranch, toBranch, note: parentWarning, loading: true },
-      onConfirm: () => void executeMerge(false),
+      confirmLabel: opts.confirmLabel ?? 'Merge branch',
+      details: { fromBranch, toBranch, note: caution, loading: true },
+      onConfirm: () => void executeMerge(force),
     })
 
-    // Background: fill in the diff stats (+/−) and, when there are uncommitted
-    // changes the merge would discard, the caution note — patched into the dialog
-    // if it's still open by the time the query returns. A running-parent warning
-    // (set above) outranks the uncommitted note.
     void (async () => {
       let patch: Partial<DialogDetails> = { loading: false }
       try {
@@ -684,14 +685,16 @@ export function AgentDetail({
         const additions = d.files.reduce((s, f) => s + (f.additions ?? 0), 0)
         const deletions = d.files.reduce((s, f) => s + (f.deletions ?? 0), 0)
         patch = { ...patch, additions, deletions }
-        if (!parentWarning && d.uncommitted_changes) {
+        // Only add the uncommitted-loss note when the caller didn't supply its own
+        // caution (which takes priority).
+        if (!caution && d.uncommitted_changes) {
           const total = (d.uncommitted_summary?.tracked_count ?? 0) + (d.uncommitted_summary?.untracked_count ?? 0)
           patch.note = `${total} uncommitted file change${total !== 1 ? 's' : ''} will be lost when merging.`
         }
       } catch { /* ignore — show the dialog without stats */ }
       const dialog = useDialogStore.getState()
       if (dialog.isOpen && dialog.variant === 'merge') {
-        dialog.update({ details: { ...dialog.details, ...patch }, type: patch.note || parentWarning ? 'warning' : 'confirm' })
+        dialog.update({ details: { ...dialog.details, ...patch }, type: (patch.note || caution) ? 'warning' : 'confirm' })
       }
     })()
   }
@@ -886,14 +889,6 @@ export function AgentDetail({
             { label: 'Force merge', description: `Merge this commit to ${toBranch} right now.`, icon: <AlertTriangle className="w-4 h-4" />, onClick: forceMerge, danger: true, tone: 'red', disabled: busy },
             { label: 'Queue merge', description: 'Merges on its own once tests pass.', icon: <Clock className="w-4 h-4" />, onClick: () => void armMerge(), tone: 'emerald', disabled: busy },
           ] as AgentTopBarMenuItem[]),
-          menuNote: verdict === 'failing'
-            ? (
-              <span className="flex items-start gap-1.5 text-amber-700 dark:text-amber-300">
-                <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-px" />
-                <span>Tests are failing — merging is soft-gated. Force to override now, or queue to merge once they pass.</span>
-              </span>
-            )
-            : undefined,
         }
 
   return (
