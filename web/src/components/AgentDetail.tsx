@@ -942,11 +942,8 @@ export function AgentDetail({
             {agent.tests && agent.tests.status !== 'none' && (
               <TestVerdictChip tests={agent.tests} variant="sm" />
             )}
-            {armed && (
-              <Badge tone="green" variant="sm" icon={<Clock className="w-3 h-3" />} title="Auto-merge armed — merges when tests pass">
-                merges when tests pass
-              </Badge>
-            )}
+            {/* The armed "merges when tests pass" state is shown by the merge button
+                itself now (the green pill), so no separate metadata-row badge. */}
             {agent.network_enforcement && <NetworkEnforcementBadge mode={agent.network_enforcement} />}
             {agent.branch_name && (
               <span className="text-xs font-mono text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
