@@ -89,6 +89,21 @@ export const ARTIFACT_TAG_FILTER_PREFIX = 'hydra-artifact-tagfilter-v2-'
 export const artifactTagFilterKey = (projectId: string | null, agentId: string): string =>
   `${ARTIFACT_TAG_FILTER_PREFIX}${projectId ?? '_'}-${agentId}`
 
+// Artifact "chrome" cache — the script names + available tags of a comparison,
+// remembered client-side so the artifacts panel can render its header, tag filter
+// and collapsed card headers instantly (no network) while the real comparison
+// loads (see artifactPrefs.ts load/saveArtifactChrome). Two levels, both
+// zero-network: per agent (the branch), and a per-project last-resort fallback
+// (artifact config is project-wide, so a brand-new agent can borrow a sibling's
+// chrome). Entries carry a `t` stamp, so the artifact-prefs prune below — which
+// sweeps this same `hydra-artifact-` prefix — drops stale ones too. projectId may
+// be null → '_' keeps the key shape stable.
+export const ARTIFACT_CHROME_PREFIX = 'hydra-artifact-chrome-'
+export const artifactChromeKey = (projectId: string | null, agentId: string): string =>
+  `${ARTIFACT_CHROME_PREFIX}a-${projectId ?? '_'}-${agentId}`
+export const artifactChromeProjectKey = (projectId: string | null): string =>
+  `${ARTIFACT_CHROME_PREFIX}p-${projectId ?? '_'}`
+
 // Per-agent view prefs (terminal height, page scroll, collapsed diff files) so
 // each agent's detail page restores its own layout (see agentViewPrefs.ts).
 // projectId may be null → '_' keeps the key shape stable.

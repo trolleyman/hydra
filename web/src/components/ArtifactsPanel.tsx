@@ -5,7 +5,7 @@ import type { ArtifactSet, ArtifactFile, ArtifactLogLine } from '../api'
 import { ArtifactFile as ArtifactFileNS } from '../api'
 import { LoaderCircle, Image as ImageIcon, ChevronDown, ChevronRight, TriangleAlert, RefreshCw, ScrollText, SquarePlus, SquareMinus, SquareDot } from 'lucide-react'
 import { InfoTooltip } from './InfoTooltip'
-import { loadArtifactPrefs, saveArtifactPrefs, loadTagFilter, saveTagFilter, clampChangeThreshold, type ArtifactTagFilter } from '../lib/artifactPrefs'
+import { loadArtifactPrefs, saveArtifactPrefs, loadTagFilter, saveTagFilter, loadArtifactChrome, saveArtifactChrome, clampChangeThreshold, type ArtifactTagFilter, type ArtifactChrome } from '../lib/artifactPrefs'
 import { computeVisibleFiles, filterIsActive, effectiveChangeType } from '../lib/artifactFilter'
 import { ArtifactFilterBar, TagBadge } from './ArtifactFilterBar'
 import { stripAnsi } from '../lib/ansi'
@@ -64,6 +64,15 @@ const TILE_TRANSITION = `left 220ms ${TILE_EASE}, top 220ms ${TILE_EASE}, width 
 // clearly committed to it. 0.3 ≈ a third of a column of slack on each side.
 const RESIZE_STICK = 0.3
 
+// mediaAspect returns a file's aspect ratio (width / height) from the artifact
+// metadata, or undefined when the server didn't record dimensions. Passed to the
+// differ to reserve the media box height via CSS aspect-ratio, so a tile lays out
+// at its final size before the image downloads (no reflow on load). dpi cancels
+// out of a ratio, so it isn't needed here.
+function mediaAspect(file: ArtifactFile): number | undefined {
+  return file.width && file.height ? file.width / file.height : undefined
+}
+
 function FileRow({ file, mode, changeThreshold = 0, gallery, index }: {
   file: ArtifactFile; mode: ImageDiffMode; changeThreshold?: number
   // The grid's diff gallery + this file's index in it, so opening an image lets ←/→
@@ -106,9 +115,9 @@ function FileRow({ file, mode, changeThreshold = 0, gallery, index }: {
           header above just selects the file name. */}
       <div data-tile-drag>
         {isVideoArtifact(file.name) ? (
-          <VideoDiffView left={file.left_url} right={file.right_url} mode={mode} fps={file.fps} />
+          <VideoDiffView left={file.left_url} right={file.right_url} mode={mode} fps={file.fps} aspect={mediaAspect(file)} />
         ) : (
-          <ImageDiffView left={file.left_url} right={file.right_url} mode={mode} name={file.name} gallery={gallery} index={index} />
+          <ImageDiffView left={file.left_url} right={file.right_url} mode={mode} name={file.name} aspect={mediaAspect(file)} gallery={gallery} index={index} />
         )}
       </div>
     </div>
@@ -1072,6 +1081,25 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
   // project/agent changes since this panel is reused across agents.
   const [search, setSearch] = useState('')
   useEffect(() => { setSearch('') }, [projectId, agentId])
+
+  // Lightweight "chrome" (script names + available tags) read from localStorage —
+  // a previous render of this agent (or, as a fallback, any agent in this project)
+  // — so the header, tag filter and collapsed card headers paint immediately, with
+  // NO network round-trip, before the WS snapshot arrives. Re-read when the
+  // project/agent changes (the panel is reused across agents). Saved back below
+  // once a live comparison settles.
+  const [chrome, setChrome] = useState<ArtifactChrome | null>(() => loadArtifactChrome(projectId, agentId))
+  useEffect(() => { setChrome(loadArtifactChrome(projectId, agentId)) }, [projectId, agentId])
+  // Persist the chrome once every script has settled, so the next open of this
+  // agent (or a sibling) renders it instantly. Skipped while anything is still
+  // generating so a partial tag set isn't cached as complete.
+  useEffect(() => {
+    if (!sets || sets.length === 0) return
+    if (sets.some((s) => (s.status as string) === 'generating')) return
+    const names = [...new Set(sets.map((s) => s.name))].sort()
+    const tags = [...new Set(sets.flatMap((s) => s.files.flatMap((f) => f.tags ?? [])))].sort()
+    saveArtifactChrome(projectId, agentId, { names, tags })
+  }, [sets, projectId, agentId])
   const updateTagFilter = useCallback((f: ArtifactTagFilter) => {
     setTagFilter(f)
     saveTagFilter(projectId, agentId, f)
@@ -1213,12 +1241,37 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
     }
   }, [mode])
 
+  // What to render: the live sets once they arrive, otherwise a skeleton built
+  // from the cached chrome (one collapsed, "generating" card per script name) so
+  // the chrome is up before the snapshot. Cards key by name, so each skeleton
+  // header is reused by its live card with no remount/jump when sets land.
+  const displaySets = useMemo<ArtifactSet[] | null>(() => {
+    if (sets) return sets
+    if (chrome && chrome.names.length > 0) {
+      return chrome.names.map((name) => ({
+        name,
+        status: 'generating' as unknown as ArtifactSet['status'],
+        changed: false,
+        files: [],
+      }))
+    }
+    return null
+  }, [sets, chrome])
+  const isSkeleton = sets === null && displaySets !== null
+
   // Every file across all sets, flattened — fed to the filter bar so it can derive
   // the offered tags/types and per-value counts itself (see ArtifactFilterBar).
-  const allFiles = useMemo(() => (sets ?? []).flatMap((s) => s.files), [sets])
-  // Tags a side exposes before its set finishes (pending_tags), so the filter
-  // appears as soon as we know what tags there are likely to be.
-  const pendingTags = useMemo(() => (sets ?? []).flatMap((s) => s.pending_tags ?? []), [sets])
+  const allFiles = useMemo(() => (displaySets ?? []).flatMap((s) => s.files), [displaySets])
+  // Tags to offer before files are present: a side's pending_tags once live, plus
+  // — while anything is still generating (incl. the skeleton) — the cached chrome
+  // tags, so the filter set only grows then settles to the live file tags once
+  // everything is ready (a stale cached tag can't linger past settle).
+  const anyGenerating = (displaySets ?? []).some((s) => (s.status as string) === 'generating')
+  const pendingTags = useMemo(() => {
+    const live = (sets ?? []).flatMap((s) => s.pending_tags ?? [])
+    const cached = anyGenerating ? (chrome?.tags ?? []) : []
+    return Array.from(new Set([...live, ...cached]))
+  }, [sets, chrome, anyGenerating])
 
   if (error) {
     return (
@@ -1227,14 +1280,16 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
       </div>
     )
   }
-  // Render nothing until we know there are configured scripts.
-  if (!sets || sets.length === 0) return null
+  // Render nothing until we know there are configured scripts — either from the
+  // live snapshot or the cached summary skeleton.
+  if (!displaySets || displaySets.length === 0) return null
 
   // Generation progress (#38): how many artifact scripts have settled (ready or
   // failed) versus how many are still generating. Shown only while work is in
-  // flight; WS pushes (or the poll above) keep it ticking until everything settles.
-  const generatingCount = sets.filter((s) => (s.status as string) === 'generating').length
-  const settledCount = sets.length - generatingCount
+  // flight; WS pushes (or the poll above) keep it ticking until everything
+  // settles. The skeleton has no real counts yet, so it just shows the spinner.
+  const generatingCount = displaySets.filter((s) => (s.status as string) === 'generating').length
+  const settledCount = displaySets.length - generatingCount
 
   return (
     <div className="mb-4">
@@ -1247,7 +1302,7 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
         {generatingCount > 0 && (
           <span className="flex items-center gap-1.5 text-[11px] font-normal text-gray-400 dark:text-gray-500">
             <LoaderCircle className="w-3 h-3 animate-spin" />
-            Generating {settledCount}/{sets.length}
+            {isSkeleton ? 'Loading' : `Generating ${settledCount}/${displaySets.length}`}
           </span>
         )}
         <InfoTooltip title="Artifacts" width={560}>
@@ -1311,7 +1366,7 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
             "no files match" empty state when expanded (with its header count
             reflecting the narrowing), rather than vanishing from the list. */}
         <ABControlsContext.Provider value={abControls}>
-          {sets.map((s) => <ArtifactSetCard key={`${projectId ?? '_'}-${agentId}-${s.name}`} set={s} mode={imageDiffMode} scale={artifactScale} spans={artifactSpans} onSpanChange={onArtifactSpanChange} filter={tagFilter} search={search} onRefresh={requestRefresh} projectId={projectId} agentId={agentId} />)}
+          {displaySets.map((s) => <ArtifactSetCard key={`${projectId ?? '_'}-${agentId}-${s.name}`} set={s} mode={imageDiffMode} scale={artifactScale} spans={artifactSpans} onSpanChange={onArtifactSpanChange} filter={tagFilter} search={search} onRefresh={requestRefresh} projectId={projectId} agentId={agentId} />)}
         </ABControlsContext.Provider>
       </div>
     </div>
