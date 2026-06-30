@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, useCallback } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useCallback, type CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
 import { api } from '../stores/apiClient'
 import type { ArtifactSet, ArtifactFile, ArtifactLogLine } from '../api'
@@ -753,13 +753,16 @@ function ArtifactSetCard({ set, mode, scale, spans, onSpanChange, filter, search
       {/* Give the header a resting tint that's distinct from the card body
           (bg-white / dark:bg-gray-800) on its own, not only on hover. Solid (not a
           translucent gray-700/40) so it stays opaque when stuck — the card's images
-          scroll underneath it. Sticky: pin this header just below the Artifacts
-          filter bar while the card's grid scrolls, releasing when the card ends.
-          top-15 tucks a few px behind the filter bar's bottom edge (its z-20 covers
-          the overlap) so the bars read as flush with no content peeking between.
-          z-10 sits below the filter bar (z-20). rounded-b-lg only while collapsed,
-          when the header IS the whole (rounded) card. */}
-      <div className={`sticky top-15 z-10 flex items-stretch overflow-hidden bg-gray-100 dark:bg-gray-700 rounded-t-lg ${collapsed ? 'rounded-b-lg' : ''}`}>
+          scroll underneath it. Sticky: pin this header flush below the Artifacts
+          filter bar while the card's grid scrolls, releasing when the card ends. The
+          `top` is the measured Changes-bar + filter-bar heights minus the scroll
+          container's pt-4, so it docks exactly at the filter bar's bottom edge (no
+          seam). z-10 sits below the filter bar (z-20). rounded-b-lg only while
+          collapsed, when the header IS the whole (rounded) card. */}
+      <div
+        style={{ top: 'calc(var(--sticky-changes-h, 45px) + var(--sticky-filter-h, 41px) - 16px)' }}
+        className={`sticky z-10 flex items-stretch overflow-hidden bg-gray-100 dark:bg-gray-700 rounded-t-lg ${collapsed ? 'rounded-b-lg' : ''}`}
+      >
         <button
           onClick={() => setCollapsed((c) => !c)}
           className="flex-1 min-w-0 flex items-center gap-2 px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors cursor-pointer text-left"
@@ -989,6 +992,22 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
   const [refreshNonce, setRefreshNonce] = useState(0)
   const refreshScriptRef = useRef<{ name: string; side?: ArtifactSide } | null>(null)
 
+  // Measured height of the sticky Artifacts filter bar, published as --sticky-filter-h
+  // so each card header can dock flush beneath it. The bar grows when it wraps to two
+  // rows on narrow widths, so a fixed offset would gap/overlap — measure it instead. A
+  // callback ref (re)attaches the observer whenever the bar mounts, since this panel
+  // renders null until its scripts load. Defaults to the unwrapped height meanwhile.
+  const [filterBarH, setFilterBarH] = useState(41)
+  const filterRoRef = useRef<ResizeObserver | null>(null)
+  const filterBarRef = useCallback((el: HTMLDivElement | null) => {
+    filterRoRef.current?.disconnect()
+    if (!el) return
+    const ro = new ResizeObserver(() => setFilterBarH(el.offsetHeight))
+    ro.observe(el)
+    filterRoRef.current = ro
+    setFilterBarH(el.offsetHeight)
+  }, [])
+
   // Tag filter, shared across every card for this agent. Reload it when the
   // project/agent changes; persist it only on an explicit user change (a save
   // effect would race the reload and clobber the new key with the old value).
@@ -1162,20 +1181,26 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
   const settledCount = sets.length - generatingCount
 
   return (
-    <div className="mb-4">
+    // Publish the measured filter-bar height so card headers can dock flush beneath
+    // it (the Changes-bar height arrives via --sticky-changes-h from DiffViewer).
+    <div className="mb-4" style={{ '--sticky-filter-h': `${filterBarH}px` } as CSSProperties}>
       {/* Reserve the filter bar's height (its segmented controls / chips are
           taller than the bare title) so the header stays the same height whether
           or not tags are present — the filter loading in must not jump the layout. */}
-      {/* Sticky: dock this Artifacts header + filters just below the Changes bar
-          (which sticks at the top) while the cards scroll under it, then release
-          once the whole panel scrolls past into the file diffs. top-6 sits a few px
-          under the stuck Changes bar's bottom edge — slightly tucked behind it (the
-          Changes bar's z-30 covers the overlap) so there's no seam of scrolling
-          content peeking between the two bars. z-20 sits below the Changes bar but
-          above the cards (whose headers stick at z-10). Needs an opaque bg (matching
-          the page) so cards scroll cleanly underneath, and -mx-1/px-1 bleeds it to
-          the same width as the Changes bar. */}
-      <div className="sticky top-6 z-20 flex flex-wrap items-center gap-2 mb-2 min-h-[1.625rem] bg-gray-50 dark:bg-gray-900 -mx-1 px-1 py-1.5 border-b border-gray-200 dark:border-gray-800 shadow-sm">
+      {/* Sticky: dock this Artifacts header + filters flush just below the Changes
+          bar (which sticks at the top) while the cards scroll under it, then release
+          once the whole panel scrolls past into the file diffs. The `top` is the
+          measured Changes-bar height minus the scroll container's pt-4 (which the
+          Changes bar cancels with -top-4), so the two bars sit exactly edge-to-edge
+          — no seam, and the bar's py-1.5 reads symmetric above/below its controls.
+          z-20 sits below the Changes bar but above the cards (whose headers stick at
+          z-10). Needs an opaque bg (matching the page) so cards scroll cleanly
+          underneath, and -mx-1/px-1 bleeds it to the same width as the Changes bar. */}
+      <div
+        ref={filterBarRef}
+        style={{ top: 'calc(var(--sticky-changes-h, 45px) - 16px)' }}
+        className="sticky z-20 flex flex-wrap items-center gap-2 mb-2 min-h-[1.625rem] bg-gray-50 dark:bg-gray-900 -mx-1 px-1 py-1.5 border-b border-gray-200 dark:border-gray-800 shadow-sm"
+      >
         <ImageIcon className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400" />
         <h3 className="text-xs font-semibold tracking-wide text-gray-500 dark:text-gray-400">Artifacts</h3>
         {generatingCount > 0 && (
