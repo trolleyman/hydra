@@ -2359,6 +2359,30 @@ func (s *SimulationServer) HandleArtifactsWS(w http.ResponseWriter, r *http.Requ
 	}
 }
 
+// HandleTestsWS streams the mock test verdicts over a WebSocket, mirroring the
+// real server's tests WS: it sends one snapshot of the simulated runners (which
+// includes any in-flight runner's live log/progress) then idles until the client
+// closes, so --simulation and the tests-panel screenshot exercise the WS path.
+func (s *SimulationServer) HandleTestsWS(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	rawConn, err := wsUpgrader.Upgrade(w, r, nil)
+	if err != nil {
+		return
+	}
+	conn := &safeConn{Conn: rawConn}
+	defer conn.Close()
+
+	msg := testsWSMessage{Type: "snapshot", Runners: simTestRunners(id)}
+	data, _ := json.Marshal(msg)
+	_ = conn.WriteMessage(websocket.TextMessage, data)
+
+	for {
+		if _, _, err := conn.ReadMessage(); err != nil {
+			return
+		}
+	}
+}
+
 // expandHunkContext adds extra context lines before/after a hunk's existing lines
 // when the requested context is greater than the default 3.
 // expandHunkContext pads a hunk with up to extraCtx synthetic context lines on
