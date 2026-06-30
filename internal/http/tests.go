@@ -77,17 +77,7 @@ func (s *Server) GetAgentTests(ctx context.Context, request api.GetAgentTestsReq
 		_ = mgr.Invalidate(*request.Params.Refresh, v)
 	}
 
-	out := make([]api.TestRunResult, 0, len(runners))
-	for _, r := range runners {
-		rep, err := mgr.Get(r, v)
-		if err != nil {
-			// Surface a resolution failure as an errored runner rather than 500ing
-			// the whole panel.
-			out = append(out, api.TestRunResult{Name: r.Name, Status: api.TestStatusErrored, Error: ptr(err.Error())})
-			continue
-		}
-		out = append(out, buildTestRunResult(request.ProjectId, mgr, rep))
-	}
+	out := s.buildTestRunners(request.ProjectId, mgr, runners, v)
 	return api.GetAgentTests200JSONResponse(api.TestsResponse{Runners: out}), nil
 }
 
