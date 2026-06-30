@@ -600,12 +600,13 @@ function EdgeExpander({ seg, onStep, onAll }: {
 }
 
 // The sticky `top` shared by each file header and the file-list sidebar so they
-// dock at the same Y, just below the Changes toolbar (which docks flush at the
-// scroll-container top via -top-4). --sticky-changes-h is the toolbar's measured
-// height (published on the panel root); the -16px cancels the scroll container's
-// pt-4, and the +12px leaves a small gap so the files sit slightly below the
-// Changes bar rather than flush against it. Mirrors STICKY_CARD_TOP's approach.
-export const FILE_STICKY_TOP = 'calc(var(--sticky-changes-h, 45px) - 16px + 12px)'
+// dock at the same Y, flush against the bottom of the Changes toolbar (which docks
+// flush at the scroll-container top via -top-4). --sticky-changes-h is the toolbar's
+// measured height (published on the panel root); the -16px cancels the scroll
+// container's pt-4 so the header pins exactly at the toolbar's bottom edge. No gap:
+// any gap here lets scrolling diff content peek through above the sticky header.
+// Mirrors STICKY_CARD_TOP's approach.
+export const FILE_STICKY_TOP = 'calc(var(--sticky-changes-h, 45px) - 16px)'
 
 export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onComment, isCollapsed, onToggleCollapse, onExpand, isHidden, onShow, currentContext, readOnly, headless, imageDiffMode, imageBefore, imageAfter }: {
   file: DiffFile
