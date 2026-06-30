@@ -2,6 +2,16 @@ import { create } from 'zustand'
 
 export type ToastType = 'info' | 'success' | 'error' | 'warning'
 
+// An action button rendered inside the toast (e.g. "View" on a needs-input
+// toast, or "Allow"/"Deny" on a security-gate toast). onClick receives the
+// toast's id so the handler can dismiss it (silently or not) after acting.
+export interface ToastAction {
+  label: string
+  onClick: (toastId: number) => void
+  // Visual emphasis: 'primary' (accent), 'danger' (red), or default (neutral).
+  variant?: 'primary' | 'danger'
+}
+
 export interface Toast {
   id: number
   message: string
@@ -16,6 +26,16 @@ export interface Toast {
   // True once the toast is animating out. It lingers in the list for one exit
   // animation before being removed, so the leave transition can play.
   exiting: boolean
+  // Optional action buttons rendered alongside the dismiss (X).
+  actions?: ToastAction[]
+  // Called when the toast is dismissed by the user (the X, or any non-silent
+  // dismiss) — but NOT on a silent dismiss. Security-gate toasts use this so
+  // that dismissing the toast denies the parked tool call.
+  onDismiss?: () => void
+  // Optional dedup key. show() replaces the live toast carrying the same key
+  // instead of stacking a duplicate (e.g. one approval request → one toast),
+  // so repeated polls/StrictMode double-runs don't pile up.
+  key?: string
 }
 
 // How long the leave animation runs before the toast is removed from the list.
@@ -24,20 +44,50 @@ const EXIT_ANIMATION_MS = 220
 
 interface ToastState {
   toasts: Toast[]
-  // Returns the new toast's id, so callers showing a persistent toast
-  // (duration: 0) can later dismiss() it — e.g. a "Merging…" indicator.
-  show: (options: { message: string; type?: ToastType; duration?: number }) => number
-  dismiss: (id: number) => void
+  // Returns the new (or replaced) toast's id, so callers showing a persistent
+  // toast (duration: 0) can later dismiss() it — e.g. a "Merging…" indicator.
+  show: (options: {
+    message: string
+    type?: ToastType
+    duration?: number
+    actions?: ToastAction[]
+    onDismiss?: () => void
+    key?: string
+  }) => number
+  // silent: skip the toast's onDismiss callback. Used when the toast is being
+  // torn down because its action already resolved the underlying request (e.g.
+  // "Allow" was clicked, or the gate cleared server-side) — so a deny-on-dismiss
+  // toast isn't also denied.
+  dismiss: (id: number, opts?: { silent?: boolean }) => void
 }
 
 let nextId = 1
 
 export const useToastStore = create<ToastState>((set, get) => ({
   toasts: [],
-  show: ({ message, type = 'info', duration = 3000 }) => {
+  show: ({ message, type = 'info', duration = 3000, actions, onDismiss, key }) => {
+    // Keyed toast already on screen → replace its contents in place (same id, no
+    // re-stack), and re-arm its expiry timer if it auto-dismisses.
+    if (key !== undefined) {
+      const existing = get().toasts.find((t) => t.key === key && !t.exiting)
+      if (existing) {
+        set((state) => ({
+          toasts: state.toasts.map((t) =>
+            t.id === existing.id
+              ? { ...t, message, type, duration, actions, onDismiss, createdAt: Date.now() }
+              : t,
+          ),
+        }))
+        if (duration > 0) setTimeout(() => get().dismiss(existing.id), duration)
+        return existing.id
+      }
+    }
     const id = nextId++
     set((state) => ({
-      toasts: [...state.toasts, { id, message, type, duration, createdAt: Date.now(), exiting: false }],
+      toasts: [
+        ...state.toasts,
+        { id, message, type, duration, createdAt: Date.now(), exiting: false, actions, onDismiss, key },
+      ],
     }))
     if (duration > 0) {
       setTimeout(() => get().dismiss(id), duration)
@@ -47,9 +97,11 @@ export const useToastStore = create<ToastState>((set, get) => ({
   // dismiss plays the leave animation: flag the toast `exiting` (so the renderer
   // swaps to the out transition and drops its countdown bar), then remove it once
   // the animation has run. Guarded so a double dismiss (timer + click) is a no-op.
-  dismiss: (id) => {
+  // Fires onDismiss first unless this is a silent teardown.
+  dismiss: (id, opts) => {
     const toast = get().toasts.find((t) => t.id === id)
     if (!toast || toast.exiting) return
+    if (!opts?.silent) toast.onDismiss?.()
     set((state) => ({
       toasts: state.toasts.map((t) => (t.id === id ? { ...t, exiting: true } : t)),
     }))
