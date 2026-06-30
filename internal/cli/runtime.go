@@ -80,6 +80,9 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 	// polling. A supervised service's state transition pushes services_changed.
 	eventHub := events.NewHub()
 	svcMgr.SetOnChange(eventHub.ServicesChanged)
+	// A finished test run settling pushes agents_changed so the sidebar/header
+	// verdict chips refresh instantly instead of lagging behind the detail panel.
+	testReg.SetOnSettle(eventHub.AgentsChanged)
 
 	server := &httppkg.Server{
 		WorktreesDir:    worktreesDir,

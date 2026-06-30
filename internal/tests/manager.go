@@ -44,6 +44,12 @@ const ProgressMarker = artifacts.ProgressMarker
 type Manager struct {
 	projectRoot string
 
+	// onSettle, if set, is called (with projectRoot) after a generation finishes,
+	// so the server can push an agents_changed event and refresh the sidebar/header
+	// verdict chips immediately instead of waiting on the slow fallback poll. Set
+	// once by the Registry at creation; read-only thereafter.
+	onSettle func(projectRoot string)
+
 	mu         sync.Mutex
 	gens       map[string]struct{}
 	progress   map[string]string
@@ -133,11 +139,22 @@ func (m *Manager) EntryDir(runner string, v Version) (string, error) {
 
 // Registry lazily creates and caches one Manager per project root.
 type Registry struct {
-	mu   sync.Mutex
-	mgrs map[string]*Manager
+	mu       sync.Mutex
+	mgrs     map[string]*Manager
+	onSettle func(projectRoot string)
 }
 
 func NewRegistry() *Registry { return &Registry{mgrs: map[string]*Manager{}} }
+
+// SetOnSettle registers a callback invoked (with the project root) whenever any
+// Manager's generation settles. Wired to events.Hub.AgentsChanged so a finished
+// test run instantly refreshes the agent list verdict chips. Call before serving;
+// it applies to Managers created afterwards.
+func (r *Registry) SetOnSettle(fn func(projectRoot string)) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.onSettle = fn
+}
 
 func (r *Registry) Manager(projectRoot string) *Manager {
 	r.mu.Lock()
@@ -146,6 +163,7 @@ func (r *Registry) Manager(projectRoot string) *Manager {
 		return m
 	}
 	m := NewManager(projectRoot)
+	m.onSettle = r.onSettle
 	r.mgrs[projectRoot] = m
 	return m
 }
@@ -301,6 +319,13 @@ func (m *Manager) get(spec config.TestScript, v Version, fg bool) (Report, error
 		m.mu.Unlock()
 		if !cancelled {
 			writeLogFile(dir, logCopy)
+		}
+		// Nudge web clients to refetch the agent list now that this run's verdict is
+		// final, so the sidebar/header chips flip from "running" instantly rather
+		// than lagging until the 30s fallback poll. Coalesced by the events hub, so
+		// firing on every settle (including background prefetches) is cheap.
+		if m.onSettle != nil {
+			m.onSettle(m.projectRoot)
 		}
 	}()
 
