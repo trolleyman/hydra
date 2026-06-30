@@ -1,8 +1,10 @@
-import type { ReactNode } from 'react'
+import { useRef, type ReactNode } from 'react'
 import type { AgentConfig, NetworkConfig, ProjectInfo, SandboxConfig } from '../../api'
 import { X, Plus, Globe, FolderOpen, EyeOff, Eye, Layers, Terminal, Maximize2 } from 'lucide-react'
 import { InfoTooltip } from '../InfoTooltip'
 import { ShellEditor } from '../ShellEditor'
+import { HighlightedTextarea, renderMarkdown } from '../../lib/markdown'
+import { ResizeHandle } from '../../lib/ResizeHandle'
 
 // ── PathListEditor ──────────────────────────────────────────────────────────────
 // Edits a list of filesystem paths (writable / masked / restore-RO / allowed hosts).
@@ -113,6 +115,7 @@ export function ConfigForm({
   defaultPrePrompt?: string
   allAgentsPrePrompt?: string | null
 }) {
+  const prePromptBoxRef = useRef<HTMLDivElement>(null)
   const sandbox: SandboxConfig = value.sandbox ?? {}
   const network: NetworkConfig = sandbox.network ?? {}
   const networkEnabled = network.enabled !== false // default on
@@ -149,7 +152,7 @@ export function ConfigForm({
             <span className="italic">&lt;default pre-prompt&gt;</span>
             <InfoTooltip title="Default Pre-Prompt">
               <p className="mb-1.5">This built-in pre-prompt is always prepended before any configured pre-prompts:</p>
-              <pre className="text-[10px] font-mono whitespace-pre-wrap text-gray-200 bg-gray-800 rounded p-1.5 max-h-48 overflow-y-auto">{defaultPrePrompt}</pre>
+              <div className="text-[10px] whitespace-pre-wrap leading-relaxed text-gray-200 bg-gray-800 rounded p-1.5 max-h-48 overflow-y-auto">{renderMarkdown(defaultPrePrompt)}</div>
               <p className="mt-1.5 text-gray-400 italic">{'<branch>'} and {'<base-branch>'} are substituted at spawn time.</p>
             </InfoTooltip>
           </div>
@@ -161,7 +164,7 @@ export function ConfigForm({
               {allAgentsPrePrompt ? (
                 <>
                   <p className="mb-1.5">The "All Agents" pre-prompt is prepended before this agent's pre-prompt:</p>
-                  <pre className="text-[10px] font-mono whitespace-pre-wrap text-gray-200 bg-gray-800 rounded p-1.5 max-h-32 overflow-y-auto">{allAgentsPrePrompt}</pre>
+                  <div className="text-[10px] whitespace-pre-wrap leading-relaxed text-gray-200 bg-gray-800 rounded p-1.5 max-h-32 overflow-y-auto">{renderMarkdown(allAgentsPrePrompt)}</div>
                 </>
               ) : (
                 <p>No "All Agents" pre-prompt is configured. Set one in the <strong>All Agents</strong> tab to have it prepended here.</p>
@@ -170,13 +173,24 @@ export function ConfigForm({
             </InfoTooltip>
           </div>
         )}
-        <textarea
-          value={value.pre_prompt || ''}
-          onChange={(e) => onChange({ ...value, pre_prompt: e.target.value || null })}
-          placeholder={inherited?.pre_prompt || 'You are a helpful assistant...'}
-          rows={4}
-          className="w-full text-sm px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-100 placeholder-gray-300 dark:placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 leading-relaxed shadow-inner resize-y"
-        />
+        <div>
+          {/* The box carries the border/background/focus ring; the inner
+              HighlightedTextarea is transparent and live-highlights markdown.
+              The box height is what the grip drags (the textarea fills it). */}
+          <div
+            ref={prePromptBoxRef}
+            className="relative h-28 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-inner overflow-hidden focus-within:ring-2 focus-within:ring-blue-500/20 focus-within:border-blue-500 transition-all"
+          >
+            <HighlightedTextarea
+              value={value.pre_prompt || ''}
+              onChange={(e) => onChange({ ...value, pre_prompt: e.target.value || null })}
+              placeholder={inherited?.pre_prompt || 'You are a helpful assistant...'}
+              wrapperClassName="w-full h-full"
+              textClassName="px-3 py-2 text-sm leading-relaxed placeholder-gray-300 dark:placeholder-gray-600"
+            />
+          </div>
+          <ResizeHandle targetRef={prePromptBoxRef} minHeight={80} />
+        </div>
       </div>
 
       {/* Fullscreen rendering — Claude only. Off by default so the web terminal keeps

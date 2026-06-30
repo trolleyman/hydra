@@ -1,5 +1,6 @@
 import { useLayoutEffect, useMemo, useRef, type CSSProperties } from 'react'
 import hljs from 'highlight.js'
+import { ResizeHandle } from '../lib/ResizeHandle'
 
 function escapeHtml(s: string): string {
   return s
@@ -79,10 +80,10 @@ export function ShellEditor({
   const typography = 'font-mono text-sm leading-[1.5] tracking-normal'
 
   return (
+    <div className={className}>
     <div
       className={
-        'relative rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-inner overflow-hidden focus-within:ring-2 focus-within:ring-blue-500/20 focus-within:border-blue-500 transition-all ' +
-        className
+        'relative rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-inner overflow-hidden focus-within:ring-2 focus-within:ring-blue-500/20 focus-within:border-blue-500 transition-all'
       }
       style={{ '--shell-gutter': gutter } as CSSProperties}
     >
@@ -123,10 +124,12 @@ export function ShellEditor({
         rows={rows}
         className={
           typography +
-          ' relative w-full resize-y m-0 py-2 pr-3 whitespace-pre-wrap break-words border-0 bg-transparent text-transparent caret-gray-800 dark:caret-gray-100 placeholder-gray-300 dark:placeholder-gray-600 focus:outline-none'
+          ' relative w-full resize-none m-0 py-2 pr-3 whitespace-pre-wrap break-words border-0 bg-transparent text-transparent caret-gray-800 dark:caret-gray-100 placeholder-gray-300 dark:placeholder-gray-600 focus:outline-none'
         }
         style={{ paddingLeft: 'var(--shell-gutter)', scrollbarGutter: 'stable' }}
       />
+    </div>
+    <ResizeHandle targetRef={taRef} minHeight={64} />
     </div>
   )
 }
