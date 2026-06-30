@@ -2075,103 +2075,30 @@ try {
 
     // Record a real animated UI element to a lossless .webm so the screenshots
     // artifact also exercises the video diff viewer (web/src/components/
-    // VideoDiffView.tsx) — the moving-picture twin of the PNG shots. We capture
-    // the repository view's loading spinner (a LoaderCircle with Tailwind
-    // animate-spin) over one full rotation.
+    // VideoDiffView.tsx) — the moving-picture twin of the PNG shots.
     //
     // The diff viewer compares video by per-frame decoded-pixel hashes (ffmpeg
     // `-f framemd5`; see internal/artifacts videoFrameHashes), so what must be
     // stable is the decoded FRAMES — container metadata/timestamps are ignored,
     // and the .webm need not be byte-identical. We still make the frames
-    // deterministic so a re-render never reads "modified". Two nondeterminism
-    // sources are removed:
-    //   * The spin is a CSS animation, so we DON'T let it free-run on the wall
-    //     clock. Pausing it via the Web Animations API doesn't stick (a style
-    //     recalc resets the CSS animation-play-state back to running), so instead
-    //     we kill all CSS animation and drive the rotation ourselves with an
-    //     explicit inline transform per frame — animate-spin IS a rotate, so this
-    //     reproduces the exact frames the animation would show, but deterministically.
-    //   * ffmpeg's libvpx-vp9 -lossless encode is deterministic for identical
-    //     input frames, but the WebM muxer stamps a wall-clock date + version
-    //     strings by default; -flags/-fflags +bitexact drop those. yuv444p keeps
-    //     full chroma (no subsampling), so the encode is genuinely lossless.
-    // (Lossless + deterministic frames keep the per-frame hashes stable run to
-    // run; bitexact muxing also makes the bytes themselves reproducible.)
-    const SPIN_FRAMES = 12 // one rotation at 12fps → a 1s clip
+    // deterministic so a re-render never reads "modified": we DON'T let the CSS
+    // animation free-run on the wall clock (we kill all CSS animation and drive
+    // the motion ourselves with an explicit per-frame transform), and the
+    // libvpx-vp9 -lossless encode is muxed with -flags/-fflags +bitexact to drop
+    // the muxer's wall-clock date/version strings (yuv444p keeps full chroma).
     const ffmpegBin = ffmpegStatic as unknown as string
-    const recordSpinner = async (theme: (typeof themes)[number]) => {
-      const ctx = await browser.newContext({ viewport: { width: 900, height: 600 }, deviceScaleFactor: 1, colorScheme: theme })
-      await ctx.clock.setFixedTime(SIM_NOW)
-      await ctx.addInitScript(({ key, mode }) => { try { localStorage.setItem(key, mode) } catch { /* ignore */ } }, { key: StorageKeys.themeMode, mode: theme })
-      await ctx.addInitScript(({ key, value }) => { try { window.localStorage.setItem(key, value) } catch { /* ignore */ } }, { key: StorageKeys.trustedProjects, value: JSON.stringify([SIM_PROJECT]) })
-      const page = await ctx.newPage()
-      try {
-        // Hold the file-contents request so the repository view stays in its
-        // loading state (centered spinner) — same trick as the repository-loading
-        // shot. NOTE: no animation-killing stylesheet here; we need the spin.
-        await page.route('**/repository/file*', () => { /* hold open */ })
-        await page.goto(base + '/project/sim-project/repository', { waitUntil: 'domcontentloaded' })
-        const spinner = page.locator('svg.lucide-loader-circle.h-5')
-        await spinner.waitFor()
-        await page.evaluate(async () => { if (document.fonts && document.fonts.ready) await document.fonts.ready })
-        // Kill every CSS animation/transition so nothing rotates on the wall
-        // clock; we set the spinner's rotation explicitly per frame below.
-        await page.addStyleTag({ content: '*,*::before,*::after{animation:none!important;transition:none!important}' })
-        // Square clip centered on the spinner: the spinner on the loading pane's
-        // background. The box is deterministic (fixed layout), so the clip is too.
-        const box = await spinner.boundingBox()
-        if (!box) throw new Error('loading spinner has no bounding box')
-        const side = 120
-        const clip = {
-          x: Math.round(box.x + box.width / 2 - side / 2),
-          y: Math.round(box.y + box.height / 2 - side / 2),
-          width: side,
-          height: side,
-        }
-        const tmp = mkdtempSync(join(tmpdir(), 'hydra-spin-'))
-        for (let i = 0; i < SPIN_FRAMES; i++) {
-          const deg = (i / SPIN_FRAMES) * 360
-          await spinner.evaluate((el, d) => { (el as SVGElement).style.transform = `rotate(${d}deg)` }, deg)
-          // Commit the transform before the shot (two rAFs, like settle()).
-          await page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))))
-          await page.screenshot({ path: join(tmp, `f${String(i).padStart(3, '0')}.png`), clip })
-        }
-        const out = join(OUT, `loading-spinner-${theme}.webm`)
-        const r = spawnSync(ffmpegBin, [
-          '-y', '-nostdin', '-loglevel', 'error',
-          '-framerate', '12', '-i', join(tmp, 'f%03d.png'),
-          '-c:v', 'libvpx-vp9', '-lossless', '1', '-pix_fmt', 'yuv444p',
-          '-g', '12', '-threads', '1', '-an',
-          '-flags', '+bitexact', '-fflags', '+bitexact',
-          out,
-        ], { encoding: 'utf8' })
-        if (r.status !== 0) throw new Error(`ffmpeg failed (${r.status}): ${r.stderr}`)
-        // No viewport:: tag — a small spinner clip has no meaningful viewport, and
-        // the built-in image/video type filter already distinguishes the .webm.
-        writeFileSync(`${out}.meta`, JSON.stringify({ tags: [`theme::${theme}`, 'section::repository'] }))
-        console.log(`wrote ${out}`)
-      } finally {
-        await ctx.close()
-      }
-    }
-    progress('recording spinner video')
-    for (const theme of themes) await recordSpinner(theme)
-
     // Record the sidebar's status dot gently pulsing while an agent is "running",
     // together with its small detail row (type pill, status badge, live-activity
-    // line) — the moving twin of the static sidebar shot, and a second clip for
-    // the video diff viewer. We clip tightly to just the one agent row.
+    // line) — the moving twin of the static sidebar shot. We clip tightly to just
+    // the one agent row.
     //
-    // Like the spinner, the pulse is a CSS keyframe (animate-status-pulse: a
-    // scale + opacity breathe), so we DON'T let it free-run on the wall clock.
-    // We kill every CSS animation and drive the dot's scale/opacity ourselves per
-    // frame, mirroring the keyframe with a raised-cosine pulse (1 → peak → 1 over
-    // the cycle), so the frames are deterministic and a re-render never reads
-    // "modified". Same bitexact/lossless ffmpeg encode as recordSpinner.
-    // 30fps for a smooth breathe (the spinner clip's 12fps is choppy for a
-    // scale/opacity pulse). 42 frames = one 1.4s cycle, matching the CSS
-    // animation's real duration. Cost is only capture time (one screenshot per
-    // frame); determinism is unaffected by fps.
+    // The pulse is a CSS keyframe (animate-status-pulse: a scale + opacity
+    // breathe). Per the determinism note above we kill every CSS animation and
+    // drive the dot's scale/opacity ourselves per frame, mirroring the keyframe
+    // with a raised-cosine pulse (1 → peak → 1 over the cycle), so the frames are
+    // deterministic. 30fps gives a smooth breathe; 42 frames = one 1.4s cycle,
+    // matching the CSS animation's real duration. Cost is only capture time (one
+    // screenshot per frame); determinism is unaffected by fps.
     const PULSE_FPS = 30
     const PULSE_FRAMES = 42 // one 1.4s breathe cycle at 30fps
     const recordStatusDot = async (theme: (typeof themes)[number]) => {
@@ -2235,146 +2162,6 @@ try {
     }
     progress('recording status-dot video')
     for (const theme of themes) await recordStatusDot(theme)
-
-    // Record the artifact-grid resize gesture: click-and-drag the first tile's image
-    // sideways and watch it snap a column at a time while the tiles beneath reflow. The
-    // tile renders at its quantised span width (MasonryGrid startResize), so it holds
-    // its size as the pointer crosses the deadband and then flips to the next column —
-    // hence runs of identical frames punctuated by a jump, not a smooth glide. This
-    // documents the masonry resize behaviour (the moving twin of the static artifacts
-    // shots) and gives the video diff viewer a third, interaction-driven clip.
-    //
-    // Determinism: the drag is driven by an explicit pointer x per frame, so each
-    // frame's layout is a pure function of the drag offset — NOT of wall-clock time.
-    // The one time-based element is the sibling-reflow easing (TILE_TRANSITION), which
-    // would otherwise leave tiles caught mid-animation at a clock-dependent position;
-    // we kill all CSS transition/animation (as the other recorders do) so every frame
-    // is the settled layout for its drag offset. The dragged tile's own height is
-    // frozen during the drag (MasonryGrid resizeKeyRef), so nothing else churns. Same
-    // bitexact/lossless ffmpeg encode as the clips above.
-    const RESIZE_FPS = 24
-    const recordResize = async (theme: (typeof themes)[number]) => {
-      const ctx = await browser.newContext({ viewport: { width: 1280, height: 1120 }, deviceScaleFactor: 1, colorScheme: theme })
-      await ctx.clock.setFixedTime(SIM_NOW)
-      await ctx.addInitScript(({ key, mode }) => { try { localStorage.setItem(key, mode) } catch { /* ignore */ } }, { key: StorageKeys.themeMode, mode: theme })
-      await ctx.addInitScript(({ key, value }) => { try { window.localStorage.setItem(key, value) } catch { /* ignore */ } }, { key: StorageKeys.trustedProjects, value: JSON.stringify([SIM_PROJECT]) })
-      // A/B mode: each image tile is a single picture whose media is body-draggable
-      // (side-by-side/slider/video disable the body drag — see FileGrid bodyResizable).
-      await ctx.addInitScript(({ key, mode }) => { try { localStorage.setItem(key, mode) } catch { /* ignore */ } }, { key: StorageKeys.diffImageMode, mode: 'ab' })
-      // Start from the aspect-ratio default spans (no persisted overrides) so the grid
-      // — and therefore every drag frame — is reproducible regardless of prior state.
-      await ctx.addInitScript(({ key }) => { try { localStorage.setItem(key, '{}') } catch { /* ignore */ } }, { key: StorageKeys.diffArtifactSpans })
-      const page = await ctx.newPage()
-      try {
-        await page.goto(base + '/project/sim-project/agent/agent-1', { waitUntil: 'domcontentloaded' })
-        // Reveal + expand the "screenshots" card, then eager-load and settle its
-        // masonry exactly like the showArtifacts capture path, so the grid is laid out
-        // on final image heights before we touch it.
-        await page.waitForFunction(() =>
-          Array.from(document.querySelectorAll('button')).some((b) => b.textContent?.includes('screenshots')),
-        )
-        await page.evaluate(() => {
-          const btn = Array.from(document.querySelectorAll('button')).find((b) => b.textContent?.includes('screenshots'))
-          btn?.click()
-        })
-        await settle(page)
-        await page.evaluate(() => { document.querySelectorAll<HTMLImageElement>('[data-mkey] img').forEach((i) => { i.loading = 'eager' }) })
-        await page.waitForFunction(() => {
-          const imgs = Array.from(document.querySelectorAll<HTMLImageElement>('[data-mkey] img'))
-          return imgs.length > 0 && imgs.every((i) => i.complete && i.naturalHeight > 0)
-        })
-        await page.waitForTimeout(500)
-        await settle(page)
-        await page.evaluate(async () => { if (document.fonts && document.fonts.ready) await document.fonts.ready })
-        // Kill every CSS animation/transition so each frame is the settled layout for
-        // its drag offset (the reflow easing is the only time-based element) — see note.
-        await page.addStyleTag({ content: '*,*::before,*::after{animation:none!important;transition:none!important}' })
-        // Pin the card's grid to the top of the scroll container so the dragged tile and
-        // the tiles beneath it are all in frame.
-        await page.evaluate(() => {
-          const btn = Array.from(document.querySelectorAll('button')).find((b) => b.textContent?.includes('screenshots'))
-          const card = btn?.closest('div.rounded-lg') as HTMLElement | null | undefined
-          const cont = card?.closest('.overflow-auto') as HTMLElement | null | undefined
-          if (card && cont) {
-            const offset = card.getBoundingClientRect().top - cont.getBoundingClientRect().top + cont.scrollTop
-            cont.scrollTop = offset - 16
-          }
-        })
-        await settle(page)
-        // The masonry container (parent of the absolutely-positioned [data-mkey] tiles)
-        // gives the grid's on-screen box; the first tile's [data-tile-drag] media is the
-        // surface we grab and drag.
-        const geom = await page.evaluate(() => {
-          const tile = document.querySelector('[data-mkey]')
-          const cont = tile?.parentElement
-          const media = document.querySelector('[data-mkey] [data-tile-drag]')
-          if (!cont || !media) return null
-          const c = cont.getBoundingClientRect()
-          const m = media.getBoundingClientRect()
-          return {
-            grid: { x: c.x, y: c.y, width: c.width, height: c.height },
-            media: { x: m.x, y: m.y, width: m.width, height: m.height },
-          }
-        })
-        if (!geom) throw new Error('artifact grid/tile not found for resize recording')
-        // Clip to the grid, capped to the viewport and an even-sided box (ffmpeg needs
-        // even dimensions for yuv).
-        const vw = 1280, vh = 1120
-        const clipX = Math.max(0, Math.round(geom.grid.x))
-        const clipY = Math.max(0, Math.round(geom.grid.y))
-        const clip = {
-          x: clipX,
-          y: clipY,
-          width: Math.floor(Math.min(geom.grid.width, vw - clipX) / 2) * 2,
-          height: Math.floor(Math.min(760, geom.grid.height, vh - clipY) / 2) * 2,
-        }
-        // Grab the media near its top-centre (inside the clip even for a tall shot) and
-        // drag it rightward toward the grid's right edge, growing it from its default
-        // span to (near) the full width, then back — a clean loop (first frame == last).
-        const startX = Math.round(geom.media.x + geom.media.width / 2)
-        const startY = Math.round(geom.media.y + Math.min(geom.media.height / 2, 70))
-        const maxX = Math.round(geom.grid.x + geom.grid.width - 24)
-        const maxDx = Math.max(0, maxX - startX)
-        const UP = 28, HOLD = 4
-        const xs: number[] = []
-        for (let i = 1; i <= UP; i++) xs.push(startX + Math.round((maxDx * i) / UP))
-        for (let i = 0; i < HOLD; i++) xs.push(startX + maxDx)
-        for (let i = UP - 1; i >= 0; i--) xs.push(startX + Math.round((maxDx * i) / UP))
-
-        const tmp = mkdtempSync(join(tmpdir(), 'hydra-resize-'))
-        let frame = 0
-        const shoot = async () => {
-          // Commit any pending React state + paint (two rAFs, like settle) before the shot.
-          await page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))))
-          await page.screenshot({ path: join(tmp, `f${String(frame++).padStart(3, '0')}.png`), clip })
-        }
-        // Frame 0: the grid at rest, before the grab.
-        await shoot()
-        await page.mouse.move(startX, startY)
-        await page.mouse.down()
-        for (const x of xs) {
-          await page.mouse.move(x, startY)
-          await shoot()
-        }
-        await page.mouse.up()
-        const out = join(OUT, `artifact-resize-${theme}.webm`)
-        const r = spawnSync(ffmpegBin, [
-          '-y', '-nostdin', '-loglevel', 'error',
-          '-framerate', String(RESIZE_FPS), '-i', join(tmp, 'f%03d.png'),
-          '-c:v', 'libvpx-vp9', '-lossless', '1', '-pix_fmt', 'yuv444p',
-          '-g', String(RESIZE_FPS), '-threads', '1', '-an',
-          '-flags', '+bitexact', '-fflags', '+bitexact',
-          out,
-        ], { encoding: 'utf8' })
-        if (r.status !== 0) throw new Error(`ffmpeg failed (${r.status}): ${r.stderr}`)
-        writeFileSync(`${out}.meta`, JSON.stringify({ tags: [`theme::${theme}`, 'section::agent'] }))
-        console.log(`wrote ${out}`)
-      } finally {
-        await ctx.close()
-      }
-    }
-    progress('recording resize video')
-    for (const theme of themes) await recordResize(theme)
 
     // Summarise any per-page failures. We exit 0 as long as at least one shot
     // rendered, so the artifacts panel still shows everything that worked (a
