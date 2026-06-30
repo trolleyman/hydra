@@ -16,6 +16,7 @@ import { IconButton } from './components/IconButton'
 import { getFileIcon } from './lib/fileIcons'
 import { Tooltip } from './components/Tooltip'
 import { ArtifactsPanel } from './components/ArtifactsPanel'
+import { TestsPanel } from './components/TestsPanel'
 import { ImageDiffView, IMAGE_DIFF_MODES, type ImageDiffMode } from './components/ArtifactImageDiff'
 import { isImagePath, agentBlobUrl } from './lib/imageDiff'
 import { useArtifactSpans } from './lib/artifactColumns'
@@ -2359,6 +2360,20 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
           />
         </div>
       </div>
+
+      {/* Test verdicts (PLAN #68) for the selected versions — single-sided, so it
+          tracks the "after" commit (latest by default) like the artifacts below,
+          and sits just under the Changes header. Renders nothing when the project
+          configures no [[tests]] runners. */}
+      {agent.branch_name && projectId && (
+        <TestsPanel
+          projectId={projectId}
+          agentId={agent.id}
+          headRef={artifactParams.headRef}
+          includeUncommitted={artifactParams.includeUncommitted}
+          refreshKey={refreshKey + (externalArtifactRefresh ?? 0)}
+        />
+      )}
 
       {/* Error banner on refresh failure */}
       {diffError && hasExistingDiff && (

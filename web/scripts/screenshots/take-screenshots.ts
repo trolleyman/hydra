@@ -553,23 +553,38 @@ try {
       // view. Viewport-only to focus on the header + prompt (agent-md's seeded
       // prompt overflows the block's max height, so the fade is visible).
       { name: 'agent-markdown', path: '/project/sim-project/agent/agent-md', viewportOnly: true },
-      // The test gate (PLAN #68): click the failing verdict chip on agent-2 to
-      // open the single-sided, failing-first tests panel (assertion messages +
-      // collapsed passing/skipped rows). agent-2's fixtures (simTestRunners) are a
-      // regression — two failing cases — so the panel shows the gate's headline.
-      { name: 'tests-panel', path: '/project/sim-project/agent/agent-2', viewportOnly: true, click: 'button[title="Show test results"]' },
+      // The tests panel (PLAN #68), now styled like the artifacts panel and living
+      // in the diff viewer just below the "Changes" header. Pin Changes to the top,
+      // then expand agent-2's single (failing) runner card by clicking its header —
+      // its fixtures (simTestRunners) are a regression with two failing cases, so
+      // the card shows the assertion messages failing-first.
+      { name: 'tests-panel', path: '/project/sim-project/agent/agent-2', scrollTo: 'Changes', clicks: ['button:has(svg.lucide-flask-conical)'] },
       // The same surface mid-run (agent-md is seeded as a running verdict): the
-      // live log tail + progress bar + partial counts.
-      { name: 'tests-panel-running', path: '/project/sim-project/agent/agent-md', viewportOnly: true, click: 'button[title="Show test results"]' },
-      // The merge gate in the header: agent-2's failing verdict turns the primary
-      // action into "Force merge" and shows the red failing chip in the metadata
-      // row (the soft gate — force is always reachable).
-      { name: 'tests-merge-gate', path: '/project/sim-project/agent/agent-2', viewportOnly: true },
-      // The force-merge confirm that names exactly what's being overridden.
-      { name: 'tests-force-merge-confirm', path: '/project/sim-project/agent/agent-2', viewportOnly: true, click: 'button:has-text("Force merge")' },
+      // expanded card's live xterm build-log tail + progress bar + partial counts.
+      { name: 'tests-panel-running', path: '/project/sim-project/agent/agent-md', scrollTo: 'Changes', clicks: ['button:has(svg.lucide-flask-conical)'] },
+      // The merge gate in the header (PLAN #68): the primary button always reads
+      // "Merge" now; opening its split-button dropdown on agent-2's failing verdict
+      // reveals the soft-gate warning plus the Force merge / Queue merge overrides.
+      { name: 'tests-merge-gate', path: '/project/sim-project/agent/agent-2', viewportOnly: true, click: 'button[aria-label="Merge options"]' },
+      // The force-merge confirm that names exactly what's being overridden — reached
+      // by opening the merge dropdown and choosing Force merge.
+      { name: 'tests-force-merge-confirm', path: '/project/sim-project/agent/agent-2', viewportOnly: true, clicks: ['button[aria-label="Merge options"]', 'button:has-text("Force merge")'] },
       // Auto-merge armed: agent-md (running + merge_when_green) shows the green
-      // "merges when green" chip and a "Cancel auto-merge" primary action.
+      // "merges when tests pass" metadata chip, and the merge button becomes the
+      // green "Merges when tests pass" pill with its own Cancel button.
       { name: 'tests-merge-when-green', path: '/project/sim-project/agent/agent-md', viewportOnly: true },
+      // The merge-gate dialog (PLAN #68): clicking the plain "Merge" button on
+      // agent-2's failing verdict opens the Force-merge / Queue-merge choice with an
+      // explanation of the soft gate, instead of bouncing off a server 409.
+      { name: 'tests-merge-gate-dialog', path: '/project/sim-project/agent/agent-2', viewportOnly: true, click: 'button[aria-label="Merge"]' },
+      // A fully-expanded tests runner card: agent-2's card opened with its "passing"
+      // roll-up also expanded, so the failing cases, the passing case and the
+      // skipped row are all visible together below the Changes header.
+      { name: 'tests-card-expanded', path: '/project/sim-project/agent/agent-2', scrollTo: 'Changes', clicks: ['button:has(svg.lucide-flask-conical)', 'button:has-text("1 passing")'] },
+      // The merge-gate dialog while tests are still running: agent-3 (running, not
+      // armed) — clicking Merge offers "Merge now" (don't wait) or Queue merge, over
+      // a blue running tile + a progress chip.
+      { name: 'tests-merge-gate-dialog-running', path: '/project/sim-project/agent/agent-3', viewportOnly: true, click: 'button[aria-label="Merge"]' },
       // The agent-type picker dropdown, opened on the compact ("mini") spawn box
       // in the sidebar. The picker is an icon-only trigger (the active agent's
       // brand mark) that opens a menu listing every agent type as its canonical

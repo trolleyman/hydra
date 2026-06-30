@@ -443,6 +443,7 @@ func (s *SimulationServer) GetAgent(w http.ResponseWriter, r *http.Request, proj
 			SessionStatus: "running",
 			CreatedAt:     &createdAt,
 			Prompt:        "Refactor the auth providers into a deeply nested package layout so the diff tree shows VS Code-style compacted folders.",
+			Tests:         simTestSummary("agent-3"),
 			AgentStatus: &api.AgentStatusInfo{
 				Status:    api.Running,
 				Timestamp: simNow().Format(time.RFC3339),
@@ -538,6 +539,19 @@ func simTestRunners(id string) []api.TestRunResult {
 			},
 		}}
 	}
+	if id == "agent-3" {
+		// Running, no failures yet — matches agent-3's running verdict summary so the
+		// panel and the sidebar/merge-gate agree (it backs the running gate dialog).
+		return []api.TestRunResult{{
+			Name: "go", Status: api.TestStatusRunning,
+			Total: ptr(0), Passed: ptr(82), Failed: ptr(0), Skipped: ptr(0),
+			StartedAt: ptr(simNow().Add(-9 * time.Second).Unix()), Progress: ptr("84/142"),
+			Log: &[]api.ArtifactLogLine{
+				{Text: "$ go test ./...", Stream: "stdout"},
+				{Text: "ok  \tinternal/heads\t0.42s", Stream: "stdout"},
+			},
+		}}
+	}
 	if id == "agent-md" {
 		// A run in flight, for the running-state screenshot.
 		return []api.TestRunResult{{
@@ -564,6 +578,10 @@ func simTestSummary(id string) *api.TestSummary {
 		return &api.TestSummary{Status: api.TestStatusRunning, Passed: ptr(82), Failed: ptr(2), Progress: ptr("84/142")}
 	case "agent-1":
 		return &api.TestSummary{Status: api.TestStatusPassing, Total: ptr(142), Passed: ptr(142), Skipped: ptr(3), DurationMs: ptr(int64(4200))}
+	case "agent-3":
+		// Running but NOT armed (unlike agent-md), so its Merge button opens the
+		// "tests still running" merge-gate dialog (Merge now / Queue merge).
+		return &api.TestSummary{Status: api.TestStatusRunning, Total: ptr(142), Passed: ptr(82), Failed: ptr(0), Progress: ptr("84/142")}
 	default:
 		return nil
 	}

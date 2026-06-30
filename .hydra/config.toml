@@ -127,6 +127,11 @@ timeout_sec = 900
 # it's installed, otherwise falls back to plain `go test` (still red/green from the
 # exit code). The whole module is slow, so allow a generous timeout.
 name = "go"
+# Go test suite. Uses gotestsum to emit JUnit (per-case detail in the panel) when
+# it's installed, otherwise falls back to plain `go test` (still red/green from the
+# exit code). The whole module is slow, so allow a generous timeout. (web/dist is
+# kept present in every checkout via a committed web/dist/.gitkeep, so the
+# //go:embed all:dist in web/embed.go compiles without building the frontend.)
 command = 'if command -v gotestsum >/dev/null 2>&1; then gotestsum --junitfile "$HYDRA_TEST_OUTPUT/go.xml" -- ./...; else go test ./...; fi'
 timeout_sec = 900
 

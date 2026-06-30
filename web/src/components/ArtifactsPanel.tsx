@@ -3,8 +3,9 @@ import { createPortal } from 'react-dom'
 import { api } from '../stores/apiClient'
 import type { ArtifactSet, ArtifactFile, ArtifactLogLine } from '../api'
 import { ArtifactFile as ArtifactFileNS } from '../api'
-import { LoaderCircle, Image as ImageIcon, ChevronDown, ChevronRight, TriangleAlert, RefreshCw, ScrollText, SquarePlus, SquareMinus, SquareDot } from 'lucide-react'
+import { LoaderCircle, Image as ImageIcon, ChevronDown, TriangleAlert, RefreshCw, ScrollText, SquarePlus, SquareMinus, SquareDot } from 'lucide-react'
 import { InfoTooltip } from './InfoTooltip'
+import { CollapsibleCard, MELT_BTN, useMeasuredHeight } from './CollapsibleCard'
 import { loadArtifactPrefs, saveArtifactPrefs, loadTagFilter, saveTagFilter, loadArtifactChrome, saveArtifactChrome, clampChangeThreshold, type ArtifactTagFilter, type ArtifactChrome } from '../lib/artifactPrefs'
 import { computeVisibleFiles, filterIsActive, effectiveChangeType } from '../lib/artifactFilter'
 import { ArtifactFilterBar, TagBadge } from './ArtifactFilterBar'
@@ -704,14 +705,6 @@ export function ElapsedTime({ startedAt }: { startedAt: number }) {
   return <>{formatElapsed(Math.max(0, Math.floor(now / 1000 - startedAt)))}</>
 }
 
-// The card header's action buttons (build log + regenerate) sit as faint icons at
-// rest and brighten ONLY the icon the pointer is actually over — a per-button
-// `hover:` (not a shared `group-hover:`), with no border or background. So hovering
-// one button no longer lights up its neighbour or boxes the whole cluster; it just
-// darkens that one icon. MELT_BTN is the shared resting+hover skin; per-button
-// classes add the rounding/layout on top.
-const MELT_BTN = 'text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 transition-colors cursor-pointer'
-
 function ArtifactSetCard({ set, mode, scale, spans, onSpanChange, filter, search, onRefresh, projectId, agentId }: { set: ArtifactSet; mode: ImageDiffMode; scale: number; spans: ArtifactSpans; onSpanChange: (key: string, span: number | null) => void; filter: ArtifactTagFilter; search: string; onRefresh: (name: string, side?: ArtifactSide) => void; projectId: string | null; agentId: string }) {
   const status = set.status as string
   // Apply the (shared) tag filter and the search query to this card's files. The
@@ -835,33 +828,9 @@ function ArtifactSetCard({ set, mode, scale, spans, onSpanChange, filter, search
   // a "·" (the two builds run in parallel), e.g. "building frontend · home 7/24".
   const progressText = [set.left_progress, set.right_progress].filter(Boolean).join(' · ')
 
-  // No overflow-hidden on the card root: a clipping ancestor would break the
-  // sticky header below (it'd be trapped in the card instead of pinning to the
-  // page). The header carries its own overflow-hidden + rounding so the corners
-  // still read as one rounded card; the body's corners are the root's own rounded bg.
-  return (
-    <div className="border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800">
-      {/* Give the header a resting tint that's distinct from the card body
-          (bg-white / dark:bg-gray-800) on its own, not only on hover. Solid (not a
-          translucent gray-700/40) so it stays opaque when stuck — the card's images
-          scroll underneath it. Sticky: pin this header flush below the Artifacts
-          filter bar while the card's grid scrolls, releasing when the card ends. The
-          `top` is the measured Changes-bar + filter-bar heights minus the scroll
-          container's pt-4, so it docks exactly at the filter bar's bottom edge (no
-          seam). z-10 sits below the filter bar (z-20). rounded-b-lg only while
-          collapsed, when the header IS the whole (rounded) card. */}
-      <div
-        style={{ top: 'calc(var(--sticky-changes-h, 45px) + var(--sticky-filter-h, 41px) - 16px)' }}
-        className={`sticky z-10 flex items-stretch overflow-hidden bg-gray-100 dark:bg-gray-700 rounded-t-lg ${collapsed ? 'rounded-b-lg' : ''}`}
-      >
-        <button
-          onClick={() => setCollapsed((c) => !c)}
-          className="flex-1 min-w-0 flex items-center gap-2 px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors cursor-pointer text-left"
-        >
-          {collapsed ? <ChevronRight className="w-3.5 h-3.5 text-gray-400 shrink-0" /> : <ChevronDown className="w-3.5 h-3.5 text-gray-400 shrink-0" />}
-          <ImageIcon className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400 shrink-0" />
-          <span className="text-sm font-medium text-gray-700 dark:text-gray-300 truncate shrink-0">{set.name}</span>
-          {status === 'generating' && (
+  const statusChips = (
+    <>
+      {status === 'generating' && (
             // Live header: spinner, the latest stdout line as progress (truncated so
             // it can't push the refresh button off the row), then how long the job
             // has been running, separated by a "·". Expand the card for the full log.
@@ -887,19 +856,19 @@ function ArtifactSetCard({ set, mode, scale, spans, onSpanChange, filter, search
               // filter hides some, the label reads "shown/total changed".
               <span className="text-xs font-medium text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-900/40 rounded-full px-2 py-0.5 shrink-0">{changedLabel}</span>
             ))}
-          {status === 'ready' && failedSide && (
+      {status === 'ready' && failedSide && (
             // One side failed to render; flag it in the header so it's visible
             // even while the card is collapsed (the images shown are one-sided).
             <span className="flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400 shrink-0">
               <TriangleAlert className="w-3 h-3" /> {failedSide === 'left' ? 'before' : 'after'} failed
             </span>
           )}
-        </button>
-        {/* Faint icon buttons, vertically centred in the stretch-height header.
-            Each brightens only on its own hover (see MELT_BTN) — no shared group
-            hover, so they don't light up together. */}
-        <div className="shrink-0 flex items-center gap-1.5 pl-1 pr-2">
-          {/* Show/hide the build log. Opening it also expands the card (the log
+    </>
+  )
+
+  const actionButtons = (
+    <>
+      {/* Show/hide the build log. Opening it also expands the card (the log
               renders in the body). Only for settled cards with a log. The open
               state stays tinted blue even at rest so "log is showing" is legible,
               brightening a touch on its own hover; the resting affordance otherwise
@@ -970,11 +939,19 @@ function ArtifactSetCard({ set, mode, scale, spans, onSpanChange, filter, search
               document.body,
             )}
           </div>
-        </div>
-      </div>
+    </>
+  )
 
-      {!collapsed && (
-        <div className="px-3 pb-2">
+  return (
+    <CollapsibleCard
+      sticky
+      icon={<ImageIcon className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400 shrink-0" />}
+      name={set.name}
+      status={statusChips}
+      actions={actionButtons}
+      collapsed={collapsed}
+      onToggleCollapsed={() => setCollapsed((c) => !c)}
+    >
           {/* While generating, stream both builds' live logs side by side; a side
               that finishes first shows its final log instead of "waiting". */}
           {status === 'generating' && <LiveLogPanes set={set} />}
@@ -1024,9 +1001,7 @@ function ArtifactSetCard({ set, mode, scale, spans, onSpanChange, filter, search
               )}
             </>
           )}
-        </div>
-      )}
-    </div>
+    </CollapsibleCard>
   )
 }
 
@@ -1083,21 +1058,12 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
   const [refreshNonce, setRefreshNonce] = useState(0)
   const refreshScriptRef = useRef<{ name: string; side?: ArtifactSide } | null>(null)
 
-  // Measured height of the sticky Artifacts filter bar, published as --sticky-filter-h
-  // so each card header can dock flush beneath it. The bar grows when it wraps to two
-  // rows on narrow widths, so a fixed offset would gap/overlap — measure it instead. A
-  // callback ref (re)attaches the observer whenever the bar mounts, since this panel
-  // renders null until its scripts load. Defaults to the unwrapped height meanwhile.
-  const [filterBarH, setFilterBarH] = useState(41)
-  const filterRoRef = useRef<ResizeObserver | null>(null)
-  const filterBarRef = useCallback((el: HTMLDivElement | null) => {
-    filterRoRef.current?.disconnect()
-    if (!el) return
-    const ro = new ResizeObserver(() => setFilterBarH(el.offsetHeight))
-    ro.observe(el)
-    filterRoRef.current = ro
-    setFilterBarH(el.offsetHeight)
-  }, [])
+  // Measured height of the sticky Artifacts filter bar, published as the shared
+  // --sticky-section-h so each card header can dock flush beneath it. The bar grows
+  // when it wraps to two rows on narrow widths, so a fixed offset would gap/overlap —
+  // measure it instead (see useMeasuredHeight; the same hook gives the tests panel's
+  // header the same treatment). Defaults to the unwrapped height meanwhile.
+  const [filterBarRef, filterBarH] = useMeasuredHeight(41)
 
   // Tag filter, shared across every card for this agent. Reload it when the
   // project/agent changes; persist it only on an explicit user change (a save
@@ -1323,7 +1289,7 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
   return (
     // Publish the measured filter-bar height so card headers can dock flush beneath
     // it (the Changes-bar height arrives via --sticky-changes-h from DiffViewer).
-    <div className="mb-4" style={{ '--sticky-filter-h': `${filterBarH}px` } as CSSProperties}>
+    <div className="mb-4" style={{ '--sticky-section-h': `${filterBarH}px` } as CSSProperties}>
       {/* Reserve the filter bar's height (its segmented controls / chips are
           taller than the bare title) so the header stays the same height whether
           or not tags are present — the filter loading in must not jump the layout. */}

@@ -7,7 +7,7 @@ export type DialogType = 'info' | 'error' | 'warning' | 'confirm'
 // tile, a stacked title/description and a details chip) matching the
 // agent-action redesign. They flow through the same store so the single mounted
 // <Dialog/> and every `isOpen` guard around the app keep working unchanged.
-export type DialogVariant = 'generic' | 'merge' | 'kill' | 'updateBase'
+export type DialogVariant = 'generic' | 'merge' | 'kill' | 'updateBase' | 'mergeGate'
 
 // Extra structured content for the rich variants, filled in (and patched in
 // asynchronously via `update`) by the merge/kill handlers.
@@ -26,6 +26,12 @@ export interface DialogDetails {
   // flag while the counts above are still being fetched.
   note?: string
   loading?: boolean
+  // mergeGate: the head's test verdict + failing count, so the gate dialog can
+  // render an explanatory status chip alongside the Force / Queue choice.
+  // testProgress is the running run's "done/total" (e.g. "84/142").
+  testStatus?: 'failing' | 'errored' | 'running'
+  testFailed?: number
+  testProgress?: string
 }
 
 interface DialogState {
@@ -36,9 +42,13 @@ interface DialogState {
   variant: DialogVariant
   // Label for the confirm button on rich variants (e.g. "Merge branch").
   confirmLabel?: string
+  // An optional second action (e.g. the merge-gate's "Force merge" alongside
+  // "Queue merge"). Rendered as an extra toned button left of the primary confirm.
+  secondaryLabel?: string
   details?: DialogDetails
   showCancel?: boolean
   onConfirm?: () => void
+  onSecondary?: () => void
   onCancel?: () => void
   show: (options: {
     title: string
@@ -46,9 +56,11 @@ interface DialogState {
     type?: DialogType
     variant?: DialogVariant
     confirmLabel?: string
+    secondaryLabel?: string
     details?: DialogDetails
     showCancel?: boolean
     onConfirm?: () => void
+    onSecondary?: () => void
     onCancel?: () => void
   }) => void
   // Patch the currently-open dialog in place (e.g. to fold in a warning or diff
@@ -64,12 +76,14 @@ export const useDialogStore = create<DialogState>((set) => ({
   type: 'info',
   variant: 'generic',
   confirmLabel: undefined,
+  secondaryLabel: undefined,
   details: undefined,
   showCancel: false,
   onConfirm: undefined,
+  onSecondary: undefined,
   onCancel: undefined,
-  show: ({ title, message, type = 'info', variant = 'generic', confirmLabel, details, showCancel = false, onConfirm, onCancel }) =>
-    set({ isOpen: true, title, message, type, variant, confirmLabel, details, showCancel, onConfirm, onCancel }),
+  show: ({ title, message, type = 'info', variant = 'generic', confirmLabel, secondaryLabel, details, showCancel = false, onConfirm, onSecondary, onCancel }) =>
+    set({ isOpen: true, title, message, type, variant, confirmLabel, secondaryLabel, details, showCancel, onConfirm, onSecondary, onCancel }),
   update: (patch) => set((s) => (s.isOpen ? patch : {})),
   hide: () => set({ isOpen: false }),
 }))

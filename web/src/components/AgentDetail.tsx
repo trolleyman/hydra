@@ -10,16 +10,15 @@ import { ApprovalDecisionRequest } from '../api'
 import { AgentTerminal } from './AgentTerminal'
 import { BranchSelector } from './BranchSelector'
 import { SeparatedRow } from './SeparatedRow'
-import { AgentTopBar } from './AgentTopBar'
+import { AgentTopBar, type AgentTopBarAction, type AgentTopBarMenuItem } from './AgentTopBar'
 import { AttachmentChips } from './AttachmentChips'
 import { ImageLightbox } from './ImageLightbox'
 import { uploadBlobUrl } from '../api/uploads'
 import type { Attachment } from '../lib/spawnDrafts'
 import { DiffViewer } from '../DiffViewer'
 import { formatStartedAgo, agentStatusBadge, archivedEndStateBadge, agentDotClass, agentDotAnimate, agentTypePill } from './AgentComponents'
-import { LoaderCircle, Merge, Trash2, Tag, RotateCcw, Pencil, TerminalSquare, Mail, ShieldAlert, ShieldCheck, ShieldOff, AlertTriangle, Clock, FlaskConical } from 'lucide-react'
+import { LoaderCircle, Merge, Trash2, Tag, RotateCcw, Pencil, TerminalSquare, Mail, ShieldAlert, ShieldCheck, ShieldOff, AlertTriangle, Clock } from 'lucide-react'
 import { TestVerdictChip } from './TestVerdict'
-import { TestsPanel } from './TestsPanel'
 import { Tooltip } from './Tooltip'
 import { Badge } from './Badge'
 import { AgentTypeIcon, type AgentTypeIconName } from './AgentTypeIcon'
@@ -226,6 +225,28 @@ function ArchivedAgentDetail({ agent, projectId, onPurged }: { agent: AgentRespo
 // "no network", and the open "unrestricted" state (so an open egress channel is
 // always visible, not silently hidden). Hidden only when the head isn't live
 // (mode absent).
+// MergeWhenGreenPill is the merge button's "armed" state (PLAN #68): a green status
+// pill that says the merge is queued to run when tests pass, carrying its own white
+// Cancel button to disarm. It replaces the plain Merge button while armed, so the
+// state and the way out are both visible at a glance.
+function MergeWhenGreenPill({ onCancel, disabled }: { onCancel: () => void; disabled?: boolean }) {
+  return (
+    <div className="shrink-0 inline-flex items-center gap-2 h-8 pl-2.5 pr-1 rounded-lg bg-emerald-100 dark:bg-emerald-900/30 border border-emerald-200 dark:border-emerald-800/50 text-emerald-700 dark:text-emerald-300">
+      <Clock className="w-4 h-4 shrink-0" />
+      <span className="text-[13px] font-semibold whitespace-nowrap">Merges when tests pass</span>
+      <button
+        type="button"
+        onClick={onCancel}
+        disabled={disabled}
+        title="Cancel the queued merge"
+        className="h-6 px-2.5 rounded-md text-[12px] font-semibold bg-white dark:bg-[#141a26] text-gray-600 dark:text-gray-200 border border-emerald-200/80 dark:border-emerald-800/60 hover:bg-emerald-50 dark:hover:bg-emerald-900/40 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        Cancel
+      </button>
+    </div>
+  )
+}
+
 function NetworkEnforcementBadge({ mode }: { mode?: string }) {
   if (!mode) return null
   const cfg: Record<string, { label: string; className: string; Icon: typeof ShieldCheck; tip: string }> = {
@@ -368,7 +389,6 @@ export function AgentDetail({
 }) {
   const [killing, setKilling] = useState(false)
   const [merging, setMerging] = useState(false)
-  const [showTests, setShowTests] = useState(false)
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleDraft, setTitleDraft] = useState('')
   const [savingTitle, setSavingTitle] = useState(false)
@@ -530,18 +550,10 @@ export function AgentDetail({
         const fileList = files.length ? `\n\n${files.map((f) => `• ${f}`).join('\n')}` : ''
         useDialogStore.getState().show({ title: 'Uncommitted Changes in Target', message: `Can't merge: the merge target (${agent.base_branch}) has uncommitted changes that the merge would overwrite. Commit or stash them, then try again.${fileList}`, type: 'warning' })
       } else if (body?.error === 'tests_failing' || body?.error === 'tests_errored') {
-        // The test gate blocked it (the verdict moved since the chip rendered).
+        // The soft gate blocked it (the verdict moved since the button rendered).
+        // Surface the same Force / Queue choice dialog the button opens proactively.
         const n = (body as { failing_tests?: number }).failing_tests ?? 0
-        const failing = body.error === 'tests_failing'
-        useDialogStore.getState().show({
-          title: failing ? `Force merge with ${n} failing test${n !== 1 ? 's' : ''}?` : 'Merge with no test verdict?',
-          message: failing
-            ? `${n || 'Some'} test${n === 1 ? '' : 's'} failing on this commit — their failures will land on ${agent.base_branch}.`
-            : `Tests couldn't run (or are still running) on this commit — there's no verdict, not a pass. Merge into ${agent.base_branch} anyway?`,
-          type: 'warning',
-          confirmLabel: failing ? 'Force merge' : 'Merge anyway',
-          onConfirm: () => void executeMerge(true),
-        })
+        confirmMergeGate(body.error === 'tests_failing' ? 'failing' : 'errored', n)
       } else if (body?.error === 'merge_conflict') {
         useDialogStore.getState().show({ title: 'Merge Conflict', message: `CONFLICT: Merge failed due to git conflicts. Please resolve them manually or update from base.`, type: 'warning' })
       } else {
@@ -553,19 +565,54 @@ export function AgentDetail({
     }
   }
 
+  // confirmMergeGate opens the rich merge-gate dialog (PLAN #68): it explains why
+  // the merge is gated (tests failing / still running / no verdict) and offers
+  // Force merge now vs Queue merge when green, so the choice is explicit rather
+  // than a bare error. Used both proactively (the Merge button when the verdict is
+  // known un-green) and reactively (a soft-gate 409 when the verdict moved).
+  function confirmMergeGate(kind: 'failing' | 'errored' | 'running', n: number) {
+    const toBranch = agent.base_branch || 'base'
+    const fromBranch = agent.branch_name || `hydra/${agent.id}`
+    const progress = agent.tests?.progress ?? undefined // e.g. "84/142"
+    // The heading + a brief situational line; the dialog's under-branch copy (see
+    // MergeGatePanel) explains what the two buttons do.
+    const title =
+      kind === 'failing'
+        ? `${n || 'Some'} test${n === 1 ? '' : 's'} failing`
+        : kind === 'running'
+          ? 'Tests still running'
+          : "Tests couldn't run"
+    const message =
+      kind === 'failing'
+        ? `Some tests are failing on this commit.`
+        : kind === 'running'
+          ? `Tests haven't finished on this commit yet.`
+          : `The runner errored, or produced no verdict, for this commit.`
+    useDialogStore.getState().show({
+      title,
+      message,
+      type: 'warning',
+      variant: 'mergeGate',
+      details: { fromBranch, toBranch, testStatus: kind, testFailed: n, testProgress: progress },
+      confirmLabel: 'Queue merge',
+      onConfirm: () => void armMerge(),
+      secondaryLabel: 'Force merge',
+      onSecondary: () => void executeMerge(true),
+    })
+  }
+
   // confirmForceMerge shows the override confirm for a failing/errored verdict,
   // with copy that names exactly what's being overridden (PLAN #68 design).
   function confirmForceMerge(kind: 'failing' | 'errored') {
     const toBranch = agent.base_branch || 'base'
     const n = agent.tests?.failed ?? 0
-    useDialogStore.getState().show({
-      title: kind === 'failing' ? `Force merge with ${n} failing test${n !== 1 ? 's' : ''}?` : 'Merge with no test verdict?',
-      message: kind === 'failing'
-        ? `${n || 'Some'} test${n === 1 ? '' : 's'} failing on this commit — their failures will land on ${toBranch}.`
-        : `Tests couldn't run on this commit — there's no verdict, not a pass. Merge into ${toBranch} anyway?`,
-      type: 'warning',
-      confirmLabel: kind === 'failing' ? 'Force merge' : 'Merge anyway',
-      onConfirm: () => void executeMerge(true),
+    showMergeConfirm({
+      force: true,
+      title: `Force merge into ${toBranch}?`,
+      confirmLabel: 'Force merge',
+      caution: kind === 'failing'
+        ? `${n || 'Some'} failing test${n === 1 ? '' : 's'} will land on ${toBranch}.`
+        : `No passing test verdict for this commit — merging anyway.`,
     })
   }
 
@@ -587,14 +634,34 @@ export function AgentDetail({
     }
   }
 
-  // handleMerge is the primary merge action; it adapts to the head's test verdict
-  // (PLAN #68): failing → force confirm, errored → merge-anyway confirm, running →
-  // arm auto-merge, otherwise the normal merge confirm below.
+  // handleMerge is the primary merge button + Ctrl+M action. The button always
+  // reads "Merge" now (PLAN #68): a click runs the normal, gated merge regardless
+  // of verdict — the soft test gate is enforced server-side (a failing verdict
+  // 409s and the catch offers a force-merge follow-up), and the explicit Force
+  // merge / Queue merge overrides live in the button's dropdown. While armed
+  // ("merge when green"), the button toggles the queue off instead.
   function handleMerge() {
+    if (agent.merge_when_green === true) return void cancelMerge()
+    // Don't wait for the server to 409: when the verdict is already known to be
+    // un-green, open the merge-gate dialog (Force / Queue + explanation) directly.
     const verdict = agent.tests?.status
-    if (verdict === 'failing') return confirmForceMerge('failing')
-    if (verdict === 'errored') return confirmForceMerge('errored')
-    if (verdict === 'running') return void armMerge()
+    const n = agent.tests?.failed ?? 0
+    if (verdict === 'failing') return confirmMergeGate('failing', n)
+    if (verdict === 'errored') return confirmMergeGate('errored', n)
+    if (verdict === 'running') return confirmMergeGate('running', n)
+    return confirmNormalMerge()
+  }
+
+  function confirmNormalMerge() {
+    showMergeConfirm({})
+  }
+
+  // showMergeConfirm renders the rich merge dialog (branch chip + diff stats + an
+  // optional caution line) — shared by the normal merge and the force-merge override
+  // so they look identical bar the title/label/caution. `force` bypasses the soft
+  // test gate server-side.
+  function showMergeConfirm(opts: { force?: boolean; title?: string; confirmLabel?: string; caution?: string }) {
+    const force = opts.force ?? false
     // If this agent is stacked on another agent (its base branch is another
     // agent's branch), the merge advances that parent agent's branch — name it,
     // and warn when the parent is still running since its working files will
@@ -602,32 +669,29 @@ export function AgentDetail({
     const parent = useAgentStore.getState().agents.find((a) => a.branch_name === agent.base_branch)
     const fromBranch = agent.branch_name || `hydra/${agent.id}`
     const toBranch = agent.base_branch || 'base'
-    // A running parent is the headline caution (merging shifts its working files
-    // mid-flight); it takes precedence over the uncommitted-loss note below.
     const parentWarning = parent && parent.session_status === 'running'
       ? `Parent agent "${parent.id}" is running — merging will change its working files.`
       : undefined
-    const targetNote = parent
-      ? `Advances agent "${parent.id}"'s branch (${toBranch}) with this agent’s work and closes the session.`
-      : 'Fast-forwards the base branch with this agent’s work and closes the session.'
+    const lead = parent
+      ? `Merges this agent’s work into agent "${parent.id}"'s branch (${toBranch}) and closes the session.`
+      : `Merges this agent’s work into ${toBranch} and closes the session.`
+    // A caller-supplied caution (e.g. failing tests for a force merge) wins over the
+    // uncommitted-changes note the background check would otherwise add.
+    const caution = opts.caution ?? parentWarning
 
     // Show the dialog immediately so it never lags behind a slow git query.
     // The diff stats + uncommitted-changes check run in the background and fold
     // into the open dialog when they return.
     useDialogStore.getState().show({
-      title: `Merge into ${toBranch}?`,
-      message: targetNote,
-      type: parentWarning ? 'warning' : 'confirm',
+      title: opts.title ?? `Merge into ${toBranch}?`,
+      message: lead,
+      type: caution ? 'warning' : 'confirm',
       variant: 'merge',
-      confirmLabel: 'Merge branch',
-      details: { fromBranch, toBranch, note: parentWarning, loading: true },
-      onConfirm: () => void executeMerge(false),
+      confirmLabel: opts.confirmLabel ?? 'Merge branch',
+      details: { fromBranch, toBranch, note: caution, loading: true },
+      onConfirm: () => void executeMerge(force),
     })
 
-    // Background: fill in the diff stats (+/−) and, when there are uncommitted
-    // changes the merge would discard, the caution note — patched into the dialog
-    // if it's still open by the time the query returns. A running-parent warning
-    // (set above) outranks the uncommitted note.
     void (async () => {
       let patch: Partial<DialogDetails> = { loading: false }
       try {
@@ -635,14 +699,16 @@ export function AgentDetail({
         const additions = d.files.reduce((s, f) => s + (f.additions ?? 0), 0)
         const deletions = d.files.reduce((s, f) => s + (f.deletions ?? 0), 0)
         patch = { ...patch, additions, deletions }
-        if (!parentWarning && d.uncommitted_changes) {
+        // Only add the uncommitted-loss note when the caller didn't supply its own
+        // caution (which takes priority).
+        if (!caution && d.uncommitted_changes) {
           const total = (d.uncommitted_summary?.tracked_count ?? 0) + (d.uncommitted_summary?.untracked_count ?? 0)
           patch.note = `${total} uncommitted file change${total !== 1 ? 's' : ''} will be lost when merging.`
         }
       } catch { /* ignore — show the dialog without stats */ }
       const dialog = useDialogStore.getState()
       if (dialog.isOpen && dialog.variant === 'merge') {
-        dialog.update({ details: { ...dialog.details, ...patch }, type: patch.note || parentWarning ? 'warning' : 'confirm' })
+        dialog.update({ details: { ...dialog.details, ...patch }, type: (patch.note || caution) ? 'warning' : 'confirm' })
       }
     })()
   }
@@ -798,33 +864,50 @@ export function AgentDetail({
     return <ArchivedAgentDetail agent={agent} projectId={projectId} onPurged={onKilled} />
   }
 
-  // The primary merge action adapts to the test verdict + auto-merge state
-  // (PLAN #68): armed → cancel; failing → force; errored → merge anyway; running
-  // → arm "merge when green"; otherwise plain Merge.
+  // The merge button (PLAN #68) has three states:
+  //  • merging  — a quiet, inert "Merging…" button (in-flight, spinner).
+  //  • armed    — the green "Merges when tests pass" pill with its own Cancel button.
+  //  • resting  — the emerald "Merge" split button; the verdict-specific overrides
+  //               (Force / Queue) live in its dropdown, with a failing-tests warning.
   const verdict = agent.tests?.status
   const armed = agent.merge_when_green === true
-  const mergeAction = armed
-    ? { label: 'Cancel auto-merge', icon: <Clock className="w-4 h-4" />, onClick: () => void cancelMerge(), variant: 'primary' as const, disabled: merging || killing, shortcut: SHORTCUT_MERGE }
-    : {
-        label: verdict === 'failing' ? 'Force merge' : verdict === 'errored' ? 'Merge anyway' : verdict === 'running' ? 'Merge when green' : 'Merge',
-        icon: merging ? (
-          <LoaderCircle className="w-4 h-4 animate-spin" />
-        ) : verdict === 'failing' || verdict === 'errored' ? (
-          <AlertTriangle className="w-4 h-4" />
-        ) : verdict === 'running' ? (
-          <Clock className="w-4 h-4" />
-        ) : (
-          <Merge className="w-4 h-4" />
-        ),
-        onClick: handleMerge,
-        variant: 'primary' as const,
-        disabled: merging || killing,
+  const busy = merging || killing
+  const toBranch = agent.base_branch || 'base'
+  // Force routes to the right confirm copy: a failing verdict names the failing
+  // count; anything else (errored / no verdict / still running) is "merge anyway".
+  const forceMerge = () => confirmForceMerge(verdict === 'failing' ? 'failing' : 'errored')
+
+  const mergeAction: AgentTopBarAction = merging
+    ? {
+        label: 'Merging…',
+        icon: <LoaderCircle className="w-4 h-4 animate-spin" />,
+        onClick: () => {},
+        variant: 'muted',
         shortcut: SHORTCUT_MERGE,
       }
-  // While tests run, also offer an immediate force-merge ("don't wait").
-  const mergeNowAction = verdict === 'running' && !armed
-    ? [{ label: 'Merge now (don’t wait)', icon: <Merge className="w-4 h-4" />, onClick: () => confirmForceMerge('errored'), variant: 'segment' as const, disabled: merging || killing }]
-    : []
+    : armed
+      ? {
+          // Compound control (see AgentTopBarAction.render): a green status pill
+          // carrying its own Cancel button, so the verdict and the way out are both
+          // visible. `onClick` is the keyboard-shortcut fallback (Ctrl+M cancels).
+          label: 'Merges when tests pass',
+          icon: <Clock className="w-4 h-4" />,
+          onClick: () => void cancelMerge(),
+          shortcut: SHORTCUT_MERGE,
+          render: <MergeWhenGreenPill onCancel={() => void cancelMerge()} disabled={busy} />,
+        }
+      : {
+          label: 'Merge',
+          icon: <Merge className="w-4 h-4" />,
+          onClick: handleMerge,
+          variant: 'primary',
+          disabled: busy,
+          shortcut: SHORTCUT_MERGE,
+          menu: ([
+            { label: 'Force merge', description: `Merge this commit to ${toBranch} right now.`, icon: <AlertTriangle className="w-4 h-4" />, onClick: forceMerge, danger: true, tone: 'red', disabled: busy },
+            { label: 'Queue merge', description: 'Merges on its own once tests pass.', icon: <Clock className="w-4 h-4" />, onClick: () => void armMerge(), tone: 'emerald', disabled: busy },
+          ] as AgentTopBarMenuItem[]),
+        }
 
   return (
     <div className="flex-1 flex flex-col min-w-0 min-h-0">
@@ -847,7 +930,6 @@ export function AgentDetail({
         }}
         actions={[
           mergeAction,
-          ...mergeNowAction,
           { label: 'Mark as unread', icon: <Mail className="w-4 h-4" />, onClick: handleMarkUnread, variant: 'segment', shortcut: SHORTCUT_MARK_UNREAD },
           { label: 'Rename', icon: <Pencil className="w-4 h-4" />, onClick: startEditingTitle, variant: 'segment', shortcut: SHORTCUT_RENAME },
           { label: 'Kill', icon: <Trash2 className="w-4 h-4" />, onClick: handleKill, variant: 'danger', disabled: merging || killing, shortcut: SHORTCUT_KILL },
@@ -873,17 +955,13 @@ export function AgentDetail({
                 {agentStatusBadge(agent.agent_status.status).label}
               </Badge>
             )}
-            {/* Test verdict chip (PLAN #68): click to open the tests panel. */}
+            {/* Test verdict chip (PLAN #68): an at-a-glance verdict. The full
+                tests panel lives in the diff viewer, below the Changes header. */}
             {agent.tests && agent.tests.status !== 'none' && (
-              <button onClick={() => setShowTests((s) => !s)} className="inline-flex" title="Show test results">
-                <TestVerdictChip tests={agent.tests} variant="sm" />
-              </button>
+              <TestVerdictChip tests={agent.tests} variant="sm" />
             )}
-            {armed && (
-              <Badge tone="green" variant="sm" icon={<Clock className="w-3 h-3" />} title="Auto-merge armed — merges when tests pass">
-                merges when green
-              </Badge>
-            )}
+            {/* The armed "merges when tests pass" state is shown by the merge button
+                itself now (the green pill), so no separate metadata-row badge. */}
             {agent.network_enforcement && <NetworkEnforcementBadge mode={agent.network_enforcement} />}
             {agent.branch_name && (
               <span className="text-xs font-mono text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
@@ -923,19 +1001,6 @@ export function AgentDetail({
           </SeparatedRow>
 
         </div>
-
-        {/* Tests panel (PLAN #68): toggled by the verdict chip. Single-sided,
-            failing-first, with a live log while running. */}
-        {showTests && projectId && (
-          <div className="mb-6 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
-            <div className="flex items-center gap-2 px-3 py-2 bg-gray-50 dark:bg-gray-800/40 border-b border-gray-100 dark:border-gray-800">
-              <FlaskConical className="w-4 h-4 text-gray-400" />
-              <span className="text-sm font-medium">Tests</span>
-              <button onClick={() => setShowTests(false)} className="ml-auto text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">Hide</button>
-            </div>
-            <TestsPanel projectId={projectId} agentId={agent.id} />
-          </div>
-        )}
 
         {/* Prompt */}
         {agent.prompt && <PromptBlock prompt={agent.prompt} projectId={projectId} />}
