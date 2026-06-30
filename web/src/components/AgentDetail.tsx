@@ -225,6 +225,28 @@ function ArchivedAgentDetail({ agent, projectId, onPurged }: { agent: AgentRespo
 // "no network", and the open "unrestricted" state (so an open egress channel is
 // always visible, not silently hidden). Hidden only when the head isn't live
 // (mode absent).
+// MergeWhenGreenPill is the merge button's "armed" state (PLAN #68): a green status
+// pill that says the merge is queued to run when tests pass, carrying its own white
+// Cancel button to disarm. It replaces the plain Merge button while armed, so the
+// state and the way out are both visible at a glance.
+function MergeWhenGreenPill({ onCancel, disabled }: { onCancel: () => void; disabled?: boolean }) {
+  return (
+    <div className="shrink-0 inline-flex items-center gap-2 h-8 pl-2.5 pr-1 rounded-lg bg-emerald-100 dark:bg-emerald-900/30 border border-emerald-200 dark:border-emerald-800/50 text-emerald-700 dark:text-emerald-300">
+      <Clock className="w-4 h-4 shrink-0" />
+      <span className="text-[13px] font-semibold whitespace-nowrap">Merges when tests pass</span>
+      <button
+        type="button"
+        onClick={onCancel}
+        disabled={disabled}
+        title="Cancel the queued merge"
+        className="h-6 px-2.5 rounded-md text-[12px] font-semibold bg-white dark:bg-[#141a26] text-gray-600 dark:text-gray-200 border border-emerald-200/80 dark:border-emerald-800/60 hover:bg-emerald-50 dark:hover:bg-emerald-900/40 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        Cancel
+      </button>
+    </div>
+  )
+}
+
 function NetworkEnforcementBadge({ mode }: { mode?: string }) {
   if (!mode) return null
   const cfg: Record<string, { label: string; className: string; Icon: typeof ShieldCheck; tip: string }> = {
@@ -817,52 +839,58 @@ export function AgentDetail({
     return <ArchivedAgentDetail agent={agent} projectId={projectId} onPurged={onKilled} />
   }
 
-  // The merge button (PLAN #68): the main button is ALWAYS "Merge" (a plain gated
-  // merge) — except while merging, and while armed, when it becomes the
-  // "merge when green" queue toggle. The verdict-specific overrides (Force merge,
-  // Queue merge) move into a split-button dropdown beside it, with a warning note
-  // heading the menu when tests are failing (the gate is soft — override is always
-  // reachable).
+  // The merge button (PLAN #68) has three states:
+  //  • merging  — a quiet, inert "Merging…" button (in-flight, spinner).
+  //  • armed    — the green "Merges when tests pass" pill with its own Cancel button.
+  //  • resting  — the emerald "Merge" split button; the verdict-specific overrides
+  //               (Force / Queue) live in its dropdown, with a failing-tests warning.
   const verdict = agent.tests?.status
   const armed = agent.merge_when_green === true
   const busy = merging || killing
+  const toBranch = agent.base_branch || 'base'
   // Force routes to the right confirm copy: a failing verdict names the failing
   // count; anything else (errored / no verdict / still running) is "merge anyway".
   const forceMerge = () => confirmForceMerge(verdict === 'failing' ? 'failing' : 'errored')
 
-  const mergeAction: AgentTopBarAction = armed
+  const mergeAction: AgentTopBarAction = merging
     ? {
-        // Queued to auto-merge when tests pass: a quieter, de-emphasised button
-        // (neutral, not the emerald CTA) with a spinner to read as "waiting", whose
-        // click cancels the queue. Force-merge-now stays in its dropdown.
-        label: 'Cancel merge',
+        label: 'Merging…',
         icon: <LoaderCircle className="w-4 h-4 animate-spin" />,
-        onClick: () => void cancelMerge(),
-        variant: undefined,
-        disabled: busy,
+        onClick: () => {},
+        variant: 'muted',
         shortcut: SHORTCUT_MERGE,
-        menu: [{ label: 'Force merge now', icon: <AlertTriangle className="w-4 h-4" />, onClick: forceMerge, danger: true, disabled: busy }],
       }
-    : {
-        label: 'Merge',
-        icon: merging ? <LoaderCircle className="w-4 h-4 animate-spin" /> : <Merge className="w-4 h-4" />,
-        onClick: handleMerge,
-        variant: 'primary',
-        disabled: busy,
-        shortcut: SHORTCUT_MERGE,
-        menu: ([
-          { label: 'Force merge', icon: <AlertTriangle className="w-4 h-4" />, onClick: forceMerge, danger: verdict === 'failing', disabled: busy },
-          { label: 'Queue merge when tests pass', icon: <Clock className="w-4 h-4" />, onClick: () => void armMerge(), disabled: busy },
-        ] as AgentTopBarMenuItem[]),
-        menuNote: verdict === 'failing'
-          ? (
-            <span className="flex items-start gap-1.5 text-amber-700 dark:text-amber-300">
-              <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-px" />
-              <span>Tests are failing — merging is soft-gated. Force to override now, or queue to merge once they pass.</span>
-            </span>
-          )
-          : undefined,
-      }
+    : armed
+      ? {
+          // Compound control (see AgentTopBarAction.render): a green status pill
+          // carrying its own Cancel button, so the verdict and the way out are both
+          // visible. `onClick` is the keyboard-shortcut fallback (Ctrl+M cancels).
+          label: 'Merges when tests pass',
+          icon: <Clock className="w-4 h-4" />,
+          onClick: () => void cancelMerge(),
+          shortcut: SHORTCUT_MERGE,
+          render: <MergeWhenGreenPill onCancel={() => void cancelMerge()} disabled={busy} />,
+        }
+      : {
+          label: 'Merge',
+          icon: <Merge className="w-4 h-4" />,
+          onClick: handleMerge,
+          variant: 'primary',
+          disabled: busy,
+          shortcut: SHORTCUT_MERGE,
+          menu: ([
+            { label: 'Force merge', description: `Merge this commit to ${toBranch} right now.`, icon: <AlertTriangle className="w-4 h-4" />, onClick: forceMerge, danger: true, tone: 'red', disabled: busy },
+            { label: 'Queue merge', description: 'Merges on its own once tests pass.', icon: <Clock className="w-4 h-4" />, onClick: () => void armMerge(), tone: 'emerald', disabled: busy },
+          ] as AgentTopBarMenuItem[]),
+          menuNote: verdict === 'failing'
+            ? (
+              <span className="flex items-start gap-1.5 text-amber-700 dark:text-amber-300">
+                <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-px" />
+                <span>Tests are failing — merging is soft-gated. Force to override now, or queue to merge once they pass.</span>
+              </span>
+            )
+            : undefined,
+        }
 
   return (
     <div className="flex-1 flex flex-col min-w-0 min-h-0">
