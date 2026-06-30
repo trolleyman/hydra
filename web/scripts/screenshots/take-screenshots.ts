@@ -633,23 +633,23 @@ try {
         name: 'toast-approval',
         path: '/settings',
         toast: {
-          message: 'Security gate — "Wire up the GitHub MCP server" wants to use MCP server "linear" (MCP server "linear" is not on the allow-list)',
+          message: 'Agent "Add needs-input" wants to use MCP server "linear"',
           type: 'warning',
           actions: [
-            { label: 'Allow once', variant: 'primary' },
-            { label: 'Always allow', variant: 'primary' },
+            { label: 'Allow', variant: 'primary' },
+            { label: 'Allow always', variant: 'primary' },
             { label: 'Deny', variant: 'danger' },
           ],
         },
       },
-      // 4. A *background* project's needs-input count rose — names the project and
-      // offers a "View" switch (the only cross-project toast we can do, since
-      // agent-level detail isn't loaded for non-selected projects).
+      // 4. A *background* project has a blocked agent — names the agent and its
+      // project (fetched on demand when the project's count changes); "View"
+      // switches to that agent. One such toast per newly-blocked agent.
       {
         name: 'toast-cross-project',
         path: '/settings',
         toast: {
-          message: 'Project "hydra" has an agent that needs input',
+          message: 'Agent "Add dark mode toggle" in project "hydra" needs input',
           type: 'warning',
           actions: [{ label: 'View', variant: 'primary' }],
         },

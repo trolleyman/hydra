@@ -5,7 +5,7 @@ import { useProjectStore } from '../stores/projectStore'
 import { useToastStore } from '../stores/toastStore'
 import { api } from '../stores/apiClient'
 import { runWithToast } from './apiAction'
-import type { ApprovalRequest } from '../api'
+import type { AgentResponse, ApprovalRequest } from '../api'
 import { ApprovalDecisionRequest } from '../api'
 
 // "Needs input" toasts linger noticeably longer than the 3s default — they ask
@@ -24,10 +24,10 @@ const FINISHED_TOAST_MS = 8_000
 //   2. Security-gate approval toasts — for each parked tool call (MCP / WebFetch
 //      / bash), a persistent toast with Allow / Deny actions. Dismissing the
 //      toast (X) denies the call; "Allow" tears it down silently.
-//   3. Cross-project needs-input toasts — agent-level detail is only loaded for
-//      the selected project, but the daemon broadcasts every project's
-//      `needs_input_count`. When a *background* project's count rises, a toast
-//      names that project and offers a "View project" button that switches to it.
+//   3. Cross-project needs-input toasts — the daemon broadcasts every project's
+//      `needs_input_count`, so when a *background* project's count changes we
+//      fetch that project's agents on demand, and pop one toast per newly-blocked
+//      agent ("Agent X in project Y needs input") whose "View" switches to it.
 //
 // Transitions are detected by diffing each agent's status against the previous
 // poll; a first-seen agent never toasts (so a page load / project switch where
@@ -38,8 +38,11 @@ export function useAgentNotifications(currentProjectId: string | null) {
   const agentsProjectId = useAgentStore((s) => s.agentsProjectId)
   const projects = useProjectStore((s) => s.projects)
 
-  // projectId → last-observed needs_input_count, for cross-project rise detection.
+  // projectId → last-observed needs_input_count, for cross-project change detection.
   const lastNeedsInput = useRef<Map<string, number>>(new Map())
+  // projectId → set of needs_input agent ids last seen for a background project,
+  // so an on-demand refetch only toasts agents that newly entered the wait.
+  const bgBlocked = useRef<Map<string, Set<string>>>(new Map())
 
   // agentId → last-observed status, for transition detection.
   const lastStatus = useRef<Map<string, string>>(new Map())
@@ -161,7 +164,7 @@ export function useAgentNotifications(currentProjectId: string | null) {
           const canRemember = a.kind === 'mcp' || a.kind === 'webfetch'
           const actions = [
             {
-              label: 'Allow once',
+              label: 'Allow',
               variant: 'primary' as const,
               onClick: (toastId: number) => {
                 void decide(agentId, a.reqid, ApprovalDecisionRequest.decision.ALLOW, false)
@@ -172,7 +175,7 @@ export function useAgentNotifications(currentProjectId: string | null) {
             ...(canRemember
               ? [
                   {
-                    label: 'Always allow',
+                    label: 'Allow always',
                     variant: 'primary' as const,
                     onClick: (toastId: number) => {
                       void decide(agentId, a.reqid, ApprovalDecisionRequest.decision.ALLOW, true)
@@ -189,7 +192,7 @@ export function useAgentNotifications(currentProjectId: string | null) {
             },
           ]
           const id = toast.show({
-            message: `Security gate — "${agentName}" ${a.summary}${a.reason ? ` (${a.reason})` : ''}`,
+            message: `Agent "${agentName}" ${a.summary}`,
             type: 'warning',
             duration: 0,
             key: `approval:${agentId}:${a.reqid}`,
@@ -206,11 +209,12 @@ export function useAgentNotifications(currentProjectId: string | null) {
     }
   }, [agents, agentsProjectId, currentProjectId, navigate])
 
-  // Cross-project needs-input toasts. We only have per-project counts for
-  // background projects (no agent-level detail), so we diff each project's
-  // needs_input_count and toast when a *non-current* project's count rises. The
-  // current project is handled agent-by-agent above, so it's recorded but never
-  // toasted here. First-seen counts are recorded silently (no toast on load).
+  // Cross-project needs-input toasts. The agent list is only loaded for the
+  // selected project (handled agent-by-agent above), but the daemon broadcasts
+  // every project's needs_input_count. So we diff each *background* project's
+  // count and, when it changes, fetch that project's agents on demand to learn
+  // which ones are blocked — popping one toast per newly-blocked agent. A
+  // first-seen count is recorded silently (no toast / fetch on load).
   useEffect(() => {
     const toast = useToastStore.getState()
     const prev = lastNeedsInput.current
@@ -218,29 +222,48 @@ export function useAgentNotifications(currentProjectId: string | null) {
     for (const p of projects) {
       const count = p.needs_input_count ?? 0
       next.set(p.id, count)
-      const before = prev.get(p.id)
       if (p.id === currentProjectId) continue
-      if (before === undefined || count <= before) continue
-      const name = p.name || p.path || p.id
-      toast.show({
-        // A dedup key so a project whose count keeps climbing reuses one toast
-        // rather than stacking a new one on every bump.
-        key: `project-needs-input:${p.id}`,
-        message: `Project "${name}" has ${count === 1 ? 'an agent that needs' : `${count} agents that need`} input`,
-        type: 'warning',
-        duration: NEEDS_INPUT_TOAST_MS,
-        actions: [
-          {
-            label: 'View',
-            variant: 'primary',
-            onClick: (toastId) => {
-              useProjectStore.getState().setSelectedProjectId(p.id)
-              navigate({ to: '/project/$projectId', params: { projectId: p.id } })
-              toast.dismiss(toastId)
-            },
-          },
-        ],
-      })
+      const before = prev.get(p.id)
+      if (before === undefined || count === before) continue
+
+      const pid = p.id
+      const projectName = p.name || p.path || p.id
+      void (async () => {
+        let projectAgents: AgentResponse[]
+        try {
+          projectAgents = await api.default.listAgents(pid)
+        } catch {
+          return // transient; a later count change retries.
+        }
+        const blocked = projectAgents.filter((a) => a.agent_status?.status === 'needs_input')
+        const blockedIds = new Set(blocked.map((a) => a.id))
+        const seen = bgBlocked.current.get(pid) ?? new Set<string>()
+        for (const a of blocked) {
+          if (seen.has(a.id)) continue // already toasted for this agent.
+          const agentName = a.title || a.id
+          toast.show({
+            // One toast per agent (no plural copy); the key dedups a re-fetch.
+            key: `bg-needs-input:${a.id}`,
+            message: `Agent "${agentName}" in project "${projectName}" needs input`,
+            type: 'warning',
+            duration: NEEDS_INPUT_TOAST_MS,
+            actions: [
+              {
+                label: 'View',
+                variant: 'primary',
+                onClick: (toastId) => {
+                  useProjectStore.getState().setSelectedProjectId(pid)
+                  navigate({ to: '/project/$projectId/agent/$agentId', params: { projectId: pid, agentId: a.id } })
+                  toast.dismiss(toastId)
+                },
+              },
+            ],
+          })
+        }
+        // Record the current blocked set so an agent that unblocks then blocks
+        // again later re-toasts, while still-blocked agents don't.
+        bgBlocked.current.set(pid, blockedIds)
+      })()
     }
     lastNeedsInput.current = next
   }, [projects, currentProjectId, navigate])
