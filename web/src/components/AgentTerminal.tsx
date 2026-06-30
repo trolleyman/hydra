@@ -7,6 +7,8 @@ import { RefreshCw, Plus, X, ChevronDown, Shield, ShieldOff } from 'lucide-react
 import { Tooltip } from './Tooltip'
 import { uploadFile, extractFiles } from '../api/uploads'
 import { useAgentStore } from '../stores/agentStore'
+import { useDialogStore } from '../stores/dialogStore'
+import { useShortcutsStore } from '../stores/shortcutsStore'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from '../lib/agentViewPrefs'
 import { loadLastGeometry, saveLastGeometry } from '../lib/terminalGeometry'
 
@@ -342,6 +344,19 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
     // Custom key handler for clipboard operations
     term.attachCustomKeyEventHandler((e: KeyboardEvent) => {
       if (e.type !== 'keydown') return true
+
+      // While a modal dialog (or the shortcuts overlay) is open, Enter/Escape
+      // belong to it — Enter confirms the primary action, Escape cancels (see
+      // the window listener in Dialog.tsx). Swallow them here so xterm never
+      // also sends a stray CR/ESC to the PTY (which would submit the agent's
+      // prompt behind the dialog). Returning false stops xterm from forwarding
+      // the byte while the keydown still bubbles to that window listener — the
+      // same trick the Ctrl+M / Ctrl+U agent shortcuts rely on below.
+      if (e.key === 'Enter' || e.key === 'Escape') {
+        if (useDialogStore.getState().isOpen || useShortcutsStore.getState().open) {
+          return false
+        }
+      }
 
       const isCopyShortcut = (isMac ? e.metaKey : e.ctrlKey) && !e.shiftKey && e.code === 'KeyC'
       const isPasteShortcut = (isMac ? e.metaKey : e.ctrlKey) && !e.shiftKey && e.code === 'KeyV'
