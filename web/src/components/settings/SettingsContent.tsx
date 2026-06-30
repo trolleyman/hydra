@@ -1,6 +1,7 @@
-import type { ReactNode } from 'react'
+import { useEffect, type ReactNode } from 'react'
 import type { AgentResponse, ConfigResponse, ProjectInfo } from '../../api'
 import { X, Terminal, AlertCircle, Save } from 'lucide-react'
+import { isTypingTarget } from '../../lib/shortcuts'
 import { AgentTerminal } from '../AgentTerminal'
 import { AgentTypeIcon, AGENT_ACCENT, type AgentTypeIconName } from '../AgentTypeIcon'
 import { SettingSection, type SettingsSection } from './shared'
@@ -109,6 +110,17 @@ export function SettingsContent({
   // Supplied by the project settings page; the global page passes nothing.
   scopeSelector?: ReactNode
 }) {
+  // Escape closes the test console, matching the X button. We defer to the
+  // embedded terminal: when focus is in the xterm (or any field) Esc belongs to
+  // it, so we only close when the keystroke isn't aimed at a typing surface.
+  useEffect(() => {
+    if (!testAgent) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !isTypingTarget(e.target)) onCloseTestAgent()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [testAgent, onCloseTestAgent])
 
   return (
     <>
