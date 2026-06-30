@@ -9,7 +9,7 @@
 //      regenerated) the stale entry is ignored, so the card falls back to its
 //      status-derived defaults instead of restoring a now-irrelevant toggle.
 
-import { ARTIFACT_PREFS_PREFIX, ARTIFACT_TAG_FILTER_PREFIX, artifactPrefsKey, artifactTagFilterKey, createShardedStore, readJSON, writeJSON } from './storage'
+import { ARTIFACT_PREFS_PREFIX, ARTIFACT_TAG_FILTER_PREFIX, artifactChromeKey, artifactChromeProjectKey, artifactPrefsKey, artifactTagFilterKey, createShardedStore, readJSON, writeJSON } from './storage'
 
 export type ArtifactPrefs = {
   collapsed?: boolean
@@ -140,7 +140,54 @@ export function saveTagFilter(projectId: string | null, agentId: string, filter:
 
 // Drop expired artifact-pref entries. Cheap to call once on app boot. The
 // tag-filter key shares this prefix but is a different shape (no timestamp), so
-// the store skips it (see createShardedStore's skipPrefix above).
+// the store skips it (see createShardedStore's skipPrefix above). Chrome entries
+// (load/saveArtifactChrome) share the prefix too but DO carry a timestamp, so
+// this same sweep prunes the stale ones — no separate prune needed.
 export function pruneArtifactPrefs(): void {
   store.prune()
+}
+
+// The artifacts panel's cached "chrome": the script names + the union of
+// available tags of a settled comparison. Persisted client-side so re-opening an
+// agent's diff renders the header, tag filter and collapsed card headers
+// instantly — with no network round-trip — while the live comparison loads in.
+// Layout is deliberately NOT cached (too many inputs affect it); only this
+// lightweight chrome.
+export type ArtifactChrome = { names: string[]; tags: string[] }
+
+// Same TTL as the per-card prefs, and a `t` stamp so the shared artifact-prefs
+// prune (above) drops stale chrome entries too.
+const ARTIFACT_CHROME_TTL_MS = 1000 * 60 * 60 * 24 * 30 // 30 days
+type StoredChrome = ArtifactChrome & { t: number }
+
+function readChrome(key: string): ArtifactChrome | null {
+  const s = readJSON<StoredChrome>(key, (v) => {
+    if (!v || typeof v !== 'object') return null
+    const o = v as { names?: unknown; tags?: unknown; t?: unknown }
+    if (!Array.isArray(o.names) || !Array.isArray(o.tags) || typeof o.t !== 'number') return null
+    return {
+      names: o.names.filter((x): x is string => typeof x === 'string'),
+      tags: o.tags.filter((x): x is string => typeof x === 'string'),
+      t: o.t,
+    }
+  })
+  if (!s || Date.now() - s.t > ARTIFACT_CHROME_TTL_MS) return null
+  return { names: s.names, tags: s.tags }
+}
+
+// loadArtifactChrome returns the last-known chrome for this agent, falling back
+// to the most recent chrome saved for the project (a brand-new agent can borrow a
+// sibling's, since artifact scripts are project-wide). null when neither exists
+// or both have expired.
+export function loadArtifactChrome(projectId: string | null, agentId: string): ArtifactChrome | null {
+  return readChrome(artifactChromeKey(projectId, agentId)) ?? readChrome(artifactChromeProjectKey(projectId))
+}
+
+// saveArtifactChrome records a settled comparison's chrome under both the per-agent
+// and per-project keys (see loadArtifactChrome's fallback). Names/tags are stored
+// as given (the caller sorts + dedupes).
+export function saveArtifactChrome(projectId: string | null, agentId: string, chrome: ArtifactChrome): void {
+  const payload: StoredChrome = { names: chrome.names, tags: chrome.tags, t: Date.now() }
+  writeJSON(artifactChromeKey(projectId, agentId), payload)
+  writeJSON(artifactChromeProjectKey(projectId), payload)
 }
