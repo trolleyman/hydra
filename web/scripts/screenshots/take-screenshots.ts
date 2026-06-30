@@ -488,6 +488,13 @@ try {
       // documenting the disabled-entry styling and the floating save affordance.
       // Pair with scrollTo: 'Diff Artifacts' so the two editors fill the viewport.
       disableSettingsEntries?: boolean
+      // Scrolls the diff so the named file's header (a path substring) is pinned
+      // beneath the sticky "Changes" toolbar, with part of that file's body
+      // scrolled under the now-stuck header — documents the sticky file header
+      // (and the file-list sidebar, which pins at the same Y). Waits for the
+      // artifacts panel (WS-populated, untracked by networkidle) first so the
+      // file's measured offset is stable. Only meaningful on an agent diff page.
+      stickFile?: string
     }[] = [
       { name: 'home', path: '/' },
       // The unread-changes indicator: the agent sidebar shows an amber dot on the
@@ -901,6 +908,20 @@ try {
         scrollTo: 'Changes',
         viewport: { width: 1280, height: 1000 },
         click: 'button:has(svg.lucide-settings)',
+      },
+      // The sticky file header: each file's header now pins beneath the sticky
+      // "Changes" toolbar while that file's diff scrolls under it — the same
+      // stacked-sticky treatment the artifacts/tests headers use. We scroll
+      // agent-1's diff so the web/src/components/AgentDetail.tsx file's header is
+      // stuck under the toolbar (its body scrolled partway under it), with the
+      // file-list sidebar pinned at the same Y on the left. A taller viewport so
+      // the toolbar, the gap below it, the pinned header and several diff rows
+      // are all in frame.
+      {
+        name: 'diff-sticky-file-header',
+        path: '/project/sim-project/agent/agent-1',
+        viewport: { width: 1280, height: 1000 },
+        stickFile: 'web/src/components/AgentDetail.tsx',
       },
       // A read-only archived (killed/merged) agent page: no live terminal/diff,
       // just the prompt and a (not-yet-wired) Resume affordance. The grayed
@@ -1744,6 +1765,32 @@ try {
             }
           }, pg.scrollTo)
           // Settle the scroll/sticky-header layout before capturing.
+          await settle(page)
+        }
+        if (pg.stickFile) {
+          // Pin the named file's header beneath the sticky "Changes" toolbar, with
+          // part of its body scrolled under it, to document the sticky file header.
+          // The artifacts panel populates over a WebSocket (not tracked by
+          // networkidle) and sits above the diff, so wait for it first — otherwise
+          // a late layout shift would move the file and the scroll would miss.
+          await page.waitForFunction(() =>
+            Array.from(document.querySelectorAll('button')).some((b) => b.textContent?.includes('screenshots')),
+          )
+          await settle(page)
+          await page.evaluate(({ name, gap }) => {
+            // The file header is the FileDiff card's sticky, rounded-t header; the
+            // artifact/test card headers share those classes, so match on the path
+            // text to pick the right one. Scroll its natural top `gap` px above the
+            // container top so it's pinned (stuck) with that much body scrolled under.
+            const header = Array.from(document.querySelectorAll('div.sticky.rounded-t-lg')).find(
+              (h) => h.textContent?.includes(name),
+            ) as HTMLElement | undefined
+            const cont = header?.closest('.overflow-auto') as HTMLElement | null | undefined
+            if (header && cont) {
+              const offset = header.getBoundingClientRect().top - cont.getBoundingClientRect().top + cont.scrollTop
+              cont.scrollTop = offset + gap
+            }
+          }, { name: pg.stickFile, gap: 150 })
           await settle(page)
         }
         if (pg.expandArtifact) {

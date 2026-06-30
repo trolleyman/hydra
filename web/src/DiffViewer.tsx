@@ -599,6 +599,14 @@ function EdgeExpander({ seg, onStep, onAll }: {
   )
 }
 
+// The sticky `top` shared by each file header and the file-list sidebar so they
+// dock at the same Y, just below the Changes toolbar (which docks flush at the
+// scroll-container top via -top-4). --sticky-changes-h is the toolbar's measured
+// height (published on the panel root); the -16px cancels the scroll container's
+// pt-4, and the +12px leaves a small gap so the files sit slightly below the
+// Changes bar rather than flush against it. Mirrors STICKY_CARD_TOP's approach.
+export const FILE_STICKY_TOP = 'calc(var(--sticky-changes-h, 45px) - 16px + 12px)'
+
 export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onComment, isCollapsed, onToggleCollapse, onExpand, isHidden, onShow, currentContext, readOnly, headless, imageDiffMode, imageBefore, imageAfter }: {
   file: DiffFile
   sideBySide: boolean
@@ -722,12 +730,18 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onCo
   )
 
   return (
-    <div ref={fileRef} className={headless ? '' : 'border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden mb-4 bg-white dark:bg-gray-900 shadow-sm'}>
+    <div ref={fileRef} className={headless ? '' : 'border border-gray-200 dark:border-gray-700 rounded-lg mb-4 bg-white dark:bg-gray-900 shadow-sm'}>
       {!headless && (
+      // Sticky header: pins flush below the Changes toolbar (FILE_STICKY_TOP, the
+      // same Y as the file-list sidebar) while the file's diff scrolls under it,
+      // releasing when the card ends. The root drops its overflow-hidden (which
+      // would trap this sticky header inside the card); the header carries its own
+      // overflow-hidden + rounded-t-lg instead, plus rounded-b-lg while collapsed.
       <div
-        className="flex items-center gap-2 px-3 py-1.5 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 z-20 cursor-pointer"
+        style={{ top: FILE_STICKY_TOP }}
+        className={`flex items-center gap-2 px-3 py-1.5 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 sticky z-20 overflow-hidden rounded-t-lg ${isCollapsed ? 'rounded-b-lg' : ''} cursor-pointer`}
         onClick={() => onToggleCollapse(file.path)}
-      >{/* TODO: Make `sticky` */}
+      >
         <button
           onClick={() => onToggleCollapse(file.path)}
           className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-500 cursor-pointer transition-colors"
@@ -759,7 +773,10 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onCo
       </div>
       )}
       {(headless || !isCollapsed) && (
-        <>
+        // rounded-b-lg + overflow-hidden replaces the clipping the root used to do
+        // (its overflow-hidden was dropped so the header can be sticky), keeping the
+        // edge-to-edge diff content's bottom corners clipped to the card's radius.
+        <div className={headless ? '' : 'overflow-hidden rounded-b-lg'}>
           {file.binary && isImagePath(file.path) ? (
             // In-tree image: reuse the artifacts panel's before/after differ.
             <div className="p-3">
@@ -866,7 +883,7 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onCo
               })}
             </div>
           )}
-        </>
+        </div>
       )}
     </div>
   )
@@ -2310,7 +2327,7 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
       {/* -top-4 cancels the scroll container's pt-4 (AgentDetail) so the stuck
           header docks flush under the top bar — no overlap (was -top-6) and no
           gap for the artifacts filter bar to peek through (was top-0). */}
-      <div ref={changesBarRef} className="flex items-center gap-3 mb-4 flex-wrap sticky -top-4 z-30 bg-gray-50 dark:bg-gray-900 py-2 border-b border-gray-200 dark:border-gray-800 shadow-sm -mx-1 px-1">
+      <div ref={changesBarRef} className="flex items-center gap-3 mb-6 flex-wrap sticky -top-4 z-30 bg-gray-50 dark:bg-gray-900 py-2 border-b border-gray-200 dark:border-gray-800 shadow-sm -mx-1 px-1">
         <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Changes</h2>
         {diff && (
           <div className="flex items-center gap-1.5">
@@ -2441,8 +2458,8 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
               prev/next pager in single-file mode) */}
           <div
             ref={sidebarRef}
-            className="hidden md:flex shrink-0 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden bg-white dark:bg-gray-800 self-start sticky top-9 z-20 flex-col shadow-sm"
-            style={{ width: sidebarWidth }}
+            className="hidden md:flex shrink-0 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden bg-white dark:bg-gray-800 self-start sticky z-20 flex-col shadow-sm"
+            style={{ width: sidebarWidth, top: FILE_STICKY_TOP }}
           >
             <div className="px-2.5 py-2 border-b border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 flex items-center justify-between">
               <span className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 truncate">
@@ -2461,7 +2478,10 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
           <div className="flex-1 min-w-0">
             {singleFile ? (
               <>
-                <div className="flex items-center gap-2 mb-3 z-20">{/* For now, not `sticky top-10` - when making the file headers sticky, make this sticky too */}
+                {/* Intentionally not sticky: the file header below now sticks at
+                    FILE_STICKY_TOP, so a sticky pager here would dock at the same
+                    Y and overlap it. The pager scrolls away; the file header stays. */}
+                <div className="flex items-center gap-2 mb-3 z-20">
                   <button
                     onClick={() => setSingleFileIdx(Math.max(0, singleFileIdx - 1))}
                     disabled={singleFileIdx === 0}
