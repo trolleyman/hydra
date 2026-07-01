@@ -113,6 +113,10 @@ func (s *SimulationServer) GetProjectConfigToml(w http.ResponseWriter, r *http.R
 	api.WriteJSON(w, http.StatusOK, api.ConfigTomlResponse{Content: "", Exists: false})
 }
 
+func (s *SimulationServer) PreviewConfigToml(w http.ResponseWriter, r *http.Request, params api.PreviewConfigTomlParams) {
+	api.WriteJSON(w, http.StatusOK, api.ConfigTomlResponse{Content: "", Exists: false})
+}
+
 func (s *SimulationServer) RemoveProject(w http.ResponseWriter, r *http.Request, projectId string) {
 	w.WriteHeader(http.StatusNoContent)
 }

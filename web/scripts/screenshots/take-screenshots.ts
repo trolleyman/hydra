@@ -46,7 +46,6 @@ import { StorageKeys, artifactTagFilterKey, promptDraftKey } from '../../src/lib
 // Identifiers seeded by the simulation server (internal/http/simulation.go),
 // named where they feed the shared key builders above.
 const SIM_PROJECT = 'sim-project'
-const SIM_PROJECT_MOBILE = 'mobile-app'
 const SIM_AGENT = 'agent-1'
 
 // A fixed instant the browser clock is pinned to for every capture, so any
@@ -1686,12 +1685,10 @@ try {
           }, StorageKeys.sidebarWidth)
         }
         await ctx.addInitScript((opts) => {
-          // Pre-trust the simulated projects so the first-open "Trust this
-          // project?" modal (web/src/components/TrustProjectModal.tsx) never
-          // pops up — it's a fixed inset-0 overlay that otherwise intercepts
-          // every click/scroll the capture flow performs. Trust is client-side
-          // localStorage keyed by project id (the shared StorageKeys.trustedProjects).
-          try { window.localStorage.setItem(opts.trustedKey, opts.trustedValue) } catch { /* ignore */ }
+          // The "Trust this project?" modal (web/src/components/TrustProjectModal.tsx)
+          // only appears while *adding* a project — never on open — so the
+          // simulated projects (already registered) never trigger it during the
+          // capture flow. No pre-trust seeding is needed.
           // Enable the toast harness (window.__hydraToast) so the `toast` page
           // option can drive the toast store. Dormant in the app unless set.
           try { window.localStorage.setItem(opts.harnessKey, '1') } catch { /* ignore */ }
@@ -1711,7 +1708,7 @@ try {
           // any shot containing the video row flap between "modified"/"unchanged".
           // Frame 0 is identical across renders, keeping those captures stable.
           ;(HTMLMediaElement.prototype as unknown as { play: () => Promise<void> }).play = () => Promise.resolve()
-        }, { trustedKey: StorageKeys.trustedProjects, trustedValue: JSON.stringify([SIM_PROJECT, SIM_PROJECT_MOBILE]), harnessKey: StorageKeys.toastHarness })
+        }, { harnessKey: StorageKeys.toastHarness })
         const page = await ctx.newPage()
         if (pg.holdRequest) {
           // Hold the matching request open (never continued/fulfilled) so the
@@ -2400,7 +2397,6 @@ try {
       const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 }, deviceScaleFactor: 1, colorScheme: theme })
       await ctx.clock.setFixedTime(SIM_NOW)
       await ctx.addInitScript(({ key, mode }) => { try { localStorage.setItem(key, mode) } catch { /* ignore */ } }, { key: StorageKeys.themeMode, mode: theme })
-      await ctx.addInitScript(({ key, value }) => { try { window.localStorage.setItem(key, value) } catch { /* ignore */ } }, { key: StorageKeys.trustedProjects, value: JSON.stringify([SIM_PROJECT]) })
       const page = await ctx.newPage()
       try {
         await page.goto(base + '/project/sim-project/', { waitUntil: 'domcontentloaded' })

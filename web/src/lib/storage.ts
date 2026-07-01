@@ -60,11 +60,6 @@ export const StorageKeys = {
   // views can be configured independently.
   repoDiffFileView: 'hydra-repo-diff-file-view',
 
-  // IDs of projects the user has reviewed and trusted (JSON array of strings).
-  // Trust is a client-only concern: a project's .hydra/config.toml can run code,
-  // so the UI prompts on first open and records the decision here.
-  trustedProjects: 'hydra-trusted-projects',
-
   // '1' when a test/screenshot harness wants to drive the toast store from page
   // context (see lib/toastHarness). Dormant unless explicitly set — only the
   // screenshot script seeds it (via addInitScript), never the app itself — so it
@@ -285,26 +280,4 @@ export function singleFieldStorage<K extends string, V>(
     // owned by write() (which removes it for a null/default value).
     removeItem: () => {},
   }
-}
-
-// ── Trusted projects ─────────────────────────────────────────────────────────
-// Trust is purely client-side: which projects the user has reviewed and accepted
-// is remembered here, never on the server.
-
-export function readTrustedProjects(): Set<string> {
-  const ids = readJSON(StorageKeys.trustedProjects, (v) =>
-    Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : null,
-  )
-  return new Set(ids ?? [])
-}
-
-export function isProjectTrusted(projectId: string): boolean {
-  return readTrustedProjects().has(projectId)
-}
-
-export function trustProject(projectId: string): void {
-  const ids = readTrustedProjects()
-  if (ids.has(projectId)) return
-  ids.add(projectId)
-  writeJSON(StorageKeys.trustedProjects, [...ids])
 }
