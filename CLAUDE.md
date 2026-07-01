@@ -32,6 +32,28 @@ Run tests using standard Go tools:
 go test ./...
 ```
 
+### Agent test gate — warnings
+
+A project's `[[tests]]` runners write a JUnit-XML or Hydra-native-JSON report into
+`$HYDRA_TEST_OUTPUT`, which Hydra parses into passed/failed/skipped **and warnings**
+counts (`internal/tests`). A *warning* is a non-failing diagnostic (an eslint warning,
+a deprecation, a lint nit): it is surfaced but **never** flips the verdict to failing or
+gates the merge. The verdict chip shows warnings only in its *long* form (agent header /
+tests panel) as an amber `⚠ N`; the *short* sidebar chip stays `✓ N` (passed only).
+
+Two ways to feed warnings in:
+
+- **eslint's JUnit formatter** — warning-severity messages are emitted as
+  `<failure type="warning">`, which Hydra maps to a warning (errors stay failures):
+  ```bash
+  eslint -f junit -o "$HYDRA_TEST_OUTPUT/eslint.xml" .
+  ```
+- **Hydra-native JSON** (the general path, reliable for any tool) — emit cases with
+  `"status": "warning"`:
+  ```json
+  { "cases": [ { "name": "no-unused-vars: src/x.ts", "status": "warning", "message": "'y' is defined but never used" } ] }
+  ```
+
 ## Visual Artifacts & Screenshots
 
 The diff viewer can run per-project "artifact" commands against both sides of a

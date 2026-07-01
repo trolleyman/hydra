@@ -29,9 +29,9 @@ func TestParseJUnitTestsuites(t *testing.T) {
 	if len(cases) != 4 {
 		t.Fatalf("got %d cases, want 4: %+v", len(cases), cases)
 	}
-	passed, failed, skipped := Summarize(cases)
-	if passed != 2 || failed != 1 || skipped != 1 {
-		t.Errorf("summary = %d/%d/%d, want 2/1/1", passed, failed, skipped)
+	passed, failed, skipped, warnings := Summarize(cases)
+	if passed != 2 || failed != 1 || skipped != 1 || warnings != 0 {
+		t.Errorf("summary = %d/%d/%d/%d, want 2/1/1/0", passed, failed, skipped, warnings)
 	}
 	// Failure message should combine attr + body.
 	var failCase *TestCase
@@ -69,9 +69,52 @@ func TestParseHydraJSON(t *testing.T) {
 	if !ok || len(cases) != 3 {
 		t.Fatalf("parseHydraJSON failed: ok=%v cases=%+v", ok, cases)
 	}
-	passed, failed, skipped := Summarize(cases)
-	if passed != 1 || failed != 1 || skipped != 1 {
-		t.Errorf("summary = %d/%d/%d, want 1/1/1", passed, failed, skipped)
+	passed, failed, skipped, warnings := Summarize(cases)
+	if passed != 1 || failed != 1 || skipped != 1 || warnings != 0 {
+		t.Errorf("summary = %d/%d/%d/%d, want 1/1/1/0", passed, failed, skipped, warnings)
+	}
+}
+
+func TestParseHydraJSONWarning(t *testing.T) {
+	js := `{"cases":[
+		{"name":"clean.ts","status":"passed"},
+		{"name":"lint: no-unused-vars","status":"warning","message":"'x' is defined but never used"},
+		{"name":"lint: deprecation","status":"warn"}
+	]}`
+	cases, ok := parseHydraJSON([]byte(js))
+	if !ok || len(cases) != 3 {
+		t.Fatalf("parseHydraJSON failed: ok=%v cases=%+v", ok, cases)
+	}
+	passed, failed, skipped, warnings := Summarize(cases)
+	if passed != 1 || failed != 0 || skipped != 0 || warnings != 2 {
+		t.Errorf("summary = %d/%d/%d/%d, want 1/0/0/2", passed, failed, skipped, warnings)
+	}
+}
+
+// A JUnit case whose failures are all type="warning" (e.g. eslint's junit
+// formatter for warning-severity messages) is a non-failing warning, not red.
+func TestParseJUnitWarningType(t *testing.T) {
+	xml := `<testsuite name="eslint" tests="2">
+	  <testcase name="a.ts" time="0">
+	    <failure message="prefer-const" type="warning">a.ts:1:1</failure>
+	  </testcase>
+	  <testcase name="b.ts" time="0">
+	    <failure message="no-undef" type="error">b.ts:2:2</failure>
+	  </testcase>
+	</testsuite>`
+	cases, ok := parseJUnit([]byte(xml))
+	if !ok {
+		t.Fatal("parseJUnit returned not-ok")
+	}
+	passed, failed, skipped, warnings := Summarize(cases)
+	if passed != 0 || failed != 1 || skipped != 0 || warnings != 1 {
+		t.Errorf("summary = %d/%d/%d/%d, want 0/1/0/1", passed, failed, skipped, warnings)
+	}
+	// The warning case keeps its message.
+	for _, c := range cases {
+		if c.Status == CaseWarning && c.Message == "" {
+			t.Errorf("warning case %q lost its message", c.Name)
+		}
 	}
 }
 

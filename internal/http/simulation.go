@@ -529,8 +529,16 @@ func (s *SimulationServer) GetAgentTests(w http.ResponseWriter, r *http.Request,
 func simTestRunners(id string) []api.TestRunResult {
 	passing := api.TestRunResult{
 		Name: "go", Status: api.TestStatusPassing,
-		Total: ptr(142), Passed: ptr(142), Failed: ptr(0), Skipped: ptr(3),
+		Total: ptr(149), Passed: ptr(142), Failed: ptr(0), Warnings: ptr(4), Skipped: ptr(3),
 		DurationMs: ptr(int64(4200)), Format: ptr("junit"), Ref: ptr("a1b2c3d"),
+		// Non-failing warnings (e.g. eslint) surface amber alongside the green pass.
+		Cases: &[]api.TestCase{
+			{Name: "eslint › web/src/DiffViewer.tsx", Status: api.TestCaseWarning, Message: ptr("'onionSkin' is assigned a value but never used  no-unused-vars")},
+			{Name: "eslint › web/src/lib/theme.ts", Status: api.TestCaseWarning, Message: ptr("Unexpected console statement  no-console")},
+			{Name: "eslint › internal/heads/heads.go", Status: api.TestCaseWarning, Message: ptr("exported func SpawnHead should have comment  golint")},
+			{Name: "eslint › web/src/components/Badge.tsx", Status: api.TestCaseWarning, Message: ptr("React Hook useMemo has a missing dependency  react-hooks/exhaustive-deps")},
+			{Name: "heads/heads.test.ts › resumes on boot", Status: api.TestCaseSkipped, Message: ptr("it.skip")},
+		},
 	}
 	if id == "agent-2" {
 		// A runner with a regression: two failing cases shown first.
@@ -584,7 +592,7 @@ func simTestSummary(id string) *api.TestSummary {
 	case "agent-md":
 		return &api.TestSummary{Status: api.TestStatusRunning, Passed: ptr(82), Failed: ptr(2), Progress: ptr("84/142")}
 	case "agent-1":
-		return &api.TestSummary{Status: api.TestStatusPassing, Total: ptr(142), Passed: ptr(142), Skipped: ptr(3), DurationMs: ptr(int64(4200))}
+		return &api.TestSummary{Status: api.TestStatusPassing, Total: ptr(149), Passed: ptr(142), Warnings: ptr(4), Skipped: ptr(3), DurationMs: ptr(int64(4200))}
 	case "agent-3":
 		// Running but NOT armed (unlike agent-md), so its Merge button opens the
 		// "tests still running" merge-gate dialog (Merge now / Queue merge).
