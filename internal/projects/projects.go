@@ -41,10 +41,11 @@ func GetOrCreateInstanceUUID() (string, error) {
 
 // ProjectInfo describes a registered Hydra project.
 //
-// Trust is intentionally not tracked here: it is a client-side concern. The web
-// UI prompts the user to review a project's .hydra/config.toml the first time
-// they open it and remembers that decision in localStorage, so the server keeps
-// no trust state.
+// Trust is not a separate flag: registration *is* the trust decision. The web UI
+// makes the user review a project's .hydra/config.toml (via PreviewConfigToml,
+// read-only) before it is added, because registering starts its [[services]] and
+// its config can run code. So every project in this list is one the user trusted
+// at add time; opening it later never re-prompts.
 type ProjectInfo struct {
 	ID   string `json:"id"`
 	Path string `json:"path"`

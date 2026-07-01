@@ -1121,6 +1121,11 @@ type UpdateAgentRequest struct {
 	Title *string `json:"title,omitempty"`
 }
 
+// PreviewConfigTomlParams defines parameters for PreviewConfigToml.
+type PreviewConfigTomlParams struct {
+	Path string `form:"path" json:"path"`
+}
+
 // ListArchivedAgentsParams defines parameters for ListArchivedAgents.
 type ListArchivedAgentsParams struct {
 	// Limit Maximum number of archived agents to return (page size). Omit or <=0 for all.
@@ -1315,6 +1320,9 @@ type ServerInterface interface {
 	// Chrome DevTools workspace configuration
 	// (GET /.well-known/appspecific/com.chrome.devtools.json)
 	GetDevToolsConfig(w http.ResponseWriter, r *http.Request)
+	// Preview the .hydra/config.toml at a filesystem path for the add-project trust prompt (read-only, does not register the project)
+	// (GET /api/config-toml-preview)
+	PreviewConfigToml(w http.ResponseWriter, r *http.Request, params PreviewConfigTomlParams)
 	// Trigger a server rebuild and restart (dev mode only)
 	// (POST /api/dev/restart)
 	DevRestart(w http.ResponseWriter, r *http.Request)
@@ -1460,6 +1468,40 @@ func (siw *ServerInterfaceWrapper) GetDevToolsConfig(w http.ResponseWriter, r *h
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetDevToolsConfig(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PreviewConfigToml operation middleware
+func (siw *ServerInterfaceWrapper) PreviewConfigToml(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PreviewConfigTomlParams
+
+	// ------------- Required query parameter "path" -------------
+
+	if paramValue := r.URL.Query().Get("path"); paramValue != "" {
+
+	} else {
+		siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "path"})
+		return
+	}
+
+	err = runtime.BindQueryParameter("form", true, true, "path", r.URL.Query(), &params.Path)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "path", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PreviewConfigToml(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -3173,6 +3215,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	}
 
 	m.HandleFunc("GET "+options.BaseURL+"/.well-known/appspecific/com.chrome.devtools.json", wrapper.GetDevToolsConfig)
+	m.HandleFunc("GET "+options.BaseURL+"/api/config-toml-preview", wrapper.PreviewConfigToml)
 	m.HandleFunc("POST "+options.BaseURL+"/api/dev/restart", wrapper.DevRestart)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects", wrapper.ListProjects)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects", wrapper.AddProject)
@@ -3246,6 +3289,41 @@ type GetDevToolsConfig403JSONResponse ErrorResponse
 func (response GetDevToolsConfig403JSONResponse) VisitGetDevToolsConfigResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(403)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type PreviewConfigTomlRequestObject struct {
+	Params PreviewConfigTomlParams
+}
+
+type PreviewConfigTomlResponseObject interface {
+	VisitPreviewConfigTomlResponse(w http.ResponseWriter) error
+}
+
+type PreviewConfigToml200JSONResponse ConfigTomlResponse
+
+func (response PreviewConfigToml200JSONResponse) VisitPreviewConfigTomlResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type PreviewConfigToml400JSONResponse ErrorResponse
+
+func (response PreviewConfigToml400JSONResponse) VisitPreviewConfigTomlResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type PreviewConfigToml500JSONResponse ErrorResponse
+
+func (response PreviewConfigToml500JSONResponse) VisitPreviewConfigTomlResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
 
 	return json.NewEncoder(w).Encode(response)
 }
@@ -4810,6 +4888,9 @@ type StrictServerInterface interface {
 	// Chrome DevTools workspace configuration
 	// (GET /.well-known/appspecific/com.chrome.devtools.json)
 	GetDevToolsConfig(ctx context.Context, request GetDevToolsConfigRequestObject) (GetDevToolsConfigResponseObject, error)
+	// Preview the .hydra/config.toml at a filesystem path for the add-project trust prompt (read-only, does not register the project)
+	// (GET /api/config-toml-preview)
+	PreviewConfigToml(ctx context.Context, request PreviewConfigTomlRequestObject) (PreviewConfigTomlResponseObject, error)
 	// Trigger a server rebuild and restart (dev mode only)
 	// (POST /api/dev/restart)
 	DevRestart(ctx context.Context, request DevRestartRequestObject) (DevRestartResponseObject, error)
@@ -4987,6 +5068,32 @@ func (sh *strictHandler) GetDevToolsConfig(w http.ResponseWriter, r *http.Reques
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetDevToolsConfigResponseObject); ok {
 		if err := validResponse.VisitGetDevToolsConfigResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// PreviewConfigToml operation middleware
+func (sh *strictHandler) PreviewConfigToml(w http.ResponseWriter, r *http.Request, params PreviewConfigTomlParams) {
+	var request PreviewConfigTomlRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.PreviewConfigToml(ctx, request.(PreviewConfigTomlRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "PreviewConfigToml")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(PreviewConfigTomlResponseObject); ok {
+		if err := validResponse.VisitPreviewConfigTomlResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

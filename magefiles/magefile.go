@@ -531,19 +531,27 @@ func (Deploy) Setup() error {
 	fmt.Println("Opening it to the network is a separate, explicit step:")
 	fmt.Printf("  %smage prod%s        build + serve on 0.0.0.0 (production)\n", colorBold, colorReset)
 	fmt.Printf("  %smage devExpose%s   serve on 0.0.0.0 with dev auto-rebuild\n", colorBold, colorReset)
-	fmt.Println("Then browse to http://<this-machine-ip>:8080 and enter the key.")
+	fmt.Println("Then browse to http://<this-machine-ip>:26662 and enter the key.")
 	return nil
+}
+
+// hydraPort is the TCP port the dev/exposed mage targets bind, overridable with
+// HYDRA_PORT. The default is a distinctive registered-range port (not the
+// heavily-squatted 8080) so hydra never collides with other local tools and is
+// easy to spot in logs; it is deliberately distinct from other services on the
+// same box.
+func hydraPort() string {
+	if port := os.Getenv("HYDRA_PORT"); port != "" {
+		return port
+	}
+	return "26662"
 }
 
 // exposedAPIAddr is the bind address used by the exposing targets (Prod /
 // DevExpose): every interface, so the UI is reachable from other devices on the
-// network. Override the port with HYDRA_PORT (default 8080).
+// network. Override the port with HYDRA_PORT (default 26662).
 func exposedAPIAddr() string {
-	port := os.Getenv("HYDRA_PORT")
-	if port == "" {
-		port = "8080"
-	}
-	return "0.0.0.0:" + port
+	return "0.0.0.0:" + hydraPort()
 }
 
 // requireAuthKey errors unless an auth key is configured, so the exposing
@@ -568,7 +576,7 @@ func requireAuthKey() error {
 // Prod builds the full project and serves the web UI on 0.0.0.0 (every network
 // interface), reachable from other devices such as your phone. Non-localhost
 // clients must present the auth key from `mage deploy:setup`; Prod refuses to
-// start without one. Override the port with HYDRA_PORT (default 8080).
+// start without one. Override the port with HYDRA_PORT (default 26662).
 func Prod() error {
 	if err := requireAuthKey(); err != nil {
 		return errtrace.Wrap(err)
@@ -781,14 +789,14 @@ func getHydraOutputFile() string {
 // For auto-reload on file changes use DevAutoReload instead.
 func Dev() error {
 	os.Setenv("HYDRA_DEV_BUILD", "1")
-	return errtrace.Wrap(devServerLoop(nil))
+	return errtrace.Wrap(devServerLoop([]string{"HYDRA_API_ADDR=localhost:" + hydraPort()}))
 }
 
 // DevExpose is Dev, but binds the web UI to 0.0.0.0 (every network interface) so
 // you can iterate on the UI from another device, e.g. your phone, with the same
 // rebuild-on-UI-restart loop. Non-localhost clients must present the auth key
 // from `mage deploy:setup`; DevExpose refuses to start without one. Override the
-// port with HYDRA_PORT (default 8080).
+// port with HYDRA_PORT (default 26662).
 func DevExpose() error {
 	if err := requireAuthKey(); err != nil {
 		return errtrace.Wrap(err)
