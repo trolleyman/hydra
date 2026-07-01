@@ -231,10 +231,10 @@ function MergeGatePanel({
   // Explains what the two buttons do, in this commit's terms.
   const gateHelp =
     status === 'failing'
-      ? 'You can force the merge now, landing the failing tests on the branch — or queue it to merge automatically once they pass.'
+      ? 'You can force the merge now, landing the failing tests on the branch — or queue it to merge automatically once the agent finishes and they pass.'
       : running
-        ? 'You can force the merge now, but the branch may carry issues the tests would catch — or queue it to merge automatically once they pass.'
-        : 'You can force the merge now without a passing verdict — or queue it to merge automatically once the tests pass.'
+        ? 'You can force the merge now, but the branch may carry issues the tests would catch — or queue it to merge automatically once the agent finishes and they pass.'
+        : 'You can force the merge now without a passing verdict — or queue it to merge automatically once the agent finishes and the tests pass.'
   return (
     <div
       className="bg-white dark:bg-[#141a26] dark:border dark:border-[#252d3b] rounded-2xl shadow-2xl w-full max-w-[470px] overflow-hidden animate-in zoom-in-95 duration-200"

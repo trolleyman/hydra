@@ -233,7 +233,7 @@ function MergeWhenGreenPill({ onCancel, disabled }: { onCancel: () => void; disa
   return (
     <div className="shrink-0 inline-flex items-center gap-2 h-8 pl-2.5 pr-1 rounded-lg bg-emerald-100 dark:bg-emerald-900/30 border border-emerald-200 dark:border-emerald-800/50 text-emerald-700 dark:text-emerald-300">
       <Clock className="w-4 h-4 shrink-0" />
-      <span className="text-[13px] font-semibold whitespace-nowrap">Merges when tests pass</span>
+      <span className="text-[13px] font-semibold whitespace-nowrap">Merges when done &amp; tests pass</span>
       <button
         type="button"
         onClick={onCancel}
@@ -616,7 +616,7 @@ export function AgentDetail({
   async function armMerge() {
     try {
       await api.default.armMergeWhenGreen(projectId ?? '', agent.id)
-      useToastStore.getState().show({ message: `Will merge "${agent.id}" when its tests pass`, type: 'info' })
+      useToastStore.getState().show({ message: `Will merge "${agent.id}" when it finishes and its tests pass`, type: 'info' })
     } catch (err) {
       useToastStore.getState().show({ message: `Couldn't arm auto-merge: ${formatError(err)}`, type: 'error' })
     }
