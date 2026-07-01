@@ -64,21 +64,36 @@ restore_ro = ["~/.config/go"]
 # pre_exit_script = ""
 
 [sandbox.network]
-## allow outbound network access from the sandbox (default true).
+## egress posture: "off" (no network), "unrestricted" (network, no host filtering), "advisory" (proxy-only host filtering — every honest client is filtered, but escapable), or "hard" (inescapable pasta+nft netns, degrading to advisory with a warning where the tooling is unavailable). Default "hard". Supersedes the legacy enabled/filter_enabled booleans.
+# mode = "hard"
+
+## with mode = "hard", fail closed (block all egress) when the inescapable boundary can't be built, instead of degrading to advisory filtering (default false).
+# strict = false
+
+## LEGACY (use mode): allow outbound network access from the sandbox. Honoured only when mode is unset.
 # enabled = true
 
-## enforce the allowed_hosts list (deny-by-default egress). Unset = on when allowed_hosts is non-empty; true = only allowed_hosts reachable (empty list blocks all egress); false = allow every host.
+## LEGACY (use mode): enforce the allowed_hosts list (deny-by-default egress). Honoured only when mode is unset. Unset = on when allowed_hosts is non-empty; true = only allowed_hosts reachable; false = allow every host.
 # filter_enabled = false
 
-## outbound host allow-list (exact host or *.suffix), enforced by the egress proxy when filter_enabled is on. Empty + filtering on = block all egress; filtering off = all hosts reachable.
+## extra outbound hosts (exact host or *.suffix) allowed when filtering is on, unioned on top of the built-in default allow-list (AI-provider APIs, package registries, git hosts).
 # allowed_hosts = []
+
+## outbound hosts (exact host or *.suffix) to deny even when otherwise allowed — overrides both allowed_hosts and the built-in defaults, so you can subtract a default host without redefining the list.
+# blocked_hosts = []
 
 [policy]
 ## enable the decision-capable gate that can deny tool calls (non-allow-listed MCP, credential reads, policy-file writes, global installs) even under skip-permissions (default true).
 # gate_enabled = true
 
-## MCP server names the agent may use; any other server is stripped before launch and denied at runtime (default none).
+## MCP server names the agent may use (whole-server grant covers all its tools); any other server is stripped before launch and denied at runtime (default none).
 # mcp_allowed = []
+
+## individual MCP tools ("<server>__<tool>") allowed even when the whole server is not; the server is kept (spawned) so those tools work, other tools park for approval (default none).
+# mcp_tools_allowed = []
+
+## auto-allow MCP tools the read/write classifier deems read-only (parking only writes/unknown). Best-effort heuristic — off by default.
+# mcp_auto_allow_read = false
 
 ## hosts WebFetch may reach without an approval round-trip; a new host parks the head for your approval (default none).
 # webfetch_allow_hosts = []
