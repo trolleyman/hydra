@@ -271,20 +271,36 @@ func BuildSpec(opts Options) (*Spec, error) {
 		args = append(args, "--chdir", opts.WorktreePath)
 	}
 
-	// Seccomp syscall filter (best-effort). The blob is passed on an inherited
-	// fd; bwrap reads it via --seccomp <fd>.
+	// Seccomp syscall filter (best-effort). bwrap reads the blob via --seccomp
+	// <fd>. Without an egress wrapper bwrap is our immediate child, so Go's
+	// inherited fd works directly. With one (hard egress), pasta sits between us
+	// and bwrap and does not preserve the inherited fd across its re-exec + netns
+	// fork, so we instead have the wrapper's innermost shell reopen the blob by
+	// path onto the same fd (see EgressWrap preExec).
 	var extraFiles []*os.File
+	var seccompPreExec string
 	cleanup := func() {}
 	if opts.Seccomp {
-		if f, err := seccompFile(); err != nil {
+		if f, path, err := seccompFile(); err != nil {
 			// Non-fatal: continue without the filter, like the demo.
 			fmt.Fprintf(os.Stderr, "hydra: seccomp filter unavailable, continuing without it: %v\n", err)
 		} else if f != nil {
-			// ExtraFiles[i] becomes fd 3+i in the child.
+			// ExtraFiles[i] becomes fd 3+i in the immediate child.
 			childFD := 3 + len(extraFiles)
-			extraFiles = append(extraFiles, f)
 			args = append(args, "--seccomp", fmt.Sprintf("%d", childFD))
-			cleanup = func() { _ = f.Close() }
+			if opts.EgressWrap != nil {
+				// Hard egress: reopen by path in the netns shell right before it
+				// execs bwrap, then unlink. Immune to whatever pasta does to fd 3.
+				_ = f.Close()
+				seccompPreExec = fmt.Sprintf("exec %d<%q\nrm -f %q\n", childFD, path, path)
+				cleanup = func() { _ = os.Remove(path) }
+			} else {
+				// No wrapper: inherit the fd directly and unlink now — the open fd
+				// keeps the inode alive.
+				_ = os.Remove(path)
+				extraFiles = append(extraFiles, f)
+				cleanup = func() { _ = f.Close() }
+			}
 		}
 	}
 
@@ -299,7 +315,7 @@ func BuildSpec(opts Options) (*Spec, error) {
 	// satisfied because hard egress only applies with Network.Enabled).
 	path, finalArgs := bwrap, args
 	if opts.EgressWrap != nil {
-		finalArgs = opts.EgressWrap(args)
+		finalArgs = opts.EgressWrap(args, seccompPreExec)
 		path = finalArgs[0]
 	}
 

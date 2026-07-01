@@ -47,11 +47,17 @@ NFTEOF`, nft, mapAddr, proxyPort)
 
 // HardWrapArgv wraps an existing bwrap argv so it runs inside a pasta netns with
 // the nft egress lock applied first. The returned argv runs `pasta … -- bash -c
-// '<nft>; exec "$@"' bash <bwrap…>`, so the nft rules load (with CAP_NET_ADMIN)
-// and then exec hands off to bwrap, which drops caps. proxyPort is the host
-// loopback port the filtering proxy listens on.
-func HardWrapArgv(h HardMode, proxyPort int, bwrapArgv []string) []string {
-	script := NftScript(h.NftPath, MapAddr, proxyPort) + "\nexec \"$@\""
+// '<nft>; <preExec> exec "$@"' bash <bwrap…>`, so the nft rules load (with
+// CAP_NET_ADMIN), the optional preExec snippet runs, and then exec hands off to
+// bwrap, which drops caps. proxyPort is the host loopback port the filtering
+// proxy listens on.
+//
+// preExec is an optional shell snippet run in this innermost shell just before it
+// execs bwrap — Hydra uses it to reopen the seccomp blob by path onto bwrap's
+// --seccomp fd, because the fd Go inherits to pasta does not survive pasta's
+// re-exec + netns fork. It must be empty or newline/semicolon-terminated.
+func HardWrapArgv(h HardMode, proxyPort int, bwrapArgv []string, preExec string) []string {
+	script := NftScript(h.NftPath, MapAddr, proxyPort) + "\n" + preExec + "exec \"$@\""
 	argv := PastaArgs(h.PastaPath, MapAddr)
 	argv = append(argv, "bash", "-c", script, "bash")
 	return append(argv, bwrapArgv...)

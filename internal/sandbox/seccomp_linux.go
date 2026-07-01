@@ -28,34 +28,39 @@ func seccompBlob() []byte {
 	return data
 }
 
-// seccompFile materializes the architecture's seccomp blob onto an unlinked,
-// read-only file descriptor suitable for passing to bwrap via --seccomp <fd>.
-// It returns (nil, nil) when no blob is available for this architecture.
-func seccompFile() (*os.File, error) {
+// seccompFile materializes the architecture's seccomp blob onto a still-linked,
+// read-only file, returning the open fd (for direct inheritance via bwrap
+// --seccomp <fd>) and its path (so a wrapper shell can reopen it — see the
+// EgressWrap preExec contract). It returns (nil, "", nil) when no blob is
+// available for this architecture. The caller owns cleanup: close the fd and, if
+// it does not otherwise unlink, os.Remove the path.
+func seccompFile() (*os.File, string, error) {
 	blob := seccompBlob()
 	if blob == nil {
-		return nil, nil
+		return nil, "", nil
 	}
 
 	tmp, err := os.CreateTemp("", "hydra-seccomp-*")
 	if err != nil {
-		return nil, errtrace.Wrap(fmt.Errorf("create seccomp temp: %w", err))
+		return nil, "", errtrace.Wrap(fmt.Errorf("create seccomp temp: %w", err))
 	}
 	path := tmp.Name()
-	defer os.Remove(path) // unlink; the reopened fd keeps the inode alive.
 
 	if _, err := tmp.Write(blob); err != nil {
 		_ = tmp.Close()
-		return nil, errtrace.Wrap(fmt.Errorf("write seccomp blob: %w", err))
+		_ = os.Remove(path)
+		return nil, "", errtrace.Wrap(fmt.Errorf("write seccomp blob: %w", err))
 	}
 	if err := tmp.Close(); err != nil {
-		return nil, errtrace.Wrap(fmt.Errorf("close seccomp temp: %w", err))
+		_ = os.Remove(path)
+		return nil, "", errtrace.Wrap(fmt.Errorf("close seccomp temp: %w", err))
 	}
 
 	// Reopen read-only so the inherited fd starts at offset 0.
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, errtrace.Wrap(fmt.Errorf("reopen seccomp blob: %w", err))
+		_ = os.Remove(path)
+		return nil, "", errtrace.Wrap(fmt.Errorf("reopen seccomp blob: %w", err))
 	}
-	return f, nil
+	return f, path, nil
 }

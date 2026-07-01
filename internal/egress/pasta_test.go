@@ -8,7 +8,7 @@ import (
 func TestHardWrapArgvShape(t *testing.T) {
 	hm := HardMode{Available: true, PastaPath: "/usr/bin/pasta", NftPath: "/usr/sbin/nft"}
 	bwrap := []string{"/usr/bin/bwrap", "--ro-bind", "/", "/", "--", "claude"}
-	argv := HardWrapArgv(hm, 54321, bwrap)
+	argv := HardWrapArgv(hm, 54321, bwrap, "")
 
 	if argv[0] != "/usr/bin/pasta" {
 		t.Fatalf("argv[0] should be pasta, got %q", argv[0])
@@ -34,6 +34,35 @@ func TestHardWrapArgvShape(t *testing.T) {
 	// Default-drop policy is the whole point.
 	if !strings.Contains(joined, "policy drop") {
 		t.Error("nft ruleset must default-drop egress")
+	}
+}
+
+func TestHardWrapArgvInjectsPreExec(t *testing.T) {
+	hm := HardMode{Available: true, PastaPath: "/usr/bin/pasta", NftPath: "/usr/sbin/nft"}
+	bwrap := []string{"/usr/bin/bwrap", "--seccomp", "3", "--", "claude"}
+	pre := "exec 3<\"/tmp/hydra-seccomp-x\"\nrm -f \"/tmp/hydra-seccomp-x\"\n"
+	argv := HardWrapArgv(hm, 54321, bwrap, pre)
+
+	// The script pasta runs is the -c argument (index after "bash", "-c").
+	var script string
+	for i, a := range argv {
+		if a == "-c" && i+1 < len(argv) {
+			script = argv[i+1]
+			break
+		}
+	}
+	if script == "" {
+		t.Fatalf("no -c script found: %v", argv)
+	}
+	// preExec must run after the nft load and immediately before exec "$@".
+	nftIdx := strings.Index(script, "NFTEOF")
+	preIdx := strings.Index(script, "exec 3<")
+	execIdx := strings.Index(script, `exec "$@"`)
+	if nftIdx < 0 || preIdx < 0 || execIdx < 0 {
+		t.Fatalf("script missing a required part: %q", script)
+	}
+	if !(nftIdx < preIdx && preIdx < execIdx) {
+		t.Errorf("preExec must sit between nft load and exec \"$@\": %q", script)
 	}
 }
 

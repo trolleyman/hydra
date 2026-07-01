@@ -213,7 +213,13 @@ type Options struct {
 	// a pasta network namespace with an nft egress lock, giving a hard
 	// allow-listed-egress boundary (see internal/egress). Linux only; nil = run
 	// bwrap directly. Ignored when NoSandbox is set.
-	EgressWrap func(bwrapArgv []string) []string
+	//
+	// preExec is a shell snippet the wrapper must run in the innermost shell
+	// (inside the netns, holding CAP_NET_ADMIN) right before it execs bwrap. Hydra
+	// uses it to reopen the seccomp blob by path onto bwrap's --seccomp fd, because
+	// the fd Go inherits to the immediate child (pasta) does not survive pasta's
+	// re-exec + netns fork. Empty when there is nothing to inject.
+	EgressWrap func(bwrapArgv []string, preExec string) []string
 
 	// HardenGUI hides the per-user runtime dir and unsets DISPLAY/WAYLAND/etc
 	// so the agent cannot drive the desktop session. Default true.

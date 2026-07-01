@@ -56,7 +56,7 @@ var egressProxies = struct {
 //
 // The proxy enforces the effective allow-list — the built-in DefaultAllowedHosts
 // unioned with net.AllowedHosts — minus net.BlockedHosts, which overrides it.
-func startEgress(id string, net *sandbox.NetworkPolicy) (env []string, wrap func([]string) []string) {
+func startEgress(id string, net *sandbox.NetworkPolicy) (env []string, wrap func([]string, string) []string) {
 	stopEgressProxy(id)
 	if !net.Enabled || net.Mode == sandbox.NetOff {
 		setEgressMode(id, EgressOff)
@@ -89,7 +89,9 @@ func startEgress(id string, net *sandbox.NetworkPolicy) (env []string, wrap func
 			storeEgress(id, p, EgressHard)
 			log.Printf("hydra egress[%s]: hard egress boundary active (pasta+nft), %d allow-listed host(s)", id, len(allowed))
 			env = egress.ProxyEnv("http://" + egress.MapAddr + ":" + itoa(port))
-			wrap = func(bwrapArgv []string) []string { return egress.HardWrapArgv(hm, port, bwrapArgv) }
+			wrap = func(bwrapArgv []string, preExec string) []string {
+				return egress.HardWrapArgv(hm, port, bwrapArgv, preExec)
+			}
 			return env, wrap
 		}
 		if net.Strict {
