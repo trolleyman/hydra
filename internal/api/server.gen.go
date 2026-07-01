@@ -113,6 +113,7 @@ const (
 const (
 	Down       ServiceStatusState = "down"
 	Failed     ServiceStatusState = "failed"
+	Paused     ServiceStatusState = "paused"
 	Restarting ServiceStatusState = "restarting"
 	Up         ServiceStatusState = "up"
 )
@@ -959,11 +960,11 @@ type ServiceStatus struct {
 	// Restarts Restarts performed so far
 	Restarts int `json:"restarts"`
 
-	// State up = running; restarting = backing off after an unexpected exit; failed = gave up after exhausting restarts; down = intentionally stopped
+	// State up = running; restarting = backing off after an unexpected exit; failed = gave up after exhausting restarts; down = intentionally stopped; paused = not running because the project has no active agents (starts when one is spawned)
 	State ServiceStatusState `json:"state"`
 }
 
-// ServiceStatusState up = running; restarting = backing off after an unexpected exit; failed = gave up after exhausting restarts; down = intentionally stopped
+// ServiceStatusState up = running; restarting = backing off after an unexpected exit; failed = gave up after exhausting restarts; down = intentionally stopped; paused = not running because the project has no active agents (starts when one is spawned)
 type ServiceStatusState string
 
 // ServiceStatusResponse defines model for ServiceStatusResponse.

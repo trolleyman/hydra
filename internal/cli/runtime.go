@@ -74,7 +74,20 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 	testReg := hydratests.NewRegistry()
 
 	// Supervises each project's [[services]] (e.g. a host-side emulator pool).
+	// Gate the services on activity: a project runs its services only while it has
+	// at least one agent, so an idle project doesn't hold a resource pool open (see
+	// RunActivityGate below). The probe counts a project's active (non-archived)
+	// agents; on a read error it returns 1 so a transient DB blip keeps services up
+	// rather than tearing a pool down.
 	svcMgr := services.NewManager()
+	svcMgr.SetActivityProbe(func(root string) int {
+		agents, err := store.ListAgents(root)
+		if err != nil {
+			log.Printf("services: count agents for %s: %v", root, err)
+			return 1
+		}
+		return len(agents)
+	})
 
 	// Fans change events to web clients over the events WS, replacing per-tab
 	// polling. A supervised service's state transition pushes services_changed.
@@ -202,11 +215,14 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 	// Watch heads with auto-merge armed and merge them once their tests pass.
 	go server.RunAutoMergeWatcher(ctx)
 
-	// Start each registered project's [[services]]. Done after the pollers so a
-	// slow service launch never delays request serving; StopAll on shutdown.
+	// Register each project's [[services]]. Done after the pollers so a slow
+	// service launch never delays request serving; StopAll on shutdown. Whether a
+	// project's services launch now is gated on it having agents (a project with
+	// none boots paused); the reconciler below flips them as agents come and go.
 	for _, root := range roots() {
 		svcMgr.StartProject(root)
 	}
+	go svcMgr.RunActivityGate(ctx)
 
 	// Remote-access auth: loopback (and the unix control socket) are always
 	// trusted; a configured key gates every non-localhost request. The key lives

@@ -10,7 +10,7 @@ export type ServiceStatus = {
     command: string;
     host: boolean;
     /**
-     * up = running; restarting = backing off after an unexpected exit; failed = gave up after exhausting restarts; down = intentionally stopped
+     * up = running; restarting = backing off after an unexpected exit; failed = gave up after exhausting restarts; down = intentionally stopped; paused = not running because the project has no active agents (starts when one is spawned)
      */
     state: ServiceStatus.state;
     /**
@@ -29,13 +29,14 @@ export type ServiceStatus = {
 };
 export namespace ServiceStatus {
     /**
-     * up = running; restarting = backing off after an unexpected exit; failed = gave up after exhausting restarts; down = intentionally stopped
+     * up = running; restarting = backing off after an unexpected exit; failed = gave up after exhausting restarts; down = intentionally stopped; paused = not running because the project has no active agents (starts when one is spawned)
      */
     export enum state {
         UP = 'up',
         RESTARTING = 'restarting',
         FAILED = 'failed',
         DOWN = 'down',
+        PAUSED = 'paused',
     }
 }
 

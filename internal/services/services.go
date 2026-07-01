@@ -40,7 +40,14 @@ const (
 	StateFailed State = "failed"
 	// StateStopped means the service was intentionally stopped (shutdown / removal).
 	StateStopped State = "down"
+	// StatePaused means the service is intentionally not running because its
+	// project currently has no active agents (the activity gate). It restarts
+	// automatically once an agent is spawned.
+	StatePaused State = "paused"
 )
+
+// pausedMessage explains a StatePaused service in the UI.
+const pausedMessage = "No active agents in this project — services start when an agent is spawned."
 
 // Status is a snapshot of one supervised service for the API/UI.
 type Status struct {
@@ -74,6 +81,26 @@ func (s *supervised) snapshot() Status {
 	return s.status
 }
 
+// reset returns the service to a fresh running status ahead of a (re)launch,
+// clearing the restart counter and any prior failure/pause message.
+func (s *supervised) reset() {
+	s.set(func(st *Status) {
+		st.State = StateRunning
+		st.PID = 0
+		st.Restarts = 0
+		st.Message = ""
+	})
+}
+
+// pause marks the service paused by the activity gate (project has no agents).
+func (s *supervised) pause() {
+	s.set(func(st *Status) {
+		st.State = StatePaused
+		st.PID = 0
+		st.Message = pausedMessage
+	})
+}
+
 func (s *supervised) set(mut func(*Status)) {
 	s.mu.Lock()
 	before := s.status.State
@@ -87,11 +114,24 @@ func (s *supervised) set(mut func(*Status)) {
 	}
 }
 
-// projectServices is the set of supervisors for one registered project.
+// projectServices is the set of supervisors for one registered project. The
+// supervised list is built once at registration and reused across start/pause
+// cycles so Status stays well-defined while the activity gate parks the project.
+// All lifecycle fields are guarded by mu, held across the (blocking) teardown in
+// stopRunLocked so a project's transitions serialize without contending across
+// projects.
 type projectServices struct {
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
-	svcs   []*supervised
+	mu      sync.Mutex
+	svcs    []*supervised
+	running bool
+	closed  bool               // unregistered (StopProject); never (re)launch again
+	cancel  context.CancelFunc // cancels the current run's supervisors; nil when down
+	wg      sync.WaitGroup
+
+	// idleSince is when the project last had zero active agents; the zero value
+	// means it currently has agents (or the gate hasn't observed it idle yet).
+	// The project is paused once it has been idle for the Manager's idleTimeout.
+	idleSince time.Time
 }
 
 // Manager owns the supervisors for every registered project. It is safe for
@@ -105,17 +145,33 @@ type Manager struct {
 	// Set once at startup before any project is supervised (see SetOnChange).
 	onChange func(root string)
 
+	// activityProbe, if set, returns the number of active agents in a project.
+	// When set, services are gated on activity: a project runs its services only
+	// while it has >=1 agent, pausing them idleTimeout after the last one is
+	// removed and relaunching them when an agent appears. When nil, services run
+	// for the whole time a project is registered (the ungated legacy behaviour).
+	// Set once before StartProject (see SetActivityProbe).
+	activityProbe func(root string) int
+
 	// Timing knobs (overridable in tests).
 	initialBackoff  time.Duration
 	maxBackoff      time.Duration
 	stableThreshold time.Duration // run longer than this and the restart counter resets
 	stopGrace       time.Duration // SIGTERM -> SIGKILL window on stop
+	idleTimeout     time.Duration // no-agent grace before pausing a project's services
+	gateInterval    time.Duration // activity-gate reconciler tick
 }
 
 // SetOnChange registers a callback invoked (with the project root) whenever a
 // supervised service's State changes. Call it once before StartProject; it is not
 // safe to change while services are running.
 func (m *Manager) SetOnChange(fn func(root string)) { m.onChange = fn }
+
+// SetActivityProbe enables activity gating: fn returns the current number of
+// active agents in a project, and services run only while a project has agents
+// (see the activityProbe field). Call it once before StartProject and before
+// RunActivityGate; it is not safe to change while services are running.
+func (m *Manager) SetActivityProbe(fn func(root string) int) { m.activityProbe = fn }
 
 // NewManager returns a Manager with production timing defaults.
 func NewManager() *Manager {
@@ -125,6 +181,8 @@ func NewManager() *Manager {
 		maxBackoff:      30 * time.Second,
 		stableThreshold: 10 * time.Second,
 		stopGrace:       5 * time.Second,
+		idleTimeout:     60 * time.Second,
+		gateInterval:    5 * time.Second,
 	}
 }
 
@@ -137,10 +195,15 @@ func normalize(root string) string {
 	return root
 }
 
-// StartProject loads the project's config and starts a supervisor per service.
-// It is idempotent: a project already running is left untouched (call
+// StartProject loads the project's config and registers a supervisor per service.
+// It is idempotent: a project already registered is left untouched (call
 // RestartProject to pick up config changes). A project with no services records
 // an empty entry so Status is well-defined.
+//
+// Whether the services actually launch now depends on the activity gate: with a
+// probe set (see SetActivityProbe) a project with no active agents is registered
+// in the paused state and its services start only once an agent appears; without
+// a probe they launch immediately.
 func (m *Manager) StartProject(root string) {
 	root = normalize(root)
 
@@ -153,10 +216,9 @@ func (m *Manager) StartProject(root string) {
 	m.mu.Lock()
 	if _, ok := m.projects[root]; ok {
 		m.mu.Unlock()
-		return // already supervised
+		return // already registered
 	}
-	ctx, cancel := context.WithCancel(context.Background())
-	ps := &projectServices{cancel: cancel}
+	ps := &projectServices{}
 	for _, spec := range cfg.Services {
 		if strings.TrimSpace(spec.Command) == "" {
 			continue
@@ -185,12 +247,71 @@ func (m *Manager) StartProject(root string) {
 	m.projects[root] = ps
 	m.mu.Unlock()
 
+	if len(ps.svcs) == 0 {
+		return
+	}
+
+	// Activity gate: hold the project paused if it has no active agents yet, so a
+	// freshly-added (or freshly-booted) project doesn't spin up services nobody is
+	// using. The reconciler (RunActivityGate) flips it to running when one appears.
+	if m.activityProbe != nil && m.activityProbe(root) == 0 {
+		ps.mu.Lock()
+		ps.idleSince = time.Now()
+		m.pauseServices(ps)
+		ps.mu.Unlock()
+		log.Printf("services: %d service(s) for %s paused (no active agents)", len(ps.svcs), root)
+		return
+	}
+
+	ps.mu.Lock()
+	m.startRunLocked(root, ps)
+	ps.mu.Unlock()
+}
+
+// startRunLocked launches a supervise goroutine for each of the project's
+// services and marks it running. Caller holds ps.mu; a no-op if already running.
+func (m *Manager) startRunLocked(root string, ps *projectServices) {
+	if ps.running || ps.closed || len(ps.svcs) == 0 {
+		return
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	ps.cancel = cancel
+	ps.running = true
 	for _, sv := range ps.svcs {
+		sv.reset()
 		ps.wg.Add(1)
 		go m.supervise(ctx, root, ps, sv)
 	}
-	if n := len(ps.svcs); n > 0 {
-		log.Printf("services: started %d service(s) for %s", n, root)
+	log.Printf("services: started %d service(s) for %s", len(ps.svcs), root)
+}
+
+// stopRunLocked cancels the current run, waits for the supervisors to exit, and
+// settles every service into rest (StatePaused for the activity gate, else
+// StateStopped). Caller holds ps.mu; a no-op if not running.
+func (m *Manager) stopRunLocked(ps *projectServices, rest State) {
+	if !ps.running {
+		return
+	}
+	ps.cancel()
+	ps.running = false
+	ps.cancel = nil
+	ps.wg.Wait()
+	// supervise() sets StateStopped when it observes the cancel; override to the
+	// intended resting state so a paused project reads as paused, not "down".
+	for _, sv := range ps.svcs {
+		if rest == StatePaused {
+			sv.pause()
+		} else {
+			sv.set(func(s *Status) { s.State = rest; s.PID = 0 })
+		}
+	}
+}
+
+// pauseServices marks every (currently-down) service paused. Caller holds ps.mu.
+// Used when a project is registered while already idle, so it never launched.
+func (m *Manager) pauseServices(ps *projectServices) {
+	for _, sv := range ps.svcs {
+		sv.pause()
 	}
 }
 
@@ -205,8 +326,10 @@ func (m *Manager) StopProject(root string) {
 	if ps == nil {
 		return
 	}
-	ps.cancel()
-	ps.wg.Wait()
+	ps.mu.Lock()
+	ps.closed = true // a concurrent gate reconcile must not relaunch it
+	m.stopRunLocked(ps, StateStopped)
+	ps.mu.Unlock()
 	log.Printf("services: stopped service(s) for %s", root)
 }
 
@@ -236,6 +359,66 @@ func (m *Manager) StopAll() {
 		}(root)
 	}
 	wg.Wait()
+}
+
+// RunActivityGate periodically reconciles every registered project's services
+// against its active-agent count until ctx is cancelled: it launches a paused
+// project's services once it has an agent, and pauses a running project's
+// services once it has been idle (no agents) for idleTimeout. It is a no-op when
+// no activity probe is set. Run it in its own goroutine after SetActivityProbe.
+func (m *Manager) RunActivityGate(ctx context.Context) {
+	if m.activityProbe == nil {
+		return
+	}
+	t := time.NewTicker(m.gateInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			m.mu.Lock()
+			roots := make([]string, 0, len(m.projects))
+			pss := make([]*projectServices, 0, len(m.projects))
+			for root, ps := range m.projects {
+				roots = append(roots, root)
+				pss = append(pss, ps)
+			}
+			m.mu.Unlock()
+			for i := range roots {
+				m.reconcileProject(roots[i], pss[i])
+			}
+		}
+	}
+}
+
+// reconcileProject applies the activity gate to one registered project: start
+// its services when it has agents, pause them once it has been idle past the
+// timeout. The agent count is read before taking ps.mu so the (possibly slow)
+// probe never blocks another project's transition.
+func (m *Manager) reconcileProject(root string, ps *projectServices) {
+	if len(ps.svcs) == 0 {
+		return
+	}
+	count := m.activityProbe(root)
+
+	ps.mu.Lock()
+	defer ps.mu.Unlock()
+	if count > 0 {
+		ps.idleSince = time.Time{}
+		if !ps.running {
+			m.startRunLocked(root, ps)
+		}
+		return
+	}
+	// No agents: start (or continue) the idle clock, and pause once it elapses.
+	if ps.idleSince.IsZero() {
+		ps.idleSince = time.Now()
+	}
+	if ps.running && time.Since(ps.idleSince) >= m.idleTimeout {
+		m.stopRunLocked(ps, StatePaused)
+		log.Printf("services: paused service(s) for %s (idle %s with no agents)", root, m.idleTimeout)
+	}
 }
 
 // Status returns a snapshot of the services for a project (nil if unknown).
