@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest'
-import { statusDotClass, agentDotClass, agentStatusBadge, archivedEndStateBadge } from './AgentComponents'
+import { statusDotClass, agentDotClass, agentStatusBadge, archivedEndStateBadge } from '../lib/agentDisplay'
 import type { AgentResponse } from '../api'
 import { AgentStatus } from '../api'
-import { TONE_DOT, TONE_BADGE } from './Badge'
+import { TONE_DOT, TONE_BADGE } from './badgeTones'
 
 // Helper: build a minimal-but-valid AgentResponse. `session` seeds the raw
 // sandbox session status; `status` (when given) seeds agent_status, the richer

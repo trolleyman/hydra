@@ -35,6 +35,9 @@ export interface TooltipProps {
   title?: string
   /** Card only: fixed width in px (drives both the box and the clamp math). */
   width?: number
+  /** Extra gap (px) between the trigger and the box, on top of the base 8px —
+   *  e.g. to clear a neighbouring control the box would otherwise sit against. */
+  offset?: number
 }
 
 // One configurable tooltip. The shared core — a portalled, fixed-position box
@@ -50,6 +53,7 @@ export function Tooltip({
   variant = 'dark',
   title,
   width = 384,
+  offset = 0,
 }: TooltipProps) {
   const card = variant === 'card'
   const showDelay = delay ?? (card ? 0 : 600)
@@ -105,12 +109,12 @@ export function Tooltip({
     else placement = spaceBelow > spaceAbove ? 'bottom' : 'top'
 
     return {
-      top: placement === 'top' ? rect.top - padding : rect.bottom + padding,
+      top: placement === 'top' ? rect.top - padding - offset : rect.bottom + padding + offset,
       left,
       placement,
       arrowX: `calc(50% + ${arrowOffset}px)`,
     }
-  }, [card, side, width])
+  }, [card, side, width, offset])
 
   const clearTimers = useCallback(() => {
     if (showTimer.current !== null) {

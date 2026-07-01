@@ -12,10 +12,34 @@ import (
 
 	"github.com/trolleyman/hydra/internal/api"
 	"github.com/trolleyman/hydra/internal/config"
+	"github.com/trolleyman/hydra/internal/db"
 	"github.com/trolleyman/hydra/internal/git"
 	"github.com/trolleyman/hydra/internal/heads"
 	hydratests "github.com/trolleyman/hydra/internal/tests"
 )
+
+// autoMergeFinishedDwell is how long a head must have sat in the finished state
+// before merge-when-green fires. Auto-merge waits for the agent to actually be
+// done — not merely for the branch tip to be green — so it never merges a head
+// mid-work (e.g. one that committed a passing intermediate state and kept going)
+// or on a momentary finished blip between turns.
+const autoMergeFinishedDwell = 10 * time.Second
+
+// headFinishedFor reports whether a's agent has held the finished state, with its
+// session still alive, for at least dwell. running/needs_input/waiting and a
+// stopped or dead session all return false: auto-merge only fires for a head that
+// genuinely completed its turn and has stayed settled — never a still-working
+// head, one blocked asking the user, or one whose session ended.
+func headFinishedFor(a db.Agent, dwell time.Duration, now time.Time) bool {
+	if a.SessionStatus != "running" || a.AgentStatus == nil || *a.AgentStatus != "finished" {
+		return false
+	}
+	t, err := time.Parse(time.RFC3339Nano, a.AgentStatusTime)
+	if err != nil {
+		return false // no reliable timestamp — wait rather than merge early
+	}
+	return now.Sub(t) >= dwell
+}
 
 // testRunnersFor resolves the enabled [[tests]] runners that apply to one version
 // of the project, read from that version's own .hydra/config.toml — the worktree's
@@ -428,6 +452,12 @@ func (s *Server) checkArmedMerges(ctx context.Context) {
 				_, _ = mgr.Get(r, v)
 			}
 		case passing == len(runners):
+			// Tests are green — but only merge once the agent has actually settled
+			// into finished (not merely a green intermediate commit while it keeps
+			// working). Waiting keeps the head armed; the next tick re-checks.
+			if !headFinishedFor(a, autoMergeFinishedDwell, time.Now()) {
+				continue
+			}
 			s.autoMerge(ctx, projectRoot, *head)
 		}
 	}

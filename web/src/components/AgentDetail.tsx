@@ -14,7 +14,7 @@ import { ImageLightbox } from './ImageLightbox'
 import { uploadBlobUrl } from '../api/uploads'
 import type { Attachment } from '../lib/spawnDrafts'
 import { DiffViewer } from '../DiffViewer'
-import { formatStartedAgo, agentStatusBadge, archivedEndStateBadge, agentDotClass, agentDotAnimate, agentTypePill } from './AgentComponents'
+import { formatStartedAgo, agentStatusBadge, archivedEndStateBadge, agentDotClass, agentDotAnimate, agentTypePill } from '../lib/agentDisplay'
 import { LoaderCircle, Merge, Trash2, Tag, RotateCcw, Pencil, TerminalSquare, Mail, ShieldAlert, ShieldCheck, ShieldOff, AlertTriangle, Clock } from 'lucide-react'
 import { TestVerdictChip } from './TestVerdict'
 import { Tooltip } from './Tooltip'
@@ -223,15 +223,42 @@ function ArchivedAgentDetail({ agent, projectId, onPurged }: { agent: AgentRespo
 // "no network", and the open "unrestricted" state (so an open egress channel is
 // always visible, not silently hidden). Hidden only when the head isn't live
 // (mode absent).
-// MergeWhenGreenPill is the merge button's "armed" state (PLAN #68): a green status
-// pill that says the merge is queued to run when tests pass, carrying its own white
-// Cancel button to disarm. It replaces the plain Merge button while armed, so the
-// state and the way out are both visible at a glance.
-function MergeWhenGreenPill({ onCancel, disabled }: { onCancel: () => void; disabled?: boolean }) {
+// mergeQueueWaitingOn describes what an armed (merge-when-green) head's queued
+// merge is currently blocked on, for the pill's tooltip. Reaching a finished
+// state is the dominant gate — the head can't merge mid-work — so any not-yet-
+// finished agent (still running, or blocked asking you something) reads simply as
+// "the agent to finish"; once it's finished, the test verdict is the remaining gate.
+function mergeQueueWaitingOn(agent: AgentResponse): string {
+  const st = agent.agent_status?.status
+  if (st && st !== 'finished') return 'the agent to finish'
+  const verdict = agent.tests?.status
+  if (verdict === 'running') return 'the tests to finish'
+  if (verdict === 'failing' || verdict === 'errored') return 'the tests to pass'
+  return 'the final checks'
+}
+
+// MergeWhenGreenPill is the merge button's "armed" state (PLAN #68): a green
+// "Merge queued" pill carrying its own white Cancel button to disarm. It replaces
+// the plain Merge button while armed, so the state and the way out are both
+// visible at a glance; a hover hint says what the queue does and what it's
+// currently waiting on. The hint opens below (the pill sits in the top bar) with
+// extra offset so it clears the Cancel button beside it.
+function MergeWhenGreenPill({ agent, onCancel, disabled }: { agent: AgentResponse; onCancel: () => void; disabled?: boolean }) {
+  const toBranch = agent.base_branch || 'its base branch'
+  const waitingOn = mergeQueueWaitingOn(agent)
   return (
     <div className="shrink-0 inline-flex items-center gap-2 h-8 pl-2.5 pr-1 rounded-lg bg-emerald-100 dark:bg-emerald-900/30 border border-emerald-200 dark:border-emerald-800/50 text-emerald-700 dark:text-emerald-300">
-      <Clock className="w-4 h-4 shrink-0" />
-      <span className="text-[13px] font-semibold whitespace-nowrap">Merges when tests pass</span>
+      <Tooltip
+        side="bottom"
+        offset={8}
+        delay={0}
+        content={`Merges into ${toBranch} on its own — but only once the agent is finished (not mid-task) and its tests pass. Waiting on ${waitingOn}.`}
+      >
+        <span className="inline-flex items-center gap-2 cursor-help">
+          <Clock className="w-4 h-4 shrink-0" />
+          <span className="text-[13px] font-semibold whitespace-nowrap">Merge queued</span>
+        </span>
+      </Tooltip>
       <button
         type="button"
         onClick={onCancel}
@@ -529,7 +556,7 @@ export function AgentDetail({
   async function armMerge() {
     try {
       await api.default.armMergeWhenGreen(projectId ?? '', agent.id)
-      useToastStore.getState().show({ message: `Will merge "${agent.id}" when its tests pass`, type: 'info' })
+      useToastStore.getState().show({ message: `Will merge "${agent.id}" when it finishes and its tests pass`, type: 'info' })
     } catch (err) {
       useToastStore.getState().show({ message: `Couldn't arm auto-merge: ${formatError(err)}`, type: 'error' })
     }
@@ -558,7 +585,40 @@ export function AgentDetail({
     if (verdict === 'failing') return confirmMergeGate('failing', n)
     if (verdict === 'errored') return confirmMergeGate('errored', n)
     if (verdict === 'running') return confirmMergeGate('running', n)
+    // Verdict is green (or there are no runners) — nothing else gates the merge,
+    // so this is where an accidental merge of a still-working agent would slip
+    // through. Warn first if it hasn't finished: still working (running/starting)
+    // or blocked asking you a question (needs_input). A non-green verdict already
+    // routes through the merge-gate above, so this only adds a prompt where there
+    // would otherwise be none.
+    const st = agent.agent_status?.status
+    if (st === 'running' || st === 'starting' || st === 'needs_input') {
+      return confirmMergeWhileActive(st === 'needs_input')
+    }
     return confirmNormalMerge()
+  }
+
+  // confirmMergeWhileActive gates a merge whose branch is green but whose AGENT
+  // hasn't finished: still working (running/starting) or blocked asking you a
+  // question (needs_input). It reuses the merge-gate dialog's Force / Queue /
+  // Cancel choice — Queue is the natural action here, arming merge-when-green so
+  // it lands once the agent is actually done. `blocked` selects the wording.
+  function confirmMergeWhileActive(blocked: boolean) {
+    const toBranch = agent.base_branch || 'base'
+    const fromBranch = agent.branch_name || `hydra/${agent.id}`
+    useDialogStore.getState().show({
+      title: blocked ? 'Agent is waiting on you' : 'Agent is still running',
+      message: blocked
+        ? `"${agent.id}" is asking you a question — merging now abandons it and may land incomplete work.`
+        : `"${agent.id}" hasn't finished this turn — merging now may capture an incomplete state.`,
+      type: 'warning',
+      variant: 'mergeGate',
+      details: { fromBranch, toBranch, agentGate: blocked ? 'needs_input' : 'running' },
+      confirmLabel: 'Queue merge',
+      onConfirm: () => void armMerge(),
+      secondaryLabel: 'Force merge',
+      onSecondary: () => void executeMerge(true),
+    })
   }
 
   function confirmNormalMerge() {
@@ -797,13 +857,13 @@ export function AgentDetail({
     : armed
       ? {
           // Compound control (see AgentTopBarAction.render): a green status pill
-          // carrying its own Cancel button, so the verdict and the way out are both
+          // carrying its own Cancel button, so the state and the way out are both
           // visible. `onClick` is the keyboard-shortcut fallback (Ctrl+M cancels).
-          label: 'Merges when tests pass',
+          label: 'Merge queued',
           icon: <Clock className="w-4 h-4" />,
           onClick: () => void cancelMerge(),
           shortcut: SHORTCUT_MERGE,
-          render: <MergeWhenGreenPill onCancel={() => void cancelMerge()} disabled={busy} />,
+          render: <MergeWhenGreenPill agent={agent} onCancel={() => void cancelMerge()} disabled={busy} />,
         }
       : {
           label: 'Merge',

@@ -5,12 +5,13 @@ import { BranchSelector } from './BranchSelector'
 import { formatError } from '../api/format_error'
 import { uploadFile, extractFiles, isImageFile } from '../api/uploads'
 import { Zap, LoaderCircle, Paperclip, Check } from 'lucide-react'
-import { AgentTypeIcon, AGENT_ACCENT } from './AgentTypeIcon'
+import { AgentTypeIcon } from './AgentTypeIcon'
+import { AGENT_ACCENT } from '../lib/agentTypeMeta'
 import { Tooltip } from './Tooltip'
 import { ImageLightbox } from './ImageLightbox'
 import { AttachmentChips } from './AttachmentChips'
 import { StorageKeys, promptDraftKey, promptScrollKey, imageCounterKey, readLocal, writeLocal } from '../lib/storage'
-import { HighlightedTextarea } from '../lib/markdown'
+import { HighlightedTextarea } from './HighlightedTextarea'
 import { spawnGeometry } from '../lib/terminalGeometry'
 import { type Attachment, spawnDraftKey, loadAttachments, saveAttachments, nextAttachmentId } from '../lib/spawnDrafts'
 import { getClipboardText, isLargePaste, detectCodeLanguage, fenceCode } from '../lib/pastedText'
@@ -82,7 +83,6 @@ function AgentTypePicker({
 
   useEffect(() => {
     if (!open) return
-    place()
     function handleClick(e: MouseEvent) {
       if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
     }
@@ -108,7 +108,9 @@ function AgentTypePicker({
         type="button"
         title={`Agent: ${active.label}`}
         aria-label={`Agent type: ${active.label}`}
-        onClick={() => setOpen((o) => !o)}
+        // Measure the trigger before opening so the fixed-position menu lands in
+        // the right spot on its first paint; scroll/resize keep it pinned after.
+        onClick={() => { if (!open) place(); setOpen((o) => !o) }}
         className={`flex items-center justify-center rounded-full border transition-colors cursor-pointer ${trigger} ${active.color} ${
           open
             ? 'bg-gray-100 dark:bg-gray-700 border-gray-300 dark:border-gray-600'

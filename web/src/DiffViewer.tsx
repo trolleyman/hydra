@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState, useCallback, Fragment, useMemo, memo, type CSSProperties } from 'react'
 import { highlightLines } from './lib/highlightCore'
 import { highlightSides } from './lib/highlightClient'
+import { getLanguage } from './lib/language'
+import hljs from './lib/hljs'
+import { ensureLanguage } from './lib/hljsLazy'
 import { api } from './stores/apiClient'
 import { formatError, apiErrorBody } from './api/format_error'
 import type { AgentResponse, CommitInfo, DiffFile, DiffHunk, DiffLine, DiffResponse } from './api'
@@ -14,11 +17,13 @@ import {
 import { DialogIconTile, DialogSectionLabel, DialogCancelButton, DialogConfirmButton } from './components/dialogPrimitives'
 import { IconButton } from './components/IconButton'
 import { getFileIcon } from './lib/fileIcons'
+import { buildFileTree, compactTree, getGroupedFiles, type TreeNode } from './lib/fileTree'
 import { Tooltip } from './components/Tooltip'
-import { useMeasuredHeight } from './components/CollapsibleCard'
+import { useMeasuredHeight } from './lib/useMeasuredHeight'
 import { ArtifactsPanel } from './components/ArtifactsPanel'
 import { TestsPanel } from './components/TestsPanel'
-import { ImageDiffView, IMAGE_DIFF_MODES, type ImageDiffMode } from './components/ArtifactImageDiff'
+import { ImageDiffView, type ImageDiffMode } from './components/ArtifactImageDiff'
+import { IMAGE_DIFF_MODES } from './components/artifactDiffContext'
 import { isImagePath, agentBlobUrl } from './lib/imageDiff'
 import { useArtifactSpans } from './lib/artifactColumns'
 import { useDialogStore } from './stores/dialogStore'
@@ -26,26 +31,6 @@ import { StorageKeys, readLocal, writeLocal } from './lib/storage'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from './lib/agentViewPrefs'
 
 // ── Syntax highlighting helpers ───────────────────────────────────────────────
-
-const EXT_LANG_MAP: Record<string, string> = {
-  ts: 'typescript', tsx: 'typescript', js: 'javascript', jsx: 'javascript',
-  go: 'go', rs: 'rust', py: 'python', rb: 'ruby', java: 'java',
-  c: 'c', cpp: 'cpp', h: 'cpp', cs: 'csharp', php: 'php',
-  css: 'css', scss: 'scss', less: 'less', html: 'html', xml: 'xml',
-  json: 'json', yaml: 'yaml', yml: 'yaml', toml: 'toml',
-  sh: 'bash', bash: 'bash', zsh: 'bash', md: 'markdown', sql: 'sql',
-  kt: 'kotlin', swift: 'swift', dart: 'dart', r: 'r',
-  dockerfile: 'dockerfile', makefile: 'makefile',
-}
-
-function getLanguage(filePath: string): string {
-  const filename = filePath.split('/').pop() ?? filePath
-  const lower = filename.toLowerCase()
-  if (lower === 'dockerfile') return 'dockerfile'
-  if (lower === 'makefile') return 'makefile'
-  const ext = lower.split('.').pop() ?? ''
-  return EXT_LANG_MAP[ext] ?? 'plaintext'
-}
 
 // ── Diff line building helpers ────────────────────────────────────────────────
 
@@ -704,9 +689,21 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onCo
   // so they paint as plain text and colourise from the Web Worker pool — the
   // hljs work runs fully off the UI thread. Whole-file input keeps the
   // highlighting correct regardless of which path runs.
+  // Fetch a not-yet-bundled grammar on demand (the worker path does this itself);
+  // langReady flips false→true once it lands, re-running the sync highlight below.
+  const [, bumpGrammar] = useState(0)
+  useEffect(() => {
+    if (lang === 'plaintext' || hljs.getLanguage(lang)) return
+    let cancelled = false
+    ensureLanguage(lang).then((ok) => { if (ok && !cancelled) bumpGrammar((n) => n + 1) })
+    return () => { cancelled = true }
+  }, [lang])
+  const langReady = lang === 'plaintext' || !!hljs.getLanguage(lang)
   const syncHighlight = useMemo(
-    () => (highlightSource && highlightSource.length <= HL_SYNC_MAX ? buildHighlightMaps(highlightSource, lang) : null),
-    [highlightSource, lang],
+    () => (highlightSource && highlightSource.length <= HL_SYNC_MAX
+      ? buildHighlightMaps(highlightSource, langReady ? lang : 'plaintext')
+      : null),
+    [highlightSource, lang, langReady],
   )
   const [asyncHighlight, setAsyncHighlight] = useState(EMPTY_HIGHLIGHT)
   useEffect(() => {
@@ -978,7 +975,7 @@ function formatCommitDate(iso: string): string {
 // immediately dismisses whichever was previously active, so scrolling the
 // pointer across many triggers (e.g. the commit list) can't leave a trail of
 // stale, lingering boxes behind.
-let activeHide: (() => void) | null = null
+let activeTooltip: { id: object; hide: () => void } | null = null
 
 function CustomTooltip({ content, children, side = 'bottom', className = 'w-full' }: {
   content: React.ReactNode
@@ -990,6 +987,9 @@ function CustomTooltip({ content, children, side = 'bottom', className = 'w-full
   const ref = useRef<HTMLDivElement>(null)
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // A stable per-instance identity for the "which tooltip is active" singleton, so
+  // hideNow can tell if it still owns the slot without referencing itself.
+  const id = useMemo(() => ({}), [])
 
   const cancelHide = useCallback(() => {
     if (hideTimer.current) {
@@ -1001,14 +1001,14 @@ function CustomTooltip({ content, children, side = 'bottom', className = 'w-full
   const hideNow = useCallback(() => {
     cancelHide()
     setVisible(false)
-    if (activeHide === hideNow) activeHide = null
-  }, [cancelHide])
+    if (activeTooltip?.id === id) activeTooltip = null
+  }, [cancelHide, id])
 
   const show = useCallback(() => {
     cancelHide()
     // Dismiss any other tooltip before we claim the active slot.
-    if (activeHide && activeHide !== hideNow) activeHide()
-    activeHide = hideNow
+    if (activeTooltip && activeTooltip.id !== id) activeTooltip.hide()
+    activeTooltip = { id, hide: hideNow }
     if (ref.current) {
       const rect = ref.current.getBoundingClientRect()
       if (side === 'right') {
@@ -1022,7 +1022,7 @@ function CustomTooltip({ content, children, side = 'bottom', className = 'w-full
       }
     }
     setVisible(true)
-  }, [side, cancelHide, hideNow])
+  }, [side, cancelHide, hideNow, id])
 
   // Hide after a short grace period so the pointer can travel from the trigger
   // into the tooltip (and back) without it disappearing.
@@ -1567,66 +1567,6 @@ function BehindBaseButton({ diff, agent, projectId, onUpdated }: {
 
 export type FileView = 'tree' | 'flat' | 'grouped'
 
-export interface TreeNode {
-  name: string
-  path: string
-  type: 'file' | 'dir'
-  children: TreeNode[]
-  file?: DiffFile
-}
-
-export function buildFileTree(files: DiffFile[]): TreeNode[] {
-  const root: TreeNode[] = []
-  for (const file of files) {
-    const parts = file.path.split('/')
-    let current = root
-    for (let i = 0; i < parts.length - 1; i++) {
-      let node = current.find((n) => n.type === 'dir' && n.name === parts[i])
-      if (!node) {
-        node = { name: parts[i], path: parts.slice(0, i + 1).join('/'), type: 'dir', children: [] }
-        current.push(node)
-      }
-      current = node.children
-    }
-    current.push({ name: parts[parts.length - 1], path: file.path, type: 'file', children: [], file })
-  }
-  return root
-}
-
-// compactTree merges chains of single-child directories into one node, the way
-// VS Code's "compact folders" does: one/two/three renders on a single row when
-// `one` contains only `two` and `two` contains only `three`. This trims the
-// horizontal indent that deeply nested trees would otherwise waste.
-//
-// A directory is folded into its child only when that child is its *sole* entry
-// and is itself a directory — so a folder holding a file (or more than one
-// child) stops the chain. The merged node keeps the deepest folder's `path`
-// (stable, unique → safe as a collapse-state / React key) and joins the segment
-// names for display.
-export function compactTree(nodes: TreeNode[]): TreeNode[] {
-  return nodes.map((node) => {
-    if (node.type !== 'dir') return node
-    let current = node
-    const names = [node.name]
-    while (current.children.length === 1 && current.children[0].type === 'dir') {
-      current = current.children[0]
-      names.push(current.name)
-    }
-    return { ...current, name: names.join('/'), children: compactTree(current.children) }
-  })
-}
-
-export function getGroupedFiles(files: DiffFile[]): [string, DiffFile[]][] {
-  const map = new Map<string, DiffFile[]>()
-  for (const file of files) {
-    const parts = file.path.split('/')
-    const folder = parts.length > 1 ? parts.slice(0, -1).join('/') : ''
-    if (!map.has(folder)) map.set(folder, [])
-    map.get(folder)!.push(file)
-  }
-  return Array.from(map.entries())
-}
-
 // ── Sidebar components ────────────────────────────────────────────────────────
 
 export function FileRow({ file, isActive, onClick, indent = 0 }: {
@@ -1927,7 +1867,7 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
     } catch (e) {
       console.error('Failed to fetch file diff:', e)
     }
-  }, [agent.id, projectId, leftSel, rightSel, ignoreWhitespace])
+  }, [agent.id, agent.branch_name, projectId, leftSel, rightSel, ignoreWhitespace])
 
   // Compute hidden-file state from a fresh diff response.
   // Large files (HIDDEN_FILE_THRESHOLD changed lines) start hidden, unless the user has explicitly shown them.

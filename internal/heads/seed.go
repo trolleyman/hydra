@@ -97,6 +97,18 @@ func seedHead(projectRoot, id string, agentType sandbox.AgentType, worktreePath,
 		"HYDRA_STATUS_LOG_PATH="+statusLogHost,
 	)
 
+	// Per-head sub-agent tracking dir: trigger-hook drops a marker file per live
+	// Claude sub-agent so the main agent's Stop hook can distinguish a real finish
+	// from "turn ended but sub-agents still running". A directory (one file per
+	// sub-agent) rather than a shared JSON file so parallel sub-agents never race
+	// on a read-modify-write. Made writable + pointed at via HYDRA_SUBAGENTS_DIR.
+	subagentsDirHost := paths.GetSubagentsDirFromProjectRoot(projectRoot, id)
+	if err := os.MkdirAll(subagentsDirHost, 0755); err != nil {
+		return nil, errtrace.Wrap(fmt.Errorf("create %s: %w", subagentsDirHost, err))
+	}
+	res.WritablePaths = append(res.WritablePaths, subagentsDirHost)
+	res.Env = append(res.Env, "HYDRA_SUBAGENTS_DIR="+subagentsDirHost)
+
 	// The hydra binary's real path, so hooks can invoke it. Visible read-only
 	// inside the sandbox via the root bind.
 	hydraBin, err := os.Executable()

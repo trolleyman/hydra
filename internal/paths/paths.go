@@ -161,6 +161,15 @@ func GetBuildLogFromProjectRoot(projectRoot, id string) string {
 	return filepath.Join(GetStatusDirFromProjectRoot(projectRoot), id+"_build.log")
 }
 
+// GetSubagentsDirFromProjectRoot returns the per-head directory tracking the
+// head's currently-live Claude sub-agents (Task tool). trigger-hook drops a
+// marker file per running sub-agent so the main agent's Stop hook can tell a
+// genuine finish from "the turn ended but sub-agents are still working". It sits
+// beside status.json under .hydra/local/status/<id>_subagents.
+func GetSubagentsDirFromProjectRoot(projectRoot, id string) string {
+	return filepath.Join(GetStatusDirFromProjectRoot(projectRoot), id+"_subagents")
+}
+
 // GetApprovalsDirFromProjectRoot returns the per-head directory used for the
 // security-gate "ask" round-trip: the in-sandbox hook writes approval requests
 // here (the dir is made writable at its real host path, like status.json) and

@@ -404,6 +404,9 @@ try {
       // popover such as the repository branch selector so the screenshot
       // documents it.
       click?: string
+      // CSS selector hovered (after load, before capture) — opens a hover-only
+      // card tooltip (e.g. the "Merge queued" pill's explanation) so it's captured.
+      hover?: string
       // CSS selectors clicked in sequence (each followed by a settle), then a
       // networkidle wait so any fetch a click kicks off has rendered before the
       // capture. Used by the branch-compare diff shots, where pressing the diff
@@ -821,6 +824,12 @@ try {
       // "merges when tests pass" metadata chip, and the merge button becomes the
       // green "Merges when tests pass" pill with its own Cancel button.
       { name: 'tests-merge-when-green', path: '/project/sim-project/agent/agent-md', viewportOnly: true },
+      // The "Merge queued" pill's hover hint, on an agent whose queued merge is
+      // blocked on the AGENT rather than the tests: agent-queued armed auto-merge
+      // (tests already green) but hasn't reached a finished state, so the hint
+      // reports it's "Waiting on the agent to finish". Hovering the pill opens the
+      // hint; viewportOnly frames the header + hint.
+      { name: 'merge-queued-tooltip', path: '/project/sim-project/agent/agent-queued', viewportOnly: true, hover: 'text=Merge queued' },
       // The merge-gate dialog (PLAN #68): clicking the plain "Merge" button on
       // agent-2's failing verdict opens the Force-merge / Queue-merge choice with an
       // explanation of the soft gate, instead of bouncing off a server 409.
@@ -833,6 +842,11 @@ try {
       // armed) — clicking Merge offers "Merge now" (don't wait) or Queue merge, over
       // a blue running tile + a progress chip.
       { name: 'tests-merge-gate-dialog-running', path: '/project/sim-project/agent/agent-3', viewportOnly: true, click: 'button[aria-label="Merge"]' },
+      // The merge gate when the AGENT (not the tests) isn't ready: agent-approval is
+      // blocked asking you a question (needs_input), so clicking Merge warns "Agent
+      // is waiting on you" and reuses the Force merge / Queue merge / Cancel choice —
+      // Queue arms merge-when-green so it lands once the agent finishes and is green.
+      { name: 'merge-agent-active-dialog', path: '/project/sim-project/agent/agent-approval', viewportOnly: true, click: 'button[aria-label="Merge"]' },
       // The agent-type picker dropdown, opened on the compact ("mini") spawn box
       // in the sidebar. The picker is an icon-only trigger (the active agent's
       // brand mark) that opens a menu listing every agent type as its canonical
@@ -1945,6 +1959,15 @@ try {
         if (pg.click) {
           // Open a popover (e.g. the branch selector) so the capture documents it.
           await page.click(pg.click)
+          await settle(page)
+        }
+        if (pg.hover) {
+          // Hover an element to open its hover-only tooltip so the capture documents
+          // it — e.g. the "Merge queued" pill's explanation. The tooltip must show
+          // synchronously on hover (delay 0): a post-hover wait would let the layout
+          // settle and drift the element out from under Playwright's fixed cursor,
+          // firing mouseleave and dismissing the (grace-less) dark hint.
+          await page.locator(pg.hover).first().hover()
           await settle(page)
         }
         if (pg.pressKey) {

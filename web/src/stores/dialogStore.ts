@@ -32,6 +32,11 @@ export interface DialogDetails {
   testStatus?: 'failing' | 'errored' | 'running'
   testFailed?: number
   testProgress?: string
+  // mergeGate: when the merge is gated because the AGENT itself hasn't finished
+  // (still working, or blocked asking you a question) rather than by a test
+  // verdict, this says which — the panel renders that reason instead of a test
+  // chip, over the same Force / Queue choice.
+  agentGate?: 'running' | 'needs_input'
 }
 
 interface DialogState {

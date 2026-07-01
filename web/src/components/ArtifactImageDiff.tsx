@@ -1,9 +1,10 @@
-import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
+import { useCallback, useContext, useEffect, useRef, useState } from 'react'
 import { ImageOff } from 'lucide-react'
 import {
   checkerStyle, IMG_CLASS, OVERLAY_CLASS, TAG_CLASS, makeAuxOpen,
   DIFF_COLOR, DIFF_PIXEL_THRESHOLD, DIFF_ALPHA,
 } from './artifactDiffShared'
+import { ABControlsContext } from './artifactDiffContext'
 import { useImageLightbox } from '../stores/imageLightboxStore'
 import type { LightboxImage } from './ImageLightbox'
 
@@ -24,14 +25,6 @@ export type ArtifactABControls = {
   highlight: boolean
   toggleView: () => void
 }
-export const ABControlsContext = createContext<ArtifactABControls | null>(null)
-
-export const IMAGE_DIFF_MODES: { value: ImageDiffMode; label: string }[] = [
-  { value: 'ab', label: 'Before · After' },
-  { value: 'slider', label: 'Before · After (slider)' },
-  { value: 'side-by-side', label: 'Side by side' },
-  { value: 'onion', label: 'Onion skin' },
-]
 
 // A single artifact image as a lightbox entry; size is unknown here (the diff
 // viewer doesn't carry byte sizes) so it's left out of the caption.
@@ -274,10 +267,10 @@ function SliderCompare({ left, right, name, aspect, gallery, index, disableOpen 
     }
   }, [dragging, update])
 
-  // The side sitting under a given clientX, for the click/middle-click open.
-  const sideAt = (clientX: number) => {
-    const el = ref.current
-    if (!el) return sizer
+  // The side sitting under a given clientX, for the click/middle-click open. Takes
+  // the target element from the event (rather than reading the ref) so it works
+  // inside makeAuxOpen's pick without a render-time ref access.
+  const sideAt = (el: Element, clientX: number) => {
     const r = el.getBoundingClientRect()
     return (((clientX - r.left) / r.width) * 100 < pos ? left : right) || sizer
   }
@@ -286,8 +279,8 @@ function SliderCompare({ left, right, name, aspect, gallery, index, disableOpen 
     <div
       ref={ref}
       className={`relative w-full select-none ${disableOpen ? '' : 'cursor-zoom-in'}`}
-      onClick={disableOpen ? undefined : (e) => openGalleryAt(openImage, gallery, index, sideAt(e.clientX), name)}
-      onAuxClick={makeAuxOpen((e) => sideAt(e.clientX))}
+      onClick={disableOpen ? undefined : (e) => openGalleryAt(openImage, gallery, index, sideAt(e.currentTarget, e.clientX), name)}
+      onAuxClick={makeAuxOpen((e) => sideAt(e.currentTarget, e.clientX))}
     >
       <span className={`${TAG_CLASS} left-1`}>Before</span>
       <span className={`${TAG_CLASS} right-1`}>After</span>
@@ -382,9 +375,13 @@ function DiffCanvas({ left, right }: { left: string; right: string }) {
   const ref = useRef<HTMLCanvasElement>(null)
   const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading')
 
+  // Reset to the loading state when either side changes (during render, before the
+  // re-diff effect below runs), so a stale overlay never lingers over the new pair.
+  const [prevSrc, setPrevSrc] = useState(`${left}\n${right}`)
+  if (prevSrc !== `${left}\n${right}`) { setPrevSrc(`${left}\n${right}`); setState('loading') }
+
   useEffect(() => {
     let cancelled = false
-    setState('loading')
     Promise.all([loadImage(left), loadImage(right)])
       .then(([la, ra]) => {
         if (cancelled) return
