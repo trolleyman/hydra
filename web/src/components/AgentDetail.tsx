@@ -241,22 +241,19 @@ function mergeQueueWaitingOn(agent: AgentResponse): string {
 // MergeWhenGreenPill is the merge button's "armed" state (PLAN #68): a green
 // "Merge queued" pill carrying its own white Cancel button to disarm. It replaces
 // the plain Merge button while armed, so the state and the way out are both
-// visible at a glance; a hover card explains what the queue does and what it's
-// currently waiting on.
+// visible at a glance; a hover hint says what the queue does and what it's
+// currently waiting on. The hint opens below (the pill sits in the top bar) with
+// extra offset so it clears the Cancel button beside it.
 function MergeWhenGreenPill({ agent, onCancel, disabled }: { agent: AgentResponse; onCancel: () => void; disabled?: boolean }) {
   const toBranch = agent.base_branch || 'its base branch'
   const waitingOn = mergeQueueWaitingOn(agent)
   return (
     <div className="shrink-0 inline-flex items-center gap-2 h-8 pl-2.5 pr-1 rounded-lg bg-emerald-100 dark:bg-emerald-900/30 border border-emerald-200 dark:border-emerald-800/50 text-emerald-700 dark:text-emerald-300">
       <Tooltip
-        variant="card"
-        title="Merge queued"
-        content={
-          <>
-            <p>Auto-merge is armed: this agent merges into <code>{toBranch}</code> on its own once it has finished and its tests pass.</p>
-            <p>Waiting on {waitingOn}.</p>
-          </>
-        }
+        side="bottom"
+        offset={8}
+        delay={0}
+        content={`Merges into ${toBranch} once it finishes and its tests pass. Waiting on ${waitingOn}.`}
       >
         <span className="inline-flex items-center gap-2 cursor-help">
           <Clock className="w-4 h-4 shrink-0" />

@@ -1946,8 +1946,11 @@ try {
           await settle(page)
         }
         if (pg.hover) {
-          // Hover an element to open its (hover-only) card tooltip so the capture
-          // documents it — e.g. the "Merge queued" pill's explanation card.
+          // Hover an element to open its hover-only tooltip so the capture documents
+          // it — e.g. the "Merge queued" pill's explanation. The tooltip must show
+          // synchronously on hover (delay 0): a post-hover wait would let the layout
+          // settle and drift the element out from under Playwright's fixed cursor,
+          // firing mouseleave and dismissing the (grace-less) dark hint.
           await page.locator(pg.hover).first().hover()
           await settle(page)
         }
