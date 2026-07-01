@@ -798,6 +798,8 @@ func toAPIAgentConfig(c config.AgentConfig) api.AgentConfig {
 		out.Policy = &api.PolicyConfig{
 			GateEnabled:        p.GateEnabled,
 			McpAllowed:         &p.MCPAllowed,
+			McpToolsAllowed:    &p.MCPToolsAllowed,
+			McpAutoAllowRead:   p.MCPAutoAllowRead,
 			WebfetchAllowHosts: &p.WebFetchAllowHosts,
 		}
 	}
@@ -848,9 +850,12 @@ func fromAPIAgentConfig(a api.AgentConfig) config.AgentConfig {
 		out.Sandbox = sb
 	}
 	if a.Policy != nil {
-		p := &config.PolicyConfig{GateEnabled: a.Policy.GateEnabled}
+		p := &config.PolicyConfig{GateEnabled: a.Policy.GateEnabled, MCPAutoAllowRead: a.Policy.McpAutoAllowRead}
 		if a.Policy.McpAllowed != nil {
 			p.MCPAllowed = *a.Policy.McpAllowed
+		}
+		if a.Policy.McpToolsAllowed != nil {
+			p.MCPToolsAllowed = *a.Policy.McpToolsAllowed
 		}
 		if a.Policy.WebfetchAllowHosts != nil {
 			p.WebFetchAllowHosts = *a.Policy.WebfetchAllowHosts

@@ -4,6 +4,7 @@ import (
 	"net/url"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -26,10 +27,14 @@ type Result struct {
 	// Reason is a one-line human explanation, shown in the deny message / card.
 	Reason string
 	// Kind classifies an Ask so a remembered approval knows what to persist:
-	// "mcp" (Target is the server name) or "webfetch" (Target is the host).
+	// "mcp" (Target is the server name), "mcp_tool" (Target is "<server>__<tool>"),
+	// or "webfetch" (Target is the host).
 	Kind string
-	// Target is the server/host an Ask is about (for the approval UI + remember).
+	// Target is the server/host/tool an Ask is about (for the approval UI + remember).
 	Target string
+	// RW is the read/write classification of an MCP tool call ("read", "write", or
+	// "" when not applicable/unknown), surfaced as a badge on the approval card.
+	RW string
 }
 
 // globalInstallRe matches Bash commands that install system- or user-global
@@ -91,9 +96,30 @@ func Decide(p Policy, toolName string, toolInput map[string]any) Result {
 	}
 
 	// MCP tool calls: mcp__<server>__<tool> (plugins: mcp__plugin_<p>_<server>__).
-	if server, ok := mcpServer(toolName); ok {
+	if server, tool, ok := mcpServerTool(toolName); ok {
+		rw := ClassifyMCPTool(tool)
+		// Whole-server grant covers every tool.
 		if containsFold(p.MCPAllowed, server) {
 			return Result{Decision: Allow}
+		}
+		full := server + "__" + tool
+		// Per-tool grant.
+		if containsFold(p.MCPToolsAllowed, full) {
+			return Result{Decision: Allow}
+		}
+		// Optional: auto-allow tools the classifier deems read-only.
+		if p.AutoAllowReadMCP && rw == "read" {
+			return Result{Decision: Allow}
+		}
+		// A server that already has some per-tool grants is a partially-allowed
+		// (kept) server: park THIS tool for approval. A server with no grants at all
+		// would have been stripped pre-launch, so parking the whole server is the
+		// meaningful ask if it is somehow reached.
+		if serverReferenced(p.MCPToolsAllowed, server) {
+			return Result{
+				Decision: Ask, Kind: "mcp_tool", Target: full, RW: rw,
+				Reason: "MCP tool " + quote(full) + " is not on the allow-list",
+			}
 		}
 		return Result{
 			Decision: Ask, Kind: "mcp", Target: server,
@@ -165,17 +191,61 @@ func Decide(p Policy, toolName string, toolInput map[string]any) Result {
 	return Result{Decision: Allow}
 }
 
-// mcpServer extracts the server name from an MCP tool call name, or reports
-// false for a non-MCP tool. mcp__<server>__<tool> → <server>.
-func mcpServer(tool string) (string, bool) {
-	if !strings.HasPrefix(tool, "mcp__") {
-		return "", false
+// mcpServerTool splits an MCP tool call name into its server and tool segments,
+// or reports false for a non-MCP tool. mcp__<server>__<tool> → (<server>, <tool>).
+// A malformed name with no tool segment treats the remainder as the server and
+// leaves the tool empty.
+func mcpServerTool(name string) (server, tool string, ok bool) {
+	if !strings.HasPrefix(name, "mcp__") {
+		return "", "", false
 	}
-	rest := strings.TrimPrefix(tool, "mcp__")
-	// The server is everything up to the next "__" (which separates the tool). A
-	// malformed name with no tool segment treats the remainder as the server.
-	server, _, _ := strings.Cut(rest, "__")
-	return server, true
+	rest := strings.TrimPrefix(name, "mcp__")
+	server, tool, _ = strings.Cut(rest, "__")
+	return server, tool, true
+}
+
+// readVerbs / writeVerbs classify an MCP tool by the leading verb in its name.
+// This is a best-effort heuristic used for the approval-card read/write badge and
+// the optional auto-allow-read policy — NOT a security guarantee (a server can
+// name a destructive tool "get_*"). A future enhancement can replace/augment this
+// with the server-declared readOnlyHint annotation captured from tools/list.
+var (
+	readVerbs  = []string{"get", "list", "read", "search", "find", "fetch", "query", "describe", "show", "view", "lookup", "count", "check", "browse", "inspect"}
+	writeVerbs = []string{"create", "update", "delete", "write", "post", "put", "patch", "set", "add", "remove", "edit", "insert", "send", "run", "exec", "execute", "modify", "move", "rename", "upload", "publish", "merge", "close", "cancel", "trigger", "deploy"}
+)
+
+// ClassifyMCPTool returns "read", "write", or "" (unknown) for an MCP tool name,
+// by matching a leading verb (split on '_', '-', or camelCase). Best-effort only.
+func ClassifyMCPTool(tool string) string {
+	verb := leadingVerb(tool)
+	if verb == "" {
+		return ""
+	}
+	if slices.Contains(readVerbs, verb) {
+		return "read"
+	}
+	if slices.Contains(writeVerbs, verb) {
+		return "write"
+	}
+	return ""
+}
+
+// leadingVerb extracts the first word of a tool name, lower-cased. It splits on
+// the first '_' or '-', or (for camelCase like "createIssue") at the first
+// upper-case letter after the initial run of lower-case letters.
+func leadingVerb(tool string) string {
+	if tool == "" {
+		return ""
+	}
+	if i := strings.IndexAny(tool, "_-"); i >= 0 {
+		return strings.ToLower(tool[:i])
+	}
+	for i, r := range tool {
+		if i > 0 && r >= 'A' && r <= 'Z' {
+			return strings.ToLower(tool[:i])
+		}
+	}
+	return strings.ToLower(tool)
 }
 
 // isPolicyFile reports whether path is a security-relevant policy file the agent
@@ -299,6 +369,17 @@ func HostAllowed(allow []string, host string) bool {
 			continue
 		}
 		if host == a {
+			return true
+		}
+	}
+	return false
+}
+
+// serverReferenced reports whether any "<server>__<tool>" entry names server.
+func serverReferenced(toolsAllowed []string, server string) bool {
+	for _, t := range toolsAllowed {
+		s, _, _ := strings.Cut(t, "__")
+		if strings.EqualFold(strings.TrimSpace(s), server) {
 			return true
 		}
 	}

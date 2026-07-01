@@ -41,8 +41,19 @@ type Policy struct {
 	GateEnabled bool `json:"gate_enabled"`
 	// MCPAllowed lists the MCP server names the agent may use. A call to any other
 	// server is parked for approval (ask); the same servers are also stripped from
-	// the seeded config pre-launch so they never spawn.
+	// the seeded config pre-launch so they never spawn. A whole-server grant covers
+	// all of that server's tools.
 	MCPAllowed []string `json:"mcp_allowed"`
+	// MCPToolsAllowed lists individual MCP tools ("<server>__<tool>") the agent may
+	// use even when the whole server is NOT on MCPAllowed. It enables per-tool
+	// gating: a server with some tools listed here is kept (spawned) so those tools
+	// work, while its other tools are parked for approval at runtime.
+	MCPToolsAllowed []string `json:"mcp_tools_allowed"`
+	// AutoAllowReadMCP, when true, auto-allows an MCP tool the read/write classifier
+	// deems read-only, parking only writes/unknown for approval. The classifier is a
+	// best-effort heuristic (see ClassifyMCPTool), so this trades safety for fewer
+	// prompts — off by default.
+	AutoAllowReadMCP bool `json:"mcp_auto_allow_read"`
 	// WebFetchAllowHosts lists hosts WebFetch may reach without an approval
 	// round-trip; a fetch to any other host is parked for approval.
 	WebFetchAllowHosts []string `json:"webfetch_allow_hosts"`

@@ -301,8 +301,11 @@ func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, pr
 func simApprovals() []api.ApprovalRequest {
 	reason1 := "MCP server \"linear\" is not on the allow-list"
 	reason2 := "WebFetch to \"docs.linear.app\" is not on the allow-list"
+	reason3 := "MCP tool \"linear__create_issue\" is not on the allow-list"
+	rw := "write"
 	return []api.ApprovalRequest{
 		{Reqid: "req-1", Tool: "mcp__linear__list_issues", Kind: "mcp", Target: "linear", Summary: "wants to use MCP server \"linear\"", Reason: &reason1},
+		{Reqid: "req-3", Tool: "mcp__linear__create_issue", Kind: "mcp_tool", Target: "linear__create_issue", Rw: &rw, Summary: "wants to use MCP tool \"linear__create_issue\" (write)", Reason: &reason3},
 		{Reqid: "req-2", Tool: "WebFetch", Kind: "webfetch", Target: "docs.linear.app", Summary: "wants to fetch from \"docs.linear.app\"", Reason: &reason2},
 	}
 }
@@ -2183,10 +2186,13 @@ func (s *SimulationServer) GetConfig(w http.ResponseWriter, r *http.Request, pro
 		Agents: map[string]api.AgentConfig{
 			"claude": {
 				PrePrompt: ptr("Claude pre-prompt"),
-				// A couple of allow-listed MCP servers so the settings MCP picker
-				// renders with checked rows.
+				// Allow-listed servers + a per-tool grant + auto-allow-read so the
+				// settings MCP picker renders with checked rows, the per-tool list, and
+				// the read/write toggle populated.
 				Policy: &api.PolicyConfig{
-					McpAllowed: ptr([]string{"github", "linear"}),
+					McpAllowed:       ptr([]string{"github", "linear"}),
+					McpToolsAllowed:  ptr([]string{"sentry__list_issues"}),
+					McpAutoAllowRead: ptr(true),
 				},
 			},
 		},

@@ -173,7 +173,11 @@ export function ConfigForm({
   function updatePolicy(patch: Partial<PolicyConfig>) {
     const next: PolicyConfig = { ...policy, ...patch }
     const empty =
-      next.gate_enabled == null && !next.mcp_allowed?.length && !next.webfetch_allow_hosts?.length
+      next.gate_enabled == null &&
+      next.mcp_auto_allow_read == null &&
+      !next.mcp_allowed?.length &&
+      !next.mcp_tools_allowed?.length &&
+      !next.webfetch_allow_hosts?.length
     onChange({ ...value, policy: empty ? null : next })
   }
 
@@ -529,6 +533,40 @@ export function ConfigForm({
           >
             <Plus className="w-3.5 h-3.5" /> Allow
           </button>
+        </div>
+
+        {/* Per-tool grants + read/write auto-allow */}
+        <div className="pt-1 space-y-2 border-t border-gray-100 dark:border-gray-800">
+          <div className="flex items-center gap-1.5 pt-1">
+            <label className="text-[11px] font-semibold text-gray-400 dark:text-gray-500">Allowed individual tools</label>
+            <InfoTooltip title="Per-tool grants">
+              <p>Allow specific tools of a server that is <em>not</em> fully allow-listed, as <code className="text-blue-300">server__tool</code> (e.g. <code className="text-blue-300">linear__create_issue</code>). The server is kept so those tools work; its other tools are parked for your approval when first used.</p>
+            </InfoTooltip>
+          </div>
+          <PathListEditor
+            paths={policy.mcp_tools_allowed ?? []}
+            onChange={(mcp_tools_allowed) => updatePolicy({ mcp_tools_allowed })}
+            placeholder="e.g. linear__create_issue"
+            addLabel="Add Tool"
+          />
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-1.5">
+              <label className="text-[11px] font-semibold text-gray-400 dark:text-gray-500">Auto-allow read-only tools</label>
+              <InfoTooltip title="Auto-allow read-only tools">
+                <p>Automatically allow MCP tools that look read-only (by name — <code className="text-blue-300">get_*</code>, <code className="text-blue-300">list_*</code>, <code className="text-blue-300">search_*</code>…), parking only writes and unrecognised tools for approval.</p>
+                <p className="mt-1.5 text-gray-400 italic">This is a best-effort heuristic, not a guarantee — a server can mislabel a destructive tool. Off by default.</p>
+              </InfoTooltip>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                className="sr-only peer"
+                checked={policy.mcp_auto_allow_read === true}
+                onChange={(e) => updatePolicy({ mcp_auto_allow_read: e.target.checked ? true : null })}
+              />
+              <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
+            </label>
+          </div>
         </div>
       </div>
     </div>

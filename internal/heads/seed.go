@@ -116,7 +116,11 @@ func seedHead(projectRoot, id string, agentType sandbox.AgentType, worktreePath,
 		// agent can still create a project-scope .claude/settings.json). We therefore
 		// do NOT seed ~/.claude/settings.json at all — the user's own settings apply
 		// normally and our policy layers on top authoritatively. (AUDIT.md F4.)
-		managed, err := sandbox.BuildClaudeSettings(nil, stableHydraBin, policy.GateEnabled, policy.MCPAllowed)
+		// The set of MCP servers KEPT in the seeded config: whole-server grants plus
+		// any server referenced by a per-tool grant (so a partially-allowed server
+		// still spawns and the runtime gate enforces the per-tool subset).
+		mcpKeep := mcpKeepSet(policy.MCPAllowed, policy.MCPToolsAllowed)
+		managed, err := sandbox.BuildClaudeSettings(nil, stableHydraBin, policy.GateEnabled, mcpKeep)
 		if err != nil {
 			return nil, errtrace.Wrap(err)
 		}
@@ -141,7 +145,7 @@ func seedHead(projectRoot, id string, agentType sandbox.AgentType, worktreePath,
 		})
 
 		claudeJSONHost := filepath.Join(cacheDir, "claude.json")
-		cfg, err := sandbox.BuildClaudeConfig(readHostFile(filepath.Join(home, ".claude.json")), worktreePath, policy.MCPAllowed)
+		cfg, err := sandbox.BuildClaudeConfig(readHostFile(filepath.Join(home, ".claude.json")), worktreePath, mcpKeep)
 		if err != nil {
 			return nil, errtrace.Wrap(err)
 		}
@@ -228,8 +232,33 @@ func resolveGatePolicy(cfg config.Config, agentType string) gate.Policy {
 	return gate.Policy{
 		GateEnabled:        p.IsGateEnabled(),
 		MCPAllowed:         p.MCPAllowed,
+		MCPToolsAllowed:    p.MCPToolsAllowed,
+		AutoAllowReadMCP:   p.MCPAutoAllowRead != nil && *p.MCPAutoAllowRead,
 		WebFetchAllowHosts: p.WebFetchAllowHosts,
 	}
+}
+
+// mcpKeepSet returns the MCP servers to keep in the seeded config: the
+// whole-server allow-list plus the server segment of every per-tool grant
+// ("<server>__<tool>" → "<server>"). A partially-allowed server must be kept so
+// it spawns; the runtime gate then enforces which of its tools are permitted.
+func mcpKeepSet(serversAllowed, toolsAllowed []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	add := func(s string) {
+		if s != "" && !seen[s] {
+			seen[s] = true
+			out = append(out, s)
+		}
+	}
+	for _, s := range serversAllowed {
+		add(s)
+	}
+	for _, t := range toolsAllowed {
+		server, _, _ := strings.Cut(t, "__")
+		add(server)
+	}
+	return out
 }
 
 // seedGatePolicy writes the trusted gate policy.json (bound read-only into the

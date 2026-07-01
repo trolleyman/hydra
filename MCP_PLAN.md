@@ -105,27 +105,33 @@ Goal: make the server whitelist manageable and reach new + resumed agents.
 - [x] Simulation seeds `mcp_servers` + a claude `mcp_allowed` + `network.mode=hard`
       so the settings screenshots exercise the new picker and mode UI.
 
-## Step 3 — Per-tool gating + read/write
+## Step 3 — Per-tool gating + read/write ✅
 
 Goal: gate individual tools within an allowed-to-run server; show read/write.
 
-- [ ] Add `MCPToolsAllowed []string` (entries `"<server>__<tool>"`) to `gate.Policy`
-      and `config.PolicyConfig` (+ `Merge`). Keep `MCPAllowed` for whole-server grants.
-- [ ] `gate.Decide`: after server-level check, check `MCPToolsAllowed`; else
-      `Ask{Kind:"mcp_tool", Target:"<server>__<tool>"}`. Add `mcpServerTool()` helper.
-- [ ] `rememberApproval` (`internal/http/approvals.go`): `case "mcp_tool"` →
-      append to `MCPToolsAllowed`.
-- [ ] **Strip keep-set becomes a union:** a server with *some* tools allowed must be
-      kept (spawned) and gated per-tool at runtime; only servers with zero grants are
-      stripped. Update `BuildClaudeConfig`/`BuildClaudeSettings` to take the tool list.
-- [ ] read/write capture: introspect each allowed server (`initialize` → `tools/list`),
-      cache the catalog + `readOnlyHint` in `.hydra/cache/` keyed by server cmd+version
-      (mirror the gemini-prompt-capture pattern). Needs a small Go MCP client.
-- [ ] Expose `rw` (`read|write|unknown`) on `gate.Request` + `api.ApprovalRequest`
-      (openapi.yaml → regen `server.gen.go` + TS client) → read/write badge on the
-      approval card + the settings tool list.
-- [ ] Optional policy toggle `mcp_auto_allow_read` (auto-allow read-only tools, ask on
-      write/unknown) — flagged as trusting server self-reporting.
+- [x] `MCPToolsAllowed []string` (entries `"<server>__<tool>"`) on `gate.Policy` and
+      `config.PolicyConfig` (+ `Merge`, spec entry, emit). `MCPAllowed` still = whole-
+      server grants.
+- [x] `gate.Decide`: whole-server → per-tool → optional auto-allow-read → park. A
+      partially-allowed server parks per-tool (`Kind:"mcp_tool"`, Target
+      `"<server>__<tool>"`); an otherwise-unknown server still parks whole-server
+      (`Kind:"mcp"`). `mcpServerTool()` + `serverReferenced()` helpers.
+- [x] `rememberApproval`: `case "mcp_tool"` → append to `MCPToolsAllowed`.
+- [x] **Strip keep-set is a union** (`heads.mcpKeepSet`): `MCPAllowed` ∪ the server
+      segment of every `MCPToolsAllowed` entry, passed to `BuildClaudeSettings` /
+      `BuildClaudeConfig`, so a partially-allowed server is kept and gated per-tool.
+- [x] read/write: `gate.ClassifyMCPTool` — a **best-effort leading-verb heuristic**
+      (get/list/search… = read; create/delete/update… = write). `rw` flows through
+      `gate.Result` → `gate.Request` → `api.ApprovalRequest.rw` → the approval toast
+      summary ("… (write)"). Tests for the classifier + per-tool Decide.
+      - [ ] DEFERRED: true `readOnlyHint` capture via a Go MCP client (spawn server →
+            `tools/list`), cached in `.hydra/cache/`. Heuristic is the interim signal;
+            noted as not-a-guarantee in the UI.
+- [x] `mcp_auto_allow_read` policy toggle (off by default) — auto-allows read-classified
+      tools, parks writes/unknown. Flagged as heuristic in the UI tooltip.
+- [x] UI: ConfigForm MCP card gains a per-tool (`server__tool`) list editor + the
+      auto-allow-read toggle. Simulation seeds per-tool grant + an `mcp_tool` approval
+      with a write badge.
 
 ## Step 4 — Runtime MCP request flow (custom tool)
 

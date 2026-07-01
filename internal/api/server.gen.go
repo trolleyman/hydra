@@ -318,7 +318,7 @@ type ApprovalListResponse struct {
 
 // ApprovalRequest defines model for ApprovalRequest.
 type ApprovalRequest struct {
-	// Kind What is being approved: 'mcp', 'webfetch', or 'bash'
+	// Kind What is being approved: 'mcp', 'mcp_tool', 'webfetch', or 'bash'
 	Kind string `json:"kind"`
 
 	// Reason One-line explanation of why the gate parked the call
@@ -327,10 +327,13 @@ type ApprovalRequest struct {
 	// Reqid Unique ID of the parked approval request
 	Reqid string `json:"reqid"`
 
+	// Rw Read/write classification of an mcp_tool request ("read", "write", or absent when unknown/not applicable). Best-effort heuristic — a badge hint, not a guarantee.
+	Rw *string `json:"rw"`
+
 	// Summary Human-readable "wants to …" summary for the approval card
 	Summary string `json:"summary"`
 
-	// Target The MCP server name, host, or command the approval is about
+	// Target The MCP server name, '<server>__<tool>', host, or command the approval is about
 	Target string `json:"target"`
 
 	// Tool The tool the agent tried to use (e.g. WebFetch or an mcp__ name)
@@ -716,8 +719,14 @@ type PolicyConfig struct {
 	// GateEnabled Enable the decision-capable gate (default true when unset).
 	GateEnabled *bool `json:"gate_enabled"`
 
-	// McpAllowed MCP server names the agent may use. Servers not listed are stripped from the seeded config pre-launch (never spawn). Deny-by-default.
+	// McpAllowed MCP server names the agent may use (whole-server grant). Servers not listed (nor referenced by mcp_tools_allowed) are stripped from the seeded config pre-launch (never spawn). Deny-by-default.
 	McpAllowed *[]string `json:"mcp_allowed"`
+
+	// McpAutoAllowRead Auto-allow MCP tools the read/write classifier deems read-only, parking only writes/unknown. Best-effort heuristic; off by default.
+	McpAutoAllowRead *bool `json:"mcp_auto_allow_read"`
+
+	// McpToolsAllowed Individual MCP tools ("<server>__<tool>") allowed even when the whole server is not. The server is kept (spawned) so those tools work; its other tools park for approval at runtime.
+	McpToolsAllowed *[]string `json:"mcp_tools_allowed"`
 
 	// WebfetchAllowHosts Hosts WebFetch may reach without an approval round-trip.
 	WebfetchAllowHosts *[]string `json:"webfetch_allow_hosts"`

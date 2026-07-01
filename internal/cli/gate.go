@@ -118,6 +118,7 @@ func resolveAsk(agentType, toolName string, result gate.Result) gate.Decision {
 		Target:  result.Target,
 		Reason:  result.Reason,
 		Summary: summary,
+		RW:      result.RW,
 		TS:      time.Now().Format(time.RFC3339Nano),
 	}
 	if err := gate.WriteRequest(dir, req); err != nil {
@@ -149,6 +150,12 @@ func approvalSummary(r gate.Result) string {
 	switch r.Kind {
 	case "mcp":
 		return "wants to use MCP server " + strconv.Quote(r.Target)
+	case "mcp_tool":
+		verb := ""
+		if r.RW != "" {
+			verb = " (" + r.RW + ")"
+		}
+		return "wants to use MCP tool " + strconv.Quote(r.Target) + verb
 	case "webfetch":
 		return "wants to fetch from " + strconv.Quote(r.Target)
 	case "bash":

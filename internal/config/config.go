@@ -39,7 +39,7 @@ const DefaultPrePrompt = "You are a head (AI agent) of Hydra, an AI orchestratio
 	"- `restore_ro` — paths re-exposed read-only after a parent was masked.\n" +
 	"- `cow_paths` — worktree-relative paths mounted copy-on-write from the project root (you can read and overwrite them; writes stay in your worktree and never touch the real files).\n" +
 	"- `network.mode` (off/unrestricted/advisory/hard) plus `network.allowed_hosts` / `network.blocked_hosts` — the egress posture and the host allow-list (added to a built-in default list) / block-list (overrides both). The legacy `network.enabled` / `network.filter_enabled` toggles still work when `mode` is unset.\n" +
-	"- `policy.webfetch_allow_hosts` / `policy.mcp_allowed` — hosts WebFetch may reach and MCP servers you may use. A security gate can deny a tool call or pause it for user approval (even with permissions skipped) when it falls outside these, so don't retry a blocked call in a loop — ask the user to widen the list.\n" +
+	"- `policy.webfetch_allow_hosts` / `policy.mcp_allowed` / `policy.mcp_tools_allowed` — hosts WebFetch may reach, MCP servers you may use (whole-server), and individual MCP tools (`server__tool`) allowed on an otherwise-restricted server. A security gate can deny a tool call or pause it for user approval (even with permissions skipped) when it falls outside these, so don't retry a blocked call in a loop — ask the user to widen the list.\n" +
 	"- `pre_spawn_script` — a bash script run inside the sandbox before every agent launch (both spawn and resume, so it must be idempotent), e.g. `mise trust`.\n" +
 	"- `pre_exit_script` — a bash script run inside a sandbox when a head ends (before its worktree is removed), for per-head teardown such as releasing a claimed resource.\n" +
 	"- `pre_prompt` — the standing instructions you are reading now.\n" +
@@ -102,9 +102,17 @@ type PolicyConfig struct {
 	// GateEnabled toggles the decision-capable gate hook. nil = default (enabled).
 	GateEnabled *bool `toml:"gate_enabled"`
 	// MCPAllowed lists the MCP server names the agent may use. Any server not
-	// listed is stripped from the seeded ~/.claude.json pre-launch (so it never
-	// spawns) and denied at runtime if reached another way.
+	// listed (and not referenced by MCPToolsAllowed) is stripped from the seeded
+	// ~/.claude.json pre-launch (so it never spawns) and denied at runtime if
+	// reached another way. A whole-server grant covers all of its tools.
 	MCPAllowed []string `toml:"mcp_allowed"`
+	// MCPToolsAllowed lists individual MCP tools ("<server>__<tool>") allowed even
+	// when the whole server is not. A server referenced here is kept (spawned) so
+	// those tools work; its other tools are parked for approval at runtime.
+	MCPToolsAllowed []string `toml:"mcp_tools_allowed"`
+	// MCPAutoAllowRead auto-allows MCP tools the read/write classifier deems
+	// read-only (parking only writes/unknown). Best-effort heuristic; off by default.
+	MCPAutoAllowRead *bool `toml:"mcp_auto_allow_read"`
 	// WebFetchAllowHosts lists hosts WebFetch may reach without an approval
 	// round-trip; a fetch to any other host parks the head for user approval.
 	WebFetchAllowHosts []string `toml:"webfetch_allow_hosts"`
@@ -125,6 +133,12 @@ func (p *PolicyConfig) Merge(other PolicyConfig) {
 	}
 	if other.MCPAllowed != nil {
 		p.MCPAllowed = other.MCPAllowed
+	}
+	if other.MCPToolsAllowed != nil {
+		p.MCPToolsAllowed = other.MCPToolsAllowed
+	}
+	if other.MCPAutoAllowRead != nil {
+		p.MCPAutoAllowRead = other.MCPAutoAllowRead
 	}
 	if other.WebFetchAllowHosts != nil {
 		p.WebFetchAllowHosts = other.WebFetchAllowHosts
@@ -1200,9 +1214,26 @@ func defaultsSpec() []specEntry {
 		},
 		{
 			table: "policy", key: "mcp_allowed",
-			doc: "MCP server names the agent may use; any other server is stripped before launch and denied at runtime (default none).",
+			doc: "MCP server names the agent may use (whole-server grant covers all its tools); any other server is stripped before launch and denied at runtime (default none).",
 			def: func() string { return "[]" },
 			get: policySlice(func(p *PolicyConfig) []string { return p.MCPAllowed }),
+		},
+		{
+			table: "policy", key: "mcp_tools_allowed",
+			doc: `individual MCP tools ("<server>__<tool>") allowed even when the whole server is not; the server is kept (spawned) so those tools work, other tools park for approval (default none).`,
+			def: func() string { return "[]" },
+			get: policySlice(func(p *PolicyConfig) []string { return p.MCPToolsAllowed }),
+		},
+		{
+			table: "policy", key: "mcp_auto_allow_read",
+			doc: "auto-allow MCP tools the read/write classifier deems read-only (parking only writes/unknown). Best-effort heuristic — off by default.",
+			def: func() string { return "false" },
+			get: func(a AgentConfig) (string, bool) {
+				if a.Policy != nil && a.Policy.MCPAutoAllowRead != nil {
+					return fmt.Sprintf("%t", *a.Policy.MCPAutoAllowRead), true
+				}
+				return "", false
+			},
 		},
 		{
 			table: "policy", key: "webfetch_allow_hosts",
@@ -2244,6 +2275,10 @@ func emitAgentPolicy(out *[]string, name string, p *PolicyConfig, keyComments, t
 		emitSetField(out, name+".policy", "gate_enabled", fmt.Sprintf("%t", *p.GateEnabled), true, keyComments)
 	}
 	emitSetField(out, name+".policy", "mcp_allowed", tomlStringArray(p.MCPAllowed), len(p.MCPAllowed) > 0, keyComments)
+	emitSetField(out, name+".policy", "mcp_tools_allowed", tomlStringArray(p.MCPToolsAllowed), len(p.MCPToolsAllowed) > 0, keyComments)
+	if p.MCPAutoAllowRead != nil {
+		emitSetField(out, name+".policy", "mcp_auto_allow_read", fmt.Sprintf("%t", *p.MCPAutoAllowRead), true, keyComments)
+	}
 	emitSetField(out, name+".policy", "webfetch_allow_hosts", tomlStringArray(p.WebFetchAllowHosts), len(p.WebFetchAllowHosts) > 0, keyComments)
 }
 
@@ -2268,7 +2303,8 @@ func policyHasContent(p *PolicyConfig) bool {
 	if p == nil {
 		return false
 	}
-	return p.GateEnabled != nil || len(p.MCPAllowed) > 0 || len(p.WebFetchAllowHosts) > 0
+	return p.GateEnabled != nil || len(p.MCPAllowed) > 0 || len(p.MCPToolsAllowed) > 0 ||
+		p.MCPAutoAllowRead != nil || len(p.WebFetchAllowHosts) > 0
 }
 
 func sandboxHasContent(sb *SandboxConfig) bool {

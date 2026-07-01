@@ -43,7 +43,7 @@ func (s *Server) ListAgentApprovals(ctx context.Context, request api.ListAgentAp
 	out := make([]api.ApprovalRequest, 0, len(reqs))
 	for _, r := range reqs {
 		reason, ts := r.Reason, r.TS
-		out = append(out, api.ApprovalRequest{
+		req := api.ApprovalRequest{
 			Reqid:   r.ReqID,
 			Tool:    r.Tool,
 			Kind:    r.Kind,
@@ -51,7 +51,12 @@ func (s *Server) ListAgentApprovals(ctx context.Context, request api.ListAgentAp
 			Summary: r.Summary,
 			Reason:  &reason,
 			Ts:      &ts,
-		})
+		}
+		if r.RW != "" {
+			rw := r.RW
+			req.Rw = &rw
+		}
+		out = append(out, req)
 	}
 	return api.ListAgentApprovals200JSONResponse{Approvals: out}, nil
 }
@@ -144,6 +149,8 @@ func rememberApproval(projectRoot, agentType, kind, target string) error {
 	switch kind {
 	case "mcp":
 		ac.Policy.MCPAllowed = appendUnique(ac.Policy.MCPAllowed, target)
+	case "mcp_tool":
+		ac.Policy.MCPToolsAllowed = appendUnique(ac.Policy.MCPToolsAllowed, target)
 	case "webfetch":
 		ac.Policy.WebFetchAllowHosts = appendUnique(ac.Policy.WebFetchAllowHosts, target)
 	default:
