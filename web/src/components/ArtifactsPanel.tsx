@@ -68,6 +68,9 @@ function presentedFiles(set: ArtifactSet): ArtifactFile[] {
 // BASE_MIN_COL_PX wide. MASONRY_GAP is the inter-column gutter.
 const BASE_MIN_COL_PX = 140
 const MASONRY_GAP = 12
+// Assumed tile height before a tile has been measured (and the basis for estimating
+// a dragged tile's grown height so siblings reflow around it — see startResize).
+const MASONRY_FALLBACK_H = 240
 
 // Tile reflow animation. An easeOutBack curve (the >1 control point) overshoots
 // slightly before settling — the gentle "boing" when a tile snaps to its new column
@@ -264,7 +267,12 @@ export function MasonryGrid({ items, spanScale = 1, scale = 1, spans, onSpanChan
   // start column the moment it snaps wider, making it jump out from under the pointer.
   // Pinning it to its start column (see placement) keeps it anchored — it grows
   // rightward from a fixed left edge while the siblings reflow around it.
-  const [drag, setDrag] = useState<{ key: string; width: number; col: number } | null>(null)
+  // baseH/baseW/aspect capture the tile's height and width at drag start so placement
+  // can estimate its GROWN height as it widens (its media height follows the aspect
+  // ratio) — the measured height is frozen during the drag (resizeKeyRef), so without
+  // this the tiles below would only reserve the tile's pre-drag height and the growing
+  // tile would overlap them instead of pushing them down. See placement + startResize.
+  const [drag, setDrag] = useState<{ key: string; width: number; col: number; baseH: number; baseW: number; aspect?: number } | null>(null)
   // The key of the tile currently being resized, read by the ResizeObserver below to
   // freeze that tile's measured height for the duration of the drag. A tile grows
   // taller as it widens (its media is w-full with a fixed aspect ratio), and letting
@@ -395,7 +403,7 @@ export function MasonryGrid({ items, spanScale = 1, scale = 1, spans, onSpanChan
   // run's combined width; its height comes from the measured content.
   const placement = useMemo(() => {
     const { cols, gap, colW } = layout
-    const FALLBACK_H = 240 // assumed height before a tile is first measured
+    const FALLBACK_H = MASONRY_FALLBACK_H // assumed height before a tile is first measured
     const bottoms = new Array(cols).fill(0)
     const pos: Record<string, { left: number; top: number; width: number; span: number }> = {}
     for (const it of items) {
@@ -414,7 +422,19 @@ export function MasonryGrid({ items, spanScale = 1, scale = 1, spans, onSpanChan
         const left = bestC * (colW + gap)
         const tileW = s * colW + (s - 1) * gap
         pos[it.key] = { left, top, width: tileW, span: s }
-        for (let k = bestC; k < bestC + s; k++) bottoms[k] = top + h + gap
+        // The tile's measured height is frozen during the drag, so estimate its GROWN
+        // height at the current span from its aspect ratio (media height = width /
+        // aspect; the chrome above/below stays fixed, derived once from the start
+        // height + width). Without this the columns beneath reserve only the pre-drag
+        // height and the widening tile overlaps them. Falls back to proportional
+        // scaling when the aspect is unknown, or the frozen height as a last resort.
+        let dh = h
+        if (drag.baseW > 0) {
+          dh = drag.aspect
+            ? Math.max(0, drag.baseH - drag.baseW / drag.aspect) + tileW / drag.aspect
+            : drag.baseH * (tileW / drag.baseW)
+        }
+        for (let k = bestC; k < bestC + s; k++) bottoms[k] = top + dh + gap
         continue
       }
       // Best start column: minimise the tallest of the columns this tile would cover.
@@ -433,8 +453,10 @@ export function MasonryGrid({ items, spanScale = 1, scale = 1, spans, onSpanChan
     const height = bottoms.length ? Math.max(...bottoms) - gap : 0
     return { pos, height: Math.max(0, height) }
     // drag.key/drag.col (not the whole drag object) so a width-only change while
-    // dragging doesn't re-pack the grid — only a start/end or a span snap does.
-  }, [items, heights, layout, spanOf, drag?.key, drag?.col])
+    // dragging doesn't re-pack the grid — only a start/end or a span snap does. The
+    // base*/aspect fields are constant for the drag's duration, so they don't add
+    // recomputes; they feed the dragged tile's grown-height estimate above.
+  }, [items, heights, layout, spanOf, drag?.key, drag?.col, drag?.baseH, drag?.baseW, drag?.aspect])
 
   // Set while a body drag (below) is resizing a tile, so the trailing click can be
   // swallowed before the media reacts to it. Holds the key of the tile being dragged.
@@ -456,6 +478,12 @@ export function MasonryGrid({ items, spanScale = 1, scale = 1, spans, onSpanChan
     const startWidth = startSpan * layout.colW + (startSpan - 1) * layout.gap
     const minW = layout.colW
     const maxW = layout.cols * layout.colW + (layout.cols - 1) * layout.gap
+    // Snapshot the tile's height/width/aspect at the start so placement can estimate
+    // its grown height as it widens (the measured height is frozen below), letting the
+    // tiles beneath reflow around it instead of being overlapped.
+    const dragItem = items.find((i) => i.key === key)
+    const baseH = heights[key] ?? MASONRY_FALLBACK_H
+    const dragAspect = dragItem?.aspect
     // Freeze this tile's measured height for the drag's duration so its siblings hold
     // still as it widens — they only move when its span snaps below.
     resizeKeyRef.current = key
@@ -488,7 +516,7 @@ export function MasonryGrid({ items, spanScale = 1, scale = 1, spans, onSpanChan
       // flips to the next size (the width transition eases the flip), rather than
       // scaling continuously under the cursor.
       const snapW = liveSpan * layout.colW + (liveSpan - 1) * layout.gap
-      setDrag({ key, width: snapW, col: startCol })
+      setDrag({ key, width: snapW, col: startCol, baseH, baseW: startWidth, aspect: dragAspect })
     }
     const finish = () => {
       resizeKeyRef.current = null
