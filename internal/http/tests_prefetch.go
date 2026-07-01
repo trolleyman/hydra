@@ -69,17 +69,10 @@ func (s *Server) testPrefetchOnce(ctx context.Context, roots []string, lastSHA m
 		// it even when prefetch is disabled below.
 		mgr.SetConcurrency(cfg.ResolveTestConcurrency())
 
-		var runners []config.TestScript
-		for _, t := range cfg.Tests {
-			if t.IsEnabled() {
-				runners = append(runners, t)
-			}
-		}
-		if len(runners) == 0 {
-			continue // no tests configured for this project
-		}
 		// Respect the per-project opt-out: foreground runs (on open / at merge) and the
-		// concurrency cap still apply, but skip the proactive background work.
+		// concurrency cap still apply, but skip the proactive background work. The
+		// runner list is resolved per head below, from each head's own config, so a
+		// branch that adds/edits [[tests]] gets those runners prefetched too.
 		if !cfg.IsTestPrefetchEnabled() {
 			continue
 		}
@@ -114,6 +107,10 @@ func (s *Server) testPrefetchOnce(ctx context.Context, roots []string, lastSHA m
 			lastSHA[head.ID] = sha
 
 			v := hydratests.Version{Ref: *head.Branch}
+			runners := s.testRunnersFor(root, v, cfg)
+			if len(runners) == 0 {
+				continue // no tests apply to this head's branch
+			}
 			var dirs []string
 			for _, r := range runners {
 				_, _ = mgr.Prefetch(r, v)

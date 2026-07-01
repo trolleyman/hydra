@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
 	"time"
 
 	"braces.dev/errtrace"
@@ -16,21 +17,83 @@ import (
 	hydratests "github.com/trolleyman/hydra/internal/tests"
 )
 
-// enabledTestRunners returns the project's live [[tests]] runners that are
-// enabled. The live config is authoritative (trusted-by-where-it's-read), never
-// a diffed ref's own config — see PLAN #26's red flag.
-func enabledTestRunners(projectRoot string) []config.TestScript {
-	cfg, err := config.Load(projectRoot)
+// testRunnersFor resolves the enabled [[tests]] runners that apply to one version
+// of the project, read from that version's own .hydra/config.toml — the worktree's
+// file for an uncommitted working tree, else the committed file at the ref — so a
+// branch's own [[tests]] edits (a changed command/timeout, or an added/removed
+// runner) take effect on that branch without merging, mirroring [[artifacts]].
+// Runners with an empty name/command, disabled (enabled = false), or a duplicate
+// name (first wins) are dropped.
+//
+// Security: a version's config is attacker-controllable, so unsafe_host is honored
+// only when the trusted live/root config (config.Load of the project root, what a
+// human controls on the base branch) authorizes that exact name+command — else the
+// command is forced back into the sandbox — and a runner the live config disables
+// by name is dropped regardless of what the branch says. Sandboxed commands need no
+// gate: the sandbox is the boundary and already runs the checkout's untrusted code.
+func (s *Server) testRunnersFor(projectRoot string, v hydratests.Version, liveCfg config.Config) []config.TestScript {
+	var content []byte
+	if v.WorktreeDir != "" {
+		data, err := os.ReadFile(config.GetProjectConfigPath(v.WorktreeDir))
+		if err != nil && !os.IsNotExist(err) {
+			return nil
+		}
+		content = data // nil when absent → inherits the user config's tests
+	} else {
+		data, err := git.ShowFile(projectRoot, v.Ref, ".hydra/config.toml")
+		if err != nil {
+			return nil
+		}
+		content = data
+	}
+
+	specs, err := config.TestsAtProjectTOML(content)
 	if err != nil {
 		return nil
 	}
-	var out []config.TestScript
-	for _, t := range cfg.Tests {
-		if t.IsEnabled() {
-			out = append(out, t)
+	trustedHost := trustedHostTestCommands(liveCfg)
+	disabled := disabledTests(liveCfg)
+	seen := make(map[string]bool, len(specs))
+	out := make([]config.TestScript, 0, len(specs))
+	for _, t := range specs {
+		if t.Name == "" || t.Command == "" || !t.IsEnabled() {
+			continue
 		}
+		if seen[t.Name] || disabled[t.Name] {
+			continue
+		}
+		seen[t.Name] = true
+		if t.UnsafeHost && !trustedHost[hostKey(t.Name, t.Command)] {
+			// A branch can't grant itself host access; force it into the sandbox.
+			t.UnsafeHost = false
+		}
+		out = append(out, t)
 	}
 	return out
+}
+
+// disabledTests returns the runner names the live config marks enabled = false — a
+// human kill-switch a branch's own config can't override. Mirrors disabledArtifacts.
+func disabledTests(cfg config.Config) map[string]bool {
+	disabled := map[string]bool{}
+	for _, t := range cfg.Tests {
+		if t.Name != "" && !t.IsEnabled() {
+			disabled[t.Name] = true
+		}
+	}
+	return disabled
+}
+
+// trustedHostTestCommands returns the name+command pairs the live config authorizes
+// to run unconfined on the host (unsafe_host = true). Mirrors trustedHostCommands.
+func trustedHostTestCommands(cfg config.Config) map[string]bool {
+	trusted := map[string]bool{}
+	for _, t := range cfg.Tests {
+		if t.UnsafeHost && t.Name != "" && t.Command != "" {
+			trusted[hostKey(t.Name, t.Command)] = true
+		}
+	}
+	return trusted
 }
 
 // testVersion resolves which checkout a head's tests run against: its uncommitted
@@ -62,14 +125,22 @@ func (s *Server) GetAgentTests(ctx context.Context, request api.GetAgentTestsReq
 	if head == nil {
 		return api.GetAgentTests404JSONResponse{Code: 404, Error: api.ErrorResponseErrorNotFound, Details: "agent not found"}, nil
 	}
-	runners := enabledTestRunners(projectRoot)
-	if s.Tests == nil || head.Branch == nil || len(runners) == 0 {
+	if s.Tests == nil || head.Branch == nil {
 		return api.GetAgentTests200JSONResponse(api.TestsResponse{Runners: []api.TestRunResult{}}), nil
 	}
 
 	mgr := s.Tests.Manager(projectRoot)
 	includeUncommitted := request.Params.IncludeUncommitted != nil && *request.Params.IncludeUncommitted
 	v := testVersion(head, request.Params.HeadRef, includeUncommitted)
+
+	liveCfg, err := config.Load(projectRoot)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	runners := s.testRunnersFor(projectRoot, v, liveCfg)
+	if len(runners) == 0 {
+		return api.GetAgentTests200JSONResponse(api.TestsResponse{Runners: []api.TestRunResult{}}), nil
+	}
 
 	// A refresh names one runner whose cached result (incl. a cached failure) the
 	// user wants discarded and re-run before responding.
@@ -166,7 +237,11 @@ func (s *Server) testSummaryFor(projectRoot string, h heads.Head) *api.TestSumma
 	if s.Tests == nil || h.Branch == nil || h.Archived {
 		return nil
 	}
-	runners := enabledTestRunners(projectRoot)
+	liveCfg, err := config.Load(projectRoot)
+	if err != nil {
+		return &api.TestSummary{Status: api.TestStatusNone}
+	}
+	runners := s.testRunnersFor(projectRoot, hydratests.Version{Ref: *h.Branch}, liveCfg)
 	if len(runners) == 0 {
 		return &api.TestSummary{Status: api.TestStatusNone}
 	}
@@ -304,7 +379,12 @@ func (s *Server) checkArmedMerges(ctx context.Context) {
 		if err != nil || head == nil || head.Branch == nil {
 			continue
 		}
-		runners := enabledTestRunners(projectRoot)
+		v := hydratests.Version{Ref: *head.Branch}
+		liveCfg, err := config.Load(projectRoot)
+		if err != nil {
+			continue // transient config read error — retry next tick
+		}
+		runners := s.testRunnersFor(projectRoot, v, liveCfg)
 		if len(runners) == 0 {
 			// Nothing to gate on — disarm so it doesn't linger forever.
 			_ = s.DB.SetMergeWhenGreen(a.ID, false, "")
@@ -312,7 +392,6 @@ func (s *Server) checkArmedMerges(ctx context.Context) {
 			continue
 		}
 		mgr := s.Tests.Manager(projectRoot)
-		v := hydratests.Version{Ref: *head.Branch}
 
 		anyBad, anyRunning, missing := false, false, false
 		passing := 0
@@ -380,12 +459,18 @@ func (s *Server) testGateVerdict(projectRoot string, h heads.Head) (code api.Mer
 	if s.Tests == nil || h.Branch == nil {
 		return "", 0, false
 	}
-	runners := enabledTestRunners(projectRoot)
+	v := hydratests.Version{Ref: *h.Branch}
+	liveCfg, err := config.Load(projectRoot)
+	if err != nil {
+		// Can't resolve the trusted config — treat as "no verdict", which blocks
+		// (errored) rather than waving the merge through.
+		return api.MergeConflictErrorErrorTestsErrored, 0, true
+	}
+	runners := s.testRunnersFor(projectRoot, v, liveCfg)
 	if len(runners) == 0 {
 		return "", 0, false
 	}
 	mgr := s.Tests.Manager(projectRoot)
-	v := hydratests.Version{Ref: *h.Branch}
 
 	anyFailing, anyErrored, anyRunning := false, 0, false
 	for _, r := range runners {
@@ -441,8 +526,10 @@ func (s *Server) ArmMergeWhenGreen(ctx context.Context, request api.ArmMergeWhen
 	if s.Tests != nil {
 		mgr := s.Tests.Manager(projectRoot)
 		v := hydratests.Version{Ref: *head.Branch}
-		for _, r := range enabledTestRunners(projectRoot) {
-			_, _ = mgr.Get(r, v)
+		if liveCfg, err := config.Load(projectRoot); err == nil {
+			for _, r := range s.testRunnersFor(projectRoot, v, liveCfg) {
+				_, _ = mgr.Get(r, v)
+			}
 		}
 	}
 	s.notifyAgentsChanged(projectRoot, true)
