@@ -204,6 +204,8 @@ export function useAgentNotifications(currentProjectId: string | null) {
               kind: a.kind,
               target: a.target,
               agentName,
+              agentId,
+              projectId: currentProjectId,
               rw: a.rw,
               reason: a.reason,
               url: a.url,

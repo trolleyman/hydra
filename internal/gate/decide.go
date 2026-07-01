@@ -64,9 +64,14 @@ var globalInstallRe = regexp.MustCompile(`(?i)\b(` +
 	`sudo\b` +
 	`)`)
 
-// gitPushRe matches a `git push` (the remote-affecting action that leaves the
-// box), excluding `--dry-run`.
-var gitPushRe = regexp.MustCompile(`(?i)\bgit\s+(-[^\s]+\s+)*push\b`)
+// gitPushRe matches an actual `git push` INVOCATION: `git` at a command boundary
+// (start of the line, or right after a `;`, `&`, `|`, `(`, or newline) followed
+// by `push`, tolerating global flags (`git -c x=y push`) in between. Anchoring to
+// the command position is deliberate — the bare substring "git push" also shows
+// up inside an argument, a quoted grep pattern, or a commit message, and matching
+// those would hard-deny a perfectly legitimate command. `--dry-run` is excluded
+// by the caller.
+var gitPushRe = regexp.MustCompile(`(?i)(?:^|[\n;&|(])\s*git\s+(?:-[^\s]+\s+)*push\b`)
 
 // settingsTamperIntentRe matches the hook-disabling settings keys. On its own a
 // mention is not enough to deny (it shows up in commit messages, an echo, a grep);
@@ -201,9 +206,14 @@ func Decide(p Policy, toolName string, toolInput map[string]any) Result {
 			}
 		}
 		if gitPushRe.MatchString(cmd) && !strings.Contains(cmd, "--dry-run") {
+			// git push leaves the sandbox and writes to a remote. We deny it
+			// outright rather than parking it for approval: the user pushes
+			// deliberately from the host, and an in-sandbox agent has no business
+			// requesting to leave the box. (The old "ask" flow is intentionally
+			// disabled — see the removed bash approval kind.)
 			return Result{
-				Decision: Ask, Kind: "bash", Target: "git push",
-				Reason: "git push leaves the sandbox and writes to a remote",
+				Decision: Deny,
+				Reason:   "git push is not allowed — it leaves the sandbox and writes to a remote (push deliberately from the host instead)",
 			}
 		}
 		return Result{Decision: Allow}
@@ -348,8 +358,10 @@ func fileArg(input map[string]any) string {
 	return ""
 }
 
-// previewArgs renders a tool call's arguments as a compact one-line JSON preview
-// for the approval card, truncated so a large payload can't blow up the toast.
+// previewArgs renders a tool call's arguments as compact JSON for the approval
+// card, which parses it back and pretty-prints it with syntax highlighting. The
+// cap keeps a pathological payload from blowing up the toast; a truncated value
+// is no longer valid JSON, so the card falls back to showing it as raw text.
 func previewArgs(input map[string]any) string {
 	if len(input) == 0 {
 		return ""
@@ -359,7 +371,7 @@ func previewArgs(input map[string]any) string {
 		return ""
 	}
 	s := string(data)
-	const max = 160
+	const max = 2000
 	if len(s) > max {
 		s = s[:max-1] + "…"
 	}

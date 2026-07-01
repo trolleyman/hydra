@@ -10,8 +10,11 @@ export interface ApprovalToastData {
   kind: string
   // The server name / "server__tool" / host / command the approval is about.
   target: string
-  // The requesting agent's title (shown as the subtitle and the quoted task).
+  // The requesting agent's title (shown as the clickable subtitle).
   agentName?: string | null
+  // The requesting agent's id + project, so the subtitle can link through to it.
+  agentId?: string | null
+  projectId?: string | null
   // Read/write classification for an mcp_tool call ("read"/"write").
   rw?: string | null
   // One-line reason the gate parked the call.

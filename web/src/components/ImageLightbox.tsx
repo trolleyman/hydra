@@ -149,7 +149,10 @@ export function ImageLightbox({
   // the lightbox when it's opened from the compact (in-sidebar) spawn form.
   return createPortal(
     <div
-      className="fixed inset-0 z-[110] overflow-hidden flex items-center justify-center bg-black/70 backdrop-blur-md animate-in fade-in duration-150"
+      // z-[100] keeps the lightbox BELOW the approval toasts (z-[110]): a passive
+      // image viewer must not hide an incoming security-gate approval. Focused
+      // modal dialogs sit above the toasts instead (z-[120]).
+      className="fixed inset-0 z-[100] overflow-hidden flex items-center justify-center bg-black/70 backdrop-blur-md animate-in fade-in duration-150"
       onClick={onClose}
       role="dialog"
       aria-modal="true"

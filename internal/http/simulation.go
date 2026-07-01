@@ -267,10 +267,11 @@ func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, pr
 			},
 		},
 		{
-			// Parked by the security gate: it tried a tool call the policy gates
-			// (an MCP server not on the allow-list), so it sits in a
-			// policy_approval wait and the detail page shows the approval card
-			// (agent-approvals shot). notification_type drives the card.
+			// A plain needs-input agent asking a clarifying question. (Security-gate
+			// approval cards are documented as their own harness shots —
+			// agent-approvals-*.png — not via a live simulated agent, so nothing
+			// here sits in a policy_approval wait; otherwise the global approval
+			// toasts would leak onto every simulated page.)
 			Id:                 "agent-approval",
 			Title:              ptr("Wire up the GitHub MCP server"),
 			AgentType:          "claude",
@@ -282,10 +283,9 @@ func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, pr
 			Prompt:             "Use the linear MCP server to pull the open issues and start on the highest-priority one.",
 			NetworkEnforcement: ptr("filtered-advisory"),
 			AgentStatus: &api.AgentStatusInfo{
-				Status:           needsInput,
-				Timestamp:        simNow().Format(time.RFC3339),
-				NotificationType: ptr("policy_approval"),
-				LastMessage:      ptr("wants to use MCP server \"linear\""),
+				Status:      needsInput,
+				Timestamp:   simNow().Format(time.RFC3339),
+				LastMessage: ptr("Which Linear team should I scope the sync to?"),
 			},
 		},
 	}
@@ -298,20 +298,6 @@ func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, pr
 		}
 	}
 	api.WriteJSON(w, http.StatusOK, resp)
-}
-
-// simApprovals is the seeded set of parked gate approvals for the policy_approval
-// demo agent (agent-approvals shot).
-func simApprovals() []api.ApprovalRequest {
-	reason1 := "MCP server \"linear\" is not on the allow-list"
-	reason2 := "WebFetch to \"docs.linear.app\" is not on the allow-list"
-	reason3 := "MCP tool \"linear__create_issue\" is not on the allow-list"
-	rw := "write"
-	return []api.ApprovalRequest{
-		{Reqid: "req-1", Tool: "mcp__linear__list_issues", Kind: "mcp", Target: "linear", Summary: "wants to use MCP server \"linear\"", Reason: &reason1},
-		{Reqid: "req-3", Tool: "mcp__linear__create_issue", Kind: "mcp_tool", Target: "linear__create_issue", Rw: &rw, Summary: "wants to use MCP tool \"linear__create_issue\" (write)", Reason: &reason3},
-		{Reqid: "req-2", Tool: "WebFetch", Kind: "webfetch", Target: "docs.linear.app", Summary: "wants to fetch from \"docs.linear.app\"", Reason: &reason2},
-	}
 }
 
 // simArchivedAgents returns the seeded archived (killed/merged) history used by
@@ -430,10 +416,9 @@ func (s *SimulationServer) GetAgent(w http.ResponseWriter, r *http.Request, proj
 			Prompt:             "Use the linear MCP server to pull the open issues and start on the highest-priority one.",
 			NetworkEnforcement: ptr("filtered-advisory"),
 			AgentStatus: &api.AgentStatusInfo{
-				Status:           api.NeedsInput,
-				Timestamp:        simNow().Format(time.RFC3339),
-				NotificationType: ptr("policy_approval"),
-				LastMessage:      ptr("wants to use MCP server \"linear\""),
+				Status:      api.NeedsInput,
+				Timestamp:   simNow().Format(time.RFC3339),
+				LastMessage: ptr("Which Linear team should I scope the sync to?"),
 			},
 		})
 		return
@@ -1671,11 +1656,10 @@ func (s *SimulationServer) SendAgentInput(w http.ResponseWriter, r *http.Request
 }
 
 func (s *SimulationServer) ListAgentApprovals(w http.ResponseWriter, r *http.Request, projectId string, id string) {
-	approvals := []api.ApprovalRequest{}
-	if id == "agent-approval" {
-		approvals = simApprovals()
-	}
-	api.WriteJSON(w, http.StatusOK, api.ApprovalListResponse{Approvals: approvals})
+	// No simulated agent parks a live gate approval — the approval cards are
+	// documented as their own harness screenshots (agent-approvals-*.png) so they
+	// don't leak onto every simulated page. Always return an empty set.
+	api.WriteJSON(w, http.StatusOK, api.ApprovalListResponse{Approvals: []api.ApprovalRequest{}})
 }
 
 func (s *SimulationServer) DecideAgentApproval(w http.ResponseWriter, r *http.Request, projectId string, id string, reqid string) {

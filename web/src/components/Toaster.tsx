@@ -108,6 +108,9 @@ export const Toaster: React.FC = () => {
   if (toasts.length === 0) return null
 
   return (
+    // z-[110] sits between the passive image lightbox (z-[100], which the approval
+    // toasts must be visible over) and focused modal dialogs (z-[120], e.g. a
+    // merge/kill confirmation, which must be visible over the toasts).
     <div className="fixed bottom-4 right-4 z-[110] flex flex-col gap-2 items-end">
       {toasts.map((toast) => (
         <ToastItem key={toast.id} toast={toast} onDismiss={() => dismiss(toast.id)} />

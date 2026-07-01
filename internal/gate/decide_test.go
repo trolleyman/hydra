@@ -57,8 +57,14 @@ func TestDecide(t *testing.T) {
 		{"bash echo key no write allowed", "Bash", map[string]any{"command": "echo checking for disableAllHooks"}, Allow},
 		{"bash write tamper key denied", "Bash", map[string]any{"command": `printf disableAllHooks >> /tmp/x`}, Deny},
 		{"write managed settings denied", "Write", map[string]any{"file_path": "/etc/claude-code/managed-settings.json"}, Deny},
-		{"bash git push asks", "Bash", map[string]any{"command": "git push origin main"}, Ask},
+		{"bash git push denied", "Bash", map[string]any{"command": "git push origin main"}, Deny},
 		{"bash git push dry-run allowed", "Bash", map[string]any{"command": "git push --dry-run"}, Allow},
+		{"bash chained git push denied", "Bash", map[string]any{"command": "echo done && git push origin main"}, Deny},
+		// The bare substring "git push" inside an argument / grep pattern / commit
+		// message must NOT trip the wire — matching those would hard-deny a
+		// legitimate command (the anchor to a command boundary is what saves them).
+		{"bash grep for git push allowed", "Bash", map[string]any{"command": "grep -rn 'git push' internal/"}, Allow},
+		{"bash commit msg mentioning git push allowed", "Bash", map[string]any{"command": "git commit -m 'document the git push flow'"}, Allow},
 		{"bash normal allowed", "Bash", map[string]any{"command": "go test ./..."}, Allow},
 		{"unrecognized tool allowed", "SomeNewTool", map[string]any{"x": "y"}, Allow},
 		{"websearch allowed", "WebSearch", map[string]any{"query": "x"}, Allow},

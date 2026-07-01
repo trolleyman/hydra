@@ -34,7 +34,8 @@ export function KeyboardShortcutsModal() {
 
   return (
     <div
-      className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200"
+      // z-[120]: a focused modal sits ABOVE the approval toasts (z-[110]).
+      className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200"
       onMouseDown={() => setOpen(false)}
     >
       <div
