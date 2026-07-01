@@ -172,3 +172,23 @@ func TestListMCPServersMalformed(t *testing.T) {
 		t.Errorf("nil inputs should yield no servers, got %+v", got)
 	}
 }
+
+func TestMCPServerSpecs(t *testing.T) {
+	claude := []byte(`{
+	  "mcpServers": {
+	    "github": {"command": "gh-mcp", "args": ["--stdio"], "env": {"TOKEN": "x"}},
+	    "remote": {"type": "http", "url": "https://example.com"}
+	  }
+	}`)
+	specs := MCPServerSpecs(claude, nil, []string{"github", "remote", "absent"})
+	if len(specs) != 1 {
+		t.Fatalf("got %d specs, want 1 (stdio only): %+v", len(specs), specs)
+	}
+	s := specs[0]
+	if s.Name != "github" || s.Command != "gh-mcp" || len(s.Args) != 1 || s.Args[0] != "--stdio" {
+		t.Errorf("unexpected spec: %+v", s)
+	}
+	if s.Env["TOKEN"] != "x" {
+		t.Errorf("env not captured: %+v", s.Env)
+	}
+}

@@ -58,6 +58,10 @@ type Policy struct {
 	// best-effort heuristic (see ClassifyMCPTool), so this trades safety for fewer
 	// prompts — off by default.
 	AutoAllowReadMCP bool `json:"mcp_auto_allow_read"`
+	// MCPToolRW maps "<server>__<tool>" to a read/write classification ("read" or
+	// "write") captured from the server-declared readOnlyHint annotation at seed
+	// time. It takes precedence over the name heuristic when present.
+	MCPToolRW map[string]string `json:"mcp_tool_rw,omitempty"`
 	// WebFetchAllowHosts lists hosts WebFetch may reach without an approval
 	// round-trip; a fetch to any other host is parked for approval.
 	WebFetchAllowHosts []string `json:"webfetch_allow_hosts"`

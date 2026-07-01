@@ -134,6 +134,21 @@ func TestDecidePerToolMCP(t *testing.T) {
 	}
 }
 
+func TestDecideCapturedHintOverridesHeuristic(t *testing.T) {
+	p := basePolicy()
+	p.MCPToolsAllowed = []string{"linear__create_issue"} // keep linear partially-allowed
+	// The name heuristic would call delete_* a write; the captured readOnlyHint says
+	// read. The captured hint must win.
+	p.MCPToolRW = map[string]string{"linear__delete_issue": "read"}
+	if r := Decide(p, "mcp__linear__delete_issue", nil); r.RW != "read" {
+		t.Errorf("captured hint should override heuristic: rw=%q, want read", r.RW)
+	}
+	// A tool with no captured hint still uses the heuristic.
+	if r := Decide(p, "mcp__linear__update_issue", nil); r.RW != "write" {
+		t.Errorf("no hint should fall back to heuristic: rw=%q, want write", r.RW)
+	}
+}
+
 func TestDecideAutoAllowRead(t *testing.T) {
 	p := basePolicy()
 	p.MCPToolsAllowed = []string{"linear__create_issue"} // keeps linear partially-allowed

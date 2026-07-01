@@ -106,12 +106,17 @@ func Decide(p Policy, toolName string, toolInput map[string]any) Result {
 		if server == HydraControlServer {
 			return Result{Decision: Allow}
 		}
+		full := server + "__" + tool
+		// Prefer the server-declared readOnlyHint captured at seed time; fall back to
+		// the name heuristic when the server declared none.
 		rw := ClassifyMCPTool(tool)
+		if hint := p.MCPToolRW[full]; hint != "" {
+			rw = hint
+		}
 		// Whole-server grant covers every tool.
 		if containsFold(p.MCPAllowed, server) {
 			return Result{Decision: Allow}
 		}
-		full := server + "__" + tool
 		// Per-tool grant.
 		if containsFold(p.MCPToolsAllowed, full) {
 			return Result{Decision: Allow}

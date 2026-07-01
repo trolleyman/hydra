@@ -268,6 +268,86 @@ func ListMCPServers(claudeJSON, mcpJSON []byte) []MCPServer {
 	return out
 }
 
+// MCPServerSpec is a stdio MCP server's launch command, used to introspect its
+// tools (read/write annotations). Non-stdio servers have an empty Command.
+type MCPServerSpec struct {
+	Name    string
+	Command string
+	Args    []string
+	Env     map[string]string
+}
+
+// MCPServerSpecs extracts stdio launch specs for the named servers from the host
+// ~/.claude.json (top-level mcpServers + projects[*].mcpServers) and a project
+// .mcp.json. Servers with no command (http/sse transports) or not in names are
+// skipped. The first spec found for a name wins.
+func MCPServerSpecs(claudeJSON, mcpJSON []byte, names []string) []MCPServerSpec {
+	want := make(map[string]bool, len(names))
+	for _, n := range names {
+		want[n] = true
+	}
+	seen := map[string]bool{}
+	var out []MCPServerSpec
+
+	consume := func(container map[string]interface{}) {
+		servers, ok := container["mcpServers"].(map[string]interface{})
+		if !ok {
+			return
+		}
+		for name, raw := range servers {
+			if !want[name] || seen[name] {
+				continue
+			}
+			m, ok := raw.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			command, _ := m["command"].(string)
+			if command == "" {
+				continue // non-stdio (http/sse) — can't spawn to introspect
+			}
+			spec := MCPServerSpec{Name: name, Command: command}
+			if rawArgs, ok := m["args"].([]interface{}); ok {
+				for _, a := range rawArgs {
+					if s, ok := a.(string); ok {
+						spec.Args = append(spec.Args, s)
+					}
+				}
+			}
+			if rawEnv, ok := m["env"].(map[string]interface{}); ok {
+				spec.Env = map[string]string{}
+				for k, v := range rawEnv {
+					if s, ok := v.(string); ok {
+						spec.Env[k] = s
+					}
+				}
+			}
+			seen[name] = true
+			out = append(out, spec)
+		}
+	}
+
+	for _, data := range [][]byte{claudeJSON, mcpJSON} {
+		if len(data) == 0 {
+			continue
+		}
+		var cfg map[string]interface{}
+		if json.Unmarshal(data, &cfg) != nil {
+			continue
+		}
+		consume(cfg)
+		if projects, ok := cfg["projects"].(map[string]interface{}); ok {
+			for _, p := range projects {
+				if pm, ok := p.(map[string]interface{}); ok {
+					consume(pm)
+				}
+			}
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
+}
+
 // BuildGeminiSettings generates the settings.json content with hook configuration for Gemini CLI.
 func BuildGeminiSettings(existing []byte, hydraBin string) ([]byte, error) {
 	hooks := buildHooksMap(HookCommand(hydraBin, "gemini"), []string{

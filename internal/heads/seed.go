@@ -160,10 +160,19 @@ func seedHead(projectRoot, id string, agentType sandbox.AgentType, worktreePath,
 		}
 		res.Binds = append(res.Binds, sandbox.Bind{Source: claudeJSONHost, Target: path.Join(home, ".claude.json")})
 
+		mcpJSON := readHostFile(filepath.Join(projectRoot, ".mcp.json"))
+
 		// Seed the catalog of host-configured MCP servers so the `hydra mcp` control
 		// server can tell the agent which servers it may request access to.
-		if err := seedMCPCatalog(res, cacheDir, id, projectRoot, hostClaudeJSON); err != nil {
+		if err := seedMCPCatalog(res, cacheDir, id, hostClaudeJSON, mcpJSON); err != nil {
 			return nil, errtrace.Wrap(err)
+		}
+
+		// Capture read/write hints (readOnlyHint) from the allow-listed servers so
+		// the gate can badge tool calls from the authoritative annotation rather than
+		// the name heuristic. Best-effort + cached; failures fall back silently.
+		if policy.GateEnabled {
+			policy.MCPToolRW = captureMCPToolRW(mcpKeep, hostClaudeJSON, mcpJSON, cacheDir)
 		}
 
 		// Seed the decision gate's inputs: a read-only policy.json the in-sandbox
@@ -255,8 +264,7 @@ func resolveGatePolicy(cfg config.Config, agentType string) gate.Policy {
 // gate.EnvMCPCatalogPath at it, so the `hydra mcp` control server can offer them
 // for the agent to request. Best-effort: an empty catalog just means the agent
 // has nothing extra to request.
-func seedMCPCatalog(res *seedResult, cacheDir, id, projectRoot string, hostClaudeJSON []byte) error {
-	mcpJSON := readHostFile(filepath.Join(projectRoot, ".mcp.json"))
+func seedMCPCatalog(res *seedResult, cacheDir, id string, hostClaudeJSON, mcpJSON []byte) error {
 	catalog := sandbox.ListMCPServers(hostClaudeJSON, mcpJSON)
 	data, err := json.Marshal(catalog)
 	if err != nil {
