@@ -1050,9 +1050,8 @@ try {
       // requests via simApprovals), so AgentDetail's ApprovalCard renders the
       // "wants to use MCP server / fetch" rows with Allow once / Always allow / Deny.
       // Viewport-only to focus on the card under the header rather than the terminal.
-      // Dark-only: this is the single reference shot for the MCP approval UI (the
-      // toast-approval shot documents a WebFetch park instead).
-      { name: 'agent-approvals', path: '/project/sim-project/agent/agent-approval', viewportOnly: true, themes: ['dark'] },
+      // Captured in both themes (the approval card has distinct light/dark styling).
+      { name: 'agent-approvals', path: '/project/sim-project/agent/agent-approval', viewportOnly: true },
       { name: 'nested-folders', path: '/project/sim-project/agent/agent-3', scrollTo: 'Changes' },
       // The diff viewer's settings popup, opened from the gear in the sticky
       // "Changes" toolbar: the file-list view modes, the diff options (side-by-
