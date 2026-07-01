@@ -224,18 +224,17 @@ function ArchivedAgentDetail({ agent, projectId, onPurged }: { agent: AgentRespo
 // always visible, not silently hidden). Hidden only when the head isn't live
 // (mode absent).
 // mergeQueueWaitingOn describes what an armed (merge-when-green) head's queued
-// merge is currently blocked on, for the pill's tooltip. The agent settling into
-// finished is the dominant gate — it can't merge mid-work — so an unfinished agent
-// is reported first (with the "you need to answer it" case called out); once it's
-// finished, the test verdict is the remaining gate.
+// merge is currently blocked on, for the pill's tooltip. Reaching a finished
+// state is the dominant gate — the head can't merge mid-work — so any not-yet-
+// finished agent (still running, or blocked asking you something) reads simply as
+// "the agent to finish"; once it's finished, the test verdict is the remaining gate.
 function mergeQueueWaitingOn(agent: AgentResponse): string {
   const st = agent.agent_status?.status
-  if (st === 'needs_input') return 'you to answer the agent’s question'
-  if (st && st !== 'finished') return 'the agent to finish working'
+  if (st && st !== 'finished') return 'the agent to finish'
   const verdict = agent.tests?.status
   if (verdict === 'running') return 'the tests to finish'
   if (verdict === 'failing' || verdict === 'errored') return 'the tests to pass'
-  return 'the final checks before it merges'
+  return 'the final checks'
 }
 
 // MergeWhenGreenPill is the merge button's "armed" state (PLAN #68): a green
@@ -253,7 +252,7 @@ function MergeWhenGreenPill({ agent, onCancel, disabled }: { agent: AgentRespons
         side="bottom"
         offset={8}
         delay={0}
-        content={`Merges into ${toBranch} once it finishes and its tests pass. Waiting on ${waitingOn}.`}
+        content={`Merges into ${toBranch} on its own — but only once the agent is finished (not mid-task) and its tests pass. Waiting on ${waitingOn}.`}
       >
         <span className="inline-flex items-center gap-2 cursor-help">
           <Clock className="w-4 h-4 shrink-0" />

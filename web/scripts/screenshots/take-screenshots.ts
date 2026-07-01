@@ -813,11 +813,11 @@ try {
       // "merges when tests pass" metadata chip, and the merge button becomes the
       // green "Merges when tests pass" pill with its own Cancel button.
       { name: 'tests-merge-when-green', path: '/project/sim-project/agent/agent-md', viewportOnly: true },
-      // The "Merge queued" pill's hover card, on an agent whose queued merge is
+      // The "Merge queued" pill's hover hint, on an agent whose queued merge is
       // blocked on the AGENT rather than the tests: agent-queued armed auto-merge
-      // (tests already green) but is now asking a question (needs_input), so the
-      // card reports it's "Waiting on you to answer the agent's question". Hovering
-      // the pill opens the card; viewportOnly frames the header + card.
+      // (tests already green) but hasn't reached a finished state, so the hint
+      // reports it's "Waiting on the agent to finish". Hovering the pill opens the
+      // hint; viewportOnly frames the header + hint.
       { name: 'merge-queued-tooltip', path: '/project/sim-project/agent/agent-queued', viewportOnly: true, hover: 'text=Merge queued' },
       // The merge-gate dialog (PLAN #68): clicking the plain "Merge" button on
       // agent-2's failing verdict opens the Force-merge / Queue-merge choice with an
