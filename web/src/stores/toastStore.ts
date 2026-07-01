@@ -28,9 +28,25 @@ export interface ApprovalToastData {
   crossProject?: string | null
 }
 
-// An action button rendered inside the toast (e.g. "View" on a needs-input
-// toast, or "Allow"/"Deny" on a security-gate toast). onClick receives the
-// toast's id so the handler can dismiss it (silently or not) after acting.
+// Structured payload for an agent status-transition toast (an agent crossing
+// into needs_input / finished). The renderer draws a "<bot> <agent> transitioned
+// to <status pill>" row whose agent label links through to the agent — so there's
+// no separate "View" button.
+export interface AgentTransitionToastData {
+  // The agent's title (the clickable label) + where it lives (for the link).
+  agentName: string
+  agentId: string
+  projectId: string
+  // The raw status the agent crossed into, rendered as the standard status pill.
+  status: string
+  // Set when the agent runs in a DIFFERENT project than the one in view — shown
+  // as a muted suffix so the toast still says where it happened.
+  projectName?: string | null
+}
+
+// An action button rendered inside the toast (e.g. "Allow"/"Deny" on a
+// security-gate toast). onClick receives the toast's id so the handler can
+// dismiss it (silently or not) after acting.
 export interface ToastAction {
   label: string
   onClick: (toastId: number) => void
@@ -65,6 +81,9 @@ export interface Toast {
   // When set, the renderer draws the rich security-gate approval card using this
   // structured data (the `message` is then only a fallback for non-approval UIs).
   approval?: ApprovalToastData
+  // When set, the renderer draws the "<agent> transitioned to <status>" row
+  // (the `message` is then only a fallback for non-visual surfaces).
+  agentTransition?: AgentTransitionToastData
 }
 
 // How long the leave animation runs before the toast is removed from the list.
@@ -83,6 +102,7 @@ interface ToastState {
     onDismiss?: () => void
     key?: string
     approval?: ApprovalToastData
+    agentTransition?: AgentTransitionToastData
   }) => number
   // silent: skip the toast's onDismiss callback. Used when the toast is being
   // torn down because its action already resolved the underlying request (e.g.
@@ -95,7 +115,7 @@ let nextId = 1
 
 export const useToastStore = create<ToastState>((set, get) => ({
   toasts: [],
-  show: ({ message, type = 'info', duration = 3000, actions, onDismiss, key, approval }) => {
+  show: ({ message, type = 'info', duration = 3000, actions, onDismiss, key, approval, agentTransition }) => {
     // Keyed toast already on screen → replace its contents in place (same id, no
     // re-stack), and re-arm its expiry timer if it auto-dismisses.
     if (key !== undefined) {
@@ -104,7 +124,7 @@ export const useToastStore = create<ToastState>((set, get) => ({
         set((state) => ({
           toasts: state.toasts.map((t) =>
             t.id === existing.id
-              ? { ...t, message, type, duration, actions, onDismiss, approval, createdAt: Date.now() }
+              ? { ...t, message, type, duration, actions, onDismiss, approval, agentTransition, createdAt: Date.now() }
               : t,
           ),
         }))
@@ -116,7 +136,7 @@ export const useToastStore = create<ToastState>((set, get) => ({
     set((state) => ({
       toasts: [
         ...state.toasts,
-        { id, message, type, duration, createdAt: Date.now(), exiting: false, actions, onDismiss, key, approval },
+        { id, message, type, duration, createdAt: Date.now(), exiting: false, actions, onDismiss, key, approval, agentTransition },
       ],
     }))
     if (duration > 0) {

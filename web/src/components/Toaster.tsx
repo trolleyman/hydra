@@ -1,8 +1,12 @@
 import React from 'react'
-import { CheckCircle, AlertCircle, AlertTriangle, Info, X } from 'lucide-react'
+import { useNavigate } from '@tanstack/react-router'
+import { CheckCircle, AlertCircle, AlertTriangle, Info, Bot, X } from 'lucide-react'
 import { useToastStore, type Toast, type ToastType } from '../stores/toastStore'
+import { useProjectStore } from '../stores/projectStore'
 import { IconButton } from './IconButton'
 import { ApprovalCard } from './ApprovalToast'
+import { Badge } from './Badge'
+import { agentStatusBadge } from './AgentComponents'
 
 // Per-type visual identity: the icon and its tinted rounded square, mirroring the
 // approval card's kind icon so the two toast styles read as one family.
@@ -28,6 +32,7 @@ const actionClass = (variant?: 'primary' | 'danger') => {
 }
 
 const ToastItem: React.FC<{ toast: Toast; onDismiss: () => void }> = ({ toast, onDismiss }) => {
+  const navigate = useNavigate()
   // Only auto-expiring toasts (duration > 0) get a countdown bar, and it's hidden
   // once the toast starts leaving so it doesn't redraw during the exit animation.
   const showCountdown = toast.duration > 0 && !toast.exiting
@@ -47,6 +52,54 @@ const ToastItem: React.FC<{ toast: Toast; onDismiss: () => void }> = ({ toast, o
   }
 
   const { Icon, wrap, bar } = TYPE_VISUAL[toast.type] ?? TYPE_VISUAL.info
+
+  // Agent status transitions render as "<bot> <agent> transitioned to <status>",
+  // the agent label linking through to the agent (so there's no View button).
+  if (toast.agentTransition) {
+    const t = toast.agentTransition
+    const badge = agentStatusBadge(t.status)
+    const openAgent = () => {
+      // Match a cross-project View: select the project (a no-op for the current
+      // one) before routing, then tear the toast down.
+      useProjectStore.getState().setSelectedProjectId(t.projectId)
+      navigate({ to: '/project/$projectId/agent/$agentId', params: { projectId: t.projectId, agentId: t.agentId } })
+      onDismiss()
+    }
+    return (
+      <div
+        role="status"
+        className={`relative min-w-[17rem] max-w-[22rem] overflow-hidden rounded-2xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-xl ${
+          toast.exiting ? 'animate-toast-out' : 'animate-toast-in'
+        }`}
+      >
+        <div className="flex items-start gap-2 p-3.5 pr-3">
+          <div className="min-w-0 flex-1 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-sm text-gray-500 dark:text-gray-400 leading-relaxed">
+            <button
+              type="button"
+              onClick={openAgent}
+              title="Open this agent"
+              className="inline-flex max-w-full min-w-0 items-center gap-1 font-semibold text-gray-900 dark:text-gray-100 hover:text-blue-600 hover:underline dark:hover:text-blue-400 cursor-pointer transition-colors"
+            >
+              <Bot className="w-3.5 h-3.5 shrink-0 text-gray-400 dark:text-gray-500" />
+              <span className="truncate">{t.agentName}</span>
+            </button>
+            <span>transitioned to</span>
+            <Badge variant="sm" className={badge.className}>{badge.label}</Badge>
+            {t.projectName && <span className="text-gray-400 dark:text-gray-500">· {t.projectName}</span>}
+          </div>
+          <IconButton onClick={onDismiss}>
+            <X className="w-4 h-4" />
+          </IconButton>
+        </div>
+        {showCountdown && (
+          <div
+            className={`toast-progress-bar absolute bottom-0 left-0 h-0.5 w-full opacity-60 ${bar}`}
+            style={{ animationDuration: `${toast.duration}ms` }}
+          />
+        )}
+      </div>
+    )
+  }
   const hasActions = toast.actions && toast.actions.length > 0
   return (
     <div

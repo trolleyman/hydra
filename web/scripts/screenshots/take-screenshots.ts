@@ -606,6 +606,14 @@ try {
           argsPreview?: string | null
           crossProject?: string | null
         }
+        // When set, the "<agent> transitioned to <status>" row is rendered.
+        agentTransition?: {
+          agentName: string
+          agentId: string
+          projectId: string
+          status: string
+          projectName?: string | null
+        }
       }
       // Restricts this page to a subset of themes. Defaults to both light+dark;
       // set e.g. ['dark'] to capture only the dark render (used where a shot only
@@ -625,24 +633,25 @@ try {
       // never produces, so they're rendered deterministically via the toast
       // harness over the settings page (a route that loads no project agents, so
       // nothing else pops a toast). Messages mirror the real ones the hook emits.
-      // 1. An agent crossed into needs_input — a "View" jumps to it; lingers 12s.
+      // 1. An agent crossed into needs_input — "<bot> <agent> transitioned to
+      // <status pill>", the agent label linking to it; lingers 12s.
       {
         name: 'toast-needs-input',
         path: '/settings',
         toast: {
-          message: '"Migrate auth providers to OAuth" needs input',
+          message: '"Migrate auth providers to OAuth" transitioned to needs input',
           type: 'warning',
-          actions: [{ label: 'View', variant: 'primary' }],
+          agentTransition: { agentName: 'Migrate auth providers to OAuth', agentId: 'agent-2', projectId: 'sim-project', status: 'needs_input' },
         },
       },
-      // 2. An agent finished — also a "View" button; auto-dismisses at 8s.
+      // 2. An agent finished — same row, green "finished" pill; auto-dismisses at 8s.
       {
         name: 'toast-finished',
         path: '/settings',
         toast: {
-          message: '"Add renameable agent titles" finished',
+          message: '"Add renameable agent titles" transitioned to finished',
           type: 'success',
-          actions: [{ label: 'View', variant: 'primary' }],
+          agentTransition: { agentName: 'Add renameable agent titles', agentId: 'agent-md', projectId: 'sim-project', status: 'finished' },
         },
       },
       // 3. Security-gate approval cards (the rich ApprovalCard): persistent, with
