@@ -225,15 +225,46 @@ function ArchivedAgentDetail({ agent, projectId, onPurged }: { agent: AgentRespo
 // "no network", and the open "unrestricted" state (so an open egress channel is
 // always visible, not silently hidden). Hidden only when the head isn't live
 // (mode absent).
-// MergeWhenGreenPill is the merge button's "armed" state (PLAN #68): a green status
-// pill that says the merge is queued to run when tests pass, carrying its own white
-// Cancel button to disarm. It replaces the plain Merge button while armed, so the
-// state and the way out are both visible at a glance.
-function MergeWhenGreenPill({ onCancel, disabled }: { onCancel: () => void; disabled?: boolean }) {
+// mergeQueueWaitingOn describes what an armed (merge-when-green) head's queued
+// merge is currently blocked on, for the pill's tooltip. The agent settling into
+// finished is the dominant gate — it can't merge mid-work — so an unfinished agent
+// is reported first (with the "you need to answer it" case called out); once it's
+// finished, the test verdict is the remaining gate.
+function mergeQueueWaitingOn(agent: AgentResponse): string {
+  const st = agent.agent_status?.status
+  if (st === 'needs_input') return 'you to answer the agent’s question'
+  if (st && st !== 'finished') return 'the agent to finish working'
+  const verdict = agent.tests?.status
+  if (verdict === 'running') return 'the tests to finish'
+  if (verdict === 'failing' || verdict === 'errored') return 'the tests to pass'
+  return 'the final checks before it merges'
+}
+
+// MergeWhenGreenPill is the merge button's "armed" state (PLAN #68): a green
+// "Merge queued" pill carrying its own white Cancel button to disarm. It replaces
+// the plain Merge button while armed, so the state and the way out are both
+// visible at a glance; a hover card explains what the queue does and what it's
+// currently waiting on.
+function MergeWhenGreenPill({ agent, onCancel, disabled }: { agent: AgentResponse; onCancel: () => void; disabled?: boolean }) {
+  const toBranch = agent.base_branch || 'its base branch'
+  const waitingOn = mergeQueueWaitingOn(agent)
   return (
     <div className="shrink-0 inline-flex items-center gap-2 h-8 pl-2.5 pr-1 rounded-lg bg-emerald-100 dark:bg-emerald-900/30 border border-emerald-200 dark:border-emerald-800/50 text-emerald-700 dark:text-emerald-300">
-      <Clock className="w-4 h-4 shrink-0" />
-      <span className="text-[13px] font-semibold whitespace-nowrap">Merges when done &amp; tests pass</span>
+      <Tooltip
+        variant="card"
+        title="Merge queued"
+        content={
+          <>
+            <p>Auto-merge is armed: this agent merges into <code>{toBranch}</code> on its own once it has finished and its tests pass.</p>
+            <p>Waiting on {waitingOn}.</p>
+          </>
+        }
+      >
+        <span className="inline-flex items-center gap-2 cursor-help">
+          <Clock className="w-4 h-4 shrink-0" />
+          <span className="text-[13px] font-semibold whitespace-nowrap">Merge queued</span>
+        </span>
+      </Tooltip>
       <button
         type="button"
         onClick={onCancel}
@@ -917,13 +948,13 @@ export function AgentDetail({
     : armed
       ? {
           // Compound control (see AgentTopBarAction.render): a green status pill
-          // carrying its own Cancel button, so the verdict and the way out are both
+          // carrying its own Cancel button, so the state and the way out are both
           // visible. `onClick` is the keyboard-shortcut fallback (Ctrl+M cancels).
-          label: 'Merges when tests pass',
+          label: 'Merge queued',
           icon: <Clock className="w-4 h-4" />,
           onClick: () => void cancelMerge(),
           shortcut: SHORTCUT_MERGE,
-          render: <MergeWhenGreenPill onCancel={() => void cancelMerge()} disabled={busy} />,
+          render: <MergeWhenGreenPill agent={agent} onCancel={() => void cancelMerge()} disabled={busy} />,
         }
       : {
           label: 'Merge',

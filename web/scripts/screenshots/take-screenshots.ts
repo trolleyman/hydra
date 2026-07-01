@@ -403,6 +403,9 @@ try {
       // popover such as the repository branch selector so the screenshot
       // documents it.
       click?: string
+      // CSS selector hovered (after load, before capture) — opens a hover-only
+      // card tooltip (e.g. the "Merge queued" pill's explanation) so it's captured.
+      hover?: string
       // CSS selectors clicked in sequence (each followed by a settle), then a
       // networkidle wait so any fetch a click kicks off has rendered before the
       // capture. Used by the branch-compare diff shots, where pressing the diff
@@ -678,6 +681,12 @@ try {
       // "merges when tests pass" metadata chip, and the merge button becomes the
       // green "Merges when tests pass" pill with its own Cancel button.
       { name: 'tests-merge-when-green', path: '/project/sim-project/agent/agent-md', viewportOnly: true },
+      // The "Merge queued" pill's hover card, on an agent whose queued merge is
+      // blocked on the AGENT rather than the tests: agent-queued armed auto-merge
+      // (tests already green) but is now asking a question (needs_input), so the
+      // card reports it's "Waiting on you to answer the agent's question". Hovering
+      // the pill opens the card; viewportOnly frames the header + card.
+      { name: 'merge-queued-tooltip', path: '/project/sim-project/agent/agent-queued', viewportOnly: true, hover: 'text=Merge queued' },
       // The merge-gate dialog (PLAN #68): clicking the plain "Merge" button on
       // agent-2's failing verdict opens the Force-merge / Queue-merge choice with an
       // explanation of the soft gate, instead of bouncing off a server 409.
@@ -1798,6 +1807,12 @@ try {
         if (pg.click) {
           // Open a popover (e.g. the branch selector) so the capture documents it.
           await page.click(pg.click)
+          await settle(page)
+        }
+        if (pg.hover) {
+          // Hover an element to open its (hover-only) card tooltip so the capture
+          // documents it — e.g. the "Merge queued" pill's explanation card.
+          await page.locator(pg.hover).first().hover()
           await settle(page)
         }
         if (pg.pressKey) {
