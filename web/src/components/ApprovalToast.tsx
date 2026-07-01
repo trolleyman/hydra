@@ -72,7 +72,7 @@ const BodyLine: React.FC<{ data: ApprovalToastData }> = ({ data }) => {
     case 'mcp_tool': {
       const [server, ...rest] = data.target.split('__')
       const tool = rest.join('__')
-      return <>An agent wants to run <Chip>{server} |&gt; {tool}</Chip>.</>
+      return <>An agent wants to run <Chip>{server} <span className="px-0.5 text-gray-400 dark:text-gray-500">▸</span> {tool}</Chip>.</>
     }
     case 'webfetch':
       return <>An agent wants to fetch from <Chip>{data.target}</Chip>.</>

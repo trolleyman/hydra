@@ -1,46 +1,27 @@
 import React from 'react'
-import { CheckCircle, AlertCircle, Info, X } from 'lucide-react'
+import { CheckCircle, AlertCircle, AlertTriangle, Info, X } from 'lucide-react'
 import { useToastStore, type Toast, type ToastType } from '../stores/toastStore'
 import { IconButton } from './IconButton'
 import { ApprovalCard } from './ApprovalToast'
 
-const getIcon = (type: ToastType) => {
-  switch (type) {
-    case 'success':
-      return <CheckCircle className="w-5 h-5 text-green-500" />
-    case 'error':
-      return <AlertCircle className="w-5 h-5 text-red-500" />
-    case 'warning':
-      return <AlertCircle className="w-5 h-5 text-amber-500" />
-    case 'info':
-    default:
-      return <Info className="w-5 h-5 text-blue-500" />
-  }
+// Per-type visual identity: the icon and its tinted rounded square, mirroring the
+// approval card's kind icon so the two toast styles read as one family.
+const TYPE_VISUAL: Record<ToastType, { Icon: React.ComponentType<{ className?: string }>; wrap: string; bar: string }> = {
+  success: { Icon: CheckCircle, wrap: 'bg-green-50 text-green-600 dark:bg-green-500/15 dark:text-green-300', bar: 'bg-green-500' },
+  error: { Icon: AlertCircle, wrap: 'bg-red-50 text-red-600 dark:bg-red-500/15 dark:text-red-300', bar: 'bg-red-500' },
+  warning: { Icon: AlertTriangle, wrap: 'bg-amber-50 text-amber-600 dark:bg-amber-500/15 dark:text-amber-300', bar: 'bg-amber-500' },
+  info: { Icon: Info, wrap: 'bg-blue-50 text-blue-600 dark:bg-blue-500/15 dark:text-blue-300', bar: 'bg-blue-500' },
 }
 
-// Countdown-bar colour, matched to the icon tint for each type.
-const getBarColor = (type: ToastType) => {
-  switch (type) {
-    case 'success':
-      return 'bg-green-500'
-    case 'error':
-      return 'bg-red-500'
-    case 'warning':
-      return 'bg-amber-500'
-    case 'info':
-    default:
-      return 'bg-blue-500'
-  }
-}
-
-// Per-variant button styling for a toast action.
+// Per-variant button styling for a toast action — matched to the approval card's
+// action buttons (rounded-lg, solid accent primary), with the hand cursor.
 const actionClass = (variant?: 'primary' | 'danger') => {
-  const base = 'text-xs px-2.5 py-1 rounded font-medium transition-colors'
+  const base = 'inline-flex items-center text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors cursor-pointer'
   switch (variant) {
     case 'primary':
       return `${base} bg-blue-600 hover:bg-blue-500 text-white`
     case 'danger':
-      return `${base} bg-red-600 hover:bg-red-500 text-white`
+      return `${base} text-red-600 border border-red-200 hover:bg-red-50 dark:text-red-400 dark:border-red-500/40 dark:hover:bg-red-500/10`
     default:
       return `${base} bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200`
   }
@@ -65,19 +46,28 @@ const ToastItem: React.FC<{ toast: Toast; onDismiss: () => void }> = ({ toast, o
     )
   }
 
+  const { Icon, wrap, bar } = TYPE_VISUAL[toast.type] ?? TYPE_VISUAL.info
+  const hasActions = toast.actions && toast.actions.length > 0
   return (
     <div
       role="status"
-      className={`relative overflow-hidden flex items-start gap-3 px-4 py-3 rounded-xl shadow-lg bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 max-w-sm ${
+      className={`relative min-w-[17rem] max-w-[22rem] overflow-hidden rounded-2xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-xl ${
         toast.exiting ? 'animate-toast-out' : 'animate-toast-in'
       }`}
     >
-      <div className="mt-0.5">{getIcon(toast.type)}</div>
-      <div className="flex flex-col gap-2 min-w-0">
-        <p className="text-sm text-gray-700 dark:text-gray-200 leading-relaxed">{toast.message}</p>
-        {toast.actions && toast.actions.length > 0 && (
-          <div className="flex items-center gap-2 flex-wrap">
-            {toast.actions.map((action) => (
+      <div className="p-4">
+        <div className="flex items-start gap-3">
+          <div className={`shrink-0 w-9 h-9 rounded-xl flex items-center justify-center ${wrap}`}>
+            <Icon className="w-[18px] h-[18px]" />
+          </div>
+          <p className="min-w-0 flex-1 self-center text-sm text-gray-700 dark:text-gray-200 leading-relaxed">{toast.message}</p>
+          <IconButton onClick={onDismiss}>
+            <X className="w-4 h-4" />
+          </IconButton>
+        </div>
+        {hasActions && (
+          <div className="mt-3 flex items-center gap-2 flex-wrap pl-12">
+            {toast.actions!.map((action) => (
               <button
                 key={action.label}
                 onClick={() => action.onClick(toast.id)}
@@ -89,12 +79,9 @@ const ToastItem: React.FC<{ toast: Toast; onDismiss: () => void }> = ({ toast, o
           </div>
         )}
       </div>
-      <IconButton onClick={onDismiss}>
-        <X className="w-4 h-4" />
-      </IconButton>
       {showCountdown && (
         <div
-          className={`toast-progress-bar absolute bottom-0 left-0 h-0.5 w-full opacity-60 ${getBarColor(toast.type)}`}
+          className={`toast-progress-bar absolute bottom-0 left-0 h-0.5 w-full opacity-60 ${bar}`}
           style={{ animationDuration: `${toast.duration}ms` }}
         />
       )}
