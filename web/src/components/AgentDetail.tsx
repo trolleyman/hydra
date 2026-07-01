@@ -645,7 +645,33 @@ export function AgentDetail({
     if (verdict === 'failing') return confirmMergeGate('failing', n)
     if (verdict === 'errored') return confirmMergeGate('errored', n)
     if (verdict === 'running') return confirmMergeGate('running', n)
+    // Verdict is green (or there are no runners) — nothing else gates the merge,
+    // so this is where an accidental merge of a still-working agent would slip
+    // through. Warn first if it hasn't finished: still working (running/starting)
+    // or blocked asking you a question (needs_input). A non-green verdict already
+    // routes through the merge-gate above, so this only adds a prompt where there
+    // would otherwise be none.
+    const st = agent.agent_status?.status
+    if (st === 'running' || st === 'starting' || st === 'needs_input') {
+      return confirmMergeWhileActive(st === 'needs_input', confirmNormalMerge)
+    }
     return confirmNormalMerge()
+  }
+
+  // confirmMergeWhileActive warns that the agent isn't finished before merging.
+  // `blocked` distinguishes "asking you a question" (needs_input) from "still
+  // working" (running/starting). On confirm it continues to the normal flow.
+  function confirmMergeWhileActive(blocked: boolean, onProceed: () => void) {
+    useDialogStore.getState().show({
+      title: blocked ? 'Agent is waiting on you' : 'Agent is still running',
+      message: blocked
+        ? `"${agent.id}" is asking you a question. Merging now abandons it — the agent's work may be incomplete.`
+        : `"${agent.id}" is still working. Merging now may capture an incomplete state.`,
+      type: 'warning',
+      confirmLabel: 'Merge anyway',
+      showCancel: true,
+      onConfirm: onProceed,
+    })
   }
 
   function confirmNormalMerge() {

@@ -132,7 +132,7 @@ export const Dialog: React.FC = () => {
               <DialogCancelButton onClick={handleCancel}>Cancel</DialogCancelButton>
             )}
             <DialogConfirmButton tone={type === 'error' ? 'red' : 'blue'} onClick={handleConfirm}>
-              {type === 'confirm' ? 'Confirm' : 'OK'}
+              {confirmLabel ?? (type === 'confirm' ? 'Confirm' : 'OK')}
             </DialogConfirmButton>
           </div>
         </div>
