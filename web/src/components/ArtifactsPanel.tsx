@@ -191,7 +191,7 @@ export function MasonryGrid({ items, spanScale = 1, scale = 1, spans, onSpanChan
   // a NUL — which can't appear in a file name, agent id or set name, so the
   // composite never collides with a different (scope, name) pair even when either
   // contains slashes or spaces. No scope → the bare file name (legacy global key).
-  const spanKey = useCallback((itemKey: string) => (scope ? `${scope} ${itemKey}` : itemKey), [scope])
+  const spanKey = useCallback((itemKey: string) => (scope ? `${scope}\0${itemKey}` : itemKey), [scope])
   const containerRef = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(0)
   // Measured tile heights, keyed by item key. Updated by the ResizeObserver below.
