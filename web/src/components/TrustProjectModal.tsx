@@ -1,6 +1,6 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { ShieldAlert } from 'lucide-react'
-import hljs from 'highlight.js'
+import hljs from '../lib/hljs'
 import { api } from '../stores/apiClient'
 import { formatError } from '../api/format_error'
 import { DialogIconTile, DialogCancelButton, DialogConfirmButton } from './dialogPrimitives'

@@ -1,5 +1,5 @@
 import { type ReactNode } from 'react'
-import hljs from 'highlight.js'
+import hljs from './hljs'
 
 // Simple inline-markdown support. We deliberately do NOT pull in a full
 // markdown library (or handle block constructs like #headings): the only goal
