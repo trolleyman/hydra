@@ -5,14 +5,17 @@ import type { ArtifactSet, ArtifactFile, ArtifactLogLine } from '../api'
 import { ArtifactFile as ArtifactFileNS } from '../api'
 import { LoaderCircle, Image as ImageIcon, ChevronDown, TriangleAlert, RefreshCw, ScrollText, SquarePlus, SquareMinus, SquareDot } from 'lucide-react'
 import { InfoTooltip } from './InfoTooltip'
-import { CollapsibleCard, MELT_BTN, useMeasuredHeight } from './CollapsibleCard'
+import { CollapsibleCard, MELT_BTN } from './CollapsibleCard'
+import { useMeasuredHeight } from '../lib/useMeasuredHeight'
+import { useMediaDims } from '../lib/artifactDims'
 import { loadArtifactPrefs, saveArtifactPrefs, loadTagFilter, saveTagFilter, loadArtifactChrome, saveArtifactChrome, clampChangeThreshold, type ArtifactTagFilter, type ArtifactChrome } from '../lib/artifactPrefs'
-import { computeVisibleFiles, filterIsActive, effectiveChangeType } from '../lib/artifactFilter'
+import { computeVisibleFiles, filterIsActive, effectiveChangeType, isVideoArtifact } from '../lib/artifactFilter'
 import { ArtifactFilterBar, TagBadge } from './ArtifactFilterBar'
 import { stripAnsi } from '../lib/ansi'
 import { type ArtifactSpans, BASE_ARTIFACT_COLUMNS, defaultSpanForAspect } from '../lib/artifactColumns'
-import { VideoDiffView, isVideoArtifact, VIDEO_MIN_TILE_PX } from './VideoDiffView'
-import { ImageDiffView, SegmentedToggle, ABControlsContext, type ImageDiffMode, type ArtifactABControls } from './ArtifactImageDiff'
+import { VideoDiffView, VIDEO_MIN_TILE_PX } from './VideoDiffView'
+import { ImageDiffView, SegmentedToggle, type ImageDiffMode, type ArtifactABControls } from './ArtifactImageDiff'
+import { ABControlsContext } from './artifactDiffContext'
 import type { LightboxImage } from './ImageLightbox'
 import { useImageLightboxStore } from '../stores/imageLightboxStore'
 import { LiveLogPanes, PersistedLogView } from './ArtifactLogView'
@@ -154,70 +157,6 @@ function FileRow({ file, mode, changeThreshold = 0, gallery, index }: {
 // dpi is the media's capture density (device-scale factor); pxWidth / dpi is its
 // logical width, which is what the grid caps a tile to (see spanOf). 1 when unknown
 // (measured client-side, or a server entry without a dpi sidecar) — logical == physical.
-export type ArtifactDim = { aspect: number; pxWidth: number; dpi: number }
-
-// useArtifactDims measures each artifact's intrinsic aspect ratio and natural pixel
-// width by loading the media off-screen, so the masonry can pick a sensible default
-// span (wide → more columns, tall → one) and cap it so the shot is never blown up
-// past its own resolution — all without the backend reporting dimensions. Images read
-// naturalWidth/Height; videos read videoWidth/Height off a metadata preload. The
-// browser caches the fetch, so the visible <img>/<video> doesn't load it twice.
-// Returns a key→dims map that fills in as media loads.
-export function useArtifactDims(sources: { key: string; url: string | null; video: boolean }[]): Record<string, ArtifactDim> {
-  const [dims, setDims] = useState<Record<string, ArtifactDim>>({})
-  // A stable signature of the (key,url) set so the effect only re-runs when the
-  // media actually changes, not on every render's fresh array.
-  const sig = sources.map((s) => `${s.key} ${s.url ?? ''}`).join('|')
-  const ref = useRef(sources)
-  ref.current = sources
-  useEffect(() => {
-    let cancelled = false
-    const set = (key: string, w: number, h: number) => {
-      if (cancelled || !w || !h) return
-      // Client-measured bytes carry no density, so dpi is 1 (logical == physical).
-      setDims((a) => (a[key] != null ? a : { ...a, [key]: { aspect: w / h, pxWidth: w, dpi: 1 } }))
-    }
-    for (const s of ref.current) {
-      if (!s.url) continue
-      if (s.video) {
-        const v = document.createElement('video')
-        v.preload = 'metadata'
-        v.onloadedmetadata = () => set(s.key, v.videoWidth, v.videoHeight)
-        v.src = s.url
-      } else {
-        const img = new Image()
-        img.onload = () => set(s.key, img.naturalWidth, img.naturalHeight)
-        img.src = s.url
-      }
-    }
-    return () => { cancelled = true }
-  }, [sig])
-  return dims
-}
-
-// useMediaDims resolves each artifact's dimensions, preferring the server-provided
-// width/height (already carried in the artifact response — measured once at
-// generation time and cached in meta.json, so no download) and falling back to
-// measuring the bytes for any file the server didn't size: videos when ffprobe
-// wasn't available, or entries cached before the server learned to record sizes.
-// Files that already have server dims are excluded from the off-screen measurement,
-// so for those the visible <img>'s loading="lazy" survives — a large diff no longer
-// eagerly fetches every image up front just to lay out the grid.
-export function useMediaDims(
-  sources: { key: string; url: string | null; video: boolean; width?: number | null; height?: number | null; dpi?: number | null }[],
-): Record<string, ArtifactDim> {
-  const serverDims = useMemo(() => {
-    const m: Record<string, ArtifactDim> = {}
-    for (const s of sources) {
-      if (s.width && s.height) m[s.key] = { aspect: s.width / s.height, pxWidth: s.width, dpi: s.dpi && s.dpi > 0 ? s.dpi : 1 }
-    }
-    return m
-  }, [sources])
-  const measureSources = useMemo(() => sources.filter((s) => !serverDims[s.key]), [sources, serverDims])
-  const measured = useArtifactDims(measureSources)
-  return useMemo(() => ({ ...measured, ...serverDims }), [measured, serverDims])
-}
-
 // Balanced (shortest-column) masonry. Each tile is absolutely positioned: we
 // measure every tile's rendered height with a ResizeObserver, then place tiles one
 // by one into whichever run of columns is currently shortest — so they pack tightly
@@ -252,7 +191,7 @@ export function MasonryGrid({ items, spanScale = 1, scale = 1, spans, onSpanChan
   // a NUL — which can't appear in a file name, agent id or set name, so the
   // composite never collides with a different (scope, name) pair even when either
   // contains slashes or spaces. No scope → the bare file name (legacy global key).
-  const spanKey = useCallback((itemKey: string) => (scope ? `${scope} ${itemKey}` : itemKey), [scope])
+  const spanKey = useCallback((itemKey: string) => (scope ? `${scope}\0${itemKey}` : itemKey), [scope])
   const containerRef = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(0)
   // Measured tile heights, keyed by item key. Updated by the ResizeObserver below.
@@ -404,6 +343,10 @@ export function MasonryGrid({ items, spanScale = 1, scale = 1, spans, onSpanChan
   // Place each tile into the run of `span` columns whose tallest column is currently
   // shortest (ties resolve leftmost, preserving reading order). Each tile fills its
   // run's combined width; its height comes from the measured content.
+  // Only drag.key/drag.col drive the layout (see below), so read them into locals:
+  // the memo then closes over exactly its deps, not the whole `drag` object.
+  const dragKey = drag?.key
+  const dragCol = drag?.col
   const placement = useMemo(() => {
     const { cols, gap, colW } = layout
     const FALLBACK_H = MASONRY_FALLBACK_H // assumed height before a tile is first measured
@@ -413,13 +356,13 @@ export function MasonryGrid({ items, spanScale = 1, scale = 1, spans, onSpanChan
       const h = heights[it.key] ?? FALLBACK_H
       const s = spanOf(it)
       let bestC = 0
-      if (drag && drag.key === it.key) {
+      if (dragKey === it.key) {
         // The tile being dragged is pinned to its start column (clamped so a wider
         // span can't run off the right edge) rather than re-packed, so a live span
         // snap grows it in place instead of teleporting it under the pointer. Its top
         // still comes from the columns it now covers, which is stable since the tiles
         // placed before it are unaffected.
-        bestC = Math.max(0, Math.min(drag.col, cols - s))
+        bestC = Math.max(0, Math.min(dragCol ?? 0, cols - s))
         let top = 0
         for (let k = bestC; k < bestC + s; k++) top = Math.max(top, bottoms[k])
         const left = bestC * (colW + gap)
@@ -452,7 +395,7 @@ export function MasonryGrid({ items, spanScale = 1, scale = 1, spans, onSpanChan
     // drag.key/drag.col (not the whole drag object) so a width-only change while
     // dragging doesn't re-pack the grid — only a start/end or a span snap does. ghostH
     // feeds the dragged tile's reserved height (it changes only when the span snaps).
-  }, [items, heights, layout, spanOf, drag?.key, drag?.col, ghostH])
+  }, [items, heights, layout, spanOf, dragKey, dragCol, ghostH])
 
   // Set while a body drag (below) is resizing a tile, so the trailing click can be
   // swallowed before the media reacts to it. Holds the key of the tile being dragged.
@@ -709,14 +652,21 @@ function FileGrid({ files, mode, scale = 1, spans, onSpanChange, scope, changeTh
     [files],
   )
   const diffGallery = useMemo<LightboxImage[]>(
-    () => imageFiles.map((f) => ({
-      url: (f.right_url ?? f.left_url) as string,
-      filename: f.name,
-      size: 0,
-      diff: { left: f.left_url, right: f.right_url, mode },
-      dpi: f.dpi ?? undefined,
-    })),
-    [imageFiles, mode],
+    () => imageFiles.map((f) => {
+      // Same status the tile's badge shows — effectiveChangeType folds in the
+      // "% changed" threshold, so a sub-threshold "modified" reads as unchanged
+      // (no glyph) in both places.
+      const ct = effectiveChangeType(f, changeThreshold)
+      return {
+        url: (f.right_url ?? f.left_url) as string,
+        filename: f.name,
+        size: 0,
+        diff: { left: f.left_url, right: f.right_url, mode },
+        dpi: f.dpi ?? undefined,
+        changeType: ct === 'added' || ct === 'removed' || ct === 'modified' ? ct : undefined,
+      }
+    }),
+    [imageFiles, mode, changeThreshold],
   )
   const galleryIndex = useMemo(() => {
     const m = new Map<string, number>()

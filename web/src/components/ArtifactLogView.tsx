@@ -245,11 +245,12 @@ function LiveLogColumn({ label, log, logUrl, error }: { label: string; log: Arti
   const succeeded = settled && !failed
   const [settledLog, setSettledLog] = useState<ArtifactLogLine[] | null>(null)
 
+  // Drop the fetched log while this side isn't settled (during render), so the
+  // next settle shows "Loading…" rather than the previous run's output.
+  if ((!settled || !logUrl) && settledLog !== null) setSettledLog(null)
+
   useEffect(() => {
-    if (!settled || !logUrl) {
-      setSettledLog(null)
-      return
-    }
+    if (!settled || !logUrl) return
     let cancelled = false
     fetch(logUrl)
       .then((r) => (r.ok ? r.json() : null))

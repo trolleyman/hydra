@@ -3036,8 +3036,8 @@ components:
           type: boolean
         state:
           type: string
-          enum: [up, restarting, failed, down]
-          description: up = running; restarting = backing off after an unexpected exit; failed = gave up after exhausting restarts; down = intentionally stopped
+          enum: [up, restarting, failed, down, paused]
+          description: up = running; restarting = backing off after an unexpected exit; failed = gave up after exhausting restarts; down = intentionally stopped; paused = not running because the project has no active agents (starts when one is spawned)
         restarts:
           type: integer
           description: Restarts performed so far

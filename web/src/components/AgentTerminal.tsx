@@ -83,6 +83,17 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
   const [notice, setNotice] = useState<string | null>(null)
   const noticeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  // Latest status/diff handlers, read from the socket + data callbacks below. The
+  // connection effect must NOT list them as deps (a fresh callback identity from the
+  // parent each render would tear the terminal down and reconnect it), so mirror
+  // them here and keep the mirror current after commit — the callbacks fire later.
+  const onStatusUpdateRef = useRef(onStatusUpdate)
+  const onDiffRefreshRef = useRef(onDiffRefresh)
+  useEffect(() => {
+    onStatusUpdateRef.current = onStatusUpdate
+    onDiffRefreshRef.current = onDiffRefresh
+  })
+
   // Toast above the terminal for upload progress/result of pasted files.
   function showNotice(msg: string, autoHide: boolean) {
     if (noticeTimeoutRef.current) clearTimeout(noticeTimeoutRef.current)
@@ -292,13 +303,13 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
               const statusEvent = msg as TerminalStatusEvent
               if (statusEvent.status) {
                 const newStatus = statusEvent.status.toLowerCase()
-                onStatusUpdate?.(newStatus)
+                onStatusUpdateRef.current?.(newStatus)
               }
               return
             }
             case TerminalEvent.type.DIFF_REFRESH: {
               const refreshEvent = msg as TerminalDiffRefreshEvent
-              onDiffRefresh?.(refreshEvent.head_moved ?? false)
+              onDiffRefreshRef.current?.(refreshEvent.head_moved ?? false)
               return
             }
             case TerminalEvent.type.DATA: {
@@ -332,7 +343,7 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
 
     ws.onclose = () => {
       term.writeln('\r\n\x1b[90m[connection closed]\x1b[0m')
-      onStatusUpdate?.('stopped')
+      onStatusUpdateRef.current?.('stopped')
     }
 
     ws.onerror = () => {
@@ -442,7 +453,7 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
         const curStatus = useAgentStore.getState().agents.find((a) => a.id === agentId)?.agent_status?.status
         if (!shell && data.includes('\r') && curStatus !== AgentStatus.NEEDS_INPUT) {
           useAgentStore.getState().setOptimisticStatus(agentId, AgentStatus.RUNNING)
-          onStatusUpdate?.(AgentStatus.RUNNING)
+          onStatusUpdateRef.current?.(AgentStatus.RUNNING)
         }
       }
     })
@@ -503,7 +514,10 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
       wsRef.current = null
       fitAddonRef.current = null
     }
-  }, [agentId, projectId, reconnectAttempt])
+    // shell/sandboxed/shellId define the connection (see getWsUrl) and are constant
+    // for a pane's lifetime (TerminalPane is keyed by tab id), so listing them can't
+    // cause spurious reconnects. onStatusUpdate/onDiffRefresh are read via refs above.
+  }, [agentId, projectId, reconnectAttempt, shell, sandboxed, shellId])
 
   return (
     <div className="relative flex-1 min-h-0 overflow-hidden flex flex-col">

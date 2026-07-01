@@ -3,7 +3,8 @@ import type { AgentConfig, McpServer, NetworkConfig, PolicyConfig, ProjectInfo, 
 import { X, Plus, Globe, FolderOpen, EyeOff, Eye, Layers, Terminal, Maximize2, Puzzle } from 'lucide-react'
 import { InfoTooltip } from '../InfoTooltip'
 import { ShellEditor } from '../ShellEditor'
-import { HighlightedTextarea, renderMarkdown } from '../../lib/markdown'
+import { renderMarkdown } from '../../lib/markdown'
+import { HighlightedTextarea } from '../HighlightedTextarea'
 import { ResizeHandle } from '../../lib/ResizeHandle'
 
 // The four egress postures, mirroring sandbox.NetworkMode on the backend.

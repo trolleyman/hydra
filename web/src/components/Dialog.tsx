@@ -1,4 +1,4 @@
-import React, { useEffect, type ReactNode } from 'react'
+import React, { useCallback, useEffect, type ReactNode } from 'react'
 import { AlertCircle, AlertTriangle, ArrowRight, Info, HelpCircle, Merge, Trash2, FolderSync, X, Clock, LoaderCircle } from 'lucide-react'
 import { useDialogStore } from '../stores/dialogStore'
 import { IconButton } from './IconButton'
@@ -8,6 +8,23 @@ import type { DialogDetails } from '../stores/dialogStore'
 export const Dialog: React.FC = () => {
   const { isOpen, title, message, type, variant, confirmLabel, secondaryLabel, details, showCancel, hide, onConfirm, onSecondary, onCancel } =
     useDialogStore()
+
+  // Memoized so the keydown effect can depend on them without re-subscribing every
+  // render, and so the effect references them after their declaration (not before).
+  const handleConfirm = useCallback(() => {
+    if (onConfirm) onConfirm()
+    hide()
+  }, [onConfirm, hide])
+
+  const handleSecondary = useCallback(() => {
+    if (onSecondary) onSecondary()
+    hide()
+  }, [onSecondary, hide])
+
+  const handleCancel = useCallback(() => {
+    if (onCancel) onCancel()
+    hide()
+  }, [onCancel, hide])
 
   // Handle Escape (cancel) and Enter (confirm) keyboard shortcuts
   useEffect(() => {
@@ -22,7 +39,7 @@ export const Dialog: React.FC = () => {
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [isOpen, onConfirm, onCancel])
+  }, [isOpen, handleCancel, handleConfirm])
 
   if (!isOpen) return null
 
@@ -38,21 +55,6 @@ export const Dialog: React.FC = () => {
       default:
         return <Info className="w-6 h-6 text-blue-500" />
     }
-  }
-
-  const handleConfirm = () => {
-    if (onConfirm) onConfirm()
-    hide()
-  }
-
-  const handleSecondary = () => {
-    if (onSecondary) onSecondary()
-    hide()
-  }
-
-  const handleCancel = () => {
-    if (onCancel) onCancel()
-    hide()
   }
 
   return (
