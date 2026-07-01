@@ -219,24 +219,36 @@ function TestRunnerCard({ runner, onRefresh }: { runner: TestRunResult; onRefres
   const cases = runner.cases ?? []
   const running = runner.status === 'running'
   const errored = runner.status === 'errored'
-  // A failing or errored runner reads as a failure: its log gets a red border and
-  // auto-opens (the error detail), mirroring a failed artifact card.
+  // A failing or errored runner reads as a failure: its log gets a red border.
   const failed = runner.status === 'failing' || errored
   const tone = verdictTone(runner.status)
 
   // Default collapsed (per design choice): every card opens via its chevron.
   const [collapsed, setCollapsed] = useState(true)
   const [showPassing, setShowPassing] = useState(false)
-  // A log exists while running (live `log`) or once settled (`log_url`). It's
-  // force-shown while running (the tail is the surface) and on failure (the error
-  // detail); otherwise it's behind the header toggle.
+  // A log exists while running (live `log`) or once settled (`log_url`).
   const hasLog = running || !!runner.log_url
   const [buildLogOpen, setBuildLogOpen] = useState(false)
-  // Only show the log when there's actually one to show: live while running,
-  // force-shown on failure (the error surface), else behind the toggle. A failing
-  // runner that captured no log (e.g. a JUnit report with no stdout) shows its
-  // cases instead of an empty "No output" terminal.
-  const logVisible = hasLog && (buildLogOpen || running || failed)
+  // A *build*/infra failure has no failing test cases to explain it: an exit-code-only
+  // runner (its "cases" are a synthetic exit-code line whose message is just the log
+  // tail), a runner that errored before producing a report, or a non-zero exit with an
+  // empty report. There the log is the only surface, so we open it by default. A
+  // "normal" test failure — one with actual failing cases — does NOT auto-open the log:
+  // the failing-case rows explain it and the log stays tucked behind the toggle. This
+  // is deliberately unlike artifact cards, which always force their log open on error;
+  // here the toggle can always hide it (see the always-present button below).
+  const buildFailure = failed && (runner.format === 'exit' || !cases.some((c) => c.status === 'failed'))
+  // Open the log once when a runner settles into a build failure. Guarded by a ref so
+  // it fires a single time per settle — the user can hide it again afterward without it
+  // springing back open, and a re-run (buildFailure flips false→true) re-arms it.
+  const autoOpenedRef = useRef(false)
+  useEffect(() => {
+    if (!buildFailure) { autoOpenedRef.current = false; return }
+    if (!autoOpenedRef.current) { autoOpenedRef.current = true; setBuildLogOpen(true) }
+  }, [buildFailure])
+  // Show the log live while running (the tail is the surface), otherwise whenever the
+  // toggle — or the build-failure auto-open above — has opened it.
+  const logVisible = hasLog && (buildLogOpen || running)
   // An `exit`-format runner has no structured test report: its "cases" are a
   // single synthetic "(command exited 0/non-zero)" derived from the exit code,
   // whose message is just the tail of the build log. When that log is on screen
@@ -267,9 +279,11 @@ function TestRunnerCard({ runner, onRefresh }: { runner: TestRunResult; onRefres
 
   const actions = (
     <>
-      {/* Show/hide the build log. Suppressed while running / failed, where it's
-          force-shown (nothing to toggle). Tinted blue while open. */}
-      {hasLog && !running && !failed && (
+      {/* Show/hide the build log. Available whenever there's a log to show — even
+          on failure, so an auto-opened build-failure log can be hidden again. Only
+          suppressed while running, where it streams live and there's nothing to
+          toggle. Tinted blue while open. */}
+      {hasLog && !running && (
         <button
           onClick={toggleBuildLog}
           title={buildLogOpen ? 'Hide build log' : 'Show build log'}
