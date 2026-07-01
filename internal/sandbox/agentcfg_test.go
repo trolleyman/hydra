@@ -66,7 +66,7 @@ func TestBuildClaudeConfigStripsNonAllowlistedMCP(t *testing.T) {
 	  "mcpServers": {"github": {"command": "gh-mcp"}, "evil": {"command": "curl|sh"}},
 	  "projects": {"/some/other": {"mcpServers": {"evil": {"command": "x"}, "playwright": {"command": "p"}}}}
 	}`)
-	data, err := BuildClaudeConfig(existing, "/work/tree", []string{"github", "playwright"})
+	data, err := BuildClaudeConfig(existing, "/work/tree", []string{"github", "playwright"}, "/usr/bin/hydra", "claude")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,6 +80,9 @@ func TestBuildClaudeConfigStripsNonAllowlistedMCP(t *testing.T) {
 	}
 	if _, ok := top["evil"]; ok {
 		t.Error("non-allow-listed user-scope server evil should be stripped")
+	}
+	if _, ok := top["hydra"]; !ok {
+		t.Error("hydra control server should always be injected")
 	}
 	projs := cfg["projects"].(map[string]any)
 	other := projs["/some/other"].(map[string]any)
@@ -99,7 +102,8 @@ func TestBuildClaudeConfigStripsNonAllowlistedMCP(t *testing.T) {
 
 func TestBuildClaudeConfigEmptyAllowlistStripsAll(t *testing.T) {
 	existing := []byte(`{"mcpServers": {"github": {"command": "x"}}}`)
-	data, err := BuildClaudeConfig(existing, "/work/tree", nil)
+	// No hydra injection (empty hydraBin) so this isolates the stripping behaviour.
+	data, err := BuildClaudeConfig(existing, "/work/tree", nil, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,6 +111,30 @@ func TestBuildClaudeConfigEmptyAllowlistStripsAll(t *testing.T) {
 	_ = json.Unmarshal(data, &cfg)
 	if servers, ok := cfg["mcpServers"].(map[string]any); ok && len(servers) != 0 {
 		t.Errorf("empty allow-list should strip every server, got %v", servers)
+	}
+}
+
+func TestBuildClaudeConfigInjectsHydraServer(t *testing.T) {
+	// Even with no existing servers and an empty allow-list, the hydra control
+	// server is injected with the mcp subcommand for the agent type.
+	data, err := BuildClaudeConfig(nil, "/work/tree", nil, "/usr/bin/hydra", "claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cfg map[string]any
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	hydra, ok := cfg["mcpServers"].(map[string]any)["hydra"].(map[string]any)
+	if !ok {
+		t.Fatalf("hydra server not injected: %v", cfg["mcpServers"])
+	}
+	if hydra["command"] != "/usr/bin/hydra" {
+		t.Errorf("hydra command = %v, want /usr/bin/hydra", hydra["command"])
+	}
+	args, _ := hydra["args"].([]any)
+	if len(args) != 2 || args[0] != "mcp" || args[1] != "claude" {
+		t.Errorf("hydra args = %v, want [mcp claude]", args)
 	}
 }
 

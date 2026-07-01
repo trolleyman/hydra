@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"braces.dev/errtrace"
+	"github.com/trolleyman/hydra/internal/gate"
 )
 
 // This file holds the per-agent configuration generators (moved from the old
@@ -119,8 +120,9 @@ func BuildClaudeSettings(existing []byte, hydraBin string, gateEnabled bool, mcp
 // settings, and strips any MCP server (user-scope or per-project) not on
 // mcpAllowed so non-allow-listed servers never spawn (a stdio MCP server is code
 // that runs the moment the session starts, so gating tool calls alone is too
-// late).
-func BuildClaudeConfig(existing []byte, worktreePath string, mcpAllowed []string) ([]byte, error) {
+// late). It also injects the Hydra control server (`hydraBin mcp <agentType>`)
+// AFTER stripping, so the agent always has the discover/request tools.
+func BuildClaudeConfig(existing []byte, worktreePath string, mcpAllowed []string, hydraBin, agentType string) ([]byte, error) {
 	cfg := make(map[string]interface{})
 	if len(existing) > 0 {
 		if err := json.Unmarshal(existing, &cfg); err != nil {
@@ -141,6 +143,20 @@ func BuildClaudeConfig(existing []byte, worktreePath string, mcpAllowed []string
 	cfg["projects"] = projects
 
 	stripMCPServers(cfg, mcpAllowed)
+
+	// Inject the Hydra control server after stripping so it is always present.
+	if hydraBin != "" {
+		servers, _ := cfg["mcpServers"].(map[string]interface{})
+		if servers == nil {
+			servers = make(map[string]interface{})
+		}
+		servers[gate.HydraControlServer] = map[string]interface{}{
+			"type":    "stdio",
+			"command": hydraBin,
+			"args":    []string{"mcp", agentType},
+		}
+		cfg["mcpServers"] = servers
+	}
 
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {

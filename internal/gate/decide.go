@@ -8,6 +8,11 @@ import (
 	"strings"
 )
 
+// HydraControlServer is the reserved name of the always-present MCP server Hydra
+// seeds into the agent's config (the discover/request-MCP-server tools). It is
+// auto-allowed by the gate and never stripped from the seeded config.
+const HydraControlServer = "hydra"
+
 // Decision is the gate's verdict for a single tool call.
 type Decision string
 
@@ -97,6 +102,10 @@ func Decide(p Policy, toolName string, toolInput map[string]any) Result {
 
 	// MCP tool calls: mcp__<server>__<tool> (plugins: mcp__plugin_<p>_<server>__).
 	if server, tool, ok := mcpServerTool(toolName); ok {
+		// Hydra's own control server (discover/request MCP servers) is always allowed.
+		if server == HydraControlServer {
+			return Result{Decision: Allow}
+		}
 		rw := ClassifyMCPTool(tool)
 		// Whole-server grant covers every tool.
 		if containsFold(p.MCPAllowed, server) {

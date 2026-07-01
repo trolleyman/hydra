@@ -24,6 +24,10 @@ const (
 	// EnvApprovalDir points at the per-head writable directory used for the
 	// "ask" request/decision round-trip.
 	EnvApprovalDir = "HYDRA_APPROVAL_DIR"
+	// EnvMCPCatalogPath points at the seeded read-only JSON list of host-configured
+	// MCP servers (name+source), used by the `hydra mcp` control server to tell the
+	// agent which servers it can request access to.
+	EnvMCPCatalogPath = "HYDRA_MCP_CATALOG_PATH"
 )
 
 // NotificationPolicyApproval is the status.json notification_type the gate sets

@@ -133,22 +133,36 @@ Goal: gate individual tools within an allowed-to-run server; show read/write.
       auto-allow-read toggle. Simulation seeds per-tool grant + an `mcp_tool` approval
       with a write badge.
 
-## Step 4 — Runtime MCP request flow (custom tool)
+## Step 4 — Runtime MCP request flow (custom tool) ✅
 
 Goal: let the inner agent discover + request a server mid-task, gated by a toast.
 
-- [ ] Ship an always-allow-listed Hydra MCP server (or reuse the gate file channel)
-      exposing `hydra__list_available_mcp_servers` and `hydra__request_mcp_server(name)`.
-      Restricted to servers the host has configured (never arbitrary).
-- [ ] `request_mcp_server` → `gate.WriteRequest` (`kind:"mcp"`, target=name) via the
-      approval dir (daemon socket is unreachable in-sandbox; the file channel works).
-- [ ] On approval: host appends to `mcp_allowed`, then **restarts the agent with
-      `--continue`** (kill session → re-seed with server un-stripped → `ResumeHead`).
-- [ ] Resume-time message telling the agent "MCP server `<name>` is now available"
-      (the requesting tool call is interrupted by the restart — design the outcome
-      message, not a synchronous return).
-- [ ] Persist granularity: "always allow" = append to whitelist (natural for MCP);
-      note one-shot means "this session only, stripped again next cold start".
+- [x] `internal/mcpserver` — a minimal MCP stdio server (newline-delimited JSON-RPC:
+      initialize/ping/tools/list/tools/call) exposing `list_available_mcp_servers` and
+      `request_mcp_server(name)`. Fully unit-tested at the JSON-RPC level.
+- [x] `hydra mcp <agentType>` CLI (`internal/cli/mcp.go`) wires it: the catalog comes
+      from a seeded read-only file (host `~/.claude.json` + project `.mcp.json` via
+      `sandbox.ListMCPServers`, minus already-allowed), and a request is restricted to
+      servers in that catalog — never arbitrary.
+- [x] `request_mcp_server` → `gate.WriteRequest` (`kind:"mcp"`, target=name) via the
+      approval dir, re-stamping the approval status while it polls the decision file —
+      so it surfaces as the normal approval toast and reuses the whole gate channel.
+- [x] Seeded as the always-present `hydra` MCP server (`BuildClaudeConfig` injects it
+      after stripping; `gate.Decide` auto-allows server `hydra`); catalog bound
+      read-only + `HYDRA_MCP_CATALOG_PATH`. Pre-prompt tells the agent about the tools.
+- [x] On approval the user's "always allow" appends to `mcp_allowed` (existing
+      `rememberApproval`); the tool tells the agent the server is available after a
+      resume (MCP config is launch-time; `ResumeHead` re-seeds).
+
+Deferred (documented, non-blocking):
+- [ ] AUTO-restart-with-`--continue` on approval (seamless reload). Currently the grant
+      persists and applies on the next resume, which the tool result explains; wiring
+      the daemon to kill+resume the head the moment the approval lands (so the agent
+      doesn't have to be manually resumed) is a follow-up. Needs care: the requesting
+      tool call is mid-poll when the restart fires.
+- [ ] End-to-end verification with a real Claude client (protocol version/handshake) —
+      the server is unit-tested but not exercised against Claude in this environment
+      (no bwrap/userns here).
 
 ---
 

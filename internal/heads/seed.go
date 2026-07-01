@@ -2,6 +2,7 @@ package heads
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -28,6 +29,10 @@ const SandboxHydraBinPath = "/tmp/hydra-internal"
 // bound to inside the sandbox (again under the reliable per-head /tmp mount). The
 // in-sandbox `hydra gate` hook reads it via gate.EnvPolicyPath.
 const GateSandboxPolicyPath = "/tmp/hydra-gate-policy.json"
+
+// mcpCatalogSandboxPath is where the read-only MCP-server catalog is bound inside
+// the sandbox (read by `hydra mcp` via gate.EnvMCPCatalogPath).
+const mcpCatalogSandboxPath = "/tmp/hydra-mcp-catalog.json"
 
 // seedResult holds the per-head sandbox inputs produced by seedHead.
 type seedResult struct {
@@ -144,8 +149,9 @@ func seedHead(projectRoot, id string, agentType sandbox.AgentType, worktreePath,
 			Upper: etcUpper,
 		})
 
+		hostClaudeJSON := readHostFile(filepath.Join(home, ".claude.json"))
 		claudeJSONHost := filepath.Join(cacheDir, "claude.json")
-		cfg, err := sandbox.BuildClaudeConfig(readHostFile(filepath.Join(home, ".claude.json")), worktreePath, mcpKeep)
+		cfg, err := sandbox.BuildClaudeConfig(hostClaudeJSON, worktreePath, mcpKeep, stableHydraBin, string(agentType))
 		if err != nil {
 			return nil, errtrace.Wrap(err)
 		}
@@ -153,6 +159,12 @@ func seedHead(projectRoot, id string, agentType sandbox.AgentType, worktreePath,
 			return nil, errtrace.Wrap(err)
 		}
 		res.Binds = append(res.Binds, sandbox.Bind{Source: claudeJSONHost, Target: path.Join(home, ".claude.json")})
+
+		// Seed the catalog of host-configured MCP servers so the `hydra mcp` control
+		// server can tell the agent which servers it may request access to.
+		if err := seedMCPCatalog(res, cacheDir, id, projectRoot, hostClaudeJSON); err != nil {
+			return nil, errtrace.Wrap(err)
+		}
 
 		// Seed the decision gate's inputs: a read-only policy.json the in-sandbox
 		// hook reads, and a per-head writable approval directory for the "ask"
@@ -236,6 +248,27 @@ func resolveGatePolicy(cfg config.Config, agentType string) gate.Policy {
 		AutoAllowReadMCP:   p.MCPAutoAllowRead != nil && *p.MCPAutoAllowRead,
 		WebFetchAllowHosts: p.WebFetchAllowHosts,
 	}
+}
+
+// seedMCPCatalog writes the read-only catalog of host-configured MCP servers
+// (host ~/.claude.json + project .mcp.json) into the sandbox and points
+// gate.EnvMCPCatalogPath at it, so the `hydra mcp` control server can offer them
+// for the agent to request. Best-effort: an empty catalog just means the agent
+// has nothing extra to request.
+func seedMCPCatalog(res *seedResult, cacheDir, id, projectRoot string, hostClaudeJSON []byte) error {
+	mcpJSON := readHostFile(filepath.Join(projectRoot, ".mcp.json"))
+	catalog := sandbox.ListMCPServers(hostClaudeJSON, mcpJSON)
+	data, err := json.Marshal(catalog)
+	if err != nil {
+		return errtrace.Wrap(err)
+	}
+	catalogHost := filepath.Join(cacheDir, id+"-mcp-catalog.json")
+	if err := os.WriteFile(catalogHost, data, 0644); err != nil {
+		return errtrace.Wrap(err)
+	}
+	res.Binds = append(res.Binds, sandbox.Bind{Source: catalogHost, Target: mcpCatalogSandboxPath, ReadOnly: true})
+	res.Env = append(res.Env, gate.EnvMCPCatalogPath+"="+mcpCatalogSandboxPath)
+	return nil
 }
 
 // mcpKeepSet returns the MCP servers to keep in the seeded config: the
