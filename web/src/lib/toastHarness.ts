@@ -1,4 +1,4 @@
-import { useToastStore, type ToastType, type ApprovalToastData } from '../stores/toastStore'
+import { useToastStore, type ToastType, type ApprovalToastData, type AgentTransitionToastData } from '../stores/toastStore'
 import { StorageKeys } from './storage'
 
 // Spec for a harness-driven toast. Mirrors the real toast shape but with action
@@ -12,6 +12,8 @@ interface HarnessToastSpec {
   actions?: { label: string; variant?: 'primary' | 'danger' }[]
   // When set, the rich security-gate approval card is rendered.
   approval?: ApprovalToastData
+  // When set, the "<agent> transitioned to <status>" row is rendered.
+  agentTransition?: AgentTransitionToastData
 }
 
 // installToastHarness exposes a tiny hook on window for driving the toast store
@@ -39,6 +41,7 @@ export function installToastHarness() {
         duration: spec.duration ?? 0,
         actions: spec.actions?.map((a) => ({ label: a.label, variant: a.variant, onClick: () => {} })),
         approval: spec.approval,
+        agentTransition: spec.agentTransition,
       }),
   }
 }

@@ -1,5 +1,4 @@
 import { useEffect, useRef } from 'react'
-import { useNavigate } from '@tanstack/react-router'
 import { useAgentStore } from '../stores/agentStore'
 import { useProjectStore } from '../stores/projectStore'
 import { useToastStore } from '../stores/toastStore'
@@ -33,7 +32,6 @@ const FINISHED_TOAST_MS = 8_000
 // poll; a first-seen agent never toasts (so a page load / project switch where
 // an agent is *already* needs_input/finished stays quiet).
 export function useAgentNotifications(currentProjectId: string | null) {
-  const navigate = useNavigate()
   const agents = useAgentStore((s) => s.agents)
   const agentsProjectId = useAgentStore((s) => s.agentsProjectId)
   const projects = useProjectStore((s) => s.projects)
@@ -74,35 +72,17 @@ export function useAgentNotifications(currentProjectId: string | null) {
       const name = agent.title || agent.id
       if (status === 'needs_input' && notifType !== 'policy_approval') {
         toast.show({
-          message: `"${name}" needs input`,
+          message: `"${name}" transitioned to needs input`,
           type: 'warning',
           duration: NEEDS_INPUT_TOAST_MS,
-          actions: [
-            {
-              label: 'View',
-              variant: 'primary',
-              onClick: (toastId) => {
-                navigate({ to: '/project/$projectId/agent/$agentId', params: { projectId: currentProjectId, agentId: agent.id } })
-                toast.dismiss(toastId)
-              },
-            },
-          ],
+          agentTransition: { agentName: name, agentId: agent.id, projectId: currentProjectId, status },
         })
       } else if (status === 'finished') {
         toast.show({
-          message: `"${name}" finished`,
+          message: `"${name}" transitioned to finished`,
           type: 'success',
           duration: FINISHED_TOAST_MS,
-          actions: [
-            {
-              label: 'View',
-              variant: 'primary',
-              onClick: (toastId) => {
-                navigate({ to: '/project/$projectId/agent/$agentId', params: { projectId: currentProjectId, agentId: agent.id } })
-                toast.dismiss(toastId)
-              },
-            },
-          ],
+          agentTransition: { agentName: name, agentId: agent.id, projectId: currentProjectId, status },
         })
       }
     }
@@ -204,6 +184,8 @@ export function useAgentNotifications(currentProjectId: string | null) {
               kind: a.kind,
               target: a.target,
               agentName,
+              agentId,
+              projectId: currentProjectId,
               rw: a.rw,
               reason: a.reason,
               url: a.url,
@@ -219,7 +201,7 @@ export function useAgentNotifications(currentProjectId: string | null) {
         }
       })()
     }
-  }, [agents, agentsProjectId, currentProjectId, navigate])
+  }, [agents, agentsProjectId, currentProjectId])
 
   // Cross-project needs-input toasts. The agent list is only loaded for the
   // selected project (handled agent-by-agent above), but the daemon broadcasts
@@ -256,20 +238,12 @@ export function useAgentNotifications(currentProjectId: string | null) {
           toast.show({
             // One toast per agent (no plural copy); the key dedups a re-fetch.
             key: `bg-needs-input:${a.id}`,
-            message: `Agent "${agentName}" in project "${projectName}" needs input`,
+            message: `Agent "${agentName}" in project "${projectName}" transitioned to needs input`,
             type: 'warning',
             duration: NEEDS_INPUT_TOAST_MS,
-            actions: [
-              {
-                label: 'View',
-                variant: 'primary',
-                onClick: (toastId) => {
-                  useProjectStore.getState().setSelectedProjectId(pid)
-                  navigate({ to: '/project/$projectId/agent/$agentId', params: { projectId: pid, agentId: a.id } })
-                  toast.dismiss(toastId)
-                },
-              },
-            ],
+            // Cross-project: the label still links through (its onClick selects the
+            // project first), and the project name is shown as a muted suffix.
+            agentTransition: { agentName, agentId: a.id, projectId: pid, status: 'needs_input', projectName },
           })
         }
         // Record the current blocked set so an agent that unblocks then blocks
@@ -278,5 +252,5 @@ export function useAgentNotifications(currentProjectId: string | null) {
       })()
     }
     lastNeedsInput.current = next
-  }, [projects, currentProjectId, navigate])
+  }, [projects, currentProjectId])
 }

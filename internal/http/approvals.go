@@ -160,8 +160,8 @@ func (s *Server) DecideAgentApproval(ctx context.Context, request api.DecideAgen
 
 // rememberApproval appends an approved MCP server / WebFetch host to the trusted
 // PROJECT config's per-agent allow-list (never the merged user/default config),
-// so it takes effect on the head's next launch. A "bash" approval (e.g. git push)
-// is one-shot and not persisted.
+// so it takes effect on the head's next launch. Any other kind is one-shot and
+// not persisted (see the default case below).
 func rememberApproval(projectRoot, agentType, kind, target string) error {
 	if target == "" {
 		return nil

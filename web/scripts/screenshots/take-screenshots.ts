@@ -139,6 +139,7 @@ function sectionFor(name: string): string {
   if (name.startsWith('repository')) return 'repository'
   if (name.startsWith('artifact')) return 'artifacts'
   if (name.startsWith('archived')) return 'archived'
+  if (name.startsWith('agent-approvals')) return 'approvals'
   if (name.startsWith('agent-')) return 'agent'
   if (name.startsWith('spawn')) return 'spawn'
   if (name.startsWith('settings') || name === 'services-warning') return 'settings'
@@ -606,17 +607,26 @@ try {
           kind: string
           target: string
           agentName?: string | null
+          agentId?: string | null
+          projectId?: string | null
           rw?: string | null
           reason?: string | null
           url?: string | null
           argsPreview?: string | null
           crossProject?: string | null
         }
+        // When set, the "<agent> transitioned to <status>" row is rendered.
+        agentTransition?: {
+          agentName: string
+          agentId: string
+          projectId: string
+          status: string
+          projectName?: string | null
+        }
       }
       // Restricts this page to a subset of themes. Defaults to both light+dark;
       // set e.g. ['dark'] to capture only the dark render (used where a shot only
-      // needs to exist once — e.g. the MCP approval card lives solely in
-      // agent-approvals-dark.png).
+      // needs to exist once).
       themes?: readonly ('light' | 'dark')[]
     }[] = [
       { name: 'home', path: '/' },
@@ -637,32 +647,37 @@ try {
       // never produces, so they're rendered deterministically via the toast
       // harness over the settings page (a route that loads no project agents, so
       // nothing else pops a toast). Messages mirror the real ones the hook emits.
-      // 1. An agent crossed into needs_input — a "View" jumps to it; lingers 12s.
+      // 1. An agent crossed into needs_input — "<bot> <agent> transitioned to
+      // <status pill>", the agent label linking to it; lingers 12s.
       {
         name: 'toast-needs-input',
         path: '/settings',
         toast: {
-          message: '"Migrate auth providers to OAuth" needs input',
+          message: '"Migrate auth providers to OAuth" transitioned to needs input',
           type: 'warning',
-          actions: [{ label: 'View', variant: 'primary' }],
+          agentTransition: { agentName: 'Migrate auth providers to OAuth', agentId: 'agent-2', projectId: 'sim-project', status: 'needs_input' },
         },
       },
-      // 2. An agent finished — also a "View" button; auto-dismisses at 8s.
+      // 2. An agent finished — same row, green "finished" pill; auto-dismisses at 8s.
       {
         name: 'toast-finished',
         path: '/settings',
         toast: {
-          message: '"Add renameable agent titles" finished',
+          message: '"Add renameable agent titles" transitioned to finished',
           type: 'success',
-          actions: [{ label: 'View', variant: 'primary' }],
+          agentTransition: { agentName: 'Add renameable agent titles', agentId: 'agent-md', projectId: 'sim-project', status: 'finished' },
         },
       },
-      // 3. Security-gate approval cards (the rich ApprovalToast): persistent, with
-      // Allow once / Always allow / Deny; dismissing denies. One shot per gated
-      // kind so the design of each is documented.
+      // 3. Security-gate approval cards (the rich ApprovalCard): persistent, with
+      // Allow once / Always allow / Deny; dismissing denies. These are the ONLY
+      // shots that render an approval card — the simulated agents never park a
+      // live approval (see simulation.go), so the global toasts don't leak onto
+      // every screen. One `agent-approvals-*` shot per gated kind documents each
+      // design, over /settings (a route that loads no project agents). agentId +
+      // projectId point the clickable agent subtitle at a real simulated agent.
       // 3a. Whole MCP server.
       {
-        name: 'toast-approval-mcp',
+        name: 'agent-approvals-mcp',
         path: '/settings',
         toast: {
           message: '',
@@ -672,12 +687,13 @@ try {
             { label: 'Always allow', variant: 'primary' },
             { label: 'Deny', variant: 'danger' },
           ],
-          approval: { kind: 'mcp', target: 'linear', agentName: 'Wire up the GitHub MCP server', reason: "Server isn't on the project allow-list." },
+          approval: { kind: 'mcp', target: 'linear', agentName: 'Wire up the GitHub MCP server', agentId: 'agent-approval', projectId: 'sim-project' },
         },
       },
-      // 3b. A specific write tool on an already-trusted server (args previewed).
+      // 3b. A specific write tool on an already-trusted server — amber WRITE badge,
+      // arguments shown as highlighted JSON in the code box.
       {
-        name: 'toast-approval-tool-write',
+        name: 'agent-approvals-tool-write',
         path: '/settings',
         toast: {
           message: '',
@@ -687,12 +703,12 @@ try {
             { label: 'Always allow', variant: 'primary' },
             { label: 'Deny', variant: 'danger' },
           ],
-          approval: { kind: 'mcp_tool', target: 'linear__create_issue', rw: 'write', agentName: 'Triage inbound bugs', argsPreview: '{"team":"Core","title":"Login 500s on staging"}', reason: 'Write tool — creates a new issue in linear.' },
+          approval: { kind: 'mcp_tool', target: 'linear__create_issue', rw: 'write', agentName: 'Triage inbound bugs', agentId: 'agent-approval', projectId: 'sim-project', argsPreview: '{"team":"Core","title":"Login 500s on staging","priority":2,"labels":["bug","regression"]}' },
         },
       },
       // 3c. A read-only tool call — quieter, teal READ badge.
       {
-        name: 'toast-approval-tool-read',
+        name: 'agent-approvals-tool-read',
         path: '/settings',
         toast: {
           message: '',
@@ -702,12 +718,13 @@ try {
             { label: 'Always allow', variant: 'primary' },
             { label: 'Deny', variant: 'danger' },
           ],
-          approval: { kind: 'mcp_tool', target: 'linear__search_issues', rw: 'read', agentName: 'Summarise this sprint', argsPreview: '{"state":"Done","cycle":42}', reason: 'Read-only — no data is modified.' },
+          approval: { kind: 'mcp_tool', target: 'linear__search_issues', rw: 'read', agentName: 'Summarise this sprint', agentId: 'agent-approval', projectId: 'sim-project', argsPreview: '{"state":"Done","cycle":42}' },
         },
       },
-      // 3d. An outbound WebFetch — GET verb + full URL previewed.
+      // 3d. An outbound WebFetch — NETWORK badge + URL, and the caption spelling
+      // out that allowing trusts the whole host (every request, including POSTs).
       {
-        name: 'toast-approval-webfetch',
+        name: 'agent-approvals-webfetch',
         path: '/settings',
         toast: {
           message: '',
@@ -717,22 +734,24 @@ try {
             { label: 'Always allow', variant: 'primary' },
             { label: 'Deny', variant: 'danger' },
           ],
-          approval: { kind: 'webfetch', target: 'docs.linear.app', agentName: 'Publish the changelog', url: 'https://docs.linear.app/api/changelog', reason: "Host isn't on the network allow-list. Allowing trusts the whole host, not just this URL." },
+          approval: { kind: 'webfetch', target: 'docs.linear.app', agentName: 'Publish the changelog', agentId: 'agent-approval', projectId: 'sim-project', url: 'https://docs.linear.app/api/changelog' },
         },
       },
-      // 4. Cross-project approval: an amber "running in another project" banner, and
-      // no "Always allow" — cross-project access is one-shot by default.
+      // 3e. An agent running in ANOTHER project: an amber "running in another
+      // project" banner. Always allow is still offered (a remembered grant is
+      // scoped to the project the approval resolves in).
       {
-        name: 'toast-cross-project',
+        name: 'agent-approvals-another-project',
         path: '/settings',
         toast: {
           message: '',
           type: 'warning',
           actions: [
             { label: 'Allow once', variant: 'primary' },
+            { label: 'Always allow', variant: 'primary' },
             { label: 'Deny', variant: 'danger' },
           ],
-          approval: { kind: 'mcp', target: 'github', agentName: 'Reconcile Stripe events', crossProject: 'payments-api', reason: 'Cross-project access — grant for this run only.' },
+          approval: { kind: 'mcp', target: 'github', agentName: 'Reconcile Stripe events', crossProject: 'payments-api' },
         },
       },
       // The keyboard-shortcuts help overlay, opened the way a user does — by
@@ -1130,13 +1149,9 @@ try {
       // ListAgents so the detail page renders from the store (the one-shot getAgent
       // never resolves in simulation); stubUpload serves the thumbnails.
       { name: 'agent-prompt-attachments', path: '/project/sim-project/agent/agent-2', viewportOnly: true, stubUpload: 'web/public/android-chrome-512x512.png' },
-      // The security-gate approval card: agent-approval sits in a policy_approval
-      // wait (simulation.go gives it notification_type=policy_approval + two parked
-      // requests via simApprovals), so AgentDetail's ApprovalCard renders the
-      // "wants to use MCP server / fetch" rows with Allow once / Always allow / Deny.
-      // Viewport-only to focus on the card under the header rather than the terminal.
-      // Captured in both themes (the approval card has distinct light/dark styling).
-      { name: 'agent-approvals', path: '/project/sim-project/agent/agent-approval', viewportOnly: true },
+      // (The security-gate approval cards are documented as the harness-driven
+      // agent-approvals-* shots above — the simulated agent no longer parks a live
+      // approval, so the cards don't leak onto every simulated page.)
       { name: 'nested-folders', path: '/project/sim-project/agent/agent-3', scrollTo: 'Changes' },
       // The diff viewer's settings popup, opened from the gear in the sticky
       // "Changes" toolbar: the file-list view modes, the diff options (side-by-
