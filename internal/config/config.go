@@ -1682,12 +1682,32 @@ func isManagedCommentedAssign(line string, keys map[string]bool) bool {
 	return false
 }
 
-// userComments keeps only the user's own comments, dropping Hydra-generated doc
-// and commented-default lines (which are regenerated) and any blank lines.
+// managedExampleLineSet holds every commented-out example line Hydra emits for an
+// empty artifacts/services/tests section (e.g. "# [[services]]", `# name = "emu-pool"`).
+// These look like ordinary user comments — the "# key = value" lines use keys that
+// aren't in the managed-key set and "# [[services]]" is not a doc line — so without
+// this set userComments would preserve them. Because the example precedes the next
+// real array table, it would be swallowed into that table's leading comments and
+// re-emitted next to a freshly generated example, duplicating the block on every
+// save without bound. Recognising them here lets them be dropped and regenerated
+// like any other managed default.
+var managedExampleLineSet = func() map[string]bool {
+	m := map[string]bool{}
+	for _, block := range [][]string{artifactsExampleLines(), servicesExampleLines(), testsExampleLines()} {
+		for _, ln := range block {
+			m[strings.TrimSpace(ln)] = true
+		}
+	}
+	return m
+}()
+
+// userComments keeps only the user's own comments, dropping Hydra-generated doc,
+// commented-default, and commented-example lines (all regenerated) and any blank
+// lines.
 func userComments(comments []string, keys map[string]bool) []string {
 	var out []string
 	for _, c := range comments {
-		if strings.TrimSpace(c) == "" || isManagedDoc(c) || isManagedCommentedAssign(c, keys) || isManagedCommentedAgentHeader(c) {
+		if t := strings.TrimSpace(c); t == "" || isManagedDoc(c) || isManagedCommentedAssign(c, keys) || isManagedCommentedAgentHeader(c) || managedExampleLineSet[t] {
 			continue
 		}
 		out = append(out, c)

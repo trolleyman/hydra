@@ -184,6 +184,35 @@ host = true
 	}
 }
 
+// TestEmptySectionExampleDoesNotAccumulate guards the save-loop bug where the
+// commented-out example for an EMPTY section (here [[services]]) sat in the gap
+// before the next real array table ([[tests]]), got swallowed into that table's
+// leading comments as if it were user-written, and was re-emitted next to a
+// freshly generated example — duplicating the block on every save.
+func TestEmptySectionExampleDoesNotAccumulate(t *testing.T) {
+	countHeaders := func(text, header string) int {
+		n := 0
+		for _, ln := range strings.Split(text, "\n") {
+			if strings.TrimSpace(ln) == header {
+				n++
+			}
+		}
+		return n
+	}
+	// No services (so the example is emitted) followed by a real [[tests]] block.
+	existing := strings.Join(servicesExampleLines(), "\n") + "\n" +
+		"[[tests]]\nname = \"go\"\ncommand = \"go test ./...\"\n"
+	first := renderConfig([]byte(existing), Config{})
+	second := renderConfig([]byte(first), Config{})
+	if got := countHeaders(second, "# [[services]]"); got != 1 {
+		t.Fatalf("services example accumulated across saves: got %d copies, want 1\n%s", got, second)
+	}
+	// The example must remain a valid, uncomment-able template.
+	if countHeaders(second, "# name = \"emu-pool\"") != 1 {
+		t.Fatalf("services example malformed after save:\n%s", second)
+	}
+}
+
 // TestServicesAuthoritativeDelete checks an explicit empty list clears services.
 func TestServicesAuthoritativeDelete(t *testing.T) {
 	src := `[[services]]
