@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState, useCallback, type ReactNode } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import hljs from '../lib/hljs'
+import { ensureLanguage } from '../lib/hljsLazy'
+import { getLanguage } from '../lib/language'
 import { api } from '../stores/apiClient'
 import { formatError } from '../api/format_error'
 import { ApiError } from '../api'
@@ -114,27 +116,6 @@ function ancestorsOf(filePath: string): string[] {
 }
 
 // ── Syntax highlighting + markdown ──────────────────────────────────────────────
-
-const EXT_LANG_MAP: Record<string, string> = {
-  ts: 'typescript', tsx: 'typescript', js: 'javascript', jsx: 'javascript',
-  go: 'go', rs: 'rust', py: 'python', rb: 'ruby', java: 'java',
-  c: 'c', cpp: 'cpp', h: 'cpp', cs: 'csharp', php: 'php',
-  css: 'css', scss: 'scss', less: 'less', html: 'html', xml: 'xml',
-  json: 'json', yaml: 'yaml', yml: 'yaml', toml: 'toml',
-  sh: 'bash', bash: 'bash', zsh: 'bash', md: 'markdown', sql: 'sql',
-  kt: 'kotlin', swift: 'swift', dart: 'dart', r: 'r',
-  dockerfile: 'dockerfile', makefile: 'makefile',
-}
-
-function getLanguage(filePath: string): string {
-  const filename = filePath.split('/').pop() ?? filePath
-  const lower = filename.toLowerCase()
-  if (lower === 'dockerfile') return 'dockerfile'
-  if (lower === 'makefile') return 'makefile'
-  if (lower === 'go.mod' || lower === 'go.sum') return 'plaintext'
-  const ext = lower.split('.').pop() ?? ''
-  return EXT_LANG_MAP[ext] ?? 'plaintext'
-}
 
 function isMarkdown(filePath: string): boolean {
   return /\.(md|markdown)$/i.test(filePath)
@@ -647,10 +628,21 @@ function TreeRow({
 // ── File content pane ───────────────────────────────────────────────────────────
 
 function CodeView({ content, lang, wrap }: { content: string; lang: string; wrap: boolean }) {
+  // Fetch a not-yet-bundled grammar on demand (the diff viewer does the same via
+  // its worker), then re-highlight: hasGrammar flips false→true once it lands.
+  const [, bumpLoaded] = useState(0)
+  useEffect(() => {
+    if (lang === 'plaintext' || hljs.getLanguage(lang)) return
+    let cancelled = false
+    ensureLanguage(lang).then((ok) => { if (ok && !cancelled) bumpLoaded((n) => n + 1) })
+    return () => { cancelled = true }
+  }, [lang])
+
+  const hasGrammar = lang !== 'plaintext' && !!hljs.getLanguage(lang)
   const lines = useMemo(() => {
     let highlighted: string
     try {
-      highlighted = lang !== 'plaintext' && hljs.getLanguage(lang)
+      highlighted = hasGrammar
         ? hljs.highlight(content, { language: lang }).value
         : escapeHtml(content)
     } catch {
@@ -661,7 +653,7 @@ function CodeView({ content, lang, wrap }: { content: string; lang: string; wrap
     // count matches the file's real line count.
     if (split.length > 1 && split[split.length - 1] === '' && content.endsWith('\n')) split.pop()
     return split
-  }, [content, lang])
+  }, [content, lang, hasGrammar])
 
   const gutterWidth = `${Math.max(2, String(lines.length).length)}ch`
 

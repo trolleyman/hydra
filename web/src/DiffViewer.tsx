@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState, useCallback, Fragment, useMemo, memo, type CSSProperties } from 'react'
 import { highlightLines } from './lib/highlightCore'
 import { highlightSides } from './lib/highlightClient'
+import { getLanguage } from './lib/language'
+import hljs from './lib/hljs'
+import { ensureLanguage } from './lib/hljsLazy'
 import { api } from './stores/apiClient'
 import { formatError, apiErrorBody } from './api/format_error'
 import type { AgentResponse, CommitInfo, DiffFile, DiffHunk, DiffLine, DiffResponse } from './api'
@@ -28,26 +31,6 @@ import { StorageKeys, readLocal, writeLocal } from './lib/storage'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from './lib/agentViewPrefs'
 
 // ── Syntax highlighting helpers ───────────────────────────────────────────────
-
-const EXT_LANG_MAP: Record<string, string> = {
-  ts: 'typescript', tsx: 'typescript', js: 'javascript', jsx: 'javascript',
-  go: 'go', rs: 'rust', py: 'python', rb: 'ruby', java: 'java',
-  c: 'c', cpp: 'cpp', h: 'cpp', cs: 'csharp', php: 'php',
-  css: 'css', scss: 'scss', less: 'less', html: 'html', xml: 'xml',
-  json: 'json', yaml: 'yaml', yml: 'yaml', toml: 'toml',
-  sh: 'bash', bash: 'bash', zsh: 'bash', md: 'markdown', sql: 'sql',
-  kt: 'kotlin', swift: 'swift', dart: 'dart', r: 'r',
-  dockerfile: 'dockerfile', makefile: 'makefile',
-}
-
-function getLanguage(filePath: string): string {
-  const filename = filePath.split('/').pop() ?? filePath
-  const lower = filename.toLowerCase()
-  if (lower === 'dockerfile') return 'dockerfile'
-  if (lower === 'makefile') return 'makefile'
-  const ext = lower.split('.').pop() ?? ''
-  return EXT_LANG_MAP[ext] ?? 'plaintext'
-}
 
 // ── Diff line building helpers ────────────────────────────────────────────────
 
@@ -706,9 +689,21 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onCo
   // so they paint as plain text and colourise from the Web Worker pool — the
   // hljs work runs fully off the UI thread. Whole-file input keeps the
   // highlighting correct regardless of which path runs.
+  // Fetch a not-yet-bundled grammar on demand (the worker path does this itself);
+  // langReady flips false→true once it lands, re-running the sync highlight below.
+  const [, bumpGrammar] = useState(0)
+  useEffect(() => {
+    if (lang === 'plaintext' || hljs.getLanguage(lang)) return
+    let cancelled = false
+    ensureLanguage(lang).then((ok) => { if (ok && !cancelled) bumpGrammar((n) => n + 1) })
+    return () => { cancelled = true }
+  }, [lang])
+  const langReady = lang === 'plaintext' || !!hljs.getLanguage(lang)
   const syncHighlight = useMemo(
-    () => (highlightSource && highlightSource.length <= HL_SYNC_MAX ? buildHighlightMaps(highlightSource, lang) : null),
-    [highlightSource, lang],
+    () => (highlightSource && highlightSource.length <= HL_SYNC_MAX
+      ? buildHighlightMaps(highlightSource, langReady ? lang : 'plaintext')
+      : null),
+    [highlightSource, lang, langReady],
   )
   const [asyncHighlight, setAsyncHighlight] = useState(EMPTY_HIGHLIGHT)
   useEffect(() => {
