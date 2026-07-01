@@ -71,15 +71,23 @@ export function TestsPanel({ projectId, agentId, headRef, includeUncommitted, re
     }
   }, [])
 
+  // Reset to "connecting" whenever the connection parameters change (during
+  // render, before the socket effect below reopens), rather than inside that effect.
+  const connKey = `${projectId}\n${agentId}\n${headRef}\n${includeUncommitted}\n${refreshKey}`
+  const [prevConnKey, setPrevConnKey] = useState(connKey)
+  if (prevConnKey !== connKey) { setPrevConnKey(connKey); setMode('connecting') }
+
   // Primary path: stream updates over a WebSocket so progress/log/verdict update
   // instantly. Falls back to polling (below) if the socket fails to open or drops.
   useEffect(() => {
     let cancelled = false
-    setMode('connecting')
     let ws: WebSocket
     try {
       ws = new WebSocket(testsWsUrl(projectId, agentId, headRef, includeUncommitted))
     } catch {
+      // The WebSocket constructor threw synchronously (e.g. a malformed URL) —
+      // fall back to polling. This error-path setState can't be hoisted out.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setMode('poll')
       return
     }
@@ -421,11 +429,12 @@ function TestLog({ runner, failed }: { runner: TestRunResult; failed: boolean })
   const url = runner.log_url
   const [fetched, setFetched] = useState<ArtifactLogLine[] | null>(null)
 
+  // Drop the fetched log while the runner is running (or has no persisted url) —
+  // during render, so the next settle shows "Loading…" not the previous output.
+  if ((running || !url) && fetched !== null) setFetched(null)
+
   useEffect(() => {
-    if (running || !url) {
-      setFetched(null)
-      return
-    }
+    if (running || !url) return
     let cancelled = false
     fetch(url)
       .then((r) => (r.ok ? r.json() : null))

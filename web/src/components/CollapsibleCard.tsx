@@ -80,6 +80,10 @@ export function CollapsibleCard({ icon, name, status, actions, collapsed, onTogg
   const [mounted, setMounted] = useState(!collapsed)
   useEffect(() => {
     if (!collapsed) {
+      // Mount deliberately in an effect (after a paint at height 0), NOT during
+      // render, so the 0→height glide can play; mounting synchronously would jump
+      // straight to the measured height. This post-paint setState is intentional.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setMounted(true)
       return
     }

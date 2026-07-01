@@ -382,9 +382,13 @@ function DiffCanvas({ left, right }: { left: string; right: string }) {
   const ref = useRef<HTMLCanvasElement>(null)
   const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading')
 
+  // Reset to the loading state when either side changes (during render, before the
+  // re-diff effect below runs), so a stale overlay never lingers over the new pair.
+  const [prevSrc, setPrevSrc] = useState(`${left}\n${right}`)
+  if (prevSrc !== `${left}\n${right}`) { setPrevSrc(`${left}\n${right}`); setState('loading') }
+
   useEffect(() => {
     let cancelled = false
-    setState('loading')
     Promise.all([loadImage(left), loadImage(right)])
       .then(([la, ra]) => {
         if (cancelled) return

@@ -82,7 +82,6 @@ function AgentTypePicker({
 
   useEffect(() => {
     if (!open) return
-    place()
     function handleClick(e: MouseEvent) {
       if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
     }
@@ -108,7 +107,9 @@ function AgentTypePicker({
         type="button"
         title={`Agent: ${active.label}`}
         aria-label={`Agent type: ${active.label}`}
-        onClick={() => setOpen((o) => !o)}
+        // Measure the trigger before opening so the fixed-position menu lands in
+        // the right spot on its first paint; scroll/resize keep it pinned after.
+        onClick={() => { if (!open) place(); setOpen((o) => !o) }}
         className={`flex items-center justify-center rounded-full border transition-colors cursor-pointer ${trigger} ${active.color} ${
           open
             ? 'bg-gray-100 dark:bg-gray-700 border-gray-300 dark:border-gray-600'

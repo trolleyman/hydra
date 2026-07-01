@@ -786,8 +786,10 @@ function FileNotFound({ path, refStr }: { path: string; refStr: string }) {
 // to the full, wrapped path; tapping again collapses.
 function FilePathLabel({ path }: { path: string }) {
   const [expanded, setExpanded] = useState(false)
-  // Collapse again whenever the displayed file changes.
-  useEffect(() => { setExpanded(false) }, [path])
+  // Collapse again whenever the displayed file changes (adjusted during render so
+  // the path never flashes expanded against the new file).
+  const [prevPath, setPrevPath] = useState(path)
+  if (prevPath !== path) { setPrevPath(path); setExpanded(false) }
 
   const slash = path.lastIndexOf('/')
   const dir = slash >= 0 ? path.slice(0, slash + 1) : ''
