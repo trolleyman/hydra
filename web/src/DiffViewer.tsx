@@ -806,7 +806,11 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onCo
           bodyOpen/bodyMounted. headless (the repo one-file view) is bare, always
           open, and never animates. */}
       <div
-        className={headless ? '' : 'overflow-hidden rounded-b-lg transition-[height] duration-200 ease-out motion-reduce:transition-none'}
+        // `isolate` keeps this body's positioned content (an in-tree image renders
+        // as `absolute inset-0` via ImageDiffView) in its own stacking context so
+        // it can't paint over the sticky file/section/changes bars above it — see
+        // the matching note in CollapsibleCard.
+        className={headless ? 'isolate' : 'isolate overflow-hidden rounded-b-lg transition-[height] duration-200 ease-out motion-reduce:transition-none'}
         style={headless ? undefined : { height: bodyOpen ? bodyH : 0 }}
         aria-hidden={headless ? undefined : !bodyOpen}
       >
