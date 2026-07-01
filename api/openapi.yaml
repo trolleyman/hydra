@@ -2138,6 +2138,9 @@ components:
           type: integer
         skipped:
           type: integer
+        warnings:
+          type: integer
+          description: Non-failing diagnostics (e.g. eslint warnings). Informational only — never part of the merge gate. Shown in the long chip / panel, not the short sidebar chip.
         duration_ms:
           type: integer
           format: int64
@@ -2848,8 +2851,8 @@ components:
 
     TestCaseStatus:
       type: string
-      enum: [passed, failed, skipped]
-      x-enum-varnames: [TestCasePassed, TestCaseFailed, TestCaseSkipped]
+      enum: [passed, failed, skipped, warning]
+      x-enum-varnames: [TestCasePassed, TestCaseFailed, TestCaseSkipped, TestCaseWarning]
 
     TestCase:
       type: object
@@ -2885,6 +2888,9 @@ components:
           type: integer
         skipped:
           type: integer
+        warnings:
+          type: integer
+          description: Non-failing diagnostics (e.g. eslint warnings). Informational only — never part of the merge gate.
         duration_ms:
           type: integer
           format: int64

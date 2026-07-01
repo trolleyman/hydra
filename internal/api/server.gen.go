@@ -162,6 +162,7 @@ const (
 	TestCaseFailed  TestCaseStatus = "failed"
 	TestCasePassed  TestCaseStatus = "passed"
 	TestCaseSkipped TestCaseStatus = "skipped"
+	TestCaseWarning TestCaseStatus = "warning"
 )
 
 // Defines values for TestStatus.
@@ -1111,6 +1112,9 @@ type TestRunResult struct {
 	// Status running = a run is in flight; passing/failing/errored = settled verdict; stale = a cached verdict exists but predates the current commit; none = no tests configured or never run. (A per-runner TestRunResult only ever uses running/passing/failing/errored; stale/none are head-summary states.)
 	Status TestStatus `json:"status"`
 	Total  *int       `json:"total,omitempty"`
+
+	// Warnings Non-failing diagnostics (e.g. eslint warnings). Informational only — never part of the merge gate.
+	Warnings *int `json:"warnings,omitempty"`
 }
 
 // TestScript A per-project test-runner command whose pass/fail verdict gates the merge button ([[tests]] in config.toml, PLAN
@@ -1158,6 +1162,9 @@ type TestSummary struct {
 	// Status running = a run is in flight; passing/failing/errored = settled verdict; stale = a cached verdict exists but predates the current commit; none = no tests configured or never run. (A per-runner TestRunResult only ever uses running/passing/failing/errored; stale/none are head-summary states.)
 	Status TestStatus `json:"status"`
 	Total  *int       `json:"total,omitempty"`
+
+	// Warnings Non-failing diagnostics (e.g. eslint warnings). Informational only — never part of the merge gate. Shown in the long chip / panel, not the short sidebar chip.
+	Warnings *int `json:"warnings,omitempty"`
 }
 
 // TestsResponse defines model for TestsResponse.

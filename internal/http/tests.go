@@ -186,6 +186,7 @@ func buildTestRunResult(projectID string, mgr *hydratests.Manager, rep hydratest
 		Passed:     ptr(rep.Passed),
 		Failed:     ptr(rep.Failed),
 		Skipped:    ptr(rep.Skipped),
+		Warnings:   ptr(rep.Warnings),
 		DurationMs: ptr(rep.DurationMs),
 		Error:      nonEmptyPtr(rep.Error),
 		Ref:        nonEmptyPtr(rep.Ref),
@@ -294,7 +295,7 @@ func (s *Server) testSummaryFor(projectRoot string, h heads.Head) *api.TestSumma
 	v := hydratests.Version{Ref: *h.Branch}
 
 	var anyRunning, anyFailing, anyErrored, anyStale bool
-	var total, passed, failed, skipped int
+	var total, passed, failed, skipped, warnings int
 	var dur int64
 	var progress, ref string
 	cached, missing := 0, 0
@@ -312,6 +313,7 @@ func (s *Server) testSummaryFor(projectRoot string, h heads.Head) *api.TestSumma
 				passed += old.Passed
 				failed += old.Failed
 				skipped += old.Skipped
+				warnings += old.Warnings
 			} else {
 				missing++
 			}
@@ -323,6 +325,7 @@ func (s *Server) testSummaryFor(projectRoot string, h heads.Head) *api.TestSumma
 		passed += rep.Passed
 		failed += rep.Failed
 		skipped += rep.Skipped
+		warnings += rep.Warnings
 		dur += rep.DurationMs
 		switch rep.Status {
 		case hydratests.StatusRunning:
@@ -354,7 +357,7 @@ func (s *Server) testSummaryFor(projectRoot string, h heads.Head) *api.TestSumma
 		status = api.TestStatusNone
 	}
 
-	sum := &api.TestSummary{Status: status, Total: &total, Passed: &passed, Failed: &failed, Skipped: &skipped}
+	sum := &api.TestSummary{Status: status, Total: &total, Passed: &passed, Failed: &failed, Skipped: &skipped, Warnings: &warnings}
 	if dur > 0 {
 		sum.DurationMs = &dur
 	}
