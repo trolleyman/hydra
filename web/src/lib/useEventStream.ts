@@ -26,7 +26,9 @@ export interface EventStreamHandlers {
 //   NOT reconnect; only a projectId change restarts the stream.
 export function useEventStream(projectId: string | null, handlers: EventStreamHandlers): void {
   const handlersRef = useRef(handlers)
-  handlersRef.current = handlers
+  // Refresh the handler mirror after commit; dispatch reads it only from async
+  // socket callbacks, so it's always current by the time a frame arrives.
+  useEffect(() => { handlersRef.current = handlers })
 
   useEffect(() => {
     if (!projectId) return

@@ -9,6 +9,21 @@ export const Dialog: React.FC = () => {
   const { isOpen, title, message, type, variant, confirmLabel, secondaryLabel, details, showCancel, hide, onConfirm, onSecondary, onCancel } =
     useDialogStore()
 
+  const handleConfirm = () => {
+    if (onConfirm) onConfirm()
+    hide()
+  }
+
+  const handleSecondary = () => {
+    if (onSecondary) onSecondary()
+    hide()
+  }
+
+  const handleCancel = () => {
+    if (onCancel) onCancel()
+    hide()
+  }
+
   // Handle Escape (cancel) and Enter (confirm) keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -38,21 +53,6 @@ export const Dialog: React.FC = () => {
       default:
         return <Info className="w-6 h-6 text-blue-500" />
     }
-  }
-
-  const handleConfirm = () => {
-    if (onConfirm) onConfirm()
-    hide()
-  }
-
-  const handleSecondary = () => {
-    if (onSecondary) onSecondary()
-    hide()
-  }
-
-  const handleCancel = () => {
-    if (onCancel) onCancel()
-    hide()
   }
 
   return (

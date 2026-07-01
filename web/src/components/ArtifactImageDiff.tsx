@@ -274,10 +274,10 @@ function SliderCompare({ left, right, name, aspect, gallery, index, disableOpen 
     }
   }, [dragging, update])
 
-  // The side sitting under a given clientX, for the click/middle-click open.
-  const sideAt = (clientX: number) => {
-    const el = ref.current
-    if (!el) return sizer
+  // The side sitting under a given clientX, for the click/middle-click open. Takes
+  // the target element from the event (rather than reading the ref) so it works
+  // inside makeAuxOpen's pick without a render-time ref access.
+  const sideAt = (el: Element, clientX: number) => {
     const r = el.getBoundingClientRect()
     return (((clientX - r.left) / r.width) * 100 < pos ? left : right) || sizer
   }
@@ -286,8 +286,8 @@ function SliderCompare({ left, right, name, aspect, gallery, index, disableOpen 
     <div
       ref={ref}
       className={`relative w-full select-none ${disableOpen ? '' : 'cursor-zoom-in'}`}
-      onClick={disableOpen ? undefined : (e) => openGalleryAt(openImage, gallery, index, sideAt(e.clientX), name)}
-      onAuxClick={makeAuxOpen((e) => sideAt(e.clientX))}
+      onClick={disableOpen ? undefined : (e) => openGalleryAt(openImage, gallery, index, sideAt(e.currentTarget, e.clientX), name)}
+      onAuxClick={makeAuxOpen((e) => sideAt(e.currentTarget, e.clientX))}
     >
       <span className={`${TAG_CLASS} left-1`}>Before</span>
       <span className={`${TAG_CLASS} right-1`}>After</span>

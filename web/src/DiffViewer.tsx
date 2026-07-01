@@ -939,7 +939,7 @@ function formatCommitDate(iso: string): string {
 // immediately dismisses whichever was previously active, so scrolling the
 // pointer across many triggers (e.g. the commit list) can't leave a trail of
 // stale, lingering boxes behind.
-let activeHide: (() => void) | null = null
+let activeTooltip: { id: object; hide: () => void } | null = null
 
 function CustomTooltip({ content, children, side = 'bottom', className = 'w-full' }: {
   content: React.ReactNode
@@ -951,6 +951,9 @@ function CustomTooltip({ content, children, side = 'bottom', className = 'w-full
   const ref = useRef<HTMLDivElement>(null)
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // A stable per-instance identity for the "which tooltip is active" singleton, so
+  // hideNow can tell if it still owns the slot without referencing itself.
+  const id = useMemo(() => ({}), [])
 
   const cancelHide = useCallback(() => {
     if (hideTimer.current) {
@@ -962,14 +965,14 @@ function CustomTooltip({ content, children, side = 'bottom', className = 'w-full
   const hideNow = useCallback(() => {
     cancelHide()
     setVisible(false)
-    if (activeHide === hideNow) activeHide = null
-  }, [cancelHide])
+    if (activeTooltip?.id === id) activeTooltip = null
+  }, [cancelHide, id])
 
   const show = useCallback(() => {
     cancelHide()
     // Dismiss any other tooltip before we claim the active slot.
-    if (activeHide && activeHide !== hideNow) activeHide()
-    activeHide = hideNow
+    if (activeTooltip && activeTooltip.id !== id) activeTooltip.hide()
+    activeTooltip = { id, hide: hideNow }
     if (ref.current) {
       const rect = ref.current.getBoundingClientRect()
       if (side === 'right') {
@@ -983,7 +986,7 @@ function CustomTooltip({ content, children, side = 'bottom', className = 'w-full
       }
     }
     setVisible(true)
-  }, [side, cancelHide, hideNow])
+  }, [side, cancelHide, hideNow, id])
 
   // Hide after a short grace period so the pointer can travel from the trigger
   // into the tooltip (and back) without it disappearing.

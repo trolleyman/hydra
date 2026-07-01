@@ -167,7 +167,9 @@ export function useArtifactDims(sources: { key: string; url: string | null; vide
   // media actually changes, not on every render's fresh array.
   const sig = sources.map((s) => `${s.key} ${s.url ?? ''}`).join('|')
   const ref = useRef(sources)
-  ref.current = sources
+  // Keep the mirror current after commit (runs before the measurement effect
+  // below on the same commit, so it reads the latest sources for a changed sig).
+  useEffect(() => { ref.current = sources })
   useEffect(() => {
     let cancelled = false
     const set = (key: string, w: number, h: number) => {
@@ -393,6 +395,10 @@ export function MasonryGrid({ items, spanScale = 1, scale = 1, spans, onSpanChan
   // Place each tile into the run of `span` columns whose tallest column is currently
   // shortest (ties resolve leftmost, preserving reading order). Each tile fills its
   // run's combined width; its height comes from the measured content.
+  // Only drag.key/drag.col drive the layout (see below), so read them into locals:
+  // the memo then closes over exactly its deps, not the whole `drag` object.
+  const dragKey = drag?.key
+  const dragCol = drag?.col
   const placement = useMemo(() => {
     const { cols, gap, colW } = layout
     const FALLBACK_H = 240 // assumed height before a tile is first measured
@@ -402,13 +408,13 @@ export function MasonryGrid({ items, spanScale = 1, scale = 1, spans, onSpanChan
       const h = heights[it.key] ?? FALLBACK_H
       const s = spanOf(it)
       let bestC = 0
-      if (drag && drag.key === it.key) {
+      if (dragKey === it.key) {
         // The tile being dragged is pinned to its start column (clamped so a wider
         // span can't run off the right edge) rather than re-packed, so a live span
         // snap grows it in place instead of teleporting it under the pointer. Its top
         // still comes from the columns it now covers, which is stable since the tiles
         // placed before it are unaffected.
-        bestC = Math.max(0, Math.min(drag.col, cols - s))
+        bestC = Math.max(0, Math.min(dragCol ?? 0, cols - s))
         let top = 0
         for (let k = bestC; k < bestC + s; k++) top = Math.max(top, bottoms[k])
         const left = bestC * (colW + gap)
@@ -434,7 +440,7 @@ export function MasonryGrid({ items, spanScale = 1, scale = 1, spans, onSpanChan
     return { pos, height: Math.max(0, height) }
     // drag.key/drag.col (not the whole drag object) so a width-only change while
     // dragging doesn't re-pack the grid — only a start/end or a span snap does.
-  }, [items, heights, layout, spanOf, drag?.key, drag?.col])
+  }, [items, heights, layout, spanOf, dragKey, dragCol])
 
   // Set while a body drag (below) is resizing a tile, so the trailing click can be
   // swallowed before the media reacts to it. Holds the key of the tile being dragged.

@@ -63,7 +63,6 @@ function useVideoSync(fps?: number | null) {
   // Frame duration for the step buttons: from the sidecar fps when present and
   // sane, else the default. Held in a ref so frameStep stays a stable callback.
   const frameDurRef = useRef(1 / DEFAULT_FPS)
-  frameDurRef.current = 1 / (fps && fps > 0 ? fps : DEFAULT_FPS)
 
   const [playing, setPlaying] = useState(true)
   const [currentTime, setCurrentTime] = useState(0)
@@ -72,10 +71,17 @@ function useVideoSync(fps?: number | null) {
   const [loop, setLoop] = useState(true)
 
   // Refs mirror the state the attach/sync callbacks read, so those stay stable
-  // (no re-attach on every render) while still seeing the latest values.
-  const playingRef = useRef(playing); playingRef.current = playing
-  const rateRef = useRef(rate); rateRef.current = rate
-  const loopRef = useRef(loop); loopRef.current = loop
+  // (no re-attach on every render) while still seeing the latest values. Synced
+  // after commit — the callbacks that read them only fire on later events.
+  const playingRef = useRef(playing)
+  const rateRef = useRef(rate)
+  const loopRef = useRef(loop)
+  useEffect(() => {
+    playingRef.current = playing
+    rateRef.current = rate
+    loopRef.current = loop
+    frameDurRef.current = 1 / (fps && fps > 0 ? fps : DEFAULT_FPS)
+  })
   const currentTimeRef = useRef(0)
   // Mirrors `duration` for the frame-step callback, which clamps to the timeline.
   const durationRef = useRef(0)
@@ -435,9 +441,8 @@ function VideoSlider({ controller, left, right, aspect }: { controller: Controll
         update(e.clientX)
       }}
       onAuxClick={makeAuxOpen((e) => {
-        const el = ref.current
-        if (!el) return sizer
-        const r = el.getBoundingClientRect()
+        // Use the event target's rect (not the ref) so no ref is read at render.
+        const r = e.currentTarget.getBoundingClientRect()
         const x = ((e.clientX - r.left) / r.width) * 100
         return (x < pos ? left : right) || sizer
       })}

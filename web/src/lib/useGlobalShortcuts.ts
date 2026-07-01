@@ -31,13 +31,17 @@ export function useGlobalShortcuts({
   // read them through refs so the listeners stay stable (bound once) and never
   // re-bind on every render.
   const selectProjectRef = useRef(selectProject)
-  selectProjectRef.current = selectProject
   const projectsRef = useRef(projects)
-  projectsRef.current = projects
   const currentProjectIdRef = useRef(currentProjectId)
-  currentProjectIdRef.current = currentProjectId
   const switcherIndexRef = useRef(switcherIndex)
-  switcherIndexRef.current = switcherIndex
+  // Keep the mirrors fresh in an effect (not during render — the listeners only
+  // read them later, from keydown/Ctrl-up, so post-commit is soon enough).
+  useEffect(() => {
+    selectProjectRef.current = selectProject
+    projectsRef.current = projects
+    currentProjectIdRef.current = currentProjectId
+    switcherIndexRef.current = switcherIndex
+  })
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {

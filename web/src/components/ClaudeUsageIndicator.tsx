@@ -47,7 +47,9 @@ function UsageStat({ label, value, valueClass }: { label: string; value: string;
 // determined (no subscription, CLI missing, non-localhost, etc.), so it stays
 // out of the way when not applicable.
 export function ClaudeUsageIndicator() {
-  const [, setTick] = useState(0)
+  // Current wall-clock time, refreshed by the countdown ticker below. Held in
+  // state (rather than reading Date.now() during render) so render stays pure.
+  const [now, setNow] = useState(() => Date.now())
   // Background poll (force=false → uses the server's ~30s cache); a click forces
   // a fresh re-probe. Transient errors keep the last good snapshot (no resetOnError).
   const { data, refetch: fetchUsage, loading } = useServerData<ClaudeUsageResponse | null, boolean>(
@@ -61,7 +63,7 @@ export function ClaudeUsageIndicator() {
   // Tick once a second only while there's a live countdown to animate.
   useEffect(() => {
     if (Number.isNaN(resetsAt)) return
-    const t = setInterval(() => setTick((n) => n + 1), 1000)
+    const t = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(t)
   }, [resetsAt])
 
@@ -72,7 +74,7 @@ export function ClaudeUsageIndicator() {
   if (!data.available && session == null && weekly == null) return null
 
   const rawReset = !Number.isNaN(resetsAt)
-    ? fmtCountdown(resetsAt - Date.now())
+    ? fmtCountdown(resetsAt - now)
     : (data.session_reset_text ?? null)
   // Strip a leading "Resets in …" so only the duration sits under the "reset"
   // label (the live countdown path is already bare; this normalizes the text
