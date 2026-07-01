@@ -529,6 +529,12 @@ try {
       // boot. The app's real default box/sidebar sizes are unchanged. Pairs with
       // seedPrompt.
       tallSpawn?: boolean
+      // Screenshot-only: seed a narrow sidebar width before boot so a menu opened
+      // from the sidebar header (the project switcher) is wider than the sidebar
+      // itself — documenting that the portal-rendered menu overlays the content
+      // instead of being clipped by the sidebar's `overflow-hidden`. Capture-time
+      // override only; the app's default width is unchanged.
+      narrowSidebar?: boolean
       // Focuses the full-page spawn textarea and selects ALL of its text after the
       // page settles, so the capture overlays the browser's selection band (which
       // marks the REAL, selectable text positions) on top of the highlight backdrop
@@ -618,6 +624,11 @@ try {
       // when other projects have updates waiting (see simulation.go ListProjects /
       // ListAgents and AgentSidebarItem).
       { name: 'unread-indicator', path: '/', click: 'button[aria-label="Select project"]' },
+      // The project switcher opened over a deliberately narrow sidebar. The menu
+      // (fixed w-72) is far wider than the sidebar, so it must overlay the content
+      // area rather than be clipped by the sidebar's `overflow-hidden` — verifies
+      // the portal-rendered menu (mirrors the Ctrl+` switcher's forced-open state).
+      { name: 'project-switcher-narrow', path: '/', click: 'button[aria-label="Select project"]', narrowSidebar: true },
       // Notification toasts (web/src/lib/useAgentNotifications.ts). These fire on
       // live status transitions / security-gate parks that the static simulation
       // never produces, so they're rendered deterministically via the toast
@@ -1682,6 +1693,11 @@ try {
         if (pg.tallSpawn) {
           await ctx.addInitScript((key) => {
             try { localStorage.setItem(key, '380') } catch { /* ignore */ }
+          }, StorageKeys.sidebarWidth)
+        }
+        if (pg.narrowSidebar) {
+          await ctx.addInitScript((key) => {
+            try { localStorage.setItem(key, '170') } catch { /* ignore */ }
           }, StorageKeys.sidebarWidth)
         }
         await ctx.addInitScript((opts) => {

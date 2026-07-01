@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { ChevronDown, Folder, FolderOpen, Plus, Check, X } from 'lucide-react'
 import type { ProjectInfo } from '../api'
 import { formatError } from '../api/format_error'
@@ -46,9 +47,17 @@ export function ProjectDropdown({
   const [pickerAvailable, setPickerAvailable] = useState(false)
   const [browsing, setBrowsing] = useState(false)
   const [hoveredId, setHoveredId] = useState<string | null>(null)
-  const dropdownRef = useRef<HTMLDivElement>(null)
+  // triggerRef wraps the button; menuRef is the portalled menu. Both are needed
+  // for outside-click detection now that the menu lives outside this subtree.
+  const triggerRef = useRef<HTMLDivElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const activeRowRef = useRef<HTMLDivElement>(null)
+  // The menu is rendered in a portal so it escapes the sidebar's
+  // `overflow-hidden` (which clips its collapse width-tween and would otherwise
+  // swallow the menu whenever the sidebar is narrower than the menu). We
+  // position it manually from the trigger's rect.
+  const [coords, setCoords] = useState<{ left: number; top?: number; bottom?: number } | null>(null)
   // The Ctrl+` switch hint is keyboard-only — hide it on touch devices.
   const finePointer = useFinePointer()
 
@@ -56,6 +65,41 @@ export function ProjectDropdown({
   // it's the usual click-to-open menu.
   const keyboardActive = keyboardIndex !== null
   const isOpen = open || keyboardActive
+
+  // Menu geometry, kept in sync with the classes on the portalled menu below.
+  const MENU_WIDTH = 288 // w-72
+  const GAP = 4 // mt-1
+
+  // Position the portalled menu from the trigger's rect: below and left-aligned,
+  // clamped to the viewport so it never runs off the right edge, and flipped
+  // above when there isn't room below.
+  useLayoutEffect(() => {
+    if (!isOpen) return
+    const updateCoords = () => {
+      const el = triggerRef.current
+      if (!el) return
+      const rect = el.getBoundingClientRect()
+      const padding = 8
+      let left = rect.left
+      if (left + MENU_WIDTH > window.innerWidth - padding) {
+        left = Math.max(padding, window.innerWidth - MENU_WIDTH - padding)
+      }
+      const maxHeight = window.innerHeight * 0.7 // max-h-[70vh]
+      const spaceBelow = window.innerHeight - rect.bottom
+      if (spaceBelow < maxHeight && rect.top > spaceBelow) {
+        setCoords({ left, bottom: window.innerHeight - rect.top + GAP })
+      } else {
+        setCoords({ left, top: rect.bottom + GAP })
+      }
+    }
+    updateCoords()
+    window.addEventListener('scroll', updateCoords, true)
+    window.addEventListener('resize', updateCoords)
+    return () => {
+      window.removeEventListener('scroll', updateCoords, true)
+      window.removeEventListener('resize', updateCoords)
+    }
+  }, [isOpen])
 
   // Keep the keyboard-highlighted row in view as the user steps through a long
   // project list.
@@ -79,11 +123,14 @@ export function ProjectDropdown({
   useEffect(() => {
     if (!open) return
     function handleClick(e: MouseEvent) {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
-        setOpen(false)
-        setShowAddInput(false)
-        setAddError(null)
-      }
+      const target = e.target as Node
+      // The menu lives in a portal, so a click inside it isn't contained by the
+      // trigger — check both before treating it as an outside click.
+      if (triggerRef.current?.contains(target)) return
+      if (menuRef.current?.contains(target)) return
+      setOpen(false)
+      setShowAddInput(false)
+      setAddError(null)
     }
     function handleKey(e: KeyboardEvent) {
       if (e.key === 'Escape') {
@@ -174,7 +221,7 @@ export function ProjectDropdown({
   }
 
   return (
-    <div ref={dropdownRef} className="relative shrink-0">
+    <div ref={triggerRef} className="relative shrink-0">
       <button
         aria-label="Select project"
         onClick={() => { setOpen((o) => !o); setShowAddInput(false); setAddError(null) }}
@@ -199,8 +246,12 @@ export function ProjectDropdown({
         <ChevronDown className="w-3 h-3" />
       </button>
 
-      {isOpen && (
-        <div className="absolute left-0 top-full mt-1 w-72 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50 max-h-[70vh] overflow-y-auto">
+      {isOpen && coords && createPortal(
+        <div
+          ref={menuRef}
+          style={{ left: coords.left, top: coords.top, bottom: coords.bottom }}
+          className="fixed w-72 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-[9999] max-h-[70vh] overflow-y-auto"
+        >
           {projects.length > 0 && (
             <div className="py-1 border-b border-gray-100 dark:border-gray-700">
               {projects.map((p, i) => (
@@ -319,7 +370,8 @@ export function ProjectDropdown({
               {SWITCH_PROJECT_HINT}
             </div>
           )}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   )
