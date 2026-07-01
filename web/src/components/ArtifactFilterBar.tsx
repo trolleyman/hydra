@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { ChevronDown, RotateCcw, Search, X } from 'lucide-react'
 import {
   type FilterableArtifact, parseScopedTag, collectTags, computeScopeCounts,
@@ -69,11 +70,45 @@ export function TagScopeFilter({
 }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
+  // The dropdown is portal'd to <body> and positioned with fixed coords: the filter
+  // bar it lives on is `sticky z-20`, which traps an in-flow absolute panel inside
+  // that stacking context so the diff viewer's `sticky z-20` file headers paint over
+  // it. Escaping to the body (like the regen menu in ArtifactsPanel) lets it sit
+  // above everything. Coords are measured from the trigger below.
+  const [coords, setCoords] = useState<{ left: number; top: number } | null>(null)
+  const PANEL_WIDTH = 224 // w-56
 
-  // Close on an outside click or Escape, like the diff viewer's settings popup.
+  // Position the panel under the trigger, right-aligned to it and clamped into the
+  // viewport; keep it pinned while scrolling/resizing.
+  useLayoutEffect(() => {
+    if (!open) return
+    const update = () => {
+      const el = ref.current
+      if (!el) return
+      const rect = el.getBoundingClientRect()
+      const padding = 8
+      const left = Math.max(padding, Math.min(rect.right - PANEL_WIDTH, window.innerWidth - PANEL_WIDTH - padding))
+      setCoords({ left, top: rect.bottom + 6 })
+    }
+    update()
+    window.addEventListener('scroll', update, true)
+    window.addEventListener('resize', update)
+    return () => {
+      window.removeEventListener('scroll', update, true)
+      window.removeEventListener('resize', update)
+    }
+  }, [open])
+
+  // Close on an outside click or Escape, like the diff viewer's settings popup. The
+  // panel lives in a portal, so a click inside it isn't inside `ref` — check both.
   useEffect(() => {
     if (!open) return
-    const onDown = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false) }
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node
+      if (ref.current?.contains(t) || panelRef.current?.contains(t)) return
+      setOpen(false)
+    }
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
     document.addEventListener('mousedown', onDown)
     document.addEventListener('keydown', onKey)
@@ -107,8 +142,12 @@ export function TagScopeFilter({
         <ChevronDown className={`w-3 h-3 transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
 
-      {open && (
-        <div className="absolute right-0 top-full mt-1.5 w-56 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl z-50 overflow-hidden text-left">
+      {open && coords && createPortal(
+        <div
+          ref={panelRef}
+          className="fixed w-56 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl z-[9999] overflow-hidden text-left"
+          style={{ left: coords.left, top: coords.top }}
+        >
           {/* Fixed header: "all" left, "clear" right. Always present (regardless
               of selection) so toggling values never grows/shrinks the menu. */}
           <div className="flex items-center justify-between px-3 py-1.5 border-b border-gray-100 dark:border-gray-700/60 text-[11px] font-medium">
@@ -143,7 +182,8 @@ export function TagScopeFilter({
           </div>
           <div className="px-3 py-1 border-t border-gray-100 dark:border-gray-700/60 text-[10px] text-gray-400 dark:text-gray-500">shift-click to isolate</div>
           {footer}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   )
