@@ -5,14 +5,17 @@ import type { ArtifactSet, ArtifactFile, ArtifactLogLine } from '../api'
 import { ArtifactFile as ArtifactFileNS } from '../api'
 import { LoaderCircle, Image as ImageIcon, ChevronDown, TriangleAlert, RefreshCw, ScrollText, SquarePlus, SquareMinus, SquareDot } from 'lucide-react'
 import { InfoTooltip } from './InfoTooltip'
-import { CollapsibleCard, MELT_BTN, useMeasuredHeight } from './CollapsibleCard'
+import { CollapsibleCard, MELT_BTN } from './CollapsibleCard'
+import { useMeasuredHeight } from '../lib/useMeasuredHeight'
+import { useMediaDims } from '../lib/artifactDims'
 import { loadArtifactPrefs, saveArtifactPrefs, loadTagFilter, saveTagFilter, loadArtifactChrome, saveArtifactChrome, clampChangeThreshold, type ArtifactTagFilter, type ArtifactChrome } from '../lib/artifactPrefs'
-import { computeVisibleFiles, filterIsActive, effectiveChangeType } from '../lib/artifactFilter'
+import { computeVisibleFiles, filterIsActive, effectiveChangeType, isVideoArtifact } from '../lib/artifactFilter'
 import { ArtifactFilterBar, TagBadge } from './ArtifactFilterBar'
 import { stripAnsi } from '../lib/ansi'
 import { type ArtifactSpans, BASE_ARTIFACT_COLUMNS, defaultSpanForAspect } from '../lib/artifactColumns'
-import { VideoDiffView, isVideoArtifact, VIDEO_MIN_TILE_PX } from './VideoDiffView'
-import { ImageDiffView, SegmentedToggle, ABControlsContext, type ImageDiffMode, type ArtifactABControls } from './ArtifactImageDiff'
+import { VideoDiffView, VIDEO_MIN_TILE_PX } from './VideoDiffView'
+import { ImageDiffView, SegmentedToggle, type ImageDiffMode, type ArtifactABControls } from './ArtifactImageDiff'
+import { ABControlsContext } from './artifactDiffContext'
 import type { LightboxImage } from './ImageLightbox'
 import { useImageLightboxStore } from '../stores/imageLightboxStore'
 import { LiveLogPanes, PersistedLogView } from './ArtifactLogView'
@@ -152,72 +155,6 @@ function FileRow({ file, mode, changeThreshold = 0, gallery, index }: {
 // dpi is the media's capture density (device-scale factor); pxWidth / dpi is its
 // logical width, which is what the grid caps a tile to (see spanOf). 1 when unknown
 // (measured client-side, or a server entry without a dpi sidecar) — logical == physical.
-export type ArtifactDim = { aspect: number; pxWidth: number; dpi: number }
-
-// useArtifactDims measures each artifact's intrinsic aspect ratio and natural pixel
-// width by loading the media off-screen, so the masonry can pick a sensible default
-// span (wide → more columns, tall → one) and cap it so the shot is never blown up
-// past its own resolution — all without the backend reporting dimensions. Images read
-// naturalWidth/Height; videos read videoWidth/Height off a metadata preload. The
-// browser caches the fetch, so the visible <img>/<video> doesn't load it twice.
-// Returns a key→dims map that fills in as media loads.
-export function useArtifactDims(sources: { key: string; url: string | null; video: boolean }[]): Record<string, ArtifactDim> {
-  const [dims, setDims] = useState<Record<string, ArtifactDim>>({})
-  // A stable signature of the (key,url) set so the effect only re-runs when the
-  // media actually changes, not on every render's fresh array.
-  const sig = sources.map((s) => `${s.key} ${s.url ?? ''}`).join('|')
-  const ref = useRef(sources)
-  // Keep the mirror current after commit (runs before the measurement effect
-  // below on the same commit, so it reads the latest sources for a changed sig).
-  useEffect(() => { ref.current = sources })
-  useEffect(() => {
-    let cancelled = false
-    const set = (key: string, w: number, h: number) => {
-      if (cancelled || !w || !h) return
-      // Client-measured bytes carry no density, so dpi is 1 (logical == physical).
-      setDims((a) => (a[key] != null ? a : { ...a, [key]: { aspect: w / h, pxWidth: w, dpi: 1 } }))
-    }
-    for (const s of ref.current) {
-      if (!s.url) continue
-      if (s.video) {
-        const v = document.createElement('video')
-        v.preload = 'metadata'
-        v.onloadedmetadata = () => set(s.key, v.videoWidth, v.videoHeight)
-        v.src = s.url
-      } else {
-        const img = new Image()
-        img.onload = () => set(s.key, img.naturalWidth, img.naturalHeight)
-        img.src = s.url
-      }
-    }
-    return () => { cancelled = true }
-  }, [sig])
-  return dims
-}
-
-// useMediaDims resolves each artifact's dimensions, preferring the server-provided
-// width/height (already carried in the artifact response — measured once at
-// generation time and cached in meta.json, so no download) and falling back to
-// measuring the bytes for any file the server didn't size: videos when ffprobe
-// wasn't available, or entries cached before the server learned to record sizes.
-// Files that already have server dims are excluded from the off-screen measurement,
-// so for those the visible <img>'s loading="lazy" survives — a large diff no longer
-// eagerly fetches every image up front just to lay out the grid.
-export function useMediaDims(
-  sources: { key: string; url: string | null; video: boolean; width?: number | null; height?: number | null; dpi?: number | null }[],
-): Record<string, ArtifactDim> {
-  const serverDims = useMemo(() => {
-    const m: Record<string, ArtifactDim> = {}
-    for (const s of sources) {
-      if (s.width && s.height) m[s.key] = { aspect: s.width / s.height, pxWidth: s.width, dpi: s.dpi && s.dpi > 0 ? s.dpi : 1 }
-    }
-    return m
-  }, [sources])
-  const measureSources = useMemo(() => sources.filter((s) => !serverDims[s.key]), [sources, serverDims])
-  const measured = useArtifactDims(measureSources)
-  return useMemo(() => ({ ...measured, ...serverDims }), [measured, serverDims])
-}
-
 // Balanced (shortest-column) masonry. Each tile is absolutely positioned: we
 // measure every tile's rendered height with a ResizeObserver, then place tiles one
 // by one into whichever run of columns is currently shortest — so they pack tightly

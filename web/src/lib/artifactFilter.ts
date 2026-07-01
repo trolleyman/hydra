@@ -11,7 +11,11 @@
 // "::") is free-form and works the same way.
 
 import { ARTIFACT_CHANGE_CATEGORY as CHANGE_CATEGORY, clampChangeThreshold, type ArtifactTagFilter } from './artifactPrefs'
-import { isVideoArtifact } from '../components/VideoDiffView'
+
+// Extensions routed to the video viewer instead of the image one.
+export function isVideoArtifact(name: string): boolean {
+  return /\.webm$/i.test(name)
+}
 
 // The minimal shape the filter/search needs from a file: its name (for the built-in
 // type filter and search), its tags, and — for before/after sets — its change_type

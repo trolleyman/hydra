@@ -20,10 +20,11 @@ import { Tooltip } from './Tooltip'
 import { IconButton } from './IconButton'
 import { useSidebarStore } from '../lib/sidebar'
 import {
-  FileDiff, FileRow, ChangeTypeIcon, TreeNodeView,
-  buildFileTree, compactTree as compactDiffTree, getGroupedFiles, type FileView,
+  FileDiff, FileRow, ChangeTypeIcon, TreeNodeView, type FileView,
 } from '../DiffViewer'
-import { IMAGE_DIFF_MODES, type ImageDiffMode } from './ArtifactImageDiff'
+import { buildFileTree, compactTree as compactDiffTree, getGroupedFiles } from '../lib/fileTree'
+import { type ImageDiffMode } from './ArtifactImageDiff'
+import { IMAGE_DIFF_MODES } from './artifactDiffContext'
 import { repoBlobUrl } from '../lib/imageDiff'
 
 // ── File tree model ────────────────────────────────────────────────────────────

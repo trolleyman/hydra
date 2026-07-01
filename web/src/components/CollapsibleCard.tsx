@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { ChevronDown } from 'lucide-react'
+import { useMeasuredHeight } from '../lib/useMeasuredHeight'
 
 // The card header's action buttons (build log / regenerate / re-run) sit as faint
 // icons at rest and brighten ONLY the icon the pointer is actually over — a
@@ -8,26 +9,6 @@ import { ChevronDown } from 'lucide-react'
 // cluster; it just darkens that one icon. MELT_BTN is the shared resting+hover
 // skin; per-button classes add the rounding/layout on top.
 export const MELT_BTN = 'text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 transition-colors cursor-pointer'
-
-// useMeasuredHeight returns a callback ref + the live offsetHeight of whatever it's
-// attached to, re-measuring on resize. The diff viewer's stacked sticky bars (the
-// Changes toolbar, each panel's section bar) publish their height as a CSS var so
-// the sticky headers below can dock flush beneath them even when a bar wraps to two
-// rows. A callback ref (not useEffect) so it re-attaches the observer whenever the
-// element mounts — the artifacts/tests panels render null until their data loads.
-export function useMeasuredHeight(initial: number): [(el: HTMLElement | null) => void, number] {
-  const [height, setHeight] = useState(initial)
-  const roRef = useRef<ResizeObserver | null>(null)
-  const ref = useCallback((el: HTMLElement | null) => {
-    roRef.current?.disconnect()
-    if (!el) return
-    const ro = new ResizeObserver(() => setHeight(el.offsetHeight))
-    ro.observe(el)
-    roRef.current = ro
-    setHeight(el.offsetHeight)
-  }, [])
-  return [ref, height]
-}
 
 // The sticky `top` for a card header: it docks flush below its panel's section bar,
 // which itself docks below the Changes toolbar. Both heights arrive as CSS vars

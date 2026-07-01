@@ -1,28 +1,8 @@
 import { Check, X, AlertTriangle, Clock, SkipForward } from 'lucide-react'
-import { Badge, type Tone } from './Badge'
+import { Badge } from './Badge'
+import { verdictTone } from './badgeTones'
 import type { TestSummary } from '../api/models/TestSummary'
 import type { TestStatus } from '../api/models/TestStatus'
-
-// Verdict → tone, the single source of truth for the test-gate chip colors
-// (PLAN #68, design 2026-06-29). passing=green, failing=red, running=blue,
-// errored=YELLOW (a "couldn't run / we don't know" caution, with a warning
-// triangle — distinct from a red failure), stale=gray (dashed). Skipped is NEVER
-// its own verdict and renders GRAY inline (amber would imply a warning a skipped
-// test doesn't warrant — per user).
-export function verdictTone(status: TestStatus): Tone {
-  switch (status) {
-    case 'passing':
-      return 'green'
-    case 'failing':
-      return 'red'
-    case 'running':
-      return 'blue'
-    case 'errored':
-      return 'yellow'
-    default:
-      return 'neutral' // stale / none
-  }
-}
 
 function VerdictIcon({ status, className = 'w-3 h-3 shrink-0' }: { status: TestStatus; className?: string }) {
   switch (status) {

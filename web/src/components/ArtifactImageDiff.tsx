@@ -1,9 +1,10 @@
-import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
+import { useCallback, useContext, useEffect, useRef, useState } from 'react'
 import { ImageOff } from 'lucide-react'
 import {
   checkerStyle, IMG_CLASS, OVERLAY_CLASS, TAG_CLASS, makeAuxOpen,
   DIFF_COLOR, DIFF_PIXEL_THRESHOLD, DIFF_ALPHA,
 } from './artifactDiffShared'
+import { ABControlsContext } from './artifactDiffContext'
 import { useImageLightbox } from '../stores/imageLightboxStore'
 import type { LightboxImage } from './ImageLightbox'
 
@@ -24,14 +25,6 @@ export type ArtifactABControls = {
   highlight: boolean
   toggleView: () => void
 }
-export const ABControlsContext = createContext<ArtifactABControls | null>(null)
-
-export const IMAGE_DIFF_MODES: { value: ImageDiffMode; label: string }[] = [
-  { value: 'ab', label: 'Before · After' },
-  { value: 'slider', label: 'Before · After (slider)' },
-  { value: 'side-by-side', label: 'Side by side' },
-  { value: 'onion', label: 'Onion skin' },
-]
 
 // A single artifact image as a lightbox entry; size is unknown here (the diff
 // viewer doesn't carry byte sizes) so it's left out of the caption.
