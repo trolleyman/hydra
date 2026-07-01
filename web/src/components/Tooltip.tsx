@@ -203,7 +203,11 @@ export function Tooltip({
           >
             <div
               className="relative p-3 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100 text-[11px] rounded-lg shadow-xl animate-in fade-in zoom-in-95 duration-100 border border-gray-200 dark:border-gray-700"
-              style={{ width }}
+              // Cap to the viewport (minus the 16px clamp pad each side) so the
+              // fixed `width` can't spill off-screen on narrow/phone viewports where
+              // it exceeds the screen. computePos clamps by the box's REAL
+              // offsetWidth, so the capped width also fixes the horizontal position.
+              style={{ width, maxWidth: 'calc(100vw - 2rem)' }}
             >
               {title && <p className="font-bold mb-1.5 border-b border-gray-200 dark:border-gray-700 pb-1">{title}</p>}
               {/* Body text + code spans. Callers tag <code> with text-blue-300 (sized
@@ -228,10 +232,12 @@ export function Tooltip({
         ) : (
           <div
             ref={boxRef}
-            className={`fixed z-[9999] -translate-x-1/2 pointer-events-none px-2 py-1 bg-gray-900 dark:bg-gray-700 text-white text-[11px] rounded shadow-lg max-w-[320px] break-words border border-gray-700 dark:border-gray-600 ${
+            className={`fixed z-[9999] -translate-x-1/2 pointer-events-none px-2 py-1 bg-gray-900 dark:bg-gray-700 text-white text-[11px] rounded shadow-lg break-words border border-gray-700 dark:border-gray-600 ${
               pos.placement === 'top' ? '-translate-y-full' : ''
             }`}
-            style={{ top: pos.top, left: pos.left }}
+            // 320px cap normally, but never wider than the viewport (minus the 8px
+            // clamp pad each side) so it can't overflow on a phone.
+            style={{ top: pos.top, left: pos.left, maxWidth: 'min(320px, calc(100vw - 1rem))' }}
           >
             {content}
             <div
