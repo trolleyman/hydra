@@ -653,24 +653,31 @@ export function AgentDetail({
     // would otherwise be none.
     const st = agent.agent_status?.status
     if (st === 'running' || st === 'starting' || st === 'needs_input') {
-      return confirmMergeWhileActive(st === 'needs_input', confirmNormalMerge)
+      return confirmMergeWhileActive(st === 'needs_input')
     }
     return confirmNormalMerge()
   }
 
-  // confirmMergeWhileActive warns that the agent isn't finished before merging.
-  // `blocked` distinguishes "asking you a question" (needs_input) from "still
-  // working" (running/starting). On confirm it continues to the normal flow.
-  function confirmMergeWhileActive(blocked: boolean, onProceed: () => void) {
+  // confirmMergeWhileActive gates a merge whose branch is green but whose AGENT
+  // hasn't finished: still working (running/starting) or blocked asking you a
+  // question (needs_input). It reuses the merge-gate dialog's Force / Queue /
+  // Cancel choice — Queue is the natural action here, arming merge-when-green so
+  // it lands once the agent is actually done. `blocked` selects the wording.
+  function confirmMergeWhileActive(blocked: boolean) {
+    const toBranch = agent.base_branch || 'base'
+    const fromBranch = agent.branch_name || `hydra/${agent.id}`
     useDialogStore.getState().show({
       title: blocked ? 'Agent is waiting on you' : 'Agent is still running',
       message: blocked
-        ? `"${agent.id}" is asking you a question. Merging now abandons it — the agent's work may be incomplete.`
-        : `"${agent.id}" is still working. Merging now may capture an incomplete state.`,
+        ? `"${agent.id}" is asking you a question — merging now abandons it and may land incomplete work.`
+        : `"${agent.id}" hasn't finished this turn — merging now may capture an incomplete state.`,
       type: 'warning',
-      confirmLabel: 'Merge anyway',
-      showCancel: true,
-      onConfirm: onProceed,
+      variant: 'mergeGate',
+      details: { fromBranch, toBranch, agentGate: blocked ? 'needs_input' : 'running' },
+      confirmLabel: 'Queue merge',
+      onConfirm: () => void armMerge(),
+      secondaryLabel: 'Force merge',
+      onSecondary: () => void executeMerge(true),
     })
   }
 

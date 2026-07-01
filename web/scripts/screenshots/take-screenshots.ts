@@ -691,6 +691,11 @@ try {
       // armed) — clicking Merge offers "Merge now" (don't wait) or Queue merge, over
       // a blue running tile + a progress chip.
       { name: 'tests-merge-gate-dialog-running', path: '/project/sim-project/agent/agent-3', viewportOnly: true, click: 'button[aria-label="Merge"]' },
+      // The merge gate when the AGENT (not the tests) isn't ready: agent-approval is
+      // blocked asking you a question (needs_input), so clicking Merge warns "Agent
+      // is waiting on you" and reuses the Force merge / Queue merge / Cancel choice —
+      // Queue arms merge-when-green so it lands once the agent finishes and is green.
+      { name: 'merge-agent-active-dialog', path: '/project/sim-project/agent/agent-approval', viewportOnly: true, click: 'button[aria-label="Merge"]' },
       // The agent-type picker dropdown, opened on the compact ("mini") spawn box
       // in the sidebar. The picker is an icon-only trigger (the active agent's
       // brand mark) that opens a menu listing every agent type as its canonical
