@@ -236,7 +236,6 @@ function TestRunnerCard({ runner, onRefresh }: { runner: TestRunResult; onRefres
   const [showPassing, setShowPassing] = useState(false)
   // A log exists while running (live `log`) or once settled (`log_url`).
   const hasLog = running || !!runner.log_url
-  const [buildLogOpen, setBuildLogOpen] = useState(false)
   // A *build*/infra failure has no failing test cases to explain it: an exit-code-only
   // runner (its "cases" are a synthetic exit-code line whose message is just the log
   // tail), a runner that errored before producing a report, or a non-zero exit with an
@@ -246,14 +245,17 @@ function TestRunnerCard({ runner, onRefresh }: { runner: TestRunResult; onRefres
   // is deliberately unlike artifact cards, which always force their log open on error;
   // here the toggle can always hide it (see the always-present button below).
   const buildFailure = failed && (runner.format === 'exit' || !cases.some((c) => c.status === 'failed'))
-  // Open the log once when a runner settles into a build failure. Guarded by a ref so
-  // it fires a single time per settle — the user can hide it again afterward without it
-  // springing back open, and a re-run (buildFailure flips false→true) re-arms it.
-  const autoOpenedRef = useRef(false)
-  useEffect(() => {
-    if (!buildFailure) { autoOpenedRef.current = false; return }
-    if (!autoOpenedRef.current) { autoOpenedRef.current = true; setBuildLogOpen(true) }
-  }, [buildFailure])
+  // Seed the log open if the card mounts already in a build failure, and re-open it
+  // whenever a runner *settles into* one — a false→true transition adjusted during
+  // render (React's sanctioned pattern, same as the connKey reset above) rather than
+  // in an effect. Firing only on the edge lets the user hide the log again afterward
+  // without it springing back open; a re-run (false→true again) re-arms it.
+  const [buildLogOpen, setBuildLogOpen] = useState(buildFailure)
+  const [prevBuildFailure, setPrevBuildFailure] = useState(buildFailure)
+  if (prevBuildFailure !== buildFailure) {
+    setPrevBuildFailure(buildFailure)
+    if (buildFailure) setBuildLogOpen(true)
+  }
   // Show the log live while running (the tail is the surface), otherwise whenever the
   // toggle — or the build-failure auto-open above — has opened it.
   const logVisible = hasLog && (buildLogOpen || running)
