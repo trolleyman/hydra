@@ -161,10 +161,12 @@ export function useAgentNotifications(currentProjectId: string | null) {
         // Surface every parked call as a persistent Allow/Deny toast. The `key`
         // dedups so a repeat fetch (or StrictMode double-run) reuses the toast.
         for (const a of approvals) {
-          const canRemember = a.kind === 'mcp' || a.kind === 'webfetch'
+          // mcp / mcp_tool / webfetch persist an "always allow"; bash (e.g. git
+          // push) is one-shot only.
+          const canRemember = a.kind === 'mcp' || a.kind === 'mcp_tool' || a.kind === 'webfetch'
           const actions = [
             {
-              label: 'Allow',
+              label: 'Allow once',
               variant: 'primary' as const,
               onClick: (toastId: number) => {
                 void decide(agentId, a.reqid, ApprovalDecisionRequest.decision.ALLOW, false)
@@ -175,7 +177,7 @@ export function useAgentNotifications(currentProjectId: string | null) {
             ...(canRemember
               ? [
                   {
-                    label: 'Allow always',
+                    label: 'Always allow',
                     variant: 'primary' as const,
                     onClick: (toastId: number) => {
                       void decide(agentId, a.reqid, ApprovalDecisionRequest.decision.ALLOW, true)
@@ -192,11 +194,21 @@ export function useAgentNotifications(currentProjectId: string | null) {
             },
           ]
           const id = toast.show({
+            // message is a fallback for non-card surfaces; the card renders `approval`.
             message: `Agent "${agentName}" ${a.summary}`,
             type: 'warning',
             duration: 0,
             key: `approval:${agentId}:${a.reqid}`,
             actions,
+            approval: {
+              kind: a.kind,
+              target: a.target,
+              agentName,
+              rw: a.rw,
+              reason: a.reason,
+              url: a.url,
+              argsPreview: a.args_preview,
+            },
             // X / Deny / any non-silent dismiss denies the parked call.
             onDismiss: () => {
               reqMap!.delete(a.reqid)

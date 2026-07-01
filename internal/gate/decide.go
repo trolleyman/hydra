@@ -1,6 +1,7 @@
 package gate
 
 import (
+	"encoding/json"
 	"net/url"
 	"path/filepath"
 	"regexp"
@@ -40,6 +41,11 @@ type Result struct {
 	// RW is the read/write classification of an MCP tool call ("read", "write", or
 	// "" when not applicable/unknown), surfaced as a badge on the approval card.
 	RW string
+	// URL is the full request URL for a WebFetch ask (the approval card previews it).
+	URL string
+	// ArgsPreview is a compact one-line preview of an MCP tool call's arguments
+	// (the approval card shows it under the tool name).
+	ArgsPreview string
 }
 
 // globalInstallRe matches Bash commands that install system- or user-global
@@ -132,7 +138,8 @@ func Decide(p Policy, toolName string, toolInput map[string]any) Result {
 		if serverReferenced(p.MCPToolsAllowed, server) {
 			return Result{
 				Decision: Ask, Kind: "mcp_tool", Target: full, RW: rw,
-				Reason: "MCP tool " + quote(full) + " is not on the allow-list",
+				ArgsPreview: previewArgs(toolInput),
+				Reason:      "MCP tool " + quote(full) + " is not on the allow-list",
 			}
 		}
 		return Result{
@@ -152,6 +159,7 @@ func Decide(p Policy, toolName string, toolInput map[string]any) Result {
 		}
 		return Result{
 			Decision: Ask, Kind: "webfetch", Target: host,
+			URL:    stringArg(toolInput, "url"),
 			Reason: "WebFetch to " + quote(host) + " is not on the allow-list",
 		}
 
@@ -338,6 +346,24 @@ func fileArg(input map[string]any) string {
 		}
 	}
 	return ""
+}
+
+// previewArgs renders a tool call's arguments as a compact one-line JSON preview
+// for the approval card, truncated so a large payload can't blow up the toast.
+func previewArgs(input map[string]any) string {
+	if len(input) == 0 {
+		return ""
+	}
+	data, err := json.Marshal(input)
+	if err != nil {
+		return ""
+	}
+	s := string(data)
+	const max = 160
+	if len(s) > max {
+		s = s[:max-1] + "…"
+	}
+	return s
 }
 
 func stringArg(input map[string]any, key string) string {

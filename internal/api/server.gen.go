@@ -318,6 +318,9 @@ type ApprovalListResponse struct {
 
 // ApprovalRequest defines model for ApprovalRequest.
 type ApprovalRequest struct {
+	// ArgsPreview Compact one-line preview of an mcp_tool call's arguments.
+	ArgsPreview *string `json:"args_preview"`
+
 	// Kind What is being approved: 'mcp', 'mcp_tool', 'webfetch', or 'bash'
 	Kind string `json:"kind"`
 
@@ -341,6 +344,9 @@ type ApprovalRequest struct {
 
 	// Ts ISO 8601 timestamp the request was raised
 	Ts *string `json:"ts,omitempty"`
+
+	// Url The full request URL for a webfetch request (previewed in the card).
+	Url *string `json:"url"`
 }
 
 // ArtifactFile defines model for ArtifactFile.

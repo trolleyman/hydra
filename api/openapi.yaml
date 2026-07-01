@@ -2535,6 +2535,14 @@ components:
             Read/write classification of an mcp_tool request ("read", "write", or
             absent when unknown/not applicable). Best-effort heuristic — a badge
             hint, not a guarantee.
+        url:
+          type: string
+          nullable: true
+          description: The full request URL for a webfetch request (previewed in the card).
+        args_preview:
+          type: string
+          nullable: true
+          description: Compact one-line preview of an mcp_tool call's arguments.
         ts:
           type: string
           description: ISO 8601 timestamp the request was raised

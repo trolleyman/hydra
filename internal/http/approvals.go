@@ -58,6 +58,14 @@ func (s *Server) ListAgentApprovals(ctx context.Context, request api.ListAgentAp
 			rw := r.RW
 			req.Rw = &rw
 		}
+		if r.URL != "" {
+			u := r.URL
+			req.Url = &u
+		}
+		if r.ArgsPreview != "" {
+			a := r.ArgsPreview
+			req.ArgsPreview = &a
+		}
 		out = append(out, req)
 	}
 	return api.ListAgentApprovals200JSONResponse{Approvals: out}, nil

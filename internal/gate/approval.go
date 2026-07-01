@@ -33,7 +33,11 @@ type Request struct {
 	// RW is the read/write classification of an mcp_tool request ("read"/"write"/""),
 	// surfaced as a badge in the approval UI.
 	RW string `json:"rw,omitempty"`
-	TS string `json:"ts"`
+	// URL is the full request URL for a webfetch request (previewed in the card).
+	URL string `json:"url,omitempty"`
+	// ArgsPreview is a compact one-line preview of an mcp_tool call's arguments.
+	ArgsPreview string `json:"args_preview,omitempty"`
+	TS          string `json:"ts"`
 }
 
 // DecisionFile is the verdict the UI writes back for a parked Request.

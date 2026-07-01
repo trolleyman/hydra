@@ -1,4 +1,4 @@
-import { useToastStore, type ToastType } from '../stores/toastStore'
+import { useToastStore, type ToastType, type ApprovalToastData } from '../stores/toastStore'
 import { StorageKeys } from './storage'
 
 // Spec for a harness-driven toast. Mirrors the real toast shape but with action
@@ -10,6 +10,8 @@ interface HarnessToastSpec {
   type?: ToastType
   duration?: number
   actions?: { label: string; variant?: 'primary' | 'danger' }[]
+  // When set, the rich security-gate approval card is rendered.
+  approval?: ApprovalToastData
 }
 
 // installToastHarness exposes a tiny hook on window for driving the toast store
@@ -36,6 +38,7 @@ export function installToastHarness() {
         type: spec.type,
         duration: spec.duration ?? 0,
         actions: spec.actions?.map((a) => ({ label: a.label, variant: a.variant, onClick: () => {} })),
+        approval: spec.approval,
       }),
   }
 }

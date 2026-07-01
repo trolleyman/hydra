@@ -592,6 +592,18 @@ try {
         message: string
         type?: 'info' | 'success' | 'error' | 'warning'
         actions?: { label: string; variant?: 'primary' | 'danger' }[]
+        // When set, the rich security-gate approval card is rendered instead of the
+        // plain message row (mirrors ApprovalToastData in the toast store).
+        approval?: {
+          kind: string
+          target: string
+          agentName?: string | null
+          rw?: string | null
+          reason?: string | null
+          url?: string | null
+          argsPreview?: string | null
+          crossProject?: string | null
+        }
       }
       // Restricts this page to a subset of themes. Defaults to both light+dark;
       // set e.g. ['dark'] to capture only the dark render (used where a shot only
@@ -632,33 +644,82 @@ try {
           actions: [{ label: 'View', variant: 'primary' }],
         },
       },
-      // 3. A security-gate parked tool call: persistent, with Allow once / Always
-      // allow / Deny; dismissing the toast denies it. Shown as a WebFetch approval
-      // (WebFetch gate parks fire today); the MCP approval is documented once, in
-      // the agent-approvals-dark card, rather than as a toast here.
+      // 3. Security-gate approval cards (the rich ApprovalToast): persistent, with
+      // Allow once / Always allow / Deny; dismissing denies. One shot per gated
+      // kind so the design of each is documented.
+      // 3a. Whole MCP server.
       {
-        name: 'toast-approval',
+        name: 'toast-approval-mcp',
         path: '/settings',
         toast: {
-          message: 'Agent "Add needs-input" wants to fetch "api.linear.app"',
+          message: '',
           type: 'warning',
           actions: [
-            { label: 'Allow', variant: 'primary' },
-            { label: 'Allow always', variant: 'primary' },
+            { label: 'Allow once', variant: 'primary' },
+            { label: 'Always allow', variant: 'primary' },
             { label: 'Deny', variant: 'danger' },
           ],
+          approval: { kind: 'mcp', target: 'linear', agentName: 'Wire up the GitHub MCP server', reason: "Server isn't on the project allow-list." },
         },
       },
-      // 4. A *background* project has a blocked agent — names the agent and its
-      // project (fetched on demand when the project's count changes); "View"
-      // switches to that agent. One such toast per newly-blocked agent.
+      // 3b. A specific write tool on an already-trusted server (args previewed).
+      {
+        name: 'toast-approval-tool-write',
+        path: '/settings',
+        toast: {
+          message: '',
+          type: 'warning',
+          actions: [
+            { label: 'Allow once', variant: 'primary' },
+            { label: 'Always allow', variant: 'primary' },
+            { label: 'Deny', variant: 'danger' },
+          ],
+          approval: { kind: 'mcp_tool', target: 'linear__create_issue', rw: 'write', agentName: 'Triage inbound bugs', argsPreview: '{"team":"Core","title":"Login 500s on staging"}', reason: 'Write tool — creates a new issue in linear.' },
+        },
+      },
+      // 3c. A read-only tool call — quieter, teal READ badge.
+      {
+        name: 'toast-approval-tool-read',
+        path: '/settings',
+        toast: {
+          message: '',
+          type: 'warning',
+          actions: [
+            { label: 'Allow once', variant: 'primary' },
+            { label: 'Always allow', variant: 'primary' },
+            { label: 'Deny', variant: 'danger' },
+          ],
+          approval: { kind: 'mcp_tool', target: 'linear__search_issues', rw: 'read', agentName: 'Summarise this sprint', argsPreview: '{"state":"Done","cycle":42}', reason: 'Read-only — no data is modified.' },
+        },
+      },
+      // 3d. An outbound WebFetch — GET verb + full URL previewed.
+      {
+        name: 'toast-approval-webfetch',
+        path: '/settings',
+        toast: {
+          message: '',
+          type: 'warning',
+          actions: [
+            { label: 'Allow once', variant: 'primary' },
+            { label: 'Always allow', variant: 'primary' },
+            { label: 'Deny', variant: 'danger' },
+          ],
+          approval: { kind: 'webfetch', target: 'docs.linear.app', agentName: 'Publish the changelog', url: 'https://docs.linear.app/api/changelog', reason: "Host isn't on the network allow-list. Allowing trusts the whole host, not just this URL." },
+        },
+      },
+      // 4. Cross-project approval: an amber "running in another project" banner, and
+      // no "Always allow" — cross-project access is one-shot by default.
       {
         name: 'toast-cross-project',
         path: '/settings',
         toast: {
-          message: 'Agent "Add dark mode toggle" in project "hydra" needs input',
+          message: '',
           type: 'warning',
-          actions: [{ label: 'View', variant: 'primary' }],
+          actions: [
+            { label: 'Allow once', variant: 'primary' },
+            { label: 'Deny', variant: 'danger' },
+          ],
+          approval: { kind: 'mcp', target: 'github', agentName: 'Reconcile Stripe events', crossProject: 'payments-api', reason: 'Cross-project access — grant for this run only.' },
         },
       },
       // The keyboard-shortcuts help overlay, opened the way a user does — by
@@ -2248,7 +2309,7 @@ try {
             h.reset()
             h.show(spec)
           }, pg.toast)
-          await page.waitForSelector('[role="status"]')
+          await page.waitForSelector('[role="status"], [role="alertdialog"]')
           await settle(page)
         }
         const out = join(OUT, `${pg.name}${suffix}.png`)

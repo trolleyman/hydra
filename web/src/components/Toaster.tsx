@@ -2,6 +2,7 @@ import React from 'react'
 import { CheckCircle, AlertCircle, Info, X } from 'lucide-react'
 import { useToastStore, type Toast, type ToastType } from '../stores/toastStore'
 import { IconButton } from './IconButton'
+import { ApprovalCard } from './ApprovalToast'
 
 const getIcon = (type: ToastType) => {
   switch (type) {
@@ -49,6 +50,21 @@ const ToastItem: React.FC<{ toast: Toast; onDismiss: () => void }> = ({ toast, o
   // Only auto-expiring toasts (duration > 0) get a countdown bar, and it's hidden
   // once the toast starts leaving so it doesn't redraw during the exit animation.
   const showCountdown = toast.duration > 0 && !toast.exiting
+
+  // Security-gate approvals render the rich card instead of the plain message row.
+  if (toast.approval) {
+    return (
+      <div className={toast.exiting ? 'animate-toast-out' : 'animate-toast-in'}>
+        <ApprovalCard
+          data={toast.approval}
+          actions={toast.actions ?? []}
+          toastId={toast.id}
+          onDismiss={onDismiss}
+        />
+      </div>
+    )
+  }
+
   return (
     <div
       role="status"

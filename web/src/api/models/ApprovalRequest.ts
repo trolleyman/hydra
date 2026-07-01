@@ -32,6 +32,14 @@ export type ApprovalRequest = {
      */
     rw?: string | null;
     /**
+     * The full request URL for a webfetch request (previewed in the card).
+     */
+    url?: string | null;
+    /**
+     * Compact one-line preview of an mcp_tool call's arguments.
+     */
+    args_preview?: string | null;
+    /**
      * ISO 8601 timestamp the request was raised
      */
     ts?: string;
