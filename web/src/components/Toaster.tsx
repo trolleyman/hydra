@@ -72,24 +72,30 @@ const ToastItem: React.FC<{ toast: Toast; onDismiss: () => void }> = ({ toast, o
           toast.exiting ? 'animate-toast-out' : 'animate-toast-in'
         }`}
       >
-        <div className="flex items-start gap-2 p-3.5 pr-3">
-          <div className="min-w-0 flex-1 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-sm text-gray-500 dark:text-gray-400 leading-relaxed">
-            <button
-              type="button"
-              onClick={openAgent}
-              title="Open this agent"
-              className="inline-flex max-w-full min-w-0 items-center gap-1 font-semibold text-gray-900 dark:text-gray-100 hover:text-blue-600 hover:underline dark:hover:text-blue-400 cursor-pointer transition-colors"
-            >
-              <Bot className="w-3.5 h-3.5 shrink-0 text-gray-400 dark:text-gray-500" />
-              <span className="truncate">{t.agentName}</span>
-            </button>
-            <span>transitioned to</span>
-            <Badge variant="sm" className={badge.className}>{badge.label}</Badge>
-            {t.projectName && <span className="text-gray-400 dark:text-gray-500">· {t.projectName}</span>}
+        <div className="p-4">
+          <div className="flex items-start gap-3">
+            <div className={`shrink-0 w-9 h-9 rounded-xl flex items-center justify-center ${wrap}`}>
+              <Bot className="w-[18px] h-[18px]" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <button
+                type="button"
+                onClick={openAgent}
+                title="Open this agent"
+                className="block max-w-full truncate text-left text-sm font-semibold text-gray-900 dark:text-gray-100 hover:text-blue-600 hover:underline dark:hover:text-blue-400 cursor-pointer transition-colors"
+              >
+                {t.agentName}
+              </button>
+              <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[13px] text-gray-500 dark:text-gray-400">
+                <span>transitioned to</span>
+                <Badge variant="sm" className={badge.className}>{badge.label}</Badge>
+                {t.projectName && <span className="text-gray-400 dark:text-gray-500">· {t.projectName}</span>}
+              </div>
+            </div>
+            <IconButton onClick={onDismiss}>
+              <X className="w-4 h-4" />
+            </IconButton>
           </div>
-          <IconButton onClick={onDismiss}>
-            <X className="w-4 h-4" />
-          </IconButton>
         </div>
         {showCountdown && (
           <div
