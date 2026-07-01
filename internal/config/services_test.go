@@ -211,6 +211,32 @@ func TestEmptySectionExampleDoesNotAccumulate(t *testing.T) {
 	if countHeaders(second, "# name = \"emu-pool\"") != 1 {
 		t.Fatalf("services example malformed after save:\n%s", second)
 	}
+
+	// Recognition is structural, not an exact-string match: an example block whose
+	// field VALUES differ from the current canonical example (e.g. carried over from
+	// an older Hydra version) is still consumed, not preserved as a user comment.
+	drifted := "# [[services]]\n# name = \"old-name\"\n# command = \"legacy up\"\n# max_restarts = 9\n" +
+		"[[tests]]\nname = \"go\"\ncommand = \"go test ./...\"\n"
+	out := renderConfig([]byte(drifted), Config{})
+	if strings.Contains(out, "old-name") || strings.Contains(out, "legacy up") {
+		t.Fatalf("drifted example preserved as user comment instead of being regenerated:\n%s", out)
+	}
+	if got := countHeaders(out, "# [[services]]"); got != 1 {
+		t.Fatalf("drifted example not collapsed to one canonical example: got %d\n%s", got, out)
+	}
+}
+
+// TestConfigHeaderDoesNotAccumulate checks the top-of-file banner (all "##" doc
+// lines) is regenerated, not preserved as user comment and re-stacked each save.
+func TestConfigHeaderDoesNotAccumulate(t *testing.T) {
+	first := renderConfig(nil, Config{})
+	second := renderConfig([]byte(first), Config{})
+	if first != second {
+		t.Errorf("header render not idempotent:\n--- first ---\n%s\n--- second ---\n%s", first, second)
+	}
+	if got := strings.Count(second, configHeaderLines()[0]); got != 1 {
+		t.Fatalf("config header accumulated: got %d copies of the banner, want 1", got)
+	}
 }
 
 // TestServicesAuthoritativeDelete checks an explicit empty list clears services.
