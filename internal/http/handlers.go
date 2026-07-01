@@ -352,6 +352,34 @@ func (s *Server) GetProjectConfigToml(_ context.Context, request api.GetProjectC
 	}), nil
 }
 
+// PreviewConfigToml reads a project's .hydra/config.toml straight off disk at an
+// arbitrary path, without registering the project. It backs the add-project trust
+// prompt: the UI shows the repo-controlled config for review *before* the project
+// is added (registering starts its [[services]], which can run code), so nothing
+// runs until the user has trusted it. Read-only — it never executes anything.
+func (s *Server) PreviewConfigToml(_ context.Context, request api.PreviewConfigTomlRequestObject) (api.PreviewConfigTomlResponseObject, error) {
+	path := strings.TrimSpace(request.Params.Path)
+	if path == "" {
+		return api.PreviewConfigToml400JSONResponse{
+			Code:    400,
+			Error:   api.ErrorResponseErrorBadRequest,
+			Details: "path is required",
+		}, nil
+	}
+	content, exists, err := config.ReadProjectConfigTOML(path)
+	if err != nil {
+		return api.PreviewConfigToml500JSONResponse{
+			Code:    500,
+			Error:   api.ErrorResponseErrorInternalError,
+			Details: err.Error(),
+		}, nil
+	}
+	return api.PreviewConfigToml200JSONResponse(api.ConfigTomlResponse{
+		Content: string(content),
+		Exists:  exists,
+	}), nil
+}
+
 func (s *Server) RemoveProject(_ context.Context, request api.RemoveProjectRequestObject) (api.RemoveProjectResponseObject, error) {
 	// Resolve the path before removal so we can stop its services afterwards.
 	var removedPath string

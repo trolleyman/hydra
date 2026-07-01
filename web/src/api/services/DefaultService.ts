@@ -186,6 +186,27 @@ export class DefaultService {
         });
     }
     /**
+     * Preview the .hydra/config.toml at a filesystem path for the add-project trust prompt (read-only, does not register the project)
+     * @param path
+     * @returns ConfigTomlResponse OK
+     * @throws ApiError
+     */
+    public previewConfigToml(
+        path: string,
+    ): CancelablePromise<ConfigTomlResponse> {
+        return this.httpRequest.request({
+            method: 'GET',
+            url: '/api/config-toml-preview',
+            query: {
+                'path': path,
+            },
+            errors: {
+                400: `Bad Request`,
+                500: `Internal Server Error`,
+            },
+        });
+    }
+    /**
      * List all Hydra agents (heads)
      * @param projectId Project ID to scope the agent list
      * @returns AgentResponse OK

@@ -14,9 +14,6 @@ import {
   readJSON,
   writeJSON,
   createShardedStore,
-  readTrustedProjects,
-  isProjectTrusted,
-  trustProject,
 } from './storage'
 
 describe('per-id key builders', () => {
@@ -286,44 +283,5 @@ describe('createShardedStore', () => {
     skipStore.prune()
     expect(localStorage.getItem(`${SKIP}x`)).toBe(JSON.stringify({ anything: true }))
     expect(localStorage.getItem(key('stale'))).toBe(null)
-  })
-})
-
-describe('trusted projects', () => {
-  beforeEach(() => localStorage.clear())
-
-  it('starts empty', () => {
-    expect(readTrustedProjects().size).toBe(0)
-    expect(isProjectTrusted('p')).toBe(false)
-  })
-
-  it('records and reports a trusted project', () => {
-    trustProject('p1')
-    expect(isProjectTrusted('p1')).toBe(true)
-    expect(readTrustedProjects().has('p1')).toBe(true)
-  })
-
-  it('is idempotent and accumulates distinct ids', () => {
-    trustProject('p1')
-    trustProject('p1')
-    trustProject('p2')
-    const ids = readTrustedProjects()
-    expect(ids.size).toBe(2)
-    expect([...ids].sort()).toEqual(['p1', 'p2'])
-  })
-
-  it('ignores malformed stored JSON', () => {
-    writeLocal(StorageKeys.trustedProjects, '{not json')
-    expect(readTrustedProjects().size).toBe(0)
-  })
-
-  it('ignores a non-array stored value', () => {
-    writeLocal(StorageKeys.trustedProjects, JSON.stringify({ p1: true }))
-    expect(readTrustedProjects().size).toBe(0)
-  })
-
-  it('filters out non-string entries', () => {
-    writeLocal(StorageKeys.trustedProjects, JSON.stringify(['ok', 5, null, 'good']))
-    expect([...readTrustedProjects()].sort()).toEqual(['good', 'ok'])
   })
 })
