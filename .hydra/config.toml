@@ -16,7 +16,11 @@ pre_prompt = """
 
 [sandbox]
 ## extra paths made writable in the sandbox (added to the built-in defaults).
-writable_paths = ["~/.cache/go", "~/.bun/install/cache", "~/.cache/goimports", "~/.magefile"]
+# ~/.local/share/go/pkg/sumdb is GOPATH/pkg/sumdb (GOPATH stays ~/.local/share/go
+# even though GOMODCACHE is redirected to ~/.cache/go); `go`/`go tool` writes the
+# checksum-db tree head there when fetching a new module, so without it fetching a
+# tool dep (e.g. gotestsum) fails with a read-only-filesystem error on sum.golang.org.
+writable_paths = ["~/.cache/go", "~/.bun/install/cache", "~/.cache/goimports", "~/.magefile", "~/.local/share/go/pkg/sumdb"]
 ## extra paths hidden in the sandbox (added to the built-in defaults).
 # masked_paths = ["~/.ssh", "~/.aws", "~/.azure", "~/.gnupg", "~/.docker", "~/.kube", "~/.password-store", "~/.config", "~/.netrc", "~/.git-credentials", "~/.npmrc", "~/.pypirc", "~/.zsh_history", "~/.bash_history", "~/.sh_history", "~/.config/mise/config.local.toml", "~/.dotfiles/mise/config.local.toml"]
 # ~/.config/go holds `go env -w` settings (GOMODCACHE=~/.cache/go/pkg/mod,
