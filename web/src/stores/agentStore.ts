@@ -157,11 +157,15 @@ export const useAgentStore = create<AgentState>((set) => ({
     if (projectId !== undefined && projectId === state.agentsProjectId) {
       notifyBackgroundMerges(state.agents, agents)
     }
-    // Status: drop the override once the backend reports the optimistic status.
+    // Status: drop the override once the backend reports the optimistic status —
+    // or the moment it reports needs_input. needs_input is the explicit "the
+    // agent is blocked on you" signal, so it must never stay masked behind a
+    // stale optimistic "running" (e.g. the agent asked a follow-up question right
+    // after the user submitted input).
     const opt = applyOverrides(
       agents, state.optimistic,
       (o) => o.until,
-      (a, o) => a.agent_status?.status === o.status,
+      (a, o) => a.agent_status?.status === o.status || a.agent_status?.status === AgentStatus.NEEDS_INPUT,
       (a, o) => ({ ...a, agent_status: { ...(a.agent_status ?? { status: o.status, timestamp: '' }), status: o.status } }),
     )
     // Marked read: force the flag off until the backend reports it cleared.

@@ -432,7 +432,15 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
         // reaches here and doesn't falsely trigger. The backend UserPromptSubmit
         // hook reports the real status shortly after; until then this avoids the
         // badge lagging on "waiting"/"finished". Shells have no agent status.
-        if (!shell && data.includes('\r')) {
+        //
+        // But NOT when the agent is asking a question (needs_input): answering
+        // one AskUserQuestion prompt often just leads to the next one, so forcing
+        // "running" here would wrongly clear the "needs you" state — and the
+        // optimistic override would then mask the real backend needs_input for
+        // its whole TTL. Leave needs_input alone and let the backend report the
+        // true next state (another question, or genuinely running).
+        const curStatus = useAgentStore.getState().agents.find((a) => a.id === agentId)?.agent_status?.status
+        if (!shell && data.includes('\r') && curStatus !== AgentStatus.NEEDS_INPUT) {
           useAgentStore.getState().setOptimisticStatus(agentId, AgentStatus.RUNNING)
           onStatusUpdate?.(AgentStatus.RUNNING)
         }
