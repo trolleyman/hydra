@@ -2551,16 +2551,31 @@ components:
           description: The tool the agent tried to use (e.g. WebFetch or an mcp__ name)
         kind:
           type: string
-          description: "What is being approved: 'mcp', 'webfetch', or 'bash'"
+          description: "What is being approved: 'mcp', 'mcp_tool', 'webfetch', or 'bash'"
         target:
           type: string
-          description: The MCP server name, host, or command the approval is about
+          description: The MCP server name, '<server>__<tool>', host, or command the approval is about
         reason:
           type: string
           description: One-line explanation of why the gate parked the call
         summary:
           type: string
           description: Human-readable "wants to …" summary for the approval card
+        rw:
+          type: string
+          nullable: true
+          description: >-
+            Read/write classification of an mcp_tool request ("read", "write", or
+            absent when unknown/not applicable). Best-effort heuristic — a badge
+            hint, not a guarantee.
+        url:
+          type: string
+          nullable: true
+          description: The full request URL for a webfetch request (previewed in the card).
+        args_preview:
+          type: string
+          nullable: true
+          description: Compact one-line preview of an mcp_tool call's arguments.
         ts:
           type: string
           description: ISO 8601 timestamp the request was raised
@@ -2589,26 +2604,48 @@ components:
     NetworkConfig:
       type: object
       properties:
-        enabled:
-          type: boolean
+        mode:
+          type: string
           nullable: true
-          description: Whether outbound network access is allowed (default true)
-        filter_enabled:
+          enum: [off, unrestricted, advisory, hard]
+          description: >-
+            Egress posture: "off" (no network), "unrestricted" (network, no host
+            filtering), "advisory" (proxy-only host filtering — every honest
+            client is filtered, but escapable), or "hard" (inescapable pasta+nft
+            netns, degrading to advisory with a warning where the tooling is
+            unavailable). Null/unset = default ("hard"). Supersedes the legacy
+            enabled/filter_enabled booleans.
+        strict:
           type: boolean
           nullable: true
           description: >-
-            Whether the allowed_hosts list is enforced (deny-by-default egress).
-            Null/unset = inferred (on when allowed_hosts is non-empty); true =
-            only allowed_hosts reachable (empty list blocks all egress); false =
-            allow every host.
+            With mode "hard", fail closed (block all egress) when the inescapable
+            boundary can't be built, instead of degrading to advisory (default
+            false).
+        enabled:
+          type: boolean
+          nullable: true
+          description: LEGACY (use mode). Honoured only when mode is unset.
+        filter_enabled:
+          type: boolean
+          nullable: true
+          description: LEGACY (use mode). Honoured only when mode is unset.
         allowed_hosts:
           type: array
           items:
             type: string
           nullable: true
           description: >-
-            Outbound host allow-list (exact host or *.suffix), enforced by the
-            egress proxy when filter_enabled is on.
+            Extra outbound hosts (exact host or *.suffix) allowed when filtering
+            is on, unioned on top of the built-in default allow-list.
+        blocked_hosts:
+          type: array
+          items:
+            type: string
+          nullable: true
+          description: >-
+            Outbound hosts (exact host or *.suffix) denied even when otherwise
+            allowed — overrides both allowed_hosts and the built-in defaults.
 
     SandboxConfig:
       type: object
@@ -2653,6 +2690,9 @@ components:
         sandbox:
           $ref: '#/components/schemas/SandboxConfig'
           nullable: true
+        policy:
+          $ref: '#/components/schemas/PolicyConfig'
+          nullable: true
         pre_prompt:
           type: string
           nullable: true
@@ -2660,6 +2700,59 @@ components:
           type: boolean
           nullable: true
           description: Enable Claude Code's fullscreen (alternate-screen) rendering. Claude only; off by default so the web terminal keeps its native scrollbar and select-to-copy.
+
+    PolicyConfig:
+      type: object
+      description: >-
+        Per-agent security-gate policy. The decision-capable gate can deny (or
+        park for approval) tool calls even under skip-permissions.
+      properties:
+        gate_enabled:
+          type: boolean
+          nullable: true
+          description: Enable the decision-capable gate (default true when unset).
+        mcp_allowed:
+          type: array
+          items:
+            type: string
+          nullable: true
+          description: >-
+            MCP server names the agent may use (whole-server grant). Servers not
+            listed (nor referenced by mcp_tools_allowed) are stripped from the
+            seeded config pre-launch (never spawn). Deny-by-default.
+        mcp_tools_allowed:
+          type: array
+          items:
+            type: string
+          nullable: true
+          description: >-
+            Individual MCP tools ("<server>__<tool>") allowed even when the whole
+            server is not. The server is kept (spawned) so those tools work; its
+            other tools park for approval at runtime.
+        mcp_auto_allow_read:
+          type: boolean
+          nullable: true
+          description: >-
+            Auto-allow MCP tools the read/write classifier deems read-only,
+            parking only writes/unknown. Best-effort heuristic; off by default.
+        webfetch_allow_hosts:
+          type: array
+          items:
+            type: string
+          nullable: true
+          description: Hosts WebFetch may reach without an approval round-trip.
+
+    McpServer:
+      type: object
+      required: [name, source]
+      description: A candidate MCP server discovered in the host/project config.
+      properties:
+        name:
+          type: string
+          description: The server key as it appears under mcpServers.
+        source:
+          type: string
+          description: Where it was found — "user" (~/.claude.json) or "project" (.mcp.json).
 
     ArtifactScript:
       type: object
@@ -2858,6 +2951,15 @@ components:
           type: object
           additionalProperties:
             $ref: '#/components/schemas/AgentConfig'
+        mcp_servers:
+          type: array
+          items:
+            $ref: '#/components/schemas/McpServer'
+          nullable: true
+          description: >-
+            Read-only: candidate MCP servers discovered in the host ~/.claude.json
+            and project .mcp.json, for populating the mcp_allowed picker. Ignored
+            on save.
         artifacts:
           type: array
           items:

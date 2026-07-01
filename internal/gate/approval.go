@@ -26,11 +26,18 @@ const (
 type Request struct {
 	ReqID   string `json:"reqid"`
 	Tool    string `json:"tool"`
-	Kind    string `json:"kind"`   // mcp | webfetch | bash
-	Target  string `json:"target"` // server name / host / "git push"
+	Kind    string `json:"kind"`   // mcp | mcp_tool | webfetch | bash
+	Target  string `json:"target"` // server name / "<server>__<tool>" / host / "git push"
 	Reason  string `json:"reason"`
 	Summary string `json:"summary"`
-	TS      string `json:"ts"`
+	// RW is the read/write classification of an mcp_tool request ("read"/"write"/""),
+	// surfaced as a badge in the approval UI.
+	RW string `json:"rw,omitempty"`
+	// URL is the full request URL for a webfetch request (previewed in the card).
+	URL string `json:"url,omitempty"`
+	// ArgsPreview is a compact one-line preview of an mcp_tool call's arguments.
+	ArgsPreview string `json:"args_preview,omitempty"`
+	TS          string `json:"ts"`
 }
 
 // DecisionFile is the verdict the UI writes back for a parked Request.

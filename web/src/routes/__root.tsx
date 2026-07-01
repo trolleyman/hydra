@@ -10,6 +10,7 @@ import { usePushStatus } from '../lib/usePushStatus'
 import { useSystemStatus } from '../lib/useSystemStatus'
 import { useArchivedAgents } from '../lib/useArchivedAgents'
 import { useGlobalShortcuts } from '../lib/useGlobalShortcuts'
+import { useAgentNotifications } from '../lib/useAgentNotifications'
 import type { AgentResponse } from '../api'
 import { ApiError, ErrorResponse } from '../api'
 import { apiErrorBody } from '../api/format_error'
@@ -270,6 +271,7 @@ function RootLayout() {
   const { refetchAgents } = useAgentPolling(currentProjectId)
   const { pushStatus, syncing, handleSync, refetchPushStatus } = usePushStatus(currentProjectId)
   const { sentinelRef: archivedSentinelRef } = useArchivedAgents(currentProjectId)
+  useAgentNotifications(currentProjectId)
   const { refetchStatus, development, spawnedAt } = useSystemStatus()
 
   // Auto-clear an agent's unread dot when it's the one currently open AND the

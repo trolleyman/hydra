@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"sort"
 	"strings"
 
 	"braces.dev/errtrace"
+	"github.com/trolleyman/hydra/internal/gate"
 )
 
 // This file holds the per-agent configuration generators (moved from the old
@@ -118,8 +120,9 @@ func BuildClaudeSettings(existing []byte, hydraBin string, gateEnabled bool, mcp
 // settings, and strips any MCP server (user-scope or per-project) not on
 // mcpAllowed so non-allow-listed servers never spawn (a stdio MCP server is code
 // that runs the moment the session starts, so gating tool calls alone is too
-// late).
-func BuildClaudeConfig(existing []byte, worktreePath string, mcpAllowed []string) ([]byte, error) {
+// late). It also injects the Hydra control server (`hydraBin mcp <agentType>`)
+// AFTER stripping, so the agent always has the discover/request tools.
+func BuildClaudeConfig(existing []byte, worktreePath string, mcpAllowed []string, hydraBin, agentType string) ([]byte, error) {
 	cfg := make(map[string]interface{})
 	if len(existing) > 0 {
 		if err := json.Unmarshal(existing, &cfg); err != nil {
@@ -140,6 +143,20 @@ func BuildClaudeConfig(existing []byte, worktreePath string, mcpAllowed []string
 	cfg["projects"] = projects
 
 	stripMCPServers(cfg, mcpAllowed)
+
+	// Inject the Hydra control server after stripping so it is always present.
+	if hydraBin != "" {
+		servers, _ := cfg["mcpServers"].(map[string]interface{})
+		if servers == nil {
+			servers = make(map[string]interface{})
+		}
+		servers[gate.HydraControlServer] = map[string]interface{}{
+			"type":    "stdio",
+			"command": hydraBin,
+			"args":    []string{"mcp", agentType},
+		}
+		cfg["mcpServers"] = servers
+	}
 
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
@@ -176,6 +193,159 @@ func stripMCPServers(cfg map[string]interface{}, allowed []string) {
 			}
 		}
 	}
+}
+
+// MCPServer names a candidate MCP server discovered in the host/project config.
+// It is the unit the allow-list (mcp_allowed) selects from.
+type MCPServer struct {
+	// Name is the server key as it appears under mcpServers.
+	Name string `json:"name"`
+	// Source is where it was found: "user" (host ~/.claude.json) or "project"
+	// (the project .mcp.json or a projects[*].mcpServers entry).
+	Source string `json:"source"`
+}
+
+// ListMCPServers enumerates candidate MCP servers from the host ~/.claude.json
+// (top-level user-scope mcpServers plus any projects[*].mcpServers) and a project
+// .mcp.json ({"mcpServers": {...}}). It returns a de-duplicated, name-sorted list;
+// a server seen in more than one place is reported once, preferring source
+// "user". Malformed JSON yields no servers from that source (best-effort).
+func ListMCPServers(claudeJSON, mcpJSON []byte) []MCPServer {
+	found := map[string]string{} // name -> source
+	add := func(name, source string) {
+		if name == "" {
+			return
+		}
+		// "user" wins over "project" when a name appears in both.
+		if existing, ok := found[name]; ok && existing == "user" {
+			return
+		}
+		found[name] = source
+	}
+	names := func(container map[string]interface{}) []string {
+		servers, ok := container["mcpServers"].(map[string]interface{})
+		if !ok {
+			return nil
+		}
+		out := make([]string, 0, len(servers))
+		for name := range servers {
+			out = append(out, name)
+		}
+		return out
+	}
+
+	if len(claudeJSON) > 0 {
+		var cfg map[string]interface{}
+		if json.Unmarshal(claudeJSON, &cfg) == nil {
+			for _, n := range names(cfg) {
+				add(n, "user")
+			}
+			if projects, ok := cfg["projects"].(map[string]interface{}); ok {
+				for _, p := range projects {
+					if pm, ok := p.(map[string]interface{}); ok {
+						for _, n := range names(pm) {
+							add(n, "project")
+						}
+					}
+				}
+			}
+		}
+	}
+	if len(mcpJSON) > 0 {
+		var cfg map[string]interface{}
+		if json.Unmarshal(mcpJSON, &cfg) == nil {
+			for _, n := range names(cfg) {
+				add(n, "project")
+			}
+		}
+	}
+
+	out := make([]MCPServer, 0, len(found))
+	for name, source := range found {
+		out = append(out, MCPServer{Name: name, Source: source})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
+}
+
+// MCPServerSpec is a stdio MCP server's launch command, used to introspect its
+// tools (read/write annotations). Non-stdio servers have an empty Command.
+type MCPServerSpec struct {
+	Name    string
+	Command string
+	Args    []string
+	Env     map[string]string
+}
+
+// MCPServerSpecs extracts stdio launch specs for the named servers from the host
+// ~/.claude.json (top-level mcpServers + projects[*].mcpServers) and a project
+// .mcp.json. Servers with no command (http/sse transports) or not in names are
+// skipped. The first spec found for a name wins.
+func MCPServerSpecs(claudeJSON, mcpJSON []byte, names []string) []MCPServerSpec {
+	want := make(map[string]bool, len(names))
+	for _, n := range names {
+		want[n] = true
+	}
+	seen := map[string]bool{}
+	var out []MCPServerSpec
+
+	consume := func(container map[string]interface{}) {
+		servers, ok := container["mcpServers"].(map[string]interface{})
+		if !ok {
+			return
+		}
+		for name, raw := range servers {
+			if !want[name] || seen[name] {
+				continue
+			}
+			m, ok := raw.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			command, _ := m["command"].(string)
+			if command == "" {
+				continue // non-stdio (http/sse) — can't spawn to introspect
+			}
+			spec := MCPServerSpec{Name: name, Command: command}
+			if rawArgs, ok := m["args"].([]interface{}); ok {
+				for _, a := range rawArgs {
+					if s, ok := a.(string); ok {
+						spec.Args = append(spec.Args, s)
+					}
+				}
+			}
+			if rawEnv, ok := m["env"].(map[string]interface{}); ok {
+				spec.Env = map[string]string{}
+				for k, v := range rawEnv {
+					if s, ok := v.(string); ok {
+						spec.Env[k] = s
+					}
+				}
+			}
+			seen[name] = true
+			out = append(out, spec)
+		}
+	}
+
+	for _, data := range [][]byte{claudeJSON, mcpJSON} {
+		if len(data) == 0 {
+			continue
+		}
+		var cfg map[string]interface{}
+		if json.Unmarshal(data, &cfg) != nil {
+			continue
+		}
+		consume(cfg)
+		if projects, ok := cfg["projects"].(map[string]interface{}); ok {
+			for _, p := range projects {
+				if pm, ok := p.(map[string]interface{}); ok {
+					consume(pm)
+				}
+			}
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
 }
 
 // BuildGeminiSettings generates the settings.json content with hook configuration for Gemini CLI.

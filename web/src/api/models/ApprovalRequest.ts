@@ -12,11 +12,11 @@ export type ApprovalRequest = {
      */
     tool: string;
     /**
-     * What is being approved: 'mcp', 'webfetch', or 'bash'
+     * What is being approved: 'mcp', 'mcp_tool', 'webfetch', or 'bash'
      */
     kind: string;
     /**
-     * The MCP server name, host, or command the approval is about
+     * The MCP server name, '<server>__<tool>', host, or command the approval is about
      */
     target: string;
     /**
@@ -27,6 +27,18 @@ export type ApprovalRequest = {
      * Human-readable "wants to …" summary for the approval card
      */
     summary: string;
+    /**
+     * Read/write classification of an mcp_tool request ("read", "write", or absent when unknown/not applicable). Best-effort heuristic — a badge hint, not a guarantee.
+     */
+    rw?: string | null;
+    /**
+     * The full request URL for a webfetch request (previewed in the card).
+     */
+    url?: string | null;
+    /**
+     * Compact one-line preview of an mcp_tool call's arguments.
+     */
+    args_preview?: string | null;
     /**
      * ISO 8601 timestamp the request was raised
      */

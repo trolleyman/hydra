@@ -460,7 +460,7 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 	// Filtering egress: when the head has a network allow-list, route its outbound
 	// HTTP(S) through a per-head proxy that only relays allow-listed hosts (hard
 	// netns+nft boundary when available, else advisory proxy env).
-	egressEnv, egressWrap := startEgress(opts.ID, net)
+	egressEnv, egressWrap := startEgress(opts.ID, &net)
 	env = append(env, egressEnv...)
 
 	sess, err := startAgentSession(reg, projectRoot, opts.ID, opts.AgentType, worktreePath, opts.Rows, opts.Cols, sandbox.Options{
@@ -716,6 +716,28 @@ func StartShellSession(reg *session.Registry, projectRoot string, head Head, row
 // ResumeHead starts a new sandbox session for an existing head (worktree and
 // branch already exist), running the agent's own --resume flow. Used by the TUI
 // and by the daemon to restore heads after a restart.
+// RestartHead relaunches a live head in a fresh sandbox: it kills the current
+// session, waits for it to exit, then resumes (re-seeding from the current
+// config). Used after granting an MCP-server request so the newly allow-listed
+// server — which MCP only loads at launch — becomes usable without the user
+// manually resuming. The conversation is restored by the resume's --continue.
+func RestartHead(reg *session.Registry, store *db.Store, projectRoot string, head Head, rows, cols uint16) error {
+	if reg.IsLive(head.ID) {
+		_ = reg.Kill(head.ID)
+		// Wait for the session to actually exit before relaunching, so the fresh
+		// session doesn't collide with the dying one in the registry.
+		deadline := time.Now().Add(10 * time.Second)
+		for reg.IsLive(head.ID) {
+			if time.Now().After(deadline) {
+				_ = reg.KillNow(head.ID)
+				break
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
+	return errtrace.Wrap(ResumeHead(reg, store, projectRoot, head, rows, cols))
+}
+
 func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head Head, rows, cols uint16) error {
 	worktreePath := projectRoot
 	if head.Worktree != nil {
@@ -765,7 +787,7 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 	env = append(env, headContextEnv(head.ID, head.AgentType, projectRoot, worktreePath, derefStr(head.Branch), head.BaseBranch)...)
 	env = append(env, claudeRenderingEnv(head.AgentType, cfg.ResolveFullscreen(string(head.AgentType)))...)
 	// Filtering egress (see SpawnHead): restart it fresh on resume.
-	egressEnv, egressWrap := startEgress(head.ID, net)
+	egressEnv, egressWrap := startEgress(head.ID, &net)
 	env = append(env, egressEnv...)
 
 	sess, err := startAgentSession(reg, projectRoot, head.ID, head.AgentType, worktreePath, rows, cols, sandbox.Options{

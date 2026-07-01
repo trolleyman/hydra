@@ -94,6 +94,14 @@ const (
 	MergeConflictErrorErrorUncommittedChanges MergeConflictErrorError = "uncommitted_changes"
 )
 
+// Defines values for NetworkConfigMode.
+const (
+	Advisory     NetworkConfigMode = "advisory"
+	Hard         NetworkConfigMode = "hard"
+	Off          NetworkConfigMode = "off"
+	Unrestricted NetworkConfigMode = "unrestricted"
+)
+
 // Defines values for RepositoryArtifactResponseStatus.
 const (
 	RepositoryArtifactResponseStatusError      RepositoryArtifactResponseStatus = "error"
@@ -200,8 +208,11 @@ type AddProjectRequest struct {
 // AgentConfig defines model for AgentConfig.
 type AgentConfig struct {
 	// Fullscreen Enable Claude Code's fullscreen (alternate-screen) rendering. Claude only; off by default so the web terminal keeps its native scrollbar and select-to-copy.
-	Fullscreen *bool   `json:"fullscreen"`
-	PrePrompt  *string `json:"pre_prompt"`
+	Fullscreen *bool `json:"fullscreen"`
+
+	// Policy Per-agent security-gate policy. The decision-capable gate can deny (or park for approval) tool calls even under skip-permissions.
+	Policy    *PolicyConfig `json:"policy,omitempty"`
+	PrePrompt *string       `json:"pre_prompt"`
 
 	// Sandbox User-editable sandbox policy, additive on top of baked-in defaults
 	Sandbox *SandboxConfig `json:"sandbox,omitempty"`
@@ -308,7 +319,10 @@ type ApprovalListResponse struct {
 
 // ApprovalRequest defines model for ApprovalRequest.
 type ApprovalRequest struct {
-	// Kind What is being approved: 'mcp', 'webfetch', or 'bash'
+	// ArgsPreview Compact one-line preview of an mcp_tool call's arguments.
+	ArgsPreview *string `json:"args_preview"`
+
+	// Kind What is being approved: 'mcp', 'mcp_tool', 'webfetch', or 'bash'
 	Kind string `json:"kind"`
 
 	// Reason One-line explanation of why the gate parked the call
@@ -317,10 +331,13 @@ type ApprovalRequest struct {
 	// Reqid Unique ID of the parked approval request
 	Reqid string `json:"reqid"`
 
+	// Rw Read/write classification of an mcp_tool request ("read", "write", or absent when unknown/not applicable). Best-effort heuristic — a badge hint, not a guarantee.
+	Rw *string `json:"rw"`
+
 	// Summary Human-readable "wants to …" summary for the approval card
 	Summary string `json:"summary"`
 
-	// Target The MCP server name, host, or command the approval is about
+	// Target The MCP server name, '<server>__<tool>', host, or command the approval is about
 	Target string `json:"target"`
 
 	// Tool The tool the agent tried to use (e.g. WebFetch or an mcp__ name)
@@ -328,6 +345,9 @@ type ApprovalRequest struct {
 
 	// Ts ISO 8601 timestamp the request was raised
 	Ts *string `json:"ts,omitempty"`
+
+	// Url The full request URL for a webfetch request (previewed in the card).
+	Url *string `json:"url"`
 }
 
 // ArtifactFile defines model for ArtifactFile.
@@ -523,6 +543,9 @@ type ConfigResponse struct {
 	DefaultPrePrompt *string     `json:"default_pre_prompt,omitempty"`
 	Defaults         AgentConfig `json:"defaults"`
 
+	// McpServers Read-only: candidate MCP servers discovered in the host ~/.claude.json and project .mcp.json, for populating the mcp_allowed picker. Ignored on save.
+	McpServers *[]McpServer `json:"mcp_servers"`
+
 	// Services Per-project long-running supervised commands ([[services]] in config.toml)
 	Services *[]ServiceScript `json:"services"`
 
@@ -646,6 +669,15 @@ type ErrorResponse struct {
 // ErrorResponseError Machine-readable error type (e.g. internal_error, not_found, unauthorized, docker_connect)
 type ErrorResponseError string
 
+// McpServer A candidate MCP server discovered in the host/project config.
+type McpServer struct {
+	// Name The server key as it appears under mcpServers.
+	Name string `json:"name"`
+
+	// Source Where it was found — "user" (~/.claude.json) or "project" (.mcp.json).
+	Source string `json:"source"`
+}
+
 // MergeConflictError defines model for MergeConflictError.
 type MergeConflictError struct {
 	// Code HTTP status code
@@ -667,14 +699,44 @@ type MergeConflictErrorError string
 
 // NetworkConfig defines model for NetworkConfig.
 type NetworkConfig struct {
-	// AllowedHosts Outbound host allow-list (exact host or *.suffix), enforced by the egress proxy when filter_enabled is on.
+	// AllowedHosts Extra outbound hosts (exact host or *.suffix) allowed when filtering is on, unioned on top of the built-in default allow-list.
 	AllowedHosts *[]string `json:"allowed_hosts"`
 
-	// Enabled Whether outbound network access is allowed (default true)
+	// BlockedHosts Outbound hosts (exact host or *.suffix) denied even when otherwise allowed — overrides both allowed_hosts and the built-in defaults.
+	BlockedHosts *[]string `json:"blocked_hosts"`
+
+	// Enabled LEGACY (use mode). Honoured only when mode is unset.
 	Enabled *bool `json:"enabled"`
 
-	// FilterEnabled Whether the allowed_hosts list is enforced (deny-by-default egress). Null/unset = inferred (on when allowed_hosts is non-empty); true = only allowed_hosts reachable (empty list blocks all egress); false = allow every host.
+	// FilterEnabled LEGACY (use mode). Honoured only when mode is unset.
 	FilterEnabled *bool `json:"filter_enabled"`
+
+	// Mode Egress posture: "off" (no network), "unrestricted" (network, no host filtering), "advisory" (proxy-only host filtering — every honest client is filtered, but escapable), or "hard" (inescapable pasta+nft netns, degrading to advisory with a warning where the tooling is unavailable). Null/unset = default ("hard"). Supersedes the legacy enabled/filter_enabled booleans.
+	Mode *NetworkConfigMode `json:"mode"`
+
+	// Strict With mode "hard", fail closed (block all egress) when the inescapable boundary can't be built, instead of degrading to advisory (default false).
+	Strict *bool `json:"strict"`
+}
+
+// NetworkConfigMode Egress posture: "off" (no network), "unrestricted" (network, no host filtering), "advisory" (proxy-only host filtering — every honest client is filtered, but escapable), or "hard" (inescapable pasta+nft netns, degrading to advisory with a warning where the tooling is unavailable). Null/unset = default ("hard"). Supersedes the legacy enabled/filter_enabled booleans.
+type NetworkConfigMode string
+
+// PolicyConfig Per-agent security-gate policy. The decision-capable gate can deny (or park for approval) tool calls even under skip-permissions.
+type PolicyConfig struct {
+	// GateEnabled Enable the decision-capable gate (default true when unset).
+	GateEnabled *bool `json:"gate_enabled"`
+
+	// McpAllowed MCP server names the agent may use (whole-server grant). Servers not listed (nor referenced by mcp_tools_allowed) are stripped from the seeded config pre-launch (never spawn). Deny-by-default.
+	McpAllowed *[]string `json:"mcp_allowed"`
+
+	// McpAutoAllowRead Auto-allow MCP tools the read/write classifier deems read-only, parking only writes/unknown. Best-effort heuristic; off by default.
+	McpAutoAllowRead *bool `json:"mcp_auto_allow_read"`
+
+	// McpToolsAllowed Individual MCP tools ("<server>__<tool>") allowed even when the whole server is not. The server is kept (spawned) so those tools work; its other tools park for approval at runtime.
+	McpToolsAllowed *[]string `json:"mcp_tools_allowed"`
+
+	// WebfetchAllowHosts Hosts WebFetch may reach without an approval round-trip.
+	WebfetchAllowHosts *[]string `json:"webfetch_allow_hosts"`
 }
 
 // ProjectInfo defines model for ProjectInfo.

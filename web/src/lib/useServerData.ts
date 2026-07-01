@@ -81,7 +81,7 @@ export function useServerData<T = unknown, A = void>(
 
   // The key the current data belongs to, so we can clear stale data when the key
   // changes (a different resource) without clearing on a mere `deps` revalidation
-  // (same key) — the latter would flicker e.g. ApprovalCard on every status bump.
+  // (same key) — the latter would flicker a status-keyed list on every status bump.
   const dataKeyRef = useRef<string | null>(null)
 
   useEffect(() => {

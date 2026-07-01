@@ -4,11 +4,16 @@
 /* eslint-disable */
 import type { AgentConfig } from './AgentConfig';
 import type { ArtifactScript } from './ArtifactScript';
+import type { McpServer } from './McpServer';
 import type { ServiceScript } from './ServiceScript';
 import type { TestScript } from './TestScript';
 export type ConfigResponse = {
     defaults: AgentConfig;
     agents: Record<string, AgentConfig>;
+    /**
+     * Read-only: candidate MCP servers discovered in the host ~/.claude.json and project .mcp.json, for populating the mcp_allowed picker. Ignored on save.
+     */
+    mcp_servers?: Array<McpServer> | null;
     /**
      * Per-project visual-artifact generation scripts ([[artifacts]] in config.toml)
      */
