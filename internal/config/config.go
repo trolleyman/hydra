@@ -44,7 +44,8 @@ const DefaultPrePrompt = "You are a head (AI agent) of Hydra, an AI orchestratio
 	"- `pre_exit_script` — a bash script run inside a sandbox when a head ends (before its worktree is removed), for per-head teardown such as releasing a claimed resource.\n" +
 	"- `pre_prompt` — the standing instructions you are reading now.\n" +
 	"\n" +
-	"These are read from `.hydra/config.toml` in the project root — the branch the repo is checked out on (usually `<base-branch>`), NOT your worktree. You can edit config.toml on your branch just fine, but the change has no effect until it is merged into that branch, so tell the user what you changed and why and let them decide whether to merge it.\n" +
+	"These are read from `.hydra/config.toml` in the project root — the branch the repo is checked out on (usually `<base-branch>`), NOT your worktree. You can edit config.toml on your branch just fine, but the change has no effect until it is merged into that branch, so tell the user what you changed and why and let them decide whether to merge it. This covers everything above plus `[[tests]]` runners: the test list is always taken from the trusted root config, never a branch's own edits, so a `[[tests]]` change on your branch does nothing until merged.\n" +
+	"The one exception is `[[artifacts]]`: the diff viewer reads them from the *ref being compared* (your branch's own config.toml/worktree), so an `[[artifacts]]` edit — or a change to the script it runs, like the screenshots generator — does take effect on your branch without merging. Only `unsafe_host` stays gated by the trusted root config; sandboxed artifact commands run as your branch defines them.\n" +
 	"\n" +
 	"## Workflow\n" +
 	"- As you work, use git commit to save your progress at logical points.\n" +
