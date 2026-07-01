@@ -709,14 +709,21 @@ function FileGrid({ files, mode, scale = 1, spans, onSpanChange, scope, changeTh
     [files],
   )
   const diffGallery = useMemo<LightboxImage[]>(
-    () => imageFiles.map((f) => ({
-      url: (f.right_url ?? f.left_url) as string,
-      filename: f.name,
-      size: 0,
-      diff: { left: f.left_url, right: f.right_url, mode },
-      dpi: f.dpi ?? undefined,
-    })),
-    [imageFiles, mode],
+    () => imageFiles.map((f) => {
+      // Same status the tile's badge shows — effectiveChangeType folds in the
+      // "% changed" threshold, so a sub-threshold "modified" reads as unchanged
+      // (no glyph) in both places.
+      const ct = effectiveChangeType(f, changeThreshold)
+      return {
+        url: (f.right_url ?? f.left_url) as string,
+        filename: f.name,
+        size: 0,
+        diff: { left: f.left_url, right: f.right_url, mode },
+        dpi: f.dpi ?? undefined,
+        changeType: ct === 'added' || ct === 'removed' || ct === 'modified' ? ct : undefined,
+      }
+    }),
+    [imageFiles, mode, changeThreshold],
   )
   const galleryIndex = useMemo(() => {
     const m = new Map<string, number>()

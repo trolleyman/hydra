@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { X, ChevronLeft, ChevronRight } from 'lucide-react'
+import { X, ChevronLeft, ChevronRight, SquarePlus, SquareMinus, SquareDot } from 'lucide-react'
 import type { ImageDiffMode } from './ArtifactImageDiff'
 import { LightboxDiff } from './LightboxDiff'
 import { makeAuxOpen } from './artifactDiffShared'
@@ -19,6 +19,26 @@ export interface LightboxImage {
   /** Pixel density (device-scale factor) the media was captured at, surfaced in the
    *  caption next to the dimensions (e.g. "780 × 1688 @2×"). Omit/1 → not shown. */
   dpi?: number
+  /** How this artifact changed vs its counterpart (added/removed/modified), when
+   *  known — shown as a small +/−/• glyph right after the filename in the caption,
+   *  mirroring the diff grid's per-file badge. Omit for plain images with no diff
+   *  context (e.g. the repository browser). */
+  changeType?: 'added' | 'removed' | 'modified'
+}
+
+// A small +/−/• glyph marking whether the artifact was added, removed, or modified
+// relative to its counterpart — mirrors the diff grid's ArtifactChangeIcon, but tuned
+// for the lightbox's always-dark backdrop (the brighter dark-theme colors).
+function ChangeTypeGlyph({ type }: { type: NonNullable<LightboxImage['changeType']> }) {
+  const cls = 'w-3.5 h-3.5 shrink-0'
+  switch (type) {
+    case 'added':
+      return <SquarePlus className={`${cls} text-green-400`} />
+    case 'removed':
+      return <SquareMinus className={`${cls} text-red-400`} />
+    case 'modified':
+      return <SquareDot className={`${cls} text-amber-400`} />
+  }
 }
 
 function formatBytes(n: number): string {
@@ -235,7 +255,14 @@ export function ImageLightbox({
         </div>
         <figcaption className="flex items-center gap-2 text-xs font-mono">
           {[
-            <span key="name" className="text-white/70">{current.filename}</span>,
+            <span key="name" className="flex items-center gap-1.5 text-white/70">
+              {current.filename}
+              {current.changeType && (
+                <span title={current.changeType} className="flex items-center">
+                  <ChangeTypeGlyph type={current.changeType} />
+                </span>
+              )}
+            </span>,
             dims && <span key="dims" className="text-white/40">{dims.w} × {dims.h}{current.dpi && current.dpi > 1 ? ` @${current.dpi}×` : ''}</span>,
             current.size > 0 && <span key="size" className="text-white/40">{formatBytes(current.size)}</span>,
             count > 1 && <span key="count" className="text-white/40">{index + 1} / {count}</span>,
