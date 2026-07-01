@@ -1,23 +1,29 @@
-import { useEffect, useState } from 'react'
+import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { ShieldAlert } from 'lucide-react'
+import hljs from 'highlight.js'
 import { api } from '../stores/apiClient'
-import type { ProjectInfo } from '../api'
 import { formatError } from '../api/format_error'
 import { DialogIconTile, DialogCancelButton, DialogConfirmButton } from './dialogPrimitives'
 
-// TrustProjectModal asks the user to review a project's .hydra/config.toml the
-// first time they open it. That file is read straight from the repository and
-// can run arbitrary code (pre_spawn_script, unsafe_host artifact commands) and
-// weaken the sandbox, so the user should recognize the project before using it.
-// Trust is a client-side, one-time decision remembered in localStorage (see
-// lib/storage); accepting just dismisses the prompt and opens the project,
-// declining backs out. Later edits to the config don't re-prompt.
-export function TrustProjectModal({
-  project,
+// TrustProjectModal asks the user to review a project's .hydra/config.toml before
+// it is added to Hydra. That file is read straight from the repository and can run
+// arbitrary code (pre_spawn_script, unsafe_host artifact commands, [[services]])
+// and weaken the sandbox, so the user should recognize the project before it is
+// registered. It reads the config read-only by path (the project isn't registered
+// yet), so nothing runs until the user clicks "Trust project". Trust is decided
+// once, at add time — there is no client-side trust state; a registered project is
+// a trusted one, and later config edits don't re-prompt.
+//
+// The component is memoized and its highlight is cached so the once-per-second
+// RootLayout re-render (the uptime ticker) can't churn it.
+export const TrustProjectModal = memo(function TrustProjectModal({
+  name,
+  path,
   onTrusted,
   onCancel,
 }: {
-  project: ProjectInfo
+  name: string
+  path: string
   onTrusted: () => void
   onCancel: () => void
 }) {
@@ -26,22 +32,27 @@ export function TrustProjectModal({
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  // Escape backs out (same as "Don't trust"). The modal is only mounted while
-  // the prompt is showing, so the listener is live exactly when it should be.
+  // Escape backs out (same as "Don't trust"). Route the key through a ref so the
+  // listener is registered exactly once for the modal's lifetime — re-subscribing
+  // on every parent render (onCancel's identity can change) is needless churn.
+  const onCancelRef = useRef(onCancel)
+  useEffect(() => {
+    onCancelRef.current = onCancel
+  }, [onCancel])
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onCancel()
+      if (e.key === 'Escape') onCancelRef.current()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [onCancel])
+  }, [])
 
   useEffect(() => {
     let cancelled = false
     setLoading(true)
     setError(null)
     api.default
-      .getProjectConfigToml(project.id)
+      .previewConfigToml(path)
       .then((res) => {
         if (cancelled) return
         setContent(res.content)
@@ -56,7 +67,20 @@ export function TrustProjectModal({
     return () => {
       cancelled = true
     }
-  }, [project.id])
+  }, [path])
+
+  // highlight.js token HTML for the config, coloured by the shared `.hljs-*`
+  // theme (see index.css). Memoized on content so it isn't recomputed on every
+  // re-render. TOML is highlighted via highlight.js's `ini` grammar (aliased
+  // `toml`). Falls back to null (plain text) if highlighting fails.
+  const highlighted = useMemo(() => {
+    if (!content) return null
+    try {
+      return hljs.highlight(content, { language: 'toml', ignoreIllegals: true }).value
+    } catch {
+      return null
+    }
+  }, [content])
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
@@ -77,8 +101,8 @@ export function TrustProjectModal({
 
         <div className="px-6 py-4 overflow-y-auto">
           <p className="text-sm text-gray-600 dark:text-gray-300 leading-relaxed">
-            <span className="font-medium text-gray-900 dark:text-gray-100">{project.name}</span>{' '}
-            <span className="font-mono text-xs text-gray-400 dark:text-gray-500 break-all">{project.path}</span>
+            <span className="font-medium text-gray-900 dark:text-gray-100">{name}</span>{' '}
+            <span className="font-mono text-xs text-gray-400 dark:text-gray-500 break-all">{path}</span>
           </p>
           <p className="text-sm text-gray-600 dark:text-gray-300 leading-relaxed mt-3">
             Hydra reads this project's <code className="font-mono text-xs">.hydra/config.toml</code> from the
@@ -87,7 +111,7 @@ export function TrustProjectModal({
             sandbox. Only trust it if you recognize this project and its config.
           </p>
           <p className="text-xs text-gray-500 dark:text-gray-400 mt-3">
-            You're asked once per project, the first time you open it; later edits to the config won't ask again.
+            You're asked once, when you add the project; later edits to the config won't ask again.
           </p>
 
           <div className="mt-4">
@@ -101,6 +125,11 @@ export function TrustProjectModal({
                 No <span className="font-mono not-italic">.hydra/config.toml</span> in this project — nothing
                 repo-controlled to run.
               </div>
+            ) : highlighted != null ? (
+              <pre
+                className="text-xs font-mono whitespace-pre-wrap break-words bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2.5 max-h-72 overflow-y-auto text-gray-800 dark:text-gray-200"
+                dangerouslySetInnerHTML={{ __html: highlighted }}
+              />
             ) : (
               <pre className="text-xs font-mono whitespace-pre-wrap break-words bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2.5 max-h-72 overflow-y-auto text-gray-800 dark:text-gray-200">
                 {content}
@@ -120,4 +149,4 @@ export function TrustProjectModal({
       </div>
     </div>
   )
-}
+})

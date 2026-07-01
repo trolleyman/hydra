@@ -1,49 +1,83 @@
+## Hydra project configuration — .hydra/config.toml
+##
+## Hydra runs autonomous coding agents ("heads"), each on its own git branch in an
+## isolated worktree and OS sandbox, supervised by a per-project daemon. This file
+## configures those agents and the daemon: the default pre-prompt, the sandbox
+## policy (what agents may read, write and reach over the network), the decision
+## gate, per-agent ([claude], [gemini], …) overrides, and the [[artifacts]],
+## [[services]] and [[tests]] commands run per project.
+##
+## Reading this file:
+##   ##  lines are Hydra's own docs and defaults — rewritten on every save, so edit
+##       the setting below each, not the ## text itself.
+##   # key = value   is a commented-out default; delete the leading "# " to override it.
+##   # your note     a single-# comment is yours and is preserved across saves.
+## Most settings are also editable from the Settings screen in the web UI.
+
 ## extra instructions appended to every agent's system prompt.
 pre_prompt = """
 - Use bun instead of npm, and bun x instead of npx
 - Check using mage build before committing
 """
+
 ## message typed into an agent that was working when the daemon restarted, so it resumes its task instead of idling (default "Continue"; "" disables).
 # resume_prompt = "Continue"
+
 ## max visual-artifact generations run at once, across foreground (viewing a diff) and background (proactive) work; lower it for RAM-hungry generators, or 0 for unlimited (default 2).
-# artifact_concurrency = 2
+artifact_concurrency = 4
+
 ## pre-generate a head's artifacts in the background once it settles, so a diff is ready before you open it; set false to generate only when viewing — foreground generation and the concurrency cap still apply (default true).
 # artifact_prefetch = true
+
 ## max test-runner generations run at once; lower it for heavy suites, or 0 for unlimited (default 1).
 # test_concurrency = 1
+
 ## re-run a head's test suites in the background when its branch-tip verdict is missing or stale, so it's ready before you open the panel; set false to run only on open / at merge — foreground runs and the concurrency cap still apply (default true).
 # test_prefetch = true
 
 [sandbox]
+# ~/.local/share/go/pkg/sumdb is GOPATH/pkg/sumdb (GOPATH stays ~/.local/share/go
+# even though GOMODCACHE is redirected to ~/.cache/go); `go`/`go tool` writes the
+# checksum-db tree head there when fetching a new module, so without it fetching a
+# tool dep (e.g. gotestsum) fails with a read-only-filesystem error on sum.golang.org.
 ## extra paths made writable in the sandbox (added to the built-in defaults).
-writable_paths = ["~/.cache/go", "~/.bun/install/cache", "~/.cache/goimports", "~/.magefile"]
+writable_paths = ["~/.cache/go", "~/.bun/install/cache", "~/.cache/goimports", "~/.magefile", "~/.local/share/go/pkg/sumdb"]
+
 ## extra paths hidden in the sandbox (added to the built-in defaults).
 # masked_paths = ["~/.ssh", "~/.aws", "~/.azure", "~/.gnupg", "~/.docker", "~/.kube", "~/.password-store", "~/.config", "~/.netrc", "~/.git-credentials", "~/.npmrc", "~/.pypirc", "~/.zsh_history", "~/.bash_history", "~/.sh_history", "~/.config/mise/config.local.toml", "~/.dotfiles/mise/config.local.toml"]
+
 # ~/.config/go holds `go env -w` settings (GOMODCACHE=~/.cache/go/pkg/mod,
 # GOCACHE=~/.cache/go/build, GOPATH=~/.local/share/go); ~/.config is masked by
 # default, so re-expose it or the sandboxed `go` falls back to ~/go/pkg/mod (not writable).
 ## paths re-exposed read-only after a masked parent (added to the built-in defaults).
 restore_ro = ["~/.config/go"]
+
 ## worktree-relative paths mounted copy-on-write from the project root (read source, writes kept per-head; e.g. large gitignored build dirs).
 # cow_paths = []
+
 ## shell script run in the sandbox before every agent launch — spawn and resume, so it must be idempotent (e.g. mise trust).
 # pre_spawn_script = ""
+
 ## shell script run in a sandbox when a head ends, before its worktree is removed — gets HYDRA_* + HYDRA_END_STATE; e.g. release a claimed resource.
 # pre_exit_script = ""
 
 [sandbox.network]
 ## allow outbound network access from the sandbox (default true).
 # enabled = true
+
 ## enforce the allowed_hosts list (deny-by-default egress). Unset = on when allowed_hosts is non-empty; true = only allowed_hosts reachable (empty list blocks all egress); false = allow every host.
 # filter_enabled = false
+
 ## outbound host allow-list (exact host or *.suffix), enforced by the egress proxy when filter_enabled is on. Empty + filtering on = block all egress; filtering off = all hosts reachable.
 # allowed_hosts = []
 
 [policy]
 ## enable the decision-capable gate that can deny tool calls (non-allow-listed MCP, credential reads, policy-file writes, global installs) even under skip-permissions (default true).
 # gate_enabled = true
+
 ## MCP server names the agent may use; any other server is stripped before launch and denied at runtime (default none).
 # mcp_allowed = []
+
 ## hosts WebFetch may reach without an approval round-trip; a new host parks the head for your approval (default none).
 # webfetch_allow_hosts = []
 
@@ -146,22 +180,16 @@ timeout_sec = 900
 ## If it writes no report, the exit code alone becomes a red/green verdict.
 ## It is also given HYDRA_TEST_SOURCE (the checkout dir) and HYDRA_TEST_REF (the
 ## resolved ref).
-# [[services]]
-# name = "emu-pool"
-# command = "scripts/emu-pool.sh up 3 --foreground"
-# host = true
-# max_restarts = 3
 [[tests]]
-# Go test suite. Uses gotestsum to emit JUnit (per-case detail in the panel) when
-# it's installed, otherwise falls back to plain `go test` (still red/green from the
-# exit code). The whole module is slow, so allow a generous timeout.
-# Go test suite. Uses gotestsum to emit JUnit (per-case detail in the panel) when
-# it's installed, otherwise falls back to plain `go test` (still red/green from the
-# exit code). The whole module is slow, so allow a generous timeout. (web/dist is
-# kept present in every checkout via a committed web/dist/.gitkeep, so the
-# //go:embed all:dist in web/embed.go compiles without building the frontend.)
+# Go test suite. Runs via `go tool gotestsum` (a version-pinned tool dependency in
+# go.mod, like oapi-codegen) so it emits JUnit and the panel shows per-case detail
+# (pass/fail per test) instead of a single synthetic "(command exited 0)" row. No
+# global/mise install needed — it builds from the module cache wherever `go` works.
+# The whole module is slow, so allow a generous timeout. (web/dist is kept present
+# in every checkout via a committed web/dist/.gitkeep, so the //go:embed all:dist in
+# web/embed.go compiles without building the frontend.)
 name = "go"
-command = "if command -v gotestsum >/dev/null 2>&1; then gotestsum --junitfile \"$HYDRA_TEST_OUTPUT/go.xml\" -- ./...; else go test ./...; fi"
+command = "go tool gotestsum --junitfile \"$HYDRA_TEST_OUTPUT/go.xml\" -- ./..."
 timeout_sec = 900
 
 [[tests]]

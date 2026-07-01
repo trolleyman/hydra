@@ -1,25 +1,24 @@
 import { describe, it, expect, afterEach, vi } from 'vitest'
 import { render, screen, fireEvent, cleanup } from '@testing-library/react'
 import { TrustProjectModal } from './TrustProjectModal'
-import type { ProjectInfo } from '../api'
 
-// The modal reads .hydra/config.toml on mount; stub the client so the effect
+// The modal previews .hydra/config.toml on mount; stub the client so the effect
 // resolves without a network call. We don't assert on the config body here —
 // the focus is the Escape-to-cancel keyboard handling.
 vi.mock('../stores/apiClient', () => ({
   api: {
     default: {
-      getProjectConfigToml: vi.fn().mockResolvedValue({ content: '', exists: false }),
+      previewConfigToml: vi.fn().mockResolvedValue({ content: '', exists: false }),
     },
   },
 }))
 
 afterEach(cleanup)
 
-const project: ProjectInfo = { id: 'a', name: 'Alpha', path: '/tmp/alpha' } as ProjectInfo
-
 function renderModal(onCancel: () => void) {
-  return render(<TrustProjectModal project={project} onTrusted={() => {}} onCancel={onCancel} />)
+  return render(
+    <TrustProjectModal name="Alpha" path="/tmp/alpha" onTrusted={() => {}} onCancel={onCancel} />,
+  )
 }
 
 describe('TrustProjectModal — Escape to cancel', () => {

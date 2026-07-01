@@ -44,7 +44,8 @@ const DefaultPrePrompt = "You are a head (AI agent) of Hydra, an AI orchestratio
 	"- `pre_exit_script` — a bash script run inside a sandbox when a head ends (before its worktree is removed), for per-head teardown such as releasing a claimed resource.\n" +
 	"- `pre_prompt` — the standing instructions you are reading now.\n" +
 	"\n" +
-	"These are read from `.hydra/config.toml` in the project root — the branch the repo is checked out on (usually `<base-branch>`), NOT your worktree. You can edit config.toml on your branch just fine, but the change has no effect until it is merged into that branch, so tell the user what you changed and why and let them decide whether to merge it.\n" +
+	"These are read from `.hydra/config.toml` in the project root — the branch the repo is checked out on (usually `<base-branch>`), NOT your worktree. You can edit config.toml on your branch just fine, but for most settings the change has no effect until it is merged into that branch, so tell the user what you changed and why and let them decide whether to merge it. This holds for everything above (sandbox policy, network, services, `pre_*` scripts, …).\n" +
+	"Two sections are the exception — `[[tests]]` and `[[artifacts]]` are read from the *ref being compared* (your branch's own config.toml/worktree), so editing them, or the scripts they run (a test command, the screenshots generator), takes effect on your branch without merging. Only `unsafe_host` stays gated by the trusted root config (a branch can't grant itself host access), and the root config can still disable a named runner/artifact; sandboxed commands otherwise run exactly as your branch defines them.\n" +
 	"\n" +
 	"## Workflow\n" +
 	"- As you work, use git commit to save your progress at logical points.\n" +
@@ -797,8 +798,10 @@ func ArtifactsAtProjectTOML(content []byte) ([]ArtifactScript, error) {
 
 // TestsAtProjectTOML resolves the [[tests]] scripts that apply when the project's
 // .hydra/config.toml holds the given content, mirroring Load's merge order (and
-// ArtifactsAtProjectTOML). Trusted-by-where-it's-read: the live merged config is
-// authoritative, never the checked-out ref's own config (see PLAN #26 red flag).
+// ArtifactsAtProjectTOML). Like artifacts, [[tests]] are read from the diffed ref's
+// own config so a branch's edits take effect on that branch; the security-sensitive
+// bits (unsafe_host, and a live kill-switch) stay gated by the trusted root config
+// at the call site (see internal/http testRunnersFor).
 func TestsAtProjectTOML(content []byte) ([]TestScript, error) {
 	cfg := LoadInternalDefaults()
 	if userPath, err := GetUserConfigPath(); err == nil {
@@ -1682,17 +1685,110 @@ func isManagedCommentedAssign(line string, keys map[string]bool) bool {
 	return false
 }
 
-// userComments keeps only the user's own comments, dropping Hydra-generated doc
-// and commented-default lines (which are regenerated) and any blank lines.
+// managedArraySections are the array-of-tables ([[name]]) sections Hydra owns and
+// regenerates. When empty, each is rendered as a commented-out example block (a
+// commented "# [[name]]" header followed by commented "# key = value" fields).
+var managedArraySections = []string{"artifacts", "services", "tests"}
+
+// isManagedCommentedArrayHeader reports whether a line is a commented-out header
+// for a managed array section (e.g. "# [[services]]") — the start of a regenerated
+// example block.
+func isManagedCommentedArrayHeader(line string) bool {
+	t := strings.TrimSpace(line)
+	if !strings.HasPrefix(t, "#") || isManagedDoc(t) {
+		return false
+	}
+	t = strings.TrimSpace(strings.TrimPrefix(t, "#"))
+	for _, s := range managedArraySections {
+		if t == "[["+s+"]]" {
+			return true
+		}
+	}
+	return false
+}
+
+// isCommentedSimpleAssign reports whether a line is a commented-out "key = value"
+// where key is a bare TOML key — i.e. an example field line like `# name = "x"`,
+// not prose that merely contains "=". Used to consume the body of a commented
+// example block regardless of the (regenerable) values it shows.
+func isCommentedSimpleAssign(line string) bool {
+	t := strings.TrimSpace(line)
+	if !strings.HasPrefix(t, "#") || isManagedDoc(t) {
+		return false
+	}
+	t = strings.TrimSpace(strings.TrimPrefix(t, "#"))
+	eq := strings.IndexByte(t, '=')
+	if eq <= 0 {
+		return false
+	}
+	return isBareTOMLKey(strings.TrimSpace(t[:eq]))
+}
+
+// isBareTOMLKey reports whether s is a non-empty TOML bare key (A-Z a-z 0-9 _ -).
+func isBareTOMLKey(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r != '_' && r != '-' && !(r >= 'a' && r <= 'z') && !(r >= 'A' && r <= 'Z') && !(r >= '0' && r <= '9') {
+			return false
+		}
+	}
+	return true
+}
+
+// userComments keeps only the user's own comments, dropping Hydra-generated doc,
+// commented-default, commented-agent-header, and commented array-section example
+// lines (all regenerated) and any blank lines. The example blocks are recognised
+// structurally — a "# [[services]]" header followed by "# key = value" body lines —
+// so they are dropped rather than swallowed into the next section as pseudo-user
+// comments and re-emitted next to a fresh example, duplicating on every save.
 func userComments(comments []string, keys map[string]bool) []string {
 	var out []string
+	inExample := false // inside a commented array-section example block
 	for _, c := range comments {
-		if strings.TrimSpace(c) == "" || isManagedDoc(c) || isManagedCommentedAssign(c, keys) || isManagedCommentedAgentHeader(c) {
+		t := strings.TrimSpace(c)
+		if t == "" {
+			inExample = false // a blank line ends an example block
 			continue
 		}
+		if isManagedDoc(c) || isManagedCommentedAssign(c, keys) || isManagedCommentedAgentHeader(c) {
+			continue
+		}
+		if isManagedCommentedArrayHeader(c) {
+			inExample = true
+			continue
+		}
+		if inExample && isCommentedSimpleAssign(c) {
+			continue
+		}
+		inExample = false
 		out = append(out, c)
 	}
 	return out
+}
+
+// configHeaderLines is the explanatory banner at the top of every rendered
+// config. Like every doc block it uses docPrefix ("##"), so it is recognised as
+// Hydra-owned and regenerated on each save rather than preserved as user comment.
+func configHeaderLines() []string {
+	return []string{
+		docPrefix + " Hydra project configuration — .hydra/config.toml",
+		docPrefix + "",
+		docPrefix + " Hydra runs autonomous coding agents (\"heads\"), each on its own git branch in an",
+		docPrefix + " isolated worktree and OS sandbox, supervised by a per-project daemon. This file",
+		docPrefix + " configures those agents and the daemon: the default pre-prompt, the sandbox",
+		docPrefix + " policy (what agents may read, write and reach over the network), the decision",
+		docPrefix + " gate, per-agent ([claude], [gemini], …) overrides, and the [[artifacts]],",
+		docPrefix + " [[services]] and [[tests]] commands run per project.",
+		docPrefix + "",
+		docPrefix + " Reading this file:",
+		docPrefix + "   ##  lines are Hydra's own docs and defaults — rewritten on every save, so edit",
+		docPrefix + "       the setting below each, not the ## text itself.",
+		docPrefix + "   # key = value   is a commented-out default; delete the leading \"# \" to override it.",
+		docPrefix + "   # your note     a single-# comment is yours and is preserved across saves.",
+		docPrefix + " Most settings are also editable from the Settings screen in the web UI.",
+	}
 }
 
 // renderConfig serializes cfg to the new flattened TOML layout, rendered on top
@@ -1748,6 +1844,9 @@ func renderConfig(existing []byte, cfg Config) string {
 
 	var out []string
 	spec := defaultsSpec()
+
+	// Explanatory banner at the very top of the file.
+	out = append(out, configHeaderLines()...)
 
 	// Root defaults (pre_prompt) — must precede any table header.
 	if tc := tableComments[""]; len(tc) > 0 {
@@ -1877,6 +1976,7 @@ func emitSpecTable(out *[]string, spec []specEntry, table, header string, def Ag
 		*out = append(*out, header)
 	}
 	for _, e := range entries {
+		*out = appendSettingBlank(*out)
 		text, isSet := e.get(def)
 		// The Hydra doc line is shown above every setting, set or not, with any
 		// preserved user comment above the doc.
@@ -1897,6 +1997,7 @@ func emitSpecTable(out *[]string, spec []specEntry, table, header string, def Ag
 // emitSpecTable's format: preserved user comment, Hydra doc line, then the value
 // (commented-out showing the default when unset).
 func emitResumePrompt(out *[]string, resumePrompt *string, keyComments map[string][]string) {
+	*out = appendSettingBlank(*out)
 	if uc := keyComments["\x00resume_prompt"]; len(uc) > 0 {
 		*out = append(*out, uc...)
 	}
@@ -1912,6 +2013,7 @@ func emitResumePrompt(out *[]string, resumePrompt *string, keyComments map[strin
 // Config-level setting, like resume_prompt). Preserved user comment, Hydra doc
 // line, then the value (commented-out showing the default when unset).
 func emitArtifactConcurrency(out *[]string, concurrency *int, keyComments map[string][]string) {
+	*out = appendSettingBlank(*out)
 	if uc := keyComments["\x00artifact_concurrency"]; len(uc) > 0 {
 		*out = append(*out, uc...)
 	}
@@ -1930,6 +2032,7 @@ func emitArtifactConcurrency(out *[]string, concurrency *int, keyComments map[st
 // setting, like artifact_concurrency). Preserved user comment, Hydra doc line,
 // then the value (commented-out showing the default when unset).
 func emitTestConcurrency(out *[]string, concurrency *int, keyComments map[string][]string) {
+	*out = appendSettingBlank(*out)
 	if uc := keyComments["\x00test_concurrency"]; len(uc) > 0 {
 		*out = append(*out, uc...)
 	}
@@ -1945,6 +2048,7 @@ func emitTestConcurrency(out *[]string, concurrency *int, keyComments map[string
 // boolean, like artifact_prefetch): preserved user comment, Hydra doc line, then
 // the value (commented-out showing the default when unset).
 func emitTestPrefetch(out *[]string, prefetch *bool, keyComments map[string][]string) {
+	*out = appendSettingBlank(*out)
 	if uc := keyComments["\x00test_prefetch"]; len(uc) > 0 {
 		*out = append(*out, uc...)
 	}
@@ -1960,6 +2064,7 @@ func emitTestPrefetch(out *[]string, prefetch *bool, keyComments map[string][]st
 // boolean, like resume_prompt): preserved user comment, Hydra doc line, then the
 // value (commented-out showing the default when unset).
 func emitArtifactPrefetch(out *[]string, prefetch *bool, keyComments map[string][]string) {
+	*out = appendSettingBlank(*out)
 	if uc := keyComments["\x00artifact_prefetch"]; len(uc) > 0 {
 		*out = append(*out, uc...)
 	}
@@ -2069,6 +2174,7 @@ func emitClaudeAgent(out *[]string, a AgentConfig, keyComments, tableComments ma
 		}
 		*out = append(*out, "pre_prompt = "+tomlStringValue(*a.PrePrompt))
 	}
+	*out = appendSettingBlank(*out)
 	if uc := keyComments[name+"\x00fullscreen"]; len(uc) > 0 {
 		*out = append(*out, uc...)
 	}
@@ -2185,4 +2291,23 @@ func appendBlank(out []string) []string {
 		return append(out, "")
 	}
 	return out
+}
+
+// appendSettingBlank separates one documented setting group (user comment + doc
+// line + value) from the previous one with a blank line — but not when out is
+// empty, already ends in a blank, or ends with a table header (real or commented,
+// e.g. "[sandbox]" / "# [claude]"), so the first setting still hugs its header.
+// Blank lines are regenerated and ignored on re-parse, so this stays idempotent.
+func appendSettingBlank(out []string) []string {
+	if len(out) == 0 {
+		return out
+	}
+	last := strings.TrimSpace(out[len(out)-1])
+	if last == "" {
+		return out
+	}
+	if h := strings.TrimSpace(strings.TrimPrefix(last, "#")); strings.HasPrefix(h, "[") && strings.HasSuffix(h, "]") {
+		return out
+	}
+	return append(out, "")
 }

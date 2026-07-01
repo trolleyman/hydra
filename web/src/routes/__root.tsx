@@ -36,7 +36,7 @@ export const Route = createRootRoute({
 import { useDialogStore } from '../stores/dialogStore'
 import { pruneArtifactPrefs } from '../lib/artifactPrefs'
 import { pruneAgentViewPrefs } from '../lib/agentViewPrefs'
-import { StorageKeys, readLocal, writeLocal, readTrustedProjects, trustProject, archivedCollapsedKey } from '../lib/storage'
+import { StorageKeys, readLocal, writeLocal, archivedCollapsedKey } from '../lib/storage'
 import { loadProjectView, saveProjectView, type ProjectView } from '../lib/projectView'
 
 // Server uptime, rendered as "up 2 hours" (the exact spawn time is in the
@@ -110,9 +110,17 @@ function RootLayout() {
   // State lives in a shared store so the agent page's top bar can host the toggle.
   const sidebarCollapsed = useSidebarStore((s) => s.collapsed)
   const toggleSidebar = useSidebarStore((s) => s.toggle)
-  // Which projects the user has trusted, mirrored from localStorage so the trust
-  // prompt re-evaluates reactively when one is accepted (see lib/storage).
-  const [trustedProjectIds, setTrustedProjectIds] = useState<Set<string>>(() => readTrustedProjects())
+  // When adding a project, the user first reviews its repo-controlled
+  // .hydra/config.toml (which can run code) before it's registered. This holds
+  // the pending review; its callbacks resolve the in-flight add (see
+  // handleAddProject). Trust is decided once, at add time — no client-side trust
+  // state is kept, so opening an already-added project never re-prompts.
+  const [trustPrompt, setTrustPrompt] = useState<{
+    name: string
+    path: string
+    onTrusted: () => void
+    onCancel: () => void
+  } | null>(null)
 
   const { projects, selectedProjectId, setProjects, setSelectedProjectId } = useProjectStore()
   const { agents, setAgents, addAgent, markRead } = useAgentStore()
@@ -435,9 +443,41 @@ function RootLayout() {
     window.location.reload()
   }
 
+  // Adding a project reads its .hydra/config.toml from the repo and, once
+  // registered, starts its [[services]] — both of which can run code. So the
+  // user reviews and trusts the config *before* we register it. Trust is decided
+  // here, once, at add time; there is no persisted trust state, so opening an
+  // already-added project never re-prompts. Declining leaves nothing registered.
   async function handleAddProject(path: string) {
+    const name = path.replace(/[/\\]+$/, '').split(/[/\\]/).pop() || path
+    const trusted = await new Promise<boolean>((resolve) => {
+      setTrustPrompt({
+        name,
+        path,
+        onTrusted: () => {
+          setTrustPrompt(null)
+          resolve(true)
+        },
+        onCancel: () => {
+          setTrustPrompt(null)
+          resolve(false)
+        },
+      })
+    })
+    if (!trusted) return
+    await registerProject(path)
+  }
+
+  // registerProject performs the actual add once the user has trusted the
+  // project. On a missing / non-git directory it offers to create+init it, then
+  // retries with those flags (no second trust prompt — the config was already
+  // reviewed).
+  async function registerProject(
+    path: string,
+    opts?: { create_if_missing?: boolean; init_git?: boolean },
+  ): Promise<void> {
     try {
-      const p = await api.default.addProject({ path })
+      const p = await api.default.addProject({ path, ...opts })
       const exists = projects.some((existing) => existing.id === p.id)
       if (!exists) {
         setProjects([...projects, p])
@@ -460,24 +500,8 @@ function RootLayout() {
                 : `The directory "${path}" is not a git repository. Do you want to initialize one?`,
               type: 'confirm',
               showCancel: true,
-              onConfirm: async () => {
-                try {
-                  const p = await api.default.addProject({
-                    path,
-                    create_if_missing: isNotFound,
-                    init_git: true,
-                  })
-                  const exists = projects.some((existing) => existing.id === p.id)
-                  if (!exists) {
-                    setProjects([...projects, p])
-                  }
-                  setSelectedProjectId(p.id)
-                  const isOnSettings = window.location.pathname.endsWith('/settings')
-                  navigate({ to: isOnSettings ? '/project/$projectId/settings' : '/project/$projectId', params: { projectId: p.id } })
-                  resolve()
-                } catch (e) {
-                  reject(e)
-                }
+              onConfirm: () => {
+                registerProject(path, { create_if_missing: isNotFound, init_git: true }).then(resolve, reject)
               },
               onCancel: () => {
                 reject(err)
@@ -514,25 +538,6 @@ function RootLayout() {
   }
 
   const filteredAgents = agents.filter((a) => !a.ephemeral)
-  const selectedProject = projects.find((p) => p.id === currentProjectId) ?? null
-
-  // A project's config.toml is read from the repo and can run code / weaken the
-  // sandbox, so the UI prompts the user to review it the first time they open a
-  // project. Trust is a client-side, one-time decision kept in localStorage, so
-  // this shows until the user accepts; later config edits don't re-prompt.
-  const untrustedProject = selectedProject && !trustedProjectIds.has(selectedProject.id) ? selectedProject : null
-
-  function handleProjectTrusted() {
-    if (!untrustedProject) return
-    trustProject(untrustedProject.id)
-    setTrustedProjectIds((prev) => new Set(prev).add(untrustedProject.id))
-  }
-
-  function handleTrustDeclined() {
-    setSelectedProjectId(null)
-    setAgents([])
-    navigate({ to: '/' })
-  }
 
   return (
     <div className="h-full bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 flex overflow-hidden">
@@ -884,11 +889,12 @@ function RootLayout() {
       <Dialog />
       <Toaster />
       <KeyboardShortcutsModal />
-      {untrustedProject && (
+      {trustPrompt && (
         <TrustProjectModal
-          project={untrustedProject}
-          onTrusted={handleProjectTrusted}
-          onCancel={handleTrustDeclined}
+          name={trustPrompt.name}
+          path={trustPrompt.path}
+          onTrusted={trustPrompt.onTrusted}
+          onCancel={trustPrompt.onCancel}
         />
       )}
     </div>
