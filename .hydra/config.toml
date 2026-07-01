@@ -152,16 +152,16 @@ timeout_sec = 900
 # host = true
 # max_restarts = 3
 [[tests]]
-# Go test suite. Uses gotestsum to emit JUnit (per-case detail in the panel) when
-# it's installed, otherwise falls back to plain `go test` (still red/green from the
-# exit code). The whole module is slow, so allow a generous timeout.
-# Go test suite. Uses gotestsum to emit JUnit (per-case detail in the panel) when
-# it's installed, otherwise falls back to plain `go test` (still red/green from the
-# exit code). The whole module is slow, so allow a generous timeout. (web/dist is
-# kept present in every checkout via a committed web/dist/.gitkeep, so the
-# //go:embed all:dist in web/embed.go compiles without building the frontend.)
+# Go test suite. Uses gotestsum to emit JUnit so the panel shows per-case detail
+# (pass/fail per test) instead of a single synthetic "(command exited 0)" row.
+# Prefers a globally-installed gotestsum; otherwise fetches it on demand with
+# `go run` (like the web job's `bun x vitest`), which needs network + the writable
+# go module cache — both available under the current sandbox settings. The whole
+# module is slow, so allow a generous timeout. (web/dist is kept present in every
+# checkout via a committed web/dist/.gitkeep, so the //go:embed all:dist in
+# web/embed.go compiles without building the frontend.)
 name = "go"
-command = "if command -v gotestsum >/dev/null 2>&1; then gotestsum --junitfile \"$HYDRA_TEST_OUTPUT/go.xml\" -- ./...; else go test ./...; fi"
+command = "if command -v gotestsum >/dev/null 2>&1; then gotestsum --junitfile \"$HYDRA_TEST_OUTPUT/go.xml\" -- ./...; else go run gotest.tools/gotestsum@latest --junitfile \"$HYDRA_TEST_OUTPUT/go.xml\" -- ./...; fi"
 timeout_sec = 900
 
 [[tests]]

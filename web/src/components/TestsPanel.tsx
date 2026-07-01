@@ -340,7 +340,7 @@ function TestRunnerCard({ runner, onRefresh }: { runner: TestRunResult; onRefres
         <div className="-mx-3">
           <button
             onClick={() => setShowPassing((s) => !s)}
-            className="flex w-full items-center gap-2 px-4 py-2 text-sm border-t border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800/40 text-left"
+            className="flex w-full items-center gap-2 px-4 py-2 text-sm border-t border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800/40 text-left cursor-pointer"
           >
             {showPassing ? <ChevronDown className="w-3 h-3 text-gray-400" /> : <ChevronRight className="w-3 h-3 text-gray-400" />}
             <Check className="w-3.5 h-3.5 text-green-600" strokeWidth={3} />
