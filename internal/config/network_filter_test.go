@@ -1,6 +1,12 @@
 package config
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/trolleyman/hydra/internal/sandbox"
+)
+
+func strp(s string) *string { return &s }
 
 // TestResolveFilterHosts covers how the filter_enabled toggle (and its inferred
 // default) resolves into sandbox.NetworkPolicy.FilterHosts.
@@ -14,36 +20,66 @@ func TestResolveFilterHosts(t *testing.T) {
 		wantHosts   int
 	}{
 		{
-			name:        "no network config: unrestricted (filter off)",
+			name:        "no network config: hard default (filter on)",
 			network:     nil,
-			wantFilter:  false,
+			wantFilter:  true,
 			wantEnabled: true,
 		},
 		{
-			name:        "allowed_hosts set, toggle unset: inferred on",
+			name:        "allowed_hosts set, nothing else: hard default (filter on)",
 			network:     &NetworkConfig{AllowedHosts: []string{"example.com"}},
 			wantFilter:  true,
 			wantEnabled: true,
 			wantHosts:   1,
 		},
 		{
-			name:        "no allowed_hosts, toggle unset: inferred off",
+			name:        "empty network config: hard default (filter on)",
 			network:     &NetworkConfig{},
-			wantFilter:  false,
+			wantFilter:  true,
 			wantEnabled: true,
 		},
 		{
-			name:        "toggle true, empty list: deny-by-default (filter on, blocks all)",
+			name:        "legacy toggle true, empty list: deny-by-default (filter on, blocks all)",
 			network:     &NetworkConfig{FilterEnabled: &tru},
 			wantFilter:  true,
 			wantEnabled: true,
 		},
 		{
-			name:        "toggle false, hosts present: explicitly allow all",
+			name:        "legacy toggle false, hosts present: explicitly allow all",
 			network:     &NetworkConfig{FilterEnabled: &fls, AllowedHosts: []string{"example.com"}},
 			wantFilter:  false,
 			wantEnabled: true,
 			wantHosts:   1,
+		},
+		{
+			name:        "legacy enabled false: network off",
+			network:     &NetworkConfig{Enabled: &fls},
+			wantFilter:  false,
+			wantEnabled: false,
+		},
+		{
+			name:        `mode "off": network off`,
+			network:     &NetworkConfig{Mode: strp("off")},
+			wantFilter:  false,
+			wantEnabled: false,
+		},
+		{
+			name:        `mode "unrestricted": filter off`,
+			network:     &NetworkConfig{Mode: strp("unrestricted")},
+			wantFilter:  false,
+			wantEnabled: true,
+		},
+		{
+			name:        `mode "advisory": filter on`,
+			network:     &NetworkConfig{Mode: strp("advisory")},
+			wantFilter:  true,
+			wantEnabled: true,
+		},
+		{
+			name:        `mode "hard" supersedes legacy filter_enabled=false`,
+			network:     &NetworkConfig{Mode: strp("hard"), FilterEnabled: &fls},
+			wantFilter:  true,
+			wantEnabled: true,
 		},
 	}
 	for _, tc := range cases {
@@ -58,6 +94,40 @@ func TestResolveFilterHosts(t *testing.T) {
 			}
 			if len(net.AllowedHosts) != tc.wantHosts {
 				t.Errorf("len(AllowedHosts) = %d, want %d", len(net.AllowedHosts), tc.wantHosts)
+			}
+		})
+	}
+}
+
+// TestResolveNetworkMode covers the resolved Mode/Strict/BlockedHosts fields for
+// the mode-based config, including the strict flag and the block-list carry.
+func TestResolveNetworkMode(t *testing.T) {
+	tru := true
+	cases := []struct {
+		name       string
+		network    *NetworkConfig
+		wantMode   sandbox.NetworkMode
+		wantStrict bool
+		wantBlock  int
+	}{
+		{"default (nil) is hard", nil, sandbox.NetHard, false, 0},
+		{"explicit advisory", &NetworkConfig{Mode: strp("advisory")}, sandbox.NetAdvisory, false, 0},
+		{"hard strict", &NetworkConfig{Mode: strp("hard"), Strict: &tru}, sandbox.NetHard, true, 0},
+		{"blocked hosts carried", &NetworkConfig{BlockedHosts: []string{"evil.com", "*.tracker.io"}}, sandbox.NetHard, false, 2},
+		{"legacy enabled=false is off", &NetworkConfig{Enabled: new(bool)}, sandbox.NetOff, false, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := Config{Defaults: AgentConfig{Sandbox: &SandboxConfig{Network: tc.network}}}
+			_, _, _, _, net, _ := cfg.ResolveSandboxOptions("claude")
+			if net.Mode != tc.wantMode {
+				t.Errorf("Mode = %q, want %q", net.Mode, tc.wantMode)
+			}
+			if net.Strict != tc.wantStrict {
+				t.Errorf("Strict = %v, want %v", net.Strict, tc.wantStrict)
+			}
+			if len(net.BlockedHosts) != tc.wantBlock {
+				t.Errorf("len(BlockedHosts) = %d, want %d", len(net.BlockedHosts), tc.wantBlock)
 			}
 		})
 	}

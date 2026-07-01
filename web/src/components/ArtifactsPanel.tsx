@@ -71,6 +71,8 @@ function presentedFiles(set: ArtifactSet): ArtifactFile[] {
 // BASE_MIN_COL_PX wide. MASONRY_GAP is the inter-column gutter.
 const BASE_MIN_COL_PX = 140
 const MASONRY_GAP = 12
+// Assumed tile height before a tile has been measured.
+const MASONRY_FALLBACK_H = 240
 
 // Tile reflow animation. An easeOutBack curve (the >1 control point) overshoots
 // slightly before settling — the gentle "boing" when a tile snaps to its new column
@@ -204,6 +206,15 @@ export function MasonryGrid({ items, spanScale = 1, scale = 1, spans, onSpanChan
   // Pinning it to its start column (see placement) keeps it anchored — it grows
   // rightward from a fixed left edge while the siblings reflow around it.
   const [drag, setDrag] = useState<{ key: string; width: number; col: number } | null>(null)
+  // The exact height the dragged tile will occupy at its current (snapped) width,
+  // measured off an invisible "ghost" copy rendered at that width with no transition
+  // (see the ghost render + layout effect below). The visible tile's measured height
+  // is frozen during the drag to avoid the columns beneath jittering as its width
+  // TRANSITION animates; the ghost gives placement the real settled height instead —
+  // accounting for label wrapping and other chrome that a formula can't — so the
+  // tiles below reserve the right space and reflow around it at each snap.
+  const [ghostH, setGhostH] = useState<number | null>(null)
+  const ghostRef = useRef<HTMLDivElement>(null)
   // The key of the tile currently being resized, read by the ResizeObserver below to
   // freeze that tile's measured height for the duration of the drag. A tile grows
   // taller as it widens (its media is w-full with a fixed aspect ratio), and letting
@@ -338,7 +349,7 @@ export function MasonryGrid({ items, spanScale = 1, scale = 1, spans, onSpanChan
   const dragCol = drag?.col
   const placement = useMemo(() => {
     const { cols, gap, colW } = layout
-    const FALLBACK_H = 240 // assumed height before a tile is first measured
+    const FALLBACK_H = MASONRY_FALLBACK_H // assumed height before a tile is first measured
     const bottoms = new Array(cols).fill(0)
     const pos: Record<string, { left: number; top: number; width: number; span: number }> = {}
     for (const it of items) {
@@ -357,7 +368,13 @@ export function MasonryGrid({ items, spanScale = 1, scale = 1, spans, onSpanChan
         const left = bestC * (colW + gap)
         const tileW = s * colW + (s - 1) * gap
         pos[it.key] = { left, top, width: tileW, span: s }
-        for (let k = bestC; k < bestC + s; k++) bottoms[k] = top + h + gap
+        // The tile's own measured height is frozen during the drag, so reserve the
+        // exact height measured off the invisible ghost (rendered at this same snapped
+        // width, no transition) — that's what the tile will actually settle to, chrome
+        // and label wrapping included. Falls back to the frozen height until the ghost
+        // has measured (a pre-paint layout effect, so no visible under-reserve).
+        const dh = ghostH ?? h
+        for (let k = bestC; k < bestC + s; k++) bottoms[k] = top + dh + gap
         continue
       }
       // Best start column: minimise the tallest of the columns this tile would cover.
@@ -376,8 +393,9 @@ export function MasonryGrid({ items, spanScale = 1, scale = 1, spans, onSpanChan
     const height = bottoms.length ? Math.max(...bottoms) - gap : 0
     return { pos, height: Math.max(0, height) }
     // drag.key/drag.col (not the whole drag object) so a width-only change while
-    // dragging doesn't re-pack the grid — only a start/end or a span snap does.
-  }, [items, heights, layout, spanOf, dragKey, dragCol])
+    // dragging doesn't re-pack the grid — only a start/end or a span snap does. ghostH
+    // feeds the dragged tile's reserved height (it changes only when the span snaps).
+  }, [items, heights, layout, spanOf, dragKey, dragCol, ghostH])
 
   // Set while a body drag (below) is resizing a tile, so the trailing click can be
   // swallowed before the media reacts to it. Holds the key of the tile being dragged.
@@ -400,7 +418,7 @@ export function MasonryGrid({ items, spanScale = 1, scale = 1, spans, onSpanChan
     const minW = layout.colW
     const maxW = layout.cols * layout.colW + (layout.cols - 1) * layout.gap
     // Freeze this tile's measured height for the drag's duration so its siblings hold
-    // still as it widens — they only move when its span snaps below.
+    // still as it widens — they reflow off the ghost measurement instead (see ghostH).
     resizeKeyRef.current = key
     // The column the tile currently sits in, so placement can pin it there (a snap to
     // a wider span must not let the packer relocate it under the pointer).
@@ -515,9 +533,36 @@ export function MasonryGrid({ items, spanScale = 1, scale = 1, spans, onSpanChan
     draggedKeyRef.current = null
   }
 
+  // Measure the ghost before paint so the columns beneath reserve the dragged tile's
+  // real settled height. Keyed on drag.width, so it re-measures each time the span
+  // snaps to a new width (the ghost has no transition, so its height is the target
+  // height immediately — not an intermediate animation frame). Cleared when the drag
+  // ends (setGhostH(null) is a bail-out no-op if it was already null).
+  useLayoutEffect(() => {
+    if (!drag) { setGhostH(null); return }
+    const el = ghostRef.current
+    if (el) setGhostH(el.offsetHeight)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [drag?.key, drag?.width])
+
+  const draggedItem = drag ? items.find((i) => i.key === drag.key) : undefined
   const canResize = !!onSpanChange && layout.cols > 1
   return (
     <div ref={containerRef} className="relative w-full" style={{ height: placement.height }}>
+      {/* Invisible ghost of the tile being dragged, rendered at its current snapped
+          width with NO transition, purely to measure the exact height it will settle
+          to (chrome + wrapped labels included). Absolutely positioned + invisible, so
+          it neither paints nor affects the container height. */}
+      {drag && draggedItem && (
+        <div
+          ref={ghostRef}
+          aria-hidden
+          className="absolute invisible pointer-events-none"
+          style={{ left: 0, top: 0, width: drag.width }}
+        >
+          {draggedItem.node}
+        </div>
+      )}
       {items.map((it) => {
         const p = placement.pos[it.key] ?? { left: 0, top: 0, width: 0, span: 1 }
         const bodyResize = canResize && it.bodyResizable !== false

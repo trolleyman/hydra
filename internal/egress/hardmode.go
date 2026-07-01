@@ -2,6 +2,7 @@ package egress
 
 import (
 	"context"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -39,8 +40,8 @@ func DetectHardMode() HardMode {
 }
 
 func detectHardMode() HardMode {
-	pasta, err := exec.LookPath("pasta")
-	if err != nil {
+	pasta := lookPasta()
+	if pasta == "" {
 		return HardMode{}
 	}
 	nft := lookNft()
@@ -56,6 +57,19 @@ func detectHardMode() HardMode {
 		return HardMode{}
 	}
 	return HardMode{Available: true, PastaPath: pasta, NftPath: nft}
+}
+
+// lookPasta resolves the pasta binary. HYDRA_PASTA overrides PATH lookup so a
+// newer pasta (e.g. one with --map-host-loopback, dropped in ~/.local/bin) can be
+// used without touching the system binary — mirrors HYDRA_BWRAP.
+func lookPasta() string {
+	if p := os.Getenv("HYDRA_PASTA"); p != "" {
+		return p
+	}
+	if p, err := exec.LookPath("pasta"); err == nil {
+		return p
+	}
+	return ""
 }
 
 // lookNft resolves nft, falling back to the usual sbin locations that are often

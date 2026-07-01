@@ -2,6 +2,8 @@ package http
 
 import (
 	"context"
+	"log"
+	"time"
 
 	"braces.dev/errtrace"
 	"github.com/trolleyman/hydra/internal/api"
@@ -43,7 +45,7 @@ func (s *Server) ListAgentApprovals(ctx context.Context, request api.ListAgentAp
 	out := make([]api.ApprovalRequest, 0, len(reqs))
 	for _, r := range reqs {
 		reason, ts := r.Reason, r.TS
-		out = append(out, api.ApprovalRequest{
+		req := api.ApprovalRequest{
 			Reqid:   r.ReqID,
 			Tool:    r.Tool,
 			Kind:    r.Kind,
@@ -51,7 +53,20 @@ func (s *Server) ListAgentApprovals(ctx context.Context, request api.ListAgentAp
 			Summary: r.Summary,
 			Reason:  &reason,
 			Ts:      &ts,
-		})
+		}
+		if r.RW != "" {
+			rw := r.RW
+			req.Rw = &rw
+		}
+		if r.URL != "" {
+			u := r.URL
+			req.Url = &u
+		}
+		if r.ArgsPreview != "" {
+			a := r.ArgsPreview
+			req.ArgsPreview = &a
+		}
+		out = append(out, req)
 	}
 	return api.ListAgentApprovals200JSONResponse{Approvals: out}, nil
 }
@@ -96,6 +111,7 @@ func (s *Server) DecideAgentApproval(ctx context.Context, request api.DecideAgen
 	// decision file, so the allow-list update can't be lost if the next launch
 	// races the agent unblocking. Best-effort: a persistence failure still lets
 	// the one-shot decision through.
+	var grantedMCPKind string // "mcp"/"mcp_tool" when a remembered MCP grant was persisted
 	if allow && remember {
 		if req, ok, _ := gate.ReadRequest(dir, request.Reqid); ok {
 			if err := rememberApproval(projectRoot, string(head.AgentType), req.Kind, req.Target); err != nil {
@@ -104,6 +120,9 @@ func (s *Server) DecideAgentApproval(ctx context.Context, request api.DecideAgen
 					Error:   api.ErrorResponseErrorInternalError,
 					Details: "remember approval: " + err.Error(),
 				}, nil
+			}
+			if req.Kind == "mcp" || req.Kind == "mcp_tool" {
+				grantedMCPKind = req.Kind
 			}
 		}
 	}
@@ -119,6 +138,23 @@ func (s *Server) DecideAgentApproval(ctx context.Context, request api.DecideAgen
 	// Nudge the UI to refresh: once the gate reads the decision and proceeds the
 	// head leaves its policy_approval wait, and the parked request drops off the list.
 	s.Events.AgentsChanged(projectRoot)
+
+	// A remembered MCP grant only takes effect at launch (MCP servers load then),
+	// so relaunch the head with --continue to make it available immediately. Async
+	// + slightly delayed so the gate reads the Allow decision and the tool call
+	// returns cleanly before the session is recycled; the conversation is restored.
+	if grantedMCPKind != "" {
+		headCopy := *head
+		go func() {
+			time.Sleep(1500 * time.Millisecond)
+			rows, cols := heads.LoadResumeSize(s.DB, projectRoot, headCopy.ID)
+			if err := heads.RestartHead(s.Sessions, s.DB, projectRoot, headCopy, rows, cols); err != nil {
+				log.Printf("hydra: auto-restart after MCP approval for %s: %v", headCopy.ID, err)
+			} else {
+				s.Events.AgentsChanged(projectRoot)
+			}
+		}()
+	}
 	return api.DecideAgentApproval204Response{}, nil
 }
 
@@ -144,6 +180,8 @@ func rememberApproval(projectRoot, agentType, kind, target string) error {
 	switch kind {
 	case "mcp":
 		ac.Policy.MCPAllowed = appendUnique(ac.Policy.MCPAllowed, target)
+	case "mcp_tool":
+		ac.Policy.MCPToolsAllowed = appendUnique(ac.Policy.MCPToolsAllowed, target)
 	case "webfetch":
 		ac.Policy.WebFetchAllowHosts = appendUnique(ac.Policy.WebFetchAllowHosts, target)
 	default:

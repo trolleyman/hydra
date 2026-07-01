@@ -305,8 +305,11 @@ func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, pr
 func simApprovals() []api.ApprovalRequest {
 	reason1 := "MCP server \"linear\" is not on the allow-list"
 	reason2 := "WebFetch to \"docs.linear.app\" is not on the allow-list"
+	reason3 := "MCP tool \"linear__create_issue\" is not on the allow-list"
+	rw := "write"
 	return []api.ApprovalRequest{
 		{Reqid: "req-1", Tool: "mcp__linear__list_issues", Kind: "mcp", Target: "linear", Summary: "wants to use MCP server \"linear\"", Reason: &reason1},
+		{Reqid: "req-3", Tool: "mcp__linear__create_issue", Kind: "mcp_tool", Target: "linear__create_issue", Rw: &rw, Summary: "wants to use MCP tool \"linear__create_issue\" (write)", Reason: &reason3},
 		{Reqid: "req-2", Tool: "WebFetch", Kind: "webfetch", Target: "docs.linear.app", Summary: "wants to fetch from \"docs.linear.app\"", Reason: &reason2},
 	}
 }
@@ -2187,8 +2190,24 @@ func (s *SimulationServer) GetConfig(w http.ResponseWriter, r *http.Request, pro
 		Agents: map[string]api.AgentConfig{
 			"claude": {
 				PrePrompt: ptr("Claude pre-prompt"),
+				// Allow-listed servers + a per-tool grant + auto-allow-read so the
+				// settings MCP picker renders with checked rows, the per-tool list, and
+				// the read/write toggle populated.
+				Policy: &api.PolicyConfig{
+					McpAllowed:       ptr([]string{"github", "linear"}),
+					McpToolsAllowed:  ptr([]string{"sentry__list_issues"}),
+					McpAutoAllowRead: ptr(true),
+				},
 			},
 		},
+		// Candidate MCP servers discovered on the host/project, driving the
+		// settings MCP allow-list picker.
+		McpServers: ptr([]api.McpServer{
+			{Name: "github", Source: "user"},
+			{Name: "linear", Source: "user"},
+			{Name: "playwright", Source: "project"},
+			{Name: "sentry", Source: "project"},
+		}),
 	}
 	// Seed a multi-line pre-spawn script so the settings screenshot exercises
 	// the ShellEditor's bash highlighting and line-number gutter. Only the
@@ -2200,12 +2219,13 @@ func (s *SimulationServer) GetConfig(w http.ResponseWriter, r *http.Request, pro
 		resp.Defaults.Sandbox = &api.SandboxConfig{
 			PreSpawnScript: ptr("#!/bin/bash\nset -euo pipefail\ncp -r \"$HYDRA_PROJECT_ROOT/pipeline/out\" \"$HYDRA_WORKTREE/pipeline/out\"\n"),
 			PreExitScript:  ptr("source \"$HYDRA_WORKTREE/.hydra/emu.env\" 2>/dev/null && scripts/emu-claim-slot.sh release\n"),
-			// Host filtering on with a few allow-listed hosts — drives the
-			// settings-host-filter screenshot (the deny-by-default egress toggle +
-			// the allow-list editor populated).
+			// Hard egress mode with extra allow-listed hosts + a blocked host —
+			// drives the settings network screenshot (mode dropdown + allowed/blocked
+			// host editors populated).
 			Network: &api.NetworkConfig{
-				FilterEnabled: ptr(true),
-				AllowedHosts:  ptr([]string{"api.anthropic.com", "github.com", "*.githubusercontent.com", "registry.npmjs.org"}),
+				Mode:         ptr(api.Hard),
+				AllowedHosts: ptr([]string{"api.internal.example.com", "*.corp.example.com"}),
+				BlockedHosts: ptr([]string{"*.tracker.io"}),
 			},
 		}
 		resp.Artifacts = &[]api.ArtifactScript{

@@ -6,6 +6,10 @@ import './index.css'
 import { routeTree } from './routeTree.gen'
 import { AuthGate } from './components/AuthGate'
 import { ImageLightboxHost } from './components/ImageLightboxHost'
+import { installToastHarness } from './lib/toastHarness'
+
+// Screenshot/test harness hook (dormant unless its localStorage flag is set).
+installToastHarness()
 
 const router = createRouter({ routeTree })
 

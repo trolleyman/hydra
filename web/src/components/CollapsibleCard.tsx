@@ -96,9 +96,15 @@ export function CollapsibleCard({ icon, name, status, actions, collapsed, onTogg
         {actions && <div className="shrink-0 flex items-center gap-1.5 pl-1 pr-2">{actions}</div>}
       </div>
       {/* Height tracks the measured content so both expand/collapse and in-place
-          content swaps glide; overflow-hidden clips the body as it grows/shrinks. */}
+          content swaps glide; overflow-hidden clips the body as it grows/shrinks.
+          `isolate` traps the body's positioned content (artifact tiles render the
+          images as `absolute inset-0`, and the compare slider has an `absolute
+          z-10` handle) in its own stacking context, so it can never paint over the
+          sticky section/changes bars above it — some mobile browsers otherwise
+          mis-order those leaked positioned layers against `position: sticky`
+          during image-decode repaints. */}
       <div
-        className="overflow-hidden transition-[height] duration-200 ease-out motion-reduce:transition-none"
+        className="isolate overflow-hidden transition-[height] duration-200 ease-out motion-reduce:transition-none"
         style={{ height: open ? bodyH : 0 }}
         aria-hidden={!open}
       >

@@ -10,6 +10,7 @@ import { usePushStatus } from '../lib/usePushStatus'
 import { useSystemStatus } from '../lib/useSystemStatus'
 import { useArchivedAgents } from '../lib/useArchivedAgents'
 import { useGlobalShortcuts } from '../lib/useGlobalShortcuts'
+import { useAgentNotifications } from '../lib/useAgentNotifications'
 import type { AgentResponse } from '../api'
 import { ApiError, ErrorResponse } from '../api'
 import { apiErrorBody } from '../api/format_error'
@@ -199,6 +200,11 @@ function RootLayout() {
     return SIDEBAR_DEFAULT
   })
   const sidebarWidthRef = useRef(sidebarWidth)
+  // True while the user is dragging the resize handle. We suppress the
+  // width/transform transition during a drag so the sidebar tracks the pointer
+  // instantly instead of lagging 200ms behind it; the transition is only for the
+  // collapse/expand animation.
+  const [sidebarResizing, setSidebarResizing] = useState(false)
   // The Archived section's collapse state is per-project (long archives differ
   // wildly between projects) and persisted; expanded by default. Re-read it when
   // the selected project changes; absence of the key means expanded.
@@ -233,6 +239,7 @@ function RootLayout() {
 
     document.body.style.cursor = 'col-resize'
     document.body.style.userSelect = 'none'
+    setSidebarResizing(true)
 
     function onMove(ev: PointerEvent) {
       const newWidth = Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, startWidth + ev.clientX - startX))
@@ -242,6 +249,7 @@ function RootLayout() {
     function onUp() {
       document.body.style.cursor = ''
       document.body.style.userSelect = ''
+      setSidebarResizing(false)
       writeLocal(StorageKeys.sidebarWidth, String(sidebarWidthRef.current))
       document.removeEventListener('pointermove', onMove)
       document.removeEventListener('pointerup', onUp)
@@ -263,6 +271,7 @@ function RootLayout() {
   const { refetchAgents } = useAgentPolling(currentProjectId)
   const { pushStatus, syncing, handleSync, refetchPushStatus } = usePushStatus(currentProjectId)
   const { sentinelRef: archivedSentinelRef } = useArchivedAgents(currentProjectId)
+  useAgentNotifications(currentProjectId)
   const { refetchStatus, development, spawnedAt } = useSystemStatus()
 
   // Auto-clear an agent's unread dot when it's the one currently open AND the
@@ -546,13 +555,23 @@ function RootLayout() {
           below that (so it never squeezes a tablet / landscape phone). With the
           top bar gone it now holds the whole app chrome: the project selector +
           collapse button in its header, the spawn box / repository / agents list
-          in the middle, and settings + usage in its footer. Collapsed removes it
-          from the flow (lg+) or slides it off-canvas (overlay); the floating
-          button over the content reveals it again. */}
+          in the middle, and settings + usage in its footer. Collapsing animates:
+          at lg+ the column's width tweens to 0 (the inner content keeps its full
+          width and is clipped by overflow-hidden, so it slides away cleanly
+          without reflowing); as an overlay it slides off-canvas via translate.
+          The floating button over the content reveals it again. */}
       <aside
-        style={{ width: sidebarWidth }}
-        className={`relative max-lg:fixed max-lg:inset-y-0 max-lg:left-0 max-lg:z-40 max-lg:!w-[80vw] max-lg:!max-w-[20rem] max-lg:shadow-2xl bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex-col shrink-0 transition-transform duration-200 ${sidebarCollapsed ? 'hidden max-lg:flex max-lg:-translate-x-full' : 'flex translate-x-0'}`}
+        style={{ width: sidebarCollapsed ? 0 : sidebarWidth }}
+        className={`relative overflow-hidden max-lg:fixed max-lg:inset-y-0 max-lg:left-0 max-lg:z-40 max-lg:!w-[80vw] max-lg:!max-w-[20rem] max-lg:shadow-2xl bg-white dark:bg-gray-800 flex shrink-0 ${sidebarResizing ? '' : 'transition-[width,transform] duration-200'} ${sidebarCollapsed ? 'max-lg:-translate-x-full' : 'translate-x-0'}`}
       >
+        {/* Inner content at a fixed width (the expanded sidebar width, or the full
+            overlay width below lg) so the collapse width-tween clips it instead of
+            squishing/reflowing every row. shrink-0 keeps it from shrinking with the
+            aside; the right border rides its trailing edge. */}
+        <div
+          style={{ width: sidebarWidth }}
+          className="flex flex-col h-full shrink-0 max-lg:!w-full border-r border-gray-200 dark:border-gray-700"
+        >
         {/* Sidebar header — app icon, project selector, and the collapse button
             to its right. This is what replaced the global top bar. */}
         <div className="flex items-center gap-1 h-12 px-2 border-b border-gray-200 dark:border-gray-700 shrink-0">
@@ -837,6 +856,7 @@ function RootLayout() {
               )
             })()}
           </div>
+        </div>
 
           {/* Resize handle (lg+ only — the overlay sidebar has a fixed width) */}
           <div
