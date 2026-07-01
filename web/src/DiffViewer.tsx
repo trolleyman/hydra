@@ -1872,7 +1872,7 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
     } catch (e) {
       console.error('Failed to fetch file diff:', e)
     }
-  }, [agent.id, projectId, leftSel, rightSel, ignoreWhitespace])
+  }, [agent.id, agent.branch_name, projectId, leftSel, rightSel, ignoreWhitespace])
 
   // Compute hidden-file state from a fresh diff response.
   // Large files (HIDDEN_FILE_THRESHOLD changed lines) start hidden, unless the user has explicitly shown them.

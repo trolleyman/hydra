@@ -1092,7 +1092,6 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
       .then((r) => { if (!cancelled) setArtifactScripts(r.scripts.map((s) => s.name)) })
       .catch(() => { if (!cancelled) setArtifactScripts([]) })
     return () => { cancelled = true }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, queryRef, ready])
 
   // Load the file content for the displayed path. Synthetic artifact paths are not
@@ -1118,7 +1117,6 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
       })
       .finally(() => { if (!cancelled) setFileLoading(false) })
     return () => { cancelled = true }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, queryRef, viewPath, ready])
 
   // Reset the content scroll position whenever the displayed file changes
@@ -1143,7 +1141,6 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
       .catch((err) => { if (!cancelled) { setDiff(null); setDiffError(formatError(err)) } })
       .finally(() => { if (!cancelled) setDiffLoading(false) })
     return () => { cancelled = true }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [diffActive, projectId, activeRef, compareRef, diffSettings.ignoreWhitespace])
 
   // Leaving diff mode or retargeting the comparison drops the mobile drill-down

@@ -337,18 +337,21 @@ function AdaptiveActions({
       next = { mode: 'icons', count: k }
     }
     setVis((prev) => (prev.mode === next.mode && prev.count === next.count ? prev : next))
-  }, [n, segmentGroups, title])
+  }, [n, segmentGroups])
 
   // Measure + recompute before paint, and on every container resize. This reads
   // the committed layout of the off-screen sizers, so the measure-then-setState
   // must happen in a layout effect (it can't be derived during render).
   useLayoutEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     recompute()
     const cont = rootRef.current?.parentElement
     if (!cont || typeof ResizeObserver === 'undefined') return
     const ro = new ResizeObserver(() => recompute())
     ro.observe(cont)
+    // Also refit when the title's measured width changes (a new title, or a font
+    // load) — that doesn't resize the container, so the container observer alone
+    // would miss it; this replaces carrying `title` as a recompute dependency.
+    if (titleMeasureRef.current) ro.observe(titleMeasureRef.current)
     return () => ro.disconnect()
   }, [recompute])
 
