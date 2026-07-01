@@ -405,6 +405,9 @@ try {
       // popover such as the repository branch selector so the screenshot
       // documents it.
       click?: string
+      // CSS selector hovered (after load, before capture) — opens a hover-only
+      // card tooltip (e.g. the "Merge queued" pill's explanation) so it's captured.
+      hover?: string
       // CSS selectors clicked in sequence (each followed by a settle), then a
       // networkidle wait so any fetch a click kicks off has rendered before the
       // capture. Used by the branch-compare diff shots, where pressing the diff
@@ -530,6 +533,12 @@ try {
       // boot. The app's real default box/sidebar sizes are unchanged. Pairs with
       // seedPrompt.
       tallSpawn?: boolean
+      // Screenshot-only: seed a narrow sidebar width before boot so a menu opened
+      // from the sidebar header (the project switcher) is wider than the sidebar
+      // itself — documenting that the portal-rendered menu overlays the content
+      // instead of being clipped by the sidebar's `overflow-hidden`. Capture-time
+      // override only; the app's default width is unchanged.
+      narrowSidebar?: boolean
       // Focuses the full-page spawn textarea and selects ALL of its text after the
       // page settles, so the capture overlays the browser's selection band (which
       // marks the REAL, selectable text positions) on top of the highlight backdrop
@@ -628,6 +637,11 @@ try {
       // when other projects have updates waiting (see simulation.go ListProjects /
       // ListAgents and AgentSidebarItem).
       { name: 'unread-indicator', path: '/', click: 'button[aria-label="Select project"]' },
+      // The project switcher opened over a deliberately narrow sidebar. The menu
+      // (fixed w-72) is far wider than the sidebar, so it must overlay the content
+      // area rather than be clipped by the sidebar's `overflow-hidden` — verifies
+      // the portal-rendered menu (mirrors the Ctrl+` switcher's forced-open state).
+      { name: 'project-switcher-narrow', path: '/', click: 'button[aria-label="Select project"]', narrowSidebar: true },
       // Notification toasts (web/src/lib/useAgentNotifications.ts). These fire on
       // live status transitions / security-gate parks that the static simulation
       // never produces, so they're rendered deterministically via the toast
@@ -829,6 +843,12 @@ try {
       // "merges when tests pass" metadata chip, and the merge button becomes the
       // green "Merges when tests pass" pill with its own Cancel button.
       { name: 'tests-merge-when-green', path: '/project/sim-project/agent/agent-md', viewportOnly: true },
+      // The "Merge queued" pill's hover hint, on an agent whose queued merge is
+      // blocked on the AGENT rather than the tests: agent-queued armed auto-merge
+      // (tests already green) but hasn't reached a finished state, so the hint
+      // reports it's "Waiting on the agent to finish". Hovering the pill opens the
+      // hint; viewportOnly frames the header + hint.
+      { name: 'merge-queued-tooltip', path: '/project/sim-project/agent/agent-queued', viewportOnly: true, hover: 'text=Merge queued' },
       // The merge-gate dialog (PLAN #68): clicking the plain "Merge" button on
       // agent-2's failing verdict opens the Force-merge / Queue-merge choice with an
       // explanation of the soft gate, instead of bouncing off a server 409.
@@ -841,6 +861,11 @@ try {
       // armed) — clicking Merge offers "Merge now" (don't wait) or Queue merge, over
       // a blue running tile + a progress chip.
       { name: 'tests-merge-gate-dialog-running', path: '/project/sim-project/agent/agent-3', viewportOnly: true, click: 'button[aria-label="Merge"]' },
+      // The merge gate when the AGENT (not the tests) isn't ready: agent-approval is
+      // blocked asking you a question (needs_input), so clicking Merge warns "Agent
+      // is waiting on you" and reuses the Force merge / Queue merge / Cancel choice —
+      // Queue arms merge-when-green so it lands once the agent finishes and is green.
+      { name: 'merge-agent-active-dialog', path: '/project/sim-project/agent/agent-approval', viewportOnly: true, click: 'button[aria-label="Merge"]' },
       // The agent-type picker dropdown, opened on the compact ("mini") spawn box
       // in the sidebar. The picker is an icon-only trigger (the active agent's
       // brand mark) that opens a menu listing every agent type as its canonical
@@ -1699,6 +1724,11 @@ try {
             try { localStorage.setItem(key, '380') } catch { /* ignore */ }
           }, StorageKeys.sidebarWidth)
         }
+        if (pg.narrowSidebar) {
+          await ctx.addInitScript((key) => {
+            try { localStorage.setItem(key, '170') } catch { /* ignore */ }
+          }, StorageKeys.sidebarWidth)
+        }
         await ctx.addInitScript((opts) => {
           // The "Trust this project?" modal (web/src/components/TrustProjectModal.tsx)
           // only appears while *adding* a project — never on open — so the
@@ -1944,6 +1974,15 @@ try {
         if (pg.click) {
           // Open a popover (e.g. the branch selector) so the capture documents it.
           await page.click(pg.click)
+          await settle(page)
+        }
+        if (pg.hover) {
+          // Hover an element to open its hover-only tooltip so the capture documents
+          // it — e.g. the "Merge queued" pill's explanation. The tooltip must show
+          // synchronously on hover (delay 0): a post-hover wait would let the layout
+          // settle and drift the element out from under Playwright's fixed cursor,
+          // firing mouseleave and dismissing the (grace-less) dark hint.
+          await page.locator(pg.hover).first().hover()
           await settle(page)
         }
         if (pg.pressKey) {

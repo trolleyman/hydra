@@ -74,14 +74,17 @@ func ParseDir(outputDir string) (cases []TestCase, format string, found bool, er
 	return cases, format, found, nil
 }
 
-// Summarize counts cases by outcome.
-func Summarize(cases []TestCase) (passed, failed, skipped int) {
+// Summarize counts cases by outcome. Warnings are their own bucket — a warning
+// case is NOT counted as passed.
+func Summarize(cases []TestCase) (passed, failed, skipped, warnings int) {
 	for _, c := range cases {
 		switch c.Status {
 		case CaseFailed:
 			failed++
 		case CaseSkipped:
 			skipped++
+		case CaseWarning:
+			warnings++
 		default:
 			passed++
 		}
@@ -114,6 +117,8 @@ func normalizeCaseStatus(s string) CaseStatus {
 		return CaseFailed
 	case "skip", "skipped", "pending", "ignored":
 		return CaseSkipped
+	case "warn", "warning", "warned":
+		return CaseWarning
 	default:
 		return CasePassed
 	}
@@ -178,14 +183,35 @@ func junitCaseToTestCase(c junitCase) TestCase {
 	tc := TestCase{Name: name, Status: CasePassed, DurationMs: int64(c.Time * 1000)}
 	switch {
 	case len(c.Failures) > 0 || len(c.Errors) > 0:
-		tc.Status = CaseFailed
 		details := append(append([]junitDetail{}, c.Failures...), c.Errors...)
+		// A case whose every failure/error is flagged type="warning" (e.g. eslint's
+		// junit formatter for warning-severity messages) is a non-failing warning,
+		// not a red failure.
+		if allWarnings(details) {
+			tc.Status = CaseWarning
+		} else {
+			tc.Status = CaseFailed
+		}
 		tc.Message = truncate(joinDetails(details), maxCaseMessage)
 	case c.Skipped != nil:
 		tc.Status = CaseSkipped
 		tc.Message = truncate(strings.TrimSpace(c.Skipped.Message), maxCaseMessage)
 	}
 	return tc
+}
+
+// allWarnings reports whether every detail is explicitly typed as a warning
+// (case-insensitive substring "warn"). An empty slice is not a warning.
+func allWarnings(details []junitDetail) bool {
+	if len(details) == 0 {
+		return false
+	}
+	for _, d := range details {
+		if !strings.Contains(strings.ToLower(d.Type), "warn") {
+			return false
+		}
+	}
+	return true
 }
 
 func joinDetails(details []junitDetail) string {

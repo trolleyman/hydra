@@ -497,8 +497,9 @@ func (m *Manager) generate(parent context.Context, spec config.TestScript, v Ver
 		// A parsed report is authoritative: a runner that exits non-zero because
 		// tests failed is a valid failing verdict, not an error.
 		rep.Cases = cases
-		rep.Passed, rep.Failed, rep.Skipped = Summarize(cases)
-		rep.Total = rep.Passed + rep.Failed + rep.Skipped
+		rep.Passed, rep.Failed, rep.Skipped, rep.Warnings = Summarize(cases)
+		rep.Total = rep.Passed + rep.Failed + rep.Skipped + rep.Warnings
+		// Warnings are informational: they never flip the verdict to failing.
 		if rep.Failed > 0 {
 			rep.Status = StatusFailing
 		} else {

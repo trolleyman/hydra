@@ -288,12 +288,31 @@ func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, pr
 				LastMessage: ptr("Which Linear team should I scope the sync to?"),
 			},
 		},
+		{
+			// Auto-merge armed AND blocked on you: it queued a merge (tests already
+			// green) but is now asking a question (needs_input), so the "Merge queued"
+			// pill's tooltip reports it's waiting on YOU — the agent-status gate, not
+			// tests (merge-queued-tooltip shot).
+			Id:            "agent-queued",
+			Title:         ptr("Add a command palette"),
+			AgentType:     "claude",
+			BaseBranch:    "main",
+			BranchName:    ptr("hydra/feat-palette"),
+			SessionPid:    1006,
+			SessionStatus: "running",
+			CreatedAt:     &createdAt0,
+			AgentStatus: &api.AgentStatusInfo{
+				Status:      needsInput,
+				Timestamp:   simNow().Format(time.RFC3339),
+				LastMessage: ptr("Bind the palette to Cmd+K or Cmd+P — which do you prefer?"),
+			},
+		},
 	}
 	// Attach test-verdict chips (PLAN #68) so the sidebar shows passing/failing/
-	// running states; agent-md is also shown with auto-merge armed.
+	// running states; agent-md and agent-queued are also shown with auto-merge armed.
 	for i := range resp {
 		resp[i].Tests = simTestSummary(resp[i].Id)
-		if resp[i].Id == "agent-md" {
+		if resp[i].Id == "agent-md" || resp[i].Id == "agent-queued" {
 			resp[i].MergeWhenGreen = ptr(true)
 		}
 	}
@@ -423,6 +442,28 @@ func (s *SimulationServer) GetAgent(w http.ResponseWriter, r *http.Request, proj
 		})
 		return
 	}
+	if id == "agent-queued" {
+		createdAt := simNow().Add(-30 * time.Minute).Unix()
+		api.WriteJSON(w, http.StatusOK, api.AgentResponse{
+			Id:            "agent-queued",
+			Title:         ptr("Add a command palette"),
+			AgentType:     "claude",
+			BaseBranch:    "main",
+			BranchName:    ptr("hydra/feat-palette"),
+			SessionPid:    1006,
+			SessionStatus: "running",
+			CreatedAt:     &createdAt,
+			Prompt:        "Add a command palette (Cmd+K) that fuzzy-searches every action and recent agent.",
+			AgentStatus: &api.AgentStatusInfo{
+				Status:      api.NeedsInput,
+				Timestamp:   simNow().Format(time.RFC3339),
+				LastMessage: ptr("Bind the palette to Cmd+K or Cmd+P — which do you prefer?"),
+			},
+			Tests:          simTestSummary("agent-queued"),
+			MergeWhenGreen: ptr(true),
+		})
+		return
+	}
 	if id == "agent-3" {
 		createdAt := simNow().Add(-3 * time.Hour).Unix()
 		api.WriteJSON(w, http.StatusOK, api.AgentResponse{
@@ -514,8 +555,16 @@ func (s *SimulationServer) GetAgentTests(w http.ResponseWriter, r *http.Request,
 func simTestRunners(id string) []api.TestRunResult {
 	passing := api.TestRunResult{
 		Name: "go", Status: api.TestStatusPassing,
-		Total: ptr(142), Passed: ptr(142), Failed: ptr(0), Skipped: ptr(3),
+		Total: ptr(149), Passed: ptr(142), Failed: ptr(0), Warnings: ptr(4), Skipped: ptr(3),
 		DurationMs: ptr(int64(4200)), Format: ptr("junit"), Ref: ptr("a1b2c3d"),
+		// Non-failing warnings (e.g. eslint) surface amber alongside the green pass.
+		Cases: &[]api.TestCase{
+			{Name: "eslint › web/src/DiffViewer.tsx", Status: api.TestCaseWarning, Message: ptr("'onionSkin' is assigned a value but never used  no-unused-vars")},
+			{Name: "eslint › web/src/lib/theme.ts", Status: api.TestCaseWarning, Message: ptr("Unexpected console statement  no-console")},
+			{Name: "eslint › internal/heads/heads.go", Status: api.TestCaseWarning, Message: ptr("exported func SpawnHead should have comment  golint")},
+			{Name: "eslint › web/src/components/Badge.tsx", Status: api.TestCaseWarning, Message: ptr("React Hook useMemo has a missing dependency  react-hooks/exhaustive-deps")},
+			{Name: "heads/heads.test.ts › resumes on boot", Status: api.TestCaseSkipped, Message: ptr("it.skip")},
+		},
 	}
 	if id == "agent-2" {
 		// A runner with a regression: two failing cases shown first.
@@ -569,7 +618,11 @@ func simTestSummary(id string) *api.TestSummary {
 	case "agent-md":
 		return &api.TestSummary{Status: api.TestStatusRunning, Passed: ptr(82), Failed: ptr(2), Progress: ptr("84/142")}
 	case "agent-1":
-		return &api.TestSummary{Status: api.TestStatusPassing, Total: ptr(142), Passed: ptr(142), Skipped: ptr(3), DurationMs: ptr(int64(4200))}
+		return &api.TestSummary{Status: api.TestStatusPassing, Total: ptr(149), Passed: ptr(142), Warnings: ptr(4), Skipped: ptr(3), DurationMs: ptr(int64(4200))}
+	case "agent-queued":
+		// Tests already green, so the merge-when-green queue is waiting purely on the
+		// agent (which is at needs_input) — what merge-queued-tooltip demonstrates.
+		return &api.TestSummary{Status: api.TestStatusPassing, Total: ptr(88), Passed: ptr(88), DurationMs: ptr(int64(2600))}
 	case "agent-3":
 		// Running but NOT armed (unlike agent-md), so its Merge button opens the
 		// "tests still running" merge-gate dialog (Merge now / Queue merge).

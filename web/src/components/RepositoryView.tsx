@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState, useCallback, type ReactNode } from 'react'
 import { useNavigate } from '@tanstack/react-router'
-import hljs from 'highlight.js'
+import hljs from '../lib/hljs'
+import { ensureLanguage } from '../lib/hljsLazy'
+import { getLanguage } from '../lib/language'
 import { api } from '../stores/apiClient'
 import { formatError } from '../api/format_error'
 import { ApiError } from '../api'
@@ -20,10 +22,11 @@ import { Tooltip } from './Tooltip'
 import { IconButton } from './IconButton'
 import { useSidebarStore } from '../lib/sidebar'
 import {
-  FileDiff, FileRow, ChangeTypeIcon, TreeNodeView,
-  buildFileTree, compactTree as compactDiffTree, getGroupedFiles, type FileView,
+  FileDiff, FileRow, ChangeTypeIcon, TreeNodeView, type FileView,
 } from '../DiffViewer'
-import { IMAGE_DIFF_MODES, type ImageDiffMode } from './ArtifactImageDiff'
+import { buildFileTree, compactTree as compactDiffTree, getGroupedFiles } from '../lib/fileTree'
+import { type ImageDiffMode } from './ArtifactImageDiff'
+import { IMAGE_DIFF_MODES } from './artifactDiffContext'
 import { repoBlobUrl } from '../lib/imageDiff'
 
 // ── File tree model ────────────────────────────────────────────────────────────
@@ -113,27 +116,6 @@ function ancestorsOf(filePath: string): string[] {
 }
 
 // ── Syntax highlighting + markdown ──────────────────────────────────────────────
-
-const EXT_LANG_MAP: Record<string, string> = {
-  ts: 'typescript', tsx: 'typescript', js: 'javascript', jsx: 'javascript',
-  go: 'go', rs: 'rust', py: 'python', rb: 'ruby', java: 'java',
-  c: 'c', cpp: 'cpp', h: 'cpp', cs: 'csharp', php: 'php',
-  css: 'css', scss: 'scss', less: 'less', html: 'html', xml: 'xml',
-  json: 'json', yaml: 'yaml', yml: 'yaml', toml: 'toml',
-  sh: 'bash', bash: 'bash', zsh: 'bash', md: 'markdown', sql: 'sql',
-  kt: 'kotlin', swift: 'swift', dart: 'dart', r: 'r',
-  dockerfile: 'dockerfile', makefile: 'makefile',
-}
-
-function getLanguage(filePath: string): string {
-  const filename = filePath.split('/').pop() ?? filePath
-  const lower = filename.toLowerCase()
-  if (lower === 'dockerfile') return 'dockerfile'
-  if (lower === 'makefile') return 'makefile'
-  if (lower === 'go.mod' || lower === 'go.sum') return 'plaintext'
-  const ext = lower.split('.').pop() ?? ''
-  return EXT_LANG_MAP[ext] ?? 'plaintext'
-}
 
 function isMarkdown(filePath: string): boolean {
   return /\.(md|markdown)$/i.test(filePath)
@@ -646,10 +628,21 @@ function TreeRow({
 // ── File content pane ───────────────────────────────────────────────────────────
 
 function CodeView({ content, lang, wrap }: { content: string; lang: string; wrap: boolean }) {
+  // Fetch a not-yet-bundled grammar on demand (the diff viewer does the same via
+  // its worker), then re-highlight: hasGrammar flips false→true once it lands.
+  const [, bumpLoaded] = useState(0)
+  useEffect(() => {
+    if (lang === 'plaintext' || hljs.getLanguage(lang)) return
+    let cancelled = false
+    ensureLanguage(lang).then((ok) => { if (ok && !cancelled) bumpLoaded((n) => n + 1) })
+    return () => { cancelled = true }
+  }, [lang])
+
+  const hasGrammar = lang !== 'plaintext' && !!hljs.getLanguage(lang)
   const lines = useMemo(() => {
     let highlighted: string
     try {
-      highlighted = lang !== 'plaintext' && hljs.getLanguage(lang)
+      highlighted = hasGrammar
         ? hljs.highlight(content, { language: lang }).value
         : escapeHtml(content)
     } catch {
@@ -660,7 +653,7 @@ function CodeView({ content, lang, wrap }: { content: string; lang: string; wrap
     // count matches the file's real line count.
     if (split.length > 1 && split[split.length - 1] === '' && content.endsWith('\n')) split.pop()
     return split
-  }, [content, lang])
+  }, [content, lang, hasGrammar])
 
   const gutterWidth = `${Math.max(2, String(lines.length).length)}ch`
 
@@ -786,8 +779,10 @@ function FileNotFound({ path, refStr }: { path: string; refStr: string }) {
 // to the full, wrapped path; tapping again collapses.
 function FilePathLabel({ path }: { path: string }) {
   const [expanded, setExpanded] = useState(false)
-  // Collapse again whenever the displayed file changes.
-  useEffect(() => { setExpanded(false) }, [path])
+  // Collapse again whenever the displayed file changes (adjusted during render so
+  // the path never flashes expanded against the new file).
+  const [prevPath, setPrevPath] = useState(path)
+  if (prevPath !== path) { setPrevPath(path); setExpanded(false) }
 
   const slash = path.lastIndexOf('/')
   const dir = slash >= 0 ? path.slice(0, slash + 1) : ''
@@ -1089,7 +1084,6 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
       .then((r) => { if (!cancelled) setArtifactScripts(r.scripts.map((s) => s.name)) })
       .catch(() => { if (!cancelled) setArtifactScripts([]) })
     return () => { cancelled = true }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, queryRef, ready])
 
   // Load the file content for the displayed path. Synthetic artifact paths are not
@@ -1115,7 +1109,6 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
       })
       .finally(() => { if (!cancelled) setFileLoading(false) })
     return () => { cancelled = true }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, queryRef, viewPath, ready])
 
   // Reset the content scroll position whenever the displayed file changes
@@ -1140,7 +1133,6 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
       .catch((err) => { if (!cancelled) { setDiff(null); setDiffError(formatError(err)) } })
       .finally(() => { if (!cancelled) setDiffLoading(false) })
     return () => { cancelled = true }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [diffActive, projectId, activeRef, compareRef, diffSettings.ignoreWhitespace])
 
   // Leaving diff mode or retargeting the comparison drops the mobile drill-down

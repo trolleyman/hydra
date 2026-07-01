@@ -67,6 +67,11 @@ export default defineConfig(({ mode }) => {
       keepDistGitkeep(),
     ],
     clearScreen: false,
+    // Emit Web Workers as ES modules (they're instantiated with { type: 'module' }).
+    // The default 'iife' worker format can't code-split, so it would inline every
+    // dynamic import — re-bundling all ~150 lazily-loaded highlight.js grammars into
+    // the highlight worker. 'es' lets those load on demand as separate chunks.
+    worker: { format: 'es' },
     server: {
       port: devPort,
       proxy: {

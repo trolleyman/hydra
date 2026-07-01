@@ -1,6 +1,6 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { ShieldAlert } from 'lucide-react'
-import hljs from 'highlight.js'
+import hljs from '../lib/hljs'
 import { api } from '../stores/apiClient'
 import { formatError } from '../api/format_error'
 import { DialogIconTile, DialogCancelButton, DialogConfirmButton } from './dialogPrimitives'
@@ -47,10 +47,13 @@ export const TrustProjectModal = memo(function TrustProjectModal({
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
+  // Show the loading state (and clear any prior error) as soon as the path
+  // changes — during render, before the fetch effect below runs.
+  const [prevPath, setPrevPath] = useState(path)
+  if (prevPath !== path) { setPrevPath(path); setLoading(true); setError(null) }
+
   useEffect(() => {
     let cancelled = false
-    setLoading(true)
-    setError(null)
     api.default
       .previewConfigToml(path)
       .then((res) => {

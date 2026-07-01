@@ -94,6 +94,96 @@ func currentStatus() api.AgentStatus {
 	return info.Status
 }
 
+// subagentStale is how long a sub-agent marker survives without a refresh before
+// it's treated as gone. A live sub-agent refreshes its marker on every tool hook
+// (far more often than this), so the TTL only reclaims a marker whose
+// SubagentStop was never delivered — it must not fire while a real sub-agent is
+// still working, hence a generous window.
+const subagentStale = 5 * time.Minute
+
+// subagentsDir returns the per-head directory of active sub-agent marker files,
+// or "" when tracking isn't configured (then it's a no-op and Stop falls back to
+// its old always-finished behavior). Set via HYDRA_SUBAGENTS_DIR by seedHead.
+func subagentsDir() string {
+	return os.Getenv("HYDRA_SUBAGENTS_DIR")
+}
+
+// sanitizeSubagentID keeps only filename-safe characters from an agent_id so it
+// can be a marker filename. agent_ids are hex, so this is defensive.
+func sanitizeSubagentID(id string) string {
+	out := make([]rune, 0, len(id))
+	for _, r := range id {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
+			out = append(out, r)
+		}
+	}
+	if len(out) == 0 {
+		return "unknown"
+	}
+	return string(out)
+}
+
+// markSubagentActive creates (or refreshes) the marker for a starting sub-agent.
+func markSubagentActive(id string) {
+	dir := subagentsDir()
+	if dir == "" || id == "" {
+		return
+	}
+	_ = os.MkdirAll(dir, 0755)
+	_ = os.WriteFile(filepath.Join(dir, sanitizeSubagentID(id)), nil, 0644)
+}
+
+// refreshSubagentActive bumps an existing marker's mtime (keeping a long-running
+// sub-agent from ageing out) but never resurrects one whose SubagentStop already
+// removed it — so a late tool hook arriving after stop can't wedge the parent.
+func refreshSubagentActive(id string) {
+	dir := subagentsDir()
+	if dir == "" || id == "" {
+		return
+	}
+	now := time.Now()
+	_ = os.Chtimes(filepath.Join(dir, sanitizeSubagentID(id)), now, now) // no-op if the marker is gone
+}
+
+// clearSubagentActive removes a sub-agent's marker (its SubagentStop fired).
+func clearSubagentActive(id string) {
+	dir := subagentsDir()
+	if dir == "" || id == "" {
+		return
+	}
+	_ = os.Remove(filepath.Join(dir, sanitizeSubagentID(id)))
+}
+
+// activeSubagentCount counts live sub-agent markers, pruning any that have gone
+// stale (a missed SubagentStop). Zero when none are running or tracking is off.
+func activeSubagentCount() int {
+	dir := subagentsDir()
+	if dir == "" {
+		return 0
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return 0
+	}
+	cutoff := time.Now().Add(-subagentStale)
+	n := 0
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		if info.ModTime().Before(cutoff) {
+			_ = os.Remove(filepath.Join(dir, e.Name()))
+			continue
+		}
+		n++
+	}
+	return n
+}
+
 // statusLogFilePath returns the per-head status_log.jsonl path, honoring
 // HYDRA_STATUS_LOG_PATH with the same fallback as statusFilePath.
 func statusLogFilePath() (string, error) {
@@ -207,6 +297,28 @@ func runTriggerHook(agentType string, eventOverride string, logFile *os.File, st
 		}
 	}
 
+	// Sub-agent (Claude Task tool) hooks share this head's status.json but must
+	// NOT drive the main agent's status: a sub-agent's tool call would otherwise
+	// overwrite the parent's real state (e.g. flip a needs_input/finished parent
+	// back to running). Sub-agent hooks carry an agent_id the main agent's hooks
+	// lack — use it to bracket sub-agent lifetime (so the main Stop can tell a
+	// real finish from "still running sub-agents") and otherwise ignore them.
+	agentID := stringField(input, "agent_id")
+	switch event {
+	case "SubagentStart", "subagentStart":
+		markSubagentActive(agentID)
+		return nil
+	case "SubagentStop", "subagentStop":
+		clearSubagentActive(agentID)
+		return nil
+	}
+	if agentID != "" {
+		// A sub-agent's own tool/notification hook: keep its liveness marker fresh
+		// (so a long-running sub-agent doesn't age out) but leave the parent alone.
+		refreshSubagentActive(agentID)
+		return nil
+	}
+
 	// lastMessage is the agent's most recent assistant message, when the hook
 	// payload carries one (Claude/Gemini include it on turn-end events).
 	lastMessage := stringField(input, "last_assistant_message")
@@ -264,7 +376,17 @@ func runTriggerHook(agentType string, eventOverride string, logFile *os.File, st
 		// notification_type marks an AskUserQuestion / permission prompt. (Claude
 		// does NOT fire PreToolUse/PostToolUse for AskUserQuestion or
 		// ExitPlanMode, so those tool calls can't be detected via PreToolUse.)
-		status = api.Finished
+		//
+		// But if sub-agents this head launched are still running, the turn ending
+		// doesn't mean the head is done — its background sub-agents are, and it
+		// will resume when they report back. Report running so the head isn't
+		// treated (or auto-merged) as finished. finished thus means "main turn
+		// ended AND no live sub-agents".
+		if activeSubagentCount() > 0 {
+			status = api.Running
+		} else {
+			status = api.Finished
+		}
 	case "SessionEnd", "sessionEnd":
 		status = api.Stopped
 	case "PreToolUse", "preToolUse", "BeforeTool":

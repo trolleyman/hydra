@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ABControlsContext, ImageDiffView, SegmentedToggle, IMAGE_DIFF_MODES, type ArtifactABControls, type ImageDiffMode } from './ArtifactImageDiff'
+import { ImageDiffView, SegmentedToggle, type ArtifactABControls, type ImageDiffMode } from './ArtifactImageDiff'
+import { ABControlsContext, IMAGE_DIFF_MODES } from './artifactDiffContext'
 import { ZoomPan } from './ZoomPan'
 
 // LightboxDiff renders a before/after artifact pair fullscreen inside the image

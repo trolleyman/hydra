@@ -6,4 +6,5 @@ export enum TestCaseStatus {
     TestCasePassed = 'passed',
     TestCaseFailed = 'failed',
     TestCaseSkipped = 'skipped',
+    TestCaseWarning = 'warning',
 }

@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import { useEffect, useState } from 'react'
-import { X, Plus, AlertTriangle, Server, RotateCw, CheckCircle2, Loader2 } from 'lucide-react'
+import { X, Plus, AlertTriangle, Server, RotateCw, CheckCircle2, Loader2, PauseCircle } from 'lucide-react'
 import { api } from '../../stores/apiClient'
 import type { ServiceScript, ServiceStatus } from '../../api'
 import { InfoTooltip } from '../InfoTooltip'
@@ -22,6 +22,7 @@ function ServiceStateBadge({ status }: { status: ServiceStatus | undefined }) {
     restarting: { label: 'Restarting', cls: 'text-amber-600 dark:text-amber-400', icon: <Loader2 className="w-3.5 h-3.5 animate-spin" /> },
     failed: { label: 'Failed', cls: 'text-red-600 dark:text-red-400', icon: <AlertTriangle className="w-3.5 h-3.5" /> },
     down: { label: 'Stopped', cls: 'text-gray-500 dark:text-gray-400', icon: <X className="w-3.5 h-3.5" /> },
+    paused: { label: 'Paused', cls: 'text-slate-500 dark:text-slate-400', icon: <PauseCircle className="w-3.5 h-3.5" /> },
   }
   const m = map[status.state] ?? map.down
   return (
@@ -66,6 +67,10 @@ export function ServicesEditor({
   }, [projectId])
 
   const statusByName = new Map(statuses.map((s) => [s.name, s]))
+  // Services are gated on activity: they run only while the project has an agent.
+  // When every live service is paused, the project is idle — surface why.
+  const anyPaused = statuses.some((s) => s.state === 'paused')
+  const allPaused = statuses.length > 0 && statuses.every((s) => s.state === 'paused')
 
   function update(index: number, patch: Partial<ServiceScript>) {
     onChange(services.map((s, i) => (i === index ? { ...s, ...patch } : s)))
@@ -115,6 +120,17 @@ export function ServicesEditor({
       <p className="text-xs text-gray-500 dark:text-gray-400 mb-4 ml-10">
         Supervised long-running commands, stored as <span className="font-mono">[[services]]</span> in config.toml. Saving applies changes immediately.
       </p>
+
+      {anyPaused && (
+        <div className="flex items-start gap-2 mb-4 text-xs text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2">
+          <PauseCircle className="w-4 h-4 mt-px shrink-0 text-slate-500 dark:text-slate-400" />
+          <span>
+            {allPaused ? 'Services are paused' : 'Some services are paused'} — this project has no active agents.
+            They start automatically when you spawn an agent, and stop again about 60&nbsp;seconds after the last
+            agent is removed, so an idle project doesn&rsquo;t keep a resource pool open.
+          </span>
+        </div>
+      )}
 
       <div className="space-y-4">
         {services.length === 0 && (

@@ -2,7 +2,7 @@
 // thread (synchronous fallback for tiny inputs) and the highlight Web Worker
 // (`highlight.worker.ts`). Keeping these pure and in their own module means the
 // worker bundle pulls in highlight.js without dragging in any React/DOM code.
-import hljs from 'highlight.js'
+import hljs from './hljs'
 
 // splitHighlightedLines turns highlight.js' single HTML string (which spans
 // newlines, with token <span>s that may straddle line boundaries) into one HTML

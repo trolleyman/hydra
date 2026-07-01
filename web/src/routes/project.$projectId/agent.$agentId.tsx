@@ -70,11 +70,17 @@ function AgentPage() {
   }, [liveAgent, agentsLoaded, projectId, agentId, navigate])
 
   const [archivedFetch, setArchivedFetch] = useState<'idle' | 'loading' | 'missing'>('idle')
-  useEffect(() => { setArchivedFetch('idle') }, [agentId])
+  // Drive the one-shot archived lookup during render (idle→loading), not in the
+  // effect: reset to idle when the viewed agent changes, then kick to loading once
+  // the live list is loaded and the agent still isn't present. The effect below
+  // only performs the async fetch. Both transitions are guarded so they settle
+  // (a resolved archived agent makes `agent` truthy; a miss lands on 'missing').
+  const [fetchedAgentId, setFetchedAgentId] = useState(agentId)
+  if (fetchedAgentId !== agentId) { setFetchedAgentId(agentId); setArchivedFetch('idle') }
+  else if (!agent && agentsLoaded && archivedFetch === 'idle') setArchivedFetch('loading')
   useEffect(() => {
-    if (agent || !agentsLoaded || archivedFetch !== 'idle') return
+    if (archivedFetch !== 'loading') return
     let cancelled = false
-    setArchivedFetch('loading')
     api.default.getAgent(projectId, agentId)
       .then((a) => {
         if (cancelled) return
@@ -83,7 +89,7 @@ function AgentPage() {
       })
       .catch(() => { if (!cancelled) setArchivedFetch('missing') })
     return () => { cancelled = true }
-  }, [agent, agentsLoaded, archivedFetch, projectId, agentId, upsertArchived])
+  }, [archivedFetch, projectId, agentId, upsertArchived])
 
   // Once a live + archived + one-shot getAgent lookup have all settled and the
   // agent is genuinely gone (hard-deleted / aborted spawn / pruned — a

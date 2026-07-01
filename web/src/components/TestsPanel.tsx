@@ -4,9 +4,9 @@ import { api } from '../stores/apiClient'
 import type { TestRunResult } from '../api/models/TestRunResult'
 import type { TestCase } from '../api/models/TestCase'
 import type { ArtifactLogLine } from '../api'
-import { verdictTone } from './TestVerdict'
-import { TONE_BADGE } from './Badge'
-import { CollapsibleCard, MELT_BTN, useMeasuredHeight } from './CollapsibleCard'
+import { TONE_BADGE, verdictTone } from './badgeTones'
+import { CollapsibleCard, MELT_BTN } from './CollapsibleCard'
+import { useMeasuredHeight } from '../lib/useMeasuredHeight'
 import { LogView } from './ArtifactLogView'
 import { InfoTooltip } from './InfoTooltip'
 
@@ -71,15 +71,23 @@ export function TestsPanel({ projectId, agentId, headRef, includeUncommitted, re
     }
   }, [])
 
+  // Reset to "connecting" whenever the connection parameters change (during
+  // render, before the socket effect below reopens), rather than inside that effect.
+  const connKey = `${projectId}\n${agentId}\n${headRef}\n${includeUncommitted}\n${refreshKey}`
+  const [prevConnKey, setPrevConnKey] = useState(connKey)
+  if (prevConnKey !== connKey) { setPrevConnKey(connKey); setMode('connecting') }
+
   // Primary path: stream updates over a WebSocket so progress/log/verdict update
   // instantly. Falls back to polling (below) if the socket fails to open or drops.
   useEffect(() => {
     let cancelled = false
-    setMode('connecting')
     let ws: WebSocket
     try {
       ws = new WebSocket(testsWsUrl(projectId, agentId, headRef, includeUncommitted))
     } catch {
+      // The WebSocket constructor threw synchronously (e.g. a malformed URL) —
+      // fall back to polling. This error-path setState can't be hoisted out.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setMode('poll')
       return
     }
@@ -247,6 +255,7 @@ function TestRunnerCard({ runner, onRefresh }: { runner: TestRunResult; onRefres
   const failing = syntheticOnly ? [] : cases.filter((c) => c.status === 'failed')
   const passing = syntheticOnly ? [] : cases.filter((c) => c.status === 'passed')
   const skipped = syntheticOnly ? [] : cases.filter((c) => c.status === 'skipped')
+  const warnings = syntheticOnly ? [] : cases.filter((c) => c.status === 'warning')
   const toggleBuildLog = () =>
     setBuildLogOpen((o) => {
       const next = !o
@@ -335,6 +344,16 @@ function TestRunnerCard({ runner, onRefresh }: { runner: TestRunResult; onRefres
         </div>
       )}
 
+      {/* Warning cases (amber, always shown — surfacing them is the point). Sit
+          between the failing cases and the passing roll-up. */}
+      {warnings.length > 0 && (
+        <div className="-mx-3 mt-1 flex flex-col border-t border-gray-100 dark:border-gray-800">
+          {warnings.map((c, i) => (
+            <WarningCase key={i} c={c} />
+          ))}
+        </div>
+      )}
+
       {/* Collapsed passing roll-up. */}
       {passing.length > 0 && (
         <div className="-mx-3">
@@ -382,6 +401,12 @@ function Summary({ runner }: { runner: TestRunResult }) {
           {runner.failed}
         </span>
       ) : null}
+      {(runner.warnings ?? 0) > 0 ? (
+        <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400">
+          <AlertTriangle className="w-3 h-3" />
+          {runner.warnings}
+        </span>
+      ) : null}
       {(runner.skipped ?? 0) > 0 ? (
         <span className="inline-flex items-center gap-1 text-gray-500">
           <SkipForward className="w-3 h-3" />
@@ -413,6 +438,26 @@ function FailingCase({ c }: { c: TestCase }) {
   )
 }
 
+// WarningCase renders one warning case — amber sibling of FailingCase. A warning
+// is non-failing (it never reddens the verdict) but worth surfacing, so it shows
+// its message inline like a failure rather than hiding in a roll-up.
+function WarningCase({ c }: { c: TestCase }) {
+  return (
+    <div className="flex flex-col gap-1.5 px-4 py-2.5 border-t border-gray-100 dark:border-gray-800 bg-amber-50/40 dark:bg-amber-900/10 first:border-t-0">
+      <div className="flex items-center gap-2">
+        <AlertTriangle className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+        <span className="font-mono text-xs font-medium">{c.name}</span>
+        {c.duration_ms != null ? <span className="ml-auto font-mono text-[10px] text-gray-400">{c.duration_ms}ms</span> : null}
+      </div>
+      {c.message ? (
+        <pre className="ml-5 text-[11px] font-mono whitespace-pre-wrap text-amber-700 dark:text-amber-300 bg-amber-100/50 dark:bg-amber-900/20 border border-amber-200/60 dark:border-amber-900/40 rounded px-2.5 py-1.5">
+          {c.message}
+        </pre>
+      ) : null}
+    </div>
+  )
+}
+
 // TestLog renders the runner's build log through the shared xterm LogView: the
 // live `log` lines while running, the persisted `log_url` once settled (fetched
 // lazily). A failed runner gets a red border, a clean finish a green one.
@@ -421,11 +466,12 @@ function TestLog({ runner, failed }: { runner: TestRunResult; failed: boolean })
   const url = runner.log_url
   const [fetched, setFetched] = useState<ArtifactLogLine[] | null>(null)
 
+  // Drop the fetched log while the runner is running (or has no persisted url) —
+  // during render, so the next settle shows "Loading…" not the previous output.
+  if ((running || !url) && fetched !== null) setFetched(null)
+
   useEffect(() => {
-    if (running || !url) {
-      setFetched(null)
-      return
-    }
+    if (running || !url) return
     let cancelled = false
     fetch(url)
       .then((r) => (r.ok ? r.json() : null))
