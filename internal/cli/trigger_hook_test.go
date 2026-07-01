@@ -69,6 +69,7 @@ func runTriggerHookForTest(t *testing.T, agentType, event string, payload map[st
 	statusPath := filepath.Join(dir, "status.json")
 	t.Setenv("HYDRA_STATUS_PATH", statusPath)
 	t.Setenv("HYDRA_STATUS_LOG_PATH", filepath.Join(dir, "status_log.jsonl"))
+	t.Setenv("HYDRA_SUBAGENTS_DIR", filepath.Join(dir, "subagents"))
 
 	raw, err := json.Marshal(payload)
 	if err != nil {
@@ -175,6 +176,7 @@ func TestTriggerHookResumePreservesTerminalStatus(t *testing.T) {
 		statusPath := filepath.Join(dir, "status.json")
 		t.Setenv("HYDRA_STATUS_PATH", statusPath)
 		t.Setenv("HYDRA_STATUS_LOG_PATH", filepath.Join(dir, "status_log.jsonl"))
+		t.Setenv("HYDRA_SUBAGENTS_DIR", filepath.Join(dir, "subagents"))
 
 		seed, err := json.Marshal(api.AgentStatusInfo{Status: c.prior})
 		if err != nil {
@@ -254,6 +256,7 @@ func runTriggerHookInfoForTest(t *testing.T, agentType, event string, payload ma
 	statusPath := filepath.Join(dir, "status.json")
 	t.Setenv("HYDRA_STATUS_PATH", statusPath)
 	t.Setenv("HYDRA_STATUS_LOG_PATH", filepath.Join(dir, "status_log.jsonl"))
+	t.Setenv("HYDRA_SUBAGENTS_DIR", filepath.Join(dir, "subagents"))
 
 	raw, err := json.Marshal(payload)
 	if err != nil {
@@ -327,6 +330,7 @@ func runTriggerHookStatusFileForTest(t *testing.T, agentType, event string, payl
 	statusPath := filepath.Join(dir, "status.json")
 	t.Setenv("HYDRA_STATUS_PATH", statusPath)
 	t.Setenv("HYDRA_STATUS_LOG_PATH", filepath.Join(dir, "status_log.jsonl"))
+	t.Setenv("HYDRA_SUBAGENTS_DIR", filepath.Join(dir, "subagents"))
 
 	raw, err := json.Marshal(payload)
 	if err != nil {
@@ -373,6 +377,7 @@ func TestTriggerHookExitPlanModeAutoApproves(t *testing.T) {
 	statusPath := filepath.Join(dir, "status.json")
 	t.Setenv("HYDRA_STATUS_PATH", statusPath)
 	t.Setenv("HYDRA_STATUS_LOG_PATH", filepath.Join(dir, "status_log.jsonl"))
+	t.Setenv("HYDRA_SUBAGENTS_DIR", filepath.Join(dir, "subagents"))
 
 	raw, err := json.Marshal(map[string]interface{}{
 		"hook_event_name": "PermissionRequest",
@@ -491,6 +496,122 @@ func TestTriggerHookNotificationTypes(t *testing.T) {
 		if file.Status != c.wantStatus {
 			t.Errorf("notification_type %q: status = %q, want %q", c.notificationType, file.Status, c.wantStatus)
 		}
+	}
+}
+
+// fireHook runs runTriggerHook once against caller-provided status/subagents
+// paths so a multi-hook sequence (SubagentStart … Stop) shares the same files
+// across calls. Returns the persisted status.json status ("" if none was written).
+func fireHook(t *testing.T, statusPath, subagentsDir, event string, payload map[string]interface{}) api.AgentStatus {
+	t.Helper()
+	t.Setenv("HYDRA_STATUS_PATH", statusPath)
+	t.Setenv("HYDRA_STATUS_LOG_PATH", statusPath+".log")
+	t.Setenv("HYDRA_SUBAGENTS_DIR", subagentsDir)
+
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := filepath.Join(t.TempDir(), "stdin.json")
+	if err := os.WriteFile(in, raw, 0644); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.Open(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	orig := os.Stdin
+	os.Stdin = f
+	defer func() { os.Stdin = orig }()
+
+	if err := runTriggerHook("claude", event, nil, io.Discard); err != nil {
+		t.Fatalf("runTriggerHook(%q): %v", event, err)
+	}
+
+	data, err := os.ReadFile(statusPath)
+	if os.IsNotExist(err) {
+		return ""
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	var info api.AgentStatusInfo
+	if err := json.Unmarshal(data, &info); err != nil {
+		t.Fatal(err)
+	}
+	return info.Status
+}
+
+// TestTriggerHookSubagentDoesNotClobberParent covers the sub-agent status bug: a
+// Claude sub-agent (Task tool) fires the same hooks against the head's shared
+// status.json, but its tool activity must NOT rewrite the parent agent's status
+// — otherwise a still-running sub-agent flips a needs_input/finished parent back
+// to running. Sub-agent hooks are identified by the agent_id field the main
+// agent's hooks lack.
+func TestTriggerHookSubagentDoesNotClobberParent(t *testing.T) {
+	dir := t.TempDir()
+	statusPath := filepath.Join(dir, "status.json")
+	subagents := filepath.Join(dir, "subagents")
+
+	// The parent asked the user a question.
+	seed, err := json.Marshal(api.AgentStatusInfo{Status: api.NeedsInput})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(statusPath, seed, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// A sub-agent's PostToolUse (carries agent_id) must leave the parent alone.
+	if got := fireHook(t, statusPath, subagents, "", map[string]interface{}{
+		"hook_event_name": "PostToolUse",
+		"tool_name":       "Bash",
+		"agent_id":        "aabbccddeeff00112",
+	}); got != api.NeedsInput {
+		t.Errorf("parent status after sub-agent PostToolUse = %q, want needs_input (unchanged)", got)
+	}
+
+	// A main-agent PostToolUse (no agent_id) still updates the parent to running.
+	if got := fireHook(t, statusPath, subagents, "", map[string]interface{}{
+		"hook_event_name": "PostToolUse",
+		"tool_name":       "Bash",
+	}); got != api.Running {
+		t.Errorf("parent status after main PostToolUse = %q, want running", got)
+	}
+}
+
+// TestTriggerHookStopAwaitsSubagents covers finished-vs-still-working: when the
+// main turn ends (Stop) while sub-agents it launched are still running, the head
+// isn't done — it reports running, not finished. Once the sub-agents stop, the
+// next Stop is a genuine finish. This is what makes "finished" reliable enough to
+// gate auto-merge on.
+func TestTriggerHookStopAwaitsSubagents(t *testing.T) {
+	dir := t.TempDir()
+	statusPath := filepath.Join(dir, "status.json")
+	subagents := filepath.Join(dir, "subagents")
+	if err := os.MkdirAll(subagents, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	fireHook(t, statusPath, subagents, "", map[string]interface{}{
+		"hook_event_name": "SubagentStart",
+		"agent_id":        "sub1",
+	})
+	if got := fireHook(t, statusPath, subagents, "", map[string]interface{}{
+		"hook_event_name": "Stop",
+	}); got != api.Running {
+		t.Errorf("Stop with a live sub-agent = %q, want running", got)
+	}
+
+	fireHook(t, statusPath, subagents, "", map[string]interface{}{
+		"hook_event_name": "SubagentStop",
+		"agent_id":        "sub1",
+	})
+	if got := fireHook(t, statusPath, subagents, "", map[string]interface{}{
+		"hook_event_name": "Stop",
+	}); got != api.Finished {
+		t.Errorf("Stop after sub-agents done = %q, want finished", got)
 	}
 }
 
