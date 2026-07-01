@@ -1,5 +1,5 @@
 import { useLayoutEffect, useMemo, useRef, type CSSProperties } from 'react'
-import hljs from 'highlight.js'
+import hljs from '../lib/hljs'
 import { ResizeHandle } from '../lib/ResizeHandle'
 
 function escapeHtml(s: string): string {

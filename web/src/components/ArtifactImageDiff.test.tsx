@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
-import { SegmentedToggle, ImageDiffView, IMAGE_DIFF_MODES } from './ArtifactImageDiff'
+import { SegmentedToggle, ImageDiffView } from './ArtifactImageDiff'
+import { IMAGE_DIFF_MODES } from './artifactDiffContext'
 
 // Unit coverage for the image-diff renderers lifted out of ArtifactsPanel (#63b).
 // These exercise the pure routing/rendering behaviour — which comparison mode

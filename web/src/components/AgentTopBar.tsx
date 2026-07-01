@@ -287,13 +287,22 @@ function AdaptiveActions({
   const [vis, setVis] = useState<{ mode: 'labels' | 'icons'; count: number }>({ mode: 'icons', count: actions.length })
   const [menuOpen, setMenuOpen] = useState(false)
 
+  // The only thing recompute needs from the actions' contents (beyond count and
+  // the measured widths) is how many contiguous runs of segment actions there are,
+  // each of which reserves pill chrome. Derive it here as a primitive so recompute
+  // closes over plain numbers, not the fresh-every-render `actions` array.
+  const n = actions.length
+  let segmentGroups = 0
+  for (let i = 0; i < n; i++) {
+    if (actionVariant(actions[i]) === 'segment' && (i === 0 || actionVariant(actions[i - 1]) !== 'segment')) segmentGroups++
+  }
+
   const recompute = useCallback(() => {
     // Measure against the parent row (title + toolbar). Read via parentElement
     // rather than an ancestor-supplied ref: ancestor refs attach after this
     // child's layout effect, so a passed ref would still be null on first measure.
     const cont = rootRef.current?.parentElement
     if (!cont) return
-    const n = actions.length
     const labeled = labeledRefs.current.slice(0, n).map((b) => b?.offsetWidth ?? 0)
     const icons = iconRefs.current.slice(0, n).map((b) => b?.offsetWidth ?? 0)
     const more = moreRef.current?.offsetWidth ?? 28
@@ -304,13 +313,9 @@ function AdaptiveActions({
     // Reserve the title's full width first — but never more than leaves room for
     // the "⋯" button, so a pathologically long title still yields the menu.
     const titleReserve = Math.min(titleNatural, Math.max(0, cont.clientWidth - more - GAP))
-    // Reserve the pill chrome around each contiguous run of segment actions —
-    // the measurer sizes members bare, so this keeps a tight row honest.
-    let groups = 0
-    for (let i = 0; i < n; i++) {
-      if (actionVariant(actions[i]) === 'segment' && (i === 0 || actionVariant(actions[i - 1]) !== 'segment')) groups++
-    }
-    const budget = Math.max(0, cont.clientWidth - titleReserve - GAP - groups * SEGMENT_CHROME)
+    // Reserve the pill chrome around each contiguous run of segment actions (count
+    // derived above) — the measurer sizes members bare, so this keeps a row honest.
+    const budget = Math.max(0, cont.clientWidth - titleReserve - GAP - segmentGroups * SEGMENT_CHROME)
     const span = (arr: number[], k: number) => arr.slice(0, k).reduce((a, b) => a + b, 0) + Math.max(0, k - 1) * GAP
     let next: { mode: 'labels' | 'icons'; count: number }
     if (span(labeled, n) <= budget) {
@@ -332,15 +337,21 @@ function AdaptiveActions({
       next = { mode: 'icons', count: k }
     }
     setVis((prev) => (prev.mode === next.mode && prev.count === next.count ? prev : next))
-  }, [actions.length, title])
+  }, [n, segmentGroups])
 
-  // Measure + recompute before paint, and on every container resize.
+  // Measure + recompute before paint, and on every container resize. This reads
+  // the committed layout of the off-screen sizers, so the measure-then-setState
+  // must happen in a layout effect (it can't be derived during render).
   useLayoutEffect(() => {
     recompute()
     const cont = rootRef.current?.parentElement
     if (!cont || typeof ResizeObserver === 'undefined') return
     const ro = new ResizeObserver(() => recompute())
     ro.observe(cont)
+    // Also refit when the title's measured width changes (a new title, or a font
+    // load) — that doesn't resize the container, so the container observer alone
+    // would miss it; this replaces carrying `title` as a recompute dependency.
+    if (titleMeasureRef.current) ro.observe(titleMeasureRef.current)
     return () => ro.disconnect()
   }, [recompute])
 

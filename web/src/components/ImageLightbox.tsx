@@ -80,7 +80,10 @@ export function ImageLightbox({
   // Natural pixel dimensions of the current image, read once it loads. Cleared
   // on navigation so a stale size never flashes against the next image.
   const [dims, setDims] = useState<{ w: number; h: number } | null>(null)
-  useEffect(() => { setDims(null) }, [index])
+  // Clear the measured size the moment the shown image changes (adjust-during-
+  // render rather than in an effect, so no stale size survives to the next paint).
+  const [dimsIndex, setDimsIndex] = useState(index)
+  if (dimsIndex !== index) { setDimsIndex(index); setDims(null) }
 
   // Comparison mode + before/after view + highlight for diff entries, held HERE (not in
   // LightboxDiff, which remounts per index) so they PERSIST as you navigate ←/→ between

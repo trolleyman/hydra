@@ -9,6 +9,7 @@
 // joined old/new side source (or null), and the worker replies with the same
 // `id` plus `old`/`new` as per-line highlighted HTML (string[] or null).
 import { highlightLines } from './highlightCore'
+import { ensureLanguage } from './hljsLazy'
 
 export interface HighlightRequest {
   id: number
@@ -23,8 +24,12 @@ export interface HighlightResponse {
   new: string[] | null
 }
 
-self.onmessage = (e: MessageEvent<HighlightRequest>) => {
+self.onmessage = async (e: MessageEvent<HighlightRequest>) => {
   const { id, lang, old, new: nw } = e.data
+  // Fetch + register the grammar on demand if it isn't one of the eager languages
+  // (no-op for eager/already-loaded/unknown ones). Highlighting here is already
+  // async from the caller's view, so this adds no main-thread cost.
+  await ensureLanguage(lang)
   const out: HighlightResponse = {
     id,
     old: old != null ? highlightLines(old, lang) : null,

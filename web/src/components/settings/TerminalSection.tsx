@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useDefaultTerminalRows, DEFAULT_SPAWN_ROWS, MIN_SPAWN_ROWS, MAX_SPAWN_ROWS } from '../../lib/terminalGeometry'
 import { SettingSection } from './shared'
 
@@ -14,11 +14,11 @@ export function TerminalSection() {
   // the way to "30") without the min-clamp snapping it up on every keystroke.
   // We only normalise — clamp to [MIN, MAX] — when the field loses focus.
   const [draft, setDraft] = useState<string>(rows == null ? '' : String(rows))
-  // Re-sync when the stored value changes from elsewhere (another tab/page),
-  // but not while the user is mid-edit (the input owns the value when focused).
-  useEffect(() => {
-    setDraft(rows == null ? '' : String(rows))
-  }, [rows])
+  // Re-sync when the stored value changes from elsewhere (another tab/page).
+  // Done during render (rows only changes on commit or an external write, never
+  // mid-keystroke — the input owns `draft` while focused), so no extra paint.
+  const [prevRows, setPrevRows] = useState(rows)
+  if (prevRows !== rows) { setPrevRows(rows); setDraft(rows == null ? '' : String(rows)) }
   const commit = () => {
     if (draft.trim() === '') { setRows(null); return }
     const n = parseInt(draft, 10)

@@ -5,7 +5,7 @@ import type { RepositoryBranch } from '../api'
 
 // shortSha collapses a full/long commit SHA to a readable prefix, leaving
 // branch names (and anything that isn't a hex SHA) untouched.
-export function shortSha(ref: string): string {
+function shortSha(ref: string): string {
   return /^[0-9a-f]{7,40}$/i.test(ref) ? ref.slice(0, 8) : ref
 }
 

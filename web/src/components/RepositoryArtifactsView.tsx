@@ -6,8 +6,10 @@ import type { ArtifactLogLine, RepositoryArtifactFile } from '../api'
 import { RepositoryArtifactResponse } from '../api'
 import { formatError } from '../api/format_error'
 import { IMG_CLASS, checkerStyle } from './artifactDiffShared'
-import { isVideoArtifact, VIDEO_MIN_TILE_PX } from './VideoDiffView'
-import { ElapsedTime, MasonryGrid, useMediaDims } from './ArtifactsPanel'
+import { VIDEO_MIN_TILE_PX } from './VideoDiffView'
+import { isVideoArtifact } from '../lib/artifactFilter'
+import { ElapsedTime, MasonryGrid } from './ArtifactsPanel'
+import { useMediaDims } from '../lib/artifactDims'
 import { LogView } from './ArtifactLogView'
 import { useImageLightbox } from '../stores/imageLightboxStore'
 import type { LightboxImage } from './ImageLightbox'
@@ -96,11 +98,14 @@ function PersistedLog({ url }: { url: string }) {
   const [lines, setLines] = useState<ArtifactLogLine[] | null>(null)
   const [err, setErr] = useState<string | null>(null)
 
-  useEffect(() => { setLines(null); setErr(null) }, [url])
+  // Drop the cached log when the url changes (a regenerate swaps it) — during
+  // render so the stale log/error never shows against the new url.
+  const [prevUrl, setPrevUrl] = useState(url)
+  if (prevUrl !== url) { setPrevUrl(url); setLines(null); setErr(null) }
+
   useEffect(() => {
     if (!open || lines !== null) return
     let cancelled = false
-    setErr(null)
     fetch(url)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then((j: { lines?: ArtifactLogLine[] }) => { if (!cancelled) setLines(j.lines ?? []) })
@@ -111,7 +116,8 @@ function PersistedLog({ url }: { url: string }) {
   return (
     <div className="pt-1.5">
       <button
-        onClick={() => setOpen((o) => !o)}
+        // Clear a prior fetch error on reopen so a retry starts clean.
+        onClick={() => { if (!open) setErr(null); setOpen((o) => !o) }}
         className="text-[11px] text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 cursor-pointer"
       >
         {open ? 'Hide' : 'Show'} build log

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { render } from '@testing-library/react'
-import { Badge, TONE_BADGE } from './Badge'
+import { Badge } from './Badge'
+import { TONE_BADGE } from './badgeTones'
 
 describe('Badge', () => {
   it('renders its children', () => {
