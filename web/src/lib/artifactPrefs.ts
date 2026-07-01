@@ -87,7 +87,7 @@ export function clampChangeThreshold(v: unknown): number {
 // (no stored 'change' key) seeds ['unchanged']. Once the user touches it, the
 // stored value (even []) wins, distinguishing "show all" from "never set".
 export const ARTIFACT_CHANGE_CATEGORY = 'change'
-const DEFAULT_HIDDEN_CHANGE_TYPES = ['unchanged']
+export const DEFAULT_HIDDEN_CHANGE_TYPES = ['unchanged']
 
 // The default filter: nothing hidden, except the change-type scope hides
 // 'unchanged'. Exported so the "reset filters" affordance can restore it.
