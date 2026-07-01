@@ -23,7 +23,7 @@ func TestProxyAllowsListedHostForwardsHTTP(t *testing.T) {
 	defer upstream.Close()
 	host := mustHost(t, upstream.URL)
 
-	p, err := Start("h1", []string{host})
+	p, err := Start("h1", []string{host}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,7 +45,7 @@ func TestProxyBlocksUnlistedHost(t *testing.T) {
 	defer upstream.Close()
 
 	// Allow-list deliberately excludes the upstream host.
-	p, err := Start("h1", []string{"only.example.com"})
+	p, err := Start("h1", []string{"only.example.com"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +71,7 @@ func TestProxyWildcard(t *testing.T) {
 	host := mustHost(t, upstream.URL) // 127.0.0.1
 
 	// A wildcard that does not cover the loopback host must still block it.
-	p, err := Start("h1", []string{"*.example.com"})
+	p, err := Start("h1", []string{"*.example.com"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,5 +83,27 @@ func TestProxyWildcard(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusForbidden {
 		t.Fatalf("non-matching wildcard should block %s, got %d", host, resp.StatusCode)
+	}
+}
+
+func TestProxyBlockListOverridesAllow(t *testing.T) {
+	upstream := newTestServer(t, "ok")
+	defer upstream.Close()
+	host := mustHost(t, upstream.URL)
+
+	// Host is on the allow-list but also on the block-list — block wins.
+	p, err := Start("h1", []string{host}, []string{host})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer p.Close()
+
+	resp, err := newClient(t, p).Get(upstream.URL)
+	if err != nil {
+		t.Fatalf("request itself should reach the proxy: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("block-list should override allow-list, got %d", resp.StatusCode)
 	}
 }

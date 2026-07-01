@@ -6,6 +6,16 @@ import { ShellEditor } from '../ShellEditor'
 import { HighlightedTextarea, renderMarkdown } from '../../lib/markdown'
 import { ResizeHandle } from '../../lib/ResizeHandle'
 
+// The four egress postures, mirroring sandbox.NetworkMode on the backend.
+type NetworkMode = 'off' | 'unrestricted' | 'advisory' | 'hard'
+
+const NETWORK_MODE_LABELS: Record<NetworkMode, string> = {
+  hard: 'Hard — inescapable filtering',
+  advisory: 'Advisory — proxy filtering',
+  unrestricted: 'Unrestricted — no filtering',
+  off: 'Off — no network',
+}
+
 // ── PathListEditor ──────────────────────────────────────────────────────────────
 // Edits a list of filesystem paths (writable / masked / restore-RO / allowed hosts).
 function PathListEditor({
@@ -118,10 +128,14 @@ export function ConfigForm({
   const prePromptBoxRef = useRef<HTMLDivElement>(null)
   const sandbox: SandboxConfig = value.sandbox ?? {}
   const network: NetworkConfig = sandbox.network ?? {}
-  const networkEnabled = network.enabled !== false // default on
-  // Mirrors the backend's inference: filtering is on when explicitly enabled, or
-  // (when the toggle is unset) whenever an allow-list is present.
-  const filterEnabled = network.filter_enabled ?? (network.allowed_hosts?.length ?? 0) > 0
+  // Effective egress mode for display. Explicit `mode` wins; otherwise derive it
+  // from the legacy enabled/filter_enabled booleans, defaulting to "hard" (the
+  // backend default). Selecting a mode writes it explicitly and clears the legacy
+  // booleans so the emitted config is unambiguous.
+  const mode: NetworkMode =
+    (network.mode as NetworkMode | null | undefined) ??
+    (network.enabled === false ? 'off' : network.filter_enabled === false ? 'unrestricted' : 'hard')
+  const showHosts = mode === 'advisory' || mode === 'hard'
 
   function updateSandbox(patch: Partial<SandboxConfig>) {
     const next: SandboxConfig = { ...sandbox, ...patch }
@@ -137,6 +151,12 @@ export function ConfigForm({
 
   function updateNetwork(patch: Partial<NetworkConfig>) {
     updateSandbox({ network: { ...network, ...patch } })
+  }
+
+  // Set the egress mode explicitly and clear the legacy booleans so `mode` is the
+  // single source of truth in the emitted config.
+  function setMode(next: NetworkMode) {
+    updateNetwork({ mode: next as NetworkConfig['mode'], enabled: null, filter_enabled: null })
   }
 
   const inheritedSandbox = inherited?.sandbox ?? null
@@ -233,61 +253,68 @@ export function ConfigForm({
 
         {/* Network */}
         <div className="space-y-2">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-1.5">
               <Globe className="w-3.5 h-3.5 text-gray-400 dark:text-gray-500" />
               <label className="text-xs font-semibold text-gray-400 dark:text-gray-500">
-                Network Access
+                Network Egress
               </label>
-              <InfoTooltip title="Network Access">
-                <p>When off, the agent runs with no network at all. When on, outbound access is allowed — unrestricted by default, or limited to an allow-list if you enable host filtering below.</p>
+              <InfoTooltip title="Network Egress">
+                <p><strong>Hard</strong> (default): outbound access limited to the allow-list, enforced by an <strong>inescapable</strong> network-namespace boundary (pasta + nft) where the host supports it — otherwise it degrades to advisory (the running head shows which is active).</p>
+                <p className="mt-1.5"><strong>Advisory</strong>: the same allow-list, but enforced only via the per-head egress proxy — every honest client is filtered, though a determined process can bypass it.</p>
+                <p className="mt-1.5"><strong>Unrestricted</strong>: network on, every host reachable. <strong>Off</strong>: no network at all.</p>
+                <p className="mt-1.5 text-gray-400 italic">Filtered modes start from a built-in default allow-list (AI-provider APIs, package registries, git hosts). Your allowed hosts are added on top; blocked hosts override both.</p>
               </InfoTooltip>
             </div>
-            <label className="relative inline-flex items-center cursor-pointer">
-              <input
-                type="checkbox"
-                className="sr-only peer"
-                checked={networkEnabled}
-                onChange={(e) => updateNetwork({ enabled: e.target.checked })}
-              />
-              <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
-            </label>
+            <select
+              value={mode}
+              onChange={(e) => setMode(e.target.value as NetworkMode)}
+              className="text-[11px] font-medium rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-2 py-1 text-gray-700 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+            >
+              {(['hard', 'advisory', 'unrestricted', 'off'] as NetworkMode[]).map((m) => (
+                <option key={m} value={m}>{NETWORK_MODE_LABELS[m]}</option>
+              ))}
+            </select>
           </div>
-          {networkEnabled && (
-            <div className="space-y-2 ml-0.5">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-1.5">
-                  <label className="text-[11px] font-semibold text-gray-400 dark:text-gray-500">Filter outbound hosts</label>
-                  <InfoTooltip title="Filter outbound hosts">
-                    <p>When on, only the hosts you list below are reachable (an empty list blocks all egress) — a deny-by-default allow-list enforced by a per-head egress proxy. When off, every host is reachable.</p>
-                    <p className="mt-1.5 text-gray-400 italic">Enforcement is a hard network-namespace boundary where the host supports it (pasta + nft), otherwise advisory proxy filtering. The running head shows which mode is active.</p>
-                  </InfoTooltip>
-                </div>
-                <label className="relative inline-flex items-center cursor-pointer">
-                  <input
-                    type="checkbox"
-                    className="sr-only peer"
-                    checked={filterEnabled}
-                    onChange={(e) => updateNetwork({ filter_enabled: e.target.checked })}
-                  />
-                  <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
-                </label>
+          {mode === 'hard' && (
+            <div className="flex items-center justify-between ml-0.5">
+              <div className="flex items-center gap-1.5">
+                <label className="text-[11px] font-semibold text-gray-400 dark:text-gray-500">Strict (fail closed)</label>
+                <InfoTooltip title="Strict hard egress">
+                  <p>When the inescapable boundary can't be built on this host (pasta/nft unavailable — e.g. macOS), <strong>fail closed</strong> and give the agent no network, instead of degrading to advisory proxy filtering.</p>
+                </InfoTooltip>
               </div>
-              {filterEnabled ? (
-                <div className="space-y-1">
-                  <p className="text-[11px] text-gray-400 dark:text-gray-500">
-                    Allowed hosts {(network.allowed_hosts?.length ?? 0) === 0 && <span className="italic text-amber-600 dark:text-amber-400">(empty — all egress blocked)</span>}
-                  </p>
-                  <PathListEditor
-                    paths={network.allowed_hosts ?? []}
-                    onChange={(allowed_hosts) => updateNetwork({ allowed_hosts })}
-                    placeholder="e.g. api.anthropic.com"
-                    addLabel="Add Host"
-                  />
-                </div>
-              ) : (
-                <p className="text-[11px] text-gray-400 dark:text-gray-500 italic">All hosts reachable.</p>
-              )}
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="sr-only peer"
+                  checked={network.strict === true}
+                  onChange={(e) => updateNetwork({ strict: e.target.checked ? true : null })}
+                />
+                <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
+              </label>
+            </div>
+          )}
+          {showHosts && (
+            <div className="space-y-3 ml-0.5">
+              <div className="space-y-1">
+                <p className="text-[11px] text-gray-400 dark:text-gray-500">Allowed hosts <span className="text-gray-400 dark:text-gray-600">(added to the built-in defaults)</span></p>
+                <PathListEditor
+                  paths={network.allowed_hosts ?? []}
+                  onChange={(allowed_hosts) => updateNetwork({ allowed_hosts })}
+                  placeholder="e.g. api.internal.example.com"
+                  addLabel="Add Host"
+                />
+              </div>
+              <div className="space-y-1">
+                <p className="text-[11px] text-gray-400 dark:text-gray-500">Blocked hosts <span className="text-gray-400 dark:text-gray-600">(override allowed + defaults)</span></p>
+                <PathListEditor
+                  paths={network.blocked_hosts ?? []}
+                  onChange={(blocked_hosts) => updateNetwork({ blocked_hosts })}
+                  placeholder="e.g. *.tracker.io"
+                  addLabel="Block Host"
+                />
+              </div>
             </div>
           )}
         </div>

@@ -38,7 +38,7 @@ const DefaultPrePrompt = "You are a head (AI agent) of Hydra, an AI orchestratio
 	"- `masked_paths` — extra paths hidden inside the sandbox.\n" +
 	"- `restore_ro` — paths re-exposed read-only after a parent was masked.\n" +
 	"- `cow_paths` — worktree-relative paths mounted copy-on-write from the project root (you can read and overwrite them; writes stay in your worktree and never touch the real files).\n" +
-	"- `network.enabled` / `network.filter_enabled` / `network.allowed_hosts` — outbound network access, whether the host allow-list is enforced, and the allow-list itself.\n" +
+	"- `network.mode` (off/unrestricted/advisory/hard) plus `network.allowed_hosts` / `network.blocked_hosts` — the egress posture and the host allow-list (added to a built-in default list) / block-list (overrides both). The legacy `network.enabled` / `network.filter_enabled` toggles still work when `mode` is unset.\n" +
 	"- `policy.webfetch_allow_hosts` / `policy.mcp_allowed` — hosts WebFetch may reach and MCP servers you may use. A security gate can deny a tool call or pause it for user approval (even with permissions skipped) when it falls outside these, so don't retry a blocked call in a loop — ask the user to widen the list.\n" +
 	"- `pre_spawn_script` — a bash script run inside the sandbox before every agent launch (both spawn and resume, so it must be idempotent), e.g. `mise trust`.\n" +
 	"- `pre_exit_script` — a bash script run inside a sandbox when a head ends (before its worktree is removed), for per-head teardown such as releasing a claimed resource.\n" +
@@ -62,18 +62,33 @@ const DefaultResumePrompt = "Continue"
 
 // NetworkConfig is the per-agent network policy.
 type NetworkConfig struct {
+	// Mode is the egress posture: "off" (no network), "unrestricted" (network, no
+	// filtering), "advisory" (proxy-only host filtering, escapable), or "hard"
+	// (inescapable pasta+nft netns, degrading to advisory with a warning when the
+	// tooling is unavailable). nil/"" = default ("hard"). When set, Mode is
+	// authoritative and supersedes the legacy Enabled/FilterEnabled booleans.
+	Mode *string `toml:"mode"`
+	// Strict, with Mode == "hard", fails closed (blocks all egress) when the hard
+	// boundary can't be built, rather than degrading to advisory. nil = false.
+	Strict *bool `toml:"strict"`
 	// Enabled toggles outbound network access. nil = inherit/default (enabled).
+	// Legacy: honoured only when Mode is unset.
 	Enabled *bool `toml:"enabled"`
 	// FilterEnabled toggles the outbound host allow-list (deny-by-default vs
 	// allow-by-default). nil = inferred (filter on when AllowedHosts is non-empty,
 	// off otherwise — the historical behaviour). true = enforce AllowedHosts: only
 	// those hosts are reachable, and an empty list blocks all egress. false = allow
 	// every host regardless of AllowedHosts. Subordinate to Enabled: with network
-	// off, nothing is reachable either way.
+	// off, nothing is reachable either way. Legacy: honoured only when Mode is unset.
 	FilterEnabled *bool `toml:"filter_enabled"`
 	// AllowedHosts is the outbound host allow-list enforced by the egress proxy
-	// when filtering is on (exact host or *.suffix wildcard).
+	// when filtering is on (exact host or *.suffix wildcard). Unioned on top of
+	// sandbox.DefaultAllowedHosts.
 	AllowedHosts []string `toml:"allowed_hosts"`
+	// BlockedHosts overrides the effective allow-list (user list + defaults): a
+	// host matching BlockedHosts is denied even if otherwise allowed. Lets a user
+	// subtract a host from the built-in defaults without redefining them.
+	BlockedHosts []string `toml:"blocked_hosts"`
 }
 
 // PolicyConfig is the per-agent security-gate policy — the "trusted live config"
@@ -723,6 +738,12 @@ func (s *SandboxConfig) Merge(other SandboxConfig) {
 		if s.Network == nil {
 			s.Network = &NetworkConfig{}
 		}
+		if other.Network.Mode != nil {
+			s.Network.Mode = other.Network.Mode
+		}
+		if other.Network.Strict != nil {
+			s.Network.Strict = other.Network.Strict
+		}
 		if other.Network.Enabled != nil {
 			s.Network.Enabled = other.Network.Enabled
 		}
@@ -731,6 +752,9 @@ func (s *SandboxConfig) Merge(other SandboxConfig) {
 		}
 		if other.Network.AllowedHosts != nil {
 			s.Network.AllowedHosts = other.Network.AllowedHosts
+		}
+		if other.Network.BlockedHosts != nil {
+			s.Network.BlockedHosts = other.Network.BlockedHosts
 		}
 	}
 	if other.PreSpawnScript != nil {
@@ -833,32 +857,70 @@ func (c Config) ResolveSandboxOptions(agentType string) (writable, masked, resto
 	writable = append([]string{}, def.WritablePaths...)
 	masked = append([]string{}, def.MaskedPaths...)
 	restore = append([]string{}, def.RestoreRO...)
-	net = sandbox.NetworkPolicy{Enabled: true}
-
 	resolved := c.GetResolvedConfig(agentType)
+	var nc *NetworkConfig
 	if sb := resolved.Sandbox; sb != nil {
 		writable = append(writable, sb.WritablePaths...)
 		masked = append(masked, sb.MaskedPaths...)
 		restore = append(restore, sb.RestoreRO...)
 		cow = append(cow, sb.CowPaths...)
-		if sb.Network != nil {
-			if sb.Network.Enabled != nil {
-				net.Enabled = *sb.Network.Enabled
-			}
-			net.AllowedHosts = sb.Network.AllowedHosts
-			if sb.Network.FilterEnabled != nil {
-				net.FilterHosts = *sb.Network.FilterEnabled
-			} else {
-				// Inferred default: filter when an allow-list is present, so existing
-				// configs that just set allowed_hosts keep enforcing it.
-				net.FilterHosts = len(sb.Network.AllowedHosts) > 0
-			}
-		}
+		nc = sb.Network
 		if sb.PreSpawnScript != nil {
 			preSpawn = *sb.PreSpawnScript
 		}
 	}
+	net = resolveNetworkPolicy(nc)
 	return writable, masked, restore, cow, net, preSpawn
+}
+
+// resolveNetworkPolicy turns the (possibly nil) config into the effective
+// sandbox.NetworkPolicy. The explicit `mode` is authoritative when set; otherwise
+// it falls back to the legacy enabled/filter_enabled booleans, and when NOTHING is
+// specified it defaults to hard (network on, deny-by-default filtering, preferring
+// the inescapable pasta+nft boundary and degrading to advisory where unavailable).
+func resolveNetworkPolicy(nc *NetworkConfig) sandbox.NetworkPolicy {
+	net := sandbox.NetworkPolicy{Mode: sandbox.NetHard, Enabled: true, FilterHosts: true}
+	if nc == nil {
+		return net
+	}
+	net.AllowedHosts = nc.AllowedHosts
+	net.BlockedHosts = nc.BlockedHosts
+	if nc.Strict != nil {
+		net.Strict = *nc.Strict
+	}
+
+	switch {
+	case nc.Mode != nil && *nc.Mode != "":
+		// Explicit mode wins.
+		net.Mode = sandbox.NetworkMode(*nc.Mode)
+	case nc.Enabled != nil || nc.FilterEnabled != nil:
+		// Legacy booleans: derive a mode so downstream only reasons about Mode.
+		enabled := nc.Enabled == nil || *nc.Enabled
+		filter := len(nc.AllowedHosts) > 0
+		if nc.FilterEnabled != nil {
+			filter = *nc.FilterEnabled
+		}
+		switch {
+		case !enabled:
+			net.Mode = sandbox.NetOff
+		case !filter:
+			net.Mode = sandbox.NetUnrestricted
+		default:
+			net.Mode = sandbox.NetHard
+		}
+	}
+
+	// Derive the convenience booleans from the mode so the sandbox builder and
+	// egress setup can key off either.
+	switch net.Mode {
+	case sandbox.NetOff:
+		net.Enabled, net.FilterHosts = false, false
+	case sandbox.NetUnrestricted:
+		net.Enabled, net.FilterHosts = true, false
+	default: // advisory | hard
+		net.Enabled, net.FilterHosts = true, true
+	}
+	return net
 }
 
 // ResolvePolicy returns the effective security-gate policy for an agent type:
@@ -1060,8 +1122,30 @@ func defaultsSpec() []specEntry {
 			},
 		},
 		{
+			table: "sandbox.network", key: "mode",
+			doc: `egress posture: "off" (no network), "unrestricted" (network, no host filtering), "advisory" (proxy-only host filtering — every honest client is filtered, but escapable), or "hard" (inescapable pasta+nft netns, degrading to advisory with a warning where the tooling is unavailable). Default "hard". Supersedes the legacy enabled/filter_enabled booleans.`,
+			def: func() string { return `"hard"` },
+			get: func(a AgentConfig) (string, bool) {
+				if a.Sandbox != nil && a.Sandbox.Network != nil && a.Sandbox.Network.Mode != nil && *a.Sandbox.Network.Mode != "" {
+					return tomlStringValue(*a.Sandbox.Network.Mode), true
+				}
+				return "", false
+			},
+		},
+		{
+			table: "sandbox.network", key: "strict",
+			doc: `with mode = "hard", fail closed (block all egress) when the inescapable boundary can't be built, instead of degrading to advisory filtering (default false).`,
+			def: func() string { return "false" },
+			get: func(a AgentConfig) (string, bool) {
+				if a.Sandbox != nil && a.Sandbox.Network != nil && a.Sandbox.Network.Strict != nil {
+					return fmt.Sprintf("%t", *a.Sandbox.Network.Strict), true
+				}
+				return "", false
+			},
+		},
+		{
 			table: "sandbox.network", key: "enabled",
-			doc: "allow outbound network access from the sandbox (default true).",
+			doc: "LEGACY (use mode): allow outbound network access from the sandbox. Honoured only when mode is unset.",
 			def: func() string { return "true" },
 			get: func(a AgentConfig) (string, bool) {
 				if a.Sandbox != nil && a.Sandbox.Network != nil && a.Sandbox.Network.Enabled != nil {
@@ -1072,7 +1156,7 @@ func defaultsSpec() []specEntry {
 		},
 		{
 			table: "sandbox.network", key: "filter_enabled",
-			doc: "enforce the allowed_hosts list (deny-by-default egress). Unset = on when allowed_hosts is non-empty; true = only allowed_hosts reachable (empty list blocks all egress); false = allow every host.",
+			doc: "LEGACY (use mode): enforce the allowed_hosts list (deny-by-default egress). Honoured only when mode is unset. Unset = on when allowed_hosts is non-empty; true = only allowed_hosts reachable; false = allow every host.",
 			def: func() string { return "false" },
 			get: func(a AgentConfig) (string, bool) {
 				if a.Sandbox != nil && a.Sandbox.Network != nil && a.Sandbox.Network.FilterEnabled != nil {
@@ -1083,11 +1167,22 @@ func defaultsSpec() []specEntry {
 		},
 		{
 			table: "sandbox.network", key: "allowed_hosts",
-			doc: "outbound host allow-list (exact host or *.suffix), enforced by the egress proxy when filter_enabled is on. Empty + filtering on = block all egress; filtering off = all hosts reachable.",
+			doc: "extra outbound hosts (exact host or *.suffix) allowed when filtering is on, unioned on top of the built-in default allow-list (AI-provider APIs, package registries, git hosts).",
 			def: func() string { return "[]" },
 			get: func(a AgentConfig) (string, bool) {
 				if a.Sandbox != nil && a.Sandbox.Network != nil && len(a.Sandbox.Network.AllowedHosts) > 0 {
 					return tomlStringArray(a.Sandbox.Network.AllowedHosts), true
+				}
+				return "", false
+			},
+		},
+		{
+			table: "sandbox.network", key: "blocked_hosts",
+			doc: "outbound hosts (exact host or *.suffix) to deny even when otherwise allowed — overrides both allowed_hosts and the built-in defaults, so you can subtract a default host without redefining the list.",
+			def: func() string { return "[]" },
+			get: func(a AgentConfig) (string, bool) {
+				if a.Sandbox != nil && a.Sandbox.Network != nil && len(a.Sandbox.Network.BlockedHosts) > 0 {
+					return tomlStringArray(a.Sandbox.Network.BlockedHosts), true
 				}
 				return "", false
 			},
@@ -2105,12 +2200,18 @@ func emitAgentSandbox(out *[]string, name string, sb *SandboxConfig, keyComments
 	if sb.PreExitScript != nil && *sb.PreExitScript != "" {
 		emitSetField(out, name+".sandbox", "pre_exit_script", tomlStringValue(*sb.PreExitScript), true, keyComments)
 	}
-	if nw := sb.Network; nw != nil && (nw.Enabled != nil || nw.FilterEnabled != nil || len(nw.AllowedHosts) > 0) {
+	if nw := sb.Network; nw != nil && networkHasContent(nw) {
 		*out = appendBlank(*out)
 		if tc := tableComments[name+".sandbox.network"]; len(tc) > 0 {
 			*out = append(*out, tc...)
 		}
 		*out = append(*out, "["+name+".sandbox.network]")
+		if nw.Mode != nil && *nw.Mode != "" {
+			emitSetField(out, name+".sandbox.network", "mode", tomlStringValue(*nw.Mode), true, keyComments)
+		}
+		if nw.Strict != nil {
+			emitSetField(out, name+".sandbox.network", "strict", fmt.Sprintf("%t", *nw.Strict), true, keyComments)
+		}
 		if nw.Enabled != nil {
 			emitSetField(out, name+".sandbox.network", "enabled", fmt.Sprintf("%t", *nw.Enabled), true, keyComments)
 		}
@@ -2118,7 +2219,14 @@ func emitAgentSandbox(out *[]string, name string, sb *SandboxConfig, keyComments
 			emitSetField(out, name+".sandbox.network", "filter_enabled", fmt.Sprintf("%t", *nw.FilterEnabled), true, keyComments)
 		}
 		emitSetField(out, name+".sandbox.network", "allowed_hosts", tomlStringArray(nw.AllowedHosts), len(nw.AllowedHosts) > 0, keyComments)
+		emitSetField(out, name+".sandbox.network", "blocked_hosts", tomlStringArray(nw.BlockedHosts), len(nw.BlockedHosts) > 0, keyComments)
 	}
+}
+
+// networkHasContent reports whether a NetworkConfig has any field worth emitting.
+func networkHasContent(nw *NetworkConfig) bool {
+	return nw.Mode != nil || nw.Strict != nil || nw.Enabled != nil ||
+		nw.FilterEnabled != nil || len(nw.AllowedHosts) > 0 || len(nw.BlockedHosts) > 0
 }
 
 // emitAgentPolicy appends the [name.policy] subtable for the settings that are
@@ -2176,7 +2284,7 @@ func sandboxHasContent(sb *SandboxConfig) bool {
 	if sb.PreExitScript != nil && *sb.PreExitScript != "" {
 		return true
 	}
-	return sb.Network != nil && (sb.Network.Enabled != nil || sb.Network.FilterEnabled != nil || len(sb.Network.AllowedHosts) > 0)
+	return sb.Network != nil && networkHasContent(sb.Network)
 }
 
 // appendBlank adds a single blank separator line if out is non-empty.

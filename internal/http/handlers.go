@@ -756,9 +756,17 @@ func toAPIAgentConfig(c config.AgentConfig) api.AgentConfig {
 			PreExitScript:  c.Sandbox.PreExitScript,
 		}
 		if c.Sandbox.Network != nil {
+			n := c.Sandbox.Network
 			out.Sandbox.Network = &api.NetworkConfig{
-				Enabled:      c.Sandbox.Network.Enabled,
-				AllowedHosts: &c.Sandbox.Network.AllowedHosts,
+				Strict:        n.Strict,
+				Enabled:       n.Enabled,
+				FilterEnabled: n.FilterEnabled,
+				AllowedHosts:  &n.AllowedHosts,
+				BlockedHosts:  &n.BlockedHosts,
+			}
+			if n.Mode != nil {
+				m := api.NetworkConfigMode(*n.Mode)
+				out.Sandbox.Network.Mode = &m
 			}
 		}
 	}
@@ -789,9 +797,21 @@ func fromAPIAgentConfig(a api.AgentConfig) config.AgentConfig {
 			sb.PreExitScript = a.Sandbox.PreExitScript
 		}
 		if a.Sandbox.Network != nil {
-			sb.Network = &config.NetworkConfig{Enabled: a.Sandbox.Network.Enabled}
-			if a.Sandbox.Network.AllowedHosts != nil {
-				sb.Network.AllowedHosts = *a.Sandbox.Network.AllowedHosts
+			n := a.Sandbox.Network
+			sb.Network = &config.NetworkConfig{
+				Strict:        n.Strict,
+				Enabled:       n.Enabled,
+				FilterEnabled: n.FilterEnabled,
+			}
+			if n.Mode != nil {
+				m := string(*n.Mode)
+				sb.Network.Mode = &m
+			}
+			if n.AllowedHosts != nil {
+				sb.Network.AllowedHosts = *n.AllowedHosts
+			}
+			if n.BlockedHosts != nil {
+				sb.Network.BlockedHosts = *n.BlockedHosts
 			}
 		}
 		out.Sandbox = sb

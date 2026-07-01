@@ -58,27 +58,32 @@ Progress log as we go.
 
 ---
 
-## Step 1 — Network sandboxing as an explicit mode (+ default allow/block lists)
+## Step 1 — Network sandboxing as an explicit mode (+ default allow/block lists) ✅
 
 Goal: make egress posture a first-class, visible, secure-by-default mode.
 
-- [ ] Add `mode = "hard" | "advisory" | "unrestricted" | "off"` to
-      `[<agent>.sandbox.network]` in `internal/config/config.go`; derive the existing
-      `NetworkPolicy{Enabled,FilterHosts}` from it (keep back-compat with the old
-      booleans, or migrate them).
-- [ ] Default `mode = "hard"`. On smoke-test failure, degrade to advisory and record
-      that it was downgraded (so the UI can flag it). Add `strict` to fail-closed
-      instead.
-- [ ] Ship a **default allow-list** (`internal/sandbox` defaults): Anthropic API +
-      common package/registry/git hosts. User `allowed_hosts` is additive on top.
-- [ ] Add a **block-list** (`blocked_hosts`) that overrides allow ∪ default-allow.
-      Wire into `gate.HostAllowed` / the proxy `allow()` so both the gate and egress
-      proxy apply the same precedence.
-- [ ] Surface `EgressMode` in the UI with a tooltip explaining hard vs advisory vs
-      the allow/block precedence; make "advisory" read as downgraded, not normal.
-- [ ] Update the stale package doc in `internal/egress/proxy.go` (still claims pasta
-      is unavailable).
-- [ ] Tests: precedence (`decide_test.go` / egress tests), mode derivation, downgrade.
+- [x] Add `mode = "hard" | "advisory" | "unrestricted" | "off"` to
+      `[<agent>.sandbox.network]` (`sandbox.NetworkMode`, `config.NetworkConfig.Mode`);
+      `resolveNetworkPolicy` derives `NetworkPolicy{Enabled,FilterHosts,Mode,...}` from
+      it, with legacy `enabled`/`filter_enabled` honoured only when `mode` is unset.
+- [x] Default `mode = "hard"` (breaking: no config now = deny-by-default filtering).
+      On pasta/nft unavailability it degrades to advisory (logged); `strict` fails
+      closed (forces `Enabled=false`) instead. See `heads.startEgress`.
+- [x] `sandbox.DefaultAllowedHosts()` — Anthropic/AI APIs + package registries + git
+      hosts. Unioned with user `allowed_hosts` in `startEgress`.
+- [x] `blocked_hosts` overrides allow ∪ default-allow — enforced in the egress proxy
+      `allow()` (`gate.HostAllowed(blocked)` wins). (Gate-side WebFetch block deferred.)
+- [x] Surfaced in the settings UI: a mode dropdown + strict toggle + allowed/blocked
+      host editors, with a tooltip explaining hard vs advisory + allow/block
+      precedence (`web/.../ConfigForm.tsx`). `EgressMode` already flows to
+      `AgentResponse` (handlers.go). API: `NetworkConfig.{mode,strict,blocked_hosts}`.
+- [x] Updated the stale `internal/egress/proxy.go` package doc.
+- [x] Tests: block-list precedence (`proxy_test.go`), mode derivation +
+      strict/blocked carry (`network_filter_test.go`), egress mode branches.
+
+Remaining polish (optional, not blocking Step 2):
+- [ ] Make "advisory" read as *downgraded* in the running-head UI (currently the
+      EgressMode badge shows the active mode but doesn't emphasise the downgrade).
 
 ## Step 2 — MCP server allow-list UI (ahead-of-time path)
 

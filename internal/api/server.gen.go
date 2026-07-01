@@ -94,6 +94,14 @@ const (
 	MergeConflictErrorErrorUncommittedChanges MergeConflictErrorError = "uncommitted_changes"
 )
 
+// Defines values for NetworkConfigMode.
+const (
+	Advisory     NetworkConfigMode = "advisory"
+	Hard         NetworkConfigMode = "hard"
+	Off          NetworkConfigMode = "off"
+	Unrestricted NetworkConfigMode = "unrestricted"
+)
+
 // Defines values for RepositoryArtifactResponseStatus.
 const (
 	RepositoryArtifactResponseStatusError      RepositoryArtifactResponseStatus = "error"
@@ -666,15 +674,27 @@ type MergeConflictErrorError string
 
 // NetworkConfig defines model for NetworkConfig.
 type NetworkConfig struct {
-	// AllowedHosts Outbound host allow-list (exact host or *.suffix), enforced by the egress proxy when filter_enabled is on.
+	// AllowedHosts Extra outbound hosts (exact host or *.suffix) allowed when filtering is on, unioned on top of the built-in default allow-list.
 	AllowedHosts *[]string `json:"allowed_hosts"`
 
-	// Enabled Whether outbound network access is allowed (default true)
+	// BlockedHosts Outbound hosts (exact host or *.suffix) denied even when otherwise allowed — overrides both allowed_hosts and the built-in defaults.
+	BlockedHosts *[]string `json:"blocked_hosts"`
+
+	// Enabled LEGACY (use mode). Honoured only when mode is unset.
 	Enabled *bool `json:"enabled"`
 
-	// FilterEnabled Whether the allowed_hosts list is enforced (deny-by-default egress). Null/unset = inferred (on when allowed_hosts is non-empty); true = only allowed_hosts reachable (empty list blocks all egress); false = allow every host.
+	// FilterEnabled LEGACY (use mode). Honoured only when mode is unset.
 	FilterEnabled *bool `json:"filter_enabled"`
+
+	// Mode Egress posture: "off" (no network), "unrestricted" (network, no host filtering), "advisory" (proxy-only host filtering — every honest client is filtered, but escapable), or "hard" (inescapable pasta+nft netns, degrading to advisory with a warning where the tooling is unavailable). Null/unset = default ("hard"). Supersedes the legacy enabled/filter_enabled booleans.
+	Mode *NetworkConfigMode `json:"mode"`
+
+	// Strict With mode "hard", fail closed (block all egress) when the inescapable boundary can't be built, instead of degrading to advisory (default false).
+	Strict *bool `json:"strict"`
 }
+
+// NetworkConfigMode Egress posture: "off" (no network), "unrestricted" (network, no host filtering), "advisory" (proxy-only host filtering — every honest client is filtered, but escapable), or "hard" (inescapable pasta+nft netns, degrading to advisory with a warning where the tooling is unavailable). Null/unset = default ("hard"). Supersedes the legacy enabled/filter_enabled booleans.
+type NetworkConfigMode string
 
 // ProjectInfo defines model for ProjectInfo.
 type ProjectInfo struct {

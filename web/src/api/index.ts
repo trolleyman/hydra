@@ -34,7 +34,7 @@ export { DiffLine } from './models/DiffLine';
 export type { DiffResponse } from './models/DiffResponse';
 export { ErrorResponse } from './models/ErrorResponse';
 export { MergeConflictError } from './models/MergeConflictError';
-export type { NetworkConfig } from './models/NetworkConfig';
+export { NetworkConfig } from './models/NetworkConfig';
 export type { ProjectInfo } from './models/ProjectInfo';
 export type { RepositoryArtifactFile } from './models/RepositoryArtifactFile';
 export { RepositoryArtifactResponse } from './models/RepositoryArtifactResponse';
