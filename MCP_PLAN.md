@@ -124,9 +124,10 @@ Goal: gate individual tools within an allowed-to-run server; show read/write.
       (get/list/search… = read; create/delete/update… = write). `rw` flows through
       `gate.Result` → `gate.Request` → `api.ApprovalRequest.rw` → the approval toast
       summary ("… (write)"). Tests for the classifier + per-tool Decide.
-      - [ ] DEFERRED: true `readOnlyHint` capture via a Go MCP client (spawn server →
-            `tools/list`), cached in `.hydra/cache/`. Heuristic is the interim signal;
-            noted as not-a-guarantee in the UI.
+      - [x] DONE: true `readOnlyHint` capture via a Go MCP client (`internal/mcpclient`
+            spawns each allow-listed server → `tools/list`), cached under `cache/mcp-rw`
+            keyed by launch-command hash. Preferred over the heuristic via
+            `gate.Policy.MCPToolRW`; still surfaced as not-a-guarantee.
 - [x] `mcp_auto_allow_read` policy toggle (off by default) — auto-allows read-classified
       tools, parks writes/unknown. Flagged as heuristic in the UI tooltip.
 - [x] UI: ConfigForm MCP card gains a per-tool (`server__tool`) list editor + the
@@ -154,15 +155,15 @@ Goal: let the inner agent discover + request a server mid-task, gated by a toast
       `rememberApproval`); the tool tells the agent the server is available after a
       resume (MCP config is launch-time; `ResumeHead` re-seeds).
 
+- [x] DONE: AUTO-restart-with-`--continue` on approval (seamless reload). A remembered
+      mcp/mcp_tool grant fires `heads.RestartHead` (kill → wait → `ResumeHead`) async +
+      ~1.5s delayed from `DecideAgentApproval`, so the newly allow-listed server loads
+      without a manual resume; the conversation is restored by `--continue`.
+
 Deferred (documented, non-blocking):
-- [ ] AUTO-restart-with-`--continue` on approval (seamless reload). Currently the grant
-      persists and applies on the next resume, which the tool result explains; wiring
-      the daemon to kill+resume the head the moment the approval lands (so the agent
-      doesn't have to be manually resumed) is a follow-up. Needs care: the requesting
-      tool call is mid-poll when the restart fires.
 - [ ] End-to-end verification with a real Claude client (protocol version/handshake) —
-      the server is unit-tested but not exercised against Claude in this environment
-      (no bwrap/userns here).
+      the MCP server/client are unit-tested but not exercised against Claude in this
+      environment (no bwrap/userns here).
 
 ---
 
