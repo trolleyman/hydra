@@ -18,6 +18,8 @@
 pre_prompt = """
 - Use bun instead of npm, and bun x instead of npx
 - Check using mage build before committing
+- After changing web code, run `cd web && bun run lint` (eslint) and fix the errors AND warnings you introduced
+- After changing Go code, run `go test ./...` and make sure it passes
 """
 
 ## message typed into an agent that was working when the daemon restarted, so it resumes its task instead of idling (default "Continue"; "" disables).
@@ -193,7 +195,11 @@ command = "go tool gotestsum --junitfile \"$HYDRA_TEST_OUTPUT/go.xml\" -- ./..."
 timeout_sec = 900
 
 [[tests]]
-# Frontend vitest suite, emitting JUnit so failing specs show their assertion.
+# Frontend vitest suite (JUnit, so failing specs show their assertion) plus an
+# ESLint pass whose findings surface on the same verdict: eslint-report.ts writes
+# a Hydra-native report where errors gate the merge like a failing test and
+# warnings show as an informational amber ⚠ N. Lint only runs once the specs pass
+# (the merge is already blocked when they don't).
 name = "web"
-command = "cd web && bun install && bun x vitest run --reporter=junit --outputFile=\"$HYDRA_TEST_OUTPUT/web.xml\""
+command = "cd web && bun install && bun x vitest run --reporter=junit --outputFile=\"$HYDRA_TEST_OUTPUT/web.xml\" && bun scripts/eslint-report.ts"
 timeout_sec = 600
