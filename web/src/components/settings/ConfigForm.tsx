@@ -1,6 +1,6 @@
-import { useRef, type ReactNode } from 'react'
-import type { AgentConfig, NetworkConfig, ProjectInfo, SandboxConfig } from '../../api'
-import { X, Plus, Globe, FolderOpen, EyeOff, Eye, Layers, Terminal, Maximize2 } from 'lucide-react'
+import { useRef, useState, type ReactNode } from 'react'
+import type { AgentConfig, McpServer, NetworkConfig, PolicyConfig, ProjectInfo, SandboxConfig } from '../../api'
+import { X, Plus, Globe, FolderOpen, EyeOff, Eye, Layers, Terminal, Maximize2, Puzzle } from 'lucide-react'
 import { InfoTooltip } from '../InfoTooltip'
 import { ShellEditor } from '../ShellEditor'
 import { HighlightedTextarea, renderMarkdown } from '../../lib/markdown'
@@ -116,6 +116,7 @@ export function ConfigForm({
   agentType,
   defaultPrePrompt,
   allAgentsPrePrompt,
+  mcpServers,
 }: {
   value: AgentConfig
   onChange: (val: AgentConfig) => void
@@ -124,8 +125,10 @@ export function ConfigForm({
   selectedProject?: ProjectInfo
   defaultPrePrompt?: string
   allAgentsPrePrompt?: string | null
+  mcpServers?: McpServer[]
 }) {
   const prePromptBoxRef = useRef<HTMLDivElement>(null)
+  const [mcpInput, setMcpInput] = useState('')
   const sandbox: SandboxConfig = value.sandbox ?? {}
   const network: NetworkConfig = sandbox.network ?? {}
   // Effective egress mode for display. Explicit `mode` wins; otherwise derive it
@@ -157,6 +160,28 @@ export function ConfigForm({
   // single source of truth in the emitted config.
   function setMode(next: NetworkMode) {
     updateNetwork({ mode: next as NetworkConfig['mode'], enabled: null, filter_enabled: null })
+  }
+
+  // ── MCP server allow-list (policy.mcp_allowed) ──
+  const policy: PolicyConfig = value.policy ?? {}
+  const mcpAllowed = policy.mcp_allowed ?? []
+  // The picker's rows: every discovered server, plus any allow-listed name that
+  // is no longer discovered (so it can be un-checked rather than silently kept).
+  const discovered = mcpServers ?? []
+  const extraAllowed = mcpAllowed.filter((n) => !discovered.some((s) => s.name === n))
+
+  function updatePolicy(patch: Partial<PolicyConfig>) {
+    const next: PolicyConfig = { ...policy, ...patch }
+    const empty =
+      next.gate_enabled == null && !next.mcp_allowed?.length && !next.webfetch_allow_hosts?.length
+    onChange({ ...value, policy: empty ? null : next })
+  }
+
+  function toggleMcp(name: string, on: boolean) {
+    const set = new Set(mcpAllowed)
+    if (on) set.add(name)
+    else set.delete(name)
+    updatePolicy({ mcp_allowed: [...set] })
   }
 
   const inheritedSandbox = inherited?.sandbox ?? null
@@ -433,6 +458,77 @@ export function ConfigForm({
             placeholder={'# e.g. source "$HYDRA_WORKTREE/.hydra/emu.env" && release-slot'}
             rows={6}
           />
+        </div>
+      </div>
+
+      {/* MCP servers allow-list (policy.mcp_allowed) */}
+      <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50/40 dark:bg-gray-800/20 p-4 space-y-3">
+        <div className="flex items-center gap-2">
+          <Puzzle className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+          <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100">MCP Servers</h3>
+          <InfoTooltip title="MCP Servers">
+            <p>Model Context Protocol servers give the agent extra tools. Only the servers you allow here can be used — <strong>deny-by-default</strong>: any others are stripped from the config before the agent launches, so they never even run.</p>
+            <p className="mt-1.5">The list is discovered from your <code className="text-blue-300">~/.claude.json</code> and this project's <code className="text-blue-300">.mcp.json</code>.</p>
+            <p className="mt-1.5 text-gray-400 italic">MCP servers are loaded at launch, so a change applies on the agent's <strong>next launch or resume</strong>, not to a running session.</p>
+          </InfoTooltip>
+        </div>
+        {discovered.length === 0 && extraAllowed.length === 0 ? (
+          <p className="text-[11px] text-gray-400 dark:text-gray-500 italic">No MCP servers found in <span className="font-mono">~/.claude.json</span> or <span className="font-mono">.mcp.json</span>. Add one by name below to pre-authorise it.</p>
+        ) : (
+          <div className="space-y-1">
+            {discovered.map((s) => (
+              <label key={s.name} className="flex items-center gap-2 py-0.5 cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500/30"
+                  checked={mcpAllowed.includes(s.name)}
+                  onChange={(e) => toggleMcp(s.name, e.target.checked)}
+                />
+                <span className="text-sm font-mono text-gray-700 dark:text-gray-200">{s.name}</span>
+                <span className="text-[10px] uppercase tracking-wide text-gray-400 dark:text-gray-500 border border-gray-200 dark:border-gray-700 rounded px-1 py-px">{s.source}</span>
+              </label>
+            ))}
+            {extraAllowed.map((name) => (
+              <label key={name} className="flex items-center gap-2 py-0.5 cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500/30"
+                  checked
+                  onChange={() => toggleMcp(name, false)}
+                />
+                <span className="text-sm font-mono text-gray-700 dark:text-gray-200">{name}</span>
+                <span className="text-[10px] uppercase tracking-wide text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-900 rounded px-1 py-px">not found</span>
+              </label>
+            ))}
+          </div>
+        )}
+        <div className="flex items-center gap-2">
+          <input
+            type="text"
+            value={mcpInput}
+            onChange={(e) => setMcpInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && mcpInput.trim()) {
+                e.preventDefault()
+                toggleMcp(mcpInput.trim(), true)
+                setMcpInput('')
+              }
+            }}
+            placeholder="Allow a server by name…"
+            className="flex-1 text-sm rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-2 py-1 text-gray-700 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+          />
+          <button
+            type="button"
+            onClick={() => {
+              if (mcpInput.trim()) {
+                toggleMcp(mcpInput.trim(), true)
+                setMcpInput('')
+              }
+            }}
+            className="inline-flex items-center gap-1 text-xs font-medium rounded-lg border border-gray-200 dark:border-gray-700 px-2 py-1 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
+          >
+            <Plus className="w-3.5 h-3.5" /> Allow
+          </button>
         </div>
       </div>
     </div>

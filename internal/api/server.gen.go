@@ -207,8 +207,11 @@ type AddProjectRequest struct {
 // AgentConfig defines model for AgentConfig.
 type AgentConfig struct {
 	// Fullscreen Enable Claude Code's fullscreen (alternate-screen) rendering. Claude only; off by default so the web terminal keeps its native scrollbar and select-to-copy.
-	Fullscreen *bool   `json:"fullscreen"`
-	PrePrompt  *string `json:"pre_prompt"`
+	Fullscreen *bool `json:"fullscreen"`
+
+	// Policy Per-agent security-gate policy. The decision-capable gate can deny (or park for approval) tool calls even under skip-permissions.
+	Policy    *PolicyConfig `json:"policy,omitempty"`
+	PrePrompt *string       `json:"pre_prompt"`
 
 	// Sandbox User-editable sandbox policy, additive on top of baked-in defaults
 	Sandbox *SandboxConfig `json:"sandbox,omitempty"`
@@ -530,6 +533,9 @@ type ConfigResponse struct {
 	DefaultPrePrompt *string     `json:"default_pre_prompt,omitempty"`
 	Defaults         AgentConfig `json:"defaults"`
 
+	// McpServers Read-only: candidate MCP servers discovered in the host ~/.claude.json and project .mcp.json, for populating the mcp_allowed picker. Ignored on save.
+	McpServers *[]McpServer `json:"mcp_servers"`
+
 	// Services Per-project long-running supervised commands ([[services]] in config.toml)
 	Services *[]ServiceScript `json:"services"`
 
@@ -653,6 +659,15 @@ type ErrorResponse struct {
 // ErrorResponseError Machine-readable error type (e.g. internal_error, not_found, unauthorized, docker_connect)
 type ErrorResponseError string
 
+// McpServer A candidate MCP server discovered in the host/project config.
+type McpServer struct {
+	// Name The server key as it appears under mcpServers.
+	Name string `json:"name"`
+
+	// Source Where it was found — "user" (~/.claude.json) or "project" (.mcp.json).
+	Source string `json:"source"`
+}
+
 // MergeConflictError defines model for MergeConflictError.
 type MergeConflictError struct {
 	// Code HTTP status code
@@ -695,6 +710,18 @@ type NetworkConfig struct {
 
 // NetworkConfigMode Egress posture: "off" (no network), "unrestricted" (network, no host filtering), "advisory" (proxy-only host filtering — every honest client is filtered, but escapable), or "hard" (inescapable pasta+nft netns, degrading to advisory with a warning where the tooling is unavailable). Null/unset = default ("hard"). Supersedes the legacy enabled/filter_enabled booleans.
 type NetworkConfigMode string
+
+// PolicyConfig Per-agent security-gate policy. The decision-capable gate can deny (or park for approval) tool calls even under skip-permissions.
+type PolicyConfig struct {
+	// GateEnabled Enable the decision-capable gate (default true when unset).
+	GateEnabled *bool `json:"gate_enabled"`
+
+	// McpAllowed MCP server names the agent may use. Servers not listed are stripped from the seeded config pre-launch (never spawn). Deny-by-default.
+	McpAllowed *[]string `json:"mcp_allowed"`
+
+	// WebfetchAllowHosts Hosts WebFetch may reach without an approval round-trip.
+	WebfetchAllowHosts *[]string `json:"webfetch_allow_hosts"`
+}
 
 // ProjectInfo defines model for ProjectInfo.
 type ProjectInfo struct {

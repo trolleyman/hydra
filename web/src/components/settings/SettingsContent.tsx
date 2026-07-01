@@ -148,19 +148,19 @@ export function SettingsContent({
 
       <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-4 sm:p-6">
         {activeSection === 'all' && (
-          <ConfigForm value={config.defaults} onChange={(defaults) => setConfig({ ...config, defaults })} inherited={inheritedConfig?.defaults ?? null} agentType="default" selectedProject={selectedProject} defaultPrePrompt={config.default_pre_prompt} />
+          <ConfigForm value={config.defaults} onChange={(defaults) => setConfig({ ...config, defaults })} inherited={inheritedConfig?.defaults ?? null} agentType="default" selectedProject={selectedProject} mcpServers={config.mcp_servers ?? undefined} defaultPrePrompt={config.default_pre_prompt} />
         )}
         {activeSection === 'claude' && (
-          <ConfigForm value={config.agents['claude'] || {}} onChange={(val) => setConfig({ ...config, agents: { ...config.agents, claude: val } })} inherited={config.defaults} agentType="claude" selectedProject={selectedProject} allAgentsPrePrompt={config.defaults.pre_prompt ?? null} />
+          <ConfigForm value={config.agents['claude'] || {}} onChange={(val) => setConfig({ ...config, agents: { ...config.agents, claude: val } })} inherited={config.defaults} agentType="claude" selectedProject={selectedProject} mcpServers={config.mcp_servers ?? undefined} allAgentsPrePrompt={config.defaults.pre_prompt ?? null} />
         )}
         {activeSection === 'gemini' && (
-          <ConfigForm value={config.agents['gemini'] || {}} onChange={(val) => setConfig({ ...config, agents: { ...config.agents, gemini: val } })} inherited={config.defaults} agentType="gemini" selectedProject={selectedProject} allAgentsPrePrompt={config.defaults.pre_prompt ?? null} />
+          <ConfigForm value={config.agents['gemini'] || {}} onChange={(val) => setConfig({ ...config, agents: { ...config.agents, gemini: val } })} inherited={config.defaults} agentType="gemini" selectedProject={selectedProject} mcpServers={config.mcp_servers ?? undefined} allAgentsPrePrompt={config.defaults.pre_prompt ?? null} />
         )}
         {activeSection === 'copilot' && (
-          <ConfigForm value={config.agents['copilot'] || {}} onChange={(val) => setConfig({ ...config, agents: { ...config.agents, copilot: val } })} inherited={config.defaults} agentType="copilot" selectedProject={selectedProject} allAgentsPrePrompt={config.defaults.pre_prompt ?? null} />
+          <ConfigForm value={config.agents['copilot'] || {}} onChange={(val) => setConfig({ ...config, agents: { ...config.agents, copilot: val } })} inherited={config.defaults} agentType="copilot" selectedProject={selectedProject} mcpServers={config.mcp_servers ?? undefined} allAgentsPrePrompt={config.defaults.pre_prompt ?? null} />
         )}
         {activeSection === 'codex' && (
-          <ConfigForm value={config.agents['codex'] || {}} onChange={(val) => setConfig({ ...config, agents: { ...config.agents, codex: val } })} inherited={config.defaults} agentType="codex" selectedProject={selectedProject} allAgentsPrePrompt={config.defaults.pre_prompt ?? null} />
+          <ConfigForm value={config.agents['codex'] || {}} onChange={(val) => setConfig({ ...config, agents: { ...config.agents, codex: val } })} inherited={config.defaults} agentType="codex" selectedProject={selectedProject} mcpServers={config.mcp_servers ?? undefined} allAgentsPrePrompt={config.defaults.pre_prompt ?? null} />
         )}
       </div>
 

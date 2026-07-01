@@ -109,3 +109,38 @@ func TestBuildClaudeConfigEmptyAllowlistStripsAll(t *testing.T) {
 		t.Errorf("empty allow-list should strip every server, got %v", servers)
 	}
 }
+
+func TestListMCPServers(t *testing.T) {
+	claude := []byte(`{
+	  "mcpServers": {"github": {"command": "gh-mcp"}, "linear": {"command": "x"}},
+	  "projects": {"/some/proj": {"mcpServers": {"playwright": {"command": "p"}, "github": {"command": "y"}}}}
+	}`)
+	mcp := []byte(`{"mcpServers": {"sentry": {"command": "s"}, "playwright": {"command": "z"}}}`)
+
+	got := ListMCPServers(claude, mcp)
+	// Expect de-duplicated, name-sorted: github(user), linear(user),
+	// playwright(project), sentry(project).
+	want := []MCPServer{
+		{Name: "github", Source: "user"},
+		{Name: "linear", Source: "user"},
+		{Name: "playwright", Source: "project"},
+		{Name: "sentry", Source: "project"},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %d servers %+v, want %d", len(got), got, len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("server[%d] = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+}
+
+func TestListMCPServersMalformed(t *testing.T) {
+	if got := ListMCPServers([]byte("not json"), nil); len(got) != 0 {
+		t.Errorf("malformed claude.json should yield no servers, got %+v", got)
+	}
+	if got := ListMCPServers(nil, nil); len(got) != 0 {
+		t.Errorf("nil inputs should yield no servers, got %+v", got)
+	}
+}

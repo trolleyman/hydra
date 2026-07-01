@@ -2642,6 +2642,9 @@ components:
         sandbox:
           $ref: '#/components/schemas/SandboxConfig'
           nullable: true
+        policy:
+          $ref: '#/components/schemas/PolicyConfig'
+          nullable: true
         pre_prompt:
           type: string
           nullable: true
@@ -2649,6 +2652,43 @@ components:
           type: boolean
           nullable: true
           description: Enable Claude Code's fullscreen (alternate-screen) rendering. Claude only; off by default so the web terminal keeps its native scrollbar and select-to-copy.
+
+    PolicyConfig:
+      type: object
+      description: >-
+        Per-agent security-gate policy. The decision-capable gate can deny (or
+        park for approval) tool calls even under skip-permissions.
+      properties:
+        gate_enabled:
+          type: boolean
+          nullable: true
+          description: Enable the decision-capable gate (default true when unset).
+        mcp_allowed:
+          type: array
+          items:
+            type: string
+          nullable: true
+          description: >-
+            MCP server names the agent may use. Servers not listed are stripped
+            from the seeded config pre-launch (never spawn). Deny-by-default.
+        webfetch_allow_hosts:
+          type: array
+          items:
+            type: string
+          nullable: true
+          description: Hosts WebFetch may reach without an approval round-trip.
+
+    McpServer:
+      type: object
+      required: [name, source]
+      description: A candidate MCP server discovered in the host/project config.
+      properties:
+        name:
+          type: string
+          description: The server key as it appears under mcpServers.
+        source:
+          type: string
+          description: Where it was found — "user" (~/.claude.json) or "project" (.mcp.json).
 
     ArtifactScript:
       type: object
@@ -2844,6 +2884,15 @@ components:
           type: object
           additionalProperties:
             $ref: '#/components/schemas/AgentConfig'
+        mcp_servers:
+          type: array
+          items:
+            $ref: '#/components/schemas/McpServer'
+          nullable: true
+          description: >-
+            Read-only: candidate MCP servers discovered in the host ~/.claude.json
+            and project .mcp.json, for populating the mcp_allowed picker. Ignored
+            on save.
         artifacts:
           type: array
           items:

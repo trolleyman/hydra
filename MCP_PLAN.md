@@ -85,18 +85,25 @@ Remaining polish (optional, not blocking Step 2):
 - [ ] Make "advisory" read as *downgraded* in the running-head UI (currently the
       EgressMode badge shows the active mode but doesn't emphasise the downgrade).
 
-## Step 2 — MCP server allow-list UI (ahead-of-time path)
+## Step 2 — MCP server allow-list UI (ahead-of-time path) ✅
 
 Goal: make the server whitelist manageable and reach new + resumed agents.
 
-- [ ] Endpoint to enumerate candidate servers: union of host `~/.claude.json` and
-      project `.mcp.json` `mcpServers` (name + description). Reuse the host-file read
-      already in `agentcfg.go`.
-- [ ] Settings-page multiselect/dropdown (Claude settings, next to the sandbox-policy
-      editor) writing `mcp_allowed` in the project config for that agent.
-- [ ] Confirm apply-on-resume UX: takes effect on next resume/relaunch (config is
-      launch-time); message this in the UI.
-- [ ] Tooltip explaining server allow-list vs per-tool gating (forward ref to Step 3).
+- [x] `sandbox.ListMCPServers(claudeJSON, mcpJSON)` enumerates candidate servers
+      (host `~/.claude.json` top-level + `projects[*].mcpServers`, and project
+      `.mcp.json`), de-duplicated, name-sorted, source-tagged (user/project). Tests
+      in `agentcfg_test.go`. Surfaced read-only on `ConfigResponse.mcp_servers` (the
+      GetConfig handler reads the host/project files best-effort).
+- [x] Exposed `policy` on the API `AgentConfig` (gate_enabled, mcp_allowed,
+      webfetch_allow_hosts), mapped both directions in handlers.go.
+- [x] Settings-page picker in `ConfigForm.tsx`: an "MCP Servers" card with a checkbox
+      per discovered server (+ source badge), any allow-listed-but-not-found names
+      shown checked, and a free-text "allow by name" input — all writing
+      `policy.mcp_allowed`.
+- [x] Apply-on-resume messaged in the card tooltip (MCP config is launch-time →
+      applies on next launch/resume; `ResumeHead` re-seeds from config).
+- [x] Simulation seeds `mcp_servers` + a claude `mcp_allowed` + `network.mode=hard`
+      so the settings screenshots exercise the new picker and mode UI.
 
 ## Step 3 — Per-tool gating + read/write
 

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"sort"
 	"strings"
 
 	"braces.dev/errtrace"
@@ -176,6 +177,79 @@ func stripMCPServers(cfg map[string]interface{}, allowed []string) {
 			}
 		}
 	}
+}
+
+// MCPServer names a candidate MCP server discovered in the host/project config.
+// It is the unit the allow-list (mcp_allowed) selects from.
+type MCPServer struct {
+	// Name is the server key as it appears under mcpServers.
+	Name string `json:"name"`
+	// Source is where it was found: "user" (host ~/.claude.json) or "project"
+	// (the project .mcp.json or a projects[*].mcpServers entry).
+	Source string `json:"source"`
+}
+
+// ListMCPServers enumerates candidate MCP servers from the host ~/.claude.json
+// (top-level user-scope mcpServers plus any projects[*].mcpServers) and a project
+// .mcp.json ({"mcpServers": {...}}). It returns a de-duplicated, name-sorted list;
+// a server seen in more than one place is reported once, preferring source
+// "user". Malformed JSON yields no servers from that source (best-effort).
+func ListMCPServers(claudeJSON, mcpJSON []byte) []MCPServer {
+	found := map[string]string{} // name -> source
+	add := func(name, source string) {
+		if name == "" {
+			return
+		}
+		// "user" wins over "project" when a name appears in both.
+		if existing, ok := found[name]; ok && existing == "user" {
+			return
+		}
+		found[name] = source
+	}
+	names := func(container map[string]interface{}) []string {
+		servers, ok := container["mcpServers"].(map[string]interface{})
+		if !ok {
+			return nil
+		}
+		out := make([]string, 0, len(servers))
+		for name := range servers {
+			out = append(out, name)
+		}
+		return out
+	}
+
+	if len(claudeJSON) > 0 {
+		var cfg map[string]interface{}
+		if json.Unmarshal(claudeJSON, &cfg) == nil {
+			for _, n := range names(cfg) {
+				add(n, "user")
+			}
+			if projects, ok := cfg["projects"].(map[string]interface{}); ok {
+				for _, p := range projects {
+					if pm, ok := p.(map[string]interface{}); ok {
+						for _, n := range names(pm) {
+							add(n, "project")
+						}
+					}
+				}
+			}
+		}
+	}
+	if len(mcpJSON) > 0 {
+		var cfg map[string]interface{}
+		if json.Unmarshal(mcpJSON, &cfg) == nil {
+			for _, n := range names(cfg) {
+				add(n, "project")
+			}
+		}
+	}
+
+	out := make([]MCPServer, 0, len(found))
+	for name, source := range found {
+		out = append(out, MCPServer{Name: name, Source: source})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
 }
 
 // BuildGeminiSettings generates the settings.json content with hook configuration for Gemini CLI.

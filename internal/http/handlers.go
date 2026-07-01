@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -598,6 +599,11 @@ func (s *Server) GetConfig(_ context.Context, request api.GetConfigRequestObject
 		resp.Agents[name] = toAPIAgentConfig(agent)
 	}
 
+	// Candidate MCP servers for the allow-list picker (read-only, best-effort).
+	if servers := listCandidateMCPServers(projectRoot); len(servers) > 0 {
+		resp.McpServers = &servers
+	}
+
 	if len(cfg.Artifacts) > 0 {
 		arts := make([]api.ArtifactScript, len(cfg.Artifacts))
 		for i, a := range cfg.Artifacts {
@@ -740,6 +746,23 @@ func fromAPIServiceScript(svc api.ServiceScript) config.ServiceScript {
 	return out
 }
 
+// listCandidateMCPServers enumerates MCP servers configured on the host
+// (~/.claude.json) and in the project (.mcp.json), for the settings allow-list
+// picker. Best-effort: unreadable/missing files just yield fewer candidates.
+func listCandidateMCPServers(projectRoot string) []api.McpServer {
+	var claudeJSON []byte
+	if home, err := os.UserHomeDir(); err == nil {
+		claudeJSON, _ = os.ReadFile(filepath.Join(home, ".claude.json"))
+	}
+	mcpJSON, _ := os.ReadFile(filepath.Join(projectRoot, ".mcp.json"))
+	servers := sandbox.ListMCPServers(claudeJSON, mcpJSON)
+	out := make([]api.McpServer, len(servers))
+	for i, srv := range servers {
+		out[i] = api.McpServer{Name: srv.Name, Source: srv.Source}
+	}
+	return out
+}
+
 // toAPIAgentConfig converts an internal AgentConfig to the API representation.
 func toAPIAgentConfig(c config.AgentConfig) api.AgentConfig {
 	out := api.AgentConfig{
@@ -768,6 +791,14 @@ func toAPIAgentConfig(c config.AgentConfig) api.AgentConfig {
 				m := api.NetworkConfigMode(*n.Mode)
 				out.Sandbox.Network.Mode = &m
 			}
+		}
+	}
+	if c.Policy != nil {
+		p := c.Policy
+		out.Policy = &api.PolicyConfig{
+			GateEnabled:        p.GateEnabled,
+			McpAllowed:         &p.MCPAllowed,
+			WebfetchAllowHosts: &p.WebFetchAllowHosts,
 		}
 	}
 	return out
@@ -815,6 +846,16 @@ func fromAPIAgentConfig(a api.AgentConfig) config.AgentConfig {
 			}
 		}
 		out.Sandbox = sb
+	}
+	if a.Policy != nil {
+		p := &config.PolicyConfig{GateEnabled: a.Policy.GateEnabled}
+		if a.Policy.McpAllowed != nil {
+			p.MCPAllowed = *a.Policy.McpAllowed
+		}
+		if a.Policy.WebfetchAllowHosts != nil {
+			p.WebFetchAllowHosts = *a.Policy.WebfetchAllowHosts
+		}
+		out.Policy = p
 	}
 	return out
 }
