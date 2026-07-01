@@ -100,6 +100,88 @@ func TestDecideAskCarriesTarget(t *testing.T) {
 	}
 }
 
+func TestDecidePerToolMCP(t *testing.T) {
+	p := basePolicy()
+	// linear is NOT a whole-server grant, but two of its tools are.
+	p.MCPToolsAllowed = []string{"linear__list_issues", "linear__create_issue"}
+
+	cases := []struct {
+		name string
+		tool string
+		want Decision
+		kind string
+	}{
+		{"whole-server grant covers all tools", "mcp__github__delete_repo", Allow, ""},
+		{"per-tool grant allows that tool", "mcp__linear__create_issue", Allow, ""},
+		{"other tool of partially-allowed server parks per-tool", "mcp__linear__delete_issue", Ask, "mcp_tool"},
+		{"unknown server parks whole-server", "mcp__evil__run", Ask, "mcp"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := Decide(p, c.tool, nil)
+			if got.Decision != c.want {
+				t.Errorf("Decide(%s) = %s, want %s", c.tool, got.Decision, c.want)
+			}
+			if c.kind != "" && got.Kind != c.kind {
+				t.Errorf("Decide(%s) kind = %q, want %q", c.tool, got.Kind, c.kind)
+			}
+		})
+	}
+
+	// The per-tool ask carries the "<server>__<tool>" target and rw badge.
+	if r := Decide(p, "mcp__linear__delete_issue", nil); r.Target != "linear__delete_issue" || r.RW != "write" {
+		t.Errorf("per-tool ask: target=%q rw=%q, want linear__delete_issue/write", r.Target, r.RW)
+	}
+}
+
+func TestDecideCapturedHintOverridesHeuristic(t *testing.T) {
+	p := basePolicy()
+	p.MCPToolsAllowed = []string{"linear__create_issue"} // keep linear partially-allowed
+	// The name heuristic would call delete_* a write; the captured readOnlyHint says
+	// read. The captured hint must win.
+	p.MCPToolRW = map[string]string{"linear__delete_issue": "read"}
+	if r := Decide(p, "mcp__linear__delete_issue", nil); r.RW != "read" {
+		t.Errorf("captured hint should override heuristic: rw=%q, want read", r.RW)
+	}
+	// A tool with no captured hint still uses the heuristic.
+	if r := Decide(p, "mcp__linear__update_issue", nil); r.RW != "write" {
+		t.Errorf("no hint should fall back to heuristic: rw=%q, want write", r.RW)
+	}
+}
+
+func TestDecideAutoAllowRead(t *testing.T) {
+	p := basePolicy()
+	p.MCPToolsAllowed = []string{"linear__create_issue"} // keeps linear partially-allowed
+	p.AutoAllowReadMCP = true
+	if r := Decide(p, "mcp__linear__list_issues", nil); r.Decision != Allow {
+		t.Errorf("auto-allow-read should allow a read tool, got %s", r.Decision)
+	}
+	if r := Decide(p, "mcp__linear__delete_issue", nil); r.Decision != Ask {
+		t.Errorf("auto-allow-read must still park a write tool, got %s", r.Decision)
+	}
+}
+
+func TestClassifyMCPTool(t *testing.T) {
+	reads := []string{"get_issue", "list_issues", "searchCode", "fetch", "query_db", "read-file"}
+	writes := []string{"create_issue", "delete_repo", "updateRecord", "post_message", "run_query", "sendEmail"}
+	unknown := []string{"", "frobnicate", "xyzzy_thing"}
+	for _, s := range reads {
+		if got := ClassifyMCPTool(s); got != "read" {
+			t.Errorf("ClassifyMCPTool(%q) = %q, want read", s, got)
+		}
+	}
+	for _, s := range writes {
+		if got := ClassifyMCPTool(s); got != "write" {
+			t.Errorf("ClassifyMCPTool(%q) = %q, want write", s, got)
+		}
+	}
+	for _, s := range unknown {
+		if got := ClassifyMCPTool(s); got != "" {
+			t.Errorf("ClassifyMCPTool(%q) = %q, want unknown", s, got)
+		}
+	}
+}
+
 func TestHostAllowed(t *testing.T) {
 	allow := []string{"exact.com", "*.wild.com", ".dot.com"}
 	yes := []string{"exact.com", "a.wild.com", "b.a.wild.com", "wild.com", "dot.com", "x.dot.com"}

@@ -1,12 +1,10 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { api } from '../stores/apiClient'
-import { useServerData } from '../lib/useServerData'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from '../lib/agentViewPrefs'
 import { formatError, apiErrorBody } from '../api/format_error'
 import { runWithToast } from '../lib/apiAction'
-import type { AgentResponse, RepositoryBranch, ApprovalRequest } from '../api'
-import { ApprovalDecisionRequest } from '../api'
+import type { AgentResponse, RepositoryBranch } from '../api'
 import { AgentTerminal } from './AgentTerminal'
 import { BranchSelector } from './BranchSelector'
 import { SeparatedRow } from './SeparatedRow'
@@ -314,91 +312,6 @@ function NetworkEnforcementBadge({ mode }: { mode?: string }) {
         {c.label}
       </Badge>
     </Tooltip>
-  )
-}
-
-// ApprovalCard surfaces the security gate's parked tool calls (AUDIT.md rec 1):
-// when a head is in a policy_approval wait, it lists the pending requests and
-// lets the user allow once / always allow / deny. "Always allow" persists the
-// MCP server or WebFetch host to the trusted config for future launches.
-function ApprovalCard({ agent, projectId, onRefresh }: { agent: AgentResponse; projectId: string | null; onRefresh?: () => void }) {
-  const [busyId, setBusyId] = useState<string | null>(null)
-
-  const isApprovalWait = agent.agent_status?.notification_type === 'policy_approval'
-  // Re-fetch whenever the status timestamp changes (each gate write bumps it),
-  // so a freshly parked call appears and a resolved one disappears promptly.
-  const statusStamp = agent.agent_status?.timestamp
-
-  // No poll: the gate's status-timestamp bumps (a dep) drive every re-fetch. The
-  // key is null unless we're in a policy_approval wait, so it stays idle otherwise.
-  const { data: approvals, setData: setApprovals } = useServerData<ApprovalRequest[]>(
-    projectId && isApprovalWait ? projectId : null,
-    async (pid) => (await api.default.listAgentApprovals(pid, agent.id)).approvals ?? [],
-    { initial: [], resetOnError: true, deps: [agent.id, statusStamp] },
-  )
-
-  if (approvals.length === 0) return null
-
-  async function decide(reqid: string, decision: ApprovalDecisionRequest.decision, remember: boolean) {
-    if (!projectId) return
-    setBusyId(reqid)
-    const res = await runWithToast(() =>
-      api.default.decideAgentApproval(projectId, agent.id, reqid, { decision, remember }),
-    )
-    if (res.ok) {
-      setApprovals((prev) => prev.filter((a) => a.reqid !== reqid))
-      onRefresh?.()
-    }
-    setBusyId(null)
-  }
-
-  const btn = 'text-xs px-2.5 py-1 rounded font-medium disabled:opacity-50'
-  return (
-    <div className="mb-4 rounded-lg border border-amber-300 dark:border-amber-700/60 bg-amber-50 dark:bg-amber-900/20 p-3">
-      <div className="text-xs font-semibold text-amber-800 dark:text-amber-300 mb-2 flex items-center gap-1.5">
-        <ShieldAlert className="w-4 h-4" /> Security gate — approval needed
-      </div>
-      <div className="flex flex-col gap-2">
-        {approvals.map((a) => {
-          const busy = busyId === a.reqid
-          const canRemember = a.kind === 'mcp' || a.kind === 'webfetch'
-          return (
-            <div key={a.reqid} className="rounded-md bg-white/70 dark:bg-black/20 px-3 py-2">
-              <div className="text-sm text-gray-800 dark:text-gray-100">
-                This head {a.summary}
-              </div>
-              {a.reason && <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{a.reason}</div>}
-              <div className="flex items-center gap-2 mt-2 flex-wrap">
-                <button
-                  disabled={busy}
-                  onClick={() => void decide(a.reqid, ApprovalDecisionRequest.decision.ALLOW, false)}
-                  className={`${btn} bg-emerald-600 hover:bg-emerald-500 text-white`}
-                >
-                  Allow once
-                </button>
-                {canRemember && (
-                  <button
-                    disabled={busy}
-                    onClick={() => void decide(a.reqid, ApprovalDecisionRequest.decision.ALLOW, true)}
-                    className={`${btn} bg-emerald-700/80 hover:bg-emerald-600 text-white`}
-                  >
-                    Always allow
-                  </button>
-                )}
-                <button
-                  disabled={busy}
-                  onClick={() => void decide(a.reqid, ApprovalDecisionRequest.decision.DENY, false)}
-                  className={`${btn} bg-red-600 hover:bg-red-500 text-white`}
-                >
-                  Deny
-                </button>
-                {busy && <LoaderCircle className="w-3.5 h-3.5 animate-spin text-gray-400" />}
-              </div>
-            </div>
-          )
-        })}
-      </div>
-    </div>
   )
 }
 
@@ -1064,8 +977,8 @@ export function AgentDetail({
         {/* Prompt */}
         {agent.prompt && <PromptBlock prompt={agent.prompt} projectId={projectId} />}
 
-        {/* Security-gate approvals (a parked tool call awaiting allow/deny) */}
-        <ApprovalCard agent={agent} projectId={projectId} onRefresh={onRefresh} />
+        {/* Security-gate approvals are surfaced as global toasts (see
+            useAgentNotifications) rather than an inline card. */}
 
         {/* Terminal */}
         <AgentTerminal

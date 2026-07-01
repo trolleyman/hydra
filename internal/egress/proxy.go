@@ -4,18 +4,23 @@
 // hosts it needs and nothing else.
 //
 // Enforcement model (important, and deliberately honest — see AUDIT.md rec 3):
-// Hydra's unprivileged bwrap sandbox shares the host network namespace when
-// network is enabled, so this proxy is reached via the standard HTTP(S)_PROXY
-// environment variables. Every well-behaved client (claude, git, npm, curl,
-// node, bun, …) honours those, so for them the allow-list is enforced at this
-// choke point. It is NOT an inescapable boundary: a determined process in a
-// shared network namespace can open a direct socket and ignore the proxy. Making
-// it inescapable needs either a privileged netfilter rule or a userspace network
-// helper (slirp4netns / pasta) to put the agent in its own namespace with only
-// the proxy reachable — neither is available in the unprivileged sandbox here.
-// The hard boundary remains `network.enabled = false`. This proxy raises the bar
-// from "unrestricted egress" to "egress filtered for every honest client", and
-// logs every blocked attempt.
+// this proxy is reached via the standard HTTP(S)_PROXY environment variables, and
+// every well-behaved client (claude, git, npm, curl, node, bun, …) honours those,
+// so for them the allow-list is enforced at this choke point. On its own that is
+// NOT an inescapable boundary: a process sharing the host network namespace can
+// open a direct socket and ignore the proxy (this is "advisory" mode).
+//
+// The inescapable boundary is HARD mode (internal/egress/hardmode.go + pasta.go):
+// pasta puts the agent in its own network namespace whose nft ruleset drops all
+// egress except TCP to this proxy, so a raw socket has nowhere to go. Hard mode is
+// selected automatically when a smoke test confirms pasta+nft work on the host,
+// and otherwise degrades to advisory (surfaced via heads.EgressMode). The proxy
+// code below is identical for both modes — only the reachability of a bypass
+// differs. `network mode = "off"` remains the absolute hard off-switch.
+//
+// A request is relayed iff its host is on the effective allow-list (user list +
+// the built-in defaults) AND not on the block-list, which overrides the allow.
+// Every blocked attempt is logged.
 package egress
 
 import (
@@ -37,19 +42,21 @@ const dialTimeout = 30 * time.Second
 type Proxy struct {
 	id      string
 	allowed []string
+	blocked []string
 	ln      net.Listener
 	srv     *http.Server
 }
 
 // Start binds a filtering proxy on a free loopback port and begins serving. id
-// is the head ID (for log lines); allowed is the host allow-list (exact or
-// "*.suffix"). Close it when the head ends.
-func Start(id string, allowed []string) (*Proxy, error) {
+// is the head ID (for log lines); allowed is the effective host allow-list and
+// blocked is the block-list that overrides it (both exact or "*.suffix"). Close
+// it when the head ends.
+func Start(id string, allowed, blocked []string) (*Proxy, error) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
-	p := &Proxy{id: id, allowed: normalize(allowed), ln: ln}
+	p := &Proxy{id: id, allowed: normalize(allowed), blocked: normalize(blocked), ln: ln}
 	p.srv = &http.Server{
 		Handler:           http.HandlerFunc(p.handle),
 		ReadHeaderTimeout: dialTimeout,
@@ -146,9 +153,13 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	_, _ = io.Copy(w, resp.Body)
 }
 
-// allow reports whether host is permitted by the allow-list.
+// allow reports whether host is permitted: on the allow-list and not overridden
+// by the block-list (block wins).
 func (p *Proxy) allow(host string) bool {
 	if host == "" {
+		return false
+	}
+	if gate.HostAllowed(p.blocked, host) {
 		return false
 	}
 	return gate.HostAllowed(p.allowed, host)

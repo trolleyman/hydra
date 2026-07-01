@@ -143,6 +143,7 @@ function sectionFor(name: string): string {
   if (name.startsWith('spawn')) return 'spawn'
   if (name.startsWith('settings') || name === 'services-warning') return 'settings'
   if (name.startsWith('diff') || name === 'nested-folders') return 'diff'
+  if (name.startsWith('toast')) return 'toast'
   return 'overview'
 }
 
@@ -583,6 +584,34 @@ try {
       // artifacts panel (WS-populated, untracked by networkidle) first so the
       // file's measured offset is stable. Only meaningful on an agent diff page.
       stickFile?: string
+      // Drives the toast store (via the window.__hydraToast harness) to render a
+      // single toast deterministically, then captures the viewport so the fixed
+      // bottom-right toast is in frame. Used to document the notification toasts
+      // (needs-input / finished / security-gate approval / cross-project), which
+      // are transient and never fire from the static simulation. reset() clears
+      // any toasts the app popped on load first, so the canvas shows just this one.
+      toast?: {
+        message: string
+        type?: 'info' | 'success' | 'error' | 'warning'
+        actions?: { label: string; variant?: 'primary' | 'danger' }[]
+        // When set, the rich security-gate approval card is rendered instead of the
+        // plain message row (mirrors ApprovalToastData in the toast store).
+        approval?: {
+          kind: string
+          target: string
+          agentName?: string | null
+          rw?: string | null
+          reason?: string | null
+          url?: string | null
+          argsPreview?: string | null
+          crossProject?: string | null
+        }
+      }
+      // Restricts this page to a subset of themes. Defaults to both light+dark;
+      // set e.g. ['dark'] to capture only the dark render (used where a shot only
+      // needs to exist once — e.g. the MCP approval card lives solely in
+      // agent-approvals-dark.png).
+      themes?: readonly ('light' | 'dark')[]
     }[] = [
       { name: 'home', path: '/' },
       // The unread-changes indicator: the agent sidebar shows an amber dot on the
@@ -592,6 +621,109 @@ try {
       // when other projects have updates waiting (see simulation.go ListProjects /
       // ListAgents and AgentSidebarItem).
       { name: 'unread-indicator', path: '/', click: 'button[aria-label="Select project"]' },
+      // Notification toasts (web/src/lib/useAgentNotifications.ts). These fire on
+      // live status transitions / security-gate parks that the static simulation
+      // never produces, so they're rendered deterministically via the toast
+      // harness over the settings page (a route that loads no project agents, so
+      // nothing else pops a toast). Messages mirror the real ones the hook emits.
+      // 1. An agent crossed into needs_input — a "View" jumps to it; lingers 12s.
+      {
+        name: 'toast-needs-input',
+        path: '/settings',
+        toast: {
+          message: '"Migrate auth providers to OAuth" needs input',
+          type: 'warning',
+          actions: [{ label: 'View', variant: 'primary' }],
+        },
+      },
+      // 2. An agent finished — also a "View" button; auto-dismisses at 8s.
+      {
+        name: 'toast-finished',
+        path: '/settings',
+        toast: {
+          message: '"Add renameable agent titles" finished',
+          type: 'success',
+          actions: [{ label: 'View', variant: 'primary' }],
+        },
+      },
+      // 3. Security-gate approval cards (the rich ApprovalToast): persistent, with
+      // Allow once / Always allow / Deny; dismissing denies. One shot per gated
+      // kind so the design of each is documented.
+      // 3a. Whole MCP server.
+      {
+        name: 'toast-approval-mcp',
+        path: '/settings',
+        toast: {
+          message: '',
+          type: 'warning',
+          actions: [
+            { label: 'Allow once', variant: 'primary' },
+            { label: 'Always allow', variant: 'primary' },
+            { label: 'Deny', variant: 'danger' },
+          ],
+          approval: { kind: 'mcp', target: 'linear', agentName: 'Wire up the GitHub MCP server', reason: "Server isn't on the project allow-list." },
+        },
+      },
+      // 3b. A specific write tool on an already-trusted server (args previewed).
+      {
+        name: 'toast-approval-tool-write',
+        path: '/settings',
+        toast: {
+          message: '',
+          type: 'warning',
+          actions: [
+            { label: 'Allow once', variant: 'primary' },
+            { label: 'Always allow', variant: 'primary' },
+            { label: 'Deny', variant: 'danger' },
+          ],
+          approval: { kind: 'mcp_tool', target: 'linear__create_issue', rw: 'write', agentName: 'Triage inbound bugs', argsPreview: '{"team":"Core","title":"Login 500s on staging"}', reason: 'Write tool — creates a new issue in linear.' },
+        },
+      },
+      // 3c. A read-only tool call — quieter, teal READ badge.
+      {
+        name: 'toast-approval-tool-read',
+        path: '/settings',
+        toast: {
+          message: '',
+          type: 'warning',
+          actions: [
+            { label: 'Allow once', variant: 'primary' },
+            { label: 'Always allow', variant: 'primary' },
+            { label: 'Deny', variant: 'danger' },
+          ],
+          approval: { kind: 'mcp_tool', target: 'linear__search_issues', rw: 'read', agentName: 'Summarise this sprint', argsPreview: '{"state":"Done","cycle":42}', reason: 'Read-only — no data is modified.' },
+        },
+      },
+      // 3d. An outbound WebFetch — GET verb + full URL previewed.
+      {
+        name: 'toast-approval-webfetch',
+        path: '/settings',
+        toast: {
+          message: '',
+          type: 'warning',
+          actions: [
+            { label: 'Allow once', variant: 'primary' },
+            { label: 'Always allow', variant: 'primary' },
+            { label: 'Deny', variant: 'danger' },
+          ],
+          approval: { kind: 'webfetch', target: 'docs.linear.app', agentName: 'Publish the changelog', url: 'https://docs.linear.app/api/changelog', reason: "Host isn't on the network allow-list. Allowing trusts the whole host, not just this URL." },
+        },
+      },
+      // 4. Cross-project approval: an amber "running in another project" banner, and
+      // no "Always allow" — cross-project access is one-shot by default.
+      {
+        name: 'toast-cross-project',
+        path: '/settings',
+        toast: {
+          message: '',
+          type: 'warning',
+          actions: [
+            { label: 'Allow once', variant: 'primary' },
+            { label: 'Deny', variant: 'danger' },
+          ],
+          approval: { kind: 'mcp', target: 'github', agentName: 'Reconcile Stripe events', crossProject: 'payments-api', reason: 'Cross-project access — grant for this run only.' },
+        },
+      },
       // The keyboard-shortcuts help overlay, opened the way a user does — by
       // pressing `?` (no on-screen button; the overlay is the discovery surface).
       // It lists every shortcut (General + Agent) from the central registry
@@ -900,11 +1032,11 @@ try {
       // ResolveFullscreen / claudeRenderingEnv). :text-is matches the pill's exact
       // label, so it can't collide with the "All agents" tab.
       { name: 'settings-claude', path: '/project/sim-project/settings', click: 'button:text-is("Claude")', viewport: { width: 1280, height: 2900 } },
-      // The OS-sandbox network host-filtering controls with filtering ACTIVE: the
-      // "Filter outbound hosts" toggle on and the allow-list populated with a few
-      // hosts (simulation.go seeds defaults.sandbox.network filter_enabled + four
-      // hosts). scrollTo pins the "Agent" section so the sandbox policy + network
-      // filter fill the frame rather than the page top.
+      // The OS-sandbox network egress controls in the new mode form: the egress
+      // "mode" dropdown on Hard, the Strict toggle, and the allowed + blocked host
+      // editors populated (simulation.go seeds defaults.sandbox.network mode=hard +
+      // allowed/blocked hosts). scrollTo pins the "Agent" section so the sandbox
+      // policy + network controls fill the frame rather than the page top.
       { name: 'settings-host-filter', path: '/project/sim-project/settings', scrollTo: 'Agent', viewport: { width: 1280, height: 1400 } },
       // The settings page at the small viewports. Below the lg breakpoint the
       // sidebar is collapsed, so a "Settings" header bar (with the show-sidebar
@@ -992,6 +1124,7 @@ try {
       // requests via simApprovals), so AgentDetail's ApprovalCard renders the
       // "wants to use MCP server / fetch" rows with Allow once / Always allow / Deny.
       // Viewport-only to focus on the card under the header rather than the terminal.
+      // Captured in both themes (the approval card has distinct light/dark styling).
       { name: 'agent-approvals', path: '/project/sim-project/agent/agent-approval', viewportOnly: true },
       { name: 'nested-folders', path: '/project/sim-project/agent/agent-3', scrollTo: 'Changes' },
       // The diff viewer's settings popup, opened from the gear in the sticky
@@ -1445,7 +1578,7 @@ try {
     const only = process.env.HYDRA_SHOT_ONLY?.split(',').map((s) => s.trim()).filter(Boolean)
     const tasks = pages
       .filter((pg) => !only || only.includes(pg.name))
-      .flatMap((pg) => themes.map((theme) => ({ pg, theme })))
+      .flatMap((pg) => (pg.themes ?? themes).map((theme) => ({ pg, theme })))
     const totalShots = tasks.length
     const cpuCount = (typeof availableParallelism === 'function' ? availableParallelism() : cpus().length) || 8
     const defaultConcurrency = Math.min(Math.max(Math.floor(cpuCount / 4), 2), 4)
@@ -1565,11 +1698,14 @@ try {
             try { localStorage.setItem(key, '380') } catch { /* ignore */ }
           }, StorageKeys.sidebarWidth)
         }
-        await ctx.addInitScript(() => {
+        await ctx.addInitScript((opts) => {
           // The "Trust this project?" modal (web/src/components/TrustProjectModal.tsx)
           // only appears while *adding* a project — never on open — so the
           // simulated projects (already registered) never trigger it during the
           // capture flow. No pre-trust seeding is needed.
+          // Enable the toast harness (window.__hydraToast) so the `toast` page
+          // option can drive the toast store. Dormant in the app unless set.
+          try { window.localStorage.setItem(opts.harnessKey, '1') } catch { /* ignore */ }
           // Deterministic shuffle (spawn-form placeholder order).
           ;(Math as unknown as { random: () => number }).random = () => 0.5
           // Freeze short-lived timers (the typewriter placeholder animation runs
@@ -1586,7 +1722,7 @@ try {
           // any shot containing the video row flap between "modified"/"unchanged".
           // Frame 0 is identical across renders, keeping those captures stable.
           ;(HTMLMediaElement.prototype as unknown as { play: () => Promise<void> }).play = () => Promise.resolve()
-        })
+        }, { harnessKey: StorageKeys.toastHarness })
         const page = await ctx.newPage()
         if (pg.holdRequest) {
           // Hold the matching request open (never continued/fulfilled) so the
@@ -2181,12 +2317,24 @@ try {
           }, pg.revealSelector)
           await settle(page)
         }
+        if (pg.toast) {
+          // Clear any toast the app popped on load, then render exactly this one,
+          // and wait for it to paint before capturing. Persistent (duration 0) so
+          // it can't expire mid-capture.
+          await page.evaluate((spec) => {
+            const h = (window as unknown as { __hydraToast: { reset: () => void; show: (s: unknown) => void } }).__hydraToast
+            h.reset()
+            h.show(spec)
+          }, pg.toast)
+          await page.waitForSelector('[role="status"], [role="alertdialog"]')
+          await settle(page)
+        }
         const out = join(OUT, `${pg.name}${suffix}.png`)
         // Scrolled pages, the lightbox (a fixed, viewport-filling overlay) from
         // either the spawn box (attachImages) or an artifact tile (openArtifactImage),
         // header-focused shots and the hovered info tooltip (a fixed portal)
         // capture the viewport; others capture the full page.
-        await captureWithRetry(page, { path: out, fullPage: !pg.scrollTo && !pg.attachImages && !pg.openArtifactImage && !pg.viewportOnly && !pg.artifactInfo && !pg.testsInfo && !pg.videoDiff && !pg.revealSelector })
+        await captureWithRetry(page, { path: out, fullPage: !pg.scrollTo && !pg.attachImages && !pg.openArtifactImage && !pg.viewportOnly && !pg.artifactInfo && !pg.testsInfo && !pg.videoDiff && !pg.revealSelector && !pg.toast })
         // Emit the tag sidecar (<file>.png.meta, {"tags":[...]}) that the diff
         // viewer reads (internal/artifacts readTagsSidecar). theme + viewport +
         // section are scoped "category::value" labels — the viewer keeps one

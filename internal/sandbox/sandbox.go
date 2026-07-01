@@ -28,20 +28,82 @@ const (
 	AgentTypeCodex   AgentType = "codex"
 )
 
+// NetworkMode is the desired egress posture for a head, chosen in config. It is
+// the *intent*; the runtime may downgrade "hard" to advisory when the kernel
+// tooling (pasta+nft) isn't available (surfaced separately via heads.EgressMode).
+type NetworkMode string
+
+const (
+	// NetOff disables outbound network entirely (own empty netns).
+	NetOff NetworkMode = "off"
+	// NetUnrestricted allows network with no host filtering.
+	NetUnrestricted NetworkMode = "unrestricted"
+	// NetAdvisory filters via the HTTP(S)_PROXY allow-list only — every honest
+	// client is filtered, but a determined process can bypass it. Chosen when the
+	// user explicitly wants proxy-only filtering (no pasta/nft netns).
+	NetAdvisory NetworkMode = "advisory"
+	// NetHard requests an inescapable pasta-netns + nft boundary, degrading to
+	// advisory (with a visible warning) when the tooling is unavailable — unless
+	// Strict is set, in which case an unavailable boundary fails closed.
+	NetHard NetworkMode = "hard"
+)
+
+// ValidNetworkMode reports whether s names a known mode (empty is allowed: it
+// means "use the default").
+func ValidNetworkMode(s string) bool {
+	switch NetworkMode(s) {
+	case "", NetOff, NetUnrestricted, NetAdvisory, NetHard:
+		return true
+	}
+	return false
+}
+
 // NetworkPolicy controls the sandbox's network access.
 type NetworkPolicy struct {
 	// Enabled allows outbound network access when true. When false the agent
-	// runs with no network at all.
+	// runs with no network at all. Derived from Mode.
 	Enabled bool
 	// FilterHosts, when true, enforces AllowedHosts as a deny-by-default allow-list
 	// (only listed hosts are reachable; an empty list blocks all egress). When
-	// false, every host is reachable (subject to Enabled). Resolved from the
-	// network config's filter_enabled toggle, defaulting to "on when AllowedHosts
-	// is non-empty".
+	// false, every host is reachable (subject to Enabled). Derived from Mode.
 	FilterHosts bool
-	// AllowedHosts is the outbound host allow-list enforced by the egress proxy
-	// when FilterHosts is true (exact host or *.suffix wildcard).
+	// Mode is the resolved egress posture (off/unrestricted/advisory/hard). It
+	// decides whether startEgress attempts the hard pasta+nft boundary.
+	Mode NetworkMode
+	// Strict, with Mode == NetHard, fails closed (blocks all egress) when the hard
+	// boundary can't be built, instead of degrading to advisory filtering.
+	Strict bool
+	// AllowedHosts is the user's outbound host allow-list, unioned on top of
+	// DefaultAllowedHosts and enforced by the egress proxy when FilterHosts is true
+	// (exact host or *.suffix wildcard).
 	AllowedHosts []string
+	// BlockedHosts overrides the effective allow-list (user + defaults): a host
+	// matching BlockedHosts is denied even if it is otherwise allowed.
+	BlockedHosts []string
+}
+
+// DefaultAllowedHosts is the built-in egress allow-list applied whenever host
+// filtering is on. It covers what an agent realistically needs to function —
+// the AI-provider APIs the agent itself talks to, the common package registries,
+// and the git hosts — so that turning on deny-by-default filtering does not
+// immediately break every agent. User AllowedHosts are unioned on top; a host
+// can be subtracted again via BlockedHosts.
+func DefaultAllowedHosts() []string {
+	return []string{
+		// Anthropic / Claude (the agent's own API traffic goes through the proxy).
+		"*.anthropic.com", "claude.ai", "*.claude.ai", "*.claudeusercontent.com",
+		// Other AI-provider APIs agents commonly use.
+		"api.openai.com", "*.openai.com", "*.googleapis.com", "*.githubcopilot.com",
+		// Package registries + language toolchains.
+		"registry.npmjs.org", "*.npmjs.org", "*.yarnpkg.com",
+		"pypi.org", "*.pypi.org", "files.pythonhosted.org",
+		"*.golang.org", "proxy.golang.org", "sum.golang.org",
+		"crates.io", "*.crates.io", "static.crates.io",
+		"rubygems.org", "*.rubygems.org",
+		// Git hosts + code download endpoints.
+		"github.com", "*.github.com", "*.githubusercontent.com", "codeload.github.com",
+		"gitlab.com", "*.gitlab.com", "bitbucket.org", "*.bitbucket.org",
+	}
 }
 
 // Bind maps a host path into the sandbox at Target. Used to seed per-head

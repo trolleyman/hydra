@@ -59,6 +59,12 @@ export const StorageKeys = {
   // viewer's own file-view setting, but kept under a separate key so the two
   // views can be configured independently.
   repoDiffFileView: 'hydra-repo-diff-file-view',
+
+  // '1' when a test/screenshot harness wants to drive the toast store from page
+  // context (see lib/toastHarness). Dormant unless explicitly set — only the
+  // screenshot script seeds it (via addInitScript), never the app itself — so it
+  // has no effect in real builds.
+  toastHarness: 'hydra-toast-harness',
 } as const
 
 // ── Dynamic keys (prefix + builder pair) ─────────────────────────────────────

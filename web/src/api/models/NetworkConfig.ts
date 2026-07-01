@@ -4,16 +4,39 @@
 /* eslint-disable */
 export type NetworkConfig = {
     /**
-     * Whether outbound network access is allowed (default true)
+     * Egress posture: "off" (no network), "unrestricted" (network, no host filtering), "advisory" (proxy-only host filtering — every honest client is filtered, but escapable), or "hard" (inescapable pasta+nft netns, degrading to advisory with a warning where the tooling is unavailable). Null/unset = default ("hard"). Supersedes the legacy enabled/filter_enabled booleans.
+     */
+    mode?: NetworkConfig.mode | null;
+    /**
+     * With mode "hard", fail closed (block all egress) when the inescapable boundary can't be built, instead of degrading to advisory (default false).
+     */
+    strict?: boolean | null;
+    /**
+     * LEGACY (use mode). Honoured only when mode is unset.
      */
     enabled?: boolean | null;
     /**
-     * Whether the allowed_hosts list is enforced (deny-by-default egress). Null/unset = inferred (on when allowed_hosts is non-empty); true = only allowed_hosts reachable (empty list blocks all egress); false = allow every host.
+     * LEGACY (use mode). Honoured only when mode is unset.
      */
     filter_enabled?: boolean | null;
     /**
-     * Outbound host allow-list (exact host or *.suffix), enforced by the egress proxy when filter_enabled is on.
+     * Extra outbound hosts (exact host or *.suffix) allowed when filtering is on, unioned on top of the built-in default allow-list.
      */
     allowed_hosts?: Array<string> | null;
+    /**
+     * Outbound hosts (exact host or *.suffix) denied even when otherwise allowed — overrides both allowed_hosts and the built-in defaults.
+     */
+    blocked_hosts?: Array<string> | null;
 };
+export namespace NetworkConfig {
+    /**
+     * Egress posture: "off" (no network), "unrestricted" (network, no host filtering), "advisory" (proxy-only host filtering — every honest client is filtered, but escapable), or "hard" (inescapable pasta+nft netns, degrading to advisory with a warning where the tooling is unavailable). Null/unset = default ("hard"). Supersedes the legacy enabled/filter_enabled booleans.
+     */
+    export enum mode {
+        OFF = 'off',
+        UNRESTRICTED = 'unrestricted',
+        ADVISORY = 'advisory',
+        HARD = 'hard',
+    }
+}
 

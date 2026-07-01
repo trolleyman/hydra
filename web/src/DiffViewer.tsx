@@ -15,6 +15,7 @@ import { DialogIconTile, DialogSectionLabel, DialogCancelButton, DialogConfirmBu
 import { IconButton } from './components/IconButton'
 import { getFileIcon } from './lib/fileIcons'
 import { Tooltip } from './components/Tooltip'
+import { useMeasuredHeight } from './components/CollapsibleCard'
 import { ArtifactsPanel } from './components/ArtifactsPanel'
 import { TestsPanel } from './components/TestsPanel'
 import { ImageDiffView, IMAGE_DIFF_MODES, type ImageDiffMode } from './components/ArtifactImageDiff'
@@ -608,6 +609,11 @@ function EdgeExpander({ seg, onStep, onAll }: {
 // Mirrors STICKY_CARD_TOP's approach.
 export const FILE_STICKY_TOP = 'calc(var(--sticky-changes-h, 45px) - 16px)'
 
+// How long the file-body collapse/expand height glide runs — kept in JS so the
+// deferred-unmount timer matches the CSS duration (mirrors CollapsibleCard's
+// COLLAPSE_MS). See FileDiff's `bodyMounted`.
+const FILE_COLLAPSE_MS = 200
+
 export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onComment, isCollapsed, onToggleCollapse, onExpand, isHidden, onShow, currentContext, readOnly, headless, imageDiffMode, imageBefore, imageAfter }: {
   file: DiffFile
   sideBySide: boolean
@@ -639,6 +645,26 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onCo
 
   const [reveal, setReveal] = useState<RevealMap>(new Map())
 
+  // Collapse/expand glides the file body between 0 and its measured height — the
+  // same height-tween the tests/artifacts CollapsibleCard uses, so the two feel
+  // identical. The body stays mounted while open and for one collapse animation,
+  // then unmounts so a collapsed file (and its highlighting) costs nothing —
+  // hence the derived memos below key off `bodyMounted`, not the raw prop, so
+  // their content stays put for the 200ms the glide plays. headless mode (the
+  // repository one-file view) is always open and never animates.
+  const [bodyRef, bodyH] = useMeasuredHeight(0)
+  const [bodyMounted, setBodyMounted] = useState(!isCollapsed)
+  useEffect(() => {
+    if (!isCollapsed) { setBodyMounted(true); return }
+    const t = setTimeout(() => setBodyMounted(false), FILE_COLLAPSE_MS)
+    return () => clearTimeout(t)
+  }, [isCollapsed])
+  // Open (fully expanded, height = content) vs. animating/closed. bodyMounted
+  // stays true through the collapse tween; bodyOpen flips to false at once so the
+  // height animates back to 0. On expand, bodyMounted is set in the effect above
+  // (after a paint at height 0) so the 0→height glide can play.
+  const bodyOpen = !isCollapsed && bodyMounted
+
   // Signature of the visible hunks. A background refresh hands us new file
   // objects even when nothing changed, so keying derived work on identity would
   // recompute on every refresh. The string signature is stable across no-op
@@ -653,25 +679,25 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onCo
   // expand below. The size/contiguity checks are a defensive guard so a
   // malformed response can't drive the reveal model with non-whole-file lines.
   const fullLines = useMemo<DiffLine[] | null>(() => {
-    if (file.binary || isHidden || isCollapsed || !file.expanded) return null
+    if (file.binary || isHidden || !bodyMounted || !file.expanded) return null
     const lines = file.hunks ? file.hunks.flatMap((h) => h.lines) : []
     if (lines.length === 0 || lines.length > FULL_MAX_LINES || !isContiguous(lines)) return null
     return lines
     // hunksSig stands in for file.hunks identity (stable across no-op refreshes).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hunksSig, file.binary, file.expanded, isHidden, isCollapsed])
+  }, [hunksSig, file.binary, file.expanded, isHidden, bodyMounted])
 
   // Lines to highlight: the whole file when expanded (so multi-line constructs
   // stay correct), else the visible `-U3` hunks. Null when nothing is rendered
   // (binary/collapsed/hidden) — highlighting an unseen body would be wasted work.
   const highlightSource = useMemo<DiffLine[] | null>(() => {
-    if (file.binary || isCollapsed || isHidden) return null
+    if (file.binary || !bodyMounted || isHidden) return null
     const lines = fullLines ?? (file.hunks ? file.hunks.flatMap((h) => h.lines) : [])
     return lines.length ? lines : null
     // hunksSig (not file.hunks identity) so an unchanged file isn't recomputed
     // when an unrelated file changes and the whole diff object is replaced.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fullLines, hunksSig, file.binary, isCollapsed, isHidden])
+  }, [fullLines, hunksSig, file.binary, bodyMounted, isHidden])
 
   // Small files highlight inline (no flash, no worker round-trip). Larger files
   // would block the main thread if every one highlighted during the same render,
@@ -773,11 +799,23 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onCo
         )}
       </div>
       )}
-      {(headless || !isCollapsed) && (
-        // rounded-b-lg + overflow-hidden replaces the clipping the root used to do
-        // (its overflow-hidden was dropped so the header can be sticky), keeping the
-        // edge-to-edge diff content's bottom corners clipped to the card's radius.
-        <div className={headless ? '' : 'overflow-hidden rounded-b-lg'}>
+      {/* Body. rounded-b-lg + overflow-hidden clip the edge-to-edge diff content's
+          bottom corners (the root dropped its overflow-hidden so the header can be
+          sticky). For the stacked view the wrapper also height-tweens the body on
+          collapse/expand — the inner measured div carries bodyRef; see
+          bodyOpen/bodyMounted. headless (the repo one-file view) is bare, always
+          open, and never animates. */}
+      <div
+        // `isolate` keeps this body's positioned content (an in-tree image renders
+        // as `absolute inset-0` via ImageDiffView) in its own stacking context so
+        // it can't paint over the sticky file/section/changes bars above it — see
+        // the matching note in CollapsibleCard.
+        className={headless ? 'isolate' : 'isolate overflow-hidden rounded-b-lg transition-[height] duration-200 ease-out motion-reduce:transition-none'}
+        style={headless ? undefined : { height: bodyOpen ? bodyH : 0 }}
+        aria-hidden={headless ? undefined : !bodyOpen}
+      >
+        {(headless || bodyMounted) && (
+        <div ref={headless ? undefined : bodyRef}>
           {file.binary && isImagePath(file.path) ? (
             // In-tree image: reuse the artifacts panel's before/after differ.
             <div className="p-3">
@@ -885,7 +923,8 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, fileRef, onCo
             </div>
           )}
         </div>
-      )}
+        )}
+      </div>
     </div>
   )
 })
@@ -2333,42 +2372,54 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
           __root.tsx) — at equal z-index the later-DOM bar would paint over the
           scrim and stay bright when the off-canvas sidebar is open on
           tablet/phone. */}
-      <div ref={changesBarRef} className="flex items-center gap-3 mb-6 flex-wrap sticky -top-4 z-[25] bg-gray-50 dark:bg-gray-900 py-2 border-b border-gray-200 dark:border-gray-800 shadow-sm -mx-1.5 sm:-mx-3 px-1.5 sm:px-3">
-        <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Changes</h2>
-        {diff && (
-          <div className="flex items-center gap-1.5">
-            <span className="text-xs text-green-600 dark:text-green-400 font-medium">+{totalAdditions}</span>
-            <span className="text-xs text-red-600 dark:text-red-400 font-medium">-{totalDeletions}</span>
-            <span className="text-xs text-gray-400 dark:text-gray-500">in {diff.files.length} file{diff.files.length !== 1 ? 's' : ''}</span>
+      <div ref={changesBarRef} className="flex items-start gap-3 mb-6 sticky -top-4 z-[25] bg-gray-50 dark:bg-gray-900 py-2 border-b border-gray-200 dark:border-gray-800 shadow-sm -mx-1.5 sm:-mx-3 px-1.5 sm:px-3">
+        {/* Wrapping content group: everything but the refresh/settings actions,
+            which stay pinned top-right (below). Wraps within its own flex-1 track
+            so the actions never move off the corner when it goes multi-line. */}
+        <div className="flex-1 min-w-0 flex items-center gap-3 flex-wrap">
+          <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Changes</h2>
+          {diff && (
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs text-green-600 dark:text-green-400 font-medium">+{totalAdditions}</span>
+              <span className="text-xs text-red-600 dark:text-red-400 font-medium">-{totalDeletions}</span>
+              <span className="text-xs text-gray-400 dark:text-gray-500">in {diff.files.length} file{diff.files.length !== 1 ? 's' : ''}</span>
+            </div>
+          )}
+
+          {/* Comparison selector (base → head) kept as one wrap unit so the arrow
+              never separates from its selectors — the whole "main → Latest commit"
+              drops to the next line together when it can't fit beside the stats. */}
+          <div className="flex items-center gap-3">
+            <LeftSelector commits={commits} selected={leftSel} onChange={handleLeftChange} baseBranch={agent.base_branch} rightSel={rightSel} />
+            <span className="text-gray-400 dark:text-gray-500 text-xs select-none"><MoveRight className='w-6 h-6' strokeWidth='1.5' /></span>
+            <RightSelector commits={commits} selected={rightSel} onChange={setRightSel}
+              left={leftSel} hasUncommitted={diff?.uncommitted_changes} />
           </div>
-        )}
 
-        <LeftSelector commits={commits} selected={leftSel} onChange={handleLeftChange} baseBranch={agent.base_branch} rightSel={rightSel} />
-        <span className="text-gray-400 dark:text-gray-500 text-xs select-none"><MoveRight className='w-6 h-6' strokeWidth='1.5' /></span>
-        <RightSelector commits={commits} selected={rightSel} onChange={setRightSel}
-          left={leftSel} hasUncommitted={diff?.uncommitted_changes} />
+          {!(leftSel.type === 'base' && rightSel.type === 'latest') && (
+            <Tooltip content="Reset to base → latest">
+              <button
+                onClick={() => { setLeftSel({ type: 'base' }); setRightSel({ type: 'latest' }) }}
+                className="flex items-center justify-center w-7 h-7 rounded-md text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors cursor-pointer"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+              </button>
+            </Tooltip>
+          )}
 
-        {!(leftSel.type === 'base' && rightSel.type === 'latest') && (
-          <Tooltip content="Reset to base → latest">
-            <button
-              onClick={() => { setLeftSel({ type: 'base' }); setRightSel({ type: 'latest' }) }}
-              className="flex items-center justify-center w-7 h-7 rounded-md text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors cursor-pointer"
-            >
-              <RotateCcw className="w-3.5 h-3.5" />
-            </button>
-          </Tooltip>
-        )}
+          {/* Uncommitted changes warning button */}
+          <UncommittedButton diff={diff} onJumpToUncommitted={handleJumpToUncommittedActual} />
 
-        {/* Uncommitted changes warning button */}
-        <UncommittedButton diff={diff} onJumpToUncommitted={handleJumpToUncommittedActual} />
+          {/* Merge conflict button */}
+          <MergeConflictButton diff={diff} agent={agent} projectId={projectId} />
 
-        {/* Merge conflict button */}
-        <MergeConflictButton diff={diff} agent={agent} projectId={projectId} />
+          {/* Branch out-of-date (behind base) warning + update button */}
+          <BehindBaseButton diff={diff} agent={agent} projectId={projectId} onUpdated={() => setRefreshKey((k) => k + 1)} />
+        </div>
 
-        {/* Branch out-of-date (behind base) warning + update button */}
-        <BehindBaseButton diff={diff} agent={agent} projectId={projectId} onUpdated={() => setRefreshKey((k) => k + 1)} />
-
-        <div className="flex items-center gap-2 ml-auto shrink-0">
+        {/* Actions pinned to the top-right corner regardless of how many lines the
+            content above wraps to (parent is items-start, this group is shrink-0). */}
+        <div className="flex items-center gap-2 shrink-0">
           {loadingDiff && hasExistingDiff && (
             <LoaderCircle className="w-3.5 h-3.5 animate-spin text-gray-400 dark:text-gray-500 shrink-0" />
           )}
