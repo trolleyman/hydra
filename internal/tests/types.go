@@ -30,6 +30,10 @@ const (
 	CasePassed  CaseStatus = "passed"
 	CaseFailed  CaseStatus = "failed"
 	CaseSkipped CaseStatus = "skipped"
+	// CaseWarning is a non-failing diagnostic (e.g. an eslint warning, a
+	// deprecation notice). It never flips the verdict to failing — it's surfaced
+	// informationally as its own count alongside passed/failed/skipped.
+	CaseWarning CaseStatus = "warning"
 )
 
 // TestCase is one parsed test case. Message carries the failure/assertion text
@@ -60,10 +64,12 @@ type Report struct {
 	Key        string     `json:"key"`           // cache key ("commit/<sha>" | "worktree/<hash>")
 	Ref        string     `json:"ref,omitempty"` // human-readable ref (the resolved SHA)
 	Status     Status     `json:"status"`        // passing | failing | errored
-	Total      int        `json:"total"`         // passed+failed+skipped
+	Total      int        `json:"total"`         // passed+failed+skipped+warnings
 	Passed     int        `json:"passed"`
 	Failed     int        `json:"failed"`
 	Skipped    int        `json:"skipped"`
+	Warnings   int        `json:"warnings"` // non-failing diagnostics; informational only
+
 	DurationMs int64      `json:"duration_ms"` // wall-clock of the whole command
 	Cases      []TestCase `json:"cases,omitempty"`
 	Error      string     `json:"error,omitempty"`  // populated when Status==errored

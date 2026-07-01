@@ -12,6 +12,10 @@ export type TestSummary = {
     passed?: number;
     failed?: number;
     skipped?: number;
+    /**
+     * Non-failing diagnostics (e.g. eslint warnings). Informational only — never part of the merge gate. Shown in the long chip / panel, not the short sidebar chip.
+     */
+    warnings?: number;
     duration_ms?: number | null;
     /**
      * Latest progress line while status is "running" (e.g. "84/142").

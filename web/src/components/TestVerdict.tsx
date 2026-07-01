@@ -57,6 +57,20 @@ function SkippedCount({ n }: { n: number }) {
   )
 }
 
+// WarningCount renders the amber warning marker that rides on a passing chip after
+// a divider, before the skipped count (✓ 142 │ ⚠ 4 │ ▸| 3). Amber — a warning DOES
+// warrant caution (unlike skipped) — but it stays an inline segment so the chip as
+// a whole remains green: warnings are informational and never fail the verdict.
+function WarningCount({ n }: { n: number }) {
+  if (n <= 0) return null
+  return (
+    <span className="inline-flex items-center gap-0.5 pl-1 ml-0.5 border-l border-current/30 text-amber-600 dark:text-amber-400">
+      <AlertTriangle className="w-2.5 h-2.5" />
+      {n}
+    </span>
+  )
+}
+
 // verdictLabel is the chip's text for each state.
 function verdictLabel(t: TestSummary): string {
   switch (t.status) {
@@ -77,11 +91,19 @@ function verdictLabel(t: TestSummary): string {
 
 // TestVerdictChip is the compact per-head verdict chip shown in the sidebar row
 // and the agent header. Renders nothing for status "none" (no tests / never run).
+//
+// Two forms (per user): the SHORT form (variant "xs", sidebar) shows just the
+// passed count (✓ 661) — no warnings, no skipped, to stay tight next to the date.
+// The LONG form (variant "sm", agent header) adds the amber warning count and the
+// gray skipped count after it (✓ 661 │ ⚠ 4 │ ▸| 3).
 export function TestVerdictChip({ tests, variant = 'xs' }: { tests?: TestSummary | null; variant?: 'xs' | 'sm' }) {
   if (!tests || tests.status === 'none') return null
   const tone = verdictTone(tests.status)
   const stale = tests.status === 'stale'
-  const showSkips = tests.status === 'passing' || tests.status === 'stale'
+  const long = variant === 'sm'
+  const settledPass = tests.status === 'passing' || tests.status === 'stale'
+  const showSkips = long && settledPass
+  const showWarnings = long && settledPass
   return (
     <Badge
       tone={tone}
@@ -104,6 +126,7 @@ export function TestVerdictChip({ tests, variant = 'xs' }: { tests?: TestSummary
           xs (sidebar) gets a tighter cap than sm (agent header, which has room). */}
       <span className="inline-flex items-center min-w-0 whitespace-nowrap">
         <span className={`truncate min-w-0 ${variant === 'sm' ? 'max-w-[16rem]' : 'max-w-[7rem]'}`}>{verdictLabel(tests)}</span>
+        {showWarnings ? <WarningCount n={tests.warnings ?? 0} /> : null}
         {showSkips ? <SkippedCount n={tests.skipped ?? 0} /> : null}
       </span>
     </Badge>
@@ -113,7 +136,7 @@ export function TestVerdictChip({ tests, variant = 'xs' }: { tests?: TestSummary
 function verdictTitle(t: TestSummary): string {
   switch (t.status) {
     case 'passing':
-      return `Tests passing — ${t.passed ?? 0} passed${t.skipped ? `, ${t.skipped} skipped` : ''}`
+      return `Tests passing — ${t.passed ?? 0} passed${t.warnings ? `, ${t.warnings} warnings` : ''}${t.skipped ? `, ${t.skipped} skipped` : ''}`
     case 'failing':
       return `Tests failing — ${t.failed ?? 0} failed (merge is soft-gated)`
     case 'running':
