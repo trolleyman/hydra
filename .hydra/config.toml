@@ -146,11 +146,6 @@ timeout_sec = 900
 ## If it writes no report, the exit code alone becomes a red/green verdict.
 ## It is also given HYDRA_TEST_SOURCE (the checkout dir) and HYDRA_TEST_REF (the
 ## resolved ref).
-# [[services]]
-# name = "emu-pool"
-# command = "scripts/emu-pool.sh up 3 --foreground"
-# host = true
-# max_restarts = 3
 [[tests]]
 # Go test suite. Uses gotestsum to emit JUnit (per-case detail in the panel) when
 # it's installed, otherwise falls back to plain `go test` (still red/green from the
