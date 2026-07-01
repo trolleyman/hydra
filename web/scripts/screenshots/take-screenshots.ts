@@ -593,6 +593,11 @@ try {
         type?: 'info' | 'success' | 'error' | 'warning'
         actions?: { label: string; variant?: 'primary' | 'danger' }[]
       }
+      // Restricts this page to a subset of themes. Defaults to both light+dark;
+      // set e.g. ['dark'] to capture only the dark render (used where a shot only
+      // needs to exist once — e.g. the MCP approval card lives solely in
+      // agent-approvals-dark.png).
+      themes?: readonly ('light' | 'dark')[]
     }[] = [
       { name: 'home', path: '/' },
       // The unread-changes indicator: the agent sidebar shows an amber dot on the
@@ -627,13 +632,15 @@ try {
           actions: [{ label: 'View', variant: 'primary' }],
         },
       },
-      // 3. A security-gate parked tool call (MCP/WebFetch): persistent, with
-      // Allow once / Always allow / Deny; dismissing the toast denies it.
+      // 3. A security-gate parked tool call: persistent, with Allow once / Always
+      // allow / Deny; dismissing the toast denies it. Shown as a WebFetch approval
+      // (WebFetch gate parks fire today); the MCP approval is documented once, in
+      // the agent-approvals-dark card, rather than as a toast here.
       {
         name: 'toast-approval',
         path: '/settings',
         toast: {
-          message: 'Agent "Add needs-input" wants to use MCP server "linear"',
+          message: 'Agent "Add needs-input" wants to fetch "api.linear.app"',
           type: 'warning',
           actions: [
             { label: 'Allow', variant: 'primary' },
@@ -1043,7 +1050,9 @@ try {
       // requests via simApprovals), so AgentDetail's ApprovalCard renders the
       // "wants to use MCP server / fetch" rows with Allow once / Always allow / Deny.
       // Viewport-only to focus on the card under the header rather than the terminal.
-      { name: 'agent-approvals', path: '/project/sim-project/agent/agent-approval', viewportOnly: true },
+      // Dark-only: this is the single reference shot for the MCP approval UI (the
+      // toast-approval shot documents a WebFetch park instead).
+      { name: 'agent-approvals', path: '/project/sim-project/agent/agent-approval', viewportOnly: true, themes: ['dark'] },
       { name: 'nested-folders', path: '/project/sim-project/agent/agent-3', scrollTo: 'Changes' },
       // The diff viewer's settings popup, opened from the gear in the sticky
       // "Changes" toolbar: the file-list view modes, the diff options (side-by-
@@ -1496,7 +1505,7 @@ try {
     const only = process.env.HYDRA_SHOT_ONLY?.split(',').map((s) => s.trim()).filter(Boolean)
     const tasks = pages
       .filter((pg) => !only || only.includes(pg.name))
-      .flatMap((pg) => themes.map((theme) => ({ pg, theme })))
+      .flatMap((pg) => (pg.themes ?? themes).map((theme) => ({ pg, theme })))
     const totalShots = tasks.length
     const cpuCount = (typeof availableParallelism === 'function' ? availableParallelism() : cpus().length) || 8
     const defaultConcurrency = Math.min(Math.max(Math.floor(cpuCount / 4), 2), 4)
