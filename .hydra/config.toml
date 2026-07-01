@@ -16,7 +16,11 @@ artifact_concurrency = 4
 
 [sandbox]
 ## extra paths made writable in the sandbox (added to the built-in defaults).
-writable_paths = ["~/.cache/go", "~/.bun/install/cache", "~/.cache/goimports", "~/.magefile"]
+# ~/.local/share/go/pkg/sumdb is GOPATH/pkg/sumdb (GOPATH stays ~/.local/share/go
+# even though GOMODCACHE is redirected to ~/.cache/go); `go`/`go tool` writes the
+# checksum-db tree head there when fetching a new module, so without it fetching a
+# tool dep (e.g. gotestsum) fails with a read-only-filesystem error on sum.golang.org.
+writable_paths = ["~/.cache/go", "~/.bun/install/cache", "~/.cache/goimports", "~/.magefile", "~/.local/share/go/pkg/sumdb"]
 ## extra paths hidden in the sandbox (added to the built-in defaults).
 # masked_paths = ["~/.ssh", "~/.aws", "~/.azure", "~/.gnupg", "~/.docker", "~/.kube", "~/.password-store", "~/.config", "~/.netrc", "~/.git-credentials", "~/.npmrc", "~/.pypirc", "~/.zsh_history", "~/.bash_history", "~/.sh_history", "~/.config/mise/config.local.toml", "~/.dotfiles/mise/config.local.toml"]
 # ~/.config/go holds `go env -w` settings (GOMODCACHE=~/.cache/go/pkg/mod,
@@ -147,16 +151,15 @@ timeout_sec = 900
 ## It is also given HYDRA_TEST_SOURCE (the checkout dir) and HYDRA_TEST_REF (the
 ## resolved ref).
 [[tests]]
-# Go test suite. Uses gotestsum to emit JUnit (per-case detail in the panel) when
-# it's installed, otherwise falls back to plain `go test` (still red/green from the
-# exit code). The whole module is slow, so allow a generous timeout.
-# Go test suite. Uses gotestsum to emit JUnit (per-case detail in the panel) when
-# it's installed, otherwise falls back to plain `go test` (still red/green from the
-# exit code). The whole module is slow, so allow a generous timeout. (web/dist is
-# kept present in every checkout via a committed web/dist/.gitkeep, so the
-# //go:embed all:dist in web/embed.go compiles without building the frontend.)
+# Go test suite. Runs via `go tool gotestsum` (a version-pinned tool dependency in
+# go.mod, like oapi-codegen) so it emits JUnit and the panel shows per-case detail
+# (pass/fail per test) instead of a single synthetic "(command exited 0)" row. No
+# global/mise install needed — it builds from the module cache wherever `go` works.
+# The whole module is slow, so allow a generous timeout. (web/dist is kept present
+# in every checkout via a committed web/dist/.gitkeep, so the //go:embed all:dist in
+# web/embed.go compiles without building the frontend.)
 name = "go"
-command = "if command -v gotestsum >/dev/null 2>&1; then gotestsum --junitfile \"$HYDRA_TEST_OUTPUT/go.xml\" -- ./...; else go test ./...; fi"
+command = "go tool gotestsum --junitfile \"$HYDRA_TEST_OUTPUT/go.xml\" -- ./..."
 timeout_sec = 900
 
 [[tests]]

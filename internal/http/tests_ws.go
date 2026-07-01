@@ -95,10 +95,9 @@ func (s *Server) streamTests(ctx context.Context, conn *safeConn, projectRoot, p
 		return errtrace.Wrap(conn.WriteMessage(websocket.TextMessage, data))
 	}
 
-	runners := enabledTestRunners(projectRoot)
-	if s.Tests == nil || head.Branch == nil || len(runners) == 0 {
-		// Nothing to run (feature off / no branch / no runners). Send an empty
-		// snapshot and keep the socket open until the client closes it.
+	if s.Tests == nil || head.Branch == nil {
+		// Nothing to run (feature off / no branch). Send an empty snapshot and keep
+		// the socket open until the client closes it.
 		_ = writeMsg(testsWSMessage{Type: "snapshot", Runners: []api.TestRunResult{}})
 		drainUntilClose(conn)
 		return
@@ -106,6 +105,17 @@ func (s *Server) streamTests(ctx context.Context, conn *safeConn, projectRoot, p
 
 	mgr := s.Tests.Manager(projectRoot)
 	v := testVersion(head, headRef, includeUncommitted)
+
+	var runners []config.TestScript
+	if liveCfg, err := config.Load(projectRoot); err == nil {
+		runners = s.testRunnersFor(projectRoot, v, liveCfg)
+	}
+	if len(runners) == 0 {
+		// No runners for this version — empty snapshot, socket stays open.
+		_ = writeMsg(testsWSMessage{Type: "snapshot", Runners: []api.TestRunResult{}})
+		drainUntilClose(conn)
+		return
+	}
 
 	// Map each runner's on-disk entry dir back to its spec, so an incoming event
 	// (keyed by dir) tells us which runner to update / rebuild.
