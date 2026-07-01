@@ -3,6 +3,7 @@ package services
 import (
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -109,6 +110,85 @@ max_restarts = 0
 	if s.Restarts != 0 {
 		t.Fatalf("expected 0 restarts, got %d", s.Restarts)
 	}
+}
+
+// counter is a tiny concurrency-safe agent-count source for the gate tests.
+type counter struct {
+	mu sync.Mutex
+	n  int
+}
+
+func (c *counter) set(n int) { c.mu.Lock(); c.n = n; c.mu.Unlock() }
+func (c *counter) get() int  { c.mu.Lock(); defer c.mu.Unlock(); return c.n }
+
+// TestActivityGateBootsPausedWithoutAgents checks that, with an activity probe
+// reporting no agents, StartProject registers the project paused rather than
+// launching its services.
+func TestActivityGateBootsPausedWithoutAgents(t *testing.T) {
+	root := writeProjectConfig(t, `[[services]]
+name = "sleeper"
+command = "sleep 60"
+host = true
+`)
+	m := fastManager()
+	agents := &counter{}
+	m.SetActivityProbe(func(string) int { return agents.get() })
+
+	m.StartProject(root)
+	defer m.StopProject(root)
+
+	s := waitForState(t, m, root, "sleeper", StatePaused, time.Second)
+	if s.PID != 0 {
+		t.Fatalf("paused service should have no PID, got %d", s.PID)
+	}
+}
+
+// TestActivityGatePausesAndResumes checks the reconciler starts a paused
+// project's services when an agent appears and pauses them again once the
+// project has been idle past the timeout.
+func TestActivityGatePausesAndResumes(t *testing.T) {
+	root := writeProjectConfig(t, `[[services]]
+name = "sleeper"
+command = "sleep 60"
+host = true
+`)
+	m := fastManager()
+	m.idleTimeout = 20 * time.Millisecond
+	m.gateInterval = 5 * time.Millisecond
+	agents := &counter{}
+	m.SetActivityProbe(func(string) int { return agents.get() })
+
+	m.StartProject(root)
+	defer m.StopProject(root)
+	waitForState(t, m, root, "sleeper", StatePaused, time.Second)
+
+	go m.RunActivityGate(t.Context())
+
+	// An agent appears → the gate launches the services.
+	agents.set(1)
+	waitForState(t, m, root, "sleeper", StateRunning, 2*time.Second)
+
+	// The agent goes away → after the idle timeout the services pause again.
+	agents.set(0)
+	waitForState(t, m, root, "sleeper", StatePaused, 2*time.Second)
+}
+
+// TestActivityGateStartsRunningWithAgents checks a project that already has an
+// agent at registration launches its services immediately (not paused).
+func TestActivityGateStartsRunningWithAgents(t *testing.T) {
+	root := writeProjectConfig(t, `[[services]]
+name = "sleeper"
+command = "sleep 60"
+host = true
+`)
+	m := fastManager()
+	agents := &counter{n: 1}
+	m.SetActivityProbe(func(string) int { return agents.get() })
+
+	m.StartProject(root)
+	defer m.StopProject(root)
+
+	waitForState(t, m, root, "sleeper", StateRunning, 2*time.Second)
 }
 
 // TestStartProjectIdempotent checks a second StartProject is a no-op (does not
