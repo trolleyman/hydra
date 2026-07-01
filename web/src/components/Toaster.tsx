@@ -6,7 +6,7 @@ import { useProjectStore } from '../stores/projectStore'
 import { IconButton } from './IconButton'
 import { ApprovalCard } from './ApprovalToast'
 import { Badge } from './Badge'
-import { agentStatusBadge } from './AgentComponents'
+import { agentStatusBadge } from '../lib/agentDisplay'
 
 // Per-type visual identity: the icon and its tinted rounded square, mirroring the
 // approval card's kind icon so the two toast styles read as one family.
