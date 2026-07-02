@@ -586,8 +586,8 @@ func simTestRunners(id string) []api.TestRunResult {
 		// panel and the sidebar/merge-gate agree (it backs the running gate dialog).
 		return []api.TestRunResult{{
 			Name: "go", Status: api.TestStatusRunning,
-			Total: ptr(0), Passed: ptr(82), Failed: ptr(0), Skipped: ptr(0),
-			StartedAt: ptr(simNow().Add(-9 * time.Second).Unix()), Progress: ptr("84/142"),
+			Total: ptr(142), Passed: ptr(82), Failed: ptr(0), Skipped: ptr(0),
+			StartedAt: ptr(simNow().Add(-9 * time.Second).Unix()), Progress: ptr("82/142"),
 			Log: &[]api.ArtifactLogLine{
 				{Text: "$ go test ./...", Stream: "stdout"},
 				{Text: "ok  \tinternal/heads\t0.42s", Stream: "stdout"},
@@ -598,7 +598,7 @@ func simTestRunners(id string) []api.TestRunResult {
 		// A run in flight, for the running-state screenshot.
 		return []api.TestRunResult{{
 			Name: "go", Status: api.TestStatusRunning,
-			Total: ptr(0), Passed: ptr(82), Failed: ptr(2), Skipped: ptr(0),
+			Total: ptr(142), Passed: ptr(82), Failed: ptr(2), Skipped: ptr(0),
 			StartedAt: ptr(simNow().Add(-12 * time.Second).Unix()), Progress: ptr("84/142"),
 			Log: &[]api.ArtifactLogLine{
 				{Text: "$ vitest run --reporter=dot", Stream: "stdout"},
@@ -617,7 +617,7 @@ func simTestSummary(id string) *api.TestSummary {
 	case "agent-2":
 		return &api.TestSummary{Status: api.TestStatusFailing, Total: ptr(147), Passed: ptr(142), Failed: ptr(2), Skipped: ptr(3), DurationMs: ptr(int64(4200))}
 	case "agent-md":
-		return &api.TestSummary{Status: api.TestStatusRunning, Passed: ptr(82), Failed: ptr(2), Progress: ptr("84/142")}
+		return &api.TestSummary{Status: api.TestStatusRunning, Total: ptr(142), Passed: ptr(82), Failed: ptr(2), Progress: ptr("84/142")}
 	case "agent-1":
 		return &api.TestSummary{Status: api.TestStatusPassing, Total: ptr(149), Passed: ptr(142), Warnings: ptr(4), Skipped: ptr(3), DurationMs: ptr(int64(4200))}
 	case "agent-queued":
