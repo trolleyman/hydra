@@ -31,6 +31,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -41,6 +42,20 @@ import (
 
 // dialTimeout bounds how long an upstream connection attempt may take.
 const dialTimeout = 30 * time.Second
+
+// egressDebug enables a per-request trace of every proxied connection. Off by
+// default (Claude opens many connections; the trace is noisy) but invaluable when
+// diagnosing whether the agent's traffic reaches the proxy at all — a
+// ConnectionRefused at the client means it never did (a netns/pasta reachability
+// problem, below this code), while silence here with the client still failing
+// points upstream. Enable with HYDRA_EGRESS_DEBUG=1.
+var egressDebug = os.Getenv("HYDRA_EGRESS_DEBUG") != ""
+
+func debugf(id, format string, args ...any) {
+	if egressDebug {
+		log.Printf("hydra egress[%s]: "+format, append([]any{id}, args...)...)
+	}
+}
 
 // ApproveFunc asks whether an outbound connection to an as-yet-unlisted host may
 // proceed. It blocks (typically prompting the user) until decided, and should
@@ -137,8 +152,10 @@ func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "hydra: egress to "+host+" blocked (not on the network allow-list)", http.StatusForbidden)
 		return
 	}
+	debugf(p.id, "CONNECT %s → dialing upstream", r.Host)
 	upstream, err := net.DialTimeout("tcp", r.Host, dialTimeout)
 	if err != nil {
+		log.Printf("hydra egress[%s]: upstream dial to %q failed: %v", p.id, r.Host, err)
 		http.Error(w, "hydra egress: "+err.Error(), http.StatusBadGateway)
 		return
 	}
@@ -180,8 +197,10 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	if outReq.URL.Host == "" {
 		outReq.URL.Host = r.Host
 	}
+	debugf(p.id, "%s %s → forwarding", r.Method, host)
 	resp, err := http.DefaultTransport.RoundTrip(outReq)
 	if err != nil {
+		log.Printf("hydra egress[%s]: forward to %q failed: %v", p.id, host, err)
 		http.Error(w, "hydra egress: "+err.Error(), http.StatusBadGateway)
 		return
 	}

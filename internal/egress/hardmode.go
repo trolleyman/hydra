@@ -2,6 +2,9 @@ package egress
 
 import (
 	"context"
+	"fmt"
+	"log"
+	"net"
 	"os"
 	"os/exec"
 	"strings"
@@ -42,20 +45,25 @@ func DetectHardMode() HardMode {
 func detectHardMode() HardMode {
 	pasta := lookPasta()
 	if pasta == "" {
+		log.Printf("hydra egress: hard mode unavailable — pasta not found (set HYDRA_PASTA or install pasta); degrading to advisory")
 		return HardMode{}
 	}
 	nft := lookNft()
 	if nft == "" {
+		log.Printf("hydra egress: hard mode unavailable — nft not found (looked on PATH + /usr/sbin,/sbin); degrading to advisory")
 		return HardMode{}
 	}
 	// --map-host-loopback is required for a deterministic proxy address; older
 	// pasta builds lack it, so don't even smoke-test those.
 	if !pastaHasMapHostLoopback(pasta) {
+		log.Printf("hydra egress: hard mode unavailable — pasta at %q lacks --map-host-loopback (too old); degrading to advisory", pasta)
 		return HardMode{}
 	}
-	if !smokeTest(pasta, nft) {
+	if reason := smokeTest(pasta, nft); reason != "" {
+		log.Printf("hydra egress: hard mode unavailable — smoke test failed: %s (pasta=%q nft=%q); degrading to advisory", reason, pasta, nft)
 		return HardMode{}
 	}
+	log.Printf("hydra egress: hard mode AVAILABLE — proxy reachable through pasta netns (pasta=%q nft=%q)", pasta, nft)
 	return HardMode{Available: true, PastaPath: pasta, NftPath: nft}
 }
 
@@ -93,17 +101,60 @@ func pastaHasMapHostLoopback(pasta string) bool {
 	return strings.Contains(string(out), "--map-host-loopback")
 }
 
-// smokeTest runs the exact pasta+nft+bash chain the real launch uses, against a
-// harmless command, and verifies the egress rule actually blocks direct traffic.
-// It returns true only if the whole pipeline executes (pasta creates the netns,
-// nft loads the ruleset, the inner command runs).
-func smokeTest(pasta, nft string) bool {
+// smokeTest runs the exact pasta+nft+bash chain the real launch uses AND verifies
+// the mapped proxy address is actually reachable from inside the netns. It returns
+// "" on success, or a short human-readable reason on failure.
+//
+// This is the load-bearing check: it is not enough that pasta creates the netns and
+// nft loads the ruleset — the agent must be able to open a TCP connection to the
+// host-loopback proxy at MapAddr:port, or every request dies with ConnectionRefused
+// (the proxy never even sees the traffic). The old smoke test only ran `true`
+// inside the netns, so a host where --map-host-loopback does not deliver traffic to
+// a 127.0.0.1 listener passed the test yet wedged every hard-mode head at runtime.
+//
+// So we stand up a throwaway host-loopback listener that emits a token, open the
+// nft rule for exactly that port, and from inside the netns connect to
+// MapAddr:port via bash's /dev/tcp and read the token back. Seeing the token proves
+// the whole path pasta+nft+map-host-loopback → host 127.0.0.1 listener works; the
+// real proxy binds 127.0.0.1 the same way, so this generalises.
+func smokeTest(pasta, nft string) string {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return fmt.Sprintf("could not bind host-loopback probe listener: %v", err)
+	}
+	defer ln.Close()
+	port := HostPort(ln.Addr().String())
+	if port == 0 {
+		return "probe listener has no port"
+	}
+	const token = "hydra-egress-probe-ok"
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			_, _ = c.Write([]byte(token))
+			_ = c.Close()
+		}
+	}()
+
 	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
 	defer cancel()
-	script := NftScript(nft, MapAddr, 1) + "\nexec \"$@\""
-	args := append(PastaArgs(pasta, MapAddr), "bash", "-c", script, "bash", "true")
-	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
-	return cmd.Run() == nil
+	// Inside the netns: connect to the mapped proxy address and echo whatever the
+	// listener sends. bash's /dev/tcp needs no extra tools in the sandbox.
+	inner := fmt.Sprintf("exec 3<>/dev/tcp/%s/%d && cat <&3", MapAddr, port)
+	script := NftScript(nft, MapAddr, port) + "\nexec \"$@\""
+	args := append(PastaArgs(pasta, MapAddr), "bash", "-c", script, "bash", "bash", "-c", inner)
+	out, err := exec.CommandContext(ctx, args[0], args[1:]...).CombinedOutput()
+	if strings.Contains(string(out), token) {
+		return ""
+	}
+	detail := strings.TrimSpace(string(out))
+	if err != nil {
+		return fmt.Sprintf("proxy unreachable from netns (%v): %s", err, detail)
+	}
+	return fmt.Sprintf("proxy unreachable from netns — token not received: %s", detail)
 }
 
 func fileExists(p string) bool {
