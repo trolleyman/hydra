@@ -112,10 +112,10 @@ func resolveAsk(agentType, toolName string, result gate.Result) gate.Decision {
 	reqid := strconv.FormatInt(time.Now().UnixNano(), 10)
 	summary := approvalSummary(result)
 	req := gate.Request{
-		ReqID:   reqid,
-		Tool:    toolName,
-		Kind:    result.Kind,
-		Target:  result.Target,
+		ReqID:       reqid,
+		Tool:        toolName,
+		Kind:        result.Kind,
+		Target:      result.Target,
 		Reason:      result.Reason,
 		Summary:     summary,
 		RW:          result.RW,

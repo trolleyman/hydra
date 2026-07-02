@@ -188,6 +188,6 @@ func stripPastaNoise(s string) string {
 }
 
 func fileExists(p string) bool {
-	cmd := exec.Command("test", "-x", p) //errtrace:skip
+	cmd := exec.Command("test", "-x", p)
 	return cmd.Run() == nil
 }

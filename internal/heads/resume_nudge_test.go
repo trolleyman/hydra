@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"braces.dev/errtrace"
 	"github.com/trolleyman/hydra/internal/sandbox"
 	"github.com/trolleyman/hydra/internal/session"
 )
@@ -52,7 +53,7 @@ func (p *fakePTY) Read(b []byte) (int, error) {
 	}
 	p.mu.Unlock()
 	<-p.closed
-	return 0, io.EOF
+	return 0, errtrace.Wrap(io.EOF)
 }
 
 func (p *fakePTY) Write(b []byte) (int, error) {

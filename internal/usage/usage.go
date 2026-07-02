@@ -15,6 +15,7 @@
 package usage
 
 import (
+	"braces.dev/errtrace"
 	"context"
 	"log"
 	"regexp"
@@ -97,7 +98,7 @@ func (c *Cache) Get(ctx context.Context, force bool) (Snapshot, error) {
 			return c.snap, nil // serve stale on transient failure
 		}
 		log.Printf("usage: probe failed after %s (%v); no cached snapshot to serve", dur, err)
-		return Snapshot{}, err
+		return Snapshot{}, errtrace.Wrap(err)
 	}
 	c.snap, c.at, c.has = snap, time.Now(), true
 	return snap, nil

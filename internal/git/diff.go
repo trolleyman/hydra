@@ -181,7 +181,7 @@ func GetDiffPaths(projectRoot, baseRef, headRef string, ignoreWhitespace, useTri
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
-	return parseDiff(out)
+	return errtrace.Wrap2(parseDiff(out))
 }
 
 // renameOldPaths returns the old names of any requested paths that are the new
@@ -304,7 +304,7 @@ func GetUntrackedDiff(projectRoot, path string, context int) ([]DiffFile, error)
 
 // GetMergeBase returns the merge-base commit hash between two refs.
 func GetMergeBase(projectRoot, baseRef, headRef string) (string, error) {
-	return gitOutput(projectRoot, "merge-base", baseRef, headRef)
+	return errtrace.Wrap2(gitOutput(projectRoot, "merge-base", baseRef, headRef))
 }
 
 // HasConflicts returns true if merging headRef into baseRef would conflict.

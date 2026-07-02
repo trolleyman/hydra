@@ -6,6 +6,7 @@ import (
 	"syscall"
 	"time"
 
+	"braces.dev/errtrace"
 	"github.com/trolleyman/hydra/internal/sandbox"
 )
 
@@ -235,7 +236,7 @@ func (s *Session) resize(rows, cols uint16) error {
 	s.mu.Lock()
 	s.rows, s.cols = rows, cols
 	s.mu.Unlock()
-	return s.proc.Resize(rows, cols)
+	return errtrace.Wrap(s.proc.Resize(rows, cols))
 }
 
 // stop signals the process to terminate; the readLoop handles cleanup.

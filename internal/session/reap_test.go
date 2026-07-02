@@ -9,6 +9,7 @@ import (
 	"sync"
 	"testing"
 
+	"braces.dev/errtrace"
 	"github.com/trolleyman/hydra/internal/sandbox"
 )
 
@@ -23,7 +24,7 @@ type fakePTY struct {
 
 func newFakePTY(alive bool) *fakePTY { return &fakePTY{alive: alive, closed: make(chan struct{})} }
 
-func (f *fakePTY) Read(p []byte) (int, error) { <-f.closed; return 0, io.EOF }
+func (f *fakePTY) Read(p []byte) (int, error)  { <-f.closed; return 0, errtrace.Wrap(io.EOF) }
 func (f *fakePTY) Write(p []byte) (int, error) { return len(p), nil }
 func (f *fakePTY) Resize(uint16, uint16) error { return nil }
 func (f *fakePTY) Wait() error                 { <-f.closed; return nil }
@@ -46,7 +47,7 @@ func (f *fakePTY) Signal(os.Signal) error {
 	if f.alive {
 		return nil
 	}
-	return errors.New("os: process already finished")
+	return errtrace.Wrap(errors.New("os: process already finished"))
 }
 
 // TestReapDeadStuckSession covers the core of the stuck-running fix: a session

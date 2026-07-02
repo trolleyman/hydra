@@ -18,6 +18,7 @@
 pre_prompt = """
 - Use bun instead of npm, and bun x instead of npx
 - Check using mage build before committing
+- Run `mage tidy` before committing Go changes and fix any warnings it reports
 - After changing web code, run `cd web && bun run lint` (eslint) and fix the errors AND warnings you introduced
 - After changing Go code, run `go test ./...` and make sure it passes
 """

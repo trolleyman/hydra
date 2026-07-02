@@ -127,7 +127,7 @@ func (s *Server) claudeUsageCache() *usage.Cache {
 	s.claudeUsageOnce.Do(func() {
 		root := s.ProjectRoot
 		s.claudeUsage = usage.NewCache(claudeUsageTTL, func(ctx context.Context) (usage.Snapshot, error) {
-			return usage.Probe(ctx, "claude", root, usage.HostEnv())
+			return errtrace.Wrap2(usage.Probe(ctx, "claude", root, usage.HostEnv()))
 		})
 	})
 	return s.claudeUsage
@@ -1655,7 +1655,7 @@ func (s *Server) listCommitsCached(projectRoot, baseBranch, headBranch string) (
 	baseSHA, errBase := git.ResolveRef(projectRoot, baseBranch)
 	headSHA, errHead := git.ResolveRef(projectRoot, headBranch)
 	if errBase != nil || errHead != nil {
-		return git.ListCommits(projectRoot, baseBranch, headBranch)
+		return errtrace.Wrap2(git.ListCommits(projectRoot, baseBranch, headBranch))
 	}
 	key := strings.Join([]string{projectRoot, baseSHA, headSHA}, "\x00")
 	if v, ok := s.commitsCache.get(key); ok {
@@ -1698,15 +1698,15 @@ func (s *Server) getDiffCached(projectRoot, diffRoot, baseRef, headRef string, i
 
 func (s *Server) getDiffCachedPaths(projectRoot, diffRoot, baseRef, headRef string, ignoreWhitespace, useTripleDot bool, paths []string, contextLines int, includeUncommitted bool) ([]git.DiffFile, error) {
 	live := func() ([]git.DiffFile, error) {
-		return git.GetDiffPaths(diffRoot, baseRef, headRef, ignoreWhitespace, useTripleDot, paths, contextLines)
+		return errtrace.Wrap2(git.GetDiffPaths(diffRoot, baseRef, headRef, ignoreWhitespace, useTripleDot, paths, contextLines))
 	}
 	if includeUncommitted {
-		return live()
+		return errtrace.Wrap2(live())
 	}
 	baseSHA, errBase := git.ResolveRef(projectRoot, baseRef)
 	headSHA, errHead := git.ResolveRef(projectRoot, headRef)
 	if errBase != nil || errHead != nil {
-		return live()
+		return errtrace.Wrap2(live())
 	}
 	dot := "2dot"
 	if useTripleDot {

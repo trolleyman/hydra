@@ -125,7 +125,7 @@ func launchNamespaceHost(projectRoot, id string, base sandbox.Options) (*nsHost,
 		return nil, errtrace.Wrap(fmt.Errorf("build supervisor sandbox: %w", err))
 	}
 
-	cmd := exec.Command(spec.Path, spec.Args[1:]...) //errtrace:skip
+	cmd := exec.Command(spec.Path, spec.Args[1:]...)
 	cmd.Env = spec.Env
 	cmd.Dir = spec.Dir
 	cmd.ExtraFiles = spec.ExtraFiles
@@ -211,7 +211,7 @@ func startAgentSession(reg *session.Registry, projectRoot, id string, agentType 
 	if err != nil {
 		return nil, errtrace.Wrap(fmt.Errorf("spawn agent in namespace host: %w", err))
 	}
-	return reg.StartWithProc(id, agentType, worktree, rows, cols, false, sp)
+	return errtrace.Wrap2(reg.StartWithProc(id, agentType, worktree, rows, cols, false, sp))
 }
 
 // runPreExitInNamespace runs a pre_exit_script as a child of the head's live

@@ -59,7 +59,7 @@ func EnsureRunning(ctx context.Context, projectRoot string) error {
 	}
 	defer logFile.Close()
 
-	cmd := exec.Command(exe, "__daemon", "--project", projectRoot) //errtrace:skip
+	cmd := exec.Command(exe, "__daemon", "--project", projectRoot)
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}

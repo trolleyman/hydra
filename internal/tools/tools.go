@@ -386,7 +386,7 @@ func missingBwrapBuildTools() []string {
 	}
 	// Only meaningful once pkg-config exists.
 	if _, err := exec.LookPath("pkg-config"); err == nil {
-		if exec.Command("pkg-config", "--exists", "libcap").Run() != nil { //errtrace:skip
+		if exec.Command("pkg-config", "--exists", "libcap").Run() != nil {
 			missing = append(missing, "libcap-dev")
 		}
 	}

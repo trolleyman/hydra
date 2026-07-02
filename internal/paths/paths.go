@@ -69,7 +69,7 @@ func GetProjectRoot(dir string) (string, error) {
 	if err != nil {
 		return "", errtrace.Wrap(fmt.Errorf("git open: not a git repository"))
 	}
-	return NormalizePath(strings.TrimRight(string(out), "\n"))
+	return errtrace.Wrap2(NormalizePath(strings.TrimRight(string(out), "\n")))
 }
 
 func GetHydraDirFromProjectRoot(projectRoot string) string {
