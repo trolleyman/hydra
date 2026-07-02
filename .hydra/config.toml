@@ -68,7 +68,7 @@ restore_ro = ["~/.config/go"]
 mode = "unrestricted"
 
 ## with mode = "hard", fail closed (block all egress) when the inescapable boundary can't be built, instead of degrading to advisory filtering (default false).
-# strict = false
+strict = true
 
 ## LEGACY (use mode): allow outbound network access from the sandbox. Honoured only when mode is unset.
 # enabled = true
