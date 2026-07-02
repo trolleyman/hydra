@@ -24,6 +24,7 @@ import (
 	"github.com/trolleyman/hydra/internal/config"
 	"github.com/trolleyman/hydra/internal/git"
 	"github.com/trolleyman/hydra/internal/paths"
+	"github.com/trolleyman/hydra/internal/service"
 	"github.com/trolleyman/hydra/internal/tools"
 )
 
@@ -697,6 +698,104 @@ func (Deploy) Ngrok() error {
 	fmt.Printf("     %sngrok start --all --config %s%s\n", colorBold, displayPath(ngrokPath), colorReset)
 	fmt.Println("\n   Or run it as a persistent background service, like the reference host:")
 	fmt.Printf("     %sngrok service install --config %s && ngrok service start%s\n", colorBold, ngrokPath, colorReset)
+	return nil
+}
+
+// Service installs Hydra as a systemd --user service that serves the web UI on
+// 0.0.0.0 (auth-key gated, like `mage prod`) and restarts on failure, so a
+// project's server comes up on login/boot without a terminal. Linux/systemd only.
+//
+// It (1) builds a full binary with the frontend embedded and installs it to
+// ~/.local/bin/hydra, (2) provisions the bundled sandbox tools so hard egress
+// works headless, and (3) writes ~/.config/systemd/user/hydra.service pinned to
+// this project, the exposed port, and the resolved HYDRA_* + PATH environment. It
+// does NOT enable or start the unit — it prints the one-liners — so nothing comes
+// up behind your back. Re-run it to refresh the binary, tools, and unit.
+//
+//	mage deploy:service
+func (Deploy) Service() error {
+	if runtime.GOOS != "linux" {
+		return errtrace.Wrap(fmt.Errorf("deploy:service is Linux/systemd only for now (this is %s); use `mage prod` in the foreground", runtime.GOOS))
+	}
+	projectRoot, err := paths.GetProjectRootFromCwd()
+	if err != nil {
+		return errtrace.Wrap(err)
+	}
+	// Exposing to the network always requires a password, same as Prod.
+	if err := requireAuthKey(); err != nil {
+		return errtrace.Wrap(err)
+	}
+
+	// Bundle pasta etc. so hard egress works under the headless service too.
+	if res, err := tools.Provision(context.Background(), projectRoot, false); err != nil {
+		fmt.Printf("%stools: provisioning failed (%v); the service will fall back to a system pasta%s\n", colorYellow, err, colorReset)
+	} else {
+		reportTools(projectRoot, res)
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return errtrace.Wrap(err)
+	}
+
+	// Build a full production binary (frontend embedded) and install it to a
+	// stable path the unit can point at.
+	if err := BuildWeb(); err != nil {
+		return errtrace.Wrap(err)
+	}
+	binPath := filepath.Join(home, ".local", "bin", "hydra")
+	if err := os.MkdirAll(filepath.Dir(binPath), 0o755); err != nil {
+		return errtrace.Wrap(err)
+	}
+	buildArgs := append([]string{"build"}, goBuildTags(false)...)
+	buildArgs = append(buildArgs, "-o", binPath, "./")
+	if err := runV("go", buildArgs...); err != nil {
+		return errtrace.Wrap(err)
+	}
+
+	// Assemble the unit environment: exposed bind, the bundled/overridden sandbox
+	// tools, and the installing shell's PATH (systemd --user starts with a minimal
+	// PATH, so without this agents wouldn't find git/claude/node/mise).
+	env := map[string]string{"HYDRA_API_ADDR": exposedAPIAddr()}
+	for k, v := range tools.Env(projectRoot, os.Getenv) { // bundled tools, if the user hasn't overridden them
+		env[k] = v
+	}
+	if pasta := os.Getenv("HYDRA_PASTA"); pasta != "" {
+		env["HYDRA_PASTA"] = pasta
+	}
+	if bwrap := os.Getenv("HYDRA_BWRAP"); bwrap != "" {
+		env["HYDRA_BWRAP"] = bwrap
+	}
+	if path := os.Getenv("PATH"); path != "" {
+		env["PATH"] = path
+	}
+
+	unit := service.RenderSystemdUnit(service.UnitOpts{
+		ProjectRoot: projectRoot,
+		BinPath:     binPath,
+		Description: filepath.Base(projectRoot),
+		Env:         env,
+	})
+	unitPath := filepath.Join(home, ".config", "systemd", "user", "hydra.service")
+	if err := os.MkdirAll(filepath.Dir(unitPath), 0o755); err != nil {
+		return errtrace.Wrap(err)
+	}
+	if err := os.WriteFile(unitPath, []byte(unit), 0o644); err != nil {
+		return errtrace.Wrap(err)
+	}
+
+	fmt.Printf("\n%s✓ Installed %s%s\n", colorGreen, displayPath(binPath), colorReset)
+	fmt.Printf("%s✓ Wrote %s%s\n", colorGreen, displayPath(unitPath), colorReset)
+	fmt.Printf("\n%sServing %s on %s (auth key required).%s\n", colorBold, filepath.Base(projectRoot), exposedAPIAddr(), colorReset)
+	fmt.Println("\nEnable it (nothing is running yet):")
+	fmt.Printf("  %ssystemctl --user daemon-reload%s\n", colorBold, colorReset)
+	fmt.Printf("  %ssystemctl --user enable --now hydra%s\n", colorBold, colorReset)
+	fmt.Println("\nTo keep it running after you log out / across reboots without a login:")
+	fmt.Printf("  %sloginctl enable-linger %s%s\n", colorBold, os.Getenv("USER"), colorReset)
+	fmt.Println("\nLogs / control:")
+	fmt.Printf("  %sjournalctl --user -u hydra -f%s\n", colorBold, colorReset)
+	fmt.Printf("  %ssystemctl --user restart hydra%s   (also picks up a re-run of this target)\n", colorBold, colorReset)
+	fmt.Printf("\n%sNote:%s the service takes over any daemon started ad-hoc by the CLI for this project.\n", colorYellow, colorReset)
 	return nil
 }
 
