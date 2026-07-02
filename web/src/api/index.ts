@@ -26,6 +26,7 @@ export { ArtifactSet } from './models/ArtifactSet';
 export type { ArtifactsResponse } from './models/ArtifactsResponse';
 export type { ClaudeUsageResponse } from './models/ClaudeUsageResponse';
 export type { CommitInfo } from './models/CommitInfo';
+export type { CommitRepositoryRequest } from './models/CommitRepositoryRequest';
 export type { ConfigResponse } from './models/ConfigResponse';
 export type { ConfigTomlResponse } from './models/ConfigTomlResponse';
 export { DiffFile } from './models/DiffFile';
@@ -47,6 +48,8 @@ export type { RepositoryBranchesResponse } from './models/RepositoryBranchesResp
 export type { RepositoryFileResponse } from './models/RepositoryFileResponse';
 export type { RepositoryPushStatus } from './models/RepositoryPushStatus';
 export type { RepositoryTreeResponse } from './models/RepositoryTreeResponse';
+export type { RepositoryUncommittedChanges } from './models/RepositoryUncommittedChanges';
+export type { RepositoryUncommittedFile } from './models/RepositoryUncommittedFile';
 export type { SandboxConfig } from './models/SandboxConfig';
 export type { ServiceScript } from './models/ServiceScript';
 export { ServiceStatus } from './models/ServiceStatus';

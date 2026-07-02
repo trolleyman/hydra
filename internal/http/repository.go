@@ -288,6 +288,46 @@ func (s *Server) GetRepositoryBranches(_ context.Context, request api.GetReposit
 	}, nil
 }
 
+// maxUncommittedFiles caps the file list in the push-status response; Total
+// still reports the real count so the UI can say "+N more".
+const maxUncommittedFiles = 20
+
+// uncommittedChanges lists projectRoot's dirty working-tree paths in the API
+// shape, truncated to maxUncommittedFiles entries.
+func uncommittedChanges(projectRoot string) (api.RepositoryUncommittedChanges, error) {
+	files, err := git.ListUncommittedFiles(projectRoot)
+	if err != nil {
+		return api.RepositoryUncommittedChanges{}, errtrace.Wrap(err)
+	}
+	out := api.RepositoryUncommittedChanges{
+		Total: len(files),
+		Files: make([]api.RepositoryUncommittedFile, 0, min(len(files), maxUncommittedFiles)),
+	}
+	for _, f := range files {
+		if len(out.Files) == maxUncommittedFiles {
+			break
+		}
+		out.Files = append(out.Files, api.RepositoryUncommittedFile{Path: f.Path, Status: f.Status})
+	}
+	return out, nil
+}
+
+// fullPushStatus reads the remote status plus the working tree's uncommitted
+// changes for projectRoot and assembles the API response. The raw RemoteStatus
+// is returned too for callers that branch on it.
+func fullPushStatus(projectRoot string) (api.RepositoryPushStatus, git.RemoteStatus, error) {
+	st, err := git.GetRemoteStatus(projectRoot)
+	if err != nil {
+		return api.RepositoryPushStatus{}, st, errtrace.Wrap(err)
+	}
+	resp := pushStatusResponse(st)
+	resp.Uncommitted, err = uncommittedChanges(projectRoot)
+	if err != nil {
+		return api.RepositoryPushStatus{}, st, errtrace.Wrap(err)
+	}
+	return resp, st, nil
+}
+
 // pushStatusResponse adapts a git.RemoteStatus into the API shape.
 func pushStatusResponse(st git.RemoteStatus) api.RepositoryPushStatus {
 	resp := api.RepositoryPushStatus{
@@ -315,14 +355,14 @@ func (s *Server) GetRepositoryPushStatus(_ context.Context, request api.GetRepos
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
-	st, err := git.GetRemoteStatus(projectRoot)
+	resp, st, err := fullPushStatus(projectRoot)
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
 	if st.HasRemote {
 		go s.maybeFetchRemote(projectRoot, st.Remote)
 	}
-	return api.GetRepositoryPushStatus200JSONResponse(pushStatusResponse(st)), nil
+	return api.GetRepositoryPushStatus200JSONResponse(resp), nil
 }
 
 // maybeFetchRemote runs `git fetch <remote>` for projectRoot in the background,
@@ -401,11 +441,11 @@ func (s *Server) PushRepository(_ context.Context, request api.PushRepositoryReq
 	}
 
 	// Re-read so the client sees the post-push state (ahead normally back to 0).
-	after, err := git.GetRemoteStatus(projectRoot)
+	after, _, err := fullPushStatus(projectRoot)
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
-	return api.PushRepository200JSONResponse(pushStatusResponse(after)), nil
+	return api.PushRepository200JSONResponse(after), nil
 }
 
 // SyncRepository fetches, integrates the remote's commits into the local branch
@@ -459,12 +499,49 @@ func (s *Server) SyncRepository(_ context.Context, request api.SyncRepositoryReq
 		}
 	}
 
-	final, err := git.GetRemoteStatus(projectRoot)
+	final, _, err := fullPushStatus(projectRoot)
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
 	s.Events.PushStatusChanged(projectRoot)
-	return api.SyncRepository200JSONResponse(pushStatusResponse(final)), nil
+	return api.SyncRepository200JSONResponse(final), nil
+}
+
+// CommitRepository sweeps every uncommitted change in the project root into a
+// single commit — the sidebar warning's one-click way to commit config edits
+// the web UI itself wrote to .hydra/config.toml (or any other local changes).
+func (s *Server) CommitRepository(_ context.Context, request api.CommitRepositoryRequestObject) (api.CommitRepositoryResponseObject, error) {
+	projectRoot, err := s.resolveProjectRoot(request.ProjectId)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+
+	var message string
+	if request.Body != nil {
+		message = strings.TrimSpace(request.Body.Message)
+	}
+	if message == "" {
+		return nil, &apiError{Code: 400, Type: api.ErrorResponseErrorBadRequest, Err: errors.New("commit message must not be empty")} //errtrace:skip
+	}
+	files, err := git.ListUncommittedFiles(projectRoot)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	if len(files) == 0 {
+		return nil, &apiError{Code: 400, Type: api.ErrorResponseErrorBadRequest, Err: errors.New("nothing to commit")} //errtrace:skip
+	}
+
+	authorName, authorEmail := gitConfigVal(projectRoot, "user.name"), gitConfigVal(projectRoot, "user.email")
+	if err := git.CommitAll(projectRoot, message, authorName, authorEmail); err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+
+	s.Events.PushStatusChanged(projectRoot)
+	resp, _, err := fullPushStatus(projectRoot)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	return api.CommitRepository200JSONResponse(resp), nil
 }
 
 // GetRepositoryFile returns the contents of a single repo-relative file at the

@@ -13,6 +13,11 @@ export interface PushStatus {
   syncing: boolean
   // Pull then push the current branch, with toasts for progress/result/conflict.
   handleSync: () => Promise<void>
+  // True while the selected project has an in-flight commit.
+  committing: boolean
+  // Commit every uncommitted change in the project root with the given message.
+  // Resolves true on success (failures toast and resolve false).
+  handleCommit: (message: string) => Promise<boolean>
   // Stable refetch handle — wire into the caller's events stream.
   refetchPushStatus: () => void
 }
@@ -27,6 +32,8 @@ export function usePushStatus(currentProjectId: string | null): PushStatus {
   // rather than bleeding onto whatever project/tab the sidebar shows next.
   const [syncingProjects, setSyncingProjects] = useState<ReadonlySet<string>>(() => new Set())
   const syncing = currentProjectId ? syncingProjects.has(currentProjectId) : false
+  const [committingProjects, setCommittingProjects] = useState<ReadonlySet<string>>(() => new Set())
+  const committing = currentProjectId ? committingProjects.has(currentProjectId) : false
 
   const { data: pushStatus, setData: setPushStatus, refetch: refetchPushStatus } =
     useServerData<RepositoryPushStatus | null>(
@@ -75,5 +82,28 @@ export function usePushStatus(currentProjectId: string | null): PushStatus {
     }
   }, [currentProjectId, syncingProjects, refetchPushStatus, setPushStatus])
 
-  return { pushStatus, syncing, handleSync, refetchPushStatus }
+  const handleCommit = useCallback(async (message: string): Promise<boolean> => {
+    if (!currentProjectId || committingProjects.has(currentProjectId)) return false
+    const projectId = currentProjectId
+    const toast = useToastStore.getState()
+    setCommittingProjects((prev) => new Set(prev).add(projectId))
+    try {
+      const result = await api.default.commitRepository(projectId, { message })
+      if (currentProjectIdRef.current === projectId) setPushStatus(result)
+      toast.show({ message: 'Committed local changes', type: 'success' })
+      return true
+    } catch (err) {
+      toast.show({ message: `Commit failed: ${formatError(err)}`, type: 'error', duration: 6000 })
+      return false
+    } finally {
+      setCommittingProjects((prev) => {
+        const next = new Set(prev)
+        next.delete(projectId)
+        return next
+      })
+      refetchPushStatus()
+    }
+  }, [currentProjectId, committingProjects, refetchPushStatus, setPushStatus])
+
+  return { pushStatus, syncing, handleSync, committing, handleCommit, refetchPushStatus }
 }

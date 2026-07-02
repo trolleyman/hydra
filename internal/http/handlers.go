@@ -989,6 +989,13 @@ func (s *Server) SaveConfig(_ context.Context, request api.SaveConfigRequestObje
 		s.Services.RestartProject(projectRoot)
 	}
 
+	// A project-scope save just dirtied .hydra/config.toml in the project root;
+	// nudge clients so the sidebar's uncommitted-changes warning appears
+	// immediately rather than on the next fallback poll.
+	if scope == api.SaveConfigParamsScopeProject {
+		s.Events.PushStatusChanged(projectRoot)
+	}
+
 	return api.SaveConfig200Response{}, nil
 }
 

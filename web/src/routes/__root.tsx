@@ -18,6 +18,7 @@ import { ChevronDown, ChevronRight, FolderGit2, Settings, LoaderCircle, PanelLef
 import { useApplyTheme } from '../lib/theme'
 import { useSidebarStore, SIDEBAR_OVERLAY_QUERY } from '../lib/sidebar'
 import { AgentSidebarItem } from '../components/AgentComponents'
+import { UncommittedChip } from '../components/UncommittedChip'
 import { SpawnForm } from '../components/SpawnForm'
 import { ProjectDropdown } from '../components/ProjectDropdown'
 
@@ -273,7 +274,7 @@ function RootLayout() {
   // refetches are wired into the single events stream below so a push triggers a
   // fetch without restarting the hooks.
   const { refetchAgents } = useAgentPolling(currentProjectId)
-  const { pushStatus, syncing, handleSync, refetchPushStatus } = usePushStatus(currentProjectId)
+  const { pushStatus, syncing, handleSync, committing, handleCommit, refetchPushStatus } = usePushStatus(currentProjectId)
   const { sentinelRef: archivedSentinelRef } = useArchivedAgents(currentProjectId)
   useAgentNotifications(currentProjectId)
   const { refetchStatus, development, spawnedAt } = useSystemStatus()
@@ -667,6 +668,16 @@ function RootLayout() {
                       <FolderGit2 className="w-4 h-4 shrink-0" />
                       Repository
                     </button>
+                    {/* Uncommitted-changes warning: the project checkout is dirty
+                        (e.g. a Settings save rewrote .hydra/config.toml). Click to
+                        review the paths and commit them all. */}
+                    {pushStatus && pushStatus.uncommitted.total > 0 && (
+                      <UncommittedChip
+                        uncommitted={pushStatus.uncommitted}
+                        committing={committing}
+                        onCommit={handleCommit}
+                      />
+                    )}
                     {/* Ahead/behind status indicator (read-only) */}
                     {(behind > 0 || ahead > 0) && (
                       <Tooltip content={statusTooltip} className="shrink-0">
