@@ -51,9 +51,9 @@ func TestListUncommittedFilesAndCommitAll(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListUncommittedFiles (dirty): %v", err)
 	}
-	got := map[string]string{}
+	got := map[string]UncommittedFile{}
 	for _, f := range files {
-		got[f.Path] = f.Status
+		got[f.Path] = f
 	}
 	want := map[string]string{
 		"a.txt":              "modified",
@@ -61,32 +61,55 @@ func TestListUncommittedFilesAndCommitAll(t *testing.T) {
 		"new name.txt":       "renamed",
 	}
 	for path, status := range want {
-		if got[path] != status {
-			t.Errorf("expected %q => %q, got %q (all: %v)", path, status, got[path], got)
+		if got[path].Status != status {
+			t.Errorf("expected %q => %q, got %q (all: %v)", path, status, got[path].Status, got)
 		}
 	}
 	if len(files) != len(want) {
 		t.Errorf("expected %d entries, got %+v", len(want), files)
 	}
+	if got["new name.txt"].OrigPath != "old name.txt" {
+		t.Errorf("expected rename OrigPath %q, got %q", "old name.txt", got["new name.txt"].OrigPath)
+	}
 
-	// CommitAll sweeps everything into one commit and leaves the tree clean.
-	if err := CommitAll(dir, "commit local changes", "", ""); err != nil {
-		t.Fatalf("CommitAll: %v", err)
+	// A pathspec-limited commit takes only the requested files — the rename
+	// entry carries both its endpoints — and leaves the rest dirty.
+	if err := CommitFiles(dir, "move file", []UncommittedFile{got["new name.txt"]}, "", ""); err != nil {
+		t.Fatalf("CommitFiles (rename): %v", err)
+	}
+	files, err = ListUncommittedFiles(dir)
+	if err != nil {
+		t.Fatalf("ListUncommittedFiles (after rename commit): %v", err)
+	}
+	got = map[string]UncommittedFile{}
+	for _, f := range files {
+		got[f.Path] = f
+	}
+	if len(files) != 2 || got["a.txt"].Status != "modified" || got[".hydra/config toml"].Status != "untracked" {
+		t.Fatalf("expected only a.txt + .hydra/config toml left dirty, got %+v", files)
+	}
+
+	// Committing the remaining paths leaves the tree clean.
+	if err := CommitFiles(dir, "commit local changes", []UncommittedFile{got["a.txt"], got[".hydra/config toml"]}, "", ""); err != nil {
+		t.Fatalf("CommitFiles: %v", err)
 	}
 	files, err = ListUncommittedFiles(dir)
 	if err != nil {
 		t.Fatalf("ListUncommittedFiles (after commit): %v", err)
 	}
 	if len(files) != 0 {
-		t.Fatalf("expected clean repo after CommitAll, got %+v", files)
+		t.Fatalf("expected clean repo after CommitFiles, got %+v", files)
 	}
 
-	// An empty message is rejected before touching the index.
-	if err := CommitAll(dir, "  ", "", ""); err == nil {
-		t.Fatal("expected CommitAll with blank message to fail")
+	// An empty message or file list is rejected before touching the index.
+	if err := CommitFiles(dir, "  ", []UncommittedFile{{Path: "a.txt"}}, "", ""); err == nil {
+		t.Fatal("expected CommitFiles with blank message to fail")
 	}
-	// Nothing to commit is an error (git exits non-zero).
-	if err := CommitAll(dir, "empty", "", ""); err == nil {
-		t.Fatal("expected CommitAll with a clean tree to fail")
+	if err := CommitFiles(dir, "empty", nil, "", ""); err == nil {
+		t.Fatal("expected CommitFiles with no paths to fail")
+	}
+	// A path with nothing to commit is an error (git exits non-zero).
+	if err := CommitFiles(dir, "clean", []UncommittedFile{{Path: "a.txt"}}, "", ""); err == nil {
+		t.Fatal("expected CommitFiles on a clean path to fail")
 	}
 }

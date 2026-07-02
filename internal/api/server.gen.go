@@ -531,6 +531,9 @@ type CommitInfo struct {
 type CommitRepositoryRequest struct {
 	// Message The commit message; must be non-blank
 	Message string `json:"message"`
+
+	// Paths Repo-relative paths to commit, as reported by the push-status uncommitted file list; must be non-empty
+	Paths []string `json:"paths"`
 }
 
 // ConfigResponse defines model for ConfigResponse.
@@ -1519,7 +1522,7 @@ type ServerInterface interface {
 	// List the branches available for the project's repository
 	// (GET /api/projects/{project_id}/repository/branches)
 	GetRepositoryBranches(w http.ResponseWriter, r *http.Request, projectId string)
-	// Commit all uncommitted changes in the project root
+	// Commit the given uncommitted paths in the project root
 	// (POST /api/projects/{project_id}/repository/commit)
 	CommitRepository(w http.ResponseWriter, r *http.Request, projectId string)
 	// Diff two refs in the project's repository
@@ -5161,7 +5164,7 @@ type StrictServerInterface interface {
 	// List the branches available for the project's repository
 	// (GET /api/projects/{project_id}/repository/branches)
 	GetRepositoryBranches(ctx context.Context, request GetRepositoryBranchesRequestObject) (GetRepositoryBranchesResponseObject, error)
-	// Commit all uncommitted changes in the project root
+	// Commit the given uncommitted paths in the project root
 	// (POST /api/projects/{project_id}/repository/commit)
 	CommitRepository(ctx context.Context, request CommitRepositoryRequestObject) (CommitRepositoryResponseObject, error)
 	// Diff two refs in the project's repository

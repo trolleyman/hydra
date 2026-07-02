@@ -13,6 +13,9 @@ import (
 type UncommittedFile struct {
 	Path   string
 	Status string // modified|added|deleted|renamed|copied|conflicted|untracked
+	// OrigPath is the source of a staged rename/copy ("" otherwise). A commit
+	// of Path must sweep it in too, or the rename's deletion half stays behind.
+	OrigPath string
 }
 
 // ListUncommittedFiles returns every path in the repository at dir with
@@ -33,12 +36,16 @@ func ListUncommittedFiles(dir string) ([]UncommittedFile, error) {
 			continue
 		}
 		x, y := e[0], e[1]
-		files = append(files, UncommittedFile{Path: e[3:], Status: statusLabel(x, y)})
+		f := UncommittedFile{Path: e[3:], Status: statusLabel(x, y)}
 		// A rename/copy entry is followed by the original path as its own
 		// NUL-separated field; it belongs to this entry, not the next one.
 		if x == 'R' || x == 'C' || y == 'R' || y == 'C' {
 			i++
+			if i < len(entries) {
+				f.OrigPath = entries[i]
+			}
 		}
+		files = append(files, f)
 	}
 	return files, nil
 }
@@ -69,15 +76,33 @@ func statusLabel(x, y byte) string {
 	}
 }
 
-// CommitAll stages every change in the repository at dir (tracked and
-// untracked) and commits it with the given message. The author/committer
-// identity falls back to Hydra's like Merge, so it works even when the host
-// has no git identity configured.
-func CommitAll(dir, message, authorName, authorEmail string) error {
+// CommitFiles stages exactly the given dirty files (tracked and untracked,
+// including deletions) in the repository at dir and commits them with the
+// given message. Other dirty or already-staged paths are left alone — the
+// commit itself is pathspec-limited, so unrelated staged content doesn't get
+// swept in. A staged rename's OrigPath goes into the commit pathspec only
+// (its deletion is already staged; the path no longer exists to `git add`).
+// The author/committer identity falls back to Hydra's like Merge, so it works
+// even when the host has no git identity configured.
+func CommitFiles(dir, message string, files []UncommittedFile, authorName, authorEmail string) error {
 	if strings.TrimSpace(message) == "" {
 		return errtrace.Wrap(fmt.Errorf("commit message must not be empty"))
 	}
-	if _, err := gitOutput(dir, "add", "-A"); err != nil {
+	if len(files) == 0 {
+		return errtrace.Wrap(fmt.Errorf("no paths to commit"))
+	}
+	// :(literal) turns off glob/magic interpretation so a path containing *, ?
+	// or a leading : is matched byte-for-byte.
+	addSpecs := make([]string, 0, len(files))
+	commitSpecs := make([]string, 0, len(files))
+	for _, f := range files {
+		addSpecs = append(addSpecs, ":(literal)"+f.Path)
+		commitSpecs = append(commitSpecs, ":(literal)"+f.Path)
+		if f.OrigPath != "" {
+			commitSpecs = append(commitSpecs, ":(literal)"+f.OrigPath)
+		}
+	}
+	if _, err := gitOutput(dir, append([]string{"add", "-A", "--"}, addSpecs...)...); err != nil {
 		return errtrace.Wrap(err)
 	}
 	if authorName == "" {
@@ -86,7 +111,7 @@ func CommitAll(dir, message, authorName, authorEmail string) error {
 	if authorEmail == "" {
 		authorEmail = "hydra@trolleyman.org"
 	}
-	cmd := exec.Command("git", "-C", dir, "commit", "-q", "-m", message)
+	cmd := exec.Command("git", append([]string{"-C", dir, "commit", "-q", "-m", message, "--"}, commitSpecs...)...)
 	cmd.Env = append(os.Environ(),
 		"GIT_AUTHOR_NAME="+authorName,
 		"GIT_AUTHOR_EMAIL="+authorEmail,

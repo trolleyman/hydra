@@ -15,9 +15,9 @@ export interface PushStatus {
   handleSync: () => Promise<void>
   // True while the selected project has an in-flight commit.
   committing: boolean
-  // Commit every uncommitted change in the project root with the given message.
-  // Resolves true on success (failures toast and resolve false).
-  handleCommit: (message: string) => Promise<boolean>
+  // Commit the given uncommitted paths in the project root with the given
+  // message. Resolves true on success (failures toast and resolve false).
+  handleCommit: (message: string, paths: string[]) => Promise<boolean>
   // Stable refetch handle — wire into the caller's events stream.
   refetchPushStatus: () => void
 }
@@ -82,15 +82,18 @@ export function usePushStatus(currentProjectId: string | null): PushStatus {
     }
   }, [currentProjectId, syncingProjects, refetchPushStatus, setPushStatus])
 
-  const handleCommit = useCallback(async (message: string): Promise<boolean> => {
+  const handleCommit = useCallback(async (message: string, paths: string[]): Promise<boolean> => {
     if (!currentProjectId || committingProjects.has(currentProjectId)) return false
     const projectId = currentProjectId
     const toast = useToastStore.getState()
     setCommittingProjects((prev) => new Set(prev).add(projectId))
     try {
-      const result = await api.default.commitRepository(projectId, { message })
+      const result = await api.default.commitRepository(projectId, { message, paths })
       if (currentProjectIdRef.current === projectId) setPushStatus(result)
-      toast.show({ message: 'Committed local changes', type: 'success' })
+      toast.show({
+        message: `Committed ${paths.length} file${paths.length === 1 ? '' : 's'}`,
+        type: 'success',
+      })
       return true
     } catch (err) {
       toast.show({ message: `Commit failed: ${formatError(err)}`, type: 'error', duration: 6000 })

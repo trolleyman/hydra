@@ -1030,8 +1030,8 @@ export class DefaultService {
         });
     }
     /**
-     * Commit all uncommitted changes in the project root
-     * Stages every change in the project root's working tree (tracked and untracked) and commits it with the given message. Backs the sidebar's uncommitted-changes warning, whose main job is sweeping up config edits the web UI itself writes to .hydra/config.toml. Returns the refreshed push status (uncommitted normally back to empty, ahead bumped by one).
+     * Commit the given uncommitted paths in the project root
+     * Stages exactly the requested paths (tracked and untracked) and commits them with the given message; other dirty paths are left untouched. Backs the sidebar's uncommitted-changes warning, whose main job is sweeping up config edits the web UI itself writes to .hydra/config.toml — the UI sends the paths it showed the user. Requested paths that are no longer dirty are skipped. Returns the refreshed push status.
      * @param projectId Project ID
      * @param requestBody
      * @returns RepositoryPushStatus OK (changes committed)
@@ -1050,7 +1050,7 @@ export class DefaultService {
             body: requestBody,
             mediaType: 'application/json',
             errors: {
-                400: `Bad Request (nothing to commit or empty message)`,
+                400: `Bad Request (no paths given, none still dirty, or empty message)`,
                 404: `Project Not Found`,
                 500: `Internal Server Error (e.g. the commit itself failed)`,
             },

@@ -1,21 +1,22 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { AlertTriangle, Loader2 } from 'lucide-react'
+import { HighlightedTextarea } from './HighlightedTextarea'
 import type { RepositoryUncommittedChanges } from '../api'
 
 // ── Uncommitted-changes warning chip ───────────────────────────────────────────
 // Sits next to the sidebar's Repository button when the project root's working
 // tree is dirty — most often because saving Settings rewrote .hydra/config.toml.
 // Clicking it opens a popover listing the dirty paths with a prefilled commit
-// message and a one-click "Commit all".
+// message and a "Commit" that commits exactly the listed paths.
 
 // Default commit message: name the file when there's exactly one (the common
 // config-save case), otherwise just say how many paths are being swept up.
 function suggestedMessage(uncommitted: RepositoryUncommittedChanges): string {
-  if (uncommitted.total === 1 && uncommitted.files.length === 1) {
+  if (uncommitted.files.length === 1) {
     return `Update ${uncommitted.files[0].path}`
   }
-  return `Commit ${uncommitted.total} local changes`
+  return `Commit ${uncommitted.files.length} local changes`
 }
 
 export function UncommittedChip({
@@ -25,15 +26,15 @@ export function UncommittedChip({
 }: {
   uncommitted: RepositoryUncommittedChanges
   committing: boolean
-  // Commits everything with the given message; resolves true on success so the
-  // popover knows to close (failures toast and leave it open for a retry).
-  onCommit: (message: string) => Promise<boolean>
+  // Commits the given paths with the given message; resolves true on success so
+  // the popover knows to close (failures toast and leave it open for a retry).
+  onCommit: (message: string, paths: string[]) => Promise<boolean>
 }) {
   const [open, setOpen] = useState(false)
   const [message, setMessage] = useState('')
   const triggerRef = useRef<HTMLButtonElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
-  const inputRef = useRef<HTMLInputElement>(null)
+  const inputRef = useRef<HTMLTextAreaElement>(null)
   const [coords, setCoords] = useState<{ left: number; top?: number; bottom?: number } | null>(null)
 
   // Popover geometry, kept in sync with the classes on the portalled box below.
@@ -100,7 +101,10 @@ export function UncommittedChip({
   const submit = async () => {
     const msg = message.trim()
     if (!msg || committing) return
-    if (await onCommit(msg)) setOpen(false)
+    // Commit exactly what the popover shows — with more paths dirty than the
+    // list cap, the rest stay uncommitted (the chip persists with the
+    // remainder, so another round sweeps them).
+    if (await onCommit(msg, uncommitted.files.map((f) => f.path))) setOpen(false)
   }
 
   const label = `${uncommitted.total} uncommitted change${uncommitted.total === 1 ? '' : 's'}`
@@ -142,22 +146,30 @@ export function UncommittedChip({
             ))}
             {uncommitted.total > uncommitted.files.length && (
               <li className="text-xs text-gray-400 dark:text-gray-500">
-                …and {uncommitted.total - uncommitted.files.length} more
+                …and {uncommitted.total - uncommitted.files.length} more, not included in this commit
               </li>
             )}
           </ul>
-          <div className="flex items-center gap-1.5">
-            <input
-              ref={inputRef}
-              type="text"
-              value={message}
-              onChange={(e) => setMessage(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') void submit()
-              }}
-              placeholder="Commit message"
-              className="flex-1 min-w-0 px-2 py-1.5 text-xs rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-100 focus:outline-none focus:ring-1 focus:ring-blue-500"
-            />
+          <HighlightedTextarea
+            ref={inputRef}
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+            onKeyDown={(e) => {
+              // Enter inserts a newline (multi-line commit messages);
+              // Ctrl/Cmd+Enter commits, mirroring the spawn box.
+              if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                e.preventDefault()
+                void submit()
+              }
+            }}
+            placeholder="Commit message"
+            // Both HighlightedTextarea layers are absolutely positioned, so the
+            // wrapper must supply the height (~2 lines + padding).
+            wrapperClassName="w-full h-14 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 focus-within:ring-1 focus-within:ring-blue-500 focus-within:border-blue-500"
+            textClassName="px-2 py-1.5 text-xs leading-relaxed placeholder-gray-400 dark:placeholder-gray-500"
+          />
+          <div className="flex items-center justify-end gap-2">
+            <span className="text-[10px] text-gray-400 dark:text-gray-500 select-none">Ctrl+Enter to commit</span>
             <button
               type="button"
               onClick={() => void submit()}
@@ -168,7 +180,7 @@ export function UncommittedChip({
                   : 'shrink-0 px-2.5 py-1.5 text-xs font-medium rounded-md bg-blue-600 hover:bg-blue-700 text-white transition-colors cursor-pointer'
               }
             >
-              {committing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Commit all'}
+              {committing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Commit'}
             </button>
           </div>
         </div>,

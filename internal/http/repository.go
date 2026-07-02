@@ -507,9 +507,11 @@ func (s *Server) SyncRepository(_ context.Context, request api.SyncRepositoryReq
 	return api.SyncRepository200JSONResponse(final), nil
 }
 
-// CommitRepository sweeps every uncommitted change in the project root into a
-// single commit — the sidebar warning's one-click way to commit config edits
-// the web UI itself wrote to .hydra/config.toml (or any other local changes).
+// CommitRepository commits the requested uncommitted paths in the project root
+// — the sidebar warning's one-click way to commit config edits the web UI
+// itself wrote to .hydra/config.toml (or any other local changes). Only paths
+// the client names (i.e. the ones its popover showed) are committed; anything
+// else dirty is left alone.
 func (s *Server) CommitRepository(_ context.Context, request api.CommitRepositoryRequestObject) (api.CommitRepositoryResponseObject, error) {
 	projectRoot, err := s.resolveProjectRoot(request.ProjectId)
 	if err != nil {
@@ -517,22 +519,40 @@ func (s *Server) CommitRepository(_ context.Context, request api.CommitRepositor
 	}
 
 	var message string
+	requested := map[string]bool{}
 	if request.Body != nil {
 		message = strings.TrimSpace(request.Body.Message)
+		for _, p := range request.Body.Paths {
+			requested[p] = true
+		}
 	}
 	if message == "" {
 		return nil, &apiError{Code: 400, Type: api.ErrorResponseErrorBadRequest, Err: errors.New("commit message must not be empty")} //errtrace:skip
 	}
+	if len(requested) == 0 {
+		return nil, &apiError{Code: 400, Type: api.ErrorResponseErrorBadRequest, Err: errors.New("no files selected to commit")} //errtrace:skip
+	}
+
+	// Re-list and intersect rather than trusting the client's paths verbatim:
+	// this validates them against the actual dirty set (a path that was
+	// committed or reverted in the meantime is just skipped) and recovers each
+	// rename's original path, which the commit pathspec needs.
 	files, err := git.ListUncommittedFiles(projectRoot)
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
-	if len(files) == 0 {
-		return nil, &apiError{Code: 400, Type: api.ErrorResponseErrorBadRequest, Err: errors.New("nothing to commit")} //errtrace:skip
+	commit := files[:0]
+	for _, f := range files {
+		if requested[f.Path] {
+			commit = append(commit, f)
+		}
+	}
+	if len(commit) == 0 {
+		return nil, &apiError{Code: 400, Type: api.ErrorResponseErrorBadRequest, Err: errors.New("nothing to commit: the selected files are no longer modified")} //errtrace:skip
 	}
 
 	authorName, authorEmail := gitConfigVal(projectRoot, "user.name"), gitConfigVal(projectRoot, "user.email")
-	if err := git.CommitAll(projectRoot, message, authorName, authorEmail); err != nil {
+	if err := git.CommitFiles(projectRoot, message, commit, authorName, authorEmail); err != nil {
 		return nil, errtrace.Wrap(err)
 	}
 

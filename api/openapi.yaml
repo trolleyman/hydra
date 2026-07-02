@@ -1544,13 +1544,15 @@ paths:
 
   /api/projects/{project_id}/repository/commit:
     post:
-      summary: Commit all uncommitted changes in the project root
+      summary: Commit the given uncommitted paths in the project root
       description: >-
-        Stages every change in the project root's working tree (tracked and
-        untracked) and commits it with the given message. Backs the sidebar's
-        uncommitted-changes warning, whose main job is sweeping up config edits
-        the web UI itself writes to .hydra/config.toml. Returns the refreshed
-        push status (uncommitted normally back to empty, ahead bumped by one).
+        Stages exactly the requested paths (tracked and untracked) and commits
+        them with the given message; other dirty paths are left untouched.
+        Backs the sidebar's uncommitted-changes warning, whose main job is
+        sweeping up config edits the web UI itself writes to
+        .hydra/config.toml — the UI sends the paths it showed the user.
+        Requested paths that are no longer dirty are skipped. Returns the
+        refreshed push status.
       operationId: commitRepository
       parameters:
         - in: path
@@ -1573,7 +1575,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/RepositoryPushStatus'
         '400':
-          description: Bad Request (nothing to commit or empty message)
+          description: Bad Request (no paths given, none still dirty, or empty message)
           content:
             application/json:
               schema:
@@ -2376,11 +2378,18 @@ components:
 
     CommitRepositoryRequest:
       type: object
-      required: [message]
+      required: [message, paths]
       properties:
         message:
           type: string
           description: The commit message; must be non-blank
+        paths:
+          type: array
+          items:
+            type: string
+          description: >-
+            Repo-relative paths to commit, as reported by the push-status
+            uncommitted file list; must be non-empty
 
     RepositoryArtifactScript:
       type: object
