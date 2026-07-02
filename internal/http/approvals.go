@@ -195,12 +195,15 @@ func resolveSiblingHostApprovals(dir, exceptReqID, host string) {
 }
 
 // rememberApproval appends an approved MCP server / MCP tool / host to the trusted
-// PROJECT config's per-agent allow-list (never the merged user/default config), so
-// it takes effect on the head's next launch. A WebFetch or egress host both go to
-// [sandbox.network] allowed_hosts (one shared list): an egress host also goes live
-// for the current session in the running proxy's allow-list (handled where the proxy
-// reads the Allow decision), and a WebFetch host goes live via gate.AddGrantedHost
-// (see the caller). Any other kind is one-shot and not persisted (default case).
+// PROJECT config (never the merged user/default config), so it takes effect on the
+// head's next launch. MCP grants are agent-specific and go to the per-agent
+// [<agent>.policy]. A WebFetch or egress host both go to the DEFAULTS-level
+// [sandbox.network] allowed_hosts — one shared list applied to every agent, since
+// the egress allow-list is a project-wide posture, not a per-agent capability. An
+// egress host also goes live for the current session in the running proxy's
+// allow-list (handled where the proxy reads the Allow decision), and a WebFetch host
+// goes live via gate.AddGrantedHost (see the caller). Any other kind is one-shot and
+// not persisted (default case).
 func rememberApproval(projectRoot, agentType, kind, target string) error {
 	if target == "" {
 		return nil
@@ -212,24 +215,30 @@ func rememberApproval(projectRoot, agentType, kind, target string) error {
 	if cfg == nil {
 		cfg = &config.Config{}
 	}
-	ac := cfg.Agents[agentType]
 	switch kind {
-	case "mcp":
-		ensurePolicy(&ac).MCPAllowed = appendUnique(ensurePolicy(&ac).MCPAllowed, target)
-	case "mcp_tool":
-		ensurePolicy(&ac).MCPToolsAllowed = appendUnique(ensurePolicy(&ac).MCPToolsAllowed, target)
+	case "mcp", "mcp_tool":
+		// MCP grants stay per-agent: which servers/tools an agent may reach is an
+		// agent-specific capability, so they land in [<agent>.policy].
+		ac := cfg.Agents[agentType]
+		if kind == "mcp" {
+			ensurePolicy(&ac).MCPAllowed = appendUnique(ensurePolicy(&ac).MCPAllowed, target)
+		} else {
+			ensurePolicy(&ac).MCPToolsAllowed = appendUnique(ensurePolicy(&ac).MCPToolsAllowed, target)
+		}
+		if cfg.Agents == nil {
+			cfg.Agents = map[string]config.AgentConfig{}
+		}
+		cfg.Agents[agentType] = ac
 	case "webfetch", "egress":
-		// WebFetch host-gating and egress filtering share one allow-list now, so a
-		// remembered host from either goes to [sandbox.network] allowed_hosts.
-		net := ensureNetwork(&ac)
+		// WebFetch host-gating and egress filtering share one allow-list, and it is
+		// a project-wide egress posture rather than an agent-specific grant, so a
+		// remembered host goes to the DEFAULTS-level [sandbox.network] allowed_hosts
+		// (shared by every agent), NOT [<agent>.sandbox.network].
+		net := ensureNetwork(&cfg.Defaults)
 		net.AllowedHosts = appendUnique(net.AllowedHosts, target)
 	default:
 		return nil // not a rememberable kind
 	}
-	if cfg.Agents == nil {
-		cfg.Agents = map[string]config.AgentConfig{}
-	}
-	cfg.Agents[agentType] = ac
 	return errtrace.Wrap(config.Save(projectRoot, *cfg))
 }
 
@@ -241,8 +250,8 @@ func ensurePolicy(ac *config.AgentConfig) *config.PolicyConfig {
 	return ac.Policy
 }
 
-// ensureNetwork lazily allocates the agent config's sandbox.network section (where
-// the egress allow-list lives).
+// ensureNetwork lazily allocates a config section's sandbox.network (where the
+// egress allow-list lives). Works for both a per-agent config and cfg.Defaults.
 func ensureNetwork(ac *config.AgentConfig) *config.NetworkConfig {
 	if ac.Sandbox == nil {
 		ac.Sandbox = &config.SandboxConfig{}
