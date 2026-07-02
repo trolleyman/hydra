@@ -421,12 +421,22 @@ func BuildCopilotHooks(hydraBin string) ([]byte, error) {
 // --append-system-prompt (applied on resume too). Gemini, Copilot and Codex have
 // no such flag, so for them the instructions are seeded as context files (see
 // seedHead, which also runs on resume) and systemPrompt is ignored here.
-func AgentArgv(agentType AgentType, resume bool, systemPrompt, prompt string) ([]string, error) {
+// AgentArgv builds the command line for an agent CLI. model, when non-empty, is
+// passed as the CLI's --model flag but ONLY on a fresh spawn (resume == false):
+// on resume the flag is omitted so the agent restores whatever model its
+// transcript was saved with and honours any in-session model change (e.g.
+// Claude's /model). Forcing --model on resume would override that and, because
+// each model has its own prompt cache, trigger a full cache-missing re-read of
+// the conversation. Empty model inherits the CLI's own default.
+func AgentArgv(agentType AgentType, resume bool, systemPrompt, prompt, model string) ([]string, error) {
 	switch agentType {
 	case AgentTypeClaude:
 		argv := []string{"claude", "--dangerously-skip-permissions"}
 		if systemPrompt != "" {
 			argv = append(argv, "--append-system-prompt", systemPrompt)
+		}
+		if !resume && model != "" {
+			argv = append(argv, "--model", model)
 		}
 		if resume {
 			// --continue resumes the most recent conversation in the worktree
@@ -440,6 +450,9 @@ func AgentArgv(agentType AgentType, resume bool, systemPrompt, prompt string) ([
 		return argv, nil
 	case AgentTypeGemini:
 		argv := []string{"gemini", "--approval-mode=yolo"}
+		if !resume && model != "" {
+			argv = append(argv, "--model", model)
+		}
 		if resume {
 			// "latest" resumes the most recent session non-interactively.
 			return append(argv, "--resume", "latest"), nil
@@ -450,6 +463,9 @@ func AgentArgv(agentType AgentType, resume bool, systemPrompt, prompt string) ([
 		return argv, nil
 	case AgentTypeCopilot:
 		argv := []string{"copilot", "--yolo"}
+		if !resume && model != "" {
+			argv = append(argv, "--model", model)
+		}
 		if resume {
 			return append(argv, "--resume"), nil
 		}
@@ -465,6 +481,9 @@ func AgentArgv(agentType AgentType, resume bool, systemPrompt, prompt string) ([
 		// flag, so the pre-prompt is seeded as ~/.codex/AGENTS.md (see seedHead)
 		// and systemPrompt is ignored here.
 		argv := []string{"codex", "--dangerously-bypass-approvals-and-sandbox"}
+		if !resume && model != "" {
+			argv = append(argv, "--model", model)
+		}
 		if resume {
 			// `resume --last` continues the most recent recorded session in this
 			// cwd without the interactive session picker.

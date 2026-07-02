@@ -1071,6 +1071,11 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 		ephemeral = *request.Body.Ephemeral
 	}
 
+	var model string
+	if request.Body.Model != nil {
+		model = strings.TrimSpace(*request.Body.Model)
+	}
+
 	// Seed the new head's PTY at the spawning browser's geometry so the agent
 	// renders at the right width from its first paint instead of the classic
 	// 80x24 — those narrow-wrapped bytes can't be re-flowed once a wider client
@@ -1091,6 +1096,7 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 		PrePrompt:     prePrompt,
 		Prompt:        prompt,
 		AgentType:     agentType,
+		Model:         model,
 		BaseBranch:    baseBranch,
 		Ephemeral:     ephemeral,
 		Rows:          rows,

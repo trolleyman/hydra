@@ -306,6 +306,7 @@ type SpawnHeadOptions struct {
 	PrePrompt  string            // pre-prompt
 	Prompt     string            // prompt
 	AgentType  sandbox.AgentType // empty = "claude"
+	Model      string            // model alias for the CLI's --model flag; empty = CLI default
 	BaseBranch string            // empty = current HEAD branch
 	Ephemeral  bool              // if true, a throwaway test agent: torn down on close, not resumed or listed by default
 	Resume     bool              // if true, resume the agent's prior conversation
@@ -447,7 +448,7 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 		return nil, errtrace.Wrap(err)
 	}
 
-	argv, err := sandbox.AgentArgv(opts.AgentType, opts.Resume, opts.PrePrompt, opts.Prompt)
+	argv, err := sandbox.AgentArgv(opts.AgentType, opts.Resume, opts.PrePrompt, opts.Prompt, opts.Model)
 	if err != nil {
 		spawnFail(store, projectRoot, opts.ID, setStatus, err)
 		return nil, errtrace.Wrap(err)
@@ -777,7 +778,9 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 	// Re-apply the writable COW mounts; the per-head upper persists the agent's
 	// earlier overwrites across this resume.
 	cowMounts := buildCowMounts(projectRoot, worktreePath, head.ID, cowPaths, true)
-	argv, err := sandbox.AgentArgv(head.AgentType, true, head.PrePrompt, "")
+	// Resume passes no model: the agent restores the model its transcript was
+	// saved with (and any in-session change), avoiding a cache-missing re-read.
+	argv, err := sandbox.AgentArgv(head.AgentType, true, head.PrePrompt, "", "")
 	if err != nil {
 		return errtrace.Wrap(err)
 	}

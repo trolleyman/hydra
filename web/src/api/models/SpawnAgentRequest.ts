@@ -16,6 +16,10 @@ export type SpawnAgentRequest = {
      */
     agent_type?: string;
     /**
+     * Model the agent CLI should use for this session (e.g. "opus", "sonnet", "haiku" for Claude). Passed as the CLI's --model flag at spawn only; on resume it is omitted so the agent restores the model its transcript was saved with (and honours any in-session /model change). Empty/omitted inherits the CLI's own default.
+     */
+    model?: string;
+    /**
      * Base branch to create the worktree from (defaults to current branch)
      */
     base_branch?: string;

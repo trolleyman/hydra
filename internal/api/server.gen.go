@@ -989,6 +989,9 @@ type SpawnAgentRequest struct {
 	// Id Unique identifier for the agent (slug format, max 40 chars)
 	Id string `json:"id"`
 
+	// Model Model the agent CLI should use for this session (e.g. "opus", "sonnet", "haiku" for Claude). Passed as the CLI's --model flag at spawn only; on resume it is omitted so the agent restores the model its transcript was saved with (and honours any in-session /model change). Empty/omitted inherits the CLI's own default.
+	Model *string `json:"model,omitempty"`
+
 	// Prompt The prompt to give to the agent
 	Prompt *string `json:"prompt,omitempty"`
 

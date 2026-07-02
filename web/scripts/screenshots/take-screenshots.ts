@@ -515,6 +515,11 @@ try {
       // document the live inline-markdown highlighting (and its line-wrapping)
       // in the textarea overlay without driving keystrokes.
       seedPrompt?: string
+      // Seeds the remembered agent→model map (StorageKeys.defaultModel) before
+      // boot, so the spawn form's agent+model picker renders with a model already
+      // selected (the trigger shows its label; the row is checked) — used to
+      // document the model selector without driving clicks through the menu.
+      seedModel?: Record<string, string>
       // Dispatches a real paste of `text` into the full-page spawn textarea
       // (with the upload endpoint stubbed so the chip settles instantly), to
       // document the large-text-paste behavior: a paste over the line threshold
@@ -929,17 +934,24 @@ try {
       // is waiting on you" and reuses the Force merge / Queue merge / Cancel choice —
       // Queue arms merge-when-green so it lands once the agent finishes and is green.
       { name: 'merge-agent-active-dialog', path: '/project/sim-project/agent/agent-approval', viewportOnly: true, click: 'button[aria-label="Merge"]' },
-      // The agent-type picker dropdown, opened on the compact ("mini") spawn box
-      // in the sidebar. The picker is an icon-only trigger (the active agent's
-      // brand mark) that opens a menu listing every agent type as its canonical
-      // brand logo + name (web/src/components/AgentTypeIcon.tsx) — so this shot
-      // documents the brand icons and their accent colours. Captured on an agent
-      // page (not the project landing) so the sidebar's compact box is the only
-      // spawn form on screen — the full-page box would otherwise add a second,
-      // identical "Agent type:" picker and make the click ambiguous. viewportOnly:
-      // the menu is a fixed overlay anchored to the trigger at the top-left, so
-      // the default viewport already frames both the box and the open menu.
-      { name: 'spawn-agent-picker', path: '/project/sim-project/agent/agent-1', viewportOnly: true, click: 'button[aria-label^="Agent type:"]' },
+      // The agent + model picker dropdown, opened on the compact ("mini") spawn
+      // box in the sidebar. The picker is a compact trigger (the active agent's
+      // brand mark + the chosen model's short label) that opens a menu grouping
+      // every agent type with its curated models nested underneath — so agent AND
+      // model are chosen in one gesture (web/src/components/SpawnForm.tsx). This
+      // shot documents the brand icons/accents and the nested model rows.
+      // Captured on an agent page (not the project landing) so the sidebar's
+      // compact box is the only spawn form on screen — the full-page box would
+      // otherwise add a second, identical picker and make the click ambiguous.
+      // viewportOnly: the menu is a fixed overlay anchored to the trigger at the
+      // top-left, so the default viewport already frames both the box and menu.
+      { name: 'spawn-agent-picker', path: '/project/sim-project/agent/agent-1', viewportOnly: true, click: 'button[aria-label^="Agent and model:"]' },
+      // The same picker with a model already selected (seeded Claude → Opus): the
+      // compact trigger shows the model label beside the brand mark, and the open
+      // menu shows the nested per-agent model rows with Opus checked. Documents
+      // the model selector's selected state (the picked model is remembered per
+      // agent type in StorageKeys.defaultModel and pins the CLI's --model at spawn).
+      { name: 'spawn-model-picker', path: '/project/sim-project/agent/agent-1', viewportOnly: true, seedModel: { claude: 'opus' }, click: 'button[aria-label^="Agent and model:"]' },
       // The repository view: a GitHub-style browser with a file/folder tree on
       // the left and the picked file rendered on the right. Simulation mode
       // serves a small mock repo (see internal/http/simulation.go) and opens
@@ -1775,6 +1787,12 @@ try {
               // ignore storage failures
             }
           }, { fullKey: promptDraftKey(SIM_PROJECT, false), compactKey: promptDraftKey(SIM_PROJECT, true), text: pg.seedPrompt })
+        }
+        // Seed the remembered agent→model map so the picker shows a selected model.
+        if (pg.seedModel) {
+          await ctx.addInitScript(({ key, map }) => {
+            try { localStorage.setItem(key, JSON.stringify(map)) } catch { /* ignore */ }
+          }, { key: StorageKeys.defaultModel, map: pg.seedModel })
         }
         // Capture-only: widen the sidebar so the compact spawn box has more
         // horizontal room and its seeded markdown wraps less / reads better.
