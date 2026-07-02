@@ -615,12 +615,16 @@ try {
           argsPreview?: string | null
           crossProject?: string | null
         }
-        // When set, the "<agent> transitioned to <status>" row is rendered.
+        // When set, the "<agent> <before> <status pill> <after>" row is rendered
+        // (mirrors AgentTransitionToastData in the toast store).
         agentTransition?: {
           agentName: string
           agentId: string
           projectId: string
-          status: string
+          status?: string
+          icon?: 'merge-queued'
+          before?: string
+          after?: string
           projectName?: string | null
         }
       }
@@ -667,6 +671,48 @@ try {
           type: 'success',
           agentTransition: { agentName: 'Add renameable agent titles', agentId: 'agent-md', projectId: 'sim-project', status: 'finished' },
         },
+      },
+      // 2b. Merge-lifecycle toasts (AgentDetail armMerge/executeMerge + the
+      // background auto-merge detector in agentStore): the same agent card, with
+      // the pill/copy describing the merge instead of a status transition.
+      // Queued (auto-merge armed) — text-only row (no pill), with the emerald
+      // "merge queued" Clock tile instead of the bot.
+      {
+        name: 'toast-merge-queued',
+        path: '/settings',
+        toast: {
+          message: 'Will merge "Add renameable agent titles" into main when it finishes and its tests pass',
+          type: 'info',
+          agentTransition: { agentName: 'Add renameable agent titles', agentId: 'agent-md', projectId: 'sim-project', icon: 'merge-queued', before: 'will merge into `main` when it finishes and tests pass' },
+        },
+      },
+      // In-flight merge — persistent (dismissed when the POST settles), green
+      // "merging" pill leading the row.
+      {
+        name: 'toast-merging',
+        path: '/settings',
+        toast: {
+          message: 'Merging agent "Add renameable agent titles" into main…',
+          type: 'info',
+          agentTransition: { agentName: 'Add renameable agent titles', agentId: 'agent-md', projectId: 'sim-project', status: 'merging', before: '', after: 'into `main`…' },
+        },
+      },
+      // Merge landed — green "merged" pill (also what a background auto-merge pops).
+      {
+        name: 'toast-merged',
+        path: '/settings',
+        toast: {
+          message: 'Agent "Add renameable agent titles" merged into main',
+          type: 'success',
+          agentTransition: { agentName: 'Add renameable agent titles', agentId: 'agent-md', projectId: 'sim-project', status: 'merged', before: '', after: 'into `main`' },
+        },
+      },
+      // 2c. A plain message toast with a `backtick` branch pill — the sidebar
+      // Sync button's success toast (usePushStatus).
+      {
+        name: 'toast-synced',
+        path: '/settings',
+        toast: { message: 'Synced with `origin/main`', type: 'success' },
       },
       // 3. Security-gate approval cards (the rich ApprovalCard): persistent, with
       // Allow once / Always allow / Deny; dismissing denies. These are the ONLY

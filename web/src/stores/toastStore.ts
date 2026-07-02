@@ -29,16 +29,27 @@ export interface ApprovalToastData {
 }
 
 // Structured payload for an agent status-transition toast (an agent crossing
-// into needs_input / finished). The renderer draws a "<bot> <agent> transitioned
-// to <status pill>" row whose agent label links through to the agent — so there's
-// no separate "View" button.
+// into needs_input / finished) — also reused by the merge-lifecycle toasts
+// (queued / merging / merged), which want the same visual identity. The renderer
+// draws a "<bot> <agent> <before> <status pill> <after>" row whose agent label
+// links through to the agent — so there's no separate "View" button.
 export interface AgentTransitionToastData {
   // The agent's title (the clickable label) + where it lives (for the link).
   agentName: string
   agentId: string
   projectId: string
-  // The raw status the agent crossed into, rendered as the standard status pill.
-  status: string
+  // The status rendered as the standard status pill (also 'merged', which only
+  // exists as a pill on these toasts). Omit it for a text-only row.
+  status?: string
+  // Icon-tile override: 'merge-queued' swaps the bot for the emerald Clock the
+  // armed merge pill / queue-merge button use. Defaults to the bot.
+  icon?: 'merge-queued'
+  // Copy before the pill. Defaults to 'transitioned to'; pass '' to lead with
+  // the pill ("[merging] into `main`…"). Like `message`, `backtick` spans render
+  // as inline mono branch pills.
+  before?: string
+  // Copy after the pill, e.g. the merge target ("into `main`").
+  after?: string
   // Set when the agent runs in a DIFFERENT project than the one in view — shown
   // as a muted suffix so the toast still says where it happened.
   projectName?: string | null
@@ -56,6 +67,8 @@ export interface ToastAction {
 
 export interface Toast {
   id: number
+  // The toast copy. `backtick` spans render as inline mono branch pills
+  // ("Synced with `origin/main`"); unpaired backticks stay literal.
   message: string
   type: ToastType
   // Total lifetime in ms before the toast auto-dismisses. 0 = persistent (the
