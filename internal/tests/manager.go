@@ -499,9 +499,20 @@ func (m *Manager) setTestTotal(dir string, total int) {
 	m.setProgressLocked(dir, lr.progressText())
 }
 
+// declaredTotal is the ::hydra:test:total:: denominator, floored at the cases
+// seen so far: a runner can only declare what it knows upfront (Go subtests
+// aren't listable), so an overshooting count grows the denominator instead of
+// rendering "130/121". 0 = no total declared.
+func (lr *liveRun) declaredTotal() int {
+	if lr.total <= 0 {
+		return 0
+	}
+	return max(lr.total, len(lr.cases))
+}
+
 func (lr *liveRun) progressText() string {
-	if lr.total > 0 {
-		return fmt.Sprintf("%d/%d", len(lr.cases), lr.total)
+	if total := lr.declaredTotal(); total > 0 {
+		return fmt.Sprintf("%d/%d", len(lr.cases), total)
 	}
 	return fmt.Sprintf("%d", len(lr.cases))
 }
@@ -523,7 +534,7 @@ func (m *Manager) flushCountsLocked(dir string) {
 	}
 	counts := &RunningCounts{
 		Passed: lr.passed, Failed: lr.failed, Skipped: lr.skipped, Warnings: lr.warnings,
-		Total: lr.total,
+		Total: lr.declaredTotal(),
 		Cases: lr.pending,
 	}
 	lr.pending = nil
@@ -547,8 +558,8 @@ func (m *Manager) fillRunningLocked(dir string, rep *Report) {
 	}
 	rep.Cases = append([]TestCase(nil), lr.cases...)
 	rep.Passed, rep.Failed, rep.Skipped, rep.Warnings = lr.passed, lr.failed, lr.skipped, lr.warnings
-	if lr.total > 0 {
-		rep.Total = lr.total
+	if total := lr.declaredTotal(); total > 0 {
+		rep.Total = total
 	} else {
 		rep.Total = len(lr.cases)
 	}

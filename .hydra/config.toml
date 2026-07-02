@@ -220,9 +220,14 @@ timeout_sec = 900
 ## becomes one literal backslash. Any other escape is left as-is.
 [[tests]]
 # Go test suite (type = "stdout": streams per-case results into the panel live via
-# ::hydra:test:*:: markers). `go test -json ./...` is piped through
-# scripts/gotest-markers, which turns each test's JSON event into a marker (package
-# import path as the location — Hydra strips the go.mod prefix — subtests as scope).
+# ::hydra:test:*:: markers). A first `go test -json -list '.*'` pass is counted by
+# `gotest-markers -total` into the ::hydra:test:total:: progress denominator (the
+# build is paid once — the real run reuses the cache; `|| true` so a build break is
+# reported by the real run, not swallowed by pipefail here). Then `go test -json
+# ./...` is piped through scripts/gotest-markers, which turns each test's JSON
+# event into a marker (package import path as the location — Hydra strips the
+# go.mod prefix — subtests as scope) and passes the `ok pkg` / `FAIL pkg` summary
+# lines through to the build log.
 # No global/mise install needed — it builds from the module cache wherever `go`
 # works. The whole module is slow, so allow a generous timeout. (web/dist is kept
 # present in every checkout via a committed web/dist/.gitkeep, so the //go:embed
@@ -232,14 +237,16 @@ timeout_sec = 900
 # change — unwrapped error returns and unused //errtrace:skip directives —
 # informational only; they never gate the merge.
 name = "go"
-command = "go test -json ./... | go run ./scripts/gotest-markers && go run ./scripts/errtrace-report"
+command = "{ go test -json -list '.*' ./... || true; } | go run ./scripts/gotest-markers -total && go test -json ./... | go run ./scripts/gotest-markers && go run ./scripts/errtrace-report"
 timeout_sec = 900
 type = "stdout"
 
 [[tests]]
 # Frontend vitest suite (type = "stdout": streams per-spec results into the panel
 # live via ::hydra:test:*:: markers) using the scripts/hydra-reporter.ts vitest
-# reporter, plus an ESLint pass whose findings surface on the same verdict:
+# reporter — it also declares a ::hydra:test:total:: denominator as modules are
+# collected and echoes per-file ok/FAIL lines into the build log — plus an ESLint
+# pass whose findings surface on the same verdict:
 # eslint-report.ts emits fail markers for errors (which gate the merge like a
 # failing test) and ⚠ warn markers for warnings (informational only). Lint runs
 # only once the specs pass (the merge is already blocked when they don't).

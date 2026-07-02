@@ -8,7 +8,13 @@
 // path); the describe chain becomes the scope, the `it` name is the leaf. It uses
 // vitest 4's reporter API — `onTestCaseResult` fires as each case finishes, so
 // counts tick live rather than all-at-once.
-import type { Reporter, TestCase, TestSuite } from 'vitest/node'
+//
+// A cumulative ::hydra:test:total:: is emitted as each module's cases are
+// collected (collection runs well ahead of execution), so the panel gets a
+// progress denominator early; the final count re-emits it at the end. Plain
+// per-file `ok/FAIL` summary lines go to stdout too — markers are kept out of
+// Hydra's build log, so these are what make it non-empty.
+import type { Reporter, TestCase, TestModule, TestSuite } from 'vitest/node'
 
 function esc(s: string): string {
   return s
@@ -34,12 +40,18 @@ function verbFor(state: string): string | undefined {
 }
 
 export default class HydraReporter implements Reporter {
-  private total = 0
+  private finished = 0
+  private declared = 0
+
+  onTestModuleCollected(module: TestModule): void {
+    this.declared += Array.from(module.children.allTests()).length
+    console.log(`::hydra:test:total:: ${this.declared}`)
+  }
 
   onTestCaseResult(testCase: TestCase): void {
     const verb = verbFor(testCase.result().state)
     if (!verb) return
-    this.total++
+    this.finished++
 
     // Walk the suite chain (describe blocks) up to the module for the scope.
     const scope: string[] = []
@@ -56,7 +68,13 @@ export default class HydraReporter implements Reporter {
     console.log(line)
   }
 
+  onTestModuleEnd(module: TestModule): void {
+    const n = Array.from(module.children.allTests()).length
+    const verdict = module.state() === 'failed' ? 'FAIL' : 'ok'
+    console.log(`${verdict}  web/${module.relativeModuleId} (${n} tests)`)
+  }
+
   onTestRunEnd(): void {
-    console.log(`::hydra:test:total:: ${this.total}`)
+    console.log(`::hydra:test:total:: ${this.finished}`)
   }
 }

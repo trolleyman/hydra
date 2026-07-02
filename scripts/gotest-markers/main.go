@@ -11,13 +11,25 @@
 //
 // It exits non-zero when any test failed (mirroring `go test`), so the usual
 // `... | gotest-markers && <next>` chaining still gates the follow-up step.
+// The go tool's own package summary lines (`ok pkg 0.3s` / `FAIL pkg` /
+// `? pkg [no test files]`) are passed through as plain stdout, so the runner's
+// build log shows per-package progress instead of being empty (markers are
+// protocol, kept out of the log by Hydra).
+//
+// With -total it instead reads a `go test -json -list '.*'` stream, counts the
+// listed test functions and emits a single ::hydra:test:total:: marker — the
+// progress denominator. Subtests can't be known upfront so the count is a
+// floor; Hydra treats an overshooting denominator gracefully. It always exits
+// 0: a build failure here is surfaced by the real run that follows.
 package main
 
 import (
 	"bufio"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 
 	"braces.dev/errtrace"
@@ -32,15 +44,61 @@ type event struct {
 }
 
 func main() {
+	total := flag.Bool("total", false, "count tests from a `go test -json -list '.*'` stream and emit a ::hydra:test:total:: marker")
+	flag.Parse()
+	run := runTests
+	if *total {
+		run = runTotal
+	}
 	if err := run(); err != nil {
 		fmt.Fprintf(os.Stderr, "gotest-markers: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-func run() error {
+// newScanner wraps stdin with a line scanner sized for noisy test output.
+func newScanner() *bufio.Scanner {
 	sc := bufio.NewScanner(os.Stdin)
 	sc.Buffer(make([]byte, 0, 1<<20), 32<<20) // large lines: a test may print a lot
+	return sc
+}
+
+// listedTestRe matches one `go test -list` output line: a bare Test/Fuzz
+// function name (they arrive as package-level output events). Benchmarks are
+// excluded — they don't run without -bench — and Examples too: one without an
+// output comment never runs, and an undercount only overshoots the denominator,
+// which Hydra clamps, while an overcount would leave progress stuck short of
+// 100%.
+var listedTestRe = regexp.MustCompile(`^(Test|Fuzz)\S*$`)
+
+// runTotal implements -total: count the test functions a `go test -json -list`
+// stream declares and emit the ::hydra:test:total:: denominator. Build failures
+// are ignored (exit 0) — the real test run right after reports them properly.
+func runTotal() error {
+	sc := newScanner()
+	n := 0
+	for sc.Scan() {
+		line := sc.Bytes()
+		if len(line) == 0 || line[0] != '{' {
+			continue
+		}
+		var e event
+		if err := json.Unmarshal(line, &e); err != nil {
+			continue
+		}
+		if e.Action == "output" && e.Test == "" && listedTestRe.MatchString(strings.TrimSpace(e.Output)) {
+			n++
+		}
+	}
+	if err := sc.Err(); err != nil {
+		return errtrace.Wrap(err)
+	}
+	fmt.Printf("::hydra:test:total:: %d\n", n)
+	return nil
+}
+
+func runTests() error {
+	sc := newScanner()
 
 	testOut := map[string][]string{} // package\x00test -> output lines
 	pkgOut := map[string][]string{}  // package -> package-level output lines
@@ -76,6 +134,12 @@ func run() error {
 		// Package-level record (Test == "").
 		switch e.Action {
 		case "output":
+			// Pass the go tool's own summary lines (`ok pkg 0.3s`, `FAIL pkg`,
+			// `? pkg [no test files]`) through as plain stdout: markers are kept
+			// out of Hydra's build log, so these are what make it non-empty.
+			if isPkgSummary(e.Output) {
+				fmt.Print(e.Output)
+			}
 			pkgOut[e.Package] = append(pkgOut[e.Package], e.Output)
 		case "fail":
 			failed = true
@@ -110,6 +174,15 @@ func emitTest(e event, out []string) {
 		line += " | " + msg
 	}
 	fmt.Println(line)
+}
+
+// isPkgSummary reports whether a package-level output line is one of the go
+// tool's per-package verdict lines. The exact prefixes (with their padding) are
+// what cmd/go prints, so a test binary's own stray output can't false-match.
+func isPkgSummary(out string) bool {
+	return strings.HasPrefix(out, "ok  \t") ||
+		strings.HasPrefix(out, "FAIL\t") ||
+		strings.HasPrefix(out, "?   \t")
 }
 
 // cleanMsg joins a test's captured output into a single message, dropping the
