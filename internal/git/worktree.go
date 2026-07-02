@@ -90,6 +90,15 @@ func CreateWorktree(projectRoot, worktreePath, branchName, baseBranch string) er
 	return nil
 }
 
+// BranchExists reports whether the given local branch exists in the repository.
+func BranchExists(projectRoot, branchName string) bool {
+	if err := ValidateRef(branchName); err != nil {
+		return false
+	}
+	_, err := gitOutput(projectRoot, "rev-parse", "--verify", "--quiet", "refs/heads/"+branchName)
+	return err == nil
+}
+
 // ResolveRef resolves a commit-ish ref to its full commit SHA.
 func ResolveRef(projectRoot, ref string) (string, error) {
 	if err := ValidateRef(ref); err != nil {

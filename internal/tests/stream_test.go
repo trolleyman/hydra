@@ -173,6 +173,25 @@ echo "plain log line"
 	}
 }
 
+// The declared ::hydra:test:total:: denominator is a floor, not a cap: a
+// runner can only count what's listable upfront (Go subtests aren't), so when
+// the streamed cases overshoot it the denominator grows instead of the
+// progress rendering "3/2".
+func TestDeclaredTotalIsAFloor(t *testing.T) {
+	lr := &liveRun{total: 2, cases: make([]TestCase, 1)}
+	if got := lr.progressText(); got != "1/2" {
+		t.Errorf("progressText under total = %q, want 1/2", got)
+	}
+	lr.cases = make([]TestCase, 3)
+	if got := lr.progressText(); got != "3/3" {
+		t.Errorf("progressText over total = %q, want 3/3", got)
+	}
+	lr.total = 0
+	if got := lr.progressText(); got != "3" {
+		t.Errorf("progressText without total = %q, want bare count", got)
+	}
+}
+
 // A type=stdout runner that emits no markers falls back to the exit-code
 // verdict, exactly like a junit runner that wrote no report.
 func TestGenerateStreamingNoMarkersFallsBack(t *testing.T) {

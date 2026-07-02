@@ -1014,8 +1014,11 @@ type SpawnAgentRequest struct {
 	// Ephemeral If true, the agent is a throwaway test agent whose worktree and branch are torn down when it stops.
 	Ephemeral *bool `json:"ephemeral,omitempty"`
 
-	// Id Unique identifier for the agent (slug format, max 40 chars)
-	Id string `json:"id"`
+	// Force With an explicit id, take over an ARCHIVED head with the same ID in this project, overwriting its archived record (the `hydra spawn --force` path). Active heads and heads in other projects still conflict.
+	Force *bool `json:"force,omitempty"`
+
+	// Id Explicit identifier for the agent (letters/digits plus ._-, usable as a git branch component). When omitted, the server derives a slug from the prompt and uniquifies it with a -2/-3… suffix, so spawns can never collide. An explicit ID that already exists (active, archived, or in another project) fails with 409 instead of overwriting the existing head.
+	Id *string `json:"id,omitempty"`
 
 	// Model Model the agent CLI should use for this session (e.g. "opus", "sonnet", "haiku" for Claude). Passed as the CLI's --model flag at spawn only; on resume it is omitted so the agent restores the model its transcript was saved with (and honours any in-session /model change). Empty/omitted inherits the CLI's own default.
 	Model *string `json:"model,omitempty"`
@@ -3663,6 +3666,15 @@ type SpawnAgent404JSONResponse ErrorResponse
 func (response SpawnAgent404JSONResponse) VisitSpawnAgentResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type SpawnAgent409JSONResponse ErrorResponse
+
+func (response SpawnAgent409JSONResponse) VisitSpawnAgentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
 
 	return json.NewEncoder(w).Encode(response)
 }

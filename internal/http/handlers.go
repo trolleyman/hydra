@@ -1052,7 +1052,11 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
-	log.Printf("api: spawn agent request: id=%q, type=%v, project=%q", request.Body.Id, request.Body.AgentType, projectRoot)
+	reqID := ""
+	if request.Body.Id != nil {
+		reqID = *request.Body.Id
+	}
+	log.Printf("api: spawn agent request: id=%q, type=%v, project=%q", reqID, request.Body.AgentType, projectRoot)
 	var agentType sandbox.AgentType
 	if request.Body.AgentType != nil && *request.Body.AgentType != "" {
 		agentType = sandbox.AgentType(*request.Body.AgentType)
@@ -1076,7 +1080,15 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 		prompt = strings.TrimSpace(*request.Body.Prompt)
 	}
 
-	id := strings.TrimSpace(request.Body.Id)
+	// The ID is optional: when omitted (the web UI's normal path) SpawnHead
+	// derives a unique slug from the prompt, so spawns can never collide with
+	// an existing head — same project, archived, or another project sharing
+	// the DB.
+	var id string
+	if request.Body.Id != nil {
+		id = strings.TrimSpace(*request.Body.Id)
+	}
+	force := request.Body.Force != nil && *request.Body.Force
 	var baseBranch string
 	if request.Body.BaseBranch != nil {
 		baseBranch = strings.TrimSpace(*request.Body.BaseBranch)
@@ -1115,12 +1127,28 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 		Model:         model,
 		BaseBranch:    baseBranch,
 		Ephemeral:     ephemeral,
+		Replace:       force,
 		Rows:          rows,
 		Cols:          cols,
 		BackgroundCtx: s.BackgroundCtx,
 		OnTitleChange: func() { s.notifyAgentsChanged(projectRoot, false) },
 	})
 	if err != nil {
+		var exists *heads.HeadExistsError
+		if errors.As(err, &exists) {
+			return api.SpawnAgent409JSONResponse{
+				Code:    409,
+				Error:   api.ErrorResponseErrorConflict,
+				Details: exists.Error(),
+			}, nil
+		}
+		if errors.Is(err, heads.ErrInvalidHeadID) {
+			return api.SpawnAgent400JSONResponse{
+				Code:    400,
+				Error:   api.ErrorResponseErrorBadRequest,
+				Details: err.Error(),
+			}, nil
+		}
 		return nil, errtrace.Wrap(err)
 	}
 	s.notifyAgentsChanged(projectRoot, true)
@@ -1575,11 +1603,15 @@ func (s *Server) RestartAgent(ctx context.Context, request api.RestartAgentReque
 	}
 
 	newHead, err := heads.SpawnHead(ctx, s.Sessions, s.DB, projectRoot, heads.SpawnHeadOptions{
-		ID:            id,
-		PrePrompt:     prePrompt,
-		Prompt:        prompt,
-		AgentType:     agentType,
-		BaseBranch:    baseBranch,
+		ID:         id,
+		PrePrompt:  prePrompt,
+		Prompt:     prompt,
+		AgentType:  agentType,
+		BaseBranch: baseBranch,
+		// The kill above just archived this ID; Replace lets the respawn take
+		// the archived record back over instead of failing the ID-collision
+		// check.
+		Replace:       true,
 		BackgroundCtx: s.BackgroundCtx,
 	})
 	if err != nil {
