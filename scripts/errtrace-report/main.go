@@ -3,12 +3,12 @@
 // whose returned errors aren't errtrace-wrapped, and unused //errtrace:skip
 // directives. It is the Go analog of web/scripts/eslint-report.ts.
 //
-// By default it is read-only (errtrace -l) and writes a Hydra-native test report
-// into $HYDRA_TEST_OUTPUT (see internal/tests for the shape) so the findings
-// surface as amber ⚠ warnings on the head's test verdict — informational only,
-// never gating the merge. Run without HYDRA_TEST_OUTPUT it just prints a summary.
-// It exits 0 once the scan completes — the report, not the exit code, carries
-// the findings — so a non-zero exit means errtrace itself could not run.
+// By default it is read-only (errtrace -l) and emits Hydra streaming test
+// markers (::hydra:test:warn:: on stdout, see internal/tests/stream.go) so the
+// findings surface as amber ⚠ warnings on the head's test verdict —
+// informational only, never gating the merge. It exits 0 once the scan
+// completes — the markers, not the exit code, carry the findings — so a non-zero
+// exit means errtrace itself could not run.
 //
 // With -w it instead rewrites the files in place (errtrace -w); `mage tidy`
 // calls it this way so both modes share one file list.
@@ -16,7 +16,6 @@ package main
 
 import (
 	"bytes"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -58,45 +57,25 @@ func run(write bool) error {
 		return errtrace.Wrap(fmt.Errorf("go tool errtrace -l: %w\n%s%s", err, stdout.String(), stderr.String()))
 	}
 
-	type testCase struct {
-		Name    string `json:"name"`
-		Status  string `json:"status"`
-		Message string `json:"message"`
-	}
-	cases := []testCase{}
-
+	warnings := 0
 	// stdout: one path per line — a file whose returned errors errtrace would rewrap.
 	for _, f := range splitLines(stdout.String()) {
-		cases = append(cases, testCase{
-			Name:    "errtrace: " + f,
-			Status:  "warning",
-			Message: "returned errors are not errtrace-wrapped; run `mage tidy`",
-		})
+		fmt.Printf("::hydra:test:warn:: %s › errtrace | returned errors are not errtrace-wrapped; run `mage tidy`\n", f)
+		warnings++
 	}
 	// stderr: "path:line:message" diagnostics, e.g. an unused skip directive.
 	for _, line := range splitLines(stderr.String()) {
 		parts := strings.SplitN(line, ":", 3)
 		if len(parts) == 3 {
-			cases = append(cases, testCase{
-				Name:    fmt.Sprintf("errtrace: %s:%s", parts[0], parts[1]),
-				Status:  "warning",
-				Message: strings.TrimSpace(parts[2]) + "; run `mage tidy` and fix its warnings",
-			})
+			fmt.Printf("::hydra:test:warn:: %s:%s › errtrace | %s; run `mage tidy` and fix its warnings\n",
+				parts[0], parts[1], strings.TrimSpace(parts[2]))
+			warnings++
 		} else {
 			fmt.Fprintln(os.Stderr, line)
 		}
 	}
 
-	if outDir := os.Getenv("HYDRA_TEST_OUTPUT"); outDir != "" {
-		report, err := json.Marshal(map[string]any{"cases": cases})
-		if err != nil {
-			return errtrace.Wrap(err)
-		}
-		if err := os.WriteFile(filepath.Join(outDir, "errtrace.json"), report, 0o644); err != nil {
-			return errtrace.Wrap(err)
-		}
-	}
-	fmt.Printf("errtrace: %d warning(s) across %d files\n", len(cases), len(files))
+	fmt.Printf("errtrace: %d warning(s) across %d files\n", warnings, len(files))
 	return nil
 }
 
