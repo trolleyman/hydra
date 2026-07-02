@@ -8,6 +8,54 @@ import (
 
 func strp(s string) *string { return &s }
 
+// TestAllowedHostsUnionAcrossLayers checks that a per-agent
+// [<agent>.sandbox.network] allowed/blocked-hosts list ADDS to the defaults-level
+// [sandbox.network] list rather than replacing it, and that resolving twice does
+// not mutate the shared defaults (the clone/alias hazard).
+func TestAllowedHostsUnionAcrossLayers(t *testing.T) {
+	cfg := Config{
+		Defaults: AgentConfig{Sandbox: &SandboxConfig{Network: &NetworkConfig{
+			AllowedHosts: []string{"shared.example.com", "dup.example.com"},
+			BlockedHosts: []string{"bad.example.com"},
+		}}},
+		Agents: map[string]AgentConfig{
+			"claude": {Sandbox: &SandboxConfig{Network: &NetworkConfig{
+				AllowedHosts: []string{"claude-only.example.com", "dup.example.com"},
+				BlockedHosts: []string{"worse.example.com"},
+			}}},
+		},
+	}
+
+	_, _, _, _, net, _ := cfg.ResolveSandboxOptions("claude")
+	wantAllowed := []string{"shared.example.com", "dup.example.com", "claude-only.example.com"}
+	if !equalStrings(net.AllowedHosts, wantAllowed) {
+		t.Errorf("claude AllowedHosts = %v, want %v (union, deduped)", net.AllowedHosts, wantAllowed)
+	}
+	wantBlocked := []string{"bad.example.com", "worse.example.com"}
+	if !equalStrings(net.BlockedHosts, wantBlocked) {
+		t.Errorf("claude BlockedHosts = %v, want %v (union)", net.BlockedHosts, wantBlocked)
+	}
+
+	// An agent with no override still sees the defaults list, unchanged by the
+	// earlier claude resolve (no aliasing/mutation of cfg.Defaults).
+	_, _, _, _, other, _ := cfg.ResolveSandboxOptions("gemini")
+	if !equalStrings(other.AllowedHosts, []string{"shared.example.com", "dup.example.com"}) {
+		t.Errorf("gemini AllowedHosts = %v, want the untouched defaults", other.AllowedHosts)
+	}
+}
+
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 // TestResolveFilterHosts covers how the filter_enabled toggle (and its inferred
 // default) resolves into sandbox.NetworkPolicy.FilterHosts.
 func TestResolveFilterHosts(t *testing.T) {

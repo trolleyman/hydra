@@ -89,7 +89,9 @@ type NetworkConfig struct {
 	FilterEnabled *bool `toml:"filter_enabled"`
 	// AllowedHosts is the outbound host allow-list enforced by the egress proxy
 	// when filtering is on (exact host or *.suffix wildcard). Unioned on top of
-	// sandbox.DefaultAllowedHosts.
+	// sandbox.DefaultAllowedHosts, and unioned across config layers (a per-agent
+	// [<agent>.sandbox.network] list adds to the [sandbox.network] one; see
+	// SandboxConfig.Merge).
 	AllowedHosts []string `toml:"allowed_hosts"`
 	// BlockedHosts overrides the effective allow-list (user list + defaults): a
 	// host matching BlockedHosts is denied even if otherwise allowed. Lets a user
@@ -846,11 +848,19 @@ func (s *SandboxConfig) Merge(other SandboxConfig) {
 		if other.Network.FilterEnabled != nil {
 			s.Network.FilterEnabled = other.Network.FilterEnabled
 		}
+		// Host lists UNION across layers (internal defaults → user → project →
+		// per-agent) rather than replacing: a per-agent [<agent>.sandbox.network]
+		// adds to the shared [sandbox.network] list instead of shadowing it, which is
+		// the intuitive model for an allow-list and avoids a per-agent override
+		// silently dropping the broader set. Narrowing is done via BlockedHosts (which
+		// overrides the allow-list), not by shrinking AllowedHosts. unionHosts always
+		// returns a fresh slice, so it never mutates the shared backing array that
+		// clone() leaves aliased on s.Network.
 		if other.Network.AllowedHosts != nil {
-			s.Network.AllowedHosts = other.Network.AllowedHosts
+			s.Network.AllowedHosts = unionHosts(s.Network.AllowedHosts, other.Network.AllowedHosts)
 		}
 		if other.Network.BlockedHosts != nil {
-			s.Network.BlockedHosts = other.Network.BlockedHosts
+			s.Network.BlockedHosts = unionHosts(s.Network.BlockedHosts, other.Network.BlockedHosts)
 		}
 	}
 	if other.PreSpawnScript != nil {
@@ -859,6 +869,24 @@ func (s *SandboxConfig) Merge(other SandboxConfig) {
 	if other.PreExitScript != nil {
 		s.PreExitScript = other.PreExitScript
 	}
+}
+
+// unionHosts returns a fresh slice containing the elements of a followed by any
+// elements of b not already present, preserving order and dropping duplicates. It
+// never aliases or mutates either input, so it is safe to use on the shallowly
+// cloned slices that AgentConfig.clone leaves sharing a backing array.
+func unionHosts(a, b []string) []string {
+	out := make([]string, 0, len(a)+len(b))
+	seen := make(map[string]bool, len(a)+len(b))
+	for _, list := range [][]string{a, b} {
+		for _, v := range list {
+			if !seen[v] {
+				seen[v] = true
+				out = append(out, v)
+			}
+		}
+	}
+	return out
 }
 
 // Load loads the merged configuration for a project.
