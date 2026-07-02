@@ -206,12 +206,14 @@ function RootLayout() {
   // collapse/expand animation.
   const [sidebarResizing, setSidebarResizing] = useState(false)
   // The Archived section's collapse state is per-project (long archives differ
-  // wildly between projects) and persisted; expanded by default. Re-read it when
-  // the selected project changes; absence of the key means expanded.
-  const [archivedCollapsed, setArchivedCollapsed] = useState(false)
+  // wildly between projects) and persisted; collapsed by default so the rarely-
+  // wanted archived history stays out of the way. Re-read it when the selected
+  // project changes; absence of the key means collapsed, and only an explicit
+  // '0' (the user expanded it) keeps it open.
+  const [archivedCollapsed, setArchivedCollapsed] = useState(true)
   useEffect(() => {
-    if (!currentProjectId) { setArchivedCollapsed(false); return }
-    setArchivedCollapsed(readLocal(archivedCollapsedKey(currentProjectId)) === '1')
+    if (!currentProjectId) { setArchivedCollapsed(true); return }
+    setArchivedCollapsed(readLocal(archivedCollapsedKey(currentProjectId)) !== '0')
   }, [currentProjectId])
 
   // Toggle + persist the per-project collapse state. Collapsing hides the whole
@@ -222,7 +224,9 @@ function RootLayout() {
     if (!currentProjectId) return
     const next = !archivedCollapsed
     setArchivedCollapsed(next)
-    writeLocal(archivedCollapsedKey(currentProjectId), next ? '1' : null)
+    // Collapsed is the default, so store nothing for it; only persist an explicit
+    // expand ('0'). Toggling back to collapsed clears the key.
+    writeLocal(archivedCollapsedKey(currentProjectId), next ? null : '0')
     if (next && selectedAgentId && archived.some((a) => a.id === selectedAgentId)) {
       navigate({ to: '/project/$projectId', params: { projectId: currentProjectId } })
     }

@@ -113,8 +113,10 @@ export const agentViewPrefsKey = (projectId: string | null, agentId: string): st
   `${AGENT_VIEW_PREFS_PREFIX}${projectId ?? '_'}-${agentId}`
 
 // Whether the sidebar's "Archived" section is collapsed, per project. Absent =
-// expanded (the default); '1' = collapsed. Per-project so collapsing one
-// project's long archive doesn't hide another's.
+// collapsed (the default — archived history is rarely wanted, so it stays out of
+// the way); '0' = the user explicitly expanded it. (Legacy '1' values from when
+// collapsed was the non-default still read as collapsed.) Per-project so one
+// project's choice doesn't leak into another's.
 export const ARCHIVED_COLLAPSED_PREFIX = 'hydra-archived-collapsed-'
 export const archivedCollapsedKey = (projectId: string): string =>
   `${ARCHIVED_COLLAPSED_PREFIX}${projectId}`
