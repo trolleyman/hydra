@@ -162,11 +162,29 @@ func smokeTest(pasta, nft string) string {
 	if strings.Contains(string(out), token) {
 		return ""
 	}
-	detail := strings.TrimSpace(string(out))
+	detail := stripPastaNoise(strings.TrimSpace(string(out)))
 	if err != nil {
 		return fmt.Sprintf("proxy unreachable from netns (%v): %s", err, detail)
 	}
 	return fmt.Sprintf("proxy unreachable from netns — token not received: %s", detail)
+}
+
+// stripPastaNoise drops pasta's benign stderr chatter so a smoke-test failure
+// reports the real cause instead of burying it. The AVX2 line in particular is
+// emitted on every run when the pasta.avx2 sibling isn't present next to the
+// binary — pasta transparently falls back to the non-AVX2 build — yet it used to
+// lead the failure detail and read as if it were the error. (Bundling the
+// pasta.avx2 sibling, as `mage tools:ensure` does, silences it at the source; this
+// keeps logs clean for a system pasta too.)
+func stripPastaNoise(s string) string {
+	var kept []string
+	for line := range strings.SplitSeq(s, "\n") {
+		if strings.Contains(line, "Can't run AVX2 build") {
+			continue
+		}
+		kept = append(kept, line)
+	}
+	return strings.TrimSpace(strings.Join(kept, "\n"))
 }
 
 func fileExists(p string) bool {

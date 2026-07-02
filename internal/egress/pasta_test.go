@@ -103,6 +103,20 @@ func TestSmokeTestReportsReasonWhenPastaMissing(t *testing.T) {
 	}
 }
 
+func TestStripPastaNoise(t *testing.T) {
+	// The AVX2 fallback line is benign chatter pasta emits when the pasta.avx2
+	// sibling is absent; it must not lead (or appear in) a failure detail.
+	in := "Can't run AVX2 build, using non-AVX2 version: No such file or directory\n" +
+		"bash: connect: Network is unreachable"
+	got := stripPastaNoise(in)
+	if strings.Contains(got, "AVX2") {
+		t.Errorf("AVX2 noise not stripped: %q", got)
+	}
+	if !strings.Contains(got, "Network is unreachable") {
+		t.Errorf("real error dropped: %q", got)
+	}
+}
+
 func TestProxyEnvCoversCommonSpellings(t *testing.T) {
 	env := ProxyEnv("http://127.0.0.1:8080")
 	for _, want := range []string{"HTTP_PROXY=", "http_proxy=", "HTTPS_PROXY=", "ALL_PROXY=", "NO_PROXY=localhost"} {
