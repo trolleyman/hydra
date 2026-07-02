@@ -18,6 +18,7 @@ import { ImageDiffView, SegmentedToggle, type ImageDiffMode, type ArtifactABCont
 import { ABControlsContext } from './artifactDiffContext'
 import type { LightboxImage } from './ImageLightbox'
 import { useImageLightboxStore } from '../stores/imageLightboxStore'
+import { applyABShortcut } from '../lib/abShortcuts'
 import { LiveLogPanes, PersistedLogView } from './ArtifactLogView'
 
 const CHANGE_LABEL: Record<string, string> = {
@@ -1122,24 +1123,20 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
     toggleView: () => onArtifactViewChange(artifactView === 'before' ? 'after' : 'before'),
   }), [artifactView, artifactHighlight, onArtifactViewChange])
 
-  // Keyboard: X flips before/after, B/A jump to a side, H toggles highlight — the same
-  // bindings as the lightbox (ImageLightbox) — only in A/B mode, and never while typing
-  // in a field. Plain single keys (no modifiers) so they don't collide with browser
-  // chords like Ctrl+H. Suppressed while the image lightbox is open: the lightbox has
-  // its own X/B/A/H (scoped to its fullscreen comparator, see LightboxDiff), and a
-  // single key must not flip both the lightbox and the grid behind it at once.
+  // Keyboard: the shared X/B/A/H comparator shortcuts (see applyABShortcut) — only in
+  // A/B mode. Suppressed while the image lightbox is open: the lightbox has its own
+  // X/B/A/H (scoped to its fullscreen comparator, see LightboxDiff), and a single key
+  // must not flip both the lightbox and the grid behind it at once.
   useEffect(() => {
     if (imageDiffMode !== 'ab') return
     const onKey = (e: KeyboardEvent) => {
-      if (e.ctrlKey || e.metaKey || e.altKey) return
       if (useImageLightboxStore.getState().images) return
-      const t = e.target as HTMLElement | null
-      if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return
-      const k = e.key.toLowerCase()
-      if (k === 'x') { e.preventDefault(); onArtifactViewChange(artifactView === 'before' ? 'after' : 'before') }
-      else if (k === 'b') { e.preventDefault(); onArtifactViewChange('before') }
-      else if (k === 'a') { e.preventDefault(); onArtifactViewChange('after') }
-      else if (k === 'h') { e.preventDefault(); onArtifactHighlightChange(!artifactHighlight) }
+      applyABShortcut(e, {
+        view: artifactView,
+        highlight: artifactHighlight,
+        onViewChange: onArtifactViewChange,
+        onHighlightChange: onArtifactHighlightChange,
+      })
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)

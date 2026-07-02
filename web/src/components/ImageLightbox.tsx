@@ -4,6 +4,7 @@ import { X, ChevronLeft, ChevronRight, SquarePlus, SquareMinus, SquareDot } from
 import type { ImageDiffMode } from './ArtifactImageDiff'
 import { LightboxDiff } from './LightboxDiff'
 import { makeAuxOpen } from './artifactDiffShared'
+import { applyABShortcut } from '../lib/abShortcuts'
 import { ZoomPan } from './ZoomPan'
 
 export interface LightboxImage {
@@ -95,25 +96,22 @@ export function ImageLightbox({
   const [abView, setAbView] = useState<'before' | 'after'>('after')
   const [highlight, setHighlight] = useState(false)
 
-  // X/B/A/H drive a diff entry's before/after view + highlight. Held here (with the
-  // state above) so they persist across navigation; non-diff (plain image) entries
-  // ignore them. Skipped while typing in a field; plain single keys (no modifiers) so
-  // they don't clash with browser chords.
+  // X/B/A/H — the shared comparator shortcuts (see applyABShortcut) — drive a diff
+  // entry's before/after view + highlight. Held here (with the state above) so they
+  // persist across navigation; non-diff (plain image) entries ignore them.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.ctrlKey || e.metaKey || e.altKey) return
       if (!images[index]?.diff) return
-      const t = e.target as HTMLElement | null
-      if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return
-      const k = e.key.toLowerCase()
-      if (k === 'x') { e.preventDefault(); setAbView((v) => (v === 'before' ? 'after' : 'before')) }
-      else if (k === 'b') { e.preventDefault(); setAbView('before') }
-      else if (k === 'a') { e.preventDefault(); setAbView('after') }
-      else if (k === 'h') { e.preventDefault(); setHighlight((h) => !h) }
+      applyABShortcut(e, {
+        view: abView,
+        highlight,
+        onViewChange: setAbView,
+        onHighlightChange: setHighlight,
+      })
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [index, images])
+  }, [index, images, abView, highlight])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

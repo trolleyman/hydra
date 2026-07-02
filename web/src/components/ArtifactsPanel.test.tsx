@@ -1,6 +1,8 @@
-import { describe, it, expect, vi, afterEach } from 'vitest'
+import { describe, it, expect, vi, afterEach, beforeAll, afterAll } from 'vitest'
 import { render, screen, fireEvent, cleanup } from '@testing-library/react'
-import { MasonryGrid } from './ArtifactsPanel'
+import type { ComponentProps } from 'react'
+import { ArtifactsPanel, MasonryGrid } from './ArtifactsPanel'
+import { useImageLightboxStore } from '../stores/imageLightboxStore'
 
 // Regression tests for the masonry tile's "drag horizontally to resize the column
 // span" gesture (startBodyResize). The handler used to sit on the whole tile, so
@@ -130,5 +132,81 @@ describe('MasonryGrid body-drag resize', () => {
     fireEvent.pointerMove(window, { clientX: 4, clientY: 60 })
     fireEvent.pointerUp(window, { clientX: 4, clientY: 60 })
     expect(onSpanChange).not.toHaveBeenCalled()
+  })
+})
+
+// Regression tests for the grid's global A/B keyboard shortcuts: the handler used to
+// bind only B (as a toggle) and H, so A and X — advertised and handled by the lightbox
+// (ImageLightbox) — silently did nothing over the grid. The grid must accept the same
+// X (flip) / B (Before) / A (After) / H (highlight) set, gate them on A/B mode, and
+// stand down while the lightbox is open. The panel is rendered for real, with inert
+// WebSocket/ResizeObserver stubs (jsdom provides neither) so it idles in its
+// "connecting" state — the key handler is registered regardless of data.
+describe('ArtifactsPanel A/B keyboard shortcuts', () => {
+  beforeAll(() => {
+    vi.stubGlobal('ResizeObserver', class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    })
+    vi.stubGlobal('WebSocket', class {
+      static OPEN = 1
+      onopen: unknown = null
+      onmessage: unknown = null
+      onclose: unknown = null
+      readyState = 0
+      send() {}
+      close() {}
+    })
+  })
+  afterAll(() => vi.unstubAllGlobals())
+  afterEach(() => useImageLightboxStore.setState({ images: null }))
+
+  function renderPanel(over: Partial<ComponentProps<typeof ArtifactsPanel>> = {}) {
+    const onView = vi.fn()
+    const onHighlight = vi.fn()
+    render(
+      <ArtifactsPanel
+        projectId="proj"
+        agentId="agent"
+        refreshKey={0}
+        imageDiffMode="ab"
+        artifactScale={1}
+        artifactView="after"
+        onArtifactViewChange={onView}
+        artifactHighlight={false}
+        onArtifactHighlightChange={onHighlight}
+        artifactSpans={{}}
+        onArtifactSpanChange={vi.fn()}
+        {...over}
+      />,
+    )
+    return { onView, onHighlight }
+  }
+
+  it('binds A (After), B (Before), X (flip) and H (highlight) in A/B mode', () => {
+    const { onView, onHighlight } = renderPanel({ artifactView: 'before' })
+    fireEvent.keyDown(document.body, { key: 'a' })
+    expect(onView).toHaveBeenLastCalledWith('after')
+    fireEvent.keyDown(document.body, { key: 'b' })
+    expect(onView).toHaveBeenLastCalledWith('before')
+    fireEvent.keyDown(document.body, { key: 'x' })
+    expect(onView).toHaveBeenLastCalledWith('after') // flip away from 'before'
+    fireEvent.keyDown(document.body, { key: 'h' })
+    expect(onHighlight).toHaveBeenLastCalledWith(true)
+  })
+
+  it('ignores the keys outside A/B mode', () => {
+    const { onView, onHighlight } = renderPanel({ imageDiffMode: 'slider' })
+    for (const key of ['a', 'b', 'x', 'h']) fireEvent.keyDown(document.body, { key })
+    expect(onView).not.toHaveBeenCalled()
+    expect(onHighlight).not.toHaveBeenCalled()
+  })
+
+  it('stands down while the image lightbox is open (its own X/B/A/H take over)', () => {
+    const { onView } = renderPanel()
+    useImageLightboxStore.setState({ images: [{ url: 'u', filename: 'f.png', size: 1 }], index: 0 })
+    fireEvent.keyDown(document.body, { key: 'a' })
+    expect(onView).not.toHaveBeenCalled()
   })
 })
