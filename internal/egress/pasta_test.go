@@ -89,6 +89,12 @@ func TestPastaArgsMapAddrIsOnLink(t *testing.T) {
 	if gp(GuestAddr) != gp(MapAddr) {
 		t.Errorf("GuestAddr %q and MapAddr %q must be in the same subnet", GuestAddr, MapAddr)
 	}
+	// Regression: -a/-n/-g only pick the values — pasta applies them to a spawned
+	// netns solely under --config-net. Without it (and with DHCP/RA/NDP disabled)
+	// the interface stays unconfigured and every connect dies with ENETUNREACH.
+	if !contains(args, "--config-net") {
+		t.Errorf("PastaArgs must pass --config-net or the netns is never configured: %v", args)
+	}
 }
 
 func TestSmokeTestReportsReasonWhenPastaMissing(t *testing.T) {
