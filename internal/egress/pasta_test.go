@@ -66,6 +66,18 @@ func TestHardWrapArgvInjectsPreExec(t *testing.T) {
 	}
 }
 
+func TestSmokeTestReportsReasonWhenPastaMissing(t *testing.T) {
+	// A bogus pasta binary must make smokeTest fail closed with a non-empty reason
+	// (so detectHardMode logs it and degrades to advisory) rather than hang or panic.
+	reason := smokeTest("/nonexistent/pasta-binary", "/usr/sbin/nft")
+	if reason == "" {
+		t.Fatal("smokeTest should report a failure reason when pasta cannot run")
+	}
+	if !strings.Contains(reason, "unreachable") {
+		t.Errorf("reason should explain the proxy was unreachable, got %q", reason)
+	}
+}
+
 func TestProxyEnvCoversCommonSpellings(t *testing.T) {
 	env := ProxyEnv("http://127.0.0.1:8080")
 	for _, want := range []string{"HTTP_PROXY=", "http_proxy=", "HTTPS_PROXY=", "ALL_PROXY=", "NO_PROXY=localhost"} {

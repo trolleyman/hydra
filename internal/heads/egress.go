@@ -93,8 +93,9 @@ func startEgress(projectRoot, id string, net *sandbox.NetworkPolicy) (env []stri
 			// Hard mode: the agent reaches the host proxy at the mapped address, and
 			// nft drops everything else. The proxy itself listens on host loopback.
 			storeEgress(id, p, EgressHard)
-			log.Printf("hydra egress[%s]: hard egress boundary active (pasta+nft), %d allow-listed host(s)", id, len(allowed))
-			env = egress.ProxyEnv("http://" + egress.MapAddr + ":" + itoa(port))
+			proxyURL := "http://" + egress.MapAddr + ":" + itoa(port)
+			log.Printf("hydra egress[%s]: hard egress boundary active (pasta+nft), %d allow-listed host(s); agent proxy=%s (host listener %s)", id, len(allowed), proxyURL, p.Addr())
+			env = egress.ProxyEnv(proxyURL)
 			wrap = func(bwrapArgv []string, preExec string) []string {
 				return egress.HardWrapArgv(hm, port, bwrapArgv, preExec)
 			}
