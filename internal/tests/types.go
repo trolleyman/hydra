@@ -38,9 +38,25 @@ const (
 
 // TestCase is one parsed test case. Message carries the failure/assertion text
 // for a failed case (and the skip reason for a skipped one, when present).
+//
+// Location is split into two axes: Path is a *filesystem* location (a
+// repo-relative file, or a package dir for Go where the report doesn't expose
+// the file) — copyable and deep-linkable, optionally carrying line/col. Scope
+// is the *logical* nesting chain between the path and the leaf name: a Java
+// class chain, a pytest class, a vitest describe chain, a Go subtest parent.
+// It's an array (not a joined string) because file names contain dots — a
+// single separator-polymorphic string can't be split back apart reliably.
+// Old cached reports carry a pre-joined Name and no Path/Scope; consumers fall
+// back to the flat Name.
 type TestCase struct {
 	Name       string     `json:"name"`
 	Status     CaseStatus `json:"status"`
+	Path       string     `json:"path,omitempty"`
+	Scope      []string   `json:"scope,omitempty"`
+	Line       int        `json:"line,omitempty"` // 1-based; 0 = unknown
+	Col        int        `json:"col,omitempty"`
+	EndLine    int        `json:"end_line,omitempty"`
+	EndCol     int        `json:"end_col,omitempty"`
 	DurationMs int64      `json:"duration_ms"`
 	Message    string     `json:"message,omitempty"`
 }
@@ -91,11 +107,25 @@ type Version struct {
 }
 
 // Event is a generation lifecycle notification delivered to Subscribe listeners.
-// Kind is "log", "progress", or "settled" — the same vocabulary as artifacts so
-// the WS/poll plumbing maps over identically.
+// Kind is "log", "progress", "counts", or "settled" — the artifacts vocabulary
+// plus "counts", the streamed-tests increment (see RunningCounts).
 type Event struct {
 	Dir      string
 	Kind     string
 	Line     LogLine
 	Progress string
+	Counts   *RunningCounts // kind == "counts"
+}
+
+// RunningCounts is the payload of a "counts" event: an in-flight run's totals
+// so far plus the cases appended since the previous event. Events are
+// coalesced (~10×/s or every caseFlushMax cases) so a 4,556-case run doesn't
+// emit 4,556 WS frames.
+type RunningCounts struct {
+	Passed   int
+	Failed   int
+	Skipped  int
+	Warnings int
+	Total    int // declared ::hydra:test:total:: denominator (0 = unknown)
+	Cases    []TestCase
 }

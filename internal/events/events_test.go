@@ -7,7 +7,11 @@ import (
 )
 
 func drainTypes(s *Subscription) []Type {
-	ts := s.Drain()
+	evs := s.Drain()
+	ts := make([]Type, 0, len(evs))
+	for _, ev := range evs {
+		ts = append(ts, ev.Type)
+	}
 	sort.Slice(ts, func(i, j int) bool { return ts[i] < ts[j] })
 	return ts
 }
@@ -42,10 +46,45 @@ func TestHubCoalesces(t *testing.T) {
 		h.AgentsChanged("/p")
 	}
 	got := s.Drain()
-	if len(got) != 1 || got[0] != AgentsChanged {
+	if len(got) != 1 || got[0].Type != AgentsChanged {
 		t.Fatalf("coalesced pending = %v, want a single agents_changed", got)
 	}
 	// One wake-up should be queued (capacity 1), and Drain cleared the set.
+	if extra := s.Drain(); extra != nil {
+		t.Errorf("second drain = %v, want nil", extra)
+	}
+}
+
+// Payload events coalesce per (Type, Key) with the latest payload winning, and
+// ride alongside plain type-level events.
+func TestHubPayloadCoalescesPerKey(t *testing.T) {
+	h := NewHub()
+	s := h.Subscribe("/p")
+	defer s.Close()
+
+	for i := 0; i < 50; i++ {
+		h.AgentTestsChanged("/p", "agent-1", i)
+	}
+	h.AgentTestsChanged("/p", "agent-2", "x")
+	h.AgentsChanged("/p")
+
+	got := s.Drain()
+	if len(got) != 3 {
+		t.Fatalf("drained %d events, want 3 (agents_changed + one per agent key): %v", len(got), got)
+	}
+	byKey := map[string]Event{}
+	for _, ev := range got {
+		byKey[ev.Key] = ev
+	}
+	if byKey[""].Type != AgentsChanged {
+		t.Errorf("plain event = %+v, want agents_changed", byKey[""])
+	}
+	if ev := byKey["agent-1"]; ev.Type != AgentTestsChanged || ev.Payload != 49 {
+		t.Errorf("agent-1 event = %+v, want latest payload 49", ev)
+	}
+	if ev := byKey["agent-2"]; ev.Payload != "x" {
+		t.Errorf("agent-2 event = %+v, want payload x", ev)
+	}
 	if extra := s.Drain(); extra != nil {
 		t.Errorf("second drain = %v, want nil", extra)
 	}

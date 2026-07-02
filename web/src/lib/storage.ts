@@ -105,6 +105,14 @@ export const artifactChromeKey = (projectId: string | null, agentId: string): st
 export const artifactChromeProjectKey = (projectId: string | null): string =>
   `${ARTIFACT_CHROME_PREFIX}p-${projectId ?? '_'}`
 
+// Test status filter, keyed by project + agent (one selection shared across all
+// of an agent's test-runner cards — see testFilterPrefs.ts). Mirrors the artifact
+// tag-filter model: the stored array lists the statuses turned *off* (hidden).
+// projectId may be null → '_' keeps the key shape stable.
+export const TEST_FILTER_PREFIX = 'hydra-test-filter-'
+export const testFilterKey = (projectId: string | null, agentId: string): string =>
+  `${TEST_FILTER_PREFIX}${projectId ?? '_'}-${agentId}`
+
 // Per-agent view prefs (terminal height, page scroll, collapsed diff files) so
 // each agent's detail page restores its own layout (see agentViewPrefs.ts).
 // projectId may be null → '_' keeps the key shape stable.

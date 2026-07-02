@@ -22,7 +22,7 @@ func TestParseJUnitTestsuites(t *testing.T) {
     <testcase name="adds" classname="util" time="0.001"/>
   </testsuite>
 </testsuites>`
-	cases, ok := parseJUnit([]byte(xml))
+	cases, ok := parseJUnit([]byte(xml), &locContext{})
 	if !ok {
 		t.Fatal("parseJUnit returned not-ok")
 	}
@@ -46,14 +46,26 @@ func TestParseJUnitTestsuites(t *testing.T) {
 	if failCase.DurationMs != 12 {
 		t.Errorf("duration = %d ms, want 12", failCase.DurationMs)
 	}
-	if failCase.Name != "auth/rotation.test.ts › grace window" {
-		t.Errorf("name = %q, want classname-prefixed", failCase.Name)
+	// The classname is no longer pre-joined into the name: a file-looking
+	// classname becomes the structured Path, the bare name stays the leaf.
+	if failCase.Name != "grace window" || failCase.Path != "auth/rotation.test.ts" || len(failCase.Scope) != 0 {
+		t.Errorf("location = name %q path %q scope %v, want (grace window, auth/rotation.test.ts, [])", failCase.Name, failCase.Path, failCase.Scope)
+	}
+	// A bare non-dotted classname ("auth") becomes a single scope segment.
+	var skippedCase *TestCase
+	for i := range cases {
+		if cases[i].Status == CaseSkipped {
+			skippedCase = &cases[i]
+		}
+	}
+	if skippedCase == nil || skippedCase.Name != "legacy" || skippedCase.Path != "" || len(skippedCase.Scope) != 1 || skippedCase.Scope[0] != "auth" {
+		t.Errorf("skipped location = %+v, want name legacy, scope [auth]", skippedCase)
 	}
 }
 
 func TestParseJUnitBareTestsuite(t *testing.T) {
 	xml := `<testsuite name="solo" tests="1"><testcase name="t" time="1"/></testsuite>`
-	cases, ok := parseJUnit([]byte(xml))
+	cases, ok := parseJUnit([]byte(xml), &locContext{})
 	if !ok || len(cases) != 1 || cases[0].DurationMs != 1000 {
 		t.Fatalf("bare testsuite parse failed: ok=%v cases=%+v", ok, cases)
 	}
@@ -102,7 +114,7 @@ func TestParseJUnitWarningType(t *testing.T) {
 	    <failure message="no-undef" type="error">b.ts:2:2</failure>
 	  </testcase>
 	</testsuite>`
-	cases, ok := parseJUnit([]byte(xml))
+	cases, ok := parseJUnit([]byte(xml), &locContext{})
 	if !ok {
 		t.Fatal("parseJUnit returned not-ok")
 	}
@@ -130,7 +142,7 @@ func TestParseDirAggregatesAndIgnoresJunk(t *testing.T) {
 	must("notes.txt", "ignore me")
 	must("bad.xml", "<not-junit/>")
 
-	cases, format, found, err := ParseDir(dir)
+	cases, format, found, err := ParseDir(dir, "")
 	if err != nil {
 		t.Fatalf("ParseDir: %v", err)
 	}
@@ -145,12 +157,141 @@ func TestParseDirAggregatesAndIgnoresJunk(t *testing.T) {
 	}
 }
 
+// gotestsum: the classname is a Go package import path — the module prefix is
+// stripped to a repo-relative dir, and subtest names split into scope.
+func TestParseJUnitGoPackage(t *testing.T) {
+	xml := `<testsuites>
+	  <testsuite name="github.com/trolleyman/hydra/internal/artifacts">
+	    <testcase name="TestGenerateAndCache" classname="github.com/trolleyman/hydra/internal/artifacts" time="0.5"/>
+	    <testcase name="TestOverlay/mounts/readonly" classname="github.com/trolleyman/hydra/internal/artifacts" time="0.1"/>
+	    <testcase name="TestRoot" classname="github.com/trolleyman/hydra" time="0"/>
+	  </testsuite>
+	</testsuites>`
+	lc := &locContext{goModule: "github.com/trolleyman/hydra"}
+	cases, ok := parseJUnit([]byte(xml), lc)
+	if !ok || len(cases) != 3 {
+		t.Fatalf("parse failed: ok=%v cases=%+v", ok, cases)
+	}
+	if cases[0].Path != "internal/artifacts" || cases[0].Name != "TestGenerateAndCache" || len(cases[0].Scope) != 0 {
+		t.Errorf("plain case = %+v, want path internal/artifacts, no scope", cases[0])
+	}
+	if cases[1].Path != "internal/artifacts" || cases[1].Name != "readonly" ||
+		!equalStrs(cases[1].Scope, []string{"TestOverlay", "mounts"}) {
+		t.Errorf("subtest case = %+v, want scope [TestOverlay mounts] name readonly", cases[1])
+	}
+	if cases[2].Path != "" || cases[2].Name != "TestRoot" {
+		t.Errorf("root-package case = %+v, want empty path", cases[2])
+	}
+}
+
+// pytest: dotted classname + native file/line attrs. The file attr wins as the
+// path, the classname's path-echoing prefix is deduped away leaving the class
+// chain, and the 0-based line is bumped to 1-based.
+func TestParseJUnitPytest(t *testing.T) {
+	xml := `<testsuites>
+	  <testsuite name="pytest" tests="2">
+	    <testcase classname="tests.test_auth.TestRotation" name="test_grace_window" file="tests/test_auth.py" line="41" time="0.01"/>
+	    <testcase classname="tests.test_auth" name="test_module_level" file="tests/test_auth.py" line="7" time="0.01"/>
+	  </testsuite>
+	</testsuites>`
+	cases, ok := parseJUnit([]byte(xml), &locContext{})
+	if !ok || len(cases) != 2 {
+		t.Fatalf("parse failed: ok=%v cases=%+v", ok, cases)
+	}
+	if cases[0].Path != "tests/test_auth.py" || !equalStrs(cases[0].Scope, []string{"TestRotation"}) ||
+		cases[0].Name != "test_grace_window" || cases[0].Line != 42 {
+		t.Errorf("class case = %+v, want path tests/test_auth.py scope [TestRotation] line 42", cases[0])
+	}
+	if !equalStrs(cases[1].Scope, nil) || cases[1].Line != 8 {
+		t.Errorf("module-level case = %+v, want empty scope line 8", cases[1])
+	}
+}
+
+// Java-style: dotted classname, no file attr anywhere → scope-only, with a
+// nested-class $ separator treated as another level.
+func TestParseJUnitDottedClassname(t *testing.T) {
+	xml := `<testsuite name="surefire">
+	  <testcase classname="com.example.auth.FooTest$Nested" name="rotatesKey" time="0.2"/>
+	</testsuite>`
+	cases, ok := parseJUnit([]byte(xml), &locContext{})
+	if !ok || len(cases) != 1 {
+		t.Fatalf("parse failed: ok=%v cases=%+v", ok, cases)
+	}
+	c := cases[0]
+	if c.Path != "" || !equalStrs(c.Scope, []string{"com", "example", "auth", "FooTest", "Nested"}) || c.Name != "rotatesKey" {
+		t.Errorf("case = %+v, want scope [com example auth FooTest Nested]", c)
+	}
+}
+
+// vitest: file classname + " > "-joined describe chain in the name → the
+// chain splits into scope levels under the file.
+func TestParseJUnitVitestDescribeChain(t *testing.T) {
+	xml := `<testsuite name="vitest">
+	  <testcase classname="src/api/format_error.test.ts" name="formatError > with cause > includes chain" time="0.004"/>
+	</testsuite>`
+	cases, ok := parseJUnit([]byte(xml), &locContext{})
+	if !ok || len(cases) != 1 {
+		t.Fatalf("parse failed: ok=%v cases=%+v", ok, cases)
+	}
+	c := cases[0]
+	if c.Path != "src/api/format_error.test.ts" || !equalStrs(c.Scope, []string{"formatError", "with cause"}) || c.Name != "includes chain" {
+		t.Errorf("case = %+v, want scope [formatError, with cause] name 'includes chain'", c)
+	}
+}
+
+// Hydra-native JSON passes the structured location fields straight through.
+func TestParseHydraJSONLocation(t *testing.T) {
+	js := `{"cases":[{"name":"no-console","status":"warning","path":"web/src/x.ts","line":12,"col":5,"scope":["rules"]}]}`
+	cases, ok := parseHydraJSON([]byte(js))
+	if !ok || len(cases) != 1 {
+		t.Fatalf("parse failed: ok=%v cases=%+v", ok, cases)
+	}
+	c := cases[0]
+	if c.Path != "web/src/x.ts" || c.Line != 12 || c.Col != 5 || !equalStrs(c.Scope, []string{"rules"}) {
+		t.Errorf("case = %+v, want location passed through", c)
+	}
+}
+
+func TestClassify(t *testing.T) {
+	lc := &locContext{goModule: "github.com/trolleyman/hydra"}
+	for _, tt := range []struct {
+		in    string
+		path  string
+		scope []string
+	}{
+		{"src/api/x.test.ts", "src/api/x.test.ts", nil},
+		{"format_error.test.ts", "format_error.test.ts", nil}, // bare file: extension, not class chain
+		{"github.com/trolleyman/hydra/internal/db", "internal/db", nil},
+		{"com.example.FooTest", "", []string{"com", "example", "FooTest"}},
+		{"FooTest$Nested", "", []string{"FooTest", "Nested"}},
+		{"auth", "", []string{"auth"}},
+		{"", "", nil},
+	} {
+		loc := lc.classify(tt.in)
+		if loc.Path != tt.path || !equalStrs(loc.Scope, tt.scope) {
+			t.Errorf("classify(%q) = (%q, %v), want (%q, %v)", tt.in, loc.Path, loc.Scope, tt.path, tt.scope)
+		}
+	}
+}
+
+func equalStrs(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 func TestParseDirEmpty(t *testing.T) {
-	_, _, found, err := ParseDir(t.TempDir())
+	_, _, found, err := ParseDir(t.TempDir(), "")
 	if err != nil || found {
 		t.Fatalf("empty dir: found=%v err=%v", found, err)
 	}
-	_, _, found, err = ParseDir(filepath.Join(t.TempDir(), "does-not-exist"))
+	_, _, found, err = ParseDir(filepath.Join(t.TempDir(), "does-not-exist"), "")
 	if err != nil || found {
 		t.Fatalf("missing dir: found=%v err=%v", found, err)
 	}

@@ -23,6 +23,8 @@ import (
 //   - "runner":   one runner's verdict changed (a run settled or was re-run).
 //   - "log":      one new captured log line for a runner.
 //   - "progress": the live progress header changed for a runner.
+//   - "counts":   a streamed (type=stdout) run's running totals plus the cases
+//     appended since the last counts message (coalesced server-side).
 type testsWSMessage struct {
 	Type     string               `json:"type"`
 	Runners  []api.TestRunResult  `json:"runners,omitempty"`
@@ -30,6 +32,18 @@ type testsWSMessage struct {
 	Name     string               `json:"name,omitempty"`
 	Line     *api.ArtifactLogLine `json:"line,omitempty"`
 	Progress *string              `json:"progress,omitempty"`
+	Counts   *testsWSCounts       `json:"counts,omitempty"`
+}
+
+// testsWSCounts is the "counts" payload: authoritative running totals (not
+// deltas) and the newly-appended cases the client merges into its case list.
+type testsWSCounts struct {
+	Passed   int            `json:"passed"`
+	Failed   int            `json:"failed"`
+	Skipped  int            `json:"skipped"`
+	Warnings int            `json:"warnings"`
+	Total    int            `json:"total"` // declared denominator, 0 = unknown
+	Cases    []api.TestCase `json:"cases,omitempty"`
 }
 
 // testsClientMessage is a client→server message. Only "refresh" (re-run one
@@ -202,6 +216,19 @@ func (s *Server) streamTests(ctx context.Context, conn *safeConn, projectRoot, p
 			case "progress":
 				p := ev.Progress
 				if err := writeMsg(testsWSMessage{Type: "progress", Name: rspec.Name, Progress: &p}); err != nil {
+					return
+				}
+			case "counts":
+				if ev.Counts == nil {
+					continue
+				}
+				counts := &testsWSCounts{
+					Passed: ev.Counts.Passed, Failed: ev.Counts.Failed,
+					Skipped: ev.Counts.Skipped, Warnings: ev.Counts.Warnings,
+					Total: ev.Counts.Total,
+					Cases: toAPITestCases(ev.Counts.Cases),
+				}
+				if err := writeMsg(testsWSMessage{Type: "counts", Name: rspec.Name, Counts: counts}); err != nil {
 					return
 				}
 			case "settled":

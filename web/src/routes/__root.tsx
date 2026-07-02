@@ -125,7 +125,7 @@ function RootLayout() {
   } | null>(null)
 
   const { projects, selectedProjectId, setProjects, setSelectedProjectId } = useProjectStore()
-  const { agents, setAgents, addAgent, markRead } = useAgentStore()
+  const { agents, setAgents, addAgent, markRead, patchAgentTests } = useAgentStore()
   const archived = useAgentStore((s) => s.archived)
   const archivedLoading = useAgentStore((s) => s.archivedLoading)
   const archivedHasMore = useAgentStore((s) => s.archivedHasMore)
@@ -343,6 +343,9 @@ function RootLayout() {
     onProjectsChanged: () => refetchStatus(),
     // A background fetch found the branch's ahead/behind changed.
     onPushStatusChanged: () => refetchPushStatus(),
+    // A streamed test run ticking: the event carries the new summary, so patch
+    // the one agent's chip in place — no agent-list refetch.
+    onAgentTestsChanged: (agentId, tests) => patchAgentTests(agentId, tests),
   })
 
   // When the app lands on the bare root path ("/") but a project is already

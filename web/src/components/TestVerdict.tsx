@@ -69,6 +69,40 @@ function verdictLabel(t: TestSummary): string {
   }
 }
 
+// liveCaseCount is how many per-case results an in-flight run has reported so
+// far. Non-zero only for streamed (type=stdout) runs, whose summary carries the
+// ticking tallies — a junit run reports nothing until it settles.
+function liveCaseCount(t: TestSummary): number {
+  return (t.passed ?? 0) + (t.failed ?? 0) + (t.warnings ?? 0) + (t.skipped ?? 0)
+}
+
+// LiveCounts renders the ticking per-status segments of an in-flight streamed
+// run (✓121 ✗2 ⚠4): green passed always, red failed / amber warnings only when
+// non-zero. The long form appends the gray skipped count and the N/total
+// progress; the short sidebar form keeps just the colored tallies (the full
+// detail stays in the chip title).
+function LiveCounts({ t, long }: { t: TestSummary; long: boolean }) {
+  return (
+    <span className="inline-flex items-center whitespace-nowrap">
+      <span className="inline-flex items-center gap-0.5 text-green-700 dark:text-green-400">
+        <Check className="w-2.5 h-2.5" strokeWidth={3} />
+        {t.passed ?? 0}
+      </span>
+      {(t.failed ?? 0) > 0 ? (
+        <span className="inline-flex items-center gap-0.5 pl-1 ml-0.5 border-l border-current/30 text-red-600 dark:text-red-400">
+          <X className="w-2.5 h-2.5" strokeWidth={3} />
+          {t.failed}
+        </span>
+      ) : null}
+      <WarningCount n={t.warnings ?? 0} />
+      {long ? <SkippedCount n={t.skipped ?? 0} /> : null}
+      {long && t.progress ? (
+        <span className="pl-1 ml-0.5 border-l border-current/30 text-gray-500 dark:text-gray-400">{t.progress}</span>
+      ) : null}
+    </span>
+  )
+}
+
 // TestVerdictChip is the compact per-head verdict chip shown in the sidebar row
 // and the agent header. Renders nothing for status "none" (no tests / never run).
 //
@@ -105,7 +139,13 @@ export function TestVerdictChip({ tests, variant = 'xs' }: { tests?: TestSummary
           on a wide one. The full text stays available via the chip's `title`.
           xs (sidebar) gets a tighter cap than sm (agent header, which has room). */}
       <span className="inline-flex items-center min-w-0 whitespace-nowrap">
-        <span className={`truncate min-w-0 ${variant === 'sm' ? 'max-w-[16rem]' : 'max-w-[7rem]'}`}>{verdictLabel(tests)}</span>
+        {tests.status === 'running' && liveCaseCount(tests) > 0 ? (
+          // A streamed run ticking: live ✓/✗/⚠ tallies instead of the bare
+          // progress string (which reads as the denominator in the long form).
+          <LiveCounts t={tests} long={long} />
+        ) : (
+          <span className={`truncate min-w-0 ${variant === 'sm' ? 'max-w-[16rem]' : 'max-w-[7rem]'}`}>{verdictLabel(tests)}</span>
+        )}
         {showWarnings ? <WarningCount n={tests.warnings ?? 0} /> : null}
         {showSkips ? <SkippedCount n={tests.skipped ?? 0} /> : null}
       </span>
@@ -120,7 +160,7 @@ function verdictTitle(t: TestSummary): string {
     case 'failing':
       return `Tests failing — ${t.failed ?? 0} failed (merge is soft-gated)`
     case 'running':
-      return `Tests running${t.progress ? ` — ${t.progress}` : ''}`
+      return `Tests running${t.progress ? ` — ${t.progress}` : ''}${liveCaseCount(t) > 0 ? ` (${t.passed ?? 0} passed${t.failed ? `, ${t.failed} failed` : ''}${t.warnings ? `, ${t.warnings} warnings` : ''}${t.skipped ? `, ${t.skipped} skipped` : ''})` : ''}`
     case 'errored':
       return "Tests couldn't run — no verdict (retry, or force-merge)"
     case 'stale':

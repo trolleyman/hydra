@@ -1096,12 +1096,26 @@ type TerminalStatusEventType string
 
 // TestCase defines model for TestCase.
 type TestCase struct {
+	Col        *int   `json:"col"`
 	DurationMs *int64 `json:"duration_ms,omitempty"`
+	EndCol     *int   `json:"end_col"`
+	EndLine    *int   `json:"end_line"`
+
+	// Line 1-based line within path, when known.
+	Line *int `json:"line"`
 
 	// Message Failure/assertion text for a failed case (or skip reason for a skipped one)
-	Message *string        `json:"message"`
-	Name    string         `json:"name"`
-	Status  TestCaseStatus `json:"status"`
+	Message *string `json:"message"`
+
+	// Name Leaf test name only when path/scope are set; older reports carry a pre-joined display name here with no path/scope.
+	Name string `json:"name"`
+
+	// Path Repo-relative filesystem location — a file (vitest/eslint/pytest) or a package dir (Go). Absent when the runner only exposes a logical scope.
+	Path *string `json:"path"`
+
+	// Scope Logical nesting chain between path and name — a class chain (com › example › FooTest), describe chain, or Go subtest parent.
+	Scope  *[]string      `json:"scope"`
+	Status TestCaseStatus `json:"status"`
 }
 
 // TestCaseStatus defines model for TestCaseStatus.
@@ -1167,6 +1181,9 @@ type TestScript struct {
 
 	// TimeoutSec Max seconds the command may run (0 = built-in default)
 	TimeoutSec *int `json:"timeout_sec,omitempty"`
+
+	// Type How results are read — "junit" (default; parse *.xml/*.json report files from $HYDRA_TEST_OUTPUT after exit) or "stdout" (parse `::hydra:test:*::` markers streamed live from stdout; the accumulated cases are the report, no file needed).
+	Type *string `json:"type"`
 
 	// UnsafeHost Run on the host with NO sandbox — runs the diffed ref's test code; only for trusted refs (default false)
 	UnsafeHost *bool `json:"unsafe_host,omitempty"`

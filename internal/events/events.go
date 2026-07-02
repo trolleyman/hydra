@@ -1,8 +1,12 @@
 // Package events provides a small in-process pub/sub hub that fans "something
 // changed, refetch it" signals out to connected web clients, replacing per-tab
-// polling (see PLAN #50). It deliberately carries no payload beyond a type and an
-// optional project scope: the daemon stays the single source of truth, and an
-// event just nudges the client to run the fetch it would otherwise have polled.
+// polling (see PLAN #50). Most events deliberately carry no payload beyond a
+// type and an optional project scope: the daemon stays the single source of
+// truth, and an event just nudges the client to run the fetch it would
+// otherwise have polled. The exception is high-frequency incremental state
+// (AgentTestsChanged) that would make refetch-on-nudge too chatty: those carry
+// a small payload the client patches in place, coalesced per Key so a slow
+// reader only ever sees the latest value.
 package events
 
 import "sync"
@@ -23,14 +27,26 @@ const (
 	// PushStatusChanged: the project branch's ahead/behind relative to its remote
 	// changed (e.g. a background fetch saw new upstream commits). Project-scoped.
 	PushStatusChanged Type = "push_status_changed"
+	// AgentTestsChanged: one head's live test summary ticked (a streamed
+	// type=stdout run appending cases). Project-scoped, carries the new summary
+	// as Payload keyed by the agent id — the client patches the agent's chip in
+	// place instead of refetching the whole agent list.
+	AgentTestsChanged Type = "agent_tests_changed"
 )
 
 // Event is one change signal. ProjectRoot scopes a project-specific event to
 // subscribers watching that (normalized) root; an empty ProjectRoot is a
 // broadcast delivered to all subscribers.
+//
+// Key + Payload turn an event into a payload event: instead of coalescing by
+// Type alone (a boolean "refetch this"), pending payload events coalesce by
+// (Type, Key) with the LATEST Payload winning — right for incremental state
+// where only the newest value matters (e.g. a ticking test summary per agent).
 type Event struct {
 	Type        Type
 	ProjectRoot string
+	Key         string // coalescing key within Type ("" = plain type-level event)
+	Payload     any    // opaque to the hub; the WS layer knows how to frame it
 }
 
 // Hub fans coalesced events out to per-subscriber queues. The zero value is not
@@ -78,6 +94,12 @@ func (h *Hub) PushStatusChanged(projectRoot string) {
 	h.Publish(Event{Type: PushStatusChanged, ProjectRoot: projectRoot})
 }
 
+// AgentTestsChanged publishes one head's ticked live test summary, coalesced
+// per agent id (latest payload wins for a slow reader).
+func (h *Hub) AgentTestsChanged(projectRoot, agentID string, payload any) {
+	h.Publish(Event{Type: AgentTestsChanged, ProjectRoot: projectRoot, Key: agentID, Payload: payload})
+}
+
 // Subscribe registers a subscriber scoped to projectRoot. It receives project
 // events matching that root plus all broadcasts. Close it when done.
 func (h *Hub) Subscribe(projectRoot string) *Subscription {
@@ -98,22 +120,26 @@ func (h *Hub) Subscribe(projectRoot string) *Subscription {
 	return s
 }
 
-// Subscription is one client's coalescing event queue. Pending events are
-// deduplicated by Type (many rapid agents_changed collapse to one), so a slow
-// reader never sees a backlog — only the set of resources that need refetching.
+// Subscription is one client's coalescing event queue. Pending plain events
+// are deduplicated by Type (many rapid agents_changed collapse to one) and
+// payload events by (Type, Key) with the latest payload winning, so a slow
+// reader never sees a backlog — only the set of resources that need refetching
+// plus the newest value of each incremental key.
 type Subscription struct {
 	hub  *Hub
 	root string
 
 	notify chan struct{}
 
-	mu      sync.Mutex
-	pending map[Type]struct{}
-	closed  bool
+	mu       sync.Mutex
+	pending  map[Type]struct{}
+	payloads map[string]Event // (Type, Key) → latest payload event
+	closed   bool
 }
 
 // offer enqueues ev for this subscriber if it matches its scope, coalescing
-// repeats of the same Type, and wakes the reader without blocking.
+// repeats of the same Type (or Type+Key for payload events), and wakes the
+// reader without blocking.
 func (s *Subscription) offer(ev Event) {
 	if ev.ProjectRoot != "" && ev.ProjectRoot != s.root {
 		return
@@ -123,7 +149,14 @@ func (s *Subscription) offer(ev Event) {
 		s.mu.Unlock()
 		return
 	}
-	s.pending[ev.Type] = struct{}{}
+	if ev.Key != "" {
+		if s.payloads == nil {
+			s.payloads = map[string]Event{}
+		}
+		s.payloads[string(ev.Type)+"\x00"+ev.Key] = ev
+	} else {
+		s.pending[ev.Type] = struct{}{}
+	}
 	s.mu.Unlock()
 	select {
 	case s.notify <- struct{}{}:
@@ -134,18 +167,24 @@ func (s *Subscription) offer(ev Event) {
 // C is the wake-up channel: it receives a value whenever new events are pending.
 func (s *Subscription) C() <-chan struct{} { return s.notify }
 
-// Drain returns and clears the currently-pending event types (nil if none).
-func (s *Subscription) Drain() []Type {
+// Drain returns and clears the currently-pending events (nil if none): the
+// coalesced plain type-level events first, then the latest payload event per
+// (Type, Key).
+func (s *Subscription) Drain() []Event {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if len(s.pending) == 0 {
+	if len(s.pending) == 0 && len(s.payloads) == 0 {
 		return nil
 	}
-	out := make([]Type, 0, len(s.pending))
+	out := make([]Event, 0, len(s.pending)+len(s.payloads))
 	for t := range s.pending {
-		out = append(out, t)
+		out = append(out, Event{Type: t})
+	}
+	for _, ev := range s.payloads {
+		out = append(out, ev)
 	}
 	clear(s.pending)
+	clear(s.payloads)
 	return out
 }
 

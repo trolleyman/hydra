@@ -29,6 +29,11 @@ export type AgentViewPrefs = {
   collapsedFiles?: string[]
   bashTabs?: BashTabPref[]
   activeTabId?: string
+  // Tests-panel view modes (the two orthogonal cog checkboxes, both off by
+  // default): group cases into per-status sections, and group the tree by
+  // logical scope (class/describe chain) instead of filesystem path.
+  testGroupResult?: boolean
+  testUseScope?: boolean
 }
 
 const AGENT_VIEW_TTL_MS = 1000 * 60 * 60 * 24 * 30 // 30 days
@@ -48,6 +53,8 @@ export function loadAgentViewPrefs(projectId: string | null, agentId: string): A
     collapsedFiles: stored.collapsedFiles,
     bashTabs: stored.bashTabs,
     activeTabId: stored.activeTabId,
+    testGroupResult: stored.testGroupResult,
+    testUseScope: stored.testUseScope,
   }
 }
 

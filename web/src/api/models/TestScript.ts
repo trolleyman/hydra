@@ -15,6 +15,10 @@ export type TestScript = {
      */
     command: string;
     /**
+     * How results are read — "junit" (default; parse *.xml*.json report files from $HYDRA_TEST_OUTPUT after exit) or "stdout" (parse `::hydra:test:*::` markers streamed live from stdout; the accumulated cases are the report, no file needed).
+     */
+    type?: string | null;
+    /**
      * Max seconds the command may run (0 = built-in default)
      */
     timeout_sec?: number;

@@ -1,22 +1,39 @@
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
-import { Check, X, AlertTriangle, LoaderCircle, RefreshCw, ScrollText, ChevronRight, ChevronDown, SkipForward, FlaskConical } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { Check, X, AlertTriangle, LoaderCircle, RefreshCw, RotateCcw, ScrollText, ChevronRight, ChevronDown, Search, SkipForward, FlaskConical } from 'lucide-react'
 import { api } from '../stores/apiClient'
 import type { TestRunResult } from '../api/models/TestRunResult'
 import type { TestCase } from '../api/models/TestCase'
+import { TestCaseStatus } from '../api/models/TestCaseStatus'
 import type { ArtifactLogLine } from '../api'
 import { TONE_BADGE, verdictTone } from './badgeTones'
 import { CollapsibleCard, MELT_BTN } from './CollapsibleCard'
 import { useMeasuredHeight } from '../lib/useMeasuredHeight'
 import { LogView } from './ArtifactLogView'
 import { InfoTooltip } from './InfoTooltip'
+import { TagScopeFilter } from './ArtifactFilterBar'
+import { CaseTree } from './CaseTree'
+import {
+  TEST_STATUS_ORDER, DEFAULT_HIDDEN_STATUSES, type TestFilter,
+  defaultTestFilter, isDefaultTestFilter, loadTestFilter, saveTestFilter,
+  computeVisibleCases, computeStatusCounts,
+} from '../lib/testFilterPrefs'
 
 // Server→client message on the tests WebSocket. Mirrors internal/http/tests_ws.go.
 // Single-sided (no before/after), so a runner is addressed by name alone.
+type TestWSCounts = {
+  passed: number
+  failed: number
+  skipped: number
+  warnings: number
+  total: number // declared denominator, 0 = unknown
+  cases?: TestCase[]
+}
 type TestWSMessage =
   | { type: 'snapshot'; runners: TestRunResult[] }
   | { type: 'runner'; runner: TestRunResult }
   | { type: 'log'; name: string; line: ArtifactLogLine }
   | { type: 'progress'; name: string; progress: string }
+  | { type: 'counts'; name: string; counts: TestWSCounts }
 
 function testsWsUrl(projectId: string, agentId: string, headRef?: string, includeUncommitted?: boolean): string {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -36,7 +53,7 @@ function testsWsUrl(projectId: string, agentId: string, headRef?: string, includ
 // commit, or the uncommitted working tree), defaulting to the branch tip. Streams
 // updates over a WebSocket so progress / the live log / the settled verdict land
 // instantly, falling back to polling if the socket can't connect or drops.
-export function TestsPanel({ projectId, agentId, headRef, includeUncommitted, refreshKey }: {
+export function TestsPanel({ projectId, agentId, headRef, includeUncommitted, refreshKey, groupResult, useScope, onScopeAvailable }: {
   projectId: string
   agentId: string
   // The "after" commit/ref to test, mirrored from the diff viewer's right-hand
@@ -46,6 +63,14 @@ export function TestsPanel({ projectId, agentId, headRef, includeUncommitted, re
   includeUncommitted?: boolean
   // Bumped by the diff viewer's refresh control to force a fresh fetch.
   refreshKey?: number
+  // View modes from the diff viewer's settings cog (see AgentViewPrefs):
+  // groupResult renders per-status sections, useScope trees by class/describe
+  // scope instead of filesystem path.
+  groupResult?: boolean
+  useScope?: boolean
+  // Reports whether any loaded case carries a logical scope, so the cog can
+  // grey the "Group by scope" checkbox when the axis doesn't exist.
+  onScopeAvailable?: (has: boolean) => void
 }) {
   // null = not yet loaded (render nothing); [] = loaded, nothing configured.
   const [runners, setRunners] = useState<TestRunResult[] | null>(null)
@@ -68,6 +93,21 @@ export function TestsPanel({ projectId, agentId, headRef, includeUncommitted, re
       setRunners((prev) => prev?.map((r) => (r.name === msg.name ? { ...r, log: [...(r.log ?? []), msg.line] } : r)) ?? prev)
     } else if (msg.type === 'progress') {
       setRunners((prev) => prev?.map((r) => (r.name === msg.name ? { ...r, progress: msg.progress } : r)) ?? prev)
+    } else if (msg.type === 'counts') {
+      // A streamed (type=stdout) run ticking: totals are authoritative, cases
+      // are the newly-appended increment (coalesced server-side) — the tree
+      // grows in place as they land.
+      setRunners((prev) => prev?.map((r) => (r.name === msg.name
+        ? {
+          ...r,
+          passed: msg.counts.passed,
+          failed: msg.counts.failed,
+          skipped: msg.counts.skipped,
+          warnings: msg.counts.warnings,
+          total: msg.counts.total > 0 ? msg.counts.total : r.total,
+          cases: msg.counts.cases?.length ? [...(r.cases ?? []), ...msg.counts.cases] : r.cases,
+        }
+        : r)) ?? prev)
     }
   }, [])
 
@@ -159,11 +199,37 @@ export function TestsPanel({ projectId, agentId, headRef, includeUncommitted, re
   // panel uses (see useMeasuredHeight + CollapsibleCard's sticky option).
   const [testsHeaderRef, testsHeaderH] = useMeasuredHeight(41)
 
+  // The status filter (persisted per project+agent, passing hidden by default —
+  // the tests analog of the artifacts tag filter) and the ephemeral search box.
+  const [filter, setFilter] = useState<TestFilter>(() => loadTestFilter(projectId, agentId))
+  const [search, setSearch] = useState('')
+  // Reload the persisted filter when switching agents (render-time adjust, same
+  // pattern as the connKey reset above).
+  const filterKey = `${projectId}\n${agentId}`
+  const [prevFilterKey, setPrevFilterKey] = useState(filterKey)
+  if (prevFilterKey !== filterKey) {
+    setPrevFilterKey(filterKey)
+    setFilter(loadTestFilter(projectId, agentId))
+    setSearch('')
+  }
+  const updateFilter = useCallback((f: TestFilter) => {
+    setFilter(f)
+    saveTestFilter(projectId, agentId, f)
+  }, [projectId, agentId])
+
+  // Every parsed case across all runners: drives the status dropdown's counts
+  // and the scope-axis availability the cog needs.
+  const allCases = useMemo(() => (runners ?? []).flatMap((r) => r.cases ?? []), [runners])
+  const statusCounts = useMemo(() => computeStatusCounts(allCases), [allCases])
+  const hasScope = useMemo(() => allCases.some((c) => (c.scope?.length ?? 0) > 0), [allCases])
+  useEffect(() => { onScopeAvailable?.(hasScope) }, [hasScope, onScopeAvailable])
+
   // Nothing configured (or not loaded yet) → render nothing, like the artifacts
   // panel, so the diff viewer doesn't reserve empty space for an absent feature.
   if (!runners || runners.length === 0) return null
 
   const runningCount = runners.filter((r) => r.status === 'running').length
+  const statusOff = filter.status
 
   return (
     <div className="mb-4" style={{ '--sticky-section-h': `${testsHeaderH}px` } as CSSProperties}>
@@ -190,14 +256,64 @@ export function TestsPanel({ projectId, agentId, headRef, includeUncommitted, re
         <InfoTooltip title="Tests" width={520}>
           <p>Per-runner pass/fail verdicts for the selected commit — the diff viewer's <strong>after</strong> side (a commit, or your uncommitted working tree), defaulting to the branch tip. Single-sided: there's no before/after comparison.</p>
           <p>Each runner is a project-defined <code className="text-blue-300">[[tests]]</code> command in <code className="text-blue-300">.hydra/config.toml</code>. Hydra runs it against the ref, parses the report it writes to <code className="text-blue-300">$HYDRA_TEST_OUTPUT</code> (JUnit XML or Hydra-JSON; otherwise a plain pass/fail from the exit code), and caches the verdict per commit. The verdict <strong>soft-gates the merge button</strong> — a failing run needs a force-merge.</p>
-          <p>Expand a card for the failing cases (assertion messages first), the passing / skipped roll-ups, and the <strong>build log</strong> (the scroll icon) — the runner's stdout/stderr, streamed live while it runs. The refresh icon re-runs that runner, discarding the cached verdict.</p>
+          <p>Expand a card for its cases as a location tree — <strong>passing cases are hidden by default</strong>; the status filter (right) reveals them, and the search box fuzzy-matches case paths and names. The changes cog offers grouping by result and by class/describe scope. The <strong>build log</strong> (the scroll icon) is the runner's stdout/stderr, streamed live while it runs. The refresh icon re-runs that runner, discarding the cached verdict.</p>
         </InfoTooltip>
+        {/* Filter cluster, right-floated — the tests analog of ArtifactFilterBar:
+            search + reset + the status scope dropdown (passing hidden by default). */}
+        <div className="ml-auto flex flex-wrap items-center gap-1.5">
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-gray-400 dark:text-gray-500" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="search"
+              aria-label="Search test cases by path or name"
+              className="h-7 w-36 pl-7 pr-6 rounded-md border text-[11px] bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 border-gray-200 dark:border-gray-600 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+            />
+            {search && (
+              <button
+                onClick={() => setSearch('')}
+                title="Clear search"
+                aria-label="Clear search"
+                className="absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 cursor-pointer"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            )}
+          </div>
+          {!isDefaultTestFilter(filter) && (
+            <button
+              onClick={() => updateFilter(defaultTestFilter())}
+              title="Reset filters"
+              className="flex items-center gap-1 h-7 px-2.5 rounded-md border text-[11px] font-medium cursor-pointer transition-colors bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600"
+            >
+              <RotateCcw className="w-3 h-3" />
+              <span className="lowercase">reset</span>
+            </button>
+          )}
+          <TagScopeFilter
+            label="status"
+            values={[...TEST_STATUS_ORDER]}
+            off={statusOff}
+            defaultOff={DEFAULT_HIDDEN_STATUSES}
+            counts={statusCounts}
+            onToggle={(val) => updateFilter({ ...filter, status: statusOff.includes(val) ? statusOff.filter((x) => x !== val) : [...statusOff, val] })}
+            onIsolate={(val) => updateFilter({ ...filter, status: TEST_STATUS_ORDER.filter((x) => x !== val) })}
+            onAll={() => updateFilter({ ...filter, status: [] })}
+            onClear={() => updateFilter({ ...filter, status: [...TEST_STATUS_ORDER] })}
+          />
+        </div>
       </div>
       <div className="flex flex-col gap-2">
         {runners.map((r) => (
           <TestRunnerCard
             key={r.name}
             runner={r}
+            filter={filter}
+            search={search}
+            groupResult={!!groupResult}
+            useScope={!!useScope}
             onRefresh={() => requestRefresh(r.name)}
           />
         ))}
@@ -222,9 +338,16 @@ function StatusIcon({ status }: { status: TestRunResult['status'] }) {
 // TestRunnerCard renders one runner through the shared CollapsibleCard, so it lays
 // out identically to an artifact set card: the runner name + verdict chip +
 // summary on the left, the build-log toggle and Re-run melt buttons on the right,
-// and the failing-first case list / live log behind the collapse toggle.
-function TestRunnerCard({ runner, onRefresh }: { runner: TestRunResult; onRefresh: () => void }) {
-  const cases = runner.cases ?? []
+// and the filtered case tree / live log behind the collapse toggle.
+function TestRunnerCard({ runner, filter, search, groupResult, useScope, onRefresh }: {
+  runner: TestRunResult
+  filter: TestFilter
+  search: string
+  groupResult: boolean
+  useScope: boolean
+  onRefresh: () => void
+}) {
+  const cases = useMemo(() => runner.cases ?? [], [runner.cases])
   const running = runner.status === 'running'
   const errored = runner.status === 'errored'
   // A failing or errored runner reads as a failure: its log gets a red border.
@@ -233,7 +356,6 @@ function TestRunnerCard({ runner, onRefresh }: { runner: TestRunResult; onRefres
 
   // Default collapsed (per design choice): every card opens via its chevron.
   const [collapsed, setCollapsed] = useState(true)
-  const [showPassing, setShowPassing] = useState(false)
   // A log exists while running (live `log`) or once settled (`log_url`).
   const hasLog = running || !!runner.log_url
   // A *build*/infra failure has no failing test cases to explain it: an exit-code-only
@@ -266,10 +388,13 @@ function TestRunnerCard({ runner, onRefresh }: { runner: TestRunResult; onRefres
   // xterm log be the only surface — the header verdict already carries the
   // pass/fail count. Keep the cases as a fallback only when there's no log to show.
   const syntheticOnly = runner.format === 'exit' && logVisible
-  const failing = syntheticOnly ? [] : cases.filter((c) => c.status === 'failed')
-  const passing = syntheticOnly ? [] : cases.filter((c) => c.status === 'passed')
-  const skipped = syntheticOnly ? [] : cases.filter((c) => c.status === 'skipped')
-  const warnings = syntheticOnly ? [] : cases.filter((c) => c.status === 'warning')
+  // The one place the status filter + search narrow this card's cases; the
+  // tree (or the per-status sections) render only what survives.
+  const visible = useMemo(
+    () => (syntheticOnly ? [] : computeVisibleCases(cases, filter, search)),
+    [syntheticOnly, cases, filter, search],
+  )
+  const hiddenCount = (syntheticOnly ? 0 : cases.length) - visible.length
   const toggleBuildLog = () =>
     setBuildLogOpen((o) => {
       const next = !o
@@ -350,57 +475,63 @@ function TestRunnerCard({ runner, onRefresh }: { runner: TestRunResult; onRefres
         </div>
       ) : null}
 
-      {/* Failing cases first (assertion messages inline). Full-bleed rows (-mx-3
-          cancels the card body inset) so they read like the existing impl. */}
-      {failing.length > 0 && (
+      {/* The filtered case tree — or its per-status sections when "Group by
+          result" is on. Full-bleed (-mx-3 cancels the card body inset). */}
+      {visible.length > 0 && (
         <div className="-mx-3 mt-1 flex flex-col border-t border-gray-100 dark:border-gray-800">
-          {failing.map((c, i) => (
-            <FailingCase key={i} c={c} />
-          ))}
+          {groupResult ? <ResultSections cases={visible} useScope={useScope} /> : <CaseTree cases={visible} useScope={useScope} />}
         </div>
       )}
 
-      {/* Warning cases (amber, always shown — surfacing them is the point). Sit
-          between the failing cases and the passing roll-up. */}
-      {warnings.length > 0 && (
-        <div className="-mx-3 mt-1 flex flex-col border-t border-gray-100 dark:border-gray-800">
-          {warnings.map((c, i) => (
-            <WarningCase key={i} c={c} />
-          ))}
-        </div>
-      )}
-
-      {/* Collapsed passing roll-up. */}
-      {passing.length > 0 && (
-        <div className="-mx-3">
-          <button
-            onClick={() => setShowPassing((s) => !s)}
-            className="flex w-full items-center gap-2 px-4 py-2 text-sm border-t border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800/40 text-left cursor-pointer"
-          >
-            {showPassing ? <ChevronDown className="w-3 h-3 text-gray-400" /> : <ChevronRight className="w-3 h-3 text-gray-400" />}
-            <Check className="w-3.5 h-3.5 text-green-600" strokeWidth={3} />
-            <span className="font-medium">{passing.length} passing</span>
-          </button>
-          {showPassing && (
-            <div className="flex flex-col bg-gray-50/50 dark:bg-gray-800/20">
-              {passing.map((c, i) => (
-                <div key={i} className="flex items-center gap-2 px-8 py-1 text-xs font-mono text-gray-600 dark:text-gray-400">
-                  <Check className="w-3 h-3 text-green-600" strokeWidth={3} /> {c.name}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Skipped roll-up. */}
-      {skipped.length > 0 && (
-        <div className="-mx-3 flex items-center gap-2 px-4 py-2 text-sm border-t border-gray-100 dark:border-gray-800 text-gray-500">
-          <SkipForward className="w-3.5 h-3.5" />
-          <span className="font-medium">{skipped.length} skipped</span>
+      {/* What the status filter / search hid, so a quiet card never reads as
+          "no tests" — the counts remain in the header regardless. */}
+      {hiddenCount > 0 && (
+        <div className="-mx-3 px-4 py-1.5 text-[11px] text-gray-400 dark:text-gray-500 border-t border-gray-100 dark:border-gray-800">
+          {hiddenCount} case{hiddenCount === 1 ? '' : 's'} hidden by filters
         </div>
       )}
     </CollapsibleCard>
+  )
+}
+
+// ResultSections renders the "Group by result" view: one collapsible section
+// per status (worst first), each holding its own CaseTree of the already-
+// filtered cases. Failing/warning sections open by default; skipped/passing
+// start collapsed (they're usually shown deliberately via the filter).
+const RESULT_SECTIONS: { status: TestCaseStatus; label: string; defaultOpen: boolean }[] = [
+  { status: TestCaseStatus.TestCaseFailed, label: 'failing', defaultOpen: true },
+  { status: TestCaseStatus.TestCaseWarning, label: 'warnings', defaultOpen: true },
+  { status: TestCaseStatus.TestCaseSkipped, label: 'skipped', defaultOpen: false },
+  { status: TestCaseStatus.TestCasePassed, label: 'passing', defaultOpen: false },
+]
+
+function ResultSections({ cases, useScope }: { cases: TestCase[]; useScope: boolean }) {
+  const [openOverride, setOpenOverride] = useState<Record<string, boolean>>({})
+  return (
+    <>
+      {RESULT_SECTIONS.map(({ status, label, defaultOpen }) => {
+        const list = cases.filter((c) => c.status === status)
+        if (list.length === 0) return null
+        const open = openOverride[status] ?? defaultOpen
+        const icon = status === 'failed' ? <X className="w-3.5 h-3.5 text-red-600 dark:text-red-400" strokeWidth={3} />
+          : status === 'warning' ? <AlertTriangle className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+            : status === 'skipped' ? <SkipForward className="w-3.5 h-3.5 text-gray-400 dark:text-gray-500" />
+              : <Check className="w-3.5 h-3.5 text-green-600" strokeWidth={3} />
+        return (
+          <div key={status} className="border-t border-gray-100 dark:border-gray-800 first:border-t-0">
+            <button
+              onClick={() => setOpenOverride((o) => ({ ...o, [status]: !open }))}
+              className="flex w-full items-center gap-2 px-4 py-2 text-sm hover:bg-gray-50 dark:hover:bg-gray-800/40 text-left cursor-pointer"
+            >
+              {open ? <ChevronDown className="w-3 h-3 text-gray-400" /> : <ChevronRight className="w-3 h-3 text-gray-400" />}
+              {icon}
+              <span className="font-medium">{list.length} {label}</span>
+            </button>
+            {open && <CaseTree cases={list} useScope={useScope} />}
+          </div>
+        )
+      })}
+    </>
   )
 }
 
@@ -434,43 +565,6 @@ function Summary({ runner }: { runner: TestRunResult }) {
       ) : null}
       {runner.format ? <span className="font-mono text-xs text-gray-400">· {runner.format}</span> : null}
     </span>
-  )
-}
-
-function FailingCase({ c }: { c: TestCase }) {
-  return (
-    <div className="flex flex-col gap-1.5 px-4 py-2.5 border-t border-gray-100 dark:border-gray-800 bg-red-50/40 dark:bg-red-900/10 first:border-t-0">
-      <div className="flex items-center gap-2">
-        <X className="w-3.5 h-3.5 text-red-600 dark:text-red-400 shrink-0" strokeWidth={3} />
-        <span className="font-mono text-xs font-medium">{c.name}</span>
-        {c.duration_ms != null ? <span className="ml-auto font-mono text-[10px] text-gray-400">{c.duration_ms}ms</span> : null}
-      </div>
-      {c.message ? (
-        <pre className="ml-5 text-[11px] font-mono whitespace-pre-wrap text-red-700 dark:text-red-300 bg-red-100/50 dark:bg-red-900/20 border border-red-200/60 dark:border-red-900/40 rounded px-2.5 py-1.5">
-          {c.message}
-        </pre>
-      ) : null}
-    </div>
-  )
-}
-
-// WarningCase renders one warning case — amber sibling of FailingCase. A warning
-// is non-failing (it never reddens the verdict) but worth surfacing, so it shows
-// its message inline like a failure rather than hiding in a roll-up.
-function WarningCase({ c }: { c: TestCase }) {
-  return (
-    <div className="flex flex-col gap-1.5 px-4 py-2.5 border-t border-gray-100 dark:border-gray-800 bg-amber-50/40 dark:bg-amber-900/10 first:border-t-0">
-      <div className="flex items-center gap-2">
-        <AlertTriangle className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
-        <span className="font-mono text-xs font-medium">{c.name}</span>
-        {c.duration_ms != null ? <span className="ml-auto font-mono text-[10px] text-gray-400">{c.duration_ms}ms</span> : null}
-      </div>
-      {c.message ? (
-        <pre className="ml-5 text-[11px] font-mono whitespace-pre-wrap text-amber-700 dark:text-amber-300 bg-amber-100/50 dark:bg-amber-900/20 border border-amber-200/60 dark:border-amber-900/40 rounded px-2.5 py-1.5">
-          {c.message}
-        </pre>
-      ) : null}
-    </div>
   )
 }
 

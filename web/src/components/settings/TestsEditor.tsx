@@ -139,6 +139,24 @@ export function TestsEditor({
                     </div>
                     <div className="space-y-1">
                       <label className="text-xs font-semibold text-gray-400 dark:text-gray-500 flex items-center gap-1">
+                        Results
+                        <InfoTooltip title="Result parsing">
+                          <p><strong>report file</strong> (default): after the command exits, Hydra parses the JUnit-XML / Hydra-JSON files it wrote into <code className="text-blue-300">$HYDRA_TEST_OUTPUT</code>.</p>
+                          <p className="mt-1.5"><strong>stdout stream</strong>: Hydra parses <code className="text-blue-300">::hydra:test:*::</code> markers live from the command's stdout — counts tick in the panel and sidebar as tests run, and the accumulated cases are the report (no file needed). One line per case:</p>
+                          <p className="mt-1 font-mono text-[11px]">::hydra:test:pass:: src/x.test.ts › adds<br />::hydra:test:fail:: src/x.test.ts:48:24 › grace window | expected kid-2<br />::hydra:test:warn:: src/y.ts:12:5 › no-console | Unexpected console<br />::hydra:test:skip:: pkg › TestResume | needs daemon<br />::hydra:test:total:: 4556</p>
+                        </InfoTooltip>
+                      </label>
+                      <select
+                        value={t.type === 'stdout' ? 'stdout' : 'junit'}
+                        onChange={(e) => update(index, { type: e.target.value === 'stdout' ? 'stdout' : undefined })}
+                        className="w-36 text-sm px-2.5 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-100 shadow-inner focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all cursor-pointer"
+                      >
+                        <option value="junit">report file</option>
+                        <option value="stdout">stdout stream</option>
+                      </select>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs font-semibold text-gray-400 dark:text-gray-500 flex items-center gap-1">
                         Timeout (s)
                         <InfoTooltip title="Timeout">
                           <p>Max seconds the command may run. Leave empty (0) for the built-in default.</p>

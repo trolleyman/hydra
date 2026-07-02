@@ -193,16 +193,7 @@ func buildTestRunResult(projectID string, mgr *hydratests.Manager, rep hydratest
 		Format:     nonEmptyPtr(rep.Format),
 	}
 	if len(rep.Cases) > 0 {
-		cases := make([]api.TestCase, 0, len(rep.Cases))
-		for _, c := range rep.Cases {
-			cases = append(cases, api.TestCase{
-				Name:       c.Name,
-				Status:     api.TestCaseStatus(c.Status),
-				DurationMs: ptr(c.DurationMs),
-				Message:    nonEmptyPtr(c.Message),
-			})
-		}
-		res.Cases = &cases
+		res.Cases = ptr(toAPITestCases(rep.Cases))
 	}
 	if rep.Status == hydratests.StatusRunning {
 		if rep.StartedAt > 0 {
@@ -216,6 +207,39 @@ func buildTestRunResult(projectID string, mgr *hydratests.Manager, rep hydratest
 		res.LogUrl = ptr(testLogURL(projectID, rep.Runner, rep.Key))
 	}
 	return res
+}
+
+// toAPITestCases maps parsed cases into the API shape, shared by the full
+// report (buildTestRunResult) and the streamed "counts" WS increments.
+func toAPITestCases(cases []hydratests.TestCase) []api.TestCase {
+	out := make([]api.TestCase, 0, len(cases))
+	for _, c := range cases {
+		ac := api.TestCase{
+			Name:       c.Name,
+			Status:     api.TestCaseStatus(c.Status),
+			Path:       nonEmptyPtr(c.Path),
+			DurationMs: ptr(c.DurationMs),
+			Message:    nonEmptyPtr(c.Message),
+		}
+		if len(c.Scope) > 0 {
+			scope := append([]string(nil), c.Scope...)
+			ac.Scope = &scope
+		}
+		if c.Line > 0 {
+			ac.Line = ptr(c.Line)
+		}
+		if c.Col > 0 {
+			ac.Col = ptr(c.Col)
+		}
+		if c.EndLine > 0 {
+			ac.EndLine = ptr(c.EndLine)
+		}
+		if c.EndCol > 0 {
+			ac.EndCol = ptr(c.EndCol)
+		}
+		out = append(out, ac)
+	}
+	return out
 }
 
 func toAPITestLog(lines []hydratests.LogLine) []api.ArtifactLogLine {
@@ -371,6 +395,29 @@ func (s *Server) testSummaryFor(projectRoot string, h heads.Head) *api.TestSumma
 		sum.AtBase = &atBase
 	}
 	return sum
+}
+
+// NotifyTestsProgress recomputes the live test summary of every head whose
+// tests are currently running and pushes each over the events WS as an
+// agent_tests_changed payload event, so sidebar/header chips tick in place
+// without every client refetching the whole agent list. Invoked (throttled per
+// run, see tests.Manager.onProgress) while a streamed type=stdout run appends
+// cases; the settle path still fires a full agents_changed refresh.
+func (s *Server) NotifyTestsProgress(projectRoot string) {
+	if s.Events == nil || s.Tests == nil || s.DB == nil {
+		return
+	}
+	headList, err := heads.ListHeads(context.Background(), s.Sessions, s.DB, projectRoot)
+	if err != nil {
+		return // best-effort: the agent-list poll still catches up
+	}
+	for _, h := range headList {
+		sum := s.testSummaryFor(projectRoot, h)
+		if sum == nil || sum.Status != api.TestStatusRunning {
+			continue
+		}
+		s.Events.AgentTestsChanged(projectRoot, h.ID, agentTestsPayload{AgentID: h.ID, Tests: sum})
+	}
 }
 
 // RunAutoMergeWatcher polls for heads with auto-merge armed (PLAN #68) and acts

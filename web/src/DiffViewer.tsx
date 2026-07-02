@@ -1633,13 +1633,19 @@ export function TreeNodeView({ node, depth, collapsedFolders, toggleFolder, onFi
 
 function SettingsPopup({ fileView, onFileViewChange, sideBySide, onSideBySideChange,
   ignoreWhitespace, onIgnoreWhitespaceChange, singleFile, onSingleFileChange,
-  imageDiffMode, onImageDiffModeChange, artifactScale, onArtifactScaleChange }: {
+  imageDiffMode, onImageDiffModeChange, artifactScale, onArtifactScaleChange,
+  testGroupResult, onTestGroupResultChange, testUseScope, onTestUseScopeChange, testScopeAvailable }: {
     fileView: FileView; onFileViewChange: (v: FileView) => void
     sideBySide: boolean; onSideBySideChange: (v: boolean) => void
     ignoreWhitespace: boolean; onIgnoreWhitespaceChange: (v: boolean) => void
     singleFile: boolean; onSingleFileChange: (v: boolean) => void
     imageDiffMode: ImageDiffMode; onImageDiffModeChange: (v: ImageDiffMode) => void
     artifactScale: number; onArtifactScaleChange: (v: number) => void
+    testGroupResult: boolean; onTestGroupResultChange: (v: boolean) => void
+    testUseScope: boolean; onTestUseScopeChange: (v: boolean) => void
+    // False when no loaded test case carries a logical scope — the "Group by
+    // scope" checkbox greys out rather than silently doing nothing.
+    testScopeAvailable: boolean
   }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -1697,6 +1703,25 @@ function SettingsPopup({ fileView, onFileViewChange, sideBySide, onSideBySideCha
                 <span className="text-xs text-gray-700 dark:text-gray-300">{label}</span>
               </label>
             ))}
+          </div>
+          {/* Test-results view modes — two orthogonal checkboxes (they compose):
+              per-status sections, and trees keyed by class/describe scope instead
+              of filesystem path. Scope greys out when no case carries one. */}
+          <p className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 tracking-wide mt-3 mb-2">Test Results</p>
+          <div className="flex flex-col gap-0.5">
+            <label className="flex items-center gap-2 py-0.5 cursor-pointer">
+              <input type="checkbox" checked={testGroupResult} onChange={(e) => onTestGroupResultChange(e.target.checked)}
+                className="w-3 h-3 accent-blue-500" />
+              <span className="text-xs text-gray-700 dark:text-gray-300">Group by result</span>
+            </label>
+            <label
+              className={`flex items-center gap-2 py-0.5 ${testScopeAvailable ? 'cursor-pointer' : 'opacity-50 cursor-not-allowed'}`}
+              title={testScopeAvailable ? undefined : 'No test case carries a class/describe scope'}
+            >
+              <input type="checkbox" checked={testUseScope} disabled={!testScopeAvailable}
+                onChange={(e) => onTestUseScopeChange(e.target.checked)} className="w-3 h-3 accent-blue-500" />
+              <span className="text-xs text-gray-700 dark:text-gray-300">Group by scope</span>
+            </label>
           </div>
           <p className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 tracking-wide mt-3 mb-2">Artifact Diff</p>
           <div className="flex flex-col gap-0.5">
@@ -1808,6 +1833,18 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
   useEffect(() => {
     patchAgentViewPrefs(projectId, agent.id, { collapsedFiles: [...collapsedFiles] })
   }, [projectId, agent.id, collapsedFiles])
+
+  // Tests-panel view modes — the two orthogonal cog checkboxes (see
+  // TESTS_PLAN.md Feature 1), persisted per agent like collapsedFiles.
+  const [testGroupResult, setTestGroupResult] = useState<boolean>(() => !!loadAgentViewPrefs(projectId, agent.id).testGroupResult)
+  const [testUseScope, setTestUseScope] = useState<boolean>(() => !!loadAgentViewPrefs(projectId, agent.id).testUseScope)
+  // Whether any loaded test case carries a logical scope (class/describe
+  // chain) — reported up by the TestsPanel so the cog can grey the "Group by
+  // scope" checkbox when the axis doesn't exist for this project's runners.
+  const [testsHaveScope, setTestsHaveScope] = useState(false)
+  useEffect(() => {
+    patchAgentViewPrefs(projectId, agent.id, { testGroupResult, testUseScope })
+  }, [projectId, agent.id, testGroupResult, testUseScope])
 
   const toggleFolder = useCallback((path: string) => {
     setCollapsedFolders((prev) => {
@@ -2381,6 +2418,9 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
             singleFile={singleFile} onSingleFileChange={handleSingleFileChange}
             imageDiffMode={imageDiffMode} onImageDiffModeChange={setImageDiffMode}
             artifactScale={artifactScale} onArtifactScaleChange={setArtifactScale}
+            testGroupResult={testGroupResult} onTestGroupResultChange={setTestGroupResult}
+            testUseScope={testUseScope} onTestUseScopeChange={setTestUseScope}
+            testScopeAvailable={testsHaveScope}
           />
         </div>
       </div>
@@ -2396,6 +2436,9 @@ export function DiffViewer({ agent, projectId, externalRefreshTrigger, externalA
           headRef={artifactParams.headRef}
           includeUncommitted={artifactParams.includeUncommitted}
           refreshKey={refreshKey + (externalArtifactRefresh ?? 0)}
+          groupResult={testGroupResult}
+          useScope={testUseScope && testsHaveScope}
+          onScopeAvailable={setTestsHaveScope}
         />
       )}
 

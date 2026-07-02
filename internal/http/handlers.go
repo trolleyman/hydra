@@ -735,6 +735,9 @@ func toAPITestScript(t config.TestScript) api.TestScript {
 	if t.CleanIgnored {
 		out.CleanIgnored = &t.CleanIgnored
 	}
+	if t.Type != "" {
+		out.Type = &t.Type
+	}
 	out.Strict = t.Strict
 	out.Enabled = t.Enabled
 	return out
@@ -751,6 +754,9 @@ func fromAPITestScript(t api.TestScript) config.TestScript {
 	}
 	if t.CleanIgnored != nil {
 		out.CleanIgnored = *t.CleanIgnored
+	}
+	if t.Type != nil {
+		out.Type = *t.Type
 	}
 	out.Strict = t.Strict
 	out.Enabled = t.Enabled

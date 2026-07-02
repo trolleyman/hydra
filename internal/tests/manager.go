@@ -49,6 +49,13 @@ type Manager struct {
 	// verdict chips immediately instead of waiting on the slow fallback poll. Set
 	// once by the Registry at creation; read-only thereafter.
 	onSettle func(projectRoot string)
+	// onProgress, if set, is called (with projectRoot) while a streamed
+	// (type=stdout) run is appending cases — throttled to testNudgeInterval per
+	// run. Wired to Server.NotifyTestsProgress, which pushes per-head
+	// agent_tests_changed payload events so the sidebar chip's live ✓/⚠/✗
+	// counts tick during the run without clients refetching the agent list.
+	// Same wiring discipline as onSettle.
+	onProgress func(projectRoot string)
 
 	mu         sync.Mutex
 	gens       map[string]struct{}
@@ -56,6 +63,7 @@ type Manager struct {
 	startedAt  map[string]int64
 	logs       map[string][]LogLine
 	markerSeen map[string]bool
+	live       map[string]*liveRun
 	cancel     map[string]context.CancelFunc
 	fgWant     map[string]bool
 	subs       map[int]chan Event
@@ -79,6 +87,7 @@ func NewManager(projectRoot string) *Manager {
 		startedAt:   map[string]int64{},
 		logs:        map[string][]LogLine{},
 		markerSeen:  map[string]bool{},
+		live:        map[string]*liveRun{},
 		cancel:      map[string]context.CancelFunc{},
 		fgWant:      map[string]bool{},
 		subs:        map[int]chan Event{},
@@ -139,9 +148,10 @@ func (m *Manager) EntryDir(runner string, v Version) (string, error) {
 
 // Registry lazily creates and caches one Manager per project root.
 type Registry struct {
-	mu       sync.Mutex
-	mgrs     map[string]*Manager
-	onSettle func(projectRoot string)
+	mu         sync.Mutex
+	mgrs       map[string]*Manager
+	onSettle   func(projectRoot string)
+	onProgress func(projectRoot string)
 }
 
 func NewRegistry() *Registry { return &Registry{mgrs: map[string]*Manager{}} }
@@ -156,6 +166,16 @@ func (r *Registry) SetOnSettle(fn func(projectRoot string)) {
 	r.onSettle = fn
 }
 
+// SetOnProgress registers a callback invoked (throttled per in-flight run)
+// while a streamed run's counts tick. Wired to events.Hub.AgentsChanged so the
+// sidebar chip counts live during a type=stdout run. Call before serving; it
+// applies to Managers created afterwards.
+func (r *Registry) SetOnProgress(fn func(projectRoot string)) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.onProgress = fn
+}
+
 func (r *Registry) Manager(projectRoot string) *Manager {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -164,6 +184,7 @@ func (r *Registry) Manager(projectRoot string) *Manager {
 	}
 	m := NewManager(projectRoot)
 	m.onSettle = r.onSettle
+	m.onProgress = r.onProgress
 	r.mgrs[projectRoot] = m
 	return m
 }
@@ -226,13 +247,13 @@ func (m *Manager) Peek(runner string, v Version) (Report, bool, error) {
 	}
 	dir := m.entryDir(runner, key)
 	m.mu.Lock()
-	_, inFlight := m.gens[dir]
-	started := m.startedAt[dir]
-	prog := m.progress[dir]
-	m.mu.Unlock()
-	if inFlight {
-		return Report{Runner: runner, Key: key, Status: StatusRunning, StartedAt: started, Progress: prog}, true, nil
+	if _, inFlight := m.gens[dir]; inFlight {
+		rep := Report{Runner: runner, Key: key, Status: StatusRunning, StartedAt: m.startedAt[dir], Progress: m.progress[dir]}
+		m.fillRunningLocked(dir, &rep)
+		m.mu.Unlock()
+		return rep, true, nil
 	}
+	m.mu.Unlock()
 	rep, ok := readReport(dir)
 	return rep, ok, nil
 }
@@ -274,14 +295,13 @@ func (m *Manager) get(spec config.TestScript, v Version, fg bool) (Report, error
 		if fg {
 			m.fgWant[dir] = true
 		}
-		prog := m.progress[dir]
-		started := m.startedAt[dir]
-		logCopy := append([]LogLine(nil), m.logs[dir]...)
+		rep := Report{Runner: spec.Name, Key: key, Ref: ref, Status: StatusRunning, Progress: m.progress[dir], StartedAt: m.startedAt[dir], Log: append([]LogLine(nil), m.logs[dir]...)}
+		m.fillRunningLocked(dir, &rep)
 		m.mu.Unlock()
 		if fg {
 			m.sched.Promote(dir)
 		}
-		return Report{Runner: spec.Name, Key: key, Ref: ref, Status: StatusRunning, Progress: prog, StartedAt: started, Log: logCopy}, nil
+		return rep, nil
 	}
 	started := time.Now().Unix()
 	genCtx, genCancel := context.WithCancel(context.Background())
@@ -308,6 +328,11 @@ func (m *Manager) get(spec config.TestScript, v Version, fg bool) (Report, error
 		}
 		m.mu.Lock()
 		logCopy := append([]LogLine(nil), m.logs[dir]...)
+		// Emit the final coalesced counts increment (a fast run can settle before
+		// the flush timer ever fires) — it also stops any pending timer. The
+		// settled event below then delivers the authoritative report anyway.
+		m.flushCountsLocked(dir)
+		delete(m.live, dir)
 		delete(m.gens, dir)
 		delete(m.progress, dir)
 		delete(m.startedAt, dir)
@@ -390,6 +415,156 @@ func (m *Manager) setProgressLocked(dir, text string) {
 	m.broadcastLocked(Event{Dir: dir, Kind: "progress", Progress: text})
 }
 
+// --- streamed test markers (type = "stdout") ---
+
+const (
+	// caseFlushInterval / caseFlushMax coalesce "counts" events: an event fires
+	// at most ~10×/s, or immediately once this many cases are pending — the
+	// backpressure guard that keeps a 4,556-case run from emitting 4,556 frames.
+	caseFlushInterval = 100 * time.Millisecond
+	caseFlushMax      = 200
+	// testNudgeInterval throttles the onProgress nudge: each one makes the
+	// server recompute running heads' summaries and push agent_tests_changed
+	// payload events, so the sidebar chip ticks ~every 2s, not at counts rate.
+	testNudgeInterval = 2 * time.Second
+)
+
+// liveRun accumulates the streamed test cases of one in-flight generation.
+// Guarded by Manager.mu.
+type liveRun struct {
+	cases                             []TestCase
+	total                             int // declared denominator (0 = unknown)
+	passed, failed, skipped, warnings int
+	pending                           []TestCase // appended since the last coalesced flush
+	timer                             *time.Timer
+	lastNudge                         time.Time // last onProgress nudge (see testNudgeInterval)
+}
+
+// appendTestCase records one streamed case: it feeds the accumulated report,
+// the running tally, the live progress header ("123/4556" — which the agent
+// list's summary also surfaces, so the sidebar chip ticks), and the coalesced
+// "counts" event stream.
+func (m *Manager) appendTestCase(dir string, tc TestCase) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, inFlight := m.gens[dir]; !inFlight {
+		return
+	}
+	lr := m.live[dir]
+	if lr == nil {
+		lr = &liveRun{}
+		m.live[dir] = lr
+	}
+	lr.cases = append(lr.cases, tc)
+	lr.pending = append(lr.pending, tc)
+	switch tc.Status {
+	case CaseFailed:
+		lr.failed++
+	case CaseSkipped:
+		lr.skipped++
+	case CaseWarning:
+		lr.warnings++
+	default:
+		lr.passed++
+	}
+	// Test markers are more specific than plain stdout lines, so they own the
+	// progress header (like an explicit ::hydra:progress:: marker would).
+	m.markerSeen[dir] = true
+	m.setProgressLocked(dir, lr.progressText())
+	if len(lr.pending) >= caseFlushMax {
+		m.flushCountsLocked(dir)
+	} else if lr.timer == nil {
+		lr.timer = time.AfterFunc(caseFlushInterval, func() {
+			m.mu.Lock()
+			defer m.mu.Unlock()
+			m.flushCountsLocked(dir)
+		})
+	}
+}
+
+// setTestTotal records the declared ::hydra:test:total:: denominator.
+func (m *Manager) setTestTotal(dir string, total int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, inFlight := m.gens[dir]; !inFlight {
+		return
+	}
+	lr := m.live[dir]
+	if lr == nil {
+		lr = &liveRun{}
+		m.live[dir] = lr
+	}
+	lr.total = total
+	m.markerSeen[dir] = true
+	m.setProgressLocked(dir, lr.progressText())
+}
+
+func (lr *liveRun) progressText() string {
+	if lr.total > 0 {
+		return fmt.Sprintf("%d/%d", len(lr.cases), lr.total)
+	}
+	return fmt.Sprintf("%d", len(lr.cases))
+}
+
+// flushCountsLocked emits one coalesced "counts" event carrying the running
+// totals plus the cases appended since the previous flush. No-op when nothing
+// is pending or the run already settled (m.live cleaned up).
+func (m *Manager) flushCountsLocked(dir string) {
+	lr := m.live[dir]
+	if lr == nil {
+		return
+	}
+	if lr.timer != nil {
+		lr.timer.Stop()
+		lr.timer = nil
+	}
+	if len(lr.pending) == 0 {
+		return
+	}
+	counts := &RunningCounts{
+		Passed: lr.passed, Failed: lr.failed, Skipped: lr.skipped, Warnings: lr.warnings,
+		Total: lr.total,
+		Cases: lr.pending,
+	}
+	lr.pending = nil
+	m.broadcastLocked(Event{Dir: dir, Kind: "counts", Counts: counts})
+	// Nudge the server (throttled) to push updated per-head summaries so the
+	// sidebar chip's live counts tick during the run — the settle nudge covers
+	// the final state. Fired async so the callback never runs under m.mu.
+	if m.onProgress != nil && time.Since(lr.lastNudge) >= testNudgeInterval {
+		lr.lastNudge = time.Now()
+		go m.onProgress(m.projectRoot)
+	}
+}
+
+// fillRunningLocked copies the in-flight streamed state into a running Report
+// snapshot, so a late subscriber (or the polling fallback) sees the partial
+// case list and tallies instead of an empty card.
+func (m *Manager) fillRunningLocked(dir string, rep *Report) {
+	lr := m.live[dir]
+	if lr == nil {
+		return
+	}
+	rep.Cases = append([]TestCase(nil), lr.cases...)
+	rep.Passed, rep.Failed, rep.Skipped, rep.Warnings = lr.passed, lr.failed, lr.skipped, lr.warnings
+	if lr.total > 0 {
+		rep.Total = lr.total
+	} else {
+		rep.Total = len(lr.cases)
+	}
+}
+
+// liveCases returns a copy of the streamed cases accumulated so far.
+func (m *Manager) liveCases(dir string) []TestCase {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	lr := m.live[dir]
+	if lr == nil {
+		return nil
+	}
+	return append([]TestCase(nil), lr.cases...)
+}
+
 // generate runs the command for one version and returns the resulting Report.
 func (m *Manager) generate(parent context.Context, spec config.TestScript, v Version, key, ref string) Report {
 	rep := Report{Runner: spec.Name, Key: key, Ref: ref, UpdatedAt: time.Now().Unix()}
@@ -447,6 +622,7 @@ func (m *Manager) generate(parent context.Context, spec config.TestScript, v Ver
 	}
 	var stderrBuf bytes.Buffer
 	var stderrMu sync.Mutex
+	lc := newLocContext(runDir)
 	scan := func(r io.Reader, stream string) {
 		sc := bufio.NewScanner(r)
 		sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
@@ -459,6 +635,19 @@ func (m *Manager) generate(parent context.Context, spec config.TestScript, v Ver
 				stderrMu.Unlock()
 			}
 			if stream == StreamStdout {
+				// ::hydra:test:*:: markers are protocol, not log output: they feed
+				// the live case accumulation + coalesced counts events, and are kept
+				// out of the log ring so a 4,556-case run doesn't flood the WS with
+				// one log frame per test.
+				if mk, ok := parseTestMarker(line, lc); ok {
+					switch mk.kind {
+					case "case":
+						m.appendTestCase(dir, mk.c)
+					case "total":
+						m.setTestTotal(dir, mk.total)
+					}
+					continue
+				}
 				if rest, ok := strings.CutPrefix(strings.TrimSpace(line), ProgressMarker); ok {
 					if text := strings.TrimSpace(rest); text != "" {
 						m.appendLog(dir, text, stream, true)
@@ -485,10 +674,22 @@ func (m *Manager) generate(parent context.Context, spec config.TestScript, v Ver
 		return errored(rep, "timed out after "+timeout.String())
 	}
 
-	cases, format, found, perr := ParseDir(outputDir)
-	if perr != nil {
-		rep.DurationMs = durationMs
-		return errored(rep, "read report: "+perr.Error())
+	var cases []TestCase
+	var format string
+	var found bool
+	if spec.IsStreaming() {
+		// type = "stdout": the accumulated ::hydra:test:*:: cases ARE the report;
+		// no file is read. Zero markers falls through to the exit-code verdict.
+		cases = m.liveCases(dir)
+		format = "stdout"
+		found = len(cases) > 0
+	} else {
+		var perr error
+		cases, format, found, perr = ParseDir(outputDir, runDir)
+		if perr != nil {
+			rep.DurationMs = durationMs
+			return errored(rep, "read report: "+perr.Error())
+		}
 	}
 
 	rep.DurationMs = durationMs

@@ -558,12 +558,13 @@ func simTestRunners(id string) []api.TestRunResult {
 		Total: ptr(149), Passed: ptr(142), Failed: ptr(0), Warnings: ptr(4), Skipped: ptr(3),
 		DurationMs: ptr(int64(4200)), Format: ptr("junit"), Ref: ptr("a1b2c3d"),
 		// Non-failing warnings (e.g. eslint) surface amber alongside the green pass.
+		// Structured locations (path + line/col + scope) exercise the CaseTree.
 		Cases: &[]api.TestCase{
-			{Name: "eslint › web/src/DiffViewer.tsx", Status: api.TestCaseWarning, Message: ptr("'onionSkin' is assigned a value but never used  no-unused-vars")},
-			{Name: "eslint › web/src/lib/theme.ts", Status: api.TestCaseWarning, Message: ptr("Unexpected console statement  no-console")},
-			{Name: "eslint › internal/heads/heads.go", Status: api.TestCaseWarning, Message: ptr("exported func SpawnHead should have comment  golint")},
-			{Name: "eslint › web/src/components/Badge.tsx", Status: api.TestCaseWarning, Message: ptr("React Hook useMemo has a missing dependency  react-hooks/exhaustive-deps")},
-			{Name: "heads/heads.test.ts › resumes on boot", Status: api.TestCaseSkipped, Message: ptr("it.skip")},
+			{Name: "no-unused-vars", Status: api.TestCaseWarning, Path: ptr("web/src/DiffViewer.tsx"), Line: ptr(1742), Col: ptr(9), Message: ptr("'onionSkin' is assigned a value but never used  no-unused-vars")},
+			{Name: "no-console", Status: api.TestCaseWarning, Path: ptr("web/src/lib/theme.ts"), Line: ptr(58), Col: ptr(3), Message: ptr("Unexpected console statement  no-console")},
+			{Name: "golint", Status: api.TestCaseWarning, Path: ptr("internal/heads/heads.go"), Line: ptr(212), Message: ptr("exported func SpawnHead should have comment  golint")},
+			{Name: "react-hooks/exhaustive-deps", Status: api.TestCaseWarning, Path: ptr("web/src/components/Badge.tsx"), Line: ptr(31), Col: ptr(6), Message: ptr("React Hook useMemo has a missing dependency  react-hooks/exhaustive-deps")},
+			{Name: "resumes on boot", Status: api.TestCaseSkipped, Path: ptr("heads/heads.test.ts"), Message: ptr("it.skip")},
 		},
 	}
 	if id == "agent-2" {
@@ -573,10 +574,10 @@ func simTestRunners(id string) []api.TestRunResult {
 			Total: ptr(147), Passed: ptr(142), Failed: ptr(2), Skipped: ptr(3),
 			DurationMs: ptr(int64(4200)), Format: ptr("junit"), Ref: ptr("a1b2c3d"),
 			Cases: &[]api.TestCase{
-				{Name: "auth/rotation.test.ts › rotates signing key on expiry", Status: api.TestCaseFailed, DurationMs: ptr(int64(38)), Message: ptr("AssertionError: expected 'kid-2' to be 'kid-3'\n  at rotation.test.ts:48:24")},
-				{Name: "auth/rotation.test.ts › keeps old sessions valid in grace window", Status: api.TestCaseFailed, DurationMs: ptr(int64(12)), Message: ptr("TypeError: currentKid is not a function\n  at token-service.ts:21:14")},
-				{Name: "diff/onion.test.ts › blends frames", Status: api.TestCasePassed, DurationMs: ptr(int64(5))},
-				{Name: "heads/heads.test.ts › resumes on boot", Status: api.TestCaseSkipped, Message: ptr("it.skip")},
+				{Name: "rotates signing key on expiry", Status: api.TestCaseFailed, Path: ptr("auth/rotation.test.ts"), Scope: ptr([]string{"key rotation"}), Line: ptr(48), Col: ptr(24), DurationMs: ptr(int64(38)), Message: ptr("AssertionError: expected 'kid-2' to be 'kid-3'\n  at rotation.test.ts:48:24")},
+				{Name: "keeps old sessions valid in grace window", Status: api.TestCaseFailed, Path: ptr("auth/rotation.test.ts"), Scope: ptr([]string{"key rotation"}), Line: ptr(63), Col: ptr(11), DurationMs: ptr(int64(12)), Message: ptr("TypeError: currentKid is not a function\n  at token-service.ts:21:14")},
+				{Name: "blends frames", Status: api.TestCasePassed, Path: ptr("diff/onion.test.ts"), Scope: ptr([]string{"onion skin"}), DurationMs: ptr(int64(5))},
+				{Name: "resumes on boot", Status: api.TestCaseSkipped, Path: ptr("heads/heads.test.ts"), Message: ptr("it.skip")},
 			},
 		}}
 	}

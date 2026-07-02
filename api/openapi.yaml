@@ -2919,6 +2919,14 @@ components:
         command:
           type: string
           description: Shell command run via `bash -c` in the checkout directory; writes a JUnit-XML or Hydra-JSON report into $HYDRA_TEST_OUTPUT
+        type:
+          type: string
+          nullable: true
+          description: >-
+            How results are read — "junit" (default; parse *.xml/*.json report
+            files from $HYDRA_TEST_OUTPUT after exit) or "stdout" (parse
+            `::hydra:test:*::` markers streamed live from stdout; the
+            accumulated cases are the report, no file needed).
         timeout_sec:
           type: integer
           description: Max seconds the command may run (0 = built-in default)
@@ -2958,8 +2966,32 @@ components:
       properties:
         name:
           type: string
+          description: Leaf test name only when path/scope are set; older reports carry a pre-joined display name here with no path/scope.
         status:
           $ref: '#/components/schemas/TestCaseStatus'
+        path:
+          type: string
+          nullable: true
+          description: Repo-relative filesystem location — a file (vitest/eslint/pytest) or a package dir (Go). Absent when the runner only exposes a logical scope.
+        scope:
+          type: array
+          items:
+            type: string
+          nullable: true
+          description: Logical nesting chain between path and name — a class chain (com › example › FooTest), describe chain, or Go subtest parent.
+        line:
+          type: integer
+          nullable: true
+          description: 1-based line within path, when known.
+        col:
+          type: integer
+          nullable: true
+        end_line:
+          type: integer
+          nullable: true
+        end_col:
+          type: integer
+          nullable: true
         duration_ms:
           type: integer
           format: int64

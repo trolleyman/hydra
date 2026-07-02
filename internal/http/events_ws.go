@@ -6,13 +6,25 @@ import (
 
 	"braces.dev/errtrace"
 	"github.com/gorilla/websocket"
+	"github.com/trolleyman/hydra/internal/api"
 	"github.com/trolleyman/hydra/internal/events"
 )
 
 // eventMsg is the JSON frame sent to the client for one change signal. The client
-// switches on Type and refetches the matching resource (PLAN #50).
+// switches on Type and refetches the matching resource (PLAN #50) — except
+// agent_tests_changed, which carries the new summary inline (agent_id + tests)
+// so the client patches the chip in place instead of refetching the agent list.
 type eventMsg struct {
-	Type string `json:"type"`
+	Type    string           `json:"type"`
+	AgentID string           `json:"agent_id,omitempty"`
+	Tests   *api.TestSummary `json:"tests,omitempty"`
+}
+
+// agentTestsPayload is the events.Event.Payload of an agent_tests_changed
+// event, published by NotifyTestsProgress and framed here.
+type agentTestsPayload struct {
+	AgentID string
+	Tests   *api.TestSummary
 }
 
 // HandleEventsWS streams change signals for one project to a web client, so the
@@ -58,14 +70,20 @@ func (s *Server) HandleEventsWS(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	writeType := func(t events.Type) error {
+	writeEvent := func(ev events.Event) error {
+		msg := eventMsg{Type: string(ev.Type)}
+		if p, ok := ev.Payload.(agentTestsPayload); ok {
+			msg.AgentID = p.AgentID
+			msg.Tests = p.Tests
+		}
 		_ = conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-		return errtrace.Wrap(conn.WriteJSON(eventMsg{Type: string(t)}))
+		return errtrace.Wrap(conn.WriteJSON(msg))
 	}
 
-	// Initial nudge: refetch everything once on (re)connect.
+	// Initial nudge: refetch everything once on (re)connect. (No initial
+	// agent_tests_changed — the agents refetch carries the summaries.)
 	for _, t := range []events.Type{events.AgentsChanged, events.ProjectsChanged, events.ServicesChanged, events.PushStatusChanged} {
-		if err := writeType(t); err != nil {
+		if err := writeEvent(events.Event{Type: t}); err != nil {
 			return
 		}
 	}
@@ -79,8 +97,8 @@ func (s *Server) HandleEventsWS(w http.ResponseWriter, r *http.Request) {
 		case <-r.Context().Done():
 			return
 		case <-sub.C():
-			for _, t := range sub.Drain() {
-				if err := writeType(t); err != nil {
+			for _, ev := range sub.Drain() {
+				if err := writeEvent(ev); err != nil {
 					return
 				}
 			}
