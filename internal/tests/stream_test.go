@@ -49,6 +49,14 @@ func TestParseTestMarker(t *testing.T) {
 		},
 		// Name-only case (no location).
 		{"::hydra:test:pass:: just a name", testMarker{kind: "case", c: TestCase{Status: CasePassed, Name: "just a name"}}, true},
+		// Escapes in the message decode to real control chars so a single marker
+		// line can carry a multi-line failure; `\\` collapses to one backslash and
+		// an unknown escape is left verbatim.
+		{
+			"::hydra:test:fail:: pkg/a › TestX | line1\\nline2\\tcol\\\\path \\q raw",
+			testMarker{kind: "case", c: TestCase{Status: CaseFailed, Path: "pkg/a", Name: "TestX", Message: "line1\nline2\tcol\\path \\q raw"}},
+			true,
+		},
 		// Rejections: unknown verb, empty payload, plain output.
 		{"::hydra:test:bogus:: x", testMarker{}, false},
 		{"::hydra:test:pass::", testMarker{}, false},

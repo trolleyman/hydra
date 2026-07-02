@@ -361,6 +361,8 @@ type TestScript struct {
 	//   - "stdout": parse `::hydra:test:<pass|fail|warn|skip>:: location › name | msg`
 	//     markers live from the command's stdout — the accumulated cases ARE the
 	//     report (no file needed), and counts stream into the UI as they happen.
+	//     One marker per line; a message may use `\n`/`\t`/`\r`/`\\` escapes to
+	//     carry a multi-line failure on that single line (see internal/tests).
 	Type string `toml:"type"`
 }
 
@@ -1491,6 +1493,8 @@ func testsDocLines() []string {
 		docPrefix + "                runner exiting non-zero because tests FAILED is a valid verdict,",
 		docPrefix + "                not a strict abort — strict only governs the shell pipeline.",
 		docPrefix + "   enabled      set false to skip this runner (default true).",
+		docPrefix + `   type         "junit" (default) reads report files after exit; "stdout" parses`,
+		docPrefix + "                ::hydra:test:*:: markers live from stdout (see streaming note below).",
 		docPrefix + " The command writes a report into $HYDRA_TEST_OUTPUT: JUnit XML (*.xml — go test",
 		docPrefix + " via gotestsum, pytest, jest/vitest, cargo-nextest, …) or a Hydra-native *.json",
 		docPrefix + ` ({total,passed,failed,skipped,duration_ms,cases:[{name,status,duration_ms,message}]}).`,
@@ -1505,6 +1509,19 @@ func testsDocLines() []string {
 		docPrefix + " (severity 2 → status \"failed\", severity 1 → \"warning\").",
 		docPrefix + " It is also given HYDRA_TEST_SOURCE (the checkout dir) and HYDRA_TEST_REF (the",
 		docPrefix + " resolved ref).",
+		docPrefix + " Streaming (type = \"stdout\"): instead of a report file, print one marker per line",
+		docPrefix + " and Hydra counts them live (into the panel and the sidebar chip):",
+		docPrefix + "   ::hydra:test:total:: 4556                                  (optional denominator)",
+		docPrefix + "   ::hydra:test:pass:: internal/artifacts › TestGenerateAndCache",
+		docPrefix + "   ::hydra:test:fail:: auth/rotation.test.ts:48:24 › grace window | expected 3 got 2",
+		docPrefix + "   ::hydra:test:warn:: web/src/x.ts:12:5 › no-console | Unexpected console statement",
+		docPrefix + "   ::hydra:test:skip:: heads/resume_test.go › TestResumeOnBoot | needs daemon",
+		docPrefix + " The token before the first › is the location (path[:line[:col]] or dotted class),",
+		docPrefix + " middle › tokens are scope levels, the last is the test name, text after | is the",
+		docPrefix + " message. A marker is one line; in the message an escape sequence expands —",
+		docPrefix + " backslash-n to a newline, backslash-t to a tab, backslash-r to a carriage return",
+		docPrefix + " (so a multi-line stack trace fits on the one line) — and a doubled backslash",
+		docPrefix + " becomes one literal backslash. Any other escape is left as-is.",
 	}
 }
 

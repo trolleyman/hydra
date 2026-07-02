@@ -43,6 +43,45 @@ var markerStatus = map[string]CaseStatus{
 // lineColRe strips an optional trailing :line[:col] off a location token.
 var lineColRe = regexp.MustCompile(`^(.+?):(\d+)(?::(\d+))?$`)
 
+// unescapeMessage decodes a small set of C-style escapes in a streamed case
+// message, so a runner can carry a multi-line failure (stack trace, diff) on the
+// single stdout line the marker protocol allows. Each ::hydra:test:*:: marker is
+// one line — a raw newline would end it — so a runner emits `\n` and Hydra turns
+// it back into a real newline here (the tests panel renders the message verbatim,
+// like a JUnit <failure> body). Recognised: `\n` → newline, `\t` → tab, `\r` →
+// carriage return, `\\` → a single backslash (so a literal backslash survives).
+// An unrecognised escape (`\x`) is left untouched, backslash and all, so ordinary
+// text — Windows paths, regexes — is never silently mangled.
+func unescapeMessage(s string) string {
+	if !strings.ContainsRune(s, '\\') {
+		return s // fast path: nothing to decode
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); i++ {
+		if s[i] != '\\' || i+1 >= len(s) {
+			b.WriteByte(s[i])
+			continue
+		}
+		switch s[i+1] {
+		case 'n':
+			b.WriteByte('\n')
+		case 't':
+			b.WriteByte('\t')
+		case 'r':
+			b.WriteByte('\r')
+		case '\\':
+			b.WriteByte('\\')
+		default:
+			// Unknown escape: keep both bytes verbatim.
+			b.WriteByte('\\')
+			b.WriteByte(s[i+1])
+		}
+		i++ // consumed the escaped byte
+	}
+	return b.String()
+}
+
 // parseTestMarker parses one raw stdout line as a test marker, returning
 // ok=false when it isn't one (wrong prefix, unknown verb, empty payload).
 func parseTestMarker(line string, lc *locContext) (testMarker, bool) {
@@ -72,7 +111,7 @@ func parseTestMarker(line string, lc *locContext) (testMarker, bool) {
 
 	// Split off the message first (everything after the first " | ").
 	rest2, msg, _ := strings.Cut(payload, " | ")
-	tc := TestCase{Status: status, Message: truncate(strings.TrimSpace(msg), maxCaseMessage)}
+	tc := TestCase{Status: status, Message: truncate(unescapeMessage(strings.TrimSpace(msg)), maxCaseMessage)}
 
 	segs := mapTrimSpace(strings.Split(rest2, " › "))
 	tc.Name = segs[len(segs)-1]
