@@ -4,6 +4,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"log"
@@ -23,6 +24,7 @@ import (
 	"github.com/trolleyman/hydra/internal/config"
 	"github.com/trolleyman/hydra/internal/git"
 	"github.com/trolleyman/hydra/internal/paths"
+	"github.com/trolleyman/hydra/internal/tools"
 )
 
 // getVersion returns the version from git describe.
@@ -448,7 +450,86 @@ func GenSeccomp() error {
 	return nil
 }
 
+// Tools groups commands for the bundled host-side sandbox helper binaries.
+type Tools mg.Namespace
+
+// Ensure downloads the bundled sandbox helper binaries (currently pasta + its
+// AVX2 sibling, from passt.top) into .hydra/local/bin if they're missing. It
+// makes no network calls when they're already present, so it's cheap to run on
+// every launch — which is exactly what the dev/serve targets do via
+// ensureToolsEnv. Run it directly to pre-fetch.
+//
+//	mage tools:ensure
+func (Tools) Ensure() error {
+	projectRoot, err := paths.GetProjectRootFromCwd()
+	if err != nil {
+		return errtrace.Wrap(err)
+	}
+	res, err := tools.Provision(context.Background(), projectRoot, false)
+	if err != nil {
+		return errtrace.Wrap(err)
+	}
+	reportTools(projectRoot, res)
+	return nil
+}
+
+// Update re-checks upstream and re-downloads the bundled tools when the build has
+// changed (by Last-Modified/size) — unlike Ensure, which only fetches what's
+// missing. Use it to pull a newer pasta.
+//
+//	mage tools:update
+func (Tools) Update() error {
+	projectRoot, err := paths.GetProjectRootFromCwd()
+	if err != nil {
+		return errtrace.Wrap(err)
+	}
+	res, err := tools.Provision(context.Background(), projectRoot, true)
+	if err != nil {
+		return errtrace.Wrap(err)
+	}
+	reportTools(projectRoot, res)
+	return nil
+}
+
+// reportTools prints a Provision result.
+func reportTools(projectRoot string, res tools.Result) {
+	if !res.Available {
+		fmt.Printf("%stools: bundling not available on %s/%s — hydra will use a system pasta%s\n",
+			colorYellow, runtime.GOOS, runtime.GOARCH, colorReset)
+		return
+	}
+	for _, a := range res.Actions {
+		fmt.Printf("%s✓%s %s\n", colorGreen, colorReset, a)
+	}
+	fmt.Printf("bundled tools in %s\n", displayPath(tools.Dir(projectRoot)))
+}
+
+// ensureToolsEnv provisions the bundled sandbox helpers if missing and points the
+// HYDRA_* env overrides at them for the hydra server this target is about to
+// launch — but only when the user hasn't already set those vars, so an explicit
+// override always wins. Provisioning failures are non-fatal: hydra falls back to
+// a system pasta, so dev/serve still runs (hard egress may just be unavailable).
+func ensureToolsEnv() {
+	projectRoot, err := paths.GetProjectRootFromCwd()
+	if err != nil {
+		log.Printf("tools: skipping provisioning (%v); using system tools", err)
+		return
+	}
+	if res, err := tools.Provision(context.Background(), projectRoot, false); err != nil {
+		log.Printf("tools: provisioning failed (%v); using system tools", err)
+	} else {
+		for _, a := range res.Actions {
+			fmt.Printf("%stools:%s %s\n", colorDim, colorReset, a)
+		}
+	}
+	for k, v := range tools.Env(projectRoot, os.Getenv) {
+		os.Setenv(k, v)
+		fmt.Printf("%stools:%s %s=%s\n", colorDim, colorReset, k, displayPath(v))
+	}
+}
+
 func Run() error {
+	ensureToolsEnv()
 	addGoBuildDeps()
 	args := append([]string{"run"}, goBuildTags(false)...)
 	args = append(args, "./", "server")
@@ -676,6 +757,7 @@ func Prod() error {
 	if err := requireAuthKey(); err != nil {
 		return errtrace.Wrap(err)
 	}
+	ensureToolsEnv()
 	addGoBuildDeps()
 	addr := exposedAPIAddr()
 	os.Setenv("HYDRA_API_ADDR", addr)
@@ -890,6 +972,7 @@ func getHydraOutputFile() string {
 // Use the UI restart button to trigger a full rebuild and restart.
 // For auto-reload on file changes use DevAutoReload instead.
 func Dev() error {
+	ensureToolsEnv()
 	os.Setenv("HYDRA_DEV_BUILD", "1")
 	return errtrace.Wrap(devServerLoop([]string{"HYDRA_API_ADDR=localhost:" + hydraPort()}))
 }
@@ -903,6 +986,7 @@ func DevExpose() error {
 	if err := requireAuthKey(); err != nil {
 		return errtrace.Wrap(err)
 	}
+	ensureToolsEnv()
 	os.Setenv("HYDRA_DEV_BUILD", "1")
 	addr := exposedAPIAddr()
 	fmt.Printf("%sDev server exposed on http://%s — reachable from other devices; auth key required%s\n", colorBold, addr, colorReset)
@@ -957,6 +1041,7 @@ func devServerLoop(extraEnv []string) error {
 // BuildWeb is still called to keep the generated TS API client (web/src/api/) in sync;
 // it uses stamp-based caching so it is a no-op when neither web/ nor api/ have changed.
 func DevFast() error {
+	ensureToolsEnv()
 	os.Setenv("HYDRA_DEV_BUILD", "1")
 	if err := GenerateGo(); err != nil {
 		return errtrace.Wrap(err)
