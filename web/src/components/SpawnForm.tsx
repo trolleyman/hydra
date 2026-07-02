@@ -4,7 +4,7 @@ import type { AgentResponse, SpawnAgentRequest, RepositoryBranch } from '../api'
 import { BranchSelector } from './BranchSelector'
 import { formatError } from '../api/format_error'
 import { uploadFile, extractFiles, isImageFile } from '../api/uploads'
-import { Zap, LoaderCircle, Paperclip, Check } from 'lucide-react'
+import { Zap, LoaderCircle, Paperclip, Check, GitBranch } from 'lucide-react'
 import { AgentTypeIcon } from './AgentTypeIcon'
 import { AGENT_ACCENT } from '../lib/agentTypeMeta'
 import { Tooltip } from './Tooltip'
@@ -56,24 +56,66 @@ const AGENT_TYPES: { id: AgentTypeOption; label: string; color: string }[] = [
   { id: 'codex', label: 'Codex', color: AGENT_ACCENT.codex },
 ]
 
-// AgentTypePicker is an icon-only trigger that opens a dropdown listing each
-// agent type as its icon + name. Used in both SpawnForm layouts so the agent
-// selector stays compact (just the brand mark) while still being discoverable.
-function AgentTypePicker({
-  value,
+// Curated model aliases per agent type, shown as a sub-list under each agent in
+// the picker. Every agent also gets an implicit "Default" row (model '') meaning
+// "don't pass --model" so the CLI uses its own default. Only Claude and Gemini
+// expose concrete aliases here; Copilot/Codex offer just Default because their
+// model slugs are less stable and pinning a wrong id would fail the launch.
+const AGENT_MODELS: Record<AgentTypeOption, { id: string; label: string }[]> = {
+  claude: [
+    { id: 'opus', label: 'Opus' },
+    { id: 'sonnet', label: 'Sonnet' },
+    { id: 'haiku', label: 'Haiku' },
+    { id: 'fable', label: 'Fable' },
+  ],
+  gemini: [
+    { id: 'gemini-2.5-pro', label: '2.5 Pro' },
+    { id: 'gemini-2.5-flash', label: '2.5 Flash' },
+  ],
+  copilot: [],
+  codex: [],
+}
+
+// Short label for the currently-selected model, shown next to the brand icon on
+// the picker trigger. Empty when on the CLI default (keeps the trigger to just
+// the icon in the common case).
+function modelLabel(agent: AgentTypeOption, model: string): string {
+  if (!model) return ''
+  return AGENT_MODELS[agent].find((m) => m.id === model)?.label ?? model
+}
+
+// The remembered-model map (agent type → model alias) persisted in localStorage,
+// so picking a model seeds the next spawn of that same agent type.
+function readModelMap(): Record<string, string> {
+  try {
+    const raw = readLocal(StorageKeys.defaultModel)
+    const parsed = raw ? JSON.parse(raw) : null
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, string>) : {}
+  } catch {
+    return {}
+  }
+}
+
+// AgentModelPicker is a compact trigger (brand icon + optional model label) that
+// opens a dropdown grouping every agent type with its curated models nested
+// underneath, so agent AND model are chosen in one gesture. Used in both
+// SpawnForm layouts. The menu is `fixed`-positioned + anchored to the trigger's
+// rect because the spawn cards clip their content (overflow-hidden for the
+// rounded gradient border).
+function AgentModelPicker({
+  agent,
+  model,
   onChange,
   size = 'md',
 }: {
-  value: AgentTypeOption
-  onChange: (t: AgentTypeOption) => void
+  agent: AgentTypeOption
+  model: string
+  onChange: (agent: AgentTypeOption, model: string) => void
   size?: 'sm' | 'md'
 }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
   const btnRef = useRef<HTMLButtonElement>(null)
-  // Menu coordinates. The spawn cards clip their content (overflow-hidden for
-  // the rounded gradient border), so the menu is positioned with `fixed` and
-  // anchored to the trigger's rect to escape that clipping.
   const [coords, setCoords] = useState<{ left: number; top: number } | null>(null)
 
   const place = useCallback(() => {
@@ -97,44 +139,63 @@ function AgentTypePicker({
     }
   }, [open, place])
 
-  const active = AGENT_TYPES.find((a) => a.id === value) ?? AGENT_TYPES[0]
-  const trigger = size === 'sm' ? 'w-6 h-6' : 'w-7 h-7'
+  const active = AGENT_TYPES.find((a) => a.id === agent) ?? AGENT_TYPES[0]
+  const label = modelLabel(agent, model)
+  const trigger = size === 'sm' ? 'h-6' : 'h-7'
+  const iconWrap = size === 'sm' ? 'w-5 h-5' : 'w-6 h-6'
   const iconCls = size === 'sm' ? 'w-3.5 h-3.5' : 'w-4 h-4'
+
+  // One selectable row: an agent + a specific model (or Default when model '').
+  const Row = ({ a, m }: { a: AgentTypeOption; m: { id: string; label: string } }) => {
+    const selected = agent === a && model === m.id
+    return (
+      <button
+        type="button"
+        onClick={() => { onChange(a, m.id); setOpen(false) }}
+        className="w-full flex items-center gap-2 pl-8 pr-3 py-1.5 text-left text-xs text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors cursor-pointer"
+      >
+        <span className={m.id ? '' : 'italic text-gray-500 dark:text-gray-400'}>{m.label}</span>
+        {selected && <Check className="w-3.5 h-3.5 ml-auto shrink-0 text-blue-500" />}
+      </button>
+    )
+  }
 
   return (
     <div ref={ref} className="relative shrink-0">
       <button
         ref={btnRef}
         type="button"
-        title={`Agent: ${active.label}`}
-        aria-label={`Agent type: ${active.label}`}
+        title={`Agent: ${active.label}${label ? ` · ${label}` : ''}`}
+        aria-label={`Agent and model: ${active.label}${label ? `, ${label}` : ''}`}
         // Measure the trigger before opening so the fixed-position menu lands in
         // the right spot on its first paint; scroll/resize keep it pinned after.
         onClick={() => { if (!open) place(); setOpen((o) => !o) }}
-        className={`flex items-center justify-center rounded-full border transition-colors cursor-pointer ${trigger} ${active.color} ${
+        className={`flex items-center gap-0.5 rounded-full border transition-colors cursor-pointer pr-1.5 ${trigger} ${
           open
             ? 'bg-gray-100 dark:bg-gray-700 border-gray-300 dark:border-gray-600'
             : 'border-transparent hover:bg-gray-100 dark:hover:bg-gray-700'
         }`}
       >
-        <AgentTypeIcon name={active.id} className={iconCls} />
+        <span className={`flex items-center justify-center rounded-full ${iconWrap} ${active.color}`}>
+          <AgentTypeIcon name={active.id} className={iconCls} />
+        </span>
+        {label && <span className="text-[10px] font-medium text-gray-600 dark:text-gray-300 max-w-[4rem] truncate">{label}</span>}
       </button>
       {open && coords && (
         <div
           style={{ position: 'fixed', left: coords.left, top: coords.top }}
-          className="w-36 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50 py-1"
+          className="w-44 max-h-80 overflow-y-auto bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50 py-1"
         >
-          {AGENT_TYPES.map((a) => (
-            <button
-              key={a.id}
-              type="button"
-              onClick={() => { onChange(a.id); setOpen(false) }}
-              className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-xs text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors cursor-pointer"
-            >
-              <AgentTypeIcon name={a.id} className={`w-4 h-4 shrink-0 ${a.color}`} />
-              <span>{a.label}</span>
-              {a.id === value && <Check className="w-3.5 h-3.5 ml-auto shrink-0 text-blue-500" />}
-            </button>
+          {AGENT_TYPES.map((a, i) => (
+            <div key={a.id}>
+              {i > 0 && <div className="my-1 border-t border-gray-100 dark:border-gray-700" />}
+              <div className="flex items-center gap-2 px-3 py-1 text-[11px] font-semibold text-gray-500 dark:text-gray-400">
+                <AgentTypeIcon name={a.id} className={`w-3.5 h-3.5 shrink-0 ${a.color}`} />
+                <span>{a.label}</span>
+              </div>
+              <Row a={a.id} m={{ id: '', label: 'Default' }} />
+              {AGENT_MODELS[a.id].map((m) => <Row key={m.id} a={a.id} m={m} />)}
+            </div>
           ))}
         </div>
       )}
@@ -153,8 +214,6 @@ export function SpawnForm({
   compact?: boolean
   disabled?: boolean
 }) {
-  const [agentId, setAgentId] = useState('')
-  const [idManuallyEdited, setIdManuallyEdited] = useState(false)
   const [agentType, setAgentType] = useState<AgentTypeOption>(() => {
     const saved = readLocal(StorageKeys.defaultAgentType)
     if (saved && (saved === 'claude' || saved === 'gemini' || saved === 'copilot' || saved === 'codex')) {
@@ -162,6 +221,10 @@ export function SpawnForm({
     }
     return 'claude'
   })
+  // Model alias for the CLI's --model flag ('' = the CLI's own default). Seeded
+  // from the remembered map for the initial agent type; the picker sets agent +
+  // model together, and the effect below persists the pick per agent type.
+  const [model, setModel] = useState<string>(() => readModelMap()[agentType] ?? '')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   // Base branch the new agent will be created from. Defaults to the project's
@@ -219,6 +282,12 @@ export function SpawnForm({
   useEffect(() => {
     writeLocal(StorageKeys.defaultAgentType, agentType)
   }, [agentType])
+
+  // Remember the chosen model per agent type so the next spawn of that agent
+  // defaults to it (mirrors defaultAgentType).
+  useEffect(() => {
+    writeLocal(StorageKeys.defaultModel, JSON.stringify({ ...readModelMap(), [agentType]: model }))
+  }, [agentType, model])
 
   // Load the project's branches for the base-branch selector. `defaultSelection`
   // also resets the chosen base to the current branch — done on the initial load
@@ -407,11 +476,6 @@ export function SpawnForm({
     }
   }, [])
 
-  function handleIdChange(value: string) {
-    setAgentId(slugify(value, 40, true))
-    setIdManuallyEdited(true)
-  }
-
   // Clipboard screenshots all arrive named "image.png", so a multi-image prompt
   // ends up with several indistinguishable attachments. Rename those generic
   // (or unnamed) images to image1.png, image2.png, … so the on-disk path — and
@@ -559,7 +623,6 @@ export function SpawnForm({
       const paths = readyAttachments.map((a) => a.path).join('\n')
       const base = prompt.trim()
       const finalPrompt = paths ? (base ? `${base}\n\n${paths}` : paths) : base
-      const finalId = idManuallyEdited ? slugify(agentId) : ''
       // Seed the new head's PTY at this browser's last terminal width and either
       // its last height or the user's configured default — so the agent renders
       // at the right size from its first paint instead of the 80x24 default (its
@@ -568,7 +631,10 @@ export function SpawnForm({
       const req: SpawnAgentRequest = {
         prompt: finalPrompt,
         agent_type: agentType,
-        id: finalId || generateId(base) || generateId(readyAttachments[0]?.filename ?? '') || 'attachment',
+        // The id is auto-derived from the prompt (the manual id field was removed
+        // from the footer to declutter it).
+        id: generateId(base) || generateId(readyAttachments[0]?.filename ?? '') || 'attachment',
+        ...(model ? { model } : {}),
         ...(baseBranch ? { base_branch: baseBranch } : {}),
         ...(geom.cols ? { cols: geom.cols } : {}),
         rows: geom.rows,
@@ -576,8 +642,6 @@ export function SpawnForm({
       const agent = await api.default.spawnAgent(projectId ?? '', req)
       if (draftKey) writeLocal(draftKey, null)
       if (scrollKey) writeLocal(scrollKey, null)
-      setAgentId('')
-      setIdManuallyEdited(false)
       // The prompt is sent — free every preview URL minted this session (including
       // ones only reachable via undo history) and clear the composer.
       objectUrlsRef.current.forEach((url) => URL.revokeObjectURL(url))
@@ -616,6 +680,9 @@ export function SpawnForm({
   // footer it shrinks and truncates; on the full-page form it sizes to content.
   function renderBranchSelector(compactSel: boolean) {
     if (!branches || branches.length === 0) return null
+    // The compact sidebar footer is tight, so there the branch selector collapses
+    // to a single branch icon (name shown in its tooltip + the open dropdown); the
+    // full-page form keeps the labelled trigger.
     const selector = (
       <BranchSelector
         branches={branches}
@@ -623,12 +690,15 @@ export function SpawnForm({
         isKnownBranch={branches.some((b) => b.name === baseBranch)}
         onSelect={setBaseBranch}
         onOpen={() => void refreshBranches(false)}
-        title="Base branch to create the agent from (pick an agent branch to stack on it)"
+        title={compactSel
+          ? `Base branch: ${baseBranch || 'current'} — pick an agent branch to stack on it`
+          : 'Base branch to create the agent from (pick an agent branch to stack on it)'}
+        triggerIcon={compactSel ? GitBranch : undefined}
         flexible={compactSel}
       />
     )
     if (compactSel) {
-      return <div className="flex min-w-0 max-w-[8rem] shrink">{selector}</div>
+      return <div className="flex shrink-0">{selector}</div>
     }
     return (
       <div className="flex items-center gap-1.5 shrink-0">
@@ -687,7 +757,6 @@ export function SpawnForm({
     }
   }
 
-  const derivedIdPlaceholder = generateId(prompt) || 'auto-generated…'
   const submitHint = isMac ? '⌘↵ to spawn' : 'Ctrl+Enter to spawn'
 
   // Shared across both layout variants. The index can fall out of range if an
@@ -738,15 +807,7 @@ export function SpawnForm({
                     <Paperclip className="w-3 h-3" />
                   </button>
                 </Tooltip>
-                <AgentTypePicker value={agentType} onChange={setAgentType} size="sm" />
-                <input
-                  type="text"
-                  value={idManuallyEdited ? agentId : ''}
-                  onChange={(e) => handleIdChange(e.target.value)}
-                  onKeyDown={handleKeyDown}
-                  placeholder={derivedIdPlaceholder}
-                  className="min-w-0 flex-1 text-[10px] text-gray-500 dark:text-gray-400 bg-transparent font-mono focus:outline-none placeholder-gray-300 dark:placeholder-gray-600 truncate ml-1"
-                />
+                <AgentModelPicker agent={agentType} model={model} onChange={(a, m) => { setAgentType(a); setModel(m) }} size="sm" />
               </div>
               {renderBranchSelector(true)}
               <button
@@ -824,22 +885,8 @@ export function SpawnForm({
                       <Paperclip className="w-4 h-4" />
                     </button>
                   </Tooltip>
-                  {/* Agent type picker (icon trigger + named dropdown) */}
-                  <AgentTypePicker value={agentType} onChange={setAgentType} />
-                  {/* Divider */}
-                  <span className="text-gray-200 dark:text-gray-600 text-sm shrink-0">|</span>
-                  {/* ID field */}
-                  <div className="flex items-center gap-1.5 min-w-0 flex-1">
-                    <span className="text-xs text-gray-400 dark:text-gray-500 shrink-0">id:</span>
-                    <input
-                      type="text"
-                      value={idManuallyEdited ? agentId : ''}
-                      onChange={(e) => handleIdChange(e.target.value)}
-                      onKeyDown={handleKeyDown}
-                      placeholder={derivedIdPlaceholder}
-                      className="flex-1 min-w-0 text-xs text-gray-600 dark:text-gray-300 font-mono bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-md px-2 py-0.5 focus:outline-none focus:border-blue-300 dark:focus:border-blue-500 focus:bg-white dark:focus:bg-gray-600 transition-colors placeholder-gray-300 dark:placeholder-gray-500"
-                    />
-                  </div>
+                  {/* Agent + model picker (icon trigger + grouped dropdown) */}
+                  <AgentModelPicker agent={agentType} model={model} onChange={(a, m) => { setAgentType(a); setModel(m) }} />
                 </div>
                 <div className="flex items-center gap-3 shrink-0 self-end sm:self-auto">
                   {renderBranchSelector(false)}

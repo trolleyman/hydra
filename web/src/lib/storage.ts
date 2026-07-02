@@ -16,6 +16,11 @@ export const StorageKeys = {
   // transient so it doesn't clobber the desktop preference.
   sidebarCollapsed: 'hydra-sidebar-collapsed',
   defaultAgentType: 'hydra-default-agent-type',
+  // Remembered model per agent type (JSON map, e.g. {"claude":"opus"}). Keyed by
+  // agent type because each CLI has its own model aliases; picking a model in the
+  // spawn form seeds the next spawn of that same agent type. '' / absent = the
+  // CLI's own default.
+  defaultModel: 'hydra-default-model',
   spawnHeight: 'hydra-sidebar-spawn-height',
 
   diffSideBySide: 'hydra-diff-side-by-side',

@@ -14,6 +14,7 @@ import (
 
 var spawnFlags struct {
 	agentType  string
+	model      string
 	baseBranch string
 	force      bool
 	detach     bool
@@ -21,6 +22,7 @@ var spawnFlags struct {
 
 func init() {
 	spawnCmd.Flags().StringVar(&spawnFlags.agentType, "agent", string(sandbox.AgentTypeClaude), "Agent type (claude, gemini, copilot, codex)")
+	spawnCmd.Flags().StringVar(&spawnFlags.model, "model", "", "Model for the agent CLI (e.g. opus, sonnet, haiku); default: CLI's own default")
 	spawnCmd.Flags().StringVar(&spawnFlags.baseBranch, "base-branch", "", "Base branch (default: current branch)")
 	spawnCmd.Flags().BoolVarP(&spawnFlags.force, "force", "f", false, "Force replace an existing head with the same ID")
 	spawnCmd.Flags().BoolVarP(&spawnFlags.detach, "detach", "d", false, "Start the agent and exit instead of attaching")
@@ -28,7 +30,7 @@ func init() {
 }
 
 var spawnCmd = &cobra.Command{
-	Use:   "spawn [--agent <agent>] [--base-branch <base-branch>] [--force|-f] [--detach|-d] <id> [prompt]",
+	Use:   "spawn [--agent <agent>] [--model <model>] [--base-branch <base-branch>] [--force|-f] [--detach|-d] <id> [prompt]",
 	Short: "Spawn a new sandboxed AI agent for the given prompt",
 	Args:  cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -65,6 +67,9 @@ var spawnCmd = &cobra.Command{
 		body := api.SpawnAgentRequest{Id: id, AgentType: &at}
 		if prompt != "" {
 			body.Prompt = &prompt
+		}
+		if spawnFlags.model != "" {
+			body.Model = &spawnFlags.model
 		}
 		if spawnFlags.baseBranch != "" {
 			body.BaseBranch = &spawnFlags.baseBranch

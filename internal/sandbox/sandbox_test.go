@@ -58,7 +58,7 @@ func TestAgentArgv(t *testing.T) {
 		{AgentTypeCodex, true, "ignored on resume", []string{"codex", "--dangerously-bypass-approvals-and-sandbox", "resume", "--last"}},
 	}
 	for _, c := range cases {
-		got, err := AgentArgv(c.agent, c.resume, "system prompt is ignored for codex", c.prompt)
+		got, err := AgentArgv(c.agent, c.resume, "system prompt is ignored for codex", c.prompt, "")
 		if err != nil {
 			t.Fatalf("AgentArgv(%q, resume=%v) error: %v", c.agent, c.resume, err)
 		}
@@ -67,8 +67,34 @@ func TestAgentArgv(t *testing.T) {
 		}
 	}
 
-	if _, err := AgentArgv(AgentType("nope"), false, "", ""); err == nil {
+	if _, err := AgentArgv(AgentType("nope"), false, "", "", ""); err == nil {
 		t.Error("AgentArgv with unknown agent type: expected error, got nil")
+	}
+}
+
+// TestAgentArgvModel verifies --model is passed on a fresh spawn but omitted on
+// resume (so the agent restores its transcript's model / any /model change).
+func TestAgentArgvModel(t *testing.T) {
+	cases := []struct {
+		agent  AgentType
+		resume bool
+		want   []string
+	}{
+		{AgentTypeClaude, false, []string{"claude", "--dangerously-skip-permissions", "--model", "opus"}},
+		{AgentTypeClaude, true, []string{"claude", "--dangerously-skip-permissions", "--continue"}},
+		{AgentTypeGemini, false, []string{"gemini", "--approval-mode=yolo", "--model", "opus"}},
+		{AgentTypeGemini, true, []string{"gemini", "--approval-mode=yolo", "--resume", "latest"}},
+		{AgentTypeCodex, false, []string{"codex", "--dangerously-bypass-approvals-and-sandbox", "--model", "opus"}},
+		{AgentTypeCodex, true, []string{"codex", "--dangerously-bypass-approvals-and-sandbox", "resume", "--last"}},
+	}
+	for _, c := range cases {
+		got, err := AgentArgv(c.agent, c.resume, "", "", "opus")
+		if err != nil {
+			t.Fatalf("AgentArgv(%q, resume=%v) error: %v", c.agent, c.resume, err)
+		}
+		if strings.Join(got, "\x00") != strings.Join(c.want, "\x00") {
+			t.Errorf("AgentArgv(%q, resume=%v, model=opus) = %v, want %v", c.agent, c.resume, got, c.want)
+		}
 	}
 }
 
