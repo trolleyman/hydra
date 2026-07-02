@@ -66,6 +66,7 @@ const AGENT_MODELS: Record<AgentTypeOption, { id: string; label: string }[]> = {
     { id: 'opus', label: 'Opus' },
     { id: 'sonnet', label: 'Sonnet' },
     { id: 'haiku', label: 'Haiku' },
+    { id: 'fable', label: 'Fable' },
   ],
   gemini: [
     { id: 'gemini-2.5-pro', label: '2.5 Pro' },
