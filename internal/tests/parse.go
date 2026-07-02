@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"braces.dev/errtrace"
@@ -21,7 +22,11 @@ const maxCaseMessage = 4000
 // accepted and aggregated; the format string reflects what was actually read
 // (mixed → "junit+hydra"). A directory with no report files returns
 // (nil, "", false, nil) so the caller can fall back to the exit code.
-func ParseDir(outputDir string) (cases []TestCase, format string, found bool, err error) {
+//
+// checkoutDir is the source tree the tests ran against; it's used only to
+// normalize case locations (relativize absolute paths, strip the Go module
+// prefix off package classnames) and may be "" to skip that.
+func ParseDir(outputDir, checkoutDir string) (cases []TestCase, format string, found bool, err error) {
 	entries, derr := os.ReadDir(outputDir)
 	if derr != nil {
 		if os.IsNotExist(derr) {
@@ -38,6 +43,7 @@ func ParseDir(outputDir string) (cases []TestCase, format string, found bool, er
 	}
 	sort.Strings(names)
 
+	lc := newLocContext(checkoutDir)
 	sawJUnit, sawHydra := false, false
 	for _, name := range names {
 		ext := strings.ToLower(filepath.Ext(name))
@@ -56,7 +62,7 @@ func ParseDir(outputDir string) (cases []TestCase, format string, found bool, er
 				found = true
 			}
 		case ".xml":
-			if c, ok := parseJUnit(data); ok {
+			if c, ok := parseJUnit(data, lc); ok {
 				cases = append(cases, c...)
 				sawJUnit = true
 				found = true
@@ -132,6 +138,7 @@ type junitSuites struct {
 
 type junitSuite struct {
 	Name   string       `xml:"name,attr"`
+	File   string       `xml:"file,attr"` // some emitters (vitest) put the file on the suite
 	Cases  []junitCase  `xml:"testcase"`
 	Suites []junitSuite `xml:"testsuite"` // nested suites
 }
@@ -139,6 +146,8 @@ type junitSuite struct {
 type junitCase struct {
 	Name      string        `xml:"name,attr"`
 	Classname string        `xml:"classname,attr"`
+	File      string        `xml:"file,attr"` // pytest, jest-junit (addFileAttribute)
+	Line      string        `xml:"line,attr"` // pytest (0-based)
 	Time      float64       `xml:"time,attr"`
 	Failures  []junitDetail `xml:"failure"`
 	Errors    []junitDetail `xml:"error"`
@@ -151,36 +160,92 @@ type junitDetail struct {
 	Body    string `xml:",chardata"`
 }
 
-func parseJUnit(data []byte) ([]TestCase, bool) {
+func parseJUnit(data []byte, lc *locContext) ([]TestCase, bool) {
 	// JUnit files come with either a <testsuites> root or a bare <testsuite>.
 	var roots junitSuites
 	if err := xml.Unmarshal(data, &roots); err == nil && len(roots.Suites) > 0 {
-		return flattenSuites(roots.Suites), true
+		return flattenSuites(roots.Suites, suiteCtx{}, lc), true
 	}
 	var single junitSuite
 	if err := xml.Unmarshal(data, &single); err == nil && (len(single.Cases) > 0 || len(single.Suites) > 0) {
-		return flattenSuites([]junitSuite{single}), true
+		return flattenSuites([]junitSuite{single}, suiteCtx{}, lc), true
 	}
 	return nil, false
 }
 
-func flattenSuites(suites []junitSuite) []TestCase {
+// suiteCtx is the enclosing-suite context inherited by nested suites/cases: a
+// suite-level file attribute, and the root suite name (used to detect pytest's
+// 0-based line attribute).
+type suiteCtx struct {
+	file     string
+	rootName string
+}
+
+func flattenSuites(suites []junitSuite, ctx suiteCtx, lc *locContext) []TestCase {
 	var out []TestCase
 	for _, s := range suites {
-		for _, c := range s.Cases {
-			out = append(out, junitCaseToTestCase(c))
+		sctx := ctx
+		if sctx.rootName == "" {
+			sctx.rootName = strings.TrimSpace(s.Name)
 		}
-		out = append(out, flattenSuites(s.Suites)...)
+		if f := strings.TrimSpace(s.File); f != "" {
+			sctx.file = f
+		}
+		for _, c := range s.Cases {
+			out = append(out, junitCaseToTestCase(c, sctx, lc))
+		}
+		out = append(out, flattenSuites(s.Suites, sctx, lc)...)
 	}
 	return out
 }
 
-func junitCaseToTestCase(c junitCase) TestCase {
+func junitCaseToTestCase(c junitCase, ctx suiteCtx, lc *locContext) TestCase {
 	name := strings.TrimSpace(c.Name)
-	if cn := strings.TrimSpace(c.Classname); cn != "" && cn != name && !strings.Contains(name, cn) {
-		name = cn + " › " + name
+	loc := lc.classify(c.Classname)
+
+	// A file attribute (pytest natively, jest-junit's addFileAttribute, vitest's
+	// suite-level file) beats whatever the classname classified to: it's the
+	// real file, exact and heuristic-free.
+	if f := strings.TrimSpace(c.File); f != "" {
+		loc.Path, _ = lc.normalizePath(f)
+		loc.goPkg = false
+	} else if loc.Path == "" && ctx.file != "" {
+		loc.Path, _ = lc.normalizePath(ctx.file)
 	}
-	tc := TestCase{Name: name, Status: CasePassed, DurationMs: int64(c.Time * 1000)}
+	// With both a real file and a dotted classname (pytest), the classname's
+	// leading segments usually just re-encode the file path — drop them.
+	loc.Scope = dedupeScope(loc.Path, loc.Scope)
+
+	tc := TestCase{Name: name, Status: CasePassed, Path: loc.Path, Scope: loc.Scope, DurationMs: int64(c.Time * 1000)}
+
+	if c.Line != "" {
+		if n, err := strconv.Atoi(strings.TrimSpace(c.Line)); err == nil && n >= 0 {
+			// pytest's junitxml line attribute is 0-based; no other mainstream
+			// emitter sets it, so key the adjustment off the default suite name.
+			if strings.EqualFold(ctx.rootName, "pytest") {
+				n++
+			}
+			tc.Line = n
+		}
+	}
+
+	switch {
+	case loc.goPkg:
+		// gotestsum: the classname was a Go package import path, so the name is
+		// a Go test identifier — "TestFoo/sub/case" nests subtests as scope.
+		if segs := strings.Split(name, "/"); len(segs) > 1 {
+			tc.Scope = append(tc.Scope, segs[:len(segs)-1]...)
+			tc.Name = segs[len(segs)-1]
+		}
+	case loc.Path != "":
+		// vitest/jest join the describe chain into the name with " > " — split
+		// it back into scope levels. Only applied under a real file path, so
+		// e.g. a bare Go subtest name is never mangled.
+		if segs := strings.Split(name, " > "); len(segs) > 1 {
+			tc.Scope = append(tc.Scope, mapTrimSpace(segs[:len(segs)-1])...)
+			tc.Name = strings.TrimSpace(segs[len(segs)-1])
+		}
+	}
 	switch {
 	case len(c.Failures) > 0 || len(c.Errors) > 0:
 		details := append(append([]junitDetail{}, c.Failures...), c.Errors...)
@@ -229,6 +294,14 @@ func joinDetails(details []junitDetail) string {
 		}
 	}
 	return strings.Join(parts, "\n")
+}
+
+func mapTrimSpace(in []string) []string {
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		out = append(out, strings.TrimSpace(s))
+	}
+	return out
 }
 
 func truncate(s string, n int) string {

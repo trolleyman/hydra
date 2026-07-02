@@ -485,7 +485,7 @@ func (m *Manager) generate(parent context.Context, spec config.TestScript, v Ver
 		return errored(rep, "timed out after "+timeout.String())
 	}
 
-	cases, format, found, perr := ParseDir(outputDir)
+	cases, format, found, perr := ParseDir(outputDir, runDir)
 	if perr != nil {
 		rep.DurationMs = durationMs
 		return errored(rep, "read report: "+perr.Error())

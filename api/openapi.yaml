@@ -2860,8 +2860,32 @@ components:
       properties:
         name:
           type: string
+          description: Leaf test name only when path/scope are set; older reports carry a pre-joined display name here with no path/scope.
         status:
           $ref: '#/components/schemas/TestCaseStatus'
+        path:
+          type: string
+          nullable: true
+          description: Repo-relative filesystem location — a file (vitest/eslint/pytest) or a package dir (Go). Absent when the runner only exposes a logical scope.
+        scope:
+          type: array
+          items:
+            type: string
+          nullable: true
+          description: Logical nesting chain between path and name — a class chain (com › example › FooTest), describe chain, or Go subtest parent.
+        line:
+          type: integer
+          nullable: true
+          description: 1-based line within path, when known.
+        col:
+          type: integer
+          nullable: true
+        end_line:
+          type: integer
+          nullable: true
+        end_col:
+          type: integer
+          nullable: true
         duration_ms:
           type: integer
           format: int64
