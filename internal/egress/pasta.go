@@ -10,12 +10,22 @@ import (
 // at mapAddr and whose automatic port forwarding is disabled. The caller appends
 // the command to run inside the namespace.
 //
+// The guest is pinned to a deterministic synthetic subnet (GuestAddr/GuestPrefixLen)
+// with mapAddr as its gateway, rather than inheriting the host's real address and
+// route. This is what makes mapAddr *on-link* and therefore reachable: pasta's
+// --map-host-loopback default is the gateway address, and a destination the guest
+// can only reach via a gateway that isn't on-link (e.g. a link-local addr) fails
+// with "Network is unreachable". Since nft locks all egress to mapAddr in hard
+// mode, the guest never needs the host's real network config.
+//
 // pasta runs OUTSIDE bwrap and creates the netns; bwrap then runs inside it
 // WITHOUT --unshare-net, inheriting it. pasta exits when the command does, so the
 // namespace is torn down automatically (no explicit cleanup).
 func PastaArgs(pasta, mapAddr string) []string {
 	return []string{
 		pasta,
+		"-a", GuestAddr, "-n", GuestPrefixLen, // deterministic guest address...
+		"-g", mapAddr, // ...with mapAddr as its (on-link) gateway
 		"--map-host-loopback", mapAddr, // reach the host proxy at a deterministic addr
 		"-q",                       // quiet
 		"-t", "none", "-u", "none", // no inbound port forwarding

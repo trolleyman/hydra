@@ -18,6 +18,7 @@ import { ImageDiffView, SegmentedToggle, type ImageDiffMode, type ArtifactABCont
 import { ABControlsContext } from './artifactDiffContext'
 import type { LightboxImage } from './ImageLightbox'
 import { useImageLightboxStore } from '../stores/imageLightboxStore'
+import { applyABShortcut } from '../lib/abShortcuts'
 import { LiveLogPanes, PersistedLogView } from './ArtifactLogView'
 
 const CHANGE_LABEL: Record<string, string> = {
@@ -90,6 +91,14 @@ const TILE_TRANSITION = `left 220ms ${TILE_EASE}, top 220ms ${TILE_EASE}, width 
 // the size feels sticky to where it is, and only commits to a new column once you've
 // clearly committed to it. 0.3 ≈ a third of a column of slack on each side.
 const RESIZE_STICK = 0.3
+
+// Rubber-band feedback while the pointer is inside that deadband: the tile stretches
+// by this fraction of the pointer's distance from its current snapped width, so the
+// drag visibly "pulls" on the tile before it commits — a little give at first, more
+// as you drag further, then the snap covers the rest of the distance. 0 would leave
+// the tile frozen until the snap (no cue that a drag is even registering); 1 would
+// track the pointer 1:1 (no snap feel at all).
+const RESIZE_PULL = 0.35
 
 // mediaAspect returns a file's aspect ratio (width / height) from the artifact
 // metadata, or undefined when the server didn't record dimensions. Passed to the
@@ -196,16 +205,19 @@ export function MasonryGrid({ items, spanScale = 1, scale = 1, spans, onSpanChan
   const [width, setWidth] = useState(0)
   // Measured tile heights, keyed by item key. Updated by the ResizeObserver below.
   const [heights, setHeights] = useState<Record<string, number>>({})
-  // The tile currently being edge/body-dragged: its live (continuous, pixel) width
-  // so it tracks the pointer instead of jumping column-by-column. The column span is
-  // committed live as the width crosses a column boundary (with stickiness), and the
-  // siblings reflow at each snap — see startResize.
+  // The tile currently being edge/body-dragged. `width` is the width the tile
+  // renders at: the current snapped span width plus a rubber-band fraction of the
+  // pointer's pull past it (see RESIZE_PULL), so the drag gives feedback before it
+  // commits. `snapW` is the bare snapped span width — what the tile will settle to —
+  // which is what the ghost measures at (see below). The column span is committed
+  // live as the width crosses a column boundary (with stickiness), and the siblings
+  // reflow at each snap — see startResize.
   // `col` is the column the dragged tile started in: the live span commits below
   // would otherwise let the masonry packer re-home the dragged tile to a different
   // start column the moment it snaps wider, making it jump out from under the pointer.
   // Pinning it to its start column (see placement) keeps it anchored — it grows
   // rightward from a fixed left edge while the siblings reflow around it.
-  const [drag, setDrag] = useState<{ key: string; width: number; col: number } | null>(null)
+  const [drag, setDrag] = useState<{ key: string; width: number; snapW: number; col: number } | null>(null)
   // The exact height the dragged tile will occupy at its current (snapped) width,
   // measured off an invisible "ghost" copy rendered at that width with no transition
   // (see the ghost render + layout effect below). The visible tile's measured height
@@ -404,9 +416,10 @@ export function MasonryGrid({ items, spanScale = 1, scale = 1, spans, onSpanChan
   // Start a live resize from `startSpan`, anchored at pointer `startX`. The column span
   // is quantised with stickiness (see RESIZE_STICK) and committed the instant it snaps
   // to a new column — live, as you drag past each boundary, not deferred to release.
-  // The dragged tile itself renders at that snapped span width (not the raw pointer
-  // position), so it holds its size through the deadband and flips a whole column at a
-  // time: it resists, then snaps, rather than scaling smoothly under the cursor. The
+  // The dragged tile itself renders anchored to that snapped span width plus a
+  // rubber-band fraction of the pointer's pull past it (RESIZE_PULL): it stretches a
+  // little to show the drag is registering, resists through the deadband, then snaps
+  // a whole column at a time — rather than scaling 1:1 under the cursor. The
   // siblings reflow at those same snap points, and nothing rearranges between them (the
   // dragged tile's height is frozen too; see resizeKeyRef). Returns move/finish, or null
   // if the grid can't resize right now. `key` is the tile's file name; the override
@@ -443,16 +456,24 @@ export function MasonryGrid({ items, spanScale = 1, scale = 1, spans, onSpanChan
         liveSpan = target
         onSpanChange(spanKey(key), liveSpan)
       }
-      // Render the tile at its current *quantised* span width — not the raw pointer
-      // width — so it holds its size through the deadband and snaps a whole column at
-      // a time when the pointer crosses the midpoint. The tile visibly resists, then
-      // flips to the next size (the width transition eases the flip), rather than
-      // scaling continuously under the cursor.
+      // Render the tile anchored to its current *quantised* span width — not the raw
+      // pointer width — plus a rubber-band fraction of the pull past it (RESIZE_PULL),
+      // so the tile visibly stretches toward the pointer through the deadband, resists,
+      // then snaps a whole column at a time when the pointer commits past the midpoint
+      // (the width transition eases both the pull and the flip).
       const snapW = liveSpan * layout.colW + (liveSpan - 1) * layout.gap
-      setDrag({ key, width: snapW, col: startCol })
+      setDrag({ key, width: snapW + (w - snapW) * RESIZE_PULL, snapW, col: startCol })
     }
     const finish = () => {
       resizeKeyRef.current = null
+      // Adopt the ghost's settled height as this tile's measured height. The tile's
+      // own ResizeObserver readings were frozen for the whole drag, and if its width
+      // transition finished before the pointer was released there is no further size
+      // change to re-trigger the observer — the stale pre-drag height would stick,
+      // leaving a permanent gap below a shrunk tile (or an overlap for a grown one).
+      // A transition still running at release re-measures via the observer as usual.
+      const settled = ghostRef.current?.offsetHeight
+      if (settled) setHeights((prev) => (prev[key] === settled ? prev : { ...prev, [key]: settled }))
       setDrag(null)
       // The span was already committed at the last snap; this just ensures the final
       // value is persisted (a no-op if unchanged — onSpanChange dedupes).
@@ -534,16 +555,17 @@ export function MasonryGrid({ items, spanScale = 1, scale = 1, spans, onSpanChan
   }
 
   // Measure the ghost before paint so the columns beneath reserve the dragged tile's
-  // real settled height. Keyed on drag.width, so it re-measures each time the span
-  // snaps to a new width (the ghost has no transition, so its height is the target
-  // height immediately — not an intermediate animation frame). Cleared when the drag
-  // ends (setGhostH(null) is a bail-out no-op if it was already null).
+  // real settled height. Keyed on drag.snapW — NOT the rubber-band render width, which
+  // changes every pointermove — so it re-measures only when the span snaps to a new
+  // width (the ghost has no transition, so its height is the target height immediately
+  // — not an intermediate animation frame). Cleared when the drag ends (setGhostH(null)
+  // is a bail-out no-op if it was already null).
   useLayoutEffect(() => {
     if (!drag) { setGhostH(null); return }
     const el = ghostRef.current
     if (el) setGhostH(el.offsetHeight)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [drag?.key, drag?.width])
+  }, [drag?.key, drag?.snapW])
 
   const draggedItem = drag ? items.find((i) => i.key === drag.key) : undefined
   const canResize = !!onSpanChange && layout.cols > 1
@@ -551,14 +573,20 @@ export function MasonryGrid({ items, spanScale = 1, scale = 1, spans, onSpanChan
     <div ref={containerRef} className="relative w-full" style={{ height: placement.height }}>
       {/* Invisible ghost of the tile being dragged, rendered at its current snapped
           width with NO transition, purely to measure the exact height it will settle
-          to (chrome + wrapped labels included). Absolutely positioned + invisible, so
-          it neither paints nor affects the container height. */}
+          to (chrome + wrapped labels included). Absolutely positioned and hidden via
+          opacity — `invisible` (visibility: hidden) alone is NOT enough, because the
+          flip view's layers set an explicit `visibility: visible` on themselves
+          (children can override an inherited hidden), which made the ghost's image
+          paint at the grid's top-left and flash during the drag. opacity has no such
+          escape hatch: it composites the whole subtree away. It doesn't affect the
+          container height either (that's placement.height, set explicitly). */}
       {drag && draggedItem && (
         <div
           ref={ghostRef}
           aria-hidden
+          data-masonry-ghost
           className="absolute invisible pointer-events-none"
-          style={{ left: 0, top: 0, width: drag.width }}
+          style={{ left: 0, top: 0, width: drag.snapW, opacity: 0 }}
         >
           {draggedItem.node}
         </div>
@@ -576,12 +604,12 @@ export function MasonryGrid({ items, spanScale = 1, scale = 1, spans, onSpanChan
             style={{
               left: p.left,
               top: p.top,
-              // While dragging this tile, render its current *snapped* span width (a
-              // whole number of columns, quantised with hysteresis — see
-              // startResize.move) and lift it above its neighbours; otherwise its
-              // placed span width. The width transition stays on so each snap eases
-              // into the next size — the tile holds, then visibly flips a column at a
-              // time rather than scaling smoothly under the cursor.
+              // While dragging this tile, render its live drag width — the snapped
+              // span width plus the rubber-band pull (see startResize.move) — and
+              // lift it above its neighbours; otherwise its placed span width. The
+              // width transition stays on so the pull trails the pointer smoothly and
+              // each snap eases into the next size — the tile stretches, resists,
+              // then visibly flips a column at a time.
               width: dragging ? (drag as { width: number }).width : p.width,
               zIndex: dragging ? 20 : undefined,
               transition: ready ? TILE_TRANSITION : undefined,
@@ -1122,21 +1150,20 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
     toggleView: () => onArtifactViewChange(artifactView === 'before' ? 'after' : 'before'),
   }), [artifactView, artifactHighlight, onArtifactViewChange])
 
-  // Keyboard: B flips before/after, H toggles highlight — only in A/B mode, and never
-  // while typing in a field. Plain single keys (no modifiers) so they don't collide
-  // with browser chords like Ctrl+H. Suppressed while the image lightbox is open: the
-  // lightbox has its own B / H (scoped to its fullscreen comparator, see LightboxDiff),
-  // and a single key must not flip both the lightbox and the grid behind it at once.
+  // Keyboard: the shared X/B/A/H comparator shortcuts (see applyABShortcut) — only in
+  // A/B mode. Suppressed while the image lightbox is open: the lightbox has its own
+  // X/B/A/H (scoped to its fullscreen comparator, see LightboxDiff), and a single key
+  // must not flip both the lightbox and the grid behind it at once.
   useEffect(() => {
     if (imageDiffMode !== 'ab') return
     const onKey = (e: KeyboardEvent) => {
-      if (e.ctrlKey || e.metaKey || e.altKey) return
       if (useImageLightboxStore.getState().images) return
-      const t = e.target as HTMLElement | null
-      if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return
-      const k = e.key.toLowerCase()
-      if (k === 'b') { e.preventDefault(); onArtifactViewChange(artifactView === 'before' ? 'after' : 'before') }
-      else if (k === 'h') { e.preventDefault(); onArtifactHighlightChange(!artifactHighlight) }
+      applyABShortcut(e, {
+        view: artifactView,
+        highlight: artifactHighlight,
+        onViewChange: onArtifactViewChange,
+        onHighlightChange: onArtifactHighlightChange,
+      })
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -1346,7 +1373,7 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
         <div className="ml-auto flex flex-wrap items-center gap-2">
           {imageDiffMode === 'ab' && (
             <div className="flex items-center gap-1.5">
-              <span title="Show every tile's before / after — shortcut: B">
+              <span title="Show every tile's before / after — X flips · B = Before · A = After">
                 <SegmentedToggle
                   value={artifactView}
                   onChange={onArtifactViewChange}
