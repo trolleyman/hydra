@@ -103,6 +103,7 @@ func TestResolveFilterHosts(t *testing.T) {
 // the mode-based config, including the strict flag and the block-list carry.
 func TestResolveNetworkMode(t *testing.T) {
 	tru := true
+	fls := false
 	cases := []struct {
 		name       string
 		network    *NetworkConfig
@@ -110,11 +111,13 @@ func TestResolveNetworkMode(t *testing.T) {
 		wantStrict bool
 		wantBlock  int
 	}{
-		{"default (nil) is hard", nil, sandbox.NetHard, false, 0},
-		{"explicit advisory", &NetworkConfig{Mode: strp("advisory")}, sandbox.NetAdvisory, false, 0},
+		{"default (nil) is hard + strict", nil, sandbox.NetHard, true, 0},
+		{"explicit advisory", &NetworkConfig{Mode: strp("advisory")}, sandbox.NetAdvisory, true, 0},
 		{"hard strict", &NetworkConfig{Mode: strp("hard"), Strict: &tru}, sandbox.NetHard, true, 0},
-		{"blocked hosts carried", &NetworkConfig{BlockedHosts: []string{"evil.com", "*.tracker.io"}}, sandbox.NetHard, false, 2},
-		{"legacy enabled=false is off", &NetworkConfig{Enabled: new(bool)}, sandbox.NetOff, false, 0},
+		{"strict opt-out", &NetworkConfig{Mode: strp("hard"), Strict: &fls}, sandbox.NetHard, false, 0},
+		{`"on" is a synonym for hard`, &NetworkConfig{Mode: strp("on")}, sandbox.NetHard, true, 0},
+		{"blocked hosts carried", &NetworkConfig{BlockedHosts: []string{"evil.com", "*.tracker.io"}}, sandbox.NetHard, true, 2},
+		{"legacy enabled=false is off", &NetworkConfig{Enabled: new(bool)}, sandbox.NetOff, true, 0},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

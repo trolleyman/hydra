@@ -99,6 +99,7 @@ const (
 	Advisory     NetworkConfigMode = "advisory"
 	Hard         NetworkConfigMode = "hard"
 	Off          NetworkConfigMode = "off"
+	On           NetworkConfigMode = "on"
 	Unrestricted NetworkConfigMode = "unrestricted"
 )
 
@@ -721,14 +722,14 @@ type NetworkConfig struct {
 	// FilterEnabled LEGACY (use mode). Honoured only when mode is unset.
 	FilterEnabled *bool `json:"filter_enabled"`
 
-	// Mode Egress posture: "off" (no network), "unrestricted" (network, no host filtering), "advisory" (proxy-only host filtering — every honest client is filtered, but escapable), or "hard" (inescapable pasta+nft netns, degrading to advisory with a warning where the tooling is unavailable). Null/unset = default ("hard"). Supersedes the legacy enabled/filter_enabled booleans.
+	// Mode Egress posture: "off" (no network), "unrestricted" (network, no host filtering), "advisory" (proxy-only host filtering — every honest client is filtered, but escapable), or "hard" (inescapable pasta+nft netns, failing closed where the tooling is unavailable unless strict=false; "on" is a synonym for "hard"). Null/unset = default ("hard"). Supersedes the legacy enabled/filter_enabled booleans.
 	Mode *NetworkConfigMode `json:"mode"`
 
-	// Strict With mode "hard", fail closed (block all egress) when the inescapable boundary can't be built, instead of degrading to advisory (default false).
+	// Strict With mode "hard", fail closed (block all egress) when the inescapable boundary can't be built, instead of degrading to advisory (default true).
 	Strict *bool `json:"strict"`
 }
 
-// NetworkConfigMode Egress posture: "off" (no network), "unrestricted" (network, no host filtering), "advisory" (proxy-only host filtering — every honest client is filtered, but escapable), or "hard" (inescapable pasta+nft netns, degrading to advisory with a warning where the tooling is unavailable). Null/unset = default ("hard"). Supersedes the legacy enabled/filter_enabled booleans.
+// NetworkConfigMode Egress posture: "off" (no network), "unrestricted" (network, no host filtering), "advisory" (proxy-only host filtering — every honest client is filtered, but escapable), or "hard" (inescapable pasta+nft netns, failing closed where the tooling is unavailable unless strict=false; "on" is a synonym for "hard"). Null/unset = default ("hard"). Supersedes the legacy enabled/filter_enabled booleans.
 type NetworkConfigMode string
 
 // PolicyConfig Per-agent security-gate policy. The decision-capable gate can deny (or park for approval) tool calls even under skip-permissions.

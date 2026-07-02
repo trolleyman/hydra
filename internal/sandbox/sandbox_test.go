@@ -5,6 +5,28 @@ import (
 	"testing"
 )
 
+func TestNetworkModeSynonyms(t *testing.T) {
+	// "on" is an accepted synonym that canonicalises to hard.
+	if got := NormalizeNetworkMode("on"); got != NetHard {
+		t.Errorf(`NormalizeNetworkMode("on") = %q, want %q`, got, NetHard)
+	}
+	// Canonical values and empty pass through unchanged.
+	for _, m := range []NetworkMode{"", NetOff, NetUnrestricted, NetAdvisory, NetHard} {
+		if got := NormalizeNetworkMode(string(m)); got != m {
+			t.Errorf("NormalizeNetworkMode(%q) = %q, want %q", m, got, m)
+		}
+	}
+	// Both canonical modes and the "on" synonym validate; junk does not.
+	for _, ok := range []string{"", "off", "unrestricted", "advisory", "hard", "on"} {
+		if !ValidNetworkMode(ok) {
+			t.Errorf("ValidNetworkMode(%q) = false, want true", ok)
+		}
+	}
+	if ValidNetworkMode("bogus") {
+		t.Error(`ValidNetworkMode("bogus") = true, want false`)
+	}
+}
+
 func TestExpandPath(t *testing.T) {
 	home := "/home/u"
 	cases := map[string]string{

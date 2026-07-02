@@ -5,6 +5,7 @@ package sandbox
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -107,6 +108,15 @@ func TestBuildSpecLinux(t *testing.T) {
 	// GUI hardening unsets DISPLAY.
 	if !hasPair2(args, "--unsetenv", "DISPLAY") {
 		t.Error("expected --unsetenv DISPLAY with HardenGUI")
+	}
+	// The sandbox is pinned to the host uid/gid so hard mode's pasta userns (which
+	// maps the host user to uid 0) can't make the agent appear as root — which
+	// would trip Claude's "cannot be used with root/sudo privileges" refusal.
+	if !hasPair2(args, "--uid", strconv.Itoa(os.Getuid())) {
+		t.Errorf("expected --uid %d to pin the host user", os.Getuid())
+	}
+	if !hasPair2(args, "--gid", strconv.Itoa(os.Getgid())) {
+		t.Errorf("expected --gid %d to pin the host group", os.Getgid())
 	}
 }
 

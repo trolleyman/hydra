@@ -2705,21 +2705,21 @@ components:
         mode:
           type: string
           nullable: true
-          enum: [off, unrestricted, advisory, hard]
+          enum: [off, unrestricted, advisory, hard, on]
           description: >-
             Egress posture: "off" (no network), "unrestricted" (network, no host
             filtering), "advisory" (proxy-only host filtering — every honest
             client is filtered, but escapable), or "hard" (inescapable pasta+nft
-            netns, degrading to advisory with a warning where the tooling is
-            unavailable). Null/unset = default ("hard"). Supersedes the legacy
-            enabled/filter_enabled booleans.
+            netns, failing closed where the tooling is unavailable unless
+            strict=false; "on" is a synonym for "hard"). Null/unset = default
+            ("hard"). Supersedes the legacy enabled/filter_enabled booleans.
         strict:
           type: boolean
           nullable: true
           description: >-
             With mode "hard", fail closed (block all egress) when the inescapable
             boundary can't be built, instead of degrading to advisory (default
-            false).
+            true).
         enabled:
           type: boolean
           nullable: true

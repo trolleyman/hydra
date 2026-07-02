@@ -42,16 +42,30 @@ const (
 	// client is filtered, but a determined process can bypass it. Chosen when the
 	// user explicitly wants proxy-only filtering (no pasta/nft netns).
 	NetAdvisory NetworkMode = "advisory"
-	// NetHard requests an inescapable pasta-netns + nft boundary, degrading to
-	// advisory (with a visible warning) when the tooling is unavailable — unless
-	// Strict is set, in which case an unavailable boundary fails closed.
+	// NetHard requests an inescapable pasta-netns + nft boundary. When the tooling
+	// is unavailable it fails closed (no network) if Strict (the default), or
+	// degrades to advisory with a visible warning when Strict is explicitly off.
+	// The config synonym "on" resolves to NetHard.
 	NetHard NetworkMode = "hard"
 )
 
-// ValidNetworkMode reports whether s names a known mode (empty is allowed: it
-// means "use the default").
-func ValidNetworkMode(s string) bool {
+// NormalizeNetworkMode canonicalises a mode string, mapping accepted synonyms to
+// their canonical NetworkMode. "on" is a synonym for NetHard (the fully-locked
+// default posture); every canonical value maps to itself. Unknown strings are
+// returned unchanged so callers can still reject them via ValidNetworkMode.
+func NormalizeNetworkMode(s string) NetworkMode {
 	switch NetworkMode(s) {
+	case "on":
+		return NetHard
+	default:
+		return NetworkMode(s)
+	}
+}
+
+// ValidNetworkMode reports whether s names a known mode (empty is allowed: it
+// means "use the default"). Accepted synonyms (e.g. "on" for "hard") are valid.
+func ValidNetworkMode(s string) bool {
+	switch NormalizeNetworkMode(s) {
 	case "", NetOff, NetUnrestricted, NetAdvisory, NetHard:
 		return true
 	}
@@ -71,7 +85,8 @@ type NetworkPolicy struct {
 	// decides whether startEgress attempts the hard pasta+nft boundary.
 	Mode NetworkMode
 	// Strict, with Mode == NetHard, fails closed (blocks all egress) when the hard
-	// boundary can't be built, instead of degrading to advisory filtering.
+	// boundary can't be built, instead of degrading to advisory filtering. On by
+	// default (see resolveNetworkPolicy).
 	Strict bool
 	// AllowedHosts is the user's outbound host allow-list, unioned on top of
 	// DefaultAllowedHosts and enforced by the egress proxy when FilterHosts is true

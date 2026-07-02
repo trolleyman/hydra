@@ -69,11 +69,13 @@ type NetworkConfig struct {
 	// Mode is the egress posture: "off" (no network), "unrestricted" (network, no
 	// filtering), "advisory" (proxy-only host filtering, escapable), or "hard"
 	// (inescapable pasta+nft netns, degrading to advisory with a warning when the
-	// tooling is unavailable). nil/"" = default ("hard"). When set, Mode is
-	// authoritative and supersedes the legacy Enabled/FilterEnabled booleans.
+	// tooling is unavailable — unless Strict). "on" is an accepted synonym for
+	// "hard". nil/"" = default ("hard"). When set, Mode is authoritative and
+	// supersedes the legacy Enabled/FilterEnabled booleans.
 	Mode *string `toml:"mode"`
 	// Strict, with Mode == "hard", fails closed (blocks all egress) when the hard
-	// boundary can't be built, rather than degrading to advisory. nil = false.
+	// boundary can't be built, rather than degrading to advisory. nil = true (strict
+	// is on by default); set false to opt into the advisory degrade.
 	Strict *bool `toml:"strict"`
 	// Enabled toggles outbound network access. nil = inherit/default (enabled).
 	// Legacy: honoured only when Mode is unset.
@@ -975,7 +977,9 @@ func (c Config) ResolveSandboxOptions(agentType string) (writable, masked, resto
 // specified it defaults to hard (network on, deny-by-default filtering, preferring
 // the inescapable pasta+nft boundary and degrading to advisory where unavailable).
 func resolveNetworkPolicy(nc *NetworkConfig) sandbox.NetworkPolicy {
-	net := sandbox.NetworkPolicy{Mode: sandbox.NetHard, Enabled: true, FilterHosts: true}
+	// Strict is on by default: an unbuildable hard boundary fails closed (no
+	// network) rather than silently degrading to escapable advisory filtering.
+	net := sandbox.NetworkPolicy{Mode: sandbox.NetHard, Enabled: true, FilterHosts: true, Strict: true}
 	if nc == nil {
 		return net
 	}
@@ -987,8 +991,8 @@ func resolveNetworkPolicy(nc *NetworkConfig) sandbox.NetworkPolicy {
 
 	switch {
 	case nc.Mode != nil && *nc.Mode != "":
-		// Explicit mode wins.
-		net.Mode = sandbox.NetworkMode(*nc.Mode)
+		// Explicit mode wins. "on" is an accepted synonym for "hard".
+		net.Mode = sandbox.NormalizeNetworkMode(*nc.Mode)
 	case nc.Enabled != nil || nc.FilterEnabled != nil:
 		// Legacy booleans: derive a mode so downstream only reasons about Mode.
 		enabled := nc.Enabled == nil || *nc.Enabled
@@ -1219,7 +1223,7 @@ func defaultsSpec() []specEntry {
 		},
 		{
 			table: "sandbox.network", key: "mode",
-			doc: `egress posture: "off" (no network), "unrestricted" (network, no host filtering), "advisory" (proxy-only host filtering — every honest client is filtered, but escapable), or "hard" (inescapable pasta+nft netns, degrading to advisory with a warning where the tooling is unavailable). Default "hard". Supersedes the legacy enabled/filter_enabled booleans.`,
+			doc: `egress posture: "off" (no network), "unrestricted" (network, no host filtering), "advisory" (proxy-only host filtering — every honest client is filtered, but escapable), or "hard" (inescapable pasta+nft netns, failing closed when the tooling is unavailable unless strict=false; "on" is a synonym for "hard"). Default "hard". Supersedes the legacy enabled/filter_enabled booleans.`,
 			def: func() string { return `"hard"` },
 			get: func(a AgentConfig) (string, bool) {
 				if a.Sandbox != nil && a.Sandbox.Network != nil && a.Sandbox.Network.Mode != nil && *a.Sandbox.Network.Mode != "" {
@@ -1230,8 +1234,8 @@ func defaultsSpec() []specEntry {
 		},
 		{
 			table: "sandbox.network", key: "strict",
-			doc: `with mode = "hard", fail closed (block all egress) when the inescapable boundary can't be built, instead of degrading to advisory filtering (default false).`,
-			def: func() string { return "false" },
+			doc: `with mode = "hard", fail closed (block all egress) when the inescapable boundary can't be built, instead of degrading to advisory filtering (default true).`,
+			def: func() string { return "true" },
 			get: func(a AgentConfig) (string, bool) {
 				if a.Sandbox != nil && a.Sandbox.Network != nil && a.Sandbox.Network.Strict != nil {
 					return fmt.Sprintf("%t", *a.Sandbox.Network.Strict), true

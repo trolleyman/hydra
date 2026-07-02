@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -103,6 +104,18 @@ func BuildSpec(opts Options) (*Spec, error) {
 		"--unshare-ipc",
 		"--unshare-uts",
 		"--die-with-parent",
+		// Pin the sandboxed process to the real host user. Without this bwrap keeps
+		// whatever uid it was launched with — which is fine directly, but in hard
+		// network mode pasta wraps bwrap in its own user namespace that maps the host
+		// user to uid 0 (it needs CAP_NET_ADMIN to configure the netns). bwrap would
+		// then inherit uid 0, the agent would run as root, and Claude refuses
+		// `--dangerously-skip-permissions cannot be used with root/sudo privileges`.
+		// Remapping back to the host uid/gid restores the "agent runs as the host
+		// user" invariant in every mode (a no-op outside hard mode); on-disk file
+		// ownership is unchanged because the inner uid maps back through pasta to the
+		// same host uid.
+		"--uid", strconv.Itoa(os.Getuid()),
+		"--gid", strconv.Itoa(os.Getgid()),
 	}
 
 	// NOTE: we deliberately do NOT pass bwrap's --new-session. It calls setsid(),
