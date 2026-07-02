@@ -18,12 +18,26 @@ import (
 // with "Network is unreachable". Since nft locks all egress to mapAddr in hard
 // mode, the guest never needs the host's real network config.
 //
+// --config-net is load-bearing: pasta only applies an address/route to a netns it
+// spawns when that flag is given — -a/-n/-g alone just select the values (pasta
+// even rejects its --no-copy-* spellings without it: "needs --config-net").
+// Without it the tap device comes up bare, expecting the guest to autoconfigure —
+// which the --no-dhcp/--no-ra/--no-ndp flags below (deliberately) rule out — so
+// every connect() died with ENETUNREACH and hard mode never activated.
+//
+// -4 keeps the netns IPv4-only: the whole proxy path is IPv4 (mapAddr), and
+// -a/-g only pin the v4 side, so without -4 --config-net would still copy the
+// host's IPv6 addresses/routes into the netns — extra setup that can fail, for
+// reach the nft lock drops anyway.
+//
 // pasta runs OUTSIDE bwrap and creates the netns; bwrap then runs inside it
 // WITHOUT --unshare-net, inheriting it. pasta exits when the command does, so the
 // namespace is torn down automatically (no explicit cleanup).
 func PastaArgs(pasta, mapAddr string) []string {
 	return []string{
 		pasta,
+		"--config-net",                        // actually configure the netns (see doc comment)
+		"-4",                                  // IPv4-only (see doc comment)
 		"-a", GuestAddr, "-n", GuestPrefixLen, // deterministic guest address...
 		"-g", mapAddr, // ...with mapAddr as its (on-link) gateway
 		"--map-host-loopback", mapAddr, // reach the host proxy at a deterministic addr
