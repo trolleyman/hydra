@@ -569,13 +569,14 @@ export function AgentDetail({
     try {
       await api.default.armMergeWhenGreen(projectId ?? '', agent.id)
       // Same agent-transition card as the status-update toasts, but text-only
-      // (no status pill — "queued" isn't a status the agent is in yet).
+      // (no status pill — "queued" isn't a status the agent is in yet) and with
+      // the emerald "merge queued" Clock in place of the bot tile.
       const name = agent.title || agent.id
       const toBranch = agent.base_branch || 'base'
       useToastStore.getState().show({
         message: `Will merge "${name}" into ${toBranch} when it finishes and its tests pass`,
         type: 'info',
-        agentTransition: { agentName: name, agentId: agent.id, projectId: projectId ?? '', before: `will merge into \`${toBranch}\` when it finishes and tests pass` },
+        agentTransition: { agentName: name, agentId: agent.id, projectId: projectId ?? '', icon: 'merge-queued', before: `will merge into \`${toBranch}\` when it finishes and tests pass` },
       })
     } catch (err) {
       useToastStore.getState().show({ message: `Couldn't arm auto-merge: ${formatError(err)}`, type: 'error' })

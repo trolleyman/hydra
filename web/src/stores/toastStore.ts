@@ -41,6 +41,9 @@ export interface AgentTransitionToastData {
   // The status rendered as the standard status pill (also 'merged', which only
   // exists as a pill on these toasts). Omit it for a text-only row.
   status?: string
+  // Icon-tile override: 'merge-queued' swaps the bot for the emerald Clock the
+  // armed merge pill / queue-merge button use. Defaults to the bot.
+  icon?: 'merge-queued'
   // Copy before the pill. Defaults to 'transitioned to'; pass '' to lead with
   // the pill ("[merging] into `main`…"). Like `message`, `backtick` spans render
   // as inline mono branch pills.

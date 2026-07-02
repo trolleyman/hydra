@@ -622,6 +622,7 @@ try {
           agentId: string
           projectId: string
           status?: string
+          icon?: 'merge-queued'
           before?: string
           after?: string
           projectName?: string | null
@@ -674,14 +675,15 @@ try {
       // 2b. Merge-lifecycle toasts (AgentDetail armMerge/executeMerge + the
       // background auto-merge detector in agentStore): the same agent card, with
       // the pill/copy describing the merge instead of a status transition.
-      // Queued (auto-merge armed) — text-only row, no pill.
+      // Queued (auto-merge armed) — text-only row (no pill), with the emerald
+      // "merge queued" Clock tile instead of the bot.
       {
         name: 'toast-merge-queued',
         path: '/settings',
         toast: {
           message: 'Will merge "Add renameable agent titles" into main when it finishes and its tests pass',
           type: 'info',
-          agentTransition: { agentName: 'Add renameable agent titles', agentId: 'agent-md', projectId: 'sim-project', before: 'will merge into `main` when it finishes and tests pass' },
+          agentTransition: { agentName: 'Add renameable agent titles', agentId: 'agent-md', projectId: 'sim-project', icon: 'merge-queued', before: 'will merge into `main` when it finishes and tests pass' },
         },
       },
       // In-flight merge — persistent (dismissed when the POST settles), green

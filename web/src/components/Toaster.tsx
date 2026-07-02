@@ -1,6 +1,6 @@
 import React from 'react'
 import { useNavigate } from '@tanstack/react-router'
-import { CheckCircle, AlertCircle, AlertTriangle, Info, Bot, X } from 'lucide-react'
+import { CheckCircle, AlertCircle, AlertTriangle, Info, Bot, Clock, X } from 'lucide-react'
 import { useToastStore, type Toast, type ToastType } from '../stores/toastStore'
 import { useProjectStore } from '../stores/projectStore'
 import { IconButton } from './IconButton'
@@ -71,6 +71,11 @@ const ToastItem: React.FC<{ toast: Toast; onDismiss: () => void }> = ({ toast, o
     const t = toast.agentTransition
     const badge = t.status ? agentStatusBadge(t.status) : undefined
     const before = t.before ?? 'transitioned to'
+    // The queued-merge toast swaps the bot tile for the app's "merge queued"
+    // identity — the emerald Clock of the armed pill / queue-merge button.
+    const tile = t.icon === 'merge-queued'
+      ? { Icon: Clock, wrap: 'bg-emerald-50 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-300', bar: 'bg-emerald-500' }
+      : { Icon: Bot, wrap, bar }
     const openAgent = () => {
       // Match a cross-project View: select the project (a no-op for the current
       // one) before routing, then tear the toast down.
@@ -87,8 +92,8 @@ const ToastItem: React.FC<{ toast: Toast; onDismiss: () => void }> = ({ toast, o
       >
         <div className="p-4">
           <div className="flex items-start gap-3">
-            <div className={`shrink-0 w-9 h-9 rounded-xl flex items-center justify-center ${wrap}`}>
-              <Bot className="w-[18px] h-[18px]" />
+            <div className={`shrink-0 w-9 h-9 rounded-xl flex items-center justify-center ${tile.wrap}`}>
+              <tile.Icon className="w-[18px] h-[18px]" />
             </div>
             <div className="min-w-0 flex-1">
               <button
@@ -113,7 +118,7 @@ const ToastItem: React.FC<{ toast: Toast; onDismiss: () => void }> = ({ toast, o
         </div>
         {showCountdown && (
           <div
-            className={`toast-progress-bar absolute bottom-0 left-0 h-0.5 w-full opacity-60 ${bar}`}
+            className={`toast-progress-bar absolute bottom-0 left-0 h-0.5 w-full opacity-60 ${tile.bar}`}
             style={{ animationDuration: `${toast.duration}ms` }}
           />
         )}
