@@ -101,11 +101,20 @@ func ReconcileLivenessOnce(reg *session.Registry, store *db.Store, projectRoot s
 // resetting it) outlasts the window and still raises the flag.
 const graceUnread = 5 * time.Second
 
+// SettleFunc is called by the poller the moment a head transitions into a
+// resting status (finished / waiting / needs_input) — a definitive "the agent
+// stopped editing" signal. The daemon wires it to the artifact prefetcher so a
+// head's screenshots are pre-generated at once instead of waiting for the slower
+// worktree-settle sweep. It must not block the poller (the caller runs it in its
+// own goroutine); a nil func disables the hook.
+type SettleFunc func(projectRoot, headID string)
+
 // RunJSONStatusPoller runs a polling loop that syncs JSON status files into the
 // DB every 1 second. roots returns the set of project roots to poll on each
 // tick; it is re-evaluated every cycle so projects added/removed at runtime are
-// picked up.
-func RunJSONStatusPoller(ctx context.Context, store *db.Store, roots func() []string, hub *events.Hub) {
+// picked up. onSettle (may be nil) is invoked on transitions into a resting
+// status so background artifact generation can start immediately.
+func RunJSONStatusPoller(ctx context.Context, store *db.Store, roots func() []string, hub *events.Hub, onSettle SettleFunc) {
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 	// One debouncer for the lifetime of the loop: its pending-unread state must
@@ -117,7 +126,7 @@ func RunJSONStatusPoller(ctx context.Context, store *db.Store, roots func() []st
 			return
 		case <-ticker.C:
 			for _, root := range roots() {
-				pollJSONStatusOnce(store, root, deb, hub)
+				pollJSONStatusOnce(store, root, deb, hub, onSettle)
 			}
 		}
 	}
@@ -126,9 +135,10 @@ func RunJSONStatusPoller(ctx context.Context, store *db.Store, roots func() []st
 // RunJSONStatusPollerOnce performs a single JSON status polling cycle. It uses a
 // throwaway debouncer, so deferred unread flags never mature within one call —
 // it is only the boot warmup; the long-lived RunJSONStatusPoller loop owns the
-// persistent debouncer that actually resolves them.
+// persistent debouncer that actually resolves them. It fires no settle hook: boot
+// warmup is the periodic prefetcher's job, not a fresh transition.
 func RunJSONStatusPollerOnce(store *db.Store, projectRoot string) {
-	pollJSONStatusOnce(store, projectRoot, newUnreadDebouncer(), nil)
+	pollJSONStatusOnce(store, projectRoot, newUnreadDebouncer(), nil, nil)
 }
 
 // pendingUnread records a running→finished/waiting transition whose unread flag
@@ -207,7 +217,7 @@ type StatusFile struct {
 	api.AgentStatusInfo
 }
 
-func pollJSONStatusOnce(store *db.Store, projectRoot string, deb *unreadDebouncer, hub *events.Hub) {
+func pollJSONStatusOnce(store *db.Store, projectRoot string, deb *unreadDebouncer, hub *events.Hub, onSettle SettleFunc) {
 	agents, err := store.ListAgents(projectRoot)
 	if err != nil {
 		log.Printf("warn: json status poller: list agents: %v", err)
@@ -289,6 +299,18 @@ func pollJSONStatusOnce(store *db.Store, projectRoot string, deb *unreadDebounce
 				// Activity resumed (e.g. the subagent's next tool hook) — cancel
 				// any pending flag before it can mature.
 				deb.forget(a.ID)
+			}
+
+			// A genuine transition into a resting status means the agent has stopped
+			// editing, so its worktree is a stable target: kick off background
+			// artifact generation now instead of waiting for the slower
+			// worktree-settle sweep. Gated on statusChanged so a running agent's
+			// per-tool-call status rewrites (which only advance the timestamp) don't
+			// re-fire it; redundant fires are cheap anyway (the artifact manager
+			// dedups by worktree version).
+			if onSettle != nil && statusChanged &&
+				(agentStatus == "finished" || agentStatus == "waiting" || agentStatus == "needs_input") {
+				onSettle(projectRoot, a.ID)
 			}
 		}
 

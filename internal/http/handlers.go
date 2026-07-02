@@ -65,6 +65,13 @@ type Server struct {
 	// per registered project (resolved per request). nil disables the feature.
 	Artifacts *artifacts.Registry
 
+	// artifactPrefetch is the cross-goroutine bookkeeping shared by the periodic
+	// prefetch sweep (RunArtifactPrefetcher) and the on-transition immediate
+	// prefetch (PrefetchHeadNow). Lazily initialised via prefetchState so either
+	// entry point can be the first to run.
+	artifactPrefetch     *artifactPrefetchState
+	artifactPrefetchOnce sync.Once
+
 	// Tests runs/caches the per-project [[tests]] commands whose verdict gates a
 	// head's merge button (PLAN #68), one Manager per project. nil disables it.
 	Tests *hydratests.Registry

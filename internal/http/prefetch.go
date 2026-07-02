@@ -3,6 +3,7 @@ package http
 import (
 	"context"
 	"log"
+	"sync"
 	"time"
 
 	"github.com/trolleyman/hydra/internal/api"
@@ -17,7 +18,108 @@ import (
 // roughly two intervals after the agent stops writing — well before the user
 // clicks in, which is the whole point — while an actively-editing head is left
 // alone so its heavy build isn't run against a moving target.
+//
+// This periodic sweep is the backstop: the low-latency path is PrefetchHeadNow,
+// fired the moment a head transitions into a resting status (finished / waiting /
+// needs_input), which is a definitive "the agent stopped editing" signal and so
+// doesn't need to wait out the two-sweep stability check.
 const prefetchInterval = 30 * time.Second
+
+// artifactPrefetchState is the bookkeeping shared by the periodic prefetch sweep
+// (RunArtifactPrefetcher) and the on-transition immediate prefetch
+// (PrefetchHeadNow). Both goroutines read and write the two maps, so every access
+// goes through mu.
+//
+//   - lastHash: headID -> last-seen worktree state hash, so a head is prefetched
+//     by the sweep only once its working tree has stopped changing (one interval
+//     of stability). PrefetchHeadNow also records here so a head it prefetched
+//     early is seen as unchanged by the next sweep (which would otherwise treat
+//     the mid-run fingerprint it last recorded as a change and cancel the render).
+//   - lastDirs: headID -> the worktree-side entry dirs last kicked off for it, so
+//     a head moving to a new version can cancel its now-stale background renders.
+type artifactPrefetchState struct {
+	mu       sync.Mutex
+	lastHash map[string]string
+	lastDirs map[string][]string
+}
+
+// prefetchState lazily initialises and returns the shared prefetch bookkeeping.
+func (s *Server) prefetchState() *artifactPrefetchState {
+	s.artifactPrefetchOnce.Do(func() {
+		s.artifactPrefetch = &artifactPrefetchState{
+			lastHash: map[string]string{},
+			lastDirs: map[string][]string{},
+		}
+	})
+	return s.artifactPrefetch
+}
+
+// observe records head's current worktree fingerprint and reports whether the
+// tree has stopped changing (settled, so it is worth running a potentially heavy
+// generation against) and whether it changed since the last sweep (changed, so
+// any stale background build can be cancelled). A first sighting is unsettled
+// (wait one interval to confirm stability); a differing fingerprint is unsettled
+// and changed; an identical one is settled.
+func (st *artifactPrefetchState) observe(headID, hash string) (settled, changed bool) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	prev, seen := st.lastHash[headID]
+	st.lastHash[headID] = hash
+	switch {
+	case !seen:
+		return false, false
+	case prev != hash:
+		return false, true
+	default:
+		return true, false
+	}
+}
+
+// setHash records head's fingerprint unconditionally. PrefetchHeadNow uses it so
+// the render it kicks off isn't cancelled by the next sweep as a stale version.
+func (st *artifactPrefetchState) setHash(headID, hash string) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	st.lastHash[headID] = hash
+}
+
+// takeDirs removes and returns the background entry dirs recorded for headID.
+func (st *artifactPrefetchState) takeDirs(headID string) []string {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	dirs := st.lastDirs[headID]
+	delete(st.lastDirs, headID)
+	return dirs
+}
+
+// setDirs records (or clears, when empty) the background entry dirs kicked off
+// for headID so a later change can cancel them.
+func (st *artifactPrefetchState) setDirs(headID string, dirs []string) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	if len(dirs) == 0 {
+		delete(st.lastDirs, headID)
+		return
+	}
+	st.lastDirs[headID] = dirs
+}
+
+// pruneTo drops per-head state for heads that no longer exist so the maps can't
+// grow without bound across the daemon's lifetime.
+func (st *artifactPrefetchState) pruneTo(live map[string]struct{}) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	for id := range st.lastHash {
+		if _, ok := live[id]; !ok {
+			delete(st.lastHash, id)
+		}
+	}
+	for id := range st.lastDirs {
+		if _, ok := live[id]; !ok {
+			delete(st.lastDirs, id)
+		}
+	}
+}
 
 // prefetch kicks off background generation for both sides of every script in the
 // plan, so the results are cached before the user opens the artifacts panel.
@@ -47,13 +149,6 @@ func (s *Server) RunArtifactPrefetcher(ctx context.Context, roots func() []strin
 	if s.Artifacts == nil {
 		return
 	}
-	// headID -> last-seen worktree state hash, so a head is prefetched only once
-	// its working tree has stopped changing (one interval of stability). Persists
-	// across cycles; pruned to the live head set each cycle.
-	lastHash := map[string]string{}
-	// headID -> the (worktree-side) entry dirs last kicked off for it, so a head
-	// moving to a new version can cancel its now-stale background renders.
-	lastDirs := map[string][]string{}
 	ticker := time.NewTicker(prefetchInterval)
 	defer ticker.Stop()
 	for {
@@ -61,7 +156,7 @@ func (s *Server) RunArtifactPrefetcher(ctx context.Context, roots func() []strin
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			s.prefetchOnce(ctx, roots(), lastHash, lastDirs)
+			s.prefetchOnce(ctx, roots())
 		}
 	}
 }
@@ -71,9 +166,9 @@ func (s *Server) RunArtifactPrefetcher(ctx context.Context, roots func() []strin
 // viewer shows by default (merge-base vs the working tree) and kicks off
 // background generation. A head whose working tree changed since the last sweep
 // is skipped this round — its build would be run against a moving target — so
-// only heads that have settled get pre-generated. lastHash carries the per-head
-// worktree fingerprint across sweeps and is pruned to the live head set here.
-func (s *Server) prefetchOnce(ctx context.Context, roots []string, lastHash map[string]string, lastDirs map[string][]string) {
+// only heads that have settled get pre-generated.
+func (s *Server) prefetchOnce(ctx context.Context, roots []string) {
+	st := s.prefetchState()
 	live := map[string]struct{}{}
 	for _, root := range roots {
 		cfg, err := config.Load(root)
@@ -104,71 +199,40 @@ func (s *Server) prefetchOnce(ctx context.Context, roots []string, lastHash map[
 				continue
 			}
 			live[head.ID] = struct{}{}
-			settled, changed := s.headState(head, lastHash)
+			// A head with no worktree compares against its committed branch tip,
+			// which is stable, so it is always settled and never changed.
+			if head.Worktree == nil {
+				s.prefetchHead(root, head)
+				continue
+			}
+			h, err := git.WorktreeStateHash(*head.Worktree)
+			if err != nil {
+				continue // can't tell; skip this round rather than thrash
+			}
+			settled, changed := st.observe(head.ID, h)
 			if changed {
 				// The working tree moved since we prefetched it, so the builds we
 				// kicked off for its previous state are stale. Cancel any still
 				// running purely as background work — freeing the generation slot and
 				// its build memory at once — instead of letting a dead render finish.
-				for _, d := range lastDirs[head.ID] {
+				for _, d := range st.takeDirs(head.ID) {
 					mgr.CancelStaleBackground(d)
 				}
-				delete(lastDirs, head.ID)
 			}
 			if !settled {
 				continue
 			}
-			s.prefetchHead(root, head, lastDirs)
+			s.prefetchHead(root, head)
 		}
 	}
-	// Drop per-head state for heads that no longer exist so the maps can't grow
-	// without bound across the daemon's lifetime.
-	for id := range lastHash {
-		if _, ok := live[id]; !ok {
-			delete(lastHash, id)
-		}
-	}
-	for id := range lastDirs {
-		if _, ok := live[id]; !ok {
-			delete(lastDirs, id)
-		}
-	}
-}
-
-// headState reports whether head's working tree has stopped changing (settled, so
-// it is worth running a potentially heavy generation against) and whether it
-// changed since the last sweep (changed, so any stale background build can be
-// preempted). A head with no worktree compares against its committed branch tip,
-// which is stable, so it is always settled and never changed. For a worktree head
-// it fingerprints the working-tree state, records it for next time, and compares
-// to the previous sweep's value: a first sighting is unsettled (wait one interval
-// to confirm stability); a differing fingerprint is unsettled and changed; an
-// identical one is settled.
-func (s *Server) headState(head *heads.Head, lastHash map[string]string) (settled, changed bool) {
-	if head.Worktree == nil {
-		return true, false
-	}
-	h, err := git.WorktreeStateHash(*head.Worktree)
-	if err != nil {
-		return false, false // can't tell; skip this round rather than thrash
-	}
-	prev, seen := lastHash[head.ID]
-	lastHash[head.ID] = h
-	switch {
-	case !seen:
-		return false, false
-	case prev != h:
-		return false, true
-	default:
-		return true, false
-	}
+	st.pruneTo(live)
 }
 
 // prefetchHead resolves the default comparison for one head and kicks off its
 // background generation, recording the worktree-side entry dirs so a later sweep
 // can cancel them if the head moves on. Best-effort: a head that can't be resolved
 // (config gone, branch deleted mid-sweep) is simply skipped.
-func (s *Server) prefetchHead(projectRoot string, head *heads.Head, lastDirs map[string][]string) {
+func (s *Server) prefetchHead(projectRoot string, head *heads.Head) {
 	// Mirror the diff viewer's default selection for an active head: base against
 	// the merge-base and show the uncommitted working tree (resolveArtifactPlan
 	// falls back to the branch tip when the head has no worktree).
@@ -178,8 +242,47 @@ func (s *Server) prefetchHead(projectRoot string, head *heads.Head, lastDirs map
 	if err != nil || plan == nil {
 		return
 	}
-	if dirs := plan.staleableDirs(); len(dirs) > 0 {
-		lastDirs[head.ID] = dirs
-	}
+	s.prefetchState().setDirs(head.ID, plan.staleableDirs())
 	plan.prefetch()
+}
+
+// PrefetchHeadNow kicks off background artifact generation for a single head
+// immediately, bypassing the periodic sweep's two-interval worktree-settle
+// debounce. It is meant to be fired the moment a head transitions into a resting
+// status (finished / waiting / needs_input): the agent has stopped editing, so
+// its working tree is a stable target and there's no reason to wait up to two 30s
+// sweeps to notice. Best-effort and safe to call redundantly — the Manager dedups
+// by version, so a version already cached or in-flight is a no-op. It shares the
+// sweep's bookkeeping, so a render it starts is cancellable by a later sweep if
+// the head resumes and moves on.
+func (s *Server) PrefetchHeadNow(ctx context.Context, projectRoot, headID string) {
+	if s.Artifacts == nil {
+		return
+	}
+	cfg, err := config.Load(projectRoot)
+	if err != nil || len(cfg.Artifacts) == 0 {
+		return // no artifacts configured for this project
+	}
+	mgr := s.Artifacts.Manager(projectRoot)
+	// Keep the generation parallelism in sync even on this path (idempotent).
+	mgr.SetConcurrency(cfg.ResolveArtifactConcurrency())
+	if !cfg.IsArtifactPrefetchEnabled() {
+		return // proactive background work opted out for this project
+	}
+	head, err := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, headID)
+	if err != nil || head == nil {
+		return
+	}
+	if head.Archived || head.Ephemeral || head.Branch == nil {
+		return
+	}
+	// Record the tree's current fingerprint as the settled state so the next sweep
+	// sees it as unchanged (it last recorded a mid-run hash) and doesn't cancel the
+	// render we're about to start as though it were stale.
+	if head.Worktree != nil {
+		if h, err := git.WorktreeStateHash(*head.Worktree); err == nil {
+			s.prefetchState().setHash(headID, h)
+		}
+	}
+	s.prefetchHead(projectRoot, head)
 }

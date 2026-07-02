@@ -83,7 +83,7 @@ func TestPollerEventsOnlyOnRenderedChange(t *testing.T) {
 
 	// 1) First report: nil → running. A rendered change, so it must emit.
 	writeAgentStatusJSON(t, root, id, api.Running, "SessionStart", base.Format(time.RFC3339Nano))
-	pollJSONStatusOnce(store, root, deb, hub)
+	pollJSONStatusOnce(store, root, deb, hub, nil)
 	if !hadAgentsEvent(sub) {
 		t.Fatal("first running report did not emit agents_changed")
 	}
@@ -93,7 +93,7 @@ func TestPollerEventsOnlyOnRenderedChange(t *testing.T) {
 	// so no event should fire — this is the bug we fixed.
 	for i := 1; i <= 3; i++ {
 		writeAgentStatusJSON(t, root, id, api.Running, "polling", base.Add(time.Duration(i)*time.Second).Format(time.RFC3339Nano))
-		pollJSONStatusOnce(store, root, deb, hub)
+		pollJSONStatusOnce(store, root, deb, hub, nil)
 		if hadAgentsEvent(sub) {
 			t.Fatalf("timestamp-only advance #%d emitted agents_changed (should be silent)", i)
 		}
@@ -112,9 +112,76 @@ func TestPollerEventsOnlyOnRenderedChange(t *testing.T) {
 	// 3) running → needs_input: a genuine transition that also raises the unread
 	// flag immediately (the agent is explicitly blocked on the user). Must emit.
 	writeAgentStatusJSON(t, root, id, api.NeedsInput, "PermissionRequest", base.Add(4*time.Second).Format(time.RFC3339Nano))
-	pollJSONStatusOnce(store, root, deb, hub)
+	pollJSONStatusOnce(store, root, deb, hub, nil)
 	if !hadAgentsEvent(sub) {
 		t.Fatal("running→needs_input transition did not emit agents_changed")
+	}
+}
+
+// TestPollerSettleHookFiresOnRestingTransition locks in the artifact-prefetch
+// trigger: onSettle must fire exactly on a genuine transition into a resting
+// status (finished / waiting / needs_input) — the "agent stopped editing" signal
+// the prefetcher uses to pre-generate artifacts at once — and must stay silent
+// for running, starting and timestamp-only rewrites (which would otherwise kick
+// heavy builds on every tool call).
+func TestPollerSettleHookFiresOnRestingTransition(t *testing.T) {
+	root := t.TempDir()
+	store, err := db.Open(root)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	const id = "agent1"
+	if err := store.UpsertAgent(&db.Agent{ID: id, ProjectPath: root, AgentType: "claude", SessionStatus: "running"}); err != nil {
+		t.Fatalf("upsert agent: %v", err)
+	}
+
+	deb := newUnreadDebouncer()
+	var settled []string
+	onSettle := func(projectRoot, headID string) {
+		if projectRoot != root {
+			t.Errorf("onSettle got project %q, want %q", projectRoot, root)
+		}
+		settled = append(settled, headID)
+	}
+
+	base := time.Date(2026, 6, 24, 18, 0, 0, 0, time.UTC)
+	// (status written, whether onSettle should have fired by the end of this step)
+	steps := []struct {
+		status   api.AgentStatus
+		wantFire bool
+	}{
+		{api.Running, false},   // nil → running: not resting
+		{api.Running, false},   // running → running (timestamp-only): no transition
+		{api.Finished, true},   // running → finished: resting, fires
+		{api.Finished, false},  // finished → finished: no transition
+		{api.Running, false},   // finished → running: back to work
+		{api.Waiting, true},    // running → waiting: resting, fires
+		{api.NeedsInput, true}, // waiting → needs_input: resting, fires
+		{api.Running, false},   // needs_input → running
+	}
+	want := 0
+	for i, step := range steps {
+		ts := base.Add(time.Duration(i) * time.Second).Format(time.RFC3339Nano)
+		writeAgentStatusJSON(t, root, id, step.status, "poll", ts)
+		before := len(settled)
+		pollJSONStatusOnce(store, root, deb, nil, onSettle)
+		fired := len(settled) > before
+		if fired != step.wantFire {
+			t.Fatalf("step %d (%s): onSettle fired=%v, want %v", i, step.status, fired, step.wantFire)
+		}
+		if step.wantFire {
+			want++
+		}
+	}
+	if len(settled) != want {
+		t.Fatalf("onSettle fired %d times, want %d", len(settled), want)
+	}
+	for _, gotID := range settled {
+		if gotID != id {
+			t.Fatalf("onSettle got head %q, want %q", gotID, id)
+		}
 	}
 }
 
@@ -147,10 +214,10 @@ func TestPollerRaisesUnreadOnSessionExit(t *testing.T) {
 	// Establish the running baseline, then running→finished arms the deferred
 	// unread without raising it yet.
 	writeAgentStatusJSON(t, root, id, api.Running, "PostToolUse", base.Format(time.RFC3339Nano))
-	pollJSONStatusOnce(store, root, deb, hub)
+	pollJSONStatusOnce(store, root, deb, hub, nil)
 	sub.Drain()
 	writeAgentStatusJSON(t, root, id, api.Finished, "Stop", base.Add(time.Second).Format(time.RFC3339Nano))
-	pollJSONStatusOnce(store, root, deb, hub)
+	pollJSONStatusOnce(store, root, deb, hub, nil)
 	if agents, err := store.ListAgents(root); err != nil {
 		t.Fatalf("list agents: %v", err)
 	} else if agents[0].HasUnreadChanges {
@@ -163,7 +230,7 @@ func TestPollerRaisesUnreadOnSessionExit(t *testing.T) {
 	if err := store.UpdateSessionInfo(id, 0, "stopped"); err != nil {
 		t.Fatalf("mark session stopped: %v", err)
 	}
-	pollJSONStatusOnce(store, root, deb, hub)
+	pollJSONStatusOnce(store, root, deb, hub, nil)
 
 	agents, err := store.ListAgents(root)
 	if err != nil {
@@ -206,19 +273,19 @@ func TestPollerBroadcastsProjectsChangedOnlyOnUnread(t *testing.T) {
 	base := time.Date(2026, 6, 24, 18, 0, 0, 0, time.UTC)
 
 	writeAgentStatusJSON(t, root, id, api.Running, "SessionStart", base.Format(time.RFC3339Nano))
-	pollJSONStatusOnce(store, root, deb, hub)
+	pollJSONStatusOnce(store, root, deb, hub, nil)
 	sub.Drain()
 
 	// Timestamp-only advance while still running: no broadcast on the hot path.
 	writeAgentStatusJSON(t, root, id, api.Running, "polling", base.Add(time.Second).Format(time.RFC3339Nano))
-	pollJSONStatusOnce(store, root, deb, hub)
+	pollJSONStatusOnce(store, root, deb, hub, nil)
 	if ev := drainSet(sub); ev[events.ProjectsChanged] {
 		t.Error("timestamp-only advance broadcast projects_changed; it must stay off the cross-project path")
 	}
 
 	// running→needs_input raises the unread flag → both events fire.
 	writeAgentStatusJSON(t, root, id, api.NeedsInput, "PermissionRequest", base.Add(2*time.Second).Format(time.RFC3339Nano))
-	pollJSONStatusOnce(store, root, deb, hub)
+	pollJSONStatusOnce(store, root, deb, hub, nil)
 	ev := drainSet(sub)
 	if !ev[events.AgentsChanged] {
 		t.Error("needs_input did not emit agents_changed")
@@ -264,11 +331,11 @@ func TestPollerNeedsInputUnreadImmediacy(t *testing.T) {
 			// Establish the running baseline so the next poll sees a transition off
 			// "running" (the unread flag only fires on that edge).
 			writeAgentStatusJSON(t, root, id, api.Running, "PostToolUse", base.Format(time.RFC3339Nano))
-			pollJSONStatusOnce(store, root, deb, hub)
+			pollJSONStatusOnce(store, root, deb, hub, nil)
 
 			// The wait arrives.
 			writeAgentStatusJSON(t, root, id, c.status, "Notification", base.Add(time.Second).Format(time.RFC3339Nano))
-			pollJSONStatusOnce(store, root, deb, hub)
+			pollJSONStatusOnce(store, root, deb, hub, nil)
 
 			agents, err := store.ListAgents(root)
 			if err != nil {

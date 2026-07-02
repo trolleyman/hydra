@@ -204,7 +204,14 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 	}
 
 	go heads.RunLivenessReconciler(ctx, reg, store, roots, eventHub)
-	go heads.RunJSONStatusPoller(ctx, store, roots, eventHub)
+	// On a head transitioning into a resting status (finished/waiting/needs_input)
+	// the agent has stopped editing, so pre-generate its diff artifacts at once
+	// rather than waiting for the periodic worktree-settle sweep below. Run in its
+	// own goroutine so the 1s poller loop never blocks on the (git + build-kickoff)
+	// work, and against the server-lifetime context so it dies on shutdown.
+	go heads.RunJSONStatusPoller(ctx, store, roots, eventHub, func(projectRoot, headID string) {
+		go server.PrefetchHeadNow(server.BackgroundCtx, projectRoot, headID)
+	})
 	go runStoragePruner(ctx, artifactReg, roots)
 	// Proactively pre-generate artifacts for settled heads so they're ready
 	// before a user clicks in, instead of starting the work only on view.
