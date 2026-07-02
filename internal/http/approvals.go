@@ -158,10 +158,12 @@ func (s *Server) DecideAgentApproval(ctx context.Context, request api.DecideAgen
 	return api.DecideAgentApproval204Response{}, nil
 }
 
-// rememberApproval appends an approved MCP server / WebFetch host to the trusted
-// PROJECT config's per-agent allow-list (never the merged user/default config),
-// so it takes effect on the head's next launch. Any other kind is one-shot and
-// not persisted (see the default case below).
+// rememberApproval appends an approved MCP server / WebFetch host / egress host to
+// the trusted PROJECT config's per-agent allow-list (never the merged user/default
+// config), so it takes effect on the head's next launch. An egress host also goes
+// live for the current session in the running proxy's allow-list (handled where
+// the proxy reads the Allow decision). Any other kind is one-shot and not
+// persisted (see the default case below).
 func rememberApproval(projectRoot, agentType, kind, target string) error {
 	if target == "" {
 		return nil
@@ -174,16 +176,16 @@ func rememberApproval(projectRoot, agentType, kind, target string) error {
 		cfg = &config.Config{}
 	}
 	ac := cfg.Agents[agentType]
-	if ac.Policy == nil {
-		ac.Policy = &config.PolicyConfig{}
-	}
 	switch kind {
 	case "mcp":
-		ac.Policy.MCPAllowed = appendUnique(ac.Policy.MCPAllowed, target)
+		ensurePolicy(&ac).MCPAllowed = appendUnique(ensurePolicy(&ac).MCPAllowed, target)
 	case "mcp_tool":
-		ac.Policy.MCPToolsAllowed = appendUnique(ac.Policy.MCPToolsAllowed, target)
+		ensurePolicy(&ac).MCPToolsAllowed = appendUnique(ensurePolicy(&ac).MCPToolsAllowed, target)
 	case "webfetch":
-		ac.Policy.WebFetchAllowHosts = appendUnique(ac.Policy.WebFetchAllowHosts, target)
+		ensurePolicy(&ac).WebFetchAllowHosts = appendUnique(ensurePolicy(&ac).WebFetchAllowHosts, target)
+	case "egress":
+		net := ensureNetwork(&ac)
+		net.AllowedHosts = appendUnique(net.AllowedHosts, target)
 	default:
 		return nil // not a rememberable kind
 	}
@@ -192,6 +194,26 @@ func rememberApproval(projectRoot, agentType, kind, target string) error {
 	}
 	cfg.Agents[agentType] = ac
 	return errtrace.Wrap(config.Save(projectRoot, *cfg))
+}
+
+// ensurePolicy lazily allocates the agent config's policy section.
+func ensurePolicy(ac *config.AgentConfig) *config.PolicyConfig {
+	if ac.Policy == nil {
+		ac.Policy = &config.PolicyConfig{}
+	}
+	return ac.Policy
+}
+
+// ensureNetwork lazily allocates the agent config's sandbox.network section (where
+// the egress allow-list lives).
+func ensureNetwork(ac *config.AgentConfig) *config.NetworkConfig {
+	if ac.Sandbox == nil {
+		ac.Sandbox = &config.SandboxConfig{}
+	}
+	if ac.Sandbox.Network == nil {
+		ac.Sandbox.Network = &config.NetworkConfig{}
+	}
+	return ac.Sandbox.Network
 }
 
 func appendUnique(list []string, v string) []string {

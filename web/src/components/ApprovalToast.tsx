@@ -1,6 +1,6 @@
 import React from 'react'
 import { useNavigate } from '@tanstack/react-router'
-import { Server, SquareTerminal, Globe, Bot, Shield, Folder, Check, X } from 'lucide-react'
+import { Server, SquareTerminal, Globe, Network, Bot, Shield, Folder, Check, X } from 'lucide-react'
 import type { ApprovalToastData, ToastAction } from '../stores/toastStore'
 import { IconButton } from './IconButton'
 
@@ -57,6 +57,8 @@ function kindVisual(data: ApprovalToastData): {
     }
     case 'webfetch':
       return { Icon: Globe, iconWrap: 'bg-teal-50 text-teal-600 dark:bg-teal-500/15 dark:text-teal-300', title: 'Web fetch', badge: { text: 'NETWORK', tone: 'teal' } }
+    case 'egress':
+      return { Icon: Network, iconWrap: 'bg-teal-50 text-teal-600 dark:bg-teal-500/15 dark:text-teal-300', title: 'Allow network host', badge: { text: 'NETWORK', tone: 'teal' } }
     default:
       return { Icon: SquareTerminal, iconWrap: 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-300', title: 'Run command', badge: { text: 'SHELL', tone: 'gray' } }
   }
@@ -76,6 +78,8 @@ const BodyLine: React.FC<{ data: ApprovalToastData }> = ({ data }) => {
     }
     case 'webfetch':
       return <>An agent wants to fetch from <Chip>{data.target}</Chip>.</>
+    case 'egress':
+      return <>An agent wants to connect to <Chip>{data.target}</Chip>, which isn&rsquo;t on its network allow-list.</>
     default:
       return <>An agent wants to run <Chip>{data.target}</Chip>.</>
   }
@@ -230,6 +234,11 @@ export const ApprovalCard: React.FC<{
           {data.kind === 'webfetch' && (
             <Caption icon={<Globe className="w-3 h-3" />}>
               Allowing trusts the whole host — every request to <span className="font-mono">{data.target}</span>, including POSTs — not just this URL.
+            </Caption>
+          )}
+          {data.kind === 'egress' && (
+            <Caption icon={<Network className="w-3 h-3" />}>
+              Allow once opens <span className="font-mono">{data.target}</span> for the rest of this session; Always allow adds it to the agent&rsquo;s network allow-list.
             </Caption>
           )}
         </div>

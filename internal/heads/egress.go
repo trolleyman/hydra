@@ -2,9 +2,14 @@ package heads
 
 import (
 	"log"
+	"strconv"
 	"sync"
+	"time"
 
+	"github.com/trolleyman/hydra/internal/api"
 	"github.com/trolleyman/hydra/internal/egress"
+	"github.com/trolleyman/hydra/internal/gate"
+	"github.com/trolleyman/hydra/internal/paths"
 	"github.com/trolleyman/hydra/internal/sandbox"
 )
 
@@ -56,7 +61,7 @@ var egressProxies = struct {
 //
 // The proxy enforces the effective allow-list — the built-in DefaultAllowedHosts
 // unioned with net.AllowedHosts — minus net.BlockedHosts, which overrides it.
-func startEgress(id string, net *sandbox.NetworkPolicy) (env []string, wrap func([]string, string) []string) {
+func startEgress(projectRoot, id string, net *sandbox.NetworkPolicy) (env []string, wrap func([]string, string) []string) {
 	stopEgressProxy(id)
 	if !net.Enabled || net.Mode == sandbox.NetOff {
 		setEgressMode(id, EgressOff)
@@ -68,7 +73,8 @@ func startEgress(id string, net *sandbox.NetworkPolicy) (env []string, wrap func
 	}
 
 	allowed := append(sandbox.DefaultAllowedHosts(), net.AllowedHosts...)
-	p, err := egress.Start(id, allowed, net.BlockedHosts)
+	approver := &egressApprover{projectRoot: projectRoot, id: id}
+	p, err := egress.Start(id, allowed, net.BlockedHosts, approver.approve)
 	if err != nil {
 		if net.Mode == sandbox.NetHard && net.Strict {
 			log.Printf("hydra egress[%s]: STRICT hard egress but proxy failed to start; failing closed (no network): %v", id, err)
@@ -145,6 +151,126 @@ func stopEgressProxy(id string) {
 	if e != nil && e.proxy != nil {
 		_ = e.proxy.Close()
 	}
+}
+
+// egressApprovalTimeout bounds how long a blocked outbound connection waits for a
+// user decision before it is denied (matching the security gate's ask timeout —
+// see internal/cli/gate.go). On timeout the agent gets the same 403 it would have
+// gotten under a silent deny, just after giving the user a chance to approve.
+const egressApprovalTimeout = 5 * time.Minute
+
+// egressApprovalPoll is how often the approver re-checks for a decision file.
+const egressApprovalPoll = 500 * time.Millisecond
+
+// egressApprover parks an agent for user approval when its egress proxy hits a
+// host that is on neither the allow- nor the block-list. It reuses the
+// security-gate approval channel: it writes a request the web UI surfaces as an
+// approval toast (the same mechanism as a parked MCP/WebFetch call) and polls for
+// the decision the UI writes back. While any host is pending it flips the head's
+// status to a policy-approval wait so the toast appears, restoring "running" once
+// the last pending host resolves.
+//
+// It runs on the host (inside the daemon), so unlike the in-sandbox `hydra gate`
+// hook it talks to the status/approval files directly rather than over env-var
+// paths. A granted host is added to the proxy's live allow-list by the proxy
+// itself; "always allow" additionally persists it to the project config via the
+// API's remember path (internal/http/approvals.go).
+type egressApprover struct {
+	projectRoot string
+	id          string
+	mu          sync.Mutex
+	active      int // hosts currently parked; the last to resolve clears the wait
+}
+
+// approve is the egress.ApproveFunc: it blocks until the user decides (or the
+// timeout/cancel fires), returning whether the connection to host may proceed.
+func (e *egressApprover) approve(host string, cancel <-chan struct{}) bool {
+	if e.projectRoot == "" {
+		return false // no channel to ask over (e.g. tests) → deny, as before
+	}
+	dir := paths.GetApprovalsDirFromProjectRoot(e.projectRoot, e.id)
+	reqid := "egress-" + strconv.FormatInt(time.Now().UnixNano(), 10)
+	summary := "wants to connect to " + strconv.Quote(host)
+	req := gate.Request{
+		ReqID:   reqid,
+		Tool:    "egress",
+		Kind:    "egress",
+		Target:  host,
+		Reason:  "egress to " + strconv.Quote(host) + " is not on the network allow-list",
+		Summary: summary,
+		TS:      time.Now().Format(time.RFC3339Nano),
+	}
+	if err := gate.WriteRequest(dir, req); err != nil {
+		log.Printf("hydra egress[%s]: write approval request for %q: %v", e.id, host, err)
+		return false
+	}
+
+	e.enter(summary)
+	defer e.leave()
+	defer gate.RemoveRequest(dir, reqid)
+
+	deadline := time.Now().Add(egressApprovalTimeout)
+	for {
+		if d, ok, err := gate.ReadDecision(dir, reqid); err == nil && ok {
+			return d.Decision == gate.Allow
+		}
+		if time.Now().After(deadline) {
+			log.Printf("hydra egress[%s]: approval for %q timed out; denying", e.id, host)
+			return false
+		}
+		select {
+		case <-cancel:
+			return false
+		case <-time.After(egressApprovalPoll):
+		}
+	}
+}
+
+// enter records a newly-parked host and flips the head into a policy-approval wait
+// so the UI surfaces the approval toast.
+func (e *egressApprover) enter(summary string) {
+	e.mu.Lock()
+	e.active++
+	e.mu.Unlock()
+	e.writeApprovalStatus(summary)
+}
+
+// leave drops a resolved host; when it was the last pending one it restores the
+// head to "running" so the wait (and its toast) clears.
+func (e *egressApprover) leave() {
+	e.mu.Lock()
+	e.active--
+	last := e.active <= 0
+	e.mu.Unlock()
+	if last {
+		e.restoreRunning()
+	}
+}
+
+// writeApprovalStatus flips status.json to a needs-input policy-approval wait. The
+// timestamp advance is what the JSON poller keys on to notice the change.
+func (e *egressApprover) writeApprovalStatus(summary string) {
+	nt := gate.NotificationPolicyApproval
+	msg := summary
+	_ = WriteAgentStatus(e.projectRoot, e.id, &api.AgentStatusInfo{
+		Status:           api.NeedsInput,
+		Timestamp:        time.Now().Format(time.RFC3339Nano),
+		LastMessage:      &msg,
+		NotificationType: &nt,
+	})
+}
+
+// restoreRunning clears the policy-approval wait, but only if it still owns the
+// status (nothing newer — e.g. the agent's own hook — has moved it on).
+func (e *egressApprover) restoreRunning() {
+	if s := ReadAgentStatus(e.projectRoot, e.id); s != nil &&
+		(s.NotificationType == nil || *s.NotificationType != gate.NotificationPolicyApproval) {
+		return
+	}
+	_ = WriteAgentStatus(e.projectRoot, e.id, &api.AgentStatusInfo{
+		Status:    api.Running,
+		Timestamp: time.Now().Format(time.RFC3339Nano),
+	})
 }
 
 func itoa(n int) string {

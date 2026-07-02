@@ -12,7 +12,7 @@ export type ApprovalRequest = {
      */
     tool: string;
     /**
-     * What is being approved: 'mcp', 'mcp_tool', 'webfetch', or 'bash'
+     * What is being approved: 'mcp', 'mcp_tool', 'webfetch', 'egress', or 'bash'
      */
     kind: string;
     /**

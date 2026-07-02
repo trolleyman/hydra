@@ -20,7 +20,10 @@
 //
 // A request is relayed iff its host is on the effective allow-list (user list +
 // the built-in defaults) AND not on the block-list, which overrides the allow.
-// Every blocked attempt is logged.
+// A host on neither list is parked for user approval (an ApproveFunc supplied by
+// the caller surfaces an approval toast in the UI); approving it allows the host
+// for the rest of the session. A host on the block-list is refused outright, with
+// no prompt. Every blocked attempt is logged.
 package egress
 
 import (
@@ -29,6 +32,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"braces.dev/errtrace"
@@ -38,25 +42,60 @@ import (
 // dialTimeout bounds how long an upstream connection attempt may take.
 const dialTimeout = 30 * time.Second
 
+// ApproveFunc asks whether an outbound connection to an as-yet-unlisted host may
+// proceed. It blocks (typically prompting the user) until decided, and should
+// abandon and return false when cancel is closed (the proxy is shutting down). A
+// nil ApproveFunc means unknown hosts are silently denied.
+type ApproveFunc func(host string, cancel <-chan struct{}) bool
+
 // Proxy is a running per-head filtering forward proxy bound to host loopback.
 type Proxy struct {
-	id      string
-	allowed []string
-	blocked []string
-	ln      net.Listener
-	srv     *http.Server
+	id  string
+	ln  net.Listener
+	srv *http.Server
+
+	// approve parks an unknown host for user approval; nil = deny unknown hosts.
+	approve ApproveFunc
+	// done is closed by Close so a pending approval can abandon its wait.
+	done     chan struct{}
+	doneOnce sync.Once
+
+	// mu guards the (mutable) allow-list and the in-flight approval map. The
+	// allow-list grows as the user approves hosts mid-session.
+	mu       sync.Mutex
+	allowed  []string
+	blocked  []string
+	inflight map[string]*inflightApproval
+}
+
+// inflightApproval collapses concurrent connections to the same unknown host into
+// a single prompt: the first caller runs the approver; the rest wait on done and
+// share result.
+type inflightApproval struct {
+	done   chan struct{}
+	result bool
 }
 
 // Start binds a filtering proxy on a free loopback port and begins serving. id
 // is the head ID (for log lines); allowed is the effective host allow-list and
-// blocked is the block-list that overrides it (both exact or "*.suffix"). Close
-// it when the head ends.
-func Start(id string, allowed, blocked []string) (*Proxy, error) {
+// blocked is the block-list that overrides it (both exact or "*.suffix"). approve,
+// when non-nil, is consulted for a host on neither list — it can park the
+// connection for user approval (and, if granted, the host is allowed for the rest
+// of the session). Close it when the head ends.
+func Start(id string, allowed, blocked []string, approve ApproveFunc) (*Proxy, error) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
-	p := &Proxy{id: id, allowed: normalize(allowed), blocked: normalize(blocked), ln: ln}
+	p := &Proxy{
+		id:       id,
+		ln:       ln,
+		approve:  approve,
+		done:     make(chan struct{}),
+		allowed:  normalize(allowed),
+		blocked:  normalize(blocked),
+		inflight: map[string]*inflightApproval{},
+	}
 	p.srv = &http.Server{
 		Handler:           http.HandlerFunc(p.handle),
 		ReadHeaderTimeout: dialTimeout,
@@ -72,11 +111,12 @@ func Start(id string, allowed, blocked []string) (*Proxy, error) {
 // Addr is the host:port the proxy listens on (e.g. 127.0.0.1:54321).
 func (p *Proxy) Addr() string { return p.ln.Addr().String() }
 
-// Close stops the proxy.
+// Close stops the proxy, abandoning any pending approvals.
 func (p *Proxy) Close() error {
 	if p == nil || p.srv == nil {
 		return nil
 	}
+	p.doneOnce.Do(func() { close(p.done) })
 	return errtrace.Wrap(p.srv.Close())
 }
 
@@ -93,8 +133,7 @@ func (p *Proxy) handle(w http.ResponseWriter, r *http.Request) {
 // host check needs no TLS interception.
 func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 	host := hostOnly(r.Host)
-	if !p.allow(host) {
-		p.deny(host)
+	if !p.authorize(host) {
 		http.Error(w, "hydra: egress to "+host+" blocked (not on the network allow-list)", http.StatusForbidden)
 		return
 	}
@@ -129,8 +168,7 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	if host == "" {
 		host = hostOnly(r.URL.Host)
 	}
-	if !p.allow(host) {
-		p.deny(host)
+	if !p.authorize(host) {
 		http.Error(w, "hydra: egress to "+host+" blocked (not on the network allow-list)", http.StatusForbidden)
 		return
 	}
@@ -153,16 +191,68 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	_, _ = io.Copy(w, resp.Body)
 }
 
-// allow reports whether host is permitted: on the allow-list and not overridden
-// by the block-list (block wins).
-func (p *Proxy) allow(host string) bool {
+// authorize reports whether an outbound connection to host may proceed. A host on
+// the effective allow-list is permitted; one on the block-list is refused outright
+// (block wins — no prompt). An otherwise-unknown host is parked for user approval
+// via the approve callback (when configured), and a granted host is added to the
+// allow-list for the rest of the session. With no approver — or on deny/timeout —
+// the host is refused.
+func (p *Proxy) authorize(host string) bool {
 	if host == "" {
 		return false
 	}
-	if gate.HostAllowed(p.blocked, host) {
+	p.mu.Lock()
+	blocked := gate.HostAllowed(p.blocked, host)
+	allowed := !blocked && gate.HostAllowed(p.allowed, host)
+	p.mu.Unlock()
+	if blocked {
+		p.deny(host)
 		return false
 	}
-	return gate.HostAllowed(p.allowed, host)
+	if allowed {
+		return true
+	}
+	if p.approve == nil {
+		p.deny(host)
+		return false
+	}
+	if p.requestApproval(host) {
+		p.mu.Lock()
+		p.allowed = append(p.allowed, host)
+		p.mu.Unlock()
+		log.Printf("hydra egress[%s]: user APPROVED outbound connection to %q (allowed for this session)", p.id, host)
+		return true
+	}
+	p.deny(host)
+	return false
+}
+
+// requestApproval runs the approve callback for host, collapsing concurrent
+// connections to the same unknown host into one prompt: the first caller runs the
+// approver; the rest wait for and share its verdict.
+func (p *Proxy) requestApproval(host string) bool {
+	p.mu.Lock()
+	if fa, ok := p.inflight[host]; ok {
+		p.mu.Unlock()
+		select {
+		case <-fa.done:
+			return fa.result
+		case <-p.done:
+			return false
+		}
+	}
+	fa := &inflightApproval{done: make(chan struct{})}
+	p.inflight[host] = fa
+	p.mu.Unlock()
+
+	result := p.approve(host, p.done)
+
+	p.mu.Lock()
+	fa.result = result
+	delete(p.inflight, host)
+	p.mu.Unlock()
+	close(fa.done)
+	return result
 }
 
 // deny logs a blocked egress attempt so an unattended head's exfil attempts are

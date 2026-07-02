@@ -460,7 +460,7 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 	// Filtering egress: when the head has a network allow-list, route its outbound
 	// HTTP(S) through a per-head proxy that only relays allow-listed hosts (hard
 	// netns+nft boundary when available, else advisory proxy env).
-	egressEnv, egressWrap := startEgress(opts.ID, &net)
+	egressEnv, egressWrap := startEgress(projectRoot, opts.ID, &net)
 	env = append(env, egressEnv...)
 
 	sess, err := startAgentSession(reg, projectRoot, opts.ID, opts.AgentType, worktreePath, opts.Rows, opts.Cols, sandbox.Options{
@@ -787,7 +787,7 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 	env = append(env, headContextEnv(head.ID, head.AgentType, projectRoot, worktreePath, derefStr(head.Branch), head.BaseBranch)...)
 	env = append(env, claudeRenderingEnv(head.AgentType, cfg.ResolveFullscreen(string(head.AgentType)))...)
 	// Filtering egress (see SpawnHead): restart it fresh on resume.
-	egressEnv, egressWrap := startEgress(head.ID, &net)
+	egressEnv, egressWrap := startEgress(projectRoot, head.ID, &net)
 	env = append(env, egressEnv...)
 
 	sess, err := startAgentSession(reg, projectRoot, head.ID, head.AgentType, worktreePath, rows, cols, sandbox.Options{

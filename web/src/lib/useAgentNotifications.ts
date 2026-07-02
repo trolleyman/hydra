@@ -21,8 +21,9 @@ const FINISHED_TOAST_MS = 8_000
 //      isn't a security-gate wait, which gets its own toast below) or `finished`,
 //      a toast pops with a "View" button that jumps to the agent.
 //   2. Security-gate approval toasts — for each parked tool call (MCP / WebFetch
-//      / bash), a persistent toast with Allow / Deny actions. Dismissing the
-//      toast (X) denies the call; "Allow" tears it down silently.
+//      / bash) or blocked egress host, a persistent toast with Allow / Deny
+//      actions. Dismissing the toast (X) denies the call; "Allow" tears it down
+//      silently.
 //   3. Cross-project needs-input toasts — the daemon broadcasts every project's
 //      `needs_input_count`, so when a *background* project's count changes we
 //      fetch that project's agents on demand, and pop one toast per newly-blocked
@@ -141,9 +142,9 @@ export function useAgentNotifications(currentProjectId: string | null) {
         // Surface every parked call as a persistent Allow/Deny toast. The `key`
         // dedups so a repeat fetch (or StrictMode double-run) reuses the toast.
         for (const a of approvals) {
-          // mcp / mcp_tool / webfetch persist an "always allow"; bash (e.g. git
-          // push) is one-shot only.
-          const canRemember = a.kind === 'mcp' || a.kind === 'mcp_tool' || a.kind === 'webfetch'
+          // mcp / mcp_tool / webfetch / egress persist an "always allow"; bash
+          // (e.g. git push) is one-shot only.
+          const canRemember = a.kind === 'mcp' || a.kind === 'mcp_tool' || a.kind === 'webfetch' || a.kind === 'egress'
           const actions = [
             {
               label: 'Allow once',

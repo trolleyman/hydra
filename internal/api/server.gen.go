@@ -323,7 +323,7 @@ type ApprovalRequest struct {
 	// ArgsPreview Compact one-line preview of an mcp_tool call's arguments.
 	ArgsPreview *string `json:"args_preview"`
 
-	// Kind What is being approved: 'mcp', 'mcp_tool', 'webfetch', or 'bash'
+	// Kind What is being approved: 'mcp', 'mcp_tool', 'webfetch', 'egress', or 'bash'
 	Kind string `json:"kind"`
 
 	// Reason One-line explanation of why the gate parked the call

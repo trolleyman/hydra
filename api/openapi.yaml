@@ -2551,7 +2551,7 @@ components:
           description: The tool the agent tried to use (e.g. WebFetch or an mcp__ name)
         kind:
           type: string
-          description: "What is being approved: 'mcp', 'mcp_tool', 'webfetch', or 'bash'"
+          description: "What is being approved: 'mcp', 'mcp_tool', 'webfetch', 'egress', or 'bash'"
         target:
           type: string
           description: The MCP server name, '<server>__<tool>', host, or command the approval is about

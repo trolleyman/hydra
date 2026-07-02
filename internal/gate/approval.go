@@ -26,7 +26,7 @@ const (
 type Request struct {
 	ReqID   string `json:"reqid"`
 	Tool    string `json:"tool"`
-	Kind    string `json:"kind"`   // mcp | mcp_tool | webfetch | bash
+	Kind    string `json:"kind"`   // mcp | mcp_tool | webfetch | egress | bash
 	Target  string `json:"target"` // server name / "<server>__<tool>" / host / "git push"
 	Reason  string `json:"reason"`
 	Summary string `json:"summary"`
@@ -56,6 +56,14 @@ func WriteRequest(dir string, r Request) error {
 		return errtrace.Wrap(err)
 	}
 	return errtrace.Wrap(os.WriteFile(filepath.Join(dir, r.ReqID+reqSuffix), data, 0644))
+}
+
+// RemoveRequest deletes the request and any decision file for reqid in dir, used
+// to retire a resolved approval so it stops being surfaced. Best-effort: missing
+// files are not an error.
+func RemoveRequest(dir, reqid string) {
+	_ = os.Remove(filepath.Join(dir, reqid+reqSuffix))
+	_ = os.Remove(filepath.Join(dir, reqid+decisionSuffix))
 }
 
 // ListRequests returns the pending (undecided) approval requests in dir, oldest

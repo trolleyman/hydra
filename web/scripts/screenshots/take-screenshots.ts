@@ -737,7 +737,24 @@ try {
           approval: { kind: 'webfetch', target: 'docs.linear.app', agentName: 'Publish the changelog', agentId: 'agent-approval', projectId: 'sim-project', url: 'https://docs.linear.app/api/changelog' },
         },
       },
-      // 3e. An agent running in ANOTHER project: an amber "running in another
+      // 3e. A blocked egress host: the agent's proxy hit a host on neither the
+      // allow- nor block-list, so the connection is parked. Allow once opens it
+      // for the session; Always allow adds it to the network allow-list.
+      {
+        name: 'agent-approvals-egress',
+        path: '/settings',
+        toast: {
+          message: '',
+          type: 'warning',
+          actions: [
+            { label: 'Allow once', variant: 'primary' },
+            { label: 'Always allow', variant: 'primary' },
+            { label: 'Deny', variant: 'danger' },
+          ],
+          approval: { kind: 'egress', target: 'telemetry.example.com', agentName: 'Add crash reporting', agentId: 'agent-approval', projectId: 'sim-project' },
+        },
+      },
+      // 3f. An agent running in ANOTHER project: an amber "running in another
       // project" banner. Always allow is still offered (a remembered grant is
       // scoped to the project the approval resolves in).
       {
