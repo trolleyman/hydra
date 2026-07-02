@@ -214,8 +214,12 @@ timeout_sec = 900
 # The whole module is slow, so allow a generous timeout. (web/dist is kept present
 # in every checkout via a committed web/dist/.gitkeep, so the //go:embed all:dist in
 # web/embed.go compiles without building the frontend.)
+# Once the tests pass, errtrace-report (read-only errtrace -l — safe against a
+# head's live worktree) surfaces what `mage tidy` would still change — unwrapped
+# error returns and unused //errtrace:skip directives — as informational ⚠
+# warnings on the same verdict; they never gate the merge.
 name = "go"
-command = "go tool gotestsum --junitfile \"$HYDRA_TEST_OUTPUT/go.xml\" -- ./..."
+command = "go tool gotestsum --junitfile \"$HYDRA_TEST_OUTPUT/go.xml\" -- ./... && go run ./scripts/errtrace-report"
 timeout_sec = 900
 
 [[tests]]

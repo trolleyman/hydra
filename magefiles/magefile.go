@@ -380,33 +380,10 @@ func Tidy() error {
 		return errtrace.Wrap(err)
 	}
 
-	// Collect all .go files except .gen.go files, including magefiles/magefile.go
-	// (which is excluded from ./... due to its build tag).
-	skipDirs := map[string]struct{}{
-		".git": {}, "vendor": {}, "node_modules": {}, ".mage": {}, ".hydra": {},
-	}
-	var goFiles []string
-	err = filepath.Walk(".", func(path string, info os.FileInfo, walkErr error) error {
-		if walkErr != nil {
-			return errtrace.Wrap(walkErr)
-		}
-		if info.IsDir() {
-			if _, skip := skipDirs[info.Name()]; skip {
-				return filepath.SkipDir //errtrace:skip // This error must be filepath.SkipDir, not wrapped.
-			}
-			return nil
-		}
-		if strings.HasSuffix(path, ".go") && !strings.HasSuffix(path, ".gen.go") {
-			goFiles = append(goFiles, path)
-		}
-		return nil
-	})
-	if err != nil {
-		return errtrace.Wrap(err)
-	}
-
-	args := append([]string{"run", "braces.dev/errtrace/cmd/errtrace@latest", "-w"}, goFiles...)
-	return errtrace.Wrap(runV("go", args...))
+	// errtrace-report owns the file list (all .go files except .gen.go, including
+	// magefiles/) and runs the go.mod-pinned errtrace tool; the "go" [[tests]]
+	// runner uses the same script read-only to surface leftovers as warnings.
+	return errtrace.Wrap(runV("go", "run", "./scripts/errtrace-report", "-w"))
 }
 
 func addGoBuildDeps() {

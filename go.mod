@@ -93,6 +93,7 @@ require (
 )
 
 tool (
+	braces.dev/errtrace/cmd/errtrace
 	github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen
 	gotest.tools/gotestsum
 )
