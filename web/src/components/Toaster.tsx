@@ -119,7 +119,7 @@ const ToastItem: React.FC<{ toast: Toast; onDismiss: () => void }> = ({ toast, o
         {showCountdown && (
           <div
             className={`toast-progress-bar absolute bottom-0 left-0 h-0.5 w-full opacity-60 ${tile.bar}`}
-            style={{ animationDuration: `${toast.duration}ms` }}
+            style={{ animationDuration: `${toast.duration}ms`, animationPlayState: toast.paused ? 'paused' : 'running' }}
           />
         )}
       </div>
@@ -160,7 +160,7 @@ const ToastItem: React.FC<{ toast: Toast; onDismiss: () => void }> = ({ toast, o
       {showCountdown && (
         <div
           className={`toast-progress-bar absolute bottom-0 left-0 h-0.5 w-full opacity-60 ${bar}`}
-          style={{ animationDuration: `${toast.duration}ms` }}
+          style={{ animationDuration: `${toast.duration}ms`, animationPlayState: toast.paused ? 'paused' : 'running' }}
         />
       )}
     </div>
@@ -168,7 +168,7 @@ const ToastItem: React.FC<{ toast: Toast; onDismiss: () => void }> = ({ toast, o
 }
 
 export const Toaster: React.FC = () => {
-  const { toasts, dismiss } = useToastStore()
+  const { toasts, dismiss, pause, resume } = useToastStore()
 
   if (toasts.length === 0) return null
 
@@ -178,7 +178,16 @@ export const Toaster: React.FC = () => {
     // merge/kill confirmation, which must be visible over the toasts).
     <div className="fixed bottom-4 right-4 z-[110] flex flex-col gap-2 items-end">
       {toasts.map((toast) => (
-        <ToastItem key={toast.id} toast={toast} onDismiss={() => dismiss(toast.id)} />
+        // A transparent wrapper carries the hover handlers so every toast variant
+        // (plain / transition / approval card) pauses uniformly — hovering freezes
+        // the auto-dismiss timer and countdown bar until the pointer leaves.
+        <div
+          key={toast.id}
+          onMouseEnter={() => pause(toast.id)}
+          onMouseLeave={() => resume(toast.id)}
+        >
+          <ToastItem toast={toast} onDismiss={() => dismiss(toast.id)} />
+        </div>
       ))}
     </div>
   )
