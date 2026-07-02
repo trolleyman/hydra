@@ -9,6 +9,10 @@ import { caseKey, caseLocation, splitPath } from '../lib/testCases'
 //     (describe/class levels) inside the file;
 //   - by scope (useScope): the class chain alone, with file:line shown as a
 //     dim secondary affordance on the leaf.
+// The tree is built from ALL of a runner's cases but renders only the
+// `visible` ones (post status-filter/search): node badges therefore always
+// tally everything under a node, while hidden rows — and subtrees with
+// nothing visible — stay out of the way.
 // Two densification rules keep it shallow: a chain of single-child folders
 // merges into one row (internal/artifacts — like VS Code compact folders), and
 // a subtree holding exactly ONE case collapses the whole chain into that
@@ -35,20 +39,24 @@ type TreeNode = {
   pathParts: string[]
   key: string // stable identity for the collapse set
   children: Map<string, TreeNode>
-  cases: TestCase[] // cases attached directly at this node
-  counts: Record<string, number>
+  cases: TestCase[] // cases attached directly at this node (all, incl. hidden)
+  visCases: TestCase[] // the filter-surviving subset of `cases`
+  counts: Record<string, number> // per-status tallies over ALL cases in the subtree
   total: number
+  visTotal: number // filter-surviving cases in the subtree; 0 → node not rendered
 }
 
 function newNode(label: string, kind: SegKind, pathParts: string[], key: string): TreeNode {
-  return { label, kind, pathParts, key, children: new Map(), cases: [], counts: {}, total: 0 }
+  return { label, kind, pathParts, key, children: new Map(), cases: [], visCases: [], counts: {}, total: 0, visTotal: 0 }
 }
 
-function buildTree(cases: TestCase[], useScope: boolean): TreeNode {
+function buildTree(cases: TestCase[], visibleSet: Set<TestCase>, useScope: boolean): TreeNode {
   const root = newNode('', 'path', [], '')
   for (const c of cases) {
+    const vis = visibleSet.has(c)
     let node = root
     node.total++
+    if (vis) node.visTotal++
     node.counts[c.status] = (node.counts[c.status] ?? 0) + 1
     for (const seg of caseSegs(c, useScope)) {
       const childKey = `${node.key}/${seg.label}`
@@ -59,9 +67,11 @@ function buildTree(cases: TestCase[], useScope: boolean): TreeNode {
       }
       node = child
       node.total++
+      if (vis) node.visTotal++
       node.counts[c.status] = (node.counts[c.status] ?? 0) + 1
     }
     node.cases.push(c)
+    if (vis) node.visCases.push(c)
   }
   compact(root)
   return root
@@ -86,8 +96,10 @@ function compact(node: TreeNode): void {
 
 // hoistedCase returns the single case of a one-case subtree along with the
 // chain prefix leading to it, or null when the subtree holds more than one.
+// Only a subtree whose FULL total is one hoists: with hidden siblings the
+// node keeps its expandable row so the everything-counted badges have a home.
 function hoistedCase(node: TreeNode): { c: TestCase; prefix: string } | null {
-  if (node.total !== 1) return null
+  if (node.total !== 1 || node.visTotal !== 1) return null
   let prefix = node.label
   let cur = node
   while (cur.cases.length === 0) {
@@ -111,9 +123,24 @@ function statusRank(s: string): number {
   return i === -1 ? STATUS_RENDER_ORDER.length : i
 }
 
+// TreeGuide is the lowlit vertical line dropped from an expanded node's
+// chevron through its children, so every row shows which parent it belongs
+// to. Rendered inside a `relative` wrapper around the children block; `depth`
+// is the expanded PARENT's depth (the line lands under its chevron).
+export function TreeGuide({ depth }: { depth: number }) {
+  return (
+    <span
+      aria-hidden
+      className="pointer-events-none absolute top-0 bottom-0 w-px bg-gray-200/80 dark:bg-gray-700/50"
+      style={{ left: depth * 14 + 13 }}
+    />
+  )
+}
+
 // NodeBadges shows a node's mixed per-status tallies (✓142 ⚠4 ✗2), omitting
-// zero buckets.
-function NodeBadges({ counts }: { counts: Record<string, number> }) {
+// zero buckets. In the tests tree these count EVERYTHING under the node —
+// the status filter and search hide rows, never the tallies.
+export function NodeBadges({ counts }: { counts: Record<string, number> }) {
   return (
     <span className="ml-auto flex items-center gap-1.5 shrink-0 text-[10px] font-medium tabular-nums">
       {(counts.failed ?? 0) > 0 && (
@@ -238,7 +265,12 @@ function NodeView({ node, depth, collapsed, onToggle, useScope }: {
         {copyPath && node.kind === 'path' ? <CopyButton text={copyPath} title={`Copy ${copyPath}`} /> : null}
         <NodeBadges counts={node.counts} />
       </button>
-      {!isCollapsed && <NodeChildren node={node} depth={depth + 1} collapsed={collapsed} onToggle={onToggle} useScope={useScope} />}
+      {!isCollapsed && (
+        <div className="relative">
+          <TreeGuide depth={depth} />
+          <NodeChildren node={node} depth={depth + 1} collapsed={collapsed} onToggle={onToggle} useScope={useScope} />
+        </div>
+      )}
     </div>
   )
 }
@@ -251,9 +283,11 @@ function NodeChildren({ node, depth, collapsed, onToggle, useScope }: {
   useScope: boolean
 }) {
   // Directories first (alphabetical), then this node's own cases, worst
-  // status first so failures surface above passing siblings.
-  const children = [...node.children.values()].sort((a, b) => a.label.localeCompare(b.label))
-  const cases = [...node.cases].sort((a, b) => statusRank(a.status) - statusRank(b.status))
+  // status first so failures surface above passing siblings. Subtrees and
+  // cases the filter fully hid don't render (their counts survive in the
+  // ancestors' badges).
+  const children = [...node.children.values()].filter((c) => c.visTotal > 0).sort((a, b) => a.label.localeCompare(b.label))
+  const cases = [...node.visCases].sort((a, b) => statusRank(a.status) - statusRank(b.status))
   return (
     <div>
       {children.map((child) => (
@@ -266,8 +300,17 @@ function NodeChildren({ node, depth, collapsed, onToggle, useScope }: {
   )
 }
 
-export function CaseTree({ cases, useScope }: { cases: TestCase[]; useScope: boolean }) {
-  const root = useMemo(() => buildTree(cases, useScope), [cases, useScope])
+export function CaseTree({ cases, visible, useScope, depth = 0 }: {
+  // ALL of the runner's cases — badges tally these regardless of filters.
+  cases: TestCase[]
+  // The filter/search-surviving subset actually rendered as rows.
+  visible: TestCase[]
+  useScope: boolean
+  // Base indent level, for embedding under a parent row (result sections).
+  depth?: number
+}) {
+  const visibleSet = useMemo(() => new Set(visible), [visible])
+  const root = useMemo(() => buildTree(cases, visibleSet, useScope), [cases, visibleSet, useScope])
   // Everything starts expanded (the filter already narrows the set); the set
   // records what the user closed. Keyed by node identity so it survives both
   // re-renders and axis switches (keys differ per axis, which is fine).
@@ -279,10 +322,10 @@ export function CaseTree({ cases, useScope }: { cases: TestCase[]; useScope: boo
       else next.add(key)
       return next
     })
-  if (cases.length === 0) return null
+  if (visible.length === 0) return null
   return (
     <div className="flex flex-col">
-      <NodeChildren node={root} depth={0} collapsed={collapsed} onToggle={onToggle} useScope={useScope} />
+      <NodeChildren node={root} depth={depth} collapsed={collapsed} onToggle={onToggle} useScope={useScope} />
     </div>
   )
 }

@@ -143,5 +143,8 @@ func parseTestMarker(line string, lc *locContext) (testMarker, bool) {
 	if tc.Name == "" {
 		return testMarker{}, false
 	}
+	// A marker that located a Go *package dir* (e.g. "internal/tests ›
+	// TestFoo") resolves to the declaring *_test.go file, like JUnit Go cases.
+	lc.resolveGoTestFile(&tc, false)
 	return testMarker{kind: "case", c: tc}, true
 }

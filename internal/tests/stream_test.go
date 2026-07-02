@@ -1,6 +1,7 @@
 package tests
 
 import (
+	"path/filepath"
 	"testing"
 
 	"github.com/trolleyman/hydra/internal/config"
@@ -82,6 +83,30 @@ func TestParseTestMarker(t *testing.T) {
 			g.Line != w.Line || g.Col != w.Col || !equalStrs(g.Scope, w.Scope) {
 			t.Errorf("parseTestMarker(%q) case = %+v, want %+v", tt.line, g, w)
 		}
+	}
+}
+
+// A streamed marker locating a Go package dir resolves to the declaring
+// *_test.go file + line when the checkout is on disk, like JUnit Go cases.
+func TestParseTestMarkerResolvesGoFile(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "internal", "tests", "stream_test.go"),
+		"package tests\n\nimport \"testing\"\n\nfunc TestMarkers(t *testing.T) {}\n")
+	lc := newLocContext(dir)
+
+	got, ok := parseTestMarker("::hydra:test:pass:: internal/tests › TestMarkers › sub case", lc)
+	if !ok {
+		t.Fatal("expected marker to parse")
+	}
+	if got.c.Path != "internal/tests/stream_test.go" || got.c.Line != 5 ||
+		!equalStrs(got.c.Scope, []string{"TestMarkers"}) || got.c.Name != "sub case" {
+		t.Errorf("case = %+v, want path internal/tests/stream_test.go line 5", got.c)
+	}
+
+	// A dir with no *_test.go (not a Go package) is left untouched.
+	got, ok = parseTestMarker("::hydra:test:pass:: internal/other › TestMarkers", lc)
+	if !ok || got.c.Path != "internal/other" || got.c.Line != 0 {
+		t.Errorf("case = %+v, want unresolved package-dir path", got.c)
 	}
 }
 

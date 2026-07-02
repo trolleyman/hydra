@@ -184,6 +184,50 @@ func TestParseJUnitGoPackage(t *testing.T) {
 	}
 }
 
+// With a real checkout on disk, a Go package-dir case resolves further to the
+// *_test.go file (and line) declaring its root test function.
+func TestParseJUnitGoPackageResolvesFile(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "go.mod"), "module github.com/trolleyman/hydra\n\ngo 1.22\n")
+	writeFile(t, filepath.Join(dir, "internal", "artifacts", "manager_test.go"),
+		"package artifacts\n\nimport \"testing\"\n\nfunc TestGenerateAndCache(t *testing.T) {}\n\nfunc TestOverlay(t *testing.T) {}\n")
+	writeFile(t, filepath.Join(dir, "internal", "artifacts", "helper_test.go"),
+		"package artifacts\n\nfunc helper() {}\n")
+
+	xml := `<testsuites>
+	  <testsuite name="github.com/trolleyman/hydra/internal/artifacts">
+	    <testcase name="TestGenerateAndCache" classname="github.com/trolleyman/hydra/internal/artifacts" time="0.5"/>
+	    <testcase name="TestOverlay/mounts/readonly" classname="github.com/trolleyman/hydra/internal/artifacts" time="0.1"/>
+	    <testcase name="TestMissing" classname="github.com/trolleyman/hydra/internal/artifacts" time="0"/>
+	  </testsuite>
+	</testsuites>`
+	cases, ok := parseJUnit([]byte(xml), newLocContext(dir))
+	if !ok || len(cases) != 3 {
+		t.Fatalf("parse failed: ok=%v cases=%+v", ok, cases)
+	}
+	if cases[0].Path != "internal/artifacts/manager_test.go" || cases[0].Line != 5 {
+		t.Errorf("plain case = %+v, want path internal/artifacts/manager_test.go line 5", cases[0])
+	}
+	// Subtests resolve via their root func (scope[0]).
+	if cases[1].Path != "internal/artifacts/manager_test.go" || cases[1].Line != 7 || cases[1].Name != "readonly" {
+		t.Errorf("subtest case = %+v, want path internal/artifacts/manager_test.go line 7", cases[1])
+	}
+	// An undeclared func (build-tagged out, generated names) keeps the package dir.
+	if cases[2].Path != "internal/artifacts" || cases[2].Line != 0 {
+		t.Errorf("unresolved case = %+v, want package-dir path", cases[2])
+	}
+}
+
+func writeFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // pytest: dotted classname + native file/line attrs. The file attr wins as the
 // path, the classname's path-echoing prefix is deduped away leaving the class
 // chain, and the 0-based line is bumped to 1-based.

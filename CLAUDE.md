@@ -61,10 +61,17 @@ file, or package dir for Go) with optional `line`/`col`/`end_line`/`end_col`, an
 `scope` (a string array: class chain / describe chain / subtest parent). The JUnit
 parser fills these itself — file-like classnames → `path`, dotted classnames
 (`com.example.FooTest`, pytest) → `scope`, Go package classnames get the go.mod module
-prefix stripped, pytest's native `file`/`line` attrs are read (0-based line bumped) —
-and Hydra-JSON reports can set them directly. The tests panel renders cases as a
-collapsible path tree (passing hidden by default; filter/search in the Tests header;
-"Group by result" / "Group by scope" checkboxes in the changes cog).
+prefix stripped *and* are then resolved to the declaring `*_test.go` file + line by
+scanning the package dir in the checkout (`locContext.resolveGoTestFile`; streamed
+markers locating a package dir resolve the same way), pytest's native `file`/`line`
+attrs are read (0-based line bumped) — and Hydra-JSON reports can set them directly.
+The tests panel renders cases as a collapsible path tree with lowlit indent-guide
+lines showing each row's parent; node tallies (`✓ ⚠ ✗`) always count everything under
+a node, filters only hide rows. Default-hidden statuses depend on the view mode:
+passed + skipped in the unified tree, nothing when "Group by result" is on (its
+per-status sections render as root tree nodes; skipped/passing start collapsed).
+Filter/search live in the Tests header; "Group by result" / "Group by scope"
+checkboxes in the changes cog.
 
 ### Streaming results (`type = "stdout"`)
 

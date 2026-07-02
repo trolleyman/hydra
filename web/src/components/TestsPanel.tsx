@@ -11,10 +11,10 @@ import { useMeasuredHeight } from '../lib/useMeasuredHeight'
 import { LogView } from './ArtifactLogView'
 import { InfoTooltip } from './InfoTooltip'
 import { TagScopeFilter } from './ArtifactFilterBar'
-import { CaseTree } from './CaseTree'
+import { CaseTree, NodeBadges, TreeGuide } from './CaseTree'
 import {
-  TEST_STATUS_ORDER, DEFAULT_HIDDEN_STATUSES, type TestFilter,
-  defaultTestFilter, isDefaultTestFilter, loadTestFilter, saveTestFilter,
+  TEST_STATUS_ORDER, type TestFilter,
+  defaultHiddenStatuses, defaultTestFilter, isDefaultTestFilter, loadTestFilter, saveTestFilter,
   computeVisibleCases, computeStatusCounts,
 } from '../lib/testFilterPrefs'
 
@@ -199,9 +199,12 @@ export function TestsPanel({ projectId, agentId, headRef, includeUncommitted, re
   // panel uses (see useMeasuredHeight + CollapsibleCard's sticky option).
   const [testsHeaderRef, testsHeaderH] = useMeasuredHeight(41)
 
-  // The status filter (persisted per project+agent, passing hidden by default —
-  // the tests analog of the artifacts tag filter) and the ephemeral search box.
-  const [filter, setFilter] = useState<TestFilter>(() => loadTestFilter(projectId, agentId))
+  // The status filter (the tests analog of the artifacts tag filter) and the
+  // ephemeral search box. Only an explicit customization is held/persisted;
+  // otherwise the mode-dependent default applies (unified tree: passed +
+  // skipped hidden; group-by-result: nothing hidden — its sections fold the
+  // boring statuses away instead), and follows the cog as the mode changes.
+  const [customFilter, setCustomFilter] = useState<TestFilter | null>(() => loadTestFilter(projectId, agentId))
   const [search, setSearch] = useState('')
   // Reload the persisted filter when switching agents (render-time adjust, same
   // pattern as the connKey reset above).
@@ -209,13 +212,17 @@ export function TestsPanel({ projectId, agentId, headRef, includeUncommitted, re
   const [prevFilterKey, setPrevFilterKey] = useState(filterKey)
   if (prevFilterKey !== filterKey) {
     setPrevFilterKey(filterKey)
-    setFilter(loadTestFilter(projectId, agentId))
+    setCustomFilter(loadTestFilter(projectId, agentId))
     setSearch('')
   }
+  const filter = customFilter ?? defaultTestFilter(!!groupResult)
   const updateFilter = useCallback((f: TestFilter) => {
-    setFilter(f)
-    saveTestFilter(projectId, agentId, f)
-  }, [projectId, agentId])
+    // A selection matching the mode default is "no customization": drop the
+    // stored value so the default keeps tracking the view mode.
+    const custom = isDefaultTestFilter(f, !!groupResult) ? null : f
+    setCustomFilter(custom)
+    saveTestFilter(projectId, agentId, custom)
+  }, [projectId, agentId, groupResult])
 
   // Every parsed case across all runners: drives the status dropdown's counts
   // and the scope-axis availability the cog needs.
@@ -256,7 +263,7 @@ export function TestsPanel({ projectId, agentId, headRef, includeUncommitted, re
         <InfoTooltip title="Tests" width={520}>
           <p>Per-runner pass/fail verdicts for the selected commit — the diff viewer's <strong>after</strong> side (a commit, or your uncommitted working tree), defaulting to the branch tip. Single-sided: there's no before/after comparison.</p>
           <p>Each runner is a project-defined <code className="text-blue-300">[[tests]]</code> command in <code className="text-blue-300">.hydra/config.toml</code>. Hydra runs it against the ref, parses the report it writes to <code className="text-blue-300">$HYDRA_TEST_OUTPUT</code> (JUnit XML or Hydra-JSON; otherwise a plain pass/fail from the exit code), and caches the verdict per commit. The verdict <strong>soft-gates the merge button</strong> — a failing run needs a force-merge.</p>
-          <p>Expand a card for its cases as a location tree — <strong>passing cases are hidden by default</strong>; the status filter (right) reveals them, and the search box fuzzy-matches case paths and names. The changes cog offers grouping by result and by class/describe scope. The <strong>build log</strong> (the scroll icon) is the runner's stdout/stderr, streamed live while it runs. The refresh icon re-runs that runner, discarding the cached verdict.</p>
+          <p>Expand a card for its cases as a location tree — <strong>passing and skipped cases are hidden by default</strong> (grouping by result hides nothing; its sections fold them away instead); the status filter (right) reveals them, and the search box fuzzy-matches case paths and names. Node tallies always count everything beneath, filtered or not. The changes cog offers grouping by result and by class/describe scope. The <strong>build log</strong> (the scroll icon) is the runner's stdout/stderr, streamed live while it runs. The refresh icon re-runs that runner, discarding the cached verdict.</p>
         </InfoTooltip>
         {/* Filter cluster, right-floated — the tests analog of ArtifactFilterBar:
             search + reset + the status scope dropdown (passing hidden by default). */}
@@ -282,9 +289,9 @@ export function TestsPanel({ projectId, agentId, headRef, includeUncommitted, re
               </button>
             )}
           </div>
-          {!isDefaultTestFilter(filter) && (
+          {customFilter !== null && (
             <button
-              onClick={() => updateFilter(defaultTestFilter())}
+              onClick={() => updateFilter(defaultTestFilter(!!groupResult))}
               title="Reset filters"
               className="flex items-center gap-1 h-7 px-2.5 rounded-md border text-[11px] font-medium cursor-pointer transition-colors bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600"
             >
@@ -296,7 +303,7 @@ export function TestsPanel({ projectId, agentId, headRef, includeUncommitted, re
             label="status"
             values={[...TEST_STATUS_ORDER]}
             off={statusOff}
-            defaultOff={DEFAULT_HIDDEN_STATUSES}
+            defaultOff={defaultHiddenStatuses(!!groupResult)}
             counts={statusCounts}
             onToggle={(val) => updateFilter({ ...filter, status: statusOff.includes(val) ? statusOff.filter((x) => x !== val) : [...statusOff, val] })}
             onIsolate={(val) => updateFilter({ ...filter, status: TEST_STATUS_ORDER.filter((x) => x !== val) })}
@@ -476,10 +483,12 @@ function TestRunnerCard({ runner, filter, search, groupResult, useScope, onRefre
       ) : null}
 
       {/* The filtered case tree — or its per-status sections when "Group by
-          result" is on. Full-bleed (-mx-3 cancels the card body inset). */}
+          result" is on. Both take every case (badges tally everything) plus
+          the filter-surviving subset actually rendered as rows. Full-bleed
+          (-mx-3 cancels the card body inset). */}
       {visible.length > 0 && (
         <div className="-mx-3 mt-1 flex flex-col border-t border-gray-100 dark:border-gray-800">
-          {groupResult ? <ResultSections cases={visible} useScope={useScope} /> : <CaseTree cases={visible} useScope={useScope} />}
+          {groupResult ? <ResultSections cases={cases} visible={visible} useScope={useScope} /> : <CaseTree cases={cases} visible={visible} useScope={useScope} />}
         </div>
       )}
 
@@ -494,10 +503,12 @@ function TestRunnerCard({ runner, filter, search, groupResult, useScope, onRefre
   )
 }
 
-// ResultSections renders the "Group by result" view: one collapsible section
-// per status (worst first), each holding its own CaseTree of the already-
-// filtered cases. Failing/warning sections open by default; skipped/passing
-// start collapsed (they're usually shown deliberately via the filter).
+// ResultSections renders the "Group by result" view: one section per status
+// (worst first), styled as a ROOT TREE NODE — chevron + status icon + label
+// with the everything-counted badge on the right, its CaseTree indented one
+// level beneath it under a guide line — so the view reads as one tree whose
+// first level is the result. Failing/warning sections open by default;
+// skipped/passing start collapsed (folded away rather than filtered out).
 const RESULT_SECTIONS: { status: TestCaseStatus; label: string; defaultOpen: boolean }[] = [
   { status: TestCaseStatus.TestCaseFailed, label: 'failing', defaultOpen: true },
   { status: TestCaseStatus.TestCaseWarning, label: 'warnings', defaultOpen: true },
@@ -505,29 +516,37 @@ const RESULT_SECTIONS: { status: TestCaseStatus; label: string; defaultOpen: boo
   { status: TestCaseStatus.TestCasePassed, label: 'passing', defaultOpen: false },
 ]
 
-function ResultSections({ cases, useScope }: { cases: TestCase[]; useScope: boolean }) {
+function ResultSections({ cases, visible, useScope }: { cases: TestCase[]; visible: TestCase[]; useScope: boolean }) {
   const [openOverride, setOpenOverride] = useState<Record<string, boolean>>({})
   return (
     <>
       {RESULT_SECTIONS.map(({ status, label, defaultOpen }) => {
-        const list = cases.filter((c) => c.status === status)
-        if (list.length === 0) return null
+        const all = cases.filter((c) => c.status === status)
+        const vis = visible.filter((c) => c.status === status)
+        if (vis.length === 0) return null
         const open = openOverride[status] ?? defaultOpen
-        const icon = status === 'failed' ? <X className="w-3.5 h-3.5 text-red-600 dark:text-red-400" strokeWidth={3} />
-          : status === 'warning' ? <AlertTriangle className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
-            : status === 'skipped' ? <SkipForward className="w-3.5 h-3.5 text-gray-400 dark:text-gray-500" />
-              : <Check className="w-3.5 h-3.5 text-green-600" strokeWidth={3} />
+        const icon = status === 'failed' ? <X className="w-3.5 h-3.5 text-red-600 dark:text-red-400 shrink-0" strokeWidth={3} />
+          : status === 'warning' ? <AlertTriangle className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+            : status === 'skipped' ? <SkipForward className="w-3.5 h-3.5 text-gray-400 dark:text-gray-500 shrink-0" />
+              : <Check className="w-3.5 h-3.5 text-green-600 shrink-0" strokeWidth={3} />
         return (
-          <div key={status} className="border-t border-gray-100 dark:border-gray-800 first:border-t-0">
+          <div key={status}>
             <button
               onClick={() => setOpenOverride((o) => ({ ...o, [status]: !open }))}
-              className="flex w-full items-center gap-2 px-4 py-2 text-sm hover:bg-gray-50 dark:hover:bg-gray-800/40 text-left cursor-pointer"
+              className="flex w-full items-center gap-1.5 py-1 pl-2 pr-3 text-left hover:bg-gray-50 dark:hover:bg-gray-800/40 cursor-pointer min-w-0"
             >
-              {open ? <ChevronDown className="w-3 h-3 text-gray-400" /> : <ChevronRight className="w-3 h-3 text-gray-400" />}
+              {open ? <ChevronDown className="w-3 h-3 text-gray-400 shrink-0" /> : <ChevronRight className="w-3 h-3 text-gray-400 shrink-0" />}
               {icon}
-              <span className="font-medium">{list.length} {label}</span>
+              <span className="text-xs font-medium text-gray-700 dark:text-gray-300 truncate min-w-0">{label}</span>
+              {/* Badge counts the status's FULL tally, like every tree node. */}
+              <NodeBadges counts={{ [status]: all.length }} />
             </button>
-            {open && <CaseTree cases={list} useScope={useScope} />}
+            {open && (
+              <div className="relative">
+                <TreeGuide depth={0} />
+                <CaseTree cases={all} visible={vis} useScope={useScope} depth={1} />
+              </div>
+            )}
           </div>
         )
       })}

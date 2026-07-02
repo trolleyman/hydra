@@ -895,6 +895,13 @@ try {
       // its fixtures (simTestRunners) are a regression with two failing cases, so
       // the card shows the assertion messages failing-first.
       { name: 'tests-panel', path: '/project/sim-project/agent/agent-2', scrollTo: 'Changes', clicks: ['button:has(svg.lucide-flask-conical)'] },
+      // The "Group by result" view of the same runner: per-status sections
+      // rendered as root tree nodes (failing open, skipped/passing collapsed)
+      // with the everything-counted badges on the right, each open section's
+      // tree indented under a lowlit guide line. Reached by expanding the
+      // runner card, ticking the checkbox in the changes cog, then clicking
+      // the Tests heading to dismiss the popup (it closes on outside click).
+      { name: 'tests-panel-grouped', path: '/project/sim-project/agent/agent-2', scrollTo: 'Changes', clicks: ['button:has(svg.lucide-flask-conical)', 'button[aria-label="View settings"]', 'label:has-text("Group by result")', 'h3:has-text("Tests")'] },
       // The same surface mid-run (agent-md is seeded as a running verdict): the
       // expanded card's live xterm build-log tail + progress bar + partial counts.
       { name: 'tests-panel-running', path: '/project/sim-project/agent/agent-md', scrollTo: 'Changes', clicks: ['button:has(svg.lucide-flask-conical)'] },

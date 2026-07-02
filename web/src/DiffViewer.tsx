@@ -1670,6 +1670,7 @@ function SettingsPopup({ fileView, onFileViewChange, sideBySide, onSideBySideCha
       <Tooltip content="Settings">
         <button
           onClick={() => setOpen((o) => !o)}
+          aria-label="View settings"
           className={`flex items-center justify-center w-7 h-7 rounded-md border transition-colors cursor-pointer ${open ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800'
             : 'text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
             }`}

@@ -2,6 +2,7 @@ package tests
 
 import (
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -15,6 +16,9 @@ import (
 type locContext struct {
 	checkoutDir string
 	goModule    string
+	// goFuncs caches, per repo-relative Go package dir, the test-function
+	// declarations found in its *_test.go files (see goTestFuncs).
+	goFuncs map[string]map[string]goFuncPos
 }
 
 func newLocContext(checkoutDir string) *locContext {
@@ -111,6 +115,89 @@ func splitClassChain(cn string) []string {
 		}
 	}
 	return out
+}
+
+// Go's testing package only picks up functions named Test*/Benchmark*/Fuzz*/
+// Example*; goTestFuncDeclRe finds their declarations in a _test.go source
+// line, goTestFuncNameRe cheaply screens a case name for that shape before any
+// directory scan.
+var (
+	goTestFuncDeclRe = regexp.MustCompile(`^func\s+((?:Test|Benchmark|Fuzz|Example)\w*)\s*\(`)
+	goTestFuncNameRe = regexp.MustCompile(`^(?:Test|Benchmark|Fuzz|Example)`)
+)
+
+// goFuncPos locates one test-function declaration within a package dir.
+type goFuncPos struct {
+	file string // base name of the declaring *_test.go
+	line int    // 1-based declaration line
+}
+
+// goTestFuncs indexes the test-function declarations of a repo-relative Go
+// package dir, scanning its *_test.go files once (cached per dir). A missing
+// or unreadable dir — or one with no test files, i.e. not actually a Go
+// package — just yields an empty index.
+func (lc *locContext) goTestFuncs(pkgDir string) map[string]goFuncPos {
+	if idx, ok := lc.goFuncs[pkgDir]; ok {
+		return idx
+	}
+	idx := map[string]goFuncPos{}
+	if lc.goFuncs == nil {
+		lc.goFuncs = map[string]map[string]goFuncPos{}
+	}
+	lc.goFuncs[pkgDir] = idx
+	entries, err := os.ReadDir(filepath.Join(lc.checkoutDir, filepath.FromSlash(pkgDir)))
+	if err != nil {
+		return idx
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), "_test.go") {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(lc.checkoutDir, filepath.FromSlash(pkgDir), e.Name()))
+		if err != nil {
+			continue
+		}
+		n := 0
+		for line := range strings.Lines(string(data)) {
+			n++
+			if m := goTestFuncDeclRe.FindStringSubmatch(line); m != nil {
+				if _, dup := idx[m[1]]; !dup {
+					idx[m[1]] = goFuncPos{file: e.Name(), line: n}
+				}
+			}
+		}
+	}
+	return idx
+}
+
+// resolveGoTestFile upgrades a case whose Path is a Go *package dir* (go test
+// reports only the import path — a package spans files) to the *_test.go file
+// and line declaring its root test function, so Go cases tree by file like
+// every other runner's. goPkg says the path definitely came from a Go package
+// import path (JUnit classname matched go.mod); otherwise the path must at
+// least be a non-file location. Purely additive: unless the declaration is
+// actually found under the checkout, the case is left untouched.
+func (lc *locContext) resolveGoTestFile(tc *TestCase, goPkg bool) {
+	if lc.checkoutDir == "" || tc.Line != 0 {
+		return
+	}
+	if !goPkg && (tc.Path == "" || fileExtRe.MatchString(tc.Path)) {
+		return
+	}
+	// The root Go test func: the first scope level when subtests were split
+	// off, else the leaf name (minus any unsplit "/sub" suffix).
+	root := tc.Name
+	if len(tc.Scope) > 0 {
+		root = tc.Scope[0]
+	}
+	root, _, _ = strings.Cut(root, "/")
+	if !goTestFuncNameRe.MatchString(root) {
+		return
+	}
+	if pos, ok := lc.goTestFuncs(tc.Path)[root]; ok {
+		tc.Path = path.Join(tc.Path, pos.file)
+		tc.Line = pos.line
+	}
 }
 
 // dedupeScope drops the leading scope segments that merely re-encode the file

@@ -237,6 +237,9 @@ func junitCaseToTestCase(c junitCase, ctx suiteCtx, lc *locContext) TestCase {
 			tc.Scope = append(tc.Scope, segs[:len(segs)-1]...)
 			tc.Name = segs[len(segs)-1]
 		}
+		// go test only knows the package; find the declaring *_test.go file
+		// (+ line) in the checkout so Go cases tree by file too.
+		lc.resolveGoTestFile(&tc, true)
 	case loc.Path != "":
 		// vitest/jest join the describe chain into the name with " > " — split
 		// it back into scope levels. Only applied under a real file path, so
