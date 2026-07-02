@@ -66,6 +66,31 @@ func TestHardWrapArgvInjectsPreExec(t *testing.T) {
 	}
 }
 
+func TestPastaArgsMapAddrIsOnLink(t *testing.T) {
+	// Regression: a link-local map address (169.254.x) is NOT on-link when it's
+	// only reachable via a gateway, so the netns connect fails with "Network is
+	// unreachable". The guest must therefore be pinned to a synthetic subnet whose
+	// gateway IS the map address, and that address must not be link-local.
+	if strings.HasPrefix(MapAddr, "169.254.") {
+		t.Fatalf("MapAddr %q is link-local — unroutable via a gateway in the netns", MapAddr)
+	}
+	args := PastaArgs("/usr/bin/pasta", MapAddr)
+	// mapAddr must be handed to pasta as the gateway, so pasta installs a default
+	// route via it and it becomes on-link for the guest.
+	if !argHasValue(args, "-g", MapAddr) {
+		t.Errorf("PastaArgs must set the gateway to MapAddr %q: %v", MapAddr, args)
+	}
+	// The guest needs a concrete address in the same subnet as the gateway.
+	if !argHasValue(args, "-a", GuestAddr) {
+		t.Errorf("PastaArgs must assign the guest address %q: %v", GuestAddr, args)
+	}
+	// Sanity: guest and gateway share the same /24 so the gateway is on-link.
+	gp := func(a string) string { return a[:strings.LastIndex(a, ".")] }
+	if gp(GuestAddr) != gp(MapAddr) {
+		t.Errorf("GuestAddr %q and MapAddr %q must be in the same subnet", GuestAddr, MapAddr)
+	}
+}
+
 func TestSmokeTestReportsReasonWhenPastaMissing(t *testing.T) {
 	// A bogus pasta binary must make smokeTest fail closed with a non-empty reason
 	// (so detectHardMode logs it and degrades to advisory) rather than hang or panic.
@@ -99,6 +124,16 @@ func TestHostPort(t *testing.T) {
 func contains(list []string, v string) bool {
 	for _, x := range list {
 		if x == v {
+			return true
+		}
+	}
+	return false
+}
+
+// argHasValue reports whether flag appears in args immediately followed by value.
+func argHasValue(args []string, flag, value string) bool {
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == flag && args[i+1] == value {
 			return true
 		}
 	}

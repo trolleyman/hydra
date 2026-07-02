@@ -13,9 +13,21 @@ import (
 )
 
 // MapAddr is the address the sandboxed netns uses to reach the host-loopback
-// proxy under pasta's --map-host-loopback translation. A link-local address keeps
-// it off any real route and deterministic for both the nft rule and HTTP_PROXY.
-const MapAddr = "169.254.1.2"
+// proxy under pasta's --map-host-loopback translation. It doubles as the guest's
+// default gateway (see PastaArgs), so it MUST be on-link inside the netns — a
+// link-local address is NOT, because Linux refuses to route a link-local
+// destination via a gateway, which yields "Network is unreachable". We instead
+// synthesise a deterministic point-to-point subnet from RFC 5737's TEST-NET-1
+// (reserved for documentation, so it never collides with a real LAN): the guest
+// is GuestAddr and its gateway is MapAddr, both in 192.0.2.0/GuestPrefixLen. This
+// gives a route the netns can actually use, and stays deterministic for the nft
+// rule and HTTP_PROXY. In hard mode nft locks all egress to MapAddr anyway, so
+// overriding the guest's addressing has no downside.
+const (
+	MapAddr        = "192.0.2.1"
+	GuestAddr      = "192.0.2.2"
+	GuestPrefixLen = "24"
+)
 
 // HardMode describes whether the kernel/tooling can give a real (inescapable)
 // egress boundary on this host, and the resolved tool paths to build it.
