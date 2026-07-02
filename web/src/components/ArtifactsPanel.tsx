@@ -1122,11 +1122,12 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
     toggleView: () => onArtifactViewChange(artifactView === 'before' ? 'after' : 'before'),
   }), [artifactView, artifactHighlight, onArtifactViewChange])
 
-  // Keyboard: B flips before/after, H toggles highlight — only in A/B mode, and never
-  // while typing in a field. Plain single keys (no modifiers) so they don't collide
-  // with browser chords like Ctrl+H. Suppressed while the image lightbox is open: the
-  // lightbox has its own B / H (scoped to its fullscreen comparator, see LightboxDiff),
-  // and a single key must not flip both the lightbox and the grid behind it at once.
+  // Keyboard: X flips before/after, B/A jump to a side, H toggles highlight — the same
+  // bindings as the lightbox (ImageLightbox) — only in A/B mode, and never while typing
+  // in a field. Plain single keys (no modifiers) so they don't collide with browser
+  // chords like Ctrl+H. Suppressed while the image lightbox is open: the lightbox has
+  // its own X/B/A/H (scoped to its fullscreen comparator, see LightboxDiff), and a
+  // single key must not flip both the lightbox and the grid behind it at once.
   useEffect(() => {
     if (imageDiffMode !== 'ab') return
     const onKey = (e: KeyboardEvent) => {
@@ -1135,7 +1136,9 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
       const t = e.target as HTMLElement | null
       if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return
       const k = e.key.toLowerCase()
-      if (k === 'b') { e.preventDefault(); onArtifactViewChange(artifactView === 'before' ? 'after' : 'before') }
+      if (k === 'x') { e.preventDefault(); onArtifactViewChange(artifactView === 'before' ? 'after' : 'before') }
+      else if (k === 'b') { e.preventDefault(); onArtifactViewChange('before') }
+      else if (k === 'a') { e.preventDefault(); onArtifactViewChange('after') }
       else if (k === 'h') { e.preventDefault(); onArtifactHighlightChange(!artifactHighlight) }
     }
     window.addEventListener('keydown', onKey)
@@ -1346,7 +1349,7 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
         <div className="ml-auto flex flex-wrap items-center gap-2">
           {imageDiffMode === 'ab' && (
             <div className="flex items-center gap-1.5">
-              <span title="Show every tile's before / after — shortcut: B">
+              <span title="Show every tile's before / after — X flips · B = Before · A = After">
                 <SegmentedToggle
                   value={artifactView}
                   onChange={onArtifactViewChange}
