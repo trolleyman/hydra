@@ -1,10 +1,14 @@
 import { useEffect, useRef } from 'react'
+import type { TestSummary } from '../api/models/TestSummary'
 
 export interface EventStreamHandlers {
   onAgentsChanged?: () => void
   onProjectsChanged?: () => void
   onServicesChanged?: () => void
   onPushStatusChanged?: () => void
+  // agent_tests_changed carries a payload (unlike the refetch nudges above):
+  // one head's live test summary ticked mid-run — patch it in place.
+  onAgentTestsChanged?: (agentId: string, tests: TestSummary) => void
 }
 
 // useEventStream subscribes to the daemon's per-project events WebSocket and
@@ -38,12 +42,13 @@ export function useEventStream(projectId: string | null, handlers: EventStreamHa
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null
     let stopped = false // unmounted or projectId changed
 
-    const dispatch = (type: string) => {
+    const dispatch = (msg: { type: string; agent_id?: string; tests?: TestSummary }) => {
       const h = handlersRef.current
-      if (type === 'agents_changed') h.onAgentsChanged?.()
-      else if (type === 'projects_changed') h.onProjectsChanged?.()
-      else if (type === 'services_changed') h.onServicesChanged?.()
-      else if (type === 'push_status_changed') h.onPushStatusChanged?.()
+      if (msg.type === 'agents_changed') h.onAgentsChanged?.()
+      else if (msg.type === 'projects_changed') h.onProjectsChanged?.()
+      else if (msg.type === 'services_changed') h.onServicesChanged?.()
+      else if (msg.type === 'push_status_changed') h.onPushStatusChanged?.()
+      else if (msg.type === 'agent_tests_changed' && msg.agent_id && msg.tests) h.onAgentTestsChanged?.(msg.agent_id, msg.tests)
     }
 
     const clearReconnect = () => {
@@ -76,8 +81,8 @@ export function useEventStream(projectId: string | null, handlers: EventStreamHa
       }
       sock.onmessage = (ev) => {
         try {
-          const msg = JSON.parse(ev.data as string) as { type?: string }
-          if (msg && typeof msg.type === 'string') dispatch(msg.type)
+          const msg = JSON.parse(ev.data as string) as { type?: string; agent_id?: string; tests?: TestSummary }
+          if (msg && typeof msg.type === 'string') dispatch(msg as { type: string; agent_id?: string; tests?: TestSummary })
         } catch {
           // ignore malformed frames
         }

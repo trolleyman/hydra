@@ -96,9 +96,6 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 	// A finished test run settling pushes agents_changed so the sidebar/header
 	// verdict chips refresh instantly instead of lagging behind the detail panel.
 	testReg.SetOnSettle(eventHub.AgentsChanged)
-	// A streamed (type=stdout) run's ticking counts push agents_changed too —
-	// throttled inside the manager — so the sidebar chip counts live mid-run.
-	testReg.SetOnProgress(eventHub.AgentsChanged)
 
 	server := &httppkg.Server{
 		WorktreesDir:    worktreesDir,
@@ -115,6 +112,13 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 		Events:          eventHub,
 		BackgroundCtx:   ctx,
 	}
+
+	// A streamed (type=stdout) run's ticking counts push per-head
+	// agent_tests_changed payload events (throttled inside the manager), so the
+	// sidebar chip counts live mid-run without clients refetching the agent
+	// list. Set after the server exists (the summary is computed there); no
+	// Manager is created until the first request/prefetch, so nothing races it.
+	testReg.SetOnProgress(server.NotifyTestsProgress)
 
 	if ok, reason := sandbox.Available(); !ok {
 		log.Printf("warn: sandbox unavailable: %s", reason)

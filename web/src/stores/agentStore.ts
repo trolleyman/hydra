@@ -64,6 +64,9 @@ interface AgentState {
   addAgent: (agent: AgentResponse) => void
   removeAgent: (id: string) => void
   updateAgent: (agent: AgentResponse) => void
+  // Patch just one agent's test summary (an agent_tests_changed payload event
+  // — a streamed run ticking) without touching the rest of the row.
+  patchAgentTests: (id: string, tests: AgentResponse['tests']) => void
   // Reset the archived list (e.g. on project switch).
   resetArchived: () => void
   setArchivedLoading: (loading: boolean) => void
@@ -205,6 +208,9 @@ export const useAgentStore = create<AgentState>((set) => ({
   })),
   updateAgent: (agent) => set((state) => ({
     agents: state.agents.map((a) => a.id === agent.id ? agent : a)
+  })),
+  patchAgentTests: (id, tests) => set((state) => ({
+    agents: state.agents.map((a) => a.id === id ? { ...a, tests } : a)
   })),
   resetArchived: () => set({ archived: [], archivedHasMore: true, archivedLoading: false }),
   setArchivedLoading: (loading) => set({ archivedLoading: loading }),

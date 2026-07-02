@@ -397,6 +397,29 @@ func (s *Server) testSummaryFor(projectRoot string, h heads.Head) *api.TestSumma
 	return sum
 }
 
+// NotifyTestsProgress recomputes the live test summary of every head whose
+// tests are currently running and pushes each over the events WS as an
+// agent_tests_changed payload event, so sidebar/header chips tick in place
+// without every client refetching the whole agent list. Invoked (throttled per
+// run, see tests.Manager.onProgress) while a streamed type=stdout run appends
+// cases; the settle path still fires a full agents_changed refresh.
+func (s *Server) NotifyTestsProgress(projectRoot string) {
+	if s.Events == nil || s.Tests == nil || s.DB == nil {
+		return
+	}
+	headList, err := heads.ListHeads(context.Background(), s.Sessions, s.DB, projectRoot)
+	if err != nil {
+		return // best-effort: the agent-list poll still catches up
+	}
+	for _, h := range headList {
+		sum := s.testSummaryFor(projectRoot, h)
+		if sum == nil || sum.Status != api.TestStatusRunning {
+			continue
+		}
+		s.Events.AgentTestsChanged(projectRoot, h.ID, agentTestsPayload{AgentID: h.ID, Tests: sum})
+	}
+}
+
 // RunAutoMergeWatcher polls for heads with auto-merge armed (PLAN #68) and acts
 // when their tests settle: merges a head whose tests are all passing, and
 // disarms (with an agents-changed nudge so the UI can toast) one whose tests

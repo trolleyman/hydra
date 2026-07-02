@@ -51,9 +51,10 @@ type Manager struct {
 	onSettle func(projectRoot string)
 	// onProgress, if set, is called (with projectRoot) while a streamed
 	// (type=stdout) run is appending cases — throttled to testNudgeInterval per
-	// run — so the agent-list summary (and with it the sidebar chip's live
-	// ✓/⚠/✗ counts) ticks during the run, not just at settle. Same wiring
-	// discipline as onSettle.
+	// run. Wired to Server.NotifyTestsProgress, which pushes per-head
+	// agent_tests_changed payload events so the sidebar chip's live ✓/⚠/✗
+	// counts tick during the run without clients refetching the agent list.
+	// Same wiring discipline as onSettle.
 	onProgress func(projectRoot string)
 
 	mu         sync.Mutex
@@ -422,9 +423,9 @@ const (
 	// backpressure guard that keeps a 4,556-case run from emitting 4,556 frames.
 	caseFlushInterval = 100 * time.Millisecond
 	caseFlushMax      = 200
-	// testNudgeInterval throttles the onProgress agents_changed nudge: every
-	// nudge makes each web client refetch the agent list (that's how the sidebar
-	// chip reads its summary), so the chip ticks ~every 2s, not at counts rate.
+	// testNudgeInterval throttles the onProgress nudge: each one makes the
+	// server recompute running heads' summaries and push agent_tests_changed
+	// payload events, so the sidebar chip ticks ~every 2s, not at counts rate.
 	testNudgeInterval = 2 * time.Second
 )
 
@@ -436,7 +437,7 @@ type liveRun struct {
 	passed, failed, skipped, warnings int
 	pending                           []TestCase // appended since the last coalesced flush
 	timer                             *time.Timer
-	lastNudge                         time.Time // last onProgress agents_changed nudge
+	lastNudge                         time.Time // last onProgress nudge (see testNudgeInterval)
 }
 
 // appendTestCase records one streamed case: it feeds the accumulated report,
@@ -527,9 +528,9 @@ func (m *Manager) flushCountsLocked(dir string) {
 	}
 	lr.pending = nil
 	m.broadcastLocked(Event{Dir: dir, Kind: "counts", Counts: counts})
-	// Nudge the agent list (throttled) so the sidebar chip's live counts tick
-	// during the run — the settle nudge covers the final state. Fired async so
-	// the hub callback never runs under m.mu.
+	// Nudge the server (throttled) to push updated per-head summaries so the
+	// sidebar chip's live counts tick during the run — the settle nudge covers
+	// the final state. Fired async so the callback never runs under m.mu.
 	if m.onProgress != nil && time.Since(lr.lastNudge) >= testNudgeInterval {
 		lr.lastNudge = time.Now()
 		go m.onProgress(m.projectRoot)

@@ -263,11 +263,15 @@ Helper `IsStreaming()`.
   in the sidebar is nearly free.
 - **Full per-status live chip** (`✓123 ⚠2 ✗1` ticking) — **implemented** for
   `type=stdout`: the running Report snapshot carries the streamed tallies (so the
-  summary Peek sees them), the manager fires a throttled (2s) `onProgress` →
-  `agents_changed` nudge from the counts flush, and the chip renders live ✓/✗/⚠
-  segments while running (short form: tallies only; long form adds skipped + the
-  `N/total` progress). junit runs still show only the progress string mid-run —
-  they report nothing per-case until settle.
+  summary Peek sees them), and the manager fires a throttled (2s) `onProgress`
+  from the counts flush. That drives `Server.NotifyTestsProgress`, which pushes a
+  dedicated **`agent_tests_changed` payload event** over the events WS —
+  `{agent_id, tests: TestSummary}`, coalesced per agent in the hub (latest wins) —
+  and the client patches that one agent's chip in place (`patchAgentTests`), no
+  agent-list refetch. The chip renders live ✓/✗/⚠ segments while running (short
+  form: tallies only; long form adds skipped + the `N/total` progress). junit
+  runs still show only the progress string mid-run — they report nothing
+  per-case until settle. Settle still fires the full `agents_changed` refresh.
 
 ### Effort: ~2 days
 `type` field + marker parser + in-flight accumulation + `counts` WS + panel merge

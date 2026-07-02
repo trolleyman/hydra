@@ -35,8 +35,8 @@ func writeAgentStatusJSON(t *testing.T, projectRoot, id string, status api.Agent
 // hadAgentsEvent reports whether the subscription saw an agents_changed since it
 // was last drained.
 func hadAgentsEvent(sub *events.Subscription) bool {
-	for _, ty := range sub.Drain() {
-		if ty == events.AgentsChanged {
+	for _, ev := range sub.Drain() {
+		if ev.Type == events.AgentsChanged {
 			return true
 		}
 	}
@@ -48,8 +48,8 @@ func hadAgentsEvent(sub *events.Subscription) bool {
 // everything, so they cannot call hadAgentsEvent twice).
 func drainSet(sub *events.Subscription) map[events.Type]bool {
 	m := map[events.Type]bool{}
-	for _, ty := range sub.Drain() {
-		m[ty] = true
+	for _, ev := range sub.Drain() {
+		m[ev.Type] = true
 	}
 	return m
 }
