@@ -89,13 +89,15 @@ function liveTotal(t: TestSummary): number {
 // run (✓121/789 ✗2 ⚠4): the green segment is passed over the declared total
 // (denominator muted, omitted when unknown), red failed / amber warnings only
 // when non-zero. The long form appends the gray skipped count; the short
-// sidebar form drops it (the full detail stays in the chip title).
+// sidebar form drops it, and drops the ✓ glyph too — the sidebar row is tight,
+// and the green count next to the chip's spinner already reads as "passing so
+// far" (the full detail stays in the chip title).
 function LiveCounts({ t, long }: { t: TestSummary; long: boolean }) {
   const total = liveTotal(t)
   return (
     <span className="inline-flex items-center whitespace-nowrap">
       <span className="inline-flex items-center gap-0.5 text-green-700 dark:text-green-400">
-        <Check className="w-2.5 h-2.5" strokeWidth={3} />
+        {long ? <Check className="w-2.5 h-2.5" strokeWidth={3} /> : null}
         <span>
           {t.passed ?? 0}
           {total > 0 ? <span className="text-gray-500 dark:text-gray-400">/{total}</span> : null}
@@ -149,14 +151,19 @@ export function TestVerdictChip({ tests, variant = 'xs' }: { tests?: TestSummary
           sidebar. min-w-0 (here + on the Badge container) lets it shrink below its
           content so the date stays visible even on a narrow sidebar; max-w caps it
           on a wide one. The full text stays available via the chip's `title`.
-          xs (sidebar) gets a tighter cap than sm (agent header, which has room). */}
-      <span className="inline-flex items-center min-w-0 whitespace-nowrap">
+          xs (sidebar) gets a tighter cap than sm (agent header, which has room).
+          This wrapper is an inline-block (NOT inline-flex) so `truncate` can
+          ellipsize the live-counts segments too when the row is too tight for
+          them — text-overflow doesn't apply to flex containers, and a plain
+          overflow clip would let the segments bleed over the neighboring
+          auto-merge clock (or vanish entirely once the chip is squeezed). */}
+      <span className="inline-block min-w-0 truncate">
         {tests.status === 'running' && liveCaseCount(tests) > 0 ? (
           // A streamed run ticking: live ✓ N/total ✗ ⚠ tallies instead of the
           // bare progress string.
           <LiveCounts t={tests} long={long} />
         ) : (
-          <span className={`truncate min-w-0 ${variant === 'sm' ? 'max-w-[16rem]' : 'max-w-[7rem]'}`}>{verdictLabel(tests)}</span>
+          <span className={`inline-block align-bottom truncate min-w-0 ${variant === 'sm' ? 'max-w-[16rem]' : 'max-w-[7rem]'}`}>{verdictLabel(tests)}</span>
         )}
         {showWarnings ? <WarningCount n={tests.warnings ?? 0} /> : null}
         {showSkips ? <SkippedCount n={tests.skipped ?? 0} /> : null}
