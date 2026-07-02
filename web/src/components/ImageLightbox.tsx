@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useState } from 'react'
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { X, ChevronLeft, ChevronRight, SquarePlus, SquareMinus, SquareDot } from 'lucide-react'
 import type { ImageDiffMode } from './ArtifactImageDiff'
@@ -125,6 +125,14 @@ export function ImageLightbox({
     return () => window.removeEventListener('keydown', onKey)
   }, [prev, next, onClose])
 
+  // Whether the current pointer press STARTED on the backdrop itself. Closing on
+  // backdrop click must ignore a drag that merely ENDS there — panning a zoomed
+  // image (or dragging the diff slider) and releasing past the image's edge makes
+  // the browser fire the trailing click on the press/release common ancestor, i.e.
+  // the backdrop. Tracked in the capture phase so a child's stopPropagation (the
+  // zoomed pan handler suspends inner gestures that way) can't hide the press.
+  const pressOnBackdrop = useRef(false)
+
   const current = images[index]
   if (!current) return null
 
@@ -176,7 +184,10 @@ export function ImageLightbox({
       // image viewer must not hide an incoming security-gate approval. Focused
       // modal dialogs sit above the toasts instead (z-[120]).
       className="fixed inset-0 z-[100] overflow-hidden flex items-center justify-center bg-black/70 backdrop-blur-md animate-in fade-in duration-150"
-      onClick={onClose}
+      onPointerDownCapture={(e) => { pressOnBackdrop.current = e.target === e.currentTarget }}
+      // Close only when the press and the click BOTH land on the backdrop — see
+      // pressOnBackdrop above for why a click alone isn't enough.
+      onClick={(e) => { if (pressOnBackdrop.current && e.target === e.currentTarget) onClose() }}
       role="dialog"
       aria-modal="true"
     >

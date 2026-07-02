@@ -4,7 +4,10 @@ import { Maximize } from 'lucide-react'
 // How far past fit you can magnify (8× the fit size). Enough to read individual
 // pixels of a downscaled screenshot without letting the image run away entirely.
 const MAX_SCALE = 8
-// Minimap width in px; its height follows the content's aspect ratio.
+// Minimap width in px on a roomy frame; its height follows the content's aspect
+// ratio. On small (phone) frames it caps at a quarter of the frame's width instead
+// so it doesn't crowd the image it maps — and since the minimap shares the frame's
+// aspect ratio, that same cap bounds its height to a quarter of the frame's too.
 const MM_W = 140
 
 // ZoomPan wraps a piece of lightbox content — a plain image OR a before/after
@@ -37,10 +40,11 @@ export function ZoomPan({ children, minimapSrc, className, style }: {
   // The frame's rendered (fit) size — the bounds the clamp + minimap math need.
   const [dims, setDims] = useState({ w: 0, h: 0 })
   const [panning, setPanning] = useState(false)
-  // Whether the next transform change should ease rather than jump. On for minimap
-  // "click to go" + Reset (a quick glide to the new spot); off for direct image
-  // drag-pan and wheel zoom, which must track the cursor 1:1.
-  const [smooth, setSmooth] = useState(false)
+  // How the next transform change should move: 'none' tracks the pointer 1:1
+  // (drag-pan must stay glued to the cursor), 'zoom' is a very short ease so each
+  // wheel step glides to its new magnification rather than jumping, and 'glide' is
+  // a longer ease for go-there jumps (minimap click, Reset view).
+  const [transition, setTransition] = useState<'none' | 'zoom' | 'glide'>('none')
   // Set while a drag actually moved, so the trailing click is swallowed (a pan
   // shouldn't also flip the A/B view or open anything).
   const movedRef = useRef(false)
@@ -86,7 +90,7 @@ export function ZoomPan({ children, minimapSrc, className, style }: {
     if (!el) return
     const onWheel = (e: WheelEvent) => {
       e.preventDefault()
-      setSmooth(false)
+      setTransition('zoom')
       const r = el.getBoundingClientRect()
       zoomAt(e.clientX - r.left, e.clientY - r.top, Math.exp(-e.deltaY * 0.0015))
     }
@@ -110,7 +114,7 @@ export function ZoomPan({ children, minimapSrc, className, style }: {
     e.stopPropagation()
     movedRef.current = false
     setPanning(true)
-    setSmooth(false)
+    setTransition('none')
     const startX = e.clientX, startY = e.clientY
     const base = { tx: view.tx, ty: view.ty }
     const onMove = (ev: PointerEvent) => {
@@ -141,7 +145,7 @@ export function ZoomPan({ children, minimapSrc, className, style }: {
   const onMinimapDown = (e: React.PointerEvent) => {
     e.preventDefault()
     e.stopPropagation()
-    setSmooth(true) // glide to the clicked spot rather than jumping
+    setTransition('glide') // glide to the clicked spot rather than jumping
     const recenter = (clientX: number, clientY: number) => {
       const el = mmRef.current
       if (!el) return
@@ -163,14 +167,20 @@ export function ZoomPan({ children, minimapSrc, className, style }: {
     window.addEventListener('pointerup', onUp)
   }
 
-  const reset = () => { setSmooth(true); setView({ scale: 1, tx: 0, ty: 0 }) }
+  const reset = () => { setTransition('glide'); setView({ scale: 1, tx: 0, ty: 0 }) }
 
-  const mmH = dims.w > 0 ? Math.round(MM_W * dims.h / dims.w) : 0
+  // The CSS ease matching the current movement kind — applied to the content
+  // transform and mirrored onto the minimap's viewport rect so they move together.
+  const transitionMs = transition === 'zoom' ? 120 : transition === 'glide' ? 200 : 0
+  const transitionCss = transitionMs > 0 ? `${transitionMs}ms ease-out` : undefined
+
+  const mmW = dims.w > 0 ? Math.min(MM_W, Math.round(dims.w / 4)) : MM_W
+  const mmH = dims.w > 0 ? Math.round(mmW * dims.h / dims.w) : 0
   // The fraction of the content currently visible, mapped into minimap px.
   const mmRect = {
-    left: (-view.tx / (dims.w * view.scale)) * MM_W,
+    left: (-view.tx / (dims.w * view.scale)) * mmW,
     top: (-view.ty / (dims.h * view.scale)) * mmH,
-    width: MM_W / view.scale,
+    width: mmW / view.scale,
     height: mmH / view.scale,
   }
 
@@ -186,7 +196,7 @@ export function ZoomPan({ children, minimapSrc, className, style }: {
         style={{
           transform: `translate(${view.tx}px, ${view.ty}px) scale(${view.scale})`,
           transformOrigin: '0 0',
-          transition: smooth ? 'transform 200ms ease-out' : undefined,
+          transition: transitionCss && `transform ${transitionCss}`,
         }}
       >
         {children}
@@ -206,16 +216,17 @@ export function ZoomPan({ children, minimapSrc, className, style }: {
           </button>
           <div
             ref={mmRef}
+            data-zoompan-minimap
             onPointerDown={onMinimapDown}
             className="relative rounded border border-white/40 bg-black/40 overflow-hidden cursor-pointer shadow-lg"
-            style={{ width: MM_W, height: mmH }}
+            style={{ width: mmW, height: mmH }}
           >
             {minimapSrc && (
               <img src={minimapSrc} alt="" draggable={false} className="absolute inset-0 w-full h-full object-fill opacity-70" />
             )}
             <div
               className="absolute border-2 border-white/90 bg-white/10 pointer-events-none"
-              style={{ left: mmRect.left, top: mmRect.top, width: mmRect.width, height: mmRect.height }}
+              style={{ left: mmRect.left, top: mmRect.top, width: mmRect.width, height: mmRect.height, transition: transitionCss && `all ${transitionCss}` }}
             />
           </div>
         </div>
