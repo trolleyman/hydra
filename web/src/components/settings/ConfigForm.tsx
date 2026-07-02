@@ -68,6 +68,60 @@ function PathListEditor({
   )
 }
 
+// PortListEditor edits a list of TCP ports (network.allowed_loopback_ports).
+// Kept as numbers on the wire; number inputs so a partial edit can't corrupt the
+// list. A row being typed (empty/0) is held as 0 and dropped by the backend's
+// out-of-range filter.
+function PortListEditor({
+  ports,
+  onChange,
+  placeholder,
+  addLabel,
+}: {
+  ports: number[]
+  onChange: (ports: number[] | null) => void
+  placeholder?: string
+  addLabel?: string
+}) {
+  return (
+    <div className="space-y-2 pt-0.5">
+      {ports.map((p, index) => (
+        <div key={index} className="flex items-center gap-2">
+          <input
+            type="number"
+            min={1}
+            max={65535}
+            value={p || ''}
+            onChange={(e) => {
+              const next = [...ports]
+              next[index] = e.target.valueAsNumber || 0
+              onChange(next)
+            }}
+            placeholder={placeholder}
+            className="flex-1 text-sm px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-100 placeholder-gray-300 dark:placeholder-gray-600 font-mono shadow-inner focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+          />
+          <button
+            onClick={() => {
+              const next = ports.filter((_, i) => i !== index)
+              onChange(next.length > 0 ? next : null)
+            }}
+            className="flex items-center justify-center w-7 h-7 rounded-md text-gray-400 hover:text-red-500 transition-colors cursor-pointer"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      ))}
+      <button
+        onClick={() => onChange([...ports, 0])}
+        className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors ml-1 cursor-pointer"
+      >
+        <Plus className="w-3.5 h-3.5" />
+        {addLabel ?? 'Add Port'}
+      </button>
+    </div>
+  )
+}
+
 // SandboxPathSection renders a labelled path-list editor with an icon + tooltip.
 function SandboxPathSection({
   icon,
@@ -344,6 +398,24 @@ export function ConfigForm({
                   addLabel="Block Host"
                 />
               </div>
+              {mode === 'hard' && (
+                <div className="space-y-1">
+                  <div className="flex items-center gap-1.5">
+                    <p className="text-[11px] text-gray-400 dark:text-gray-500">Allowed loopback ports</p>
+                    <InfoTooltip title="Allowed loopback ports">
+                      <p>Host-loopback TCP ports the sandbox may still reach at <code className="text-blue-300">127.0.0.1</code> under hard mode, whose network namespace otherwise cuts off every host-local daemon.</p>
+                      <p className="mt-1.5">For tools that hardcode loopback — e.g. adb's server: <code className="text-blue-300">5037</code> lets a sandboxed <code className="text-blue-300">adb</code> see the host's emulators.</p>
+                      <p className="mt-1.5 text-gray-400 italic">The other modes share the host loopback already, so this only applies to hard mode.</p>
+                    </InfoTooltip>
+                  </div>
+                  <PortListEditor
+                    ports={network.allowed_loopback_ports ?? []}
+                    onChange={(allowed_loopback_ports) => updateNetwork({ allowed_loopback_ports })}
+                    placeholder="e.g. 5037"
+                    addLabel="Add Port"
+                  />
+                </div>
+              )}
             </div>
           )}
         </div>

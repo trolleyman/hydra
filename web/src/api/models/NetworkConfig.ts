@@ -27,6 +27,10 @@ export type NetworkConfig = {
      * Outbound hosts (exact host or *.suffix) denied even when otherwise allowed — overrides both allowed_hosts and the built-in defaults.
      */
     blocked_hosts?: Array<string> | null;
+    /**
+     * Host-loopback TCP ports reachable from the sandbox even under mode "hard", whose network namespace otherwise cuts off the host's 127.0.0.1 — for host-local daemons that hardcode loopback, e.g. adb's server on 5037. No effect in other modes (they share the host loopback already).
+     */
+    allowed_loopback_ports?: Array<number> | null;
 };
 export namespace NetworkConfig {
     /**

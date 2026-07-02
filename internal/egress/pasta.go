@@ -7,8 +7,9 @@ import (
 
 // PastaArgs returns the pasta invocation (up to and including the "--"
 // separator) that creates a network namespace whose host-loopback is reachable
-// at mapAddr and whose automatic port forwarding is disabled. The caller appends
-// the command to run inside the namespace.
+// at mapAddr and whose automatic port forwarding is disabled — except for
+// loopbackTCPPorts, which are spliced through to the host's loopback (see
+// LoopbackPortSpec). The caller appends the command to run inside the namespace.
 //
 // The guest is pinned to a deterministic synthetic subnet (GuestAddr/GuestPrefixLen)
 // with mapAddr as its gateway, rather than inheriting the host's real address and
@@ -33,7 +34,7 @@ import (
 // pasta runs OUTSIDE bwrap and creates the netns; bwrap then runs inside it
 // WITHOUT --unshare-net, inheriting it. pasta exits when the command does, so the
 // namespace is torn down automatically (no explicit cleanup).
-func PastaArgs(pasta, mapAddr string) []string {
+func PastaArgs(pasta, mapAddr string, loopbackTCPPorts []int) []string {
 	return []string{
 		pasta,
 		"--config-net",                        // actually configure the netns (see doc comment)
@@ -43,10 +44,38 @@ func PastaArgs(pasta, mapAddr string) []string {
 		"--map-host-loopback", mapAddr, // reach the host proxy at a deterministic addr
 		"-q",                       // quiet
 		"-t", "none", "-u", "none", // no inbound port forwarding
-		"-T", "none", "-U", "none", // no outbound port forwarding
+		"-T", LoopbackPortSpec(loopbackTCPPorts), // outbound TCP: only the allow-listed loopback ports
+		"-U", "none", // no outbound UDP forwarding
 		"--no-dhcp", "--no-dhcpv6", "--no-ndp", "--no-ra", // no autoconfig services
 		"--",
 	}
+}
+
+// LoopbackPortSpec renders a loopback-port allow-list as a pasta -T port spec:
+// "none" when empty, else a comma-separated port list ("5037" / "5037,8080").
+// pasta then binds each port on the namespace's loopback and splices connections
+// through to the same port on the HOST's loopback — this is how a sandboxed
+// client reaches a host-local daemon that hard mode's netns would otherwise cut
+// off (e.g. adb's hardcoded 127.0.0.1:5037). The splice happens in pasta, in
+// userspace, so the in-namespace connection still travels over "lo" and needs no
+// nft change (the ruleset's `oifname "lo" accept` already covers it).
+//
+// Out-of-range ports are dropped rather than passed through: a bad value must
+// not make pasta reject its whole argv and kill the head at launch.
+func LoopbackPortSpec(ports []int) string {
+	var parts []string
+	seen := map[int]bool{}
+	for _, p := range ports {
+		if p < 1 || p > 65535 || seen[p] {
+			continue
+		}
+		seen[p] = true
+		parts = append(parts, fmt.Sprintf("%d", p))
+	}
+	if len(parts) == 0 {
+		return "none"
+	}
+	return strings.Join(parts, ",")
 }
 
 // NftScript returns a shell snippet that loads an nft ruleset dropping ALL egress
@@ -80,9 +109,13 @@ NFTEOF`, nft, mapAddr, proxyPort)
 // execs bwrap — Hydra uses it to reopen the seccomp blob by path onto bwrap's
 // --seccomp fd, because the fd Go inherits to pasta does not survive pasta's
 // re-exec + netns fork. It must be empty or newline/semicolon-terminated.
-func HardWrapArgv(h HardMode, proxyPort int, bwrapArgv []string, preExec string) []string {
+//
+// loopbackTCPPorts are the host-loopback ports the namespace may still reach
+// (config `[sandbox.network] allowed_loopback_ports`, spliced via pasta -T —
+// see LoopbackPortSpec).
+func HardWrapArgv(h HardMode, proxyPort int, loopbackTCPPorts []int, bwrapArgv []string, preExec string) []string {
 	script := NftScript(h.NftPath, MapAddr, proxyPort) + "\n" + preExec + "exec \"$@\""
-	argv := PastaArgs(h.PastaPath, MapAddr)
+	argv := PastaArgs(h.PastaPath, MapAddr, loopbackTCPPorts)
 	argv = append(argv, "bash", "-c", script, "bash")
 	return append(argv, bwrapArgv...)
 }

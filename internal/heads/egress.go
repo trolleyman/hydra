@@ -94,10 +94,11 @@ func startEgress(projectRoot, id string, net *sandbox.NetworkPolicy) (env []stri
 			// nft drops everything else. The proxy itself listens on host loopback.
 			storeEgress(id, p, EgressHard)
 			proxyURL := "http://" + egress.MapAddr + ":" + itoa(port)
-			log.Printf("hydra egress[%s]: hard egress boundary active (pasta+nft), %d allow-listed host(s); agent proxy=%s (host listener %s)", id, len(allowed), proxyURL, p.Addr())
+			loopbackPorts := net.AllowedLoopbackPorts
+			log.Printf("hydra egress[%s]: hard egress boundary active (pasta+nft), %d allow-listed host(s); agent proxy=%s (host listener %s); loopback ports spliced: %s", id, len(allowed), proxyURL, p.Addr(), egress.LoopbackPortSpec(loopbackPorts))
 			env = egress.ProxyEnv(proxyURL)
 			wrap = func(bwrapArgv []string, preExec string) []string {
-				return egress.HardWrapArgv(hm, port, bwrapArgv, preExec)
+				return egress.HardWrapArgv(hm, port, loopbackPorts, bwrapArgv, preExec)
 			}
 			return env, wrap
 		}

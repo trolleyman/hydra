@@ -95,6 +95,14 @@ type NetworkPolicy struct {
 	// BlockedHosts overrides the effective allow-list (user + defaults): a host
 	// matching BlockedHosts is denied even if it is otherwise allowed.
 	BlockedHosts []string
+	// AllowedLoopbackPorts lists host-loopback TCP ports the sandbox may reach
+	// even in hard mode, where the pasta netns otherwise cuts off the host's
+	// 127.0.0.1 entirely (pasta splices in-namespace connections to
+	// 127.0.0.1:<port> through to the host's loopback). Lets a head talk to a
+	// host-local daemon that hardcodes loopback, e.g. adb's server on 5037.
+	// Irrelevant outside hard mode: off has no network, and the other modes share
+	// the host's loopback anyway.
+	AllowedLoopbackPorts []int
 }
 
 // DefaultAllowedHosts is the built-in egress allow-list applied whenever host

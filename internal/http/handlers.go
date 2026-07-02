@@ -822,11 +822,12 @@ func toAPIAgentConfig(c config.AgentConfig) api.AgentConfig {
 		if c.Sandbox.Network != nil {
 			n := c.Sandbox.Network
 			out.Sandbox.Network = &api.NetworkConfig{
-				Strict:        n.Strict,
-				Enabled:       n.Enabled,
-				FilterEnabled: n.FilterEnabled,
-				AllowedHosts:  &n.AllowedHosts,
-				BlockedHosts:  &n.BlockedHosts,
+				Strict:               n.Strict,
+				Enabled:              n.Enabled,
+				FilterEnabled:        n.FilterEnabled,
+				AllowedHosts:         &n.AllowedHosts,
+				BlockedHosts:         &n.BlockedHosts,
+				AllowedLoopbackPorts: &n.AllowedLoopbackPorts,
 			}
 			if n.Mode != nil {
 				m := api.NetworkConfigMode(*n.Mode)
@@ -885,6 +886,9 @@ func fromAPIAgentConfig(a api.AgentConfig) config.AgentConfig {
 			}
 			if n.BlockedHosts != nil {
 				sb.Network.BlockedHosts = *n.BlockedHosts
+			}
+			if n.AllowedLoopbackPorts != nil {
+				sb.Network.AllowedLoopbackPorts = *n.AllowedLoopbackPorts
 			}
 		}
 		out.Sandbox = sb

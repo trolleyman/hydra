@@ -44,6 +44,46 @@ func TestAllowedHostsUnionAcrossLayers(t *testing.T) {
 	}
 }
 
+// TestAllowedLoopbackPortsUnionAcrossLayers checks that the loopback-port
+// allow-list merges like the host lists (per-agent adds to defaults, deduped)
+// and lands on the resolved sandbox.NetworkPolicy.
+func TestAllowedLoopbackPortsUnionAcrossLayers(t *testing.T) {
+	cfg := Config{
+		Defaults: AgentConfig{Sandbox: &SandboxConfig{Network: &NetworkConfig{
+			AllowedLoopbackPorts: []int{5037},
+		}}},
+		Agents: map[string]AgentConfig{
+			"claude": {Sandbox: &SandboxConfig{Network: &NetworkConfig{
+				AllowedLoopbackPorts: []int{5037, 8080},
+			}}},
+		},
+	}
+
+	_, _, _, _, net, _ := cfg.ResolveSandboxOptions("claude")
+	if want := []int{5037, 8080}; !equalInts(net.AllowedLoopbackPorts, want) {
+		t.Errorf("claude AllowedLoopbackPorts = %v, want %v (union, deduped)", net.AllowedLoopbackPorts, want)
+	}
+
+	// An agent with no override still sees the defaults list, unchanged by the
+	// earlier claude resolve.
+	_, _, _, _, other, _ := cfg.ResolveSandboxOptions("gemini")
+	if want := []int{5037}; !equalInts(other.AllowedLoopbackPorts, want) {
+		t.Errorf("gemini AllowedLoopbackPorts = %v, want the untouched defaults %v", other.AllowedLoopbackPorts, want)
+	}
+}
+
+func equalInts(a, b []int) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 func equalStrings(a, b []string) bool {
 	if len(a) != len(b) {
 		return false

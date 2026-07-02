@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -41,7 +42,7 @@ const DefaultPrePrompt = "You are a head (AI agent) of Hydra, an AI orchestratio
 	"- `masked_paths` — extra paths hidden inside the sandbox.\n" +
 	"- `restore_ro` — paths re-exposed read-only after a parent was masked.\n" +
 	"- `cow_paths` — worktree-relative paths mounted copy-on-write from the project root (you can read and overwrite them; writes stay in your worktree and never touch the real files).\n" +
-	"- `network.mode` (off/unrestricted/advisory/hard) plus `network.allowed_hosts` / `network.blocked_hosts` — the egress posture and the host allow-list (added to a built-in default list) / block-list (overrides both). This same list also gates the WebFetch tool: with filtering off (unrestricted/off) WebFetch reaches any host, otherwise it may reach only allow-listed hosts and a new one pauses for user approval. The legacy `network.enabled` / `network.filter_enabled` toggles still work when `mode` is unset.\n" +
+	"- `network.mode` (off/unrestricted/advisory/hard) plus `network.allowed_hosts` / `network.blocked_hosts` — the egress posture and the host allow-list (added to a built-in default list) / block-list (overrides both). This same list also gates the WebFetch tool: with filtering off (unrestricted/off) WebFetch reaches any host, otherwise it may reach only allow-listed hosts and a new one pauses for user approval. The legacy `network.enabled` / `network.filter_enabled` toggles still work when `mode` is unset. `network.allowed_loopback_ports` (e.g. `[5037]` for adb) lists host-loopback TCP ports that stay reachable at 127.0.0.1 under hard mode, whose network namespace otherwise cuts off host-local daemons.\n" +
 	"- `policy.mcp_allowed` / `policy.mcp_tools_allowed` — MCP servers you may use (whole-server), and individual MCP tools (`server__tool`) allowed on an otherwise-restricted server. A security gate can deny a tool call or pause it for user approval (even with permissions skipped) when it falls outside these, so don't retry a blocked call in a loop — ask the user to widen the list. You also have Hydra control tools (`mcp__hydra__list_available_mcp_servers`, `mcp__hydra__request_mcp_server`) to discover host-configured MCP servers and request access to one at runtime (the user approves it; it becomes usable after you resume).\n" +
 	"- `pre_spawn_script` — a bash script run inside the sandbox before every agent launch (both spawn and resume, so it must be idempotent), e.g. `mise trust`.\n" +
 	"- `pre_exit_script` — a bash script run inside a sandbox when a head ends (before its worktree is removed), for per-head teardown such as releasing a claimed resource.\n" +
@@ -97,6 +98,13 @@ type NetworkConfig struct {
 	// host matching BlockedHosts is denied even if otherwise allowed. Lets a user
 	// subtract a host from the built-in defaults without redefining them.
 	BlockedHosts []string `toml:"blocked_hosts"`
+	// AllowedLoopbackPorts lists host-loopback TCP ports the sandbox may reach
+	// even under mode = "hard", whose netns otherwise cuts off the host's
+	// 127.0.0.1 entirely (pasta splices connections to 127.0.0.1:<port> through
+	// to the host's loopback). For host-local daemons that hardcode loopback,
+	// e.g. adb's server: [5037]. Unioned across config layers like AllowedHosts.
+	// No effect outside hard mode (other modes share the host loopback already).
+	AllowedLoopbackPorts []int `toml:"allowed_loopback_ports"`
 }
 
 // PolicyConfig is the per-agent security-gate policy — the "trusted live config"
@@ -862,6 +870,9 @@ func (s *SandboxConfig) Merge(other SandboxConfig) {
 		if other.Network.BlockedHosts != nil {
 			s.Network.BlockedHosts = unionHosts(s.Network.BlockedHosts, other.Network.BlockedHosts)
 		}
+		if other.Network.AllowedLoopbackPorts != nil {
+			s.Network.AllowedLoopbackPorts = unionPorts(s.Network.AllowedLoopbackPorts, other.Network.AllowedLoopbackPorts)
+		}
 	}
 	if other.PreSpawnScript != nil {
 		s.PreSpawnScript = other.PreSpawnScript
@@ -879,6 +890,22 @@ func unionHosts(a, b []string) []string {
 	out := make([]string, 0, len(a)+len(b))
 	seen := make(map[string]bool, len(a)+len(b))
 	for _, list := range [][]string{a, b} {
+		for _, v := range list {
+			if !seen[v] {
+				seen[v] = true
+				out = append(out, v)
+			}
+		}
+	}
+	return out
+}
+
+// unionPorts is unionHosts for the loopback-port allow-list: fresh slice,
+// order-preserving, duplicate-dropping, never aliasing either input.
+func unionPorts(a, b []int) []int {
+	out := make([]int, 0, len(a)+len(b))
+	seen := make(map[int]bool, len(a)+len(b))
+	for _, list := range [][]int{a, b} {
 		for _, v := range list {
 			if !seen[v] {
 				seen[v] = true
@@ -1013,6 +1040,7 @@ func resolveNetworkPolicy(nc *NetworkConfig) sandbox.NetworkPolicy {
 	}
 	net.AllowedHosts = nc.AllowedHosts
 	net.BlockedHosts = nc.BlockedHosts
+	net.AllowedLoopbackPorts = nc.AllowedLoopbackPorts
 	if nc.Strict != nil {
 		net.Strict = *nc.Strict
 	}
@@ -1130,6 +1158,15 @@ func tomlStringArray(vals []string) string {
 	parts := make([]string, len(vals))
 	for i, v := range vals {
 		parts[i] = tomlStringValue(v)
+	}
+	return "[" + strings.Join(parts, ", ") + "]"
+}
+
+// tomlIntArray renders an int slice as a TOML inline array.
+func tomlIntArray(vals []int) string {
+	parts := make([]string, len(vals))
+	for i, v := range vals {
+		parts[i] = strconv.Itoa(v)
 	}
 	return "[" + strings.Join(parts, ", ") + "]"
 }
@@ -1311,6 +1348,17 @@ func defaultsSpec() []specEntry {
 			get: func(a AgentConfig) (string, bool) {
 				if a.Sandbox != nil && a.Sandbox.Network != nil && len(a.Sandbox.Network.BlockedHosts) > 0 {
 					return tomlStringArray(a.Sandbox.Network.BlockedHosts), true
+				}
+				return "", false
+			},
+		},
+		{
+			table: "sandbox.network", key: "allowed_loopback_ports",
+			doc: `host-loopback TCP ports reachable from the sandbox even under mode = "hard" (whose netns otherwise cuts off the host's 127.0.0.1) — for host-local daemons that hardcode loopback, e.g. adb's server: [5037]. No effect in other modes (they share the host loopback already).`,
+			def: func() string { return "[]" },
+			get: func(a AgentConfig) (string, bool) {
+				if a.Sandbox != nil && a.Sandbox.Network != nil && len(a.Sandbox.Network.AllowedLoopbackPorts) > 0 {
+					return tomlIntArray(a.Sandbox.Network.AllowedLoopbackPorts), true
 				}
 				return "", false
 			},
@@ -2488,13 +2536,15 @@ func emitAgentSandbox(out *[]string, name string, sb *SandboxConfig, keyComments
 		}
 		emitSetField(out, name+".sandbox.network", "allowed_hosts", tomlStringArray(nw.AllowedHosts), len(nw.AllowedHosts) > 0, keyComments)
 		emitSetField(out, name+".sandbox.network", "blocked_hosts", tomlStringArray(nw.BlockedHosts), len(nw.BlockedHosts) > 0, keyComments)
+		emitSetField(out, name+".sandbox.network", "allowed_loopback_ports", tomlIntArray(nw.AllowedLoopbackPorts), len(nw.AllowedLoopbackPorts) > 0, keyComments)
 	}
 }
 
 // networkHasContent reports whether a NetworkConfig has any field worth emitting.
 func networkHasContent(nw *NetworkConfig) bool {
 	return nw.Mode != nil || nw.Strict != nil || nw.Enabled != nil ||
-		nw.FilterEnabled != nil || len(nw.AllowedHosts) > 0 || len(nw.BlockedHosts) > 0
+		nw.FilterEnabled != nil || len(nw.AllowedHosts) > 0 || len(nw.BlockedHosts) > 0 ||
+		len(nw.AllowedLoopbackPorts) > 0
 }
 
 // emitAgentPolicy appends the [name.policy] subtable for the settings that are
