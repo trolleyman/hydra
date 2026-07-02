@@ -65,7 +65,7 @@ restore_ro = ["~/.config/go"]
 
 [sandbox.network]
 ## egress posture: "off" (no network), "unrestricted" (network, no host filtering), "advisory" (proxy-only host filtering — every honest client is filtered, but escapable), or "hard" (inescapable pasta+nft netns, degrading to advisory with a warning where the tooling is unavailable). Default "hard". Supersedes the legacy enabled/filter_enabled booleans.
-# mode = "hard"
+mode = "unrestricted"
 
 ## with mode = "hard", fail closed (block all egress) when the inescapable boundary can't be built, instead of degrading to advisory filtering (default false).
 # strict = false
@@ -194,7 +194,15 @@ timeout_sec = 900
 ## The command writes a report into $HYDRA_TEST_OUTPUT: JUnit XML (*.xml — go test
 ## via gotestsum, pytest, jest/vitest, cargo-nextest, …) or a Hydra-native *.json
 ## ({total,passed,failed,skipped,duration_ms,cases:[{name,status,duration_ms,message}]}).
+## Every *.xml / *.json in the dir is parsed and the cases are merged, so one
+## command may emit several reports (e.g. a test report plus a lint report).
 ## If it writes no report, the exit code alone becomes a red/green verdict.
+## Warnings: a case with status "warning" (Hydra JSON), or a JUnit <failure
+## type="warning">, is a non-failing diagnostic — it shows as an amber ⚠ N on the
+## long verdict chip (agent header / tests panel) but never fails the run or gates
+## the merge (lint errors stay failures and do gate). ESLint 9's junit formatters
+## don't tag severity, so feed lint via `-f json` converted to a Hydra-JSON report
+## (severity 2 → status "failed", severity 1 → "warning").
 ## It is also given HYDRA_TEST_SOURCE (the checkout dir) and HYDRA_TEST_REF (the
 ## resolved ref).
 [[tests]]
