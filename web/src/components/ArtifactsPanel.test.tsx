@@ -1,6 +1,8 @@
-import { describe, it, expect, vi, afterEach } from 'vitest'
+import { describe, it, expect, vi, afterEach, beforeAll, afterAll } from 'vitest'
 import { render, screen, fireEvent, cleanup } from '@testing-library/react'
-import { MasonryGrid } from './ArtifactsPanel'
+import type { ComponentProps } from 'react'
+import { ArtifactsPanel, MasonryGrid } from './ArtifactsPanel'
+import { useImageLightboxStore } from '../stores/imageLightboxStore'
 
 // Regression tests for the masonry tile's "drag horizontally to resize the column
 // span" gesture (startBodyResize). The handler used to sit on the whole tile, so
@@ -130,5 +132,189 @@ describe('MasonryGrid body-drag resize', () => {
     fireEvent.pointerMove(window, { clientX: 4, clientY: 60 })
     fireEvent.pointerUp(window, { clientX: 4, clientY: 60 })
     expect(onSpanChange).not.toHaveBeenCalled()
+  })
+})
+
+// Regression tests for the live-drag mechanics: the rubber-band pull feedback, the
+// snap hysteresis, the measurement ghost being truly hidden, and the tile's measured
+// height being refreshed when the drag ends (its ResizeObserver readings are frozen
+// during the drag, so without the refresh the stale pre-drag height left a permanent
+// gap below a shrunk tile).
+//
+// Layout arithmetic in jsdom: the container measures 0px wide, so the grid renders
+// BASE_ARTIFACT_COLUMNS (6) columns of colW=0 and every width is a multiple of the
+// 12px gap (unit = colW + gap = 12). aspect 1.6 ⇒ a default span of 3, i.e. a
+// starting tile width of 3*0 + 2*12 = 24px. A pointer at clientX=x (down at 0) gives
+// a raw width w = 24 + x, and spanFloat = (w + 12) / 12; the snap-to-4 threshold is
+// spanFloat ≥ 3 + 0.5 + RESIZE_STICK(0.3) = 3.8, i.e. x ≥ 9.6.
+describe('MasonryGrid drag feedback + ghost + settled height', () => {
+  afterEach(() => vi.restoreAllMocks())
+
+  const tileEl = (container: HTMLElement) =>
+    container.querySelector('[data-mkey="screenshot.png"]') as HTMLElement
+  const ghostEl = (container: HTMLElement) =>
+    container.querySelector('[data-masonry-ghost]') as HTMLElement | null
+
+  // Press on the media and pull 8px right: past the 6px activation threshold, but
+  // inside the snap deadband (spanFloat ≈ 3.67 < 3.8).
+  function startPull(container: HTMLElement) {
+    fireEvent.pointerDown(screen.getByTestId('media'), { button: 0, clientX: 0, clientY: 0 })
+    fireEvent.pointerMove(window, { clientX: 8, clientY: 0 })
+    return container
+  }
+
+  it('stretches the tile with a rubber-band pull inside the deadband (feedback before the snap)', () => {
+    const onSpanChange = vi.fn()
+    const { container } = renderGrid(onSpanChange)
+    startPull(container)
+    // No snap yet…
+    expect(onSpanChange).not.toHaveBeenCalled()
+    // …but the tile visibly stretches: snapped 24px + RESIZE_PULL(0.35) * 8px pull.
+    const w = parseFloat(tileEl(container).style.width)
+    expect(w).toBeCloseTo(24 + 8 * 0.35)
+    expect(w).toBeGreaterThan(24) // more than frozen-at-snap
+    expect(w).toBeLessThan(24 + 8) // less than 1:1 pointer tracking
+    fireEvent.pointerUp(window, { clientX: 8, clientY: 0 })
+  })
+
+  it('snaps the span only once the pointer commits past the halfway+stick threshold', () => {
+    const onSpanChange = vi.fn()
+    const { container } = renderGrid(onSpanChange)
+    startPull(container) // 8px: inside the deadband, held
+    expect(onSpanChange).not.toHaveBeenCalled()
+    // 12px: spanFloat = 4.0 ≥ 3.8 — commits to span 4 mid-drag.
+    fireEvent.pointerMove(window, { clientX: 12, clientY: 0 })
+    expect(onSpanChange).toHaveBeenCalledWith('screenshot.png', 4)
+    // The tile now renders the new snapped width (4*0 + 3*12 = 36) with no residual
+    // pull (the pointer sits exactly on the new width).
+    expect(parseFloat(tileEl(container).style.width)).toBeCloseTo(36)
+    fireEvent.pointerUp(window, { clientX: 12, clientY: 0 })
+  })
+
+  it('keeps the measurement ghost fully hidden even when the tile forces visibility:visible', () => {
+    const onSpanChange = vi.fn()
+    // The flip view's layers set an explicit visibility:visible on themselves, which
+    // escapes an inherited visibility:hidden — the ghost's image used to paint at the
+    // grid's top-left and flash during the drag. opacity:0 has no such escape hatch.
+    const { container } = render(
+      <MasonryGrid
+        items={[{
+          key: 'screenshot.png',
+          node: (
+            <div data-tile-drag>
+              <img data-testid="media" alt="" style={{ visibility: 'visible' }} />
+            </div>
+          ),
+          aspect: 1.6,
+        }]}
+        spans={{}}
+        onSpanChange={onSpanChange}
+      />,
+    )
+    expect(ghostEl(container)).toBeNull() // no ghost at rest
+    startPull(container)
+    const ghost = ghostEl(container)
+    expect(ghost).not.toBeNull()
+    expect(ghost!.style.opacity).toBe('0')
+    // The ghost renders at the *snapped* width (24px), not the rubber-band width —
+    // it measures the height the tile will settle to.
+    expect(ghost!.style.width).toBe('24px')
+    fireEvent.pointerUp(window, { clientX: 8, clientY: 0 })
+    expect(ghostEl(container)).toBeNull() // gone once the drag ends
+  })
+
+  it("adopts the ghost's settled height when the drag ends (no leftover reserved space)", () => {
+    // The dragged tile's ResizeObserver readings are frozen during the drag, and if
+    // its width transition settles before release nothing re-measures it afterwards —
+    // placement kept reserving the stale pre-drag height, leaving a big empty gap
+    // below a shrunk tile. finish() must fold the ghost's settled height back in.
+    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(500)
+    const onSpanChange = vi.fn()
+    const { container } = renderGrid(onSpanChange)
+    const grid = container.firstChild as HTMLElement
+    // Unmeasured tile (no ResizeObserver in jsdom): the fallback height is reserved.
+    expect(grid.style.height).toBe('240px')
+    startPull(container)
+    fireEvent.pointerMove(window, { clientX: 12, clientY: 0 }) // snap to span 4
+    fireEvent.pointerUp(window, { clientX: 12, clientY: 0 })
+    // After the drag the container reserves the ghost-measured settled height — not
+    // the stale pre-drag/fallback one.
+    expect(grid.style.height).toBe('500px')
+  })
+})
+
+// Regression tests for the grid's global A/B keyboard shortcuts: the handler used to
+// bind only B (as a toggle) and H, so A and X — advertised and handled by the lightbox
+// (ImageLightbox) — silently did nothing over the grid. The grid must accept the same
+// X (flip) / B (Before) / A (After) / H (highlight) set, gate them on A/B mode, and
+// stand down while the lightbox is open. The panel is rendered for real, with inert
+// WebSocket/ResizeObserver stubs (jsdom provides neither) so it idles in its
+// "connecting" state — the key handler is registered regardless of data.
+describe('ArtifactsPanel A/B keyboard shortcuts', () => {
+  beforeAll(() => {
+    vi.stubGlobal('ResizeObserver', class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    })
+    vi.stubGlobal('WebSocket', class {
+      static OPEN = 1
+      onopen: unknown = null
+      onmessage: unknown = null
+      onclose: unknown = null
+      readyState = 0
+      send() {}
+      close() {}
+    })
+  })
+  afterAll(() => vi.unstubAllGlobals())
+  afterEach(() => useImageLightboxStore.setState({ images: null }))
+
+  function renderPanel(over: Partial<ComponentProps<typeof ArtifactsPanel>> = {}) {
+    const onView = vi.fn()
+    const onHighlight = vi.fn()
+    render(
+      <ArtifactsPanel
+        projectId="proj"
+        agentId="agent"
+        refreshKey={0}
+        imageDiffMode="ab"
+        artifactScale={1}
+        artifactView="after"
+        onArtifactViewChange={onView}
+        artifactHighlight={false}
+        onArtifactHighlightChange={onHighlight}
+        artifactSpans={{}}
+        onArtifactSpanChange={vi.fn()}
+        {...over}
+      />,
+    )
+    return { onView, onHighlight }
+  }
+
+  it('binds A (After), B (Before), X (flip) and H (highlight) in A/B mode', () => {
+    const { onView, onHighlight } = renderPanel({ artifactView: 'before' })
+    fireEvent.keyDown(document.body, { key: 'a' })
+    expect(onView).toHaveBeenLastCalledWith('after')
+    fireEvent.keyDown(document.body, { key: 'b' })
+    expect(onView).toHaveBeenLastCalledWith('before')
+    fireEvent.keyDown(document.body, { key: 'x' })
+    expect(onView).toHaveBeenLastCalledWith('after') // flip away from 'before'
+    fireEvent.keyDown(document.body, { key: 'h' })
+    expect(onHighlight).toHaveBeenLastCalledWith(true)
+  })
+
+  it('ignores the keys outside A/B mode', () => {
+    const { onView, onHighlight } = renderPanel({ imageDiffMode: 'slider' })
+    for (const key of ['a', 'b', 'x', 'h']) fireEvent.keyDown(document.body, { key })
+    expect(onView).not.toHaveBeenCalled()
+    expect(onHighlight).not.toHaveBeenCalled()
+  })
+
+  it('stands down while the image lightbox is open (its own X/B/A/H take over)', () => {
+    const { onView } = renderPanel()
+    useImageLightboxStore.setState({ images: [{ url: 'u', filename: 'f.png', size: 1 }], index: 0 })
+    fireEvent.keyDown(document.body, { key: 'a' })
+    expect(onView).not.toHaveBeenCalled()
   })
 })

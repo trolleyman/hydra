@@ -2020,30 +2020,60 @@ func (s *SimulationServer) GetRepositoryPushStatus(w http.ResponseWriter, r *htt
 		Behind:    1,
 		HasRemote: true,
 		CanPush:   true,
+		// A dirty config file, so the sidebar's uncommitted-changes warning
+		// (and its commit popover) shows in screenshots.
+		Uncommitted: simUncommitted(),
+	})
+}
+
+// simUncommitted is the mock working-tree state: the one dirty file a config
+// save typically leaves behind. Pushing/syncing doesn't clean the tree, so
+// those mocks report it too; only CommitRepository clears it.
+func simUncommitted() api.RepositoryUncommittedChanges {
+	return api.RepositoryUncommittedChanges{
+		Total: 1,
+		Files: []api.RepositoryUncommittedFile{
+			{Path: ".hydra/config.toml", Status: "modified"},
+		},
+	}
+}
+
+func (s *SimulationServer) CommitRepository(w http.ResponseWriter, r *http.Request, projectId string) {
+	branch, remote := "main", "origin"
+	api.WriteJSON(w, http.StatusOK, api.RepositoryPushStatus{
+		Branch:      &branch,
+		Remote:      &remote,
+		Ahead:       3,
+		Behind:      1,
+		HasRemote:   true,
+		CanPush:     true,
+		Uncommitted: api.RepositoryUncommittedChanges{Total: 0, Files: []api.RepositoryUncommittedFile{}},
 	})
 }
 
 func (s *SimulationServer) PushRepository(w http.ResponseWriter, r *http.Request, projectId string) {
 	branch, remote := "main", "origin"
 	api.WriteJSON(w, http.StatusOK, api.RepositoryPushStatus{
-		Branch:    &branch,
-		Remote:    &remote,
-		Ahead:     0,
-		Behind:    1,
-		HasRemote: true,
-		CanPush:   false,
+		Branch:      &branch,
+		Remote:      &remote,
+		Ahead:       0,
+		Behind:      1,
+		HasRemote:   true,
+		CanPush:     false,
+		Uncommitted: simUncommitted(),
 	})
 }
 
 func (s *SimulationServer) SyncRepository(w http.ResponseWriter, r *http.Request, projectId string) {
 	branch, remote := "main", "origin"
 	api.WriteJSON(w, http.StatusOK, api.RepositoryPushStatus{
-		Branch:    &branch,
-		Remote:    &remote,
-		Ahead:     0,
-		Behind:    0,
-		HasRemote: true,
-		CanPush:   false,
+		Branch:      &branch,
+		Remote:      &remote,
+		Ahead:       0,
+		Behind:      0,
+		HasRemote:   true,
+		CanPush:     false,
+		Uncommitted: simUncommitted(),
 	})
 }
 

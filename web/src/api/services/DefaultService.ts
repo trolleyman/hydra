@@ -10,6 +10,7 @@ import type { ApprovalListResponse } from '../models/ApprovalListResponse';
 import type { ArtifactsResponse } from '../models/ArtifactsResponse';
 import type { ClaudeUsageResponse } from '../models/ClaudeUsageResponse';
 import type { CommitInfo } from '../models/CommitInfo';
+import type { CommitRepositoryRequest } from '../models/CommitRepositoryRequest';
 import type { ConfigResponse } from '../models/ConfigResponse';
 import type { ConfigTomlResponse } from '../models/ConfigTomlResponse';
 import type { DiffResponse } from '../models/DiffResponse';
@@ -1025,6 +1026,33 @@ export class DefaultService {
                 404: `Project Not Found`,
                 409: `Conflict (the pull could not be merged cleanly)`,
                 500: `Internal Server Error (e.g. fetch/push rejected or auth failure)`,
+            },
+        });
+    }
+    /**
+     * Commit the given uncommitted paths in the project root
+     * Stages exactly the requested paths (tracked and untracked) and commits them with the given message; other dirty paths are left untouched. Backs the sidebar's uncommitted-changes warning, whose main job is sweeping up config edits the web UI itself writes to .hydra/config.toml — the UI sends the paths it showed the user. Requested paths that are no longer dirty are skipped. Returns the refreshed push status.
+     * @param projectId Project ID
+     * @param requestBody
+     * @returns RepositoryPushStatus OK (changes committed)
+     * @throws ApiError
+     */
+    public commitRepository(
+        projectId: string,
+        requestBody: CommitRepositoryRequest,
+    ): CancelablePromise<RepositoryPushStatus> {
+        return this.httpRequest.request({
+            method: 'POST',
+            url: '/api/projects/{project_id}/repository/commit',
+            path: {
+                'project_id': projectId,
+            },
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                400: `Bad Request (no paths given, none still dirty, or empty message)`,
+                404: `Project Not Found`,
+                500: `Internal Server Error (e.g. the commit itself failed)`,
             },
         });
     }

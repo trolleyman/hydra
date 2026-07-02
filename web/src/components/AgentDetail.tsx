@@ -472,11 +472,23 @@ export function AgentDetail({
   // (e.g. a stale verdict that re-ran red), it offers a force-merge follow-up.
   async function executeMerge(force: boolean) {
     setMerging(true)
-    const toastId = useToastStore.getState().show({ message: `Merging agent "${agent.id}"…`, type: 'info', duration: 0 })
+    // Both toasts render the agent-transition card (bot icon + clickable agent
+    // name + status pill), matching the status-update notifications.
+    const name = agent.title || agent.id
+    const toastId = useToastStore.getState().show({
+      message: `Merging agent "${name}" into ${agent.base_branch}…`,
+      type: 'info',
+      duration: 0,
+      agentTransition: { agentName: name, agentId: agent.id, projectId: projectId ?? '', status: 'merging', before: '', after: `into \`${agent.base_branch}\`…` },
+    })
     try {
       await api.default.mergeAgent(projectId ?? '', agent.id, force || undefined)
       useToastStore.getState().dismiss(toastId)
-      useToastStore.getState().show({ message: `Agent "${agent.id}" merged into ${agent.base_branch}`, type: 'success' })
+      useToastStore.getState().show({
+        message: `Agent "${name}" merged into ${agent.base_branch}`,
+        type: 'success',
+        agentTransition: { agentName: name, agentId: agent.id, projectId: projectId ?? '', status: 'merged', before: '', after: `into \`${agent.base_branch}\`` },
+      })
       useAgentStore.getState().upsertArchived({ ...agent, archived: true, end_state: 'merged', session_status: 'stopped', session_pid: 0 })
       onKilled(agent.id)
     } catch (err) {
@@ -556,7 +568,16 @@ export function AgentDetail({
   async function armMerge() {
     try {
       await api.default.armMergeWhenGreen(projectId ?? '', agent.id)
-      useToastStore.getState().show({ message: `Will merge "${agent.id}" when it finishes and its tests pass`, type: 'info' })
+      // Same agent-transition card as the status-update toasts, but text-only
+      // (no status pill — "queued" isn't a status the agent is in yet) and with
+      // the emerald "merge queued" Clock in place of the bot tile.
+      const name = agent.title || agent.id
+      const toBranch = agent.base_branch || 'base'
+      useToastStore.getState().show({
+        message: `Will merge "${name}" into ${toBranch} when it finishes and its tests pass`,
+        type: 'info',
+        agentTransition: { agentName: name, agentId: agent.id, projectId: projectId ?? '', icon: 'merge-queued', before: `will merge into \`${toBranch}\` when it finishes and tests pass` },
+      })
     } catch (err) {
       useToastStore.getState().show({ message: `Couldn't arm auto-merge: ${formatError(err)}`, type: 'error' })
     }

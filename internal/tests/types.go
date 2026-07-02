@@ -76,15 +76,15 @@ const (
 // artifacts.Meta), written as report.json in the cache entry dir. The transient
 // fields (json:"-") describe an in-flight run and are never persisted.
 type Report struct {
-	Runner     string     `json:"runner"`        // the [[tests]] script name
-	Key        string     `json:"key"`           // cache key ("commit/<sha>" | "worktree/<hash>")
-	Ref        string     `json:"ref,omitempty"` // human-readable ref (the resolved SHA)
-	Status     Status     `json:"status"`        // passing | failing | errored
-	Total      int        `json:"total"`         // passed+failed+skipped+warnings
-	Passed     int        `json:"passed"`
-	Failed     int        `json:"failed"`
-	Skipped    int        `json:"skipped"`
-	Warnings   int        `json:"warnings"` // non-failing diagnostics; informational only
+	Runner   string `json:"runner"`        // the [[tests]] script name
+	Key      string `json:"key"`           // cache key ("commit/<sha>" | "worktree/<hash>")
+	Ref      string `json:"ref,omitempty"` // human-readable ref (the resolved SHA)
+	Status   Status `json:"status"`        // passing | failing | errored
+	Total    int    `json:"total"`         // passed+failed+skipped+warnings
+	Passed   int    `json:"passed"`
+	Failed   int    `json:"failed"`
+	Skipped  int    `json:"skipped"`
+	Warnings int    `json:"warnings"` // non-failing diagnostics; informational only
 
 	DurationMs int64      `json:"duration_ms"` // wall-clock of the whole command
 	Cases      []TestCase `json:"cases,omitempty"`

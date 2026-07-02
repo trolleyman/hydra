@@ -1,6 +1,7 @@
 package sandbox
 
 import (
+	"braces.dev/errtrace"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -29,12 +30,12 @@ func TestWrapPreSpawnExecutes(t *testing.T) {
 
 	run := func(t *testing.T, wrapped []string) error {
 		t.Helper()
-		cmd := exec.Command(wrapped[0], wrapped[1:]...) //errtrace:skip
+		cmd := exec.Command(wrapped[0], wrapped[1:]...)
 		out, err := cmd.CombinedOutput()
 		if len(out) > 0 {
 			t.Logf("output: %s", out)
 		}
-		return err
+		return errtrace.Wrap(err)
 	}
 
 	wrapped := WrapPreSpawn(script, argv)
@@ -68,7 +69,7 @@ func TestWrapPreSpawnExecutes(t *testing.T) {
 	gate := filepath.Join(dir, "should-not-exist")
 	gateArgv := []string{"/bin/sh", "-c", "echo leaked > " + q(gate)}
 	gateWrapped := WrapPreSpawn("exit 3", gateArgv)
-	gateOut, gateErr := exec.Command(gateWrapped[0], gateWrapped[1:]...).CombinedOutput() //errtrace:skip
+	gateOut, gateErr := exec.Command(gateWrapped[0], gateWrapped[1:]...).CombinedOutput()
 	if gateErr == nil {
 		t.Fatalf("expected non-zero exit from a failing pre-spawn script; output: %s", gateOut)
 	}

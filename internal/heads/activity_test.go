@@ -136,9 +136,9 @@ func TestIsSuggestedNextMessage(t *testing.T) {
 		{"  spin up the app  ", true}, // trimmed, still terse
 		{"", false},
 		{"The spike is built, tested, and committed. Here's what landed…", false}, // multi-sentence
-		{"line one\nline two", false},                                             // multi-line
-		{strings.Repeat("x", 81), false},                                          // too long
-		{"Where should the app binary be distributed first?", true},               // shape is terse; the question exclusion is applied by callers, not here
+		{"line one\nline two", false},                               // multi-line
+		{strings.Repeat("x", 81), false},                            // too long
+		{"Where should the app binary be distributed first?", true}, // shape is terse; the question exclusion is applied by callers, not here
 	}
 	for _, c := range cases {
 		if got := IsSuggestedNextMessage(c.msg); got != c.want {

@@ -129,14 +129,22 @@ function applyOverrides<O>(
 // Only call this for a same-project refresh; on a project switch the old agents
 // also "vanish" but haven't merged. The synchronous merge path removes the agent
 // via removeAgent (not setAgents) and shows its own toast, so it won't fire here.
-function notifyBackgroundMerges(prev: AgentResponse[], next: AgentResponse[]) {
+function notifyBackgroundMerges(prev: AgentResponse[], next: AgentResponse[], projectId: string) {
   if (prev.length === 0) return
   const nextIds = new Set(next.map((a) => a.id))
   for (const agent of prev) {
     if (agent.merge_when_green && !nextIds.has(agent.id)) {
+      const name = agent.title || agent.id
       useToastStore.getState().show({
-        message: `Agent "${agent.id}" merged into ${agent.base_branch || 'its base branch'}`,
+        message: `Agent "${name}" merged into ${agent.base_branch || 'its base branch'}`,
         type: 'success',
+        // Rendered as the agent-transition card (matching the status-update
+        // toasts); the message is only the fallback for non-card surfaces. The
+        // backticks render the branch as a mono pill.
+        agentTransition: {
+          agentName: name, agentId: agent.id, projectId, status: 'merged',
+          before: '', after: agent.base_branch ? `into \`${agent.base_branch}\`` : 'into its base branch',
+        },
       })
     }
   }
@@ -157,8 +165,8 @@ export const useAgentStore = create<AgentState>((set) => ({
     // Detect background merges before applying overrides: an armed agent that has
     // left the list on a same-project refresh was merged by the daemon. Skip on a
     // project switch (projectId differs), which also drops the previous agents.
-    if (projectId !== undefined && projectId === state.agentsProjectId) {
-      notifyBackgroundMerges(state.agents, agents)
+    if (projectId != null && projectId === state.agentsProjectId) {
+      notifyBackgroundMerges(state.agents, agents, projectId)
     }
     // Status: drop the override once the backend reports the optimistic status —
     // or the moment it reports needs_input. needs_input is the explicit "the

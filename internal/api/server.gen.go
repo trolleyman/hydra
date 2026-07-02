@@ -527,6 +527,15 @@ type CommitInfo struct {
 	Timestamp string `json:"timestamp"`
 }
 
+// CommitRepositoryRequest defines model for CommitRepositoryRequest.
+type CommitRepositoryRequest struct {
+	// Message The commit message; must be non-blank
+	Message string `json:"message"`
+
+	// Paths Repo-relative paths to commit, as reported by the push-status uncommitted file list; must be non-empty
+	Paths []string `json:"paths"`
+}
+
 // ConfigResponse defines model for ConfigResponse.
 type ConfigResponse struct {
 	Agents map[string]AgentConfig `json:"agents"`
@@ -893,6 +902,9 @@ type RepositoryPushStatus struct {
 
 	// Remote The remote a push would target (e.g. "origin"), or null if none
 	Remote *string `json:"remote"`
+
+	// Uncommitted Uncommitted changes in the project root's working tree. Drives the sidebar warning that config edits (e.g. the web UI writing .hydra/config.toml) are sitting uncommitted.
+	Uncommitted RepositoryUncommittedChanges `json:"uncommitted"`
 }
 
 // RepositoryTreeResponse defines model for RepositoryTreeResponse.
@@ -905,6 +917,24 @@ type RepositoryTreeResponse struct {
 
 	// Ref The git ref the tree was read from (e.g. HEAD)
 	Ref string `json:"ref"`
+}
+
+// RepositoryUncommittedChanges Uncommitted changes in the project root's working tree. Drives the sidebar warning that config edits (e.g. the web UI writing .hydra/config.toml) are sitting uncommitted.
+type RepositoryUncommittedChanges struct {
+	// Files The uncommitted paths in git's status order, truncated to the first 20 when total exceeds that.
+	Files []RepositoryUncommittedFile `json:"files"`
+
+	// Total Total number of uncommitted paths (tracked changes + untracked files)
+	Total int `json:"total"`
+}
+
+// RepositoryUncommittedFile defines model for RepositoryUncommittedFile.
+type RepositoryUncommittedFile struct {
+	// Path Repo-relative path of the uncommitted file
+	Path string `json:"path"`
+
+	// Status One of modified|added|deleted|renamed|copied|conflicted|untracked
+	Status string `json:"status"`
 }
 
 // SandboxConfig User-editable sandbox policy, additive on top of baked-in defaults
@@ -1402,6 +1432,9 @@ type SendAgentInputJSONRequestBody = AgentInputRequest
 // SaveConfigJSONRequestBody defines body for SaveConfig for application/json ContentType.
 type SaveConfigJSONRequestBody = ConfigResponse
 
+// CommitRepositoryJSONRequestBody defines body for CommitRepository for application/json ContentType.
+type CommitRepositoryJSONRequestBody = CommitRepositoryRequest
+
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
 	// Chrome DevTools workspace configuration
@@ -1506,6 +1539,9 @@ type ServerInterface interface {
 	// List the branches available for the project's repository
 	// (GET /api/projects/{project_id}/repository/branches)
 	GetRepositoryBranches(w http.ResponseWriter, r *http.Request, projectId string)
+	// Commit the given uncommitted paths in the project root
+	// (POST /api/projects/{project_id}/repository/commit)
+	CommitRepository(w http.ResponseWriter, r *http.Request, projectId string)
 	// Diff two refs in the project's repository
 	// (GET /api/projects/{project_id}/repository/diff)
 	GetRepositoryDiff(w http.ResponseWriter, r *http.Request, projectId string, params GetRepositoryDiffParams)
@@ -2808,6 +2844,31 @@ func (siw *ServerInterfaceWrapper) GetRepositoryBranches(w http.ResponseWriter, 
 	handler.ServeHTTP(w, r)
 }
 
+// CommitRepository operation middleware
+func (siw *ServerInterfaceWrapper) CommitRepository(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CommitRepository(w, r, projectId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetRepositoryDiff operation middleware
 func (siw *ServerInterfaceWrapper) GetRepositoryDiff(w http.ResponseWriter, r *http.Request) {
 
@@ -3335,6 +3396,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/repository/artifacts", wrapper.GetRepositoryArtifacts)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/repository/artifacts/{name}", wrapper.GetRepositoryArtifact)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/repository/branches", wrapper.GetRepositoryBranches)
+	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/repository/commit", wrapper.CommitRepository)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/repository/diff", wrapper.GetRepositoryDiff)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/repository/file", wrapper.GetRepositoryFile)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/repository/push", wrapper.PushRepository)
@@ -4610,6 +4672,51 @@ func (response GetRepositoryBranches500JSONResponse) VisitGetRepositoryBranchesR
 	return json.NewEncoder(w).Encode(response)
 }
 
+type CommitRepositoryRequestObject struct {
+	ProjectId string `json:"project_id"`
+	Body      *CommitRepositoryJSONRequestBody
+}
+
+type CommitRepositoryResponseObject interface {
+	VisitCommitRepositoryResponse(w http.ResponseWriter) error
+}
+
+type CommitRepository200JSONResponse RepositoryPushStatus
+
+func (response CommitRepository200JSONResponse) VisitCommitRepositoryResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type CommitRepository400JSONResponse ErrorResponse
+
+func (response CommitRepository400JSONResponse) VisitCommitRepositoryResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type CommitRepository404JSONResponse ErrorResponse
+
+func (response CommitRepository404JSONResponse) VisitCommitRepositoryResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type CommitRepository500JSONResponse ErrorResponse
+
+func (response CommitRepository500JSONResponse) VisitCommitRepositoryResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 type GetRepositoryDiffRequestObject struct {
 	ProjectId string `json:"project_id"`
 	Params    GetRepositoryDiffParams
@@ -5074,6 +5181,9 @@ type StrictServerInterface interface {
 	// List the branches available for the project's repository
 	// (GET /api/projects/{project_id}/repository/branches)
 	GetRepositoryBranches(ctx context.Context, request GetRepositoryBranchesRequestObject) (GetRepositoryBranchesResponseObject, error)
+	// Commit the given uncommitted paths in the project root
+	// (POST /api/projects/{project_id}/repository/commit)
+	CommitRepository(ctx context.Context, request CommitRepositoryRequestObject) (CommitRepositoryResponseObject, error)
 	// Diff two refs in the project's repository
 	// (GET /api/projects/{project_id}/repository/diff)
 	GetRepositoryDiff(ctx context.Context, request GetRepositoryDiffRequestObject) (GetRepositoryDiffResponseObject, error)
@@ -6080,6 +6190,39 @@ func (sh *strictHandler) GetRepositoryBranches(w http.ResponseWriter, r *http.Re
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetRepositoryBranchesResponseObject); ok {
 		if err := validResponse.VisitGetRepositoryBranchesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CommitRepository operation middleware
+func (sh *strictHandler) CommitRepository(w http.ResponseWriter, r *http.Request, projectId string) {
+	var request CommitRepositoryRequestObject
+
+	request.ProjectId = projectId
+
+	var body CommitRepositoryJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CommitRepository(ctx, request.(CommitRepositoryRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CommitRepository")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CommitRepositoryResponseObject); ok {
+		if err := validResponse.VisitCommitRepositoryResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

@@ -31,10 +31,10 @@ func (c *Client) Spawn(req SpawnRequest) (*Spawned, error) {
 // Spawned is a non-functional placeholder on Windows.
 type Spawned struct{}
 
-func (s *Spawned) Read(b []byte) (int, error)      { return 0, errtrace.Wrap(errUnsupported) }
-func (s *Spawned) Write(b []byte) (int, error)     { return 0, errtrace.Wrap(errUnsupported) }
-func (s *Spawned) Close() error                    { return errtrace.Wrap(errUnsupported) }
-func (s *Spawned) Resize(rows, cols uint16) error  { return errtrace.Wrap(errUnsupported) }
-func (s *Spawned) Wait() error                     { return errtrace.Wrap(errUnsupported) }
-func (s *Spawned) Pid() int                        { return 0 }
-func (s *Spawned) Signal(sig os.Signal) error      { return errtrace.Wrap(errUnsupported) }
+func (s *Spawned) Read(b []byte) (int, error)     { return 0, errtrace.Wrap(errUnsupported) }
+func (s *Spawned) Write(b []byte) (int, error)    { return 0, errtrace.Wrap(errUnsupported) }
+func (s *Spawned) Close() error                   { return errtrace.Wrap(errUnsupported) }
+func (s *Spawned) Resize(rows, cols uint16) error { return errtrace.Wrap(errUnsupported) }
+func (s *Spawned) Wait() error                    { return errtrace.Wrap(errUnsupported) }
+func (s *Spawned) Pid() int                       { return 0 }
+func (s *Spawned) Signal(sig os.Signal) error     { return errtrace.Wrap(errUnsupported) }

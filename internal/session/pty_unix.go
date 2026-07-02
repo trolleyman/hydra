@@ -19,7 +19,7 @@ type ptyProcess struct {
 
 // startProcess launches spec under a new PTY of the given initial size.
 func startProcess(spec *sandbox.Spec, rows, cols uint16) (*ptyProcess, error) {
-	cmd := exec.Command(spec.Path, spec.Args[1:]...) //errtrace:skip
+	cmd := exec.Command(spec.Path, spec.Args[1:]...)
 	cmd.Env = spec.Env
 	cmd.Dir = spec.Dir
 	cmd.ExtraFiles = spec.ExtraFiles

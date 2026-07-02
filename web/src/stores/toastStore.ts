@@ -29,16 +29,27 @@ export interface ApprovalToastData {
 }
 
 // Structured payload for an agent status-transition toast (an agent crossing
-// into needs_input / finished). The renderer draws a "<bot> <agent> transitioned
-// to <status pill>" row whose agent label links through to the agent — so there's
-// no separate "View" button.
+// into needs_input / finished) — also reused by the merge-lifecycle toasts
+// (queued / merging / merged), which want the same visual identity. The renderer
+// draws a "<bot> <agent> <before> <status pill> <after>" row whose agent label
+// links through to the agent — so there's no separate "View" button.
 export interface AgentTransitionToastData {
   // The agent's title (the clickable label) + where it lives (for the link).
   agentName: string
   agentId: string
   projectId: string
-  // The raw status the agent crossed into, rendered as the standard status pill.
-  status: string
+  // The status rendered as the standard status pill (also 'merged', which only
+  // exists as a pill on these toasts). Omit it for a text-only row.
+  status?: string
+  // Icon-tile override: 'merge-queued' swaps the bot for the emerald Clock the
+  // armed merge pill / queue-merge button use. Defaults to the bot.
+  icon?: 'merge-queued'
+  // Copy before the pill. Defaults to 'transitioned to'; pass '' to lead with
+  // the pill ("[merging] into `main`…"). Like `message`, `backtick` spans render
+  // as inline mono branch pills.
+  before?: string
+  // Copy after the pill, e.g. the merge target ("into `main`").
+  after?: string
   // Set when the agent runs in a DIFFERENT project than the one in view — shown
   // as a muted suffix so the toast still says where it happened.
   projectName?: string | null
@@ -56,6 +67,8 @@ export interface ToastAction {
 
 export interface Toast {
   id: number
+  // The toast copy. `backtick` spans render as inline mono branch pills
+  // ("Synced with `origin/main`"); unpaired backticks stay literal.
   message: string
   type: ToastType
   // Total lifetime in ms before the toast auto-dismisses. 0 = persistent (the
@@ -68,6 +81,10 @@ export interface Toast {
   // True once the toast is animating out. It lingers in the list for one exit
   // animation before being removed, so the leave transition can play.
   exiting: boolean
+  // True while the pointer is hovering the toast: the auto-dismiss timer is
+  // suspended and the countdown bar frozen, so a toast can be read/acted on
+  // without expiring under the cursor. Only meaningful for duration > 0 toasts.
+  paused?: boolean
   // Optional action buttons rendered alongside the dismiss (X).
   actions?: ToastAction[]
   // Called when the toast is dismissed by the user (the X, or any non-silent
@@ -109,9 +126,47 @@ interface ToastState {
   // "Allow" was clicked, or the gate cleared server-side) — so a deny-on-dismiss
   // toast isn't also denied.
   dismiss: (id: number, opts?: { silent?: boolean }) => void
+  // Suspend a toast's auto-dismiss timer (on pointer enter). Captures how much
+  // lifetime was left so resume() can re-arm from there. No-op for persistent
+  // (duration 0) or already-paused/exiting toasts.
+  pause: (id: number) => void
+  // Re-arm a paused toast's timer with the remaining lifetime (on pointer leave).
+  resume: (id: number) => void
 }
 
 let nextId = 1
+
+// Live auto-dismiss timers, keyed by toast id, kept out of the store's state so
+// arming/clearing one doesn't trigger a re-render. `timeoutId` is null while a
+// toast is paused; `remaining`/`startedAt` track how much lifetime is left so a
+// paused timer can resume from where it stopped.
+interface ToastTimer {
+  timeoutId: ReturnType<typeof setTimeout> | null
+  remaining: number
+  startedAt: number
+}
+const timers = new Map<number, ToastTimer>()
+
+// armTimer (re)starts the countdown for a toast, clearing any prior timer for the
+// same id first (e.g. a keyed toast replaced in place).
+function armTimer(id: number, ms: number, expire: (id: number) => void) {
+  clearTimer(id)
+  timers.set(id, {
+    remaining: ms,
+    startedAt: Date.now(),
+    timeoutId: setTimeout(() => {
+      timers.delete(id)
+      expire(id)
+    }, ms),
+  })
+}
+
+// clearTimer cancels and forgets a toast's timer, if any.
+function clearTimer(id: number) {
+  const t = timers.get(id)
+  if (t?.timeoutId != null) clearTimeout(t.timeoutId)
+  timers.delete(id)
+}
 
 export const useToastStore = create<ToastState>((set, get) => ({
   toasts: [],
@@ -128,7 +183,7 @@ export const useToastStore = create<ToastState>((set, get) => ({
               : t,
           ),
         }))
-        if (duration > 0) setTimeout(() => get().dismiss(existing.id), duration)
+        if (duration > 0) armTimer(existing.id, duration, (i) => get().dismiss(i))
         return existing.id
       }
     }
@@ -140,7 +195,7 @@ export const useToastStore = create<ToastState>((set, get) => ({
       ],
     }))
     if (duration > 0) {
-      setTimeout(() => get().dismiss(id), duration)
+      armTimer(id, duration, (i) => get().dismiss(i))
     }
     return id
   },
@@ -151,6 +206,7 @@ export const useToastStore = create<ToastState>((set, get) => ({
   dismiss: (id, opts) => {
     const toast = get().toasts.find((t) => t.id === id)
     if (!toast || toast.exiting) return
+    clearTimer(id)
     if (!opts?.silent) toast.onDismiss?.()
     set((state) => ({
       toasts: state.toasts.map((t) => (t.id === id ? { ...t, exiting: true } : t)),
@@ -158,5 +214,23 @@ export const useToastStore = create<ToastState>((set, get) => ({
     setTimeout(() => {
       set((state) => ({ toasts: state.toasts.filter((t) => t.id !== id) }))
     }, EXIT_ANIMATION_MS)
+  },
+  pause: (id) => {
+    const t = timers.get(id)
+    if (!t || t.timeoutId == null) return // no live timer, or already paused
+    clearTimeout(t.timeoutId)
+    const remaining = Math.max(0, t.remaining - (Date.now() - t.startedAt))
+    timers.set(id, { timeoutId: null, remaining, startedAt: Date.now() })
+    set((state) => ({
+      toasts: state.toasts.map((t2) => (t2.id === id ? { ...t2, paused: true } : t2)),
+    }))
+  },
+  resume: (id) => {
+    const t = timers.get(id)
+    if (!t || t.timeoutId != null) return // no paused timer to resume
+    armTimer(id, t.remaining, (i) => get().dismiss(i))
+    set((state) => ({
+      toasts: state.toasts.map((t2) => (t2.id === id ? { ...t2, paused: false } : t2)),
+    }))
   },
 }))

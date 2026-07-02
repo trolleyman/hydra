@@ -32,7 +32,7 @@ func ValidateRef(ref string) error {
 // GetCurrentBranch returns the name of the currently checked-out branch.
 // Returns the commit hash if in detached HEAD state.
 func GetCurrentBranch(projectRoot string) (string, error) {
-	return gitOutput(projectRoot, "rev-parse", "--abbrev-ref", "HEAD")
+	return errtrace.Wrap2(gitOutput(projectRoot, "rev-parse", "--abbrev-ref", "HEAD"))
 }
 
 // ListHydraBranches returns all branches matching hydra/*.
@@ -95,7 +95,7 @@ func ResolveRef(projectRoot, ref string) (string, error) {
 	if err := ValidateRef(ref); err != nil {
 		return "", errtrace.Wrap(err)
 	}
-	return gitOutput(projectRoot, "rev-parse", ref+"^{commit}")
+	return errtrace.Wrap2(gitOutput(projectRoot, "rev-parse", ref+"^{commit}"))
 }
 
 // ShowFile returns the contents of a repo-relative path as it exists at ref

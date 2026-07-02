@@ -1,9 +1,10 @@
-import { Fragment, useCallback, useEffect, useState } from 'react'
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { X, ChevronLeft, ChevronRight, SquarePlus, SquareMinus, SquareDot } from 'lucide-react'
 import type { ImageDiffMode } from './ArtifactImageDiff'
 import { LightboxDiff } from './LightboxDiff'
 import { makeAuxOpen } from './artifactDiffShared'
+import { applyABShortcut } from '../lib/abShortcuts'
 import { ZoomPan } from './ZoomPan'
 
 export interface LightboxImage {
@@ -95,25 +96,37 @@ export function ImageLightbox({
   const [abView, setAbView] = useState<'before' | 'after'>('after')
   const [highlight, setHighlight] = useState(false)
 
-  // X/B/A/H drive a diff entry's before/after view + highlight. Held here (with the
-  // state above) so they persist across navigation; non-diff (plain image) entries
-  // ignore them. Skipped while typing in a field; plain single keys (no modifiers) so
-  // they don't clash with browser chords.
+  // Steal focus while open, restore it on close. The opener can leave focus in a
+  // keyboard-hungry widget — the terminal's hidden xterm textarea is the prime case
+  // (e.g. opening a prompt-attachment thumbnail right after typing in the terminal):
+  // every keystroke would keep feeding the shell, and the shortcut handlers below
+  // would swallow nothing/act on nothing (X/B/A/H skip fields, Esc/←/→ would both
+  // navigate AND type into the terminal). Focusing the (tabIndex -1) backdrop makes
+  // the dialog the key target for as long as it's up, like any focused modal.
+  const rootRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    rootRef.current?.focus()
+    // Restore on unmount; if the opener left the DOM meanwhile, focus() no-ops.
+    return () => opener?.focus()
+  }, [])
+
+  // X/B/A/H — the shared comparator shortcuts (see applyABShortcut) — drive a diff
+  // entry's before/after view + highlight. Held here (with the state above) so they
+  // persist across navigation; non-diff (plain image) entries ignore them.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.ctrlKey || e.metaKey || e.altKey) return
       if (!images[index]?.diff) return
-      const t = e.target as HTMLElement | null
-      if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return
-      const k = e.key.toLowerCase()
-      if (k === 'x') { e.preventDefault(); setAbView((v) => (v === 'before' ? 'after' : 'before')) }
-      else if (k === 'b') { e.preventDefault(); setAbView('before') }
-      else if (k === 'a') { e.preventDefault(); setAbView('after') }
-      else if (k === 'h') { e.preventDefault(); setHighlight((h) => !h) }
+      applyABShortcut(e, {
+        view: abView,
+        highlight,
+        onViewChange: setAbView,
+        onHighlightChange: setHighlight,
+      })
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [index, images])
+  }, [index, images, abView, highlight])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -124,6 +137,14 @@ export function ImageLightbox({
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [prev, next, onClose])
+
+  // Whether the current pointer press STARTED on the backdrop itself. Closing on
+  // backdrop click must ignore a drag that merely ENDS there — panning a zoomed
+  // image (or dragging the diff slider) and releasing past the image's edge makes
+  // the browser fire the trailing click on the press/release common ancestor, i.e.
+  // the backdrop. Tracked in the capture phase so a child's stopPropagation (the
+  // zoomed pan handler suspends inner gestures that way) can't hide the press.
+  const pressOnBackdrop = useRef(false)
 
   const current = images[index]
   if (!current) return null
@@ -175,10 +196,17 @@ export function ImageLightbox({
       // z-[100] keeps the lightbox BELOW the approval toasts (z-[110]): a passive
       // image viewer must not hide an incoming security-gate approval. Focused
       // modal dialogs sit above the toasts instead (z-[120]).
-      className="fixed inset-0 z-[100] overflow-hidden flex items-center justify-center bg-black/70 backdrop-blur-md animate-in fade-in duration-150"
-      onClick={onClose}
+      className="fixed inset-0 z-[100] overflow-hidden flex items-center justify-center bg-black/70 backdrop-blur-md animate-in fade-in duration-150 outline-none"
+      onPointerDownCapture={(e) => { pressOnBackdrop.current = e.target === e.currentTarget }}
+      // Close only when the press and the click BOTH land on the backdrop — see
+      // pressOnBackdrop above for why a click alone isn't enough.
+      onClick={(e) => { if (pressOnBackdrop.current && e.target === e.currentTarget) onClose() }}
       role="dialog"
       aria-modal="true"
+      // Click-focusable (not tabbable) so the focus-steal above can land here, and
+      // so a click inside keeps the dialog — not the page behind it — the key target.
+      tabIndex={-1}
+      ref={rootRef}
     >
       {/* Close button */}
       <button

@@ -18,6 +18,7 @@
 pre_prompt = """
 - Use bun instead of npm, and bun x instead of npx
 - Check using mage build before committing
+- Run `mage tidy` before committing Go changes and fix any warnings it reports
 - After changing web code, run `cd web && bun run lint` (eslint) and fix the errors AND warnings you introduced
 - After changing Go code, run `go test ./...` and make sure it passes
 """
@@ -68,7 +69,7 @@ restore_ro = ["~/.config/go"]
 mode = "unrestricted"
 
 ## with mode = "hard", fail closed (block all egress) when the inescapable boundary can't be built, instead of degrading to advisory filtering (default false).
-# strict = false
+strict = true
 
 ## LEGACY (use mode): allow outbound network access from the sandbox. Honoured only when mode is unset.
 # enabled = true
@@ -99,9 +100,12 @@ mode = "unrestricted"
 # webfetch_allow_hosts = []
 
 ## Claude-specific overrides: any of the settings above, applied only to claude agents.
-# [claude]
+[claude]
 ## enable Claude Code's fullscreen (alternate-screen) rendering — flicker-free, but it takes over the terminal and captures the mouse; off (the default) keeps this terminal's native scrollbar and select-to-copy.
 # fullscreen = false
+
+[claude.policy]
+webfetch_allow_hosts = ["code.claude.com"]
 
 ## Gemini-specific overrides: any of the settings above, applied only to gemini agents.
 # [gemini]
@@ -213,8 +217,12 @@ timeout_sec = 900
 # The whole module is slow, so allow a generous timeout. (web/dist is kept present
 # in every checkout via a committed web/dist/.gitkeep, so the //go:embed all:dist in
 # web/embed.go compiles without building the frontend.)
+# Once the tests pass, errtrace-report (read-only errtrace -l — safe against a
+# head's live worktree) surfaces what `mage tidy` would still change — unwrapped
+# error returns and unused //errtrace:skip directives — as informational ⚠
+# warnings on the same verdict; they never gate the merge.
 name = "go"
-command = "go tool gotestsum --junitfile \"$HYDRA_TEST_OUTPUT/go.xml\" -- ./..."
+command = "go tool gotestsum --junitfile \"$HYDRA_TEST_OUTPUT/go.xml\" -- ./... && go run ./scripts/errtrace-report"
 timeout_sec = 900
 
 [[tests]]

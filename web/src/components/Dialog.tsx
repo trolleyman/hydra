@@ -3,6 +3,7 @@ import { AlertCircle, AlertTriangle, ArrowRight, Info, HelpCircle, Merge, Trash2
 import { useDialogStore } from '../stores/dialogStore'
 import { IconButton } from './IconButton'
 import { DialogIconTile, DialogCancelButton, DialogConfirmButton, type DialogTone } from './dialogPrimitives'
+import { BranchPill } from './BranchPill'
 import type { DialogDetails } from '../stores/dialogStore'
 
 export const Dialog: React.FC = () => {
@@ -357,16 +358,6 @@ function MergeDetails({ details }: { details?: DialogDetails }) {
       />
       {details?.note && <CautionNote note={details.note} />}
     </>
-  )
-}
-
-// A branch name rendered as an inline mono pill, the way the update-from-base
-// dialog embeds branch names mid-sentence.
-function BranchPill({ children }: { children: ReactNode }) {
-  return (
-    <span className="inline-flex items-center rounded-md bg-gray-100 dark:bg-gray-700/60 border border-gray-200 dark:border-gray-600 px-1.5 py-px font-mono text-[0.9em] text-gray-700 dark:text-gray-200 align-baseline">
-      {children}
-    </span>
   )
 }
 

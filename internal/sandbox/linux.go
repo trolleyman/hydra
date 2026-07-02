@@ -81,7 +81,7 @@ func trimOutput(b []byte) string {
 // locations, optional network isolation and a seccomp syscall filter.
 func BuildSpec(opts Options) (*Spec, error) {
 	if opts.NoSandbox {
-		return rawSpec(opts)
+		return errtrace.Wrap2(rawSpec(opts))
 	}
 
 	bwrap, err := bwrapPath()

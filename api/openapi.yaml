@@ -1542,6 +1542,57 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /api/projects/{project_id}/repository/commit:
+    post:
+      summary: Commit the given uncommitted paths in the project root
+      description: >-
+        Stages exactly the requested paths (tracked and untracked) and commits
+        them with the given message; other dirty paths are left untouched.
+        Backs the sidebar's uncommitted-changes warning, whose main job is
+        sweeping up config edits the web UI itself writes to
+        .hydra/config.toml — the UI sends the paths it showed the user.
+        Requested paths that are no longer dirty are skipped. Returns the
+        refreshed push status.
+      operationId: commitRepository
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            type: string
+          description: Project ID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CommitRepositoryRequest'
+      responses:
+        '200':
+          description: OK (changes committed)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RepositoryPushStatus'
+        '400':
+          description: Bad Request (no paths given, none still dirty, or empty message)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Project Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error (e.g. the commit itself failed)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /api/projects/{project_id}/repository/artifacts:
     get:
       summary: List the artifact scripts configured at a ref
@@ -2267,7 +2318,7 @@ components:
 
     RepositoryPushStatus:
       type: object
-      required: [can_push, ahead, behind, has_remote]
+      required: [can_push, ahead, behind, has_remote, uncommitted]
       properties:
         branch:
           type: string
@@ -2292,6 +2343,53 @@ components:
         can_push:
           type: boolean
           description: True if there is a branch, a remote, and at least one commit to push
+        uncommitted:
+          $ref: '#/components/schemas/RepositoryUncommittedChanges'
+
+    RepositoryUncommittedChanges:
+      type: object
+      required: [total, files]
+      description: >-
+        Uncommitted changes in the project root's working tree. Drives the
+        sidebar warning that config edits (e.g. the web UI writing
+        .hydra/config.toml) are sitting uncommitted.
+      properties:
+        total:
+          type: integer
+          description: Total number of uncommitted paths (tracked changes + untracked files)
+        files:
+          type: array
+          items:
+            $ref: '#/components/schemas/RepositoryUncommittedFile'
+          description: >-
+            The uncommitted paths in git's status order, truncated to the first
+            20 when total exceeds that.
+
+    RepositoryUncommittedFile:
+      type: object
+      required: [path, status]
+      properties:
+        path:
+          type: string
+          description: Repo-relative path of the uncommitted file
+        status:
+          type: string
+          description: One of modified|added|deleted|renamed|copied|conflicted|untracked
+
+    CommitRepositoryRequest:
+      type: object
+      required: [message, paths]
+      properties:
+        message:
+          type: string
+          description: The commit message; must be non-blank
+        paths:
+          type: array
+          items:
+            type: string
+          description: >-
+            Repo-relative paths to commit, as reported by the push-status
+            uncommitted file list; must be non-empty
 
     RepositoryArtifactScript:
       type: object

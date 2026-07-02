@@ -1128,7 +1128,7 @@ func runPreExitScript(ctx context.Context, head Head, endState string) {
 	defer spec.Cleanup()
 
 	log.Printf("heads: running pre_exit_script for agent %s (end_state=%q)", head.ID, endState)
-	cmd := exec.CommandContext(runCtx, spec.Path, spec.Args[1:]...) //errtrace:skip
+	cmd := exec.CommandContext(runCtx, spec.Path, spec.Args[1:]...)
 	cmd.Dir = spec.Dir
 	cmd.Env = spec.Env
 	cmd.ExtraFiles = spec.ExtraFiles

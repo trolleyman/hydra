@@ -33,7 +33,7 @@ func Available() (bool, string) {
 // sandbox-demo/macos/sandbox.sb.
 func BuildSpec(opts Options) (*Spec, error) {
 	if opts.NoSandbox {
-		return rawSpec(opts)
+		return errtrace.Wrap2(rawSpec(opts))
 	}
 
 	sandboxExec, err := exec.LookPath("sandbox-exec")

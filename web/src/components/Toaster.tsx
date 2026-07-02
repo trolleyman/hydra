@@ -1,12 +1,23 @@
 import React from 'react'
 import { useNavigate } from '@tanstack/react-router'
-import { CheckCircle, AlertCircle, AlertTriangle, Info, Bot, X } from 'lucide-react'
+import { CheckCircle, AlertCircle, AlertTriangle, Info, Bot, Clock, X } from 'lucide-react'
 import { useToastStore, type Toast, type ToastType } from '../stores/toastStore'
 import { useProjectStore } from '../stores/projectStore'
 import { IconButton } from './IconButton'
 import { ApprovalCard } from './ApprovalToast'
 import { Badge } from './Badge'
+import { BranchPill } from './BranchPill'
 import { agentStatusBadge } from '../lib/agentDisplay'
+
+// withBranchPills renders toast copy with `backtick` spans as inline mono pills
+// (branch names — "Synced with `origin/main`", "merged into `main`"), matching
+// how the dialogs embed branch names mid-sentence. Unpaired backticks stay
+// literal; text without backticks passes through untouched.
+function withBranchPills(text: string): React.ReactNode {
+  const parts = text.split(/`([^`]*)`/) // odd indices are the quoted spans
+  if (parts.length === 1) return text
+  return parts.map((part, i) => (i % 2 === 1 ? <BranchPill key={i}>{part}</BranchPill> : part))
+}
 
 // Per-type visual identity: the icon and its tinted rounded square, mirroring the
 // approval card's kind icon so the two toast styles read as one family.
@@ -53,11 +64,18 @@ const ToastItem: React.FC<{ toast: Toast; onDismiss: () => void }> = ({ toast, o
 
   const { Icon, wrap, bar } = TYPE_VISUAL[toast.type] ?? TYPE_VISUAL.info
 
-  // Agent status transitions render as "<bot> <agent> transitioned to <status>",
-  // the agent label linking through to the agent (so there's no View button).
+  // Agent status transitions (and the merge-lifecycle toasts reusing the same
+  // card) render as "<bot> <agent> <before> <status pill> <after>", the agent
+  // label linking through to the agent (so there's no View button).
   if (toast.agentTransition) {
     const t = toast.agentTransition
-    const badge = agentStatusBadge(t.status)
+    const badge = t.status ? agentStatusBadge(t.status) : undefined
+    const before = t.before ?? 'transitioned to'
+    // The queued-merge toast swaps the bot tile for the app's "merge queued"
+    // identity — the emerald Clock of the armed pill / queue-merge button.
+    const tile = t.icon === 'merge-queued'
+      ? { Icon: Clock, wrap: 'bg-emerald-50 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-300', bar: 'bg-emerald-500' }
+      : { Icon: Bot, wrap, bar }
     const openAgent = () => {
       // Match a cross-project View: select the project (a no-op for the current
       // one) before routing, then tear the toast down.
@@ -74,8 +92,8 @@ const ToastItem: React.FC<{ toast: Toast; onDismiss: () => void }> = ({ toast, o
       >
         <div className="p-4">
           <div className="flex items-start gap-3">
-            <div className={`shrink-0 w-9 h-9 rounded-xl flex items-center justify-center ${wrap}`}>
-              <Bot className="w-[18px] h-[18px]" />
+            <div className={`shrink-0 w-9 h-9 rounded-xl flex items-center justify-center ${tile.wrap}`}>
+              <tile.Icon className="w-[18px] h-[18px]" />
             </div>
             <div className="min-w-0 flex-1">
               <button
@@ -87,8 +105,9 @@ const ToastItem: React.FC<{ toast: Toast; onDismiss: () => void }> = ({ toast, o
                 {t.agentName}
               </button>
               <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[13px] text-gray-500 dark:text-gray-400">
-                <span>transitioned to</span>
-                <Badge variant="sm" className={badge.className}>{badge.label}</Badge>
+                {before && <span>{withBranchPills(before)}</span>}
+                {badge && <Badge variant="sm" className={badge.className}>{badge.label}</Badge>}
+                {t.after && <span>{withBranchPills(t.after)}</span>}
                 {t.projectName && <span className="text-gray-400 dark:text-gray-500">· {t.projectName}</span>}
               </div>
             </div>
@@ -99,8 +118,8 @@ const ToastItem: React.FC<{ toast: Toast; onDismiss: () => void }> = ({ toast, o
         </div>
         {showCountdown && (
           <div
-            className={`toast-progress-bar absolute bottom-0 left-0 h-0.5 w-full opacity-60 ${bar}`}
-            style={{ animationDuration: `${toast.duration}ms` }}
+            className={`toast-progress-bar absolute bottom-0 left-0 h-0.5 w-full opacity-60 ${tile.bar}`}
+            style={{ animationDuration: `${toast.duration}ms`, animationPlayState: toast.paused ? 'paused' : 'running' }}
           />
         )}
       </div>
@@ -119,7 +138,7 @@ const ToastItem: React.FC<{ toast: Toast; onDismiss: () => void }> = ({ toast, o
           <div className={`shrink-0 w-9 h-9 rounded-xl flex items-center justify-center ${wrap}`}>
             <Icon className="w-[18px] h-[18px]" />
           </div>
-          <p className="min-w-0 flex-1 self-center text-sm text-gray-700 dark:text-gray-200 leading-relaxed">{toast.message}</p>
+          <p className="min-w-0 flex-1 self-center text-sm text-gray-700 dark:text-gray-200 leading-relaxed">{withBranchPills(toast.message)}</p>
           <IconButton onClick={onDismiss}>
             <X className="w-4 h-4" />
           </IconButton>
@@ -141,7 +160,7 @@ const ToastItem: React.FC<{ toast: Toast; onDismiss: () => void }> = ({ toast, o
       {showCountdown && (
         <div
           className={`toast-progress-bar absolute bottom-0 left-0 h-0.5 w-full opacity-60 ${bar}`}
-          style={{ animationDuration: `${toast.duration}ms` }}
+          style={{ animationDuration: `${toast.duration}ms`, animationPlayState: toast.paused ? 'paused' : 'running' }}
         />
       )}
     </div>
@@ -149,7 +168,7 @@ const ToastItem: React.FC<{ toast: Toast; onDismiss: () => void }> = ({ toast, o
 }
 
 export const Toaster: React.FC = () => {
-  const { toasts, dismiss } = useToastStore()
+  const { toasts, dismiss, pause, resume } = useToastStore()
 
   if (toasts.length === 0) return null
 
@@ -159,7 +178,16 @@ export const Toaster: React.FC = () => {
     // merge/kill confirmation, which must be visible over the toasts).
     <div className="fixed bottom-4 right-4 z-[110] flex flex-col gap-2 items-end">
       {toasts.map((toast) => (
-        <ToastItem key={toast.id} toast={toast} onDismiss={() => dismiss(toast.id)} />
+        // A transparent wrapper carries the hover handlers so every toast variant
+        // (plain / transition / approval card) pauses uniformly — hovering freezes
+        // the auto-dismiss timer and countdown bar until the pointer leaves.
+        <div
+          key={toast.id}
+          onMouseEnter={() => pause(toast.id)}
+          onMouseLeave={() => resume(toast.id)}
+        >
+          <ToastItem toast={toast} onDismiss={() => dismiss(toast.id)} />
+        </div>
       ))}
     </div>
   )

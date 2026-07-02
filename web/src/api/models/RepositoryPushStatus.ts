@@ -2,6 +2,7 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
+import type { RepositoryUncommittedChanges } from './RepositoryUncommittedChanges';
 export type RepositoryPushStatus = {
     /**
      * The repository's current branch, or null when HEAD is detached
@@ -27,5 +28,6 @@ export type RepositoryPushStatus = {
      * True if there is a branch, a remote, and at least one commit to push
      */
     can_push: boolean;
+    uncommitted: RepositoryUncommittedChanges;
 };
 

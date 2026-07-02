@@ -31,7 +31,7 @@ func unixHTTPClient(sock string) *http.Client {
 		Transport: &http.Transport{
 			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 				var d net.Dialer
-				return d.DialContext(ctx, "unix", sock)
+				return errtrace.Wrap2(d.DialContext(ctx, "unix", sock))
 			},
 		},
 		Timeout: 60 * time.Second,
@@ -178,7 +178,7 @@ func (c *Client) SetAgentBaseBranch(ctx context.Context, id, baseBranch string) 
 func (c *Client) DialTerminal(id string, shell bool) (*websocket.Conn, error) {
 	dialer := &websocket.Dialer{
 		NetDial: func(_, _ string) (net.Conn, error) {
-			return net.Dial("unix", c.sock)
+			return errtrace.Wrap2(net.Dial("unix", c.sock))
 		},
 		HandshakeTimeout: 10 * time.Second,
 	}

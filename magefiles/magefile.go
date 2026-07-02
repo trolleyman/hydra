@@ -4,6 +4,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"log"
@@ -23,6 +24,8 @@ import (
 	"github.com/trolleyman/hydra/internal/config"
 	"github.com/trolleyman/hydra/internal/git"
 	"github.com/trolleyman/hydra/internal/paths"
+	"github.com/trolleyman/hydra/internal/service"
+	"github.com/trolleyman/hydra/internal/tools"
 )
 
 // getVersion returns the version from git describe.
@@ -377,33 +380,10 @@ func Tidy() error {
 		return errtrace.Wrap(err)
 	}
 
-	// Collect all .go files except .gen.go files, including magefiles/magefile.go
-	// (which is excluded from ./... due to its build tag).
-	skipDirs := map[string]struct{}{
-		".git": {}, "vendor": {}, "node_modules": {}, ".mage": {}, ".hydra": {},
-	}
-	var goFiles []string
-	err = filepath.Walk(".", func(path string, info os.FileInfo, walkErr error) error {
-		if walkErr != nil {
-			return errtrace.Wrap(walkErr)
-		}
-		if info.IsDir() {
-			if _, skip := skipDirs[info.Name()]; skip {
-				return filepath.SkipDir //errtrace:skip // This error must be filepath.SkipDir, not wrapped.
-			}
-			return nil
-		}
-		if strings.HasSuffix(path, ".go") && !strings.HasSuffix(path, ".gen.go") {
-			goFiles = append(goFiles, path)
-		}
-		return nil
-	})
-	if err != nil {
-		return errtrace.Wrap(err)
-	}
-
-	args := append([]string{"run", "braces.dev/errtrace/cmd/errtrace@latest", "-w"}, goFiles...)
-	return errtrace.Wrap(runV("go", args...))
+	// errtrace-report owns the file list (all .go files except .gen.go, including
+	// magefiles/) and runs the go.mod-pinned errtrace tool; the "go" [[tests]]
+	// runner uses the same script read-only to surface leftovers as warnings.
+	return errtrace.Wrap(runV("go", "run", "./scripts/errtrace-report", "-w"))
 }
 
 func addGoBuildDeps() {
@@ -448,7 +428,90 @@ func GenSeccomp() error {
 	return nil
 }
 
+// Tools groups commands for the bundled host-side sandbox helper binaries.
+type Tools mg.Namespace
+
+// Ensure provisions the bundled sandbox helper binaries into .hydra/tools/bin if
+// they're missing: pasta (+ its AVX2 sibling) is downloaded from passt.top, and
+// bwrap is built from its pinned source release. bwrap has no official prebuilt
+// binary, so this needs a C toolchain (meson/ninja/cc/libcap); without it bwrap
+// is skipped gracefully and the system bwrap is used. Run it to provision
+// everything up front; the dev/serve targets only auto-provision pasta (fast, no
+// build) via ensureToolsEnv.
+//
+//	mage tools:ensure
+func (Tools) Ensure() error {
+	projectRoot, err := paths.GetProjectRootFromCwd()
+	if err != nil {
+		return errtrace.Wrap(err)
+	}
+	res, err := tools.Provision(context.Background(), projectRoot, tools.Options{Bwrap: true})
+	if err != nil {
+		return errtrace.Wrap(err)
+	}
+	reportTools(projectRoot, res)
+	return nil
+}
+
+// Update re-checks upstream and re-downloads pasta when its build changed (by
+// Last-Modified/size) and rebuilds bwrap against the pinned source release —
+// unlike Ensure, which only fetches/builds what's missing.
+//
+//	mage tools:update
+func (Tools) Update() error {
+	projectRoot, err := paths.GetProjectRootFromCwd()
+	if err != nil {
+		return errtrace.Wrap(err)
+	}
+	res, err := tools.Provision(context.Background(), projectRoot, tools.Options{Force: true, Bwrap: true})
+	if err != nil {
+		return errtrace.Wrap(err)
+	}
+	reportTools(projectRoot, res)
+	return nil
+}
+
+// reportTools prints a Provision result.
+func reportTools(projectRoot string, res tools.Result) {
+	if !res.Available {
+		fmt.Printf("%stools: bundling not available on %s/%s — hydra will use a system pasta%s\n",
+			colorYellow, runtime.GOOS, runtime.GOARCH, colorReset)
+		return
+	}
+	for _, a := range res.Actions {
+		fmt.Printf("%s✓%s %s\n", colorGreen, colorReset, a)
+	}
+	fmt.Printf("bundled tools in %s\n", displayPath(tools.Dir(projectRoot)))
+}
+
+// ensureToolsEnv provisions the bundled sandbox helpers if missing and points the
+// HYDRA_* env overrides at them for the hydra server this target is about to
+// launch — but only when the user hasn't already set those vars, so an explicit
+// override always wins. It provisions only pasta (a fast download); bwrap is a
+// source build reserved for the explicit `mage tools:ensure`, and any already-
+// built bwrap is still picked up via tools.Env. Provisioning failures are
+// non-fatal: hydra falls back to system tools, so dev/serve still runs.
+func ensureToolsEnv() {
+	projectRoot, err := paths.GetProjectRootFromCwd()
+	if err != nil {
+		log.Printf("tools: skipping provisioning (%v); using system tools", err)
+		return
+	}
+	if res, err := tools.Provision(context.Background(), projectRoot, tools.Options{}); err != nil {
+		log.Printf("tools: provisioning failed (%v); using system tools", err)
+	} else {
+		for _, a := range res.Actions {
+			fmt.Printf("%stools:%s %s\n", colorDim, colorReset, a)
+		}
+	}
+	for k, v := range tools.Env(projectRoot, os.Getenv) {
+		os.Setenv(k, v)
+		fmt.Printf("%stools:%s %s=%s\n", colorDim, colorReset, k, displayPath(v))
+	}
+}
+
 func Run() error {
+	ensureToolsEnv()
 	addGoBuildDeps()
 	args := append([]string{"run"}, goBuildTags(false)...)
 	args = append(args, "./", "server")
@@ -619,6 +682,105 @@ func (Deploy) Ngrok() error {
 	return nil
 }
 
+// Service installs Hydra as a systemd --user service that serves the web UI on
+// 0.0.0.0 (auth-key gated, like `mage prod`) and restarts on failure, so a
+// project's server comes up on login/boot without a terminal. Linux/systemd only.
+//
+// It (1) builds a full binary with the frontend embedded and installs it to
+// ~/.local/bin/hydra, (2) provisions the bundled sandbox tools so hard egress
+// works headless, and (3) writes ~/.config/systemd/user/hydra.service pinned to
+// this project, the exposed port, and the resolved HYDRA_* + PATH environment. It
+// does NOT enable or start the unit — it prints the one-liners — so nothing comes
+// up behind your back. Re-run it to refresh the binary, tools, and unit.
+//
+//	mage deploy:service
+func (Deploy) Service() error {
+	if runtime.GOOS != "linux" {
+		return errtrace.Wrap(fmt.Errorf("deploy:service is Linux/systemd only for now (this is %s); use `mage prod` in the foreground", runtime.GOOS))
+	}
+	projectRoot, err := paths.GetProjectRootFromCwd()
+	if err != nil {
+		return errtrace.Wrap(err)
+	}
+	// Exposing to the network always requires a password, same as Prod.
+	if err := requireAuthKey(); err != nil {
+		return errtrace.Wrap(err)
+	}
+
+	// Bundle pasta (and build bwrap) so hard egress works under the headless
+	// service too — a service can't fall back to a nice shell env.
+	if res, err := tools.Provision(context.Background(), projectRoot, tools.Options{Bwrap: true}); err != nil {
+		fmt.Printf("%stools: provisioning failed (%v); the service will fall back to a system pasta%s\n", colorYellow, err, colorReset)
+	} else {
+		reportTools(projectRoot, res)
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return errtrace.Wrap(err)
+	}
+
+	// Build a full production binary (frontend embedded) and install it to a
+	// stable path the unit can point at.
+	if err := BuildWeb(); err != nil {
+		return errtrace.Wrap(err)
+	}
+	binPath := filepath.Join(home, ".local", "bin", "hydra")
+	if err := os.MkdirAll(filepath.Dir(binPath), 0o755); err != nil {
+		return errtrace.Wrap(err)
+	}
+	buildArgs := append([]string{"build"}, goBuildTags(false)...)
+	buildArgs = append(buildArgs, "-o", binPath, "./")
+	if err := runV("go", buildArgs...); err != nil {
+		return errtrace.Wrap(err)
+	}
+
+	// Assemble the unit environment: exposed bind, the bundled/overridden sandbox
+	// tools, and the installing shell's PATH (systemd --user starts with a minimal
+	// PATH, so without this agents wouldn't find git/claude/node/mise).
+	env := map[string]string{"HYDRA_API_ADDR": exposedAPIAddr()}
+	for k, v := range tools.Env(projectRoot, os.Getenv) { // bundled tools, if the user hasn't overridden them
+		env[k] = v
+	}
+	if pasta := os.Getenv("HYDRA_PASTA"); pasta != "" {
+		env["HYDRA_PASTA"] = pasta
+	}
+	if bwrap := os.Getenv("HYDRA_BWRAP"); bwrap != "" {
+		env["HYDRA_BWRAP"] = bwrap
+	}
+	if path := os.Getenv("PATH"); path != "" {
+		env["PATH"] = path
+	}
+
+	unit := service.RenderSystemdUnit(service.UnitOpts{
+		ProjectRoot: projectRoot,
+		BinPath:     binPath,
+		Description: filepath.Base(projectRoot),
+		Env:         env,
+	})
+	unitPath := filepath.Join(home, ".config", "systemd", "user", "hydra.service")
+	if err := os.MkdirAll(filepath.Dir(unitPath), 0o755); err != nil {
+		return errtrace.Wrap(err)
+	}
+	if err := os.WriteFile(unitPath, []byte(unit), 0o644); err != nil {
+		return errtrace.Wrap(err)
+	}
+
+	fmt.Printf("\n%s✓ Installed %s%s\n", colorGreen, displayPath(binPath), colorReset)
+	fmt.Printf("%s✓ Wrote %s%s\n", colorGreen, displayPath(unitPath), colorReset)
+	fmt.Printf("\n%sServing %s on %s (auth key required).%s\n", colorBold, filepath.Base(projectRoot), exposedAPIAddr(), colorReset)
+	fmt.Println("\nEnable it (nothing is running yet):")
+	fmt.Printf("  %ssystemctl --user daemon-reload%s\n", colorBold, colorReset)
+	fmt.Printf("  %ssystemctl --user enable --now hydra%s\n", colorBold, colorReset)
+	fmt.Println("\nTo keep it running after you log out / across reboots without a login:")
+	fmt.Printf("  %sloginctl enable-linger %s%s\n", colorBold, os.Getenv("USER"), colorReset)
+	fmt.Println("\nLogs / control:")
+	fmt.Printf("  %sjournalctl --user -u hydra -f%s\n", colorBold, colorReset)
+	fmt.Printf("  %ssystemctl --user restart hydra%s   (also picks up a re-run of this target)\n", colorBold, colorReset)
+	fmt.Printf("\n%sNote:%s the service takes over any daemon started ad-hoc by the CLI for this project.\n", colorYellow, colorReset)
+	return nil
+}
+
 // gitUserEmail returns the configured git user.email for the project (best
 // effort), used as a sensible default for the ngrok allowed-email prompt. Empty
 // if git isn't configured or available.
@@ -676,6 +838,7 @@ func Prod() error {
 	if err := requireAuthKey(); err != nil {
 		return errtrace.Wrap(err)
 	}
+	ensureToolsEnv()
 	addGoBuildDeps()
 	addr := exposedAPIAddr()
 	os.Setenv("HYDRA_API_ADDR", addr)
@@ -689,8 +852,8 @@ func Prod() error {
 // holds a secret). The repo's root .gitignore already lists it; this keeps the
 // setup self-sufficient should that entry ever be missing.
 func ensureDeployGitignored(projectRoot string) error {
-	return ensureGitignored(projectRoot, "/.hydra/deploy.toml",
-		"# Hydra remote-access auth key (secret; generated by `mage deploy:setup`)")
+	return errtrace.Wrap(ensureGitignored(projectRoot, "/.hydra/deploy.toml",
+		"# Hydra remote-access auth key (secret; generated by `mage deploy:setup`)"))
 }
 
 // ensureGitignored appends entry (preceded by comment) to the project's
@@ -890,6 +1053,7 @@ func getHydraOutputFile() string {
 // Use the UI restart button to trigger a full rebuild and restart.
 // For auto-reload on file changes use DevAutoReload instead.
 func Dev() error {
+	ensureToolsEnv()
 	os.Setenv("HYDRA_DEV_BUILD", "1")
 	return errtrace.Wrap(devServerLoop([]string{"HYDRA_API_ADDR=localhost:" + hydraPort()}))
 }
@@ -903,6 +1067,7 @@ func DevExpose() error {
 	if err := requireAuthKey(); err != nil {
 		return errtrace.Wrap(err)
 	}
+	ensureToolsEnv()
 	os.Setenv("HYDRA_DEV_BUILD", "1")
 	addr := exposedAPIAddr()
 	fmt.Printf("%sDev server exposed on http://%s — reachable from other devices; auth key required%s\n", colorBold, addr, colorReset)
@@ -957,6 +1122,7 @@ func devServerLoop(extraEnv []string) error {
 // BuildWeb is still called to keep the generated TS API client (web/src/api/) in sync;
 // it uses stamp-based caching so it is a no-op when neither web/ nor api/ have changed.
 func DevFast() error {
+	ensureToolsEnv()
 	os.Setenv("HYDRA_DEV_BUILD", "1")
 	if err := GenerateGo(); err != nil {
 		return errtrace.Wrap(err)

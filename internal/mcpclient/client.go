@@ -34,7 +34,7 @@ type ToolInfo struct {
 // via the MCP stdio handshake. The whole exchange is bounded by ctx; the process
 // is killed when ctx ends or the handshake completes.
 func ListTools(ctx context.Context, command string, args, env []string) ([]ToolInfo, error) {
-	cmd := exec.CommandContext(ctx, command, args...) //errtrace:skip
+	cmd := exec.CommandContext(ctx, command, args...)
 	if env != nil {
 		cmd.Env = env
 	}
