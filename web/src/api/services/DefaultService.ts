@@ -250,6 +250,7 @@ export class DefaultService {
             errors: {
                 400: `Bad Request`,
                 404: `Project Not Found`,
+                409: `Conflict (a head with this ID already exists — active, archived, or in another project)`,
                 500: `Internal Server Error`,
             },
         });

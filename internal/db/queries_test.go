@@ -1,6 +1,7 @@
 package db
 
 import (
+	"errors"
 	"testing"
 )
 
@@ -212,4 +213,49 @@ func mustList(t *testing.T, store *Store, root string) []Agent {
 		t.Fatal(err)
 	}
 	return rows
+}
+
+func TestCreateAgentRefusesTakenID(t *testing.T) {
+	store := newTestStore(t)
+
+	if err := store.CreateAgent(&Agent{ID: "head", ProjectPath: "/tmp/proj-a", AgentType: "claude"}); err != nil {
+		t.Fatalf("first create: %v", err)
+	}
+
+	// Same ID from another project must NOT steal the record (the ID is a
+	// global primary key across every project in the shared DB).
+	err := store.CreateAgent(&Agent{ID: "head", ProjectPath: "/tmp/proj-b", AgentType: "claude"})
+	if !errors.Is(err, ErrAgentIDTaken) {
+		t.Fatalf("cross-project create: got %v, want ErrAgentIDTaken", err)
+	}
+	if a, err := store.GetAgent("head"); err != nil || a == nil || a.ProjectPath != "/tmp/proj-a" {
+		t.Fatalf("original record was disturbed: (%+v, %v)", a, err)
+	}
+
+	// An archived (soft-deleted) record still holds the ID.
+	if err := store.ArchiveAgent("head", "killed"); err != nil {
+		t.Fatal(err)
+	}
+	err = store.CreateAgent(&Agent{ID: "head", ProjectPath: "/tmp/proj-a", AgentType: "claude"})
+	if !errors.Is(err, ErrAgentIDTaken) {
+		t.Fatalf("archived-collision create: got %v, want ErrAgentIDTaken", err)
+	}
+}
+
+func TestGetAgentAny(t *testing.T) {
+	store := newTestStore(t)
+
+	if a, err := store.GetAgentAny("missing"); err != nil || a != nil {
+		t.Fatalf("missing: got (%+v, %v), want (nil, nil)", a, err)
+	}
+
+	mustArchive(t, store, &Agent{ID: "head", ProjectPath: "/tmp/proj", AgentType: "claude"}, "killed")
+	// Archived rows are invisible to GetAgent but must be visible to GetAgentAny.
+	if a, err := store.GetAgent("head"); err != nil || a != nil {
+		t.Fatalf("GetAgent should not see archived rows: (%+v, %v)", a, err)
+	}
+	a, err := store.GetAgentAny("head")
+	if err != nil || a == nil || !a.DeletedAt.Valid {
+		t.Fatalf("GetAgentAny: got (%+v, %v), want archived record", a, err)
+	}
 }

@@ -3,6 +3,7 @@ package db
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"braces.dev/errtrace"
@@ -11,6 +12,10 @@ import (
 
 // ErrOperationInProgress is returned when a TrySetHeadStatus CAS fails.
 var ErrOperationInProgress = errors.New("operation already in progress")
+
+// ErrAgentIDTaken is returned by CreateAgent when a record with the same ID —
+// active or archived, in any project — already exists.
+var ErrAgentIDTaken = errors.New("agent ID already taken")
 
 // reader returns the query-only read pool used by the read methods below, so
 // concurrent reads don't serialise behind the single writer connection. Falls
@@ -27,6 +32,35 @@ func (s *Store) reader() *gorm.DB {
 func (s *Store) UpsertAgent(a *Agent) error {
 	result := s.db.Unscoped().Save(a)
 	return errtrace.Wrap(result.Error)
+}
+
+// CreateAgent inserts a new agent record, never overwriting an existing one.
+// Returns ErrAgentIDTaken when a record with the same ID already exists — the
+// ID is a global primary key shared by every project, so this also guards a
+// spawn in one project from clobbering a same-ID head in another. The unique
+// constraint (not a pre-read) is what detects the clash, so concurrent spawns
+// racing on the same ID resolve safely.
+func (s *Store) CreateAgent(a *Agent) error {
+	err := s.db.Create(a).Error
+	if err != nil && (errors.Is(err, gorm.ErrDuplicatedKey) || strings.Contains(err.Error(), "UNIQUE constraint failed")) {
+		return errtrace.Wrap(fmt.Errorf("%w: %q", ErrAgentIDTaken, a.ID))
+	}
+	return errtrace.Wrap(err)
+}
+
+// GetAgentAny returns the agent with the given ID regardless of project or
+// archival state (soft-deleted rows included), or nil if no such record exists.
+// Spawn uses it to detect ID collisions across the whole shared database.
+func (s *Store) GetAgentAny(id string) (*Agent, error) {
+	var a Agent
+	err := s.reader().Unscoped().First(&a, "id = ?", id).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	return &a, nil
 }
 
 // ImportIfAbsent inserts an agent record only when no record with that ID exists.

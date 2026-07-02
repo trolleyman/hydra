@@ -21,31 +21,6 @@ type AgentTypeOption = 'claude' | 'gemini' | 'copilot' | 'codex'
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/i.test(navigator.platform)
 
-function slugify(text: string, maxLength = 40, allowTrailingHyphen = false): string {
-  let slug = text
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9\s-]/g, '')
-    .replace(/\s+/g, '-')
-    .replace(/-+/g, '-')
-
-  if (slug.length > maxLength) {
-    const lastHyphen = slug.lastIndexOf('-', maxLength)
-    if (lastHyphen > 0) {
-      slug = slug.slice(0, lastHyphen)
-    } else {
-      slug = slug.slice(0, maxLength)
-    }
-  }
-
-  return allowTrailingHyphen ? slug : slug.replace(/-$/, '')
-}
-
-function generateId(prompt: string): string {
-  const words = prompt.trim().split(/\s+/).slice(0, 8).join(' ')
-  return slugify(words)
-}
-
 // Selectable agent types with their display label. The AgentTypeOption ids line
 // up with AgentTypeIcon's names, so the icon and its brand accent colour
 // (AGENT_ACCENT) can both be rendered directly from the id.
@@ -631,9 +606,8 @@ export function SpawnForm({
       const req: SpawnAgentRequest = {
         prompt: finalPrompt,
         agent_type: agentType,
-        // The id is auto-derived from the prompt (the manual id field was removed
-        // from the footer to declutter it).
-        id: generateId(base) || generateId(readyAttachments[0]?.filename ?? '') || 'attachment',
+        // No id: the server derives one from the prompt and uniquifies it, so a
+        // repeated prompt can never collide with an existing head.
         ...(model ? { model } : {}),
         ...(baseBranch ? { base_branch: baseBranch } : {}),
         ...(geom.cols ? { cols: geom.cols } : {}),

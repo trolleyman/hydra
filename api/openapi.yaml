@@ -305,6 +305,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Conflict (a head with this ID already exists — active, archived, or in another project)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '500':
           description: Internal Server Error
           content:
@@ -2014,14 +2020,26 @@ components:
 
     SpawnAgentRequest:
       type: object
-      required: [id]
       properties:
         prompt:
           type: string
           description: The prompt to give to the agent
         id:
           type: string
-          description: Unique identifier for the agent (slug format, max 40 chars)
+          description: >-
+            Explicit identifier for the agent (letters/digits plus ._-, usable
+            as a git branch component). When omitted, the server derives a slug
+            from the prompt and uniquifies it with a -2/-3… suffix, so spawns
+            can never collide. An explicit ID that already exists (active,
+            archived, or in another project) fails with 409 instead of
+            overwriting the existing head.
+        force:
+          type: boolean
+          description: >-
+            With an explicit id, take over an ARCHIVED head with the same ID in
+            this project, overwriting its archived record (the `hydra spawn
+            --force` path). Active heads and heads in other projects still
+            conflict.
         agent_type:
           type: string
           description: "Agent type: claude, gemini, copilot, codex, or bash"

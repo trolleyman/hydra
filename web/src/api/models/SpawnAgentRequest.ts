@@ -8,9 +8,13 @@ export type SpawnAgentRequest = {
      */
     prompt?: string;
     /**
-     * Unique identifier for the agent (slug format, max 40 chars)
+     * Explicit identifier for the agent (letters/digits plus ._-, usable as a git branch component). When omitted, the server derives a slug from the prompt and uniquifies it with a -2/-3… suffix, so spawns can never collide. An explicit ID that already exists (active, archived, or in another project) fails with 409 instead of overwriting the existing head.
      */
-    id: string;
+    id?: string;
+    /**
+     * With an explicit id, take over an ARCHIVED head with the same ID in this project, overwriting its archived record (the `hydra spawn --force` path). Active heads and heads in other projects still conflict.
+     */
+    force?: boolean;
     /**
      * Agent type: claude, gemini, copilot, codex, or bash
      */

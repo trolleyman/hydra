@@ -58,13 +58,18 @@ var spawnCmd = &cobra.Command{
 			return errtrace.Wrap(err)
 		}
 
-		// Replace an existing head if --force.
+		// Replace an existing head if --force: kill archives a live head, and
+		// force lets the spawn take over the archived record for this ID.
 		if spawnFlags.force {
 			_ = client.KillAgent(ctx, id)
 		}
 
 		at := string(agentType)
-		body := api.SpawnAgentRequest{Id: id, AgentType: &at}
+		body := api.SpawnAgentRequest{Id: &id, AgentType: &at}
+		if spawnFlags.force {
+			t := true
+			body.Force = &t
+		}
 		if prompt != "" {
 			body.Prompt = &prompt
 		}

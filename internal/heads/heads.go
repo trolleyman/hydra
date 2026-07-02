@@ -3,8 +3,7 @@ package heads
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
-	"encoding/hex"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -302,7 +301,7 @@ func archivedAgentStatus(a *db.Agent) *api.AgentStatusInfo {
 
 // SpawnHeadOptions holds parameters for spawning a new agent head.
 type SpawnHeadOptions struct {
-	ID         string            // empty = auto-generated
+	ID         string            // empty = auto-generated from the prompt, uniquified with a -2/-3… suffix
 	PrePrompt  string            // pre-prompt
 	Prompt     string            // prompt
 	AgentType  sandbox.AgentType // empty = "claude"
@@ -310,8 +309,13 @@ type SpawnHeadOptions struct {
 	BaseBranch string            // empty = current HEAD branch
 	Ephemeral  bool              // if true, a throwaway test agent: torn down on close, not resumed or listed by default
 	Resume     bool              // if true, resume the agent's prior conversation
-	Rows       uint16
-	Cols       uint16
+	// Replace allows an explicit ID to take over an ARCHIVED head with the same
+	// ID in the SAME project, overwriting its archived record (the restart and
+	// `hydra spawn --force` paths). Without it any existing record — active or
+	// archived, this project or another — fails the spawn with *HeadExistsError.
+	Replace bool
+	Rows    uint16
+	Cols    uint16
 	// BackgroundCtx is the server-lifetime context for detached best-effort work
 	// kicked off by the spawn (currently the async title-refinement claude call),
 	// so that work is cancelled on shutdown rather than orphaning a child process.
@@ -337,12 +341,44 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 	if opts.AgentType == "" {
 		opts.AgentType = sandbox.AgentTypeClaude
 	}
+	// Resolve the head ID. Auto-generated IDs are derived from the prompt and
+	// uniquified against the whole shared DB (IDs are a global primary key
+	// across projects) plus this repo's branches/worktrees, so a repeated
+	// prompt can never collide with an existing head. Explicit IDs are
+	// validated and any collision is reported instead of silently overwriting
+	// the existing record (which used to hijack same-ID heads from other
+	// projects and resurrect archived ones).
+	replacing := false
 	if opts.ID == "" {
-		b := make([]byte, 4)
-		if _, err := rand.Read(b); err != nil {
-			return nil, errtrace.Wrap(fmt.Errorf("generate id: %w", err))
+		opts.ID = pickUniqueHeadID(store, projectRoot, opts.Prompt)
+	} else {
+		if err := ValidateHeadID(opts.ID); err != nil {
+			return nil, errtrace.Wrap(err)
 		}
-		opts.ID = hex.EncodeToString(b)
+		var existing *db.Agent
+		if store != nil {
+			var err error
+			existing, err = store.GetAgentAny(opts.ID)
+			if err != nil {
+				return nil, errtrace.Wrap(fmt.Errorf("check existing agent: %w", err))
+			}
+		}
+		if existing != nil {
+			sameProject := existing.ProjectPath == projectRoot
+			archived := existing.DeletedAt.Valid
+			if !opts.Replace || !sameProject || !archived {
+				return nil, errtrace.Wrap(&HeadExistsError{
+					ID:          opts.ID,
+					ProjectPath: existing.ProjectPath,
+					SameProject: sameProject,
+					Archived:    archived,
+				})
+			}
+			replacing = true
+		}
+		if !replacing && (git.BranchExists(projectRoot, "hydra/"+opts.ID) || headWorktreeExists(projectRoot, opts.ID)) {
+			return nil, errtrace.Wrap(&HeadExistsError{ID: opts.ID})
+		}
 	}
 
 	baseBranch := opts.BaseBranch
@@ -387,14 +423,35 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 			HeadStatus:    "idle",
 			CreatedAt:     now,
 		}
-		if err := store.UpsertAgent(agent); err != nil {
-			return nil, errtrace.Wrap(fmt.Errorf("upsert agent: %w", err))
+		if replacing {
+			// Take over the archived same-project record (Replace path): the
+			// unscoped save un-deletes and overwrites it.
+			if err := store.UpsertAgent(agent); err != nil {
+				return nil, errtrace.Wrap(fmt.Errorf("replace archived agent: %w", err))
+			}
+		} else if err := store.CreateAgent(agent); err != nil {
+			if errors.Is(err, db.ErrAgentIDTaken) {
+				// Race backstop: another spawn claimed the ID between the
+				// uniqueness check and the insert.
+				if existing, lookErr := store.GetAgentAny(opts.ID); lookErr == nil && existing != nil {
+					return nil, errtrace.Wrap(&HeadExistsError{
+						ID:          opts.ID,
+						ProjectPath: existing.ProjectPath,
+						SameProject: existing.ProjectPath == projectRoot,
+						Archived:    existing.DeletedAt.Valid,
+					})
+				}
+				return nil, errtrace.Wrap(&HeadExistsError{ID: opts.ID, ProjectPath: projectRoot, SameProject: true})
+			}
+			return nil, errtrace.Wrap(fmt.Errorf("create agent: %w", err))
 		}
 	}
 
 	if err := git.CreateWorktree(projectRoot, worktreePath, branchName, baseBranch); err != nil {
 		if store != nil {
-			_ = store.SoftDeleteAgent(opts.ID)
+			// Hard-delete: an aborted spawn never really existed, and a
+			// soft-deleted tombstone would reserve the ID forever.
+			_ = store.HardDeleteAgent(opts.ID)
 		}
 		RemoveAgentStatusFiles(projectRoot, opts.ID)
 		return nil, errtrace.Wrap(err)
@@ -533,7 +590,9 @@ func spawnCleanup(store *db.Store, projectRoot string, opts SpawnHeadOptions, wo
 	_ = git.RemoveWorktree(projectRoot, worktreePath)
 	_ = git.DeleteBranch(projectRoot, branchName)
 	if store != nil {
-		_ = store.SoftDeleteAgent(opts.ID)
+		// Hard-delete: an aborted spawn never really existed, and a soft-deleted
+		// tombstone would reserve the ID forever.
+		_ = store.HardDeleteAgent(opts.ID)
 	}
 	RemoveAgentStatusFiles(projectRoot, opts.ID)
 	removeNamespaceHost(opts.ID)
