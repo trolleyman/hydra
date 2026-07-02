@@ -22,6 +22,10 @@ const AGENT_STATUS: Record<string, { label: string; badge: Tone; dot?: Tone }> =
   waiting: { label: 'waiting', badge: 'yellow', dot: 'yellow' },
   finished: { label: 'finished', badge: 'violet', dot: 'violet' },
   merging: { label: 'merging', badge: 'green', dot: 'green' },
+  // Not a live agent status — the end-state pill on the "merged into <base>"
+  // toasts. Green (success), unlike the sidebar's muted archived chip
+  // (archivedEndStateBadge), which deliberately stays quiet.
+  merged: { label: 'merged', badge: 'green' },
   ended: { label: 'ended', badge: 'muted' },
   exited: { label: 'exited', badge: 'red' },
   killing: { label: 'killing', badge: 'faint', dot: 'redSoft' },

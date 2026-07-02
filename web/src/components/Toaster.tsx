@@ -53,11 +53,13 @@ const ToastItem: React.FC<{ toast: Toast; onDismiss: () => void }> = ({ toast, o
 
   const { Icon, wrap, bar } = TYPE_VISUAL[toast.type] ?? TYPE_VISUAL.info
 
-  // Agent status transitions render as "<bot> <agent> transitioned to <status>",
-  // the agent label linking through to the agent (so there's no View button).
+  // Agent status transitions (and the merge-lifecycle toasts reusing the same
+  // card) render as "<bot> <agent> <before> <status pill> <after>", the agent
+  // label linking through to the agent (so there's no View button).
   if (toast.agentTransition) {
     const t = toast.agentTransition
-    const badge = agentStatusBadge(t.status)
+    const badge = t.status ? agentStatusBadge(t.status) : undefined
+    const before = t.before ?? 'transitioned to'
     const openAgent = () => {
       // Match a cross-project View: select the project (a no-op for the current
       // one) before routing, then tear the toast down.
@@ -87,8 +89,9 @@ const ToastItem: React.FC<{ toast: Toast; onDismiss: () => void }> = ({ toast, o
                 {t.agentName}
               </button>
               <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[13px] text-gray-500 dark:text-gray-400">
-                <span>transitioned to</span>
-                <Badge variant="sm" className={badge.className}>{badge.label}</Badge>
+                {before && <span>{before}</span>}
+                {badge && <Badge variant="sm" className={badge.className}>{badge.label}</Badge>}
+                {t.after && <span>{t.after}</span>}
                 {t.projectName && <span className="text-gray-400 dark:text-gray-500">· {t.projectName}</span>}
               </div>
             </div>
