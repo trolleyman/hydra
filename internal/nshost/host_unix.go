@@ -61,7 +61,7 @@ func handleConn(c *net.UnixConn) {
 		return
 	}
 
-	cmd := exec.Command(req.Argv[0], req.Argv[1:]...) //errtrace:skip
+	cmd := exec.Command(req.Argv[0], req.Argv[1:]...)
 	cmd.Env = req.Env
 	cmd.Dir = req.Cwd
 	rows, cols := req.Rows, req.Cols

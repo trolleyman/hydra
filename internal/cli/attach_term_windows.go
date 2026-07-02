@@ -5,6 +5,7 @@ package cli
 import (
 	"errors"
 
+	"braces.dev/errtrace"
 	"github.com/gorilla/websocket"
 )
 
@@ -14,5 +15,5 @@ func attachWS(conn *websocket.Conn) error {
 	if conn != nil {
 		_ = conn.Close()
 	}
-	return errors.New("hydra: interactive attach is not yet supported on Windows")
+	return errtrace.Wrap(errors.New("hydra: interactive attach is not yet supported on Windows"))
 }

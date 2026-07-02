@@ -1,6 +1,7 @@
 package usage
 
 import (
+	"braces.dev/errtrace"
 	"context"
 	"testing"
 	"time"
@@ -141,7 +142,7 @@ func TestCacheServesStaleOnError(t *testing.T) {
 			v := 10.0
 			return Snapshot{Available: true, SessionPercentUsed: &v}, nil
 		}
-		return Snapshot{}, context.DeadlineExceeded
+		return Snapshot{}, errtrace.Wrap(context.DeadlineExceeded)
 	})
 
 	first, err := c.Get(context.Background(), false)

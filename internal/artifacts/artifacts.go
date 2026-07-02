@@ -797,7 +797,7 @@ func (m *Manager) versionKey(v Version) (key, ref string, err error) {
 // already queued as background, the call promotes it so it stops waiting behind
 // other background work.
 func (m *Manager) Get(spec config.ArtifactScript, v Version) (Meta, error) {
-	return m.get(spec, v, true)
+	return errtrace.Wrap2(m.get(spec, v, true))
 }
 
 // Prefetch starts a background generation for (spec, v) if it is neither cached
@@ -809,7 +809,7 @@ func (m *Manager) Get(spec config.ArtifactScript, v Version) (Meta, error) {
 // version reuses the in-flight run or its cached result. See the daemon's
 // artifact prefetcher (internal/http/prefetch.go).
 func (m *Manager) Prefetch(spec config.ArtifactScript, v Version) (Meta, error) {
-	return m.get(spec, v, false)
+	return errtrace.Wrap2(m.get(spec, v, false))
 }
 
 func (m *Manager) get(spec config.ArtifactScript, v Version, fg bool) (Meta, error) {
@@ -1027,7 +1027,7 @@ func (m *Manager) generate(parent context.Context, spec config.ArtifactScript, v
 	}
 	defer launch.Cleanup()
 
-	cmd := exec.CommandContext(ctx, launch.Path, launch.Args[1:]...) //errtrace:skip
+	cmd := exec.CommandContext(ctx, launch.Path, launch.Args[1:]...)
 	cmd.Dir = launch.Dir
 	cmd.Env = launch.Env
 	cmd.ExtraFiles = launch.ExtraFiles

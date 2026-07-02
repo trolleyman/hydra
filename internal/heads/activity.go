@@ -9,6 +9,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"braces.dev/errtrace"
 	"github.com/trolleyman/hydra/internal/api"
 	"github.com/trolleyman/hydra/internal/paths"
 )
@@ -263,13 +264,13 @@ func describeActivity(tool string, input map[string]interface{}) string {
 func tailFile(path string, n int64) ([]byte, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, err
+		return nil, errtrace.Wrap(err)
 	}
 	defer f.Close()
 
 	fi, err := f.Stat()
 	if err != nil {
-		return nil, err
+		return nil, errtrace.Wrap(err)
 	}
 	size := fi.Size()
 	start := int64(0)
@@ -278,7 +279,7 @@ func tailFile(path string, n int64) ([]byte, error) {
 	}
 	buf := make([]byte, size-start)
 	if _, err := f.ReadAt(buf, start); err != nil {
-		return nil, err
+		return nil, errtrace.Wrap(err)
 	}
 	if start > 0 {
 		if i := bytes.IndexByte(buf, '\n'); i >= 0 {

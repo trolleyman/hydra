@@ -208,12 +208,12 @@ func (m *Manager) versionKey(v Version) (key, ref string, err error) {
 // it is neither cached nor in flight. A returned Report with StatusRunning means
 // poll again shortly.
 func (m *Manager) Get(spec config.TestScript, v Version) (Report, error) {
-	return m.get(spec, v, true)
+	return errtrace.Wrap2(m.get(spec, v, true))
 }
 
 // Prefetch starts a background generation (no foreground priority).
 func (m *Manager) Prefetch(spec config.TestScript, v Version) (Report, error) {
-	return m.get(spec, v, false)
+	return errtrace.Wrap2(m.get(spec, v, false))
 }
 
 // Peek returns the cached report for (runner, v) without starting a run, plus
@@ -427,7 +427,7 @@ func (m *Manager) generate(parent context.Context, spec config.TestScript, v Ver
 	}
 	defer launch.Cleanup()
 
-	cmd := exec.CommandContext(ctx, launch.Path, launch.Args[1:]...) //errtrace:skip
+	cmd := exec.CommandContext(ctx, launch.Path, launch.Args[1:]...)
 	cmd.Dir = launch.Dir
 	cmd.Env = launch.Env
 	cmd.ExtraFiles = launch.ExtraFiles

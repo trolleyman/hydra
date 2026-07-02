@@ -3,6 +3,7 @@
 package sandbox
 
 import "errors"
+import "braces.dev/errtrace"
 
 // ErrUnsupported is returned by BuildSpec on platforms without a sandbox backend.
 var ErrUnsupported = errors.New("hydra sandboxing is not yet supported on Windows (Windows Sandbox backend is planned)")
@@ -16,7 +17,7 @@ func Available() (bool, string) {
 // shell, which runs the command directly with no confinement.
 func BuildSpec(opts Options) (*Spec, error) {
 	if opts.NoSandbox {
-		return rawSpec(opts)
+		return errtrace.Wrap2(rawSpec(opts))
 	}
-	return nil, ErrUnsupported
+	return nil, errtrace.Wrap(ErrUnsupported)
 }

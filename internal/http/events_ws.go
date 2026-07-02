@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"time"
 
+	"braces.dev/errtrace"
 	"github.com/gorilla/websocket"
 	"github.com/trolleyman/hydra/internal/events"
 )
@@ -48,7 +49,7 @@ func (s *Server) HandleEventsWS(w http.ResponseWriter, r *http.Request) {
 		conn.SetReadLimit(512)
 		_ = conn.SetReadDeadline(time.Now().Add(pongWait))
 		conn.SetPongHandler(func(string) error {
-			return conn.SetReadDeadline(time.Now().Add(pongWait))
+			return errtrace.Wrap(conn.SetReadDeadline(time.Now().Add(pongWait)))
 		})
 		for {
 			if _, _, err := conn.ReadMessage(); err != nil {
@@ -59,7 +60,7 @@ func (s *Server) HandleEventsWS(w http.ResponseWriter, r *http.Request) {
 
 	writeType := func(t events.Type) error {
 		_ = conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-		return conn.WriteJSON(eventMsg{Type: string(t)})
+		return errtrace.Wrap(conn.WriteJSON(eventMsg{Type: string(t)}))
 	}
 
 	// Initial nudge: refetch everything once on (re)connect.

@@ -599,7 +599,7 @@ func (m *Manager) buildCmd(ctx context.Context, root string, sv *supervised) (*e
 		return nil, func() {}, errtrace.Wrap(err)
 	}
 
-	cmd := exec.CommandContext(ctx, spec.Path, spec.Args[1:]...) //errtrace:skip
+	cmd := exec.CommandContext(ctx, spec.Path, spec.Args[1:]...)
 	cmd.Dir = spec.Dir
 	cmd.Env = spec.Env
 	cmd.ExtraFiles = spec.ExtraFiles
