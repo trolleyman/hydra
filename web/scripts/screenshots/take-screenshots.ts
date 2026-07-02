@@ -641,6 +641,11 @@ try {
       // when other projects have updates waiting (see simulation.go ListProjects /
       // ListAgents and AgentSidebarItem).
       { name: 'unread-indicator', path: '/', click: 'button[aria-label="Select project"]' },
+      // The uncommitted-changes warning next to the Repository button (the
+      // simulation reports a dirty .hydra/config.toml — see simulation.go
+      // GetRepositoryPushStatus), opened to its commit popover: the dirty path
+      // list plus the prefilled message input and "Commit all" button.
+      { name: 'uncommitted-changes-popover', path: '/project/sim-project/', click: '[data-testid="uncommitted-chip"]' },
       // The project switcher opened over a deliberately narrow sidebar. The menu
       // (fixed w-72) is far wider than the sidebar, so it must overlay the content
       // area rather than be clipped by the sidebar's `overflow-hidden` — verifies
