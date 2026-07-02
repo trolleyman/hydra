@@ -454,11 +454,13 @@ func GenSeccomp() error {
 // Tools groups commands for the bundled host-side sandbox helper binaries.
 type Tools mg.Namespace
 
-// Ensure downloads the bundled sandbox helper binaries (currently pasta + its
-// AVX2 sibling, from passt.top) into .hydra/local/bin if they're missing. It
-// makes no network calls when they're already present, so it's cheap to run on
-// every launch — which is exactly what the dev/serve targets do via
-// ensureToolsEnv. Run it directly to pre-fetch.
+// Ensure provisions the bundled sandbox helper binaries into .hydra/tools/bin if
+// they're missing: pasta (+ its AVX2 sibling) is downloaded from passt.top, and
+// bwrap is built from its pinned source release. bwrap has no official prebuilt
+// binary, so this needs a C toolchain (meson/ninja/cc/libcap); without it bwrap
+// is skipped gracefully and the system bwrap is used. Run it to provision
+// everything up front; the dev/serve targets only auto-provision pasta (fast, no
+// build) via ensureToolsEnv.
 //
 //	mage tools:ensure
 func (Tools) Ensure() error {
@@ -466,7 +468,7 @@ func (Tools) Ensure() error {
 	if err != nil {
 		return errtrace.Wrap(err)
 	}
-	res, err := tools.Provision(context.Background(), projectRoot, false)
+	res, err := tools.Provision(context.Background(), projectRoot, tools.Options{Bwrap: true})
 	if err != nil {
 		return errtrace.Wrap(err)
 	}
@@ -474,9 +476,9 @@ func (Tools) Ensure() error {
 	return nil
 }
 
-// Update re-checks upstream and re-downloads the bundled tools when the build has
-// changed (by Last-Modified/size) — unlike Ensure, which only fetches what's
-// missing. Use it to pull a newer pasta.
+// Update re-checks upstream and re-downloads pasta when its build changed (by
+// Last-Modified/size) and rebuilds bwrap against the pinned source release —
+// unlike Ensure, which only fetches/builds what's missing.
 //
 //	mage tools:update
 func (Tools) Update() error {
@@ -484,7 +486,7 @@ func (Tools) Update() error {
 	if err != nil {
 		return errtrace.Wrap(err)
 	}
-	res, err := tools.Provision(context.Background(), projectRoot, true)
+	res, err := tools.Provision(context.Background(), projectRoot, tools.Options{Force: true, Bwrap: true})
 	if err != nil {
 		return errtrace.Wrap(err)
 	}
@@ -508,15 +510,17 @@ func reportTools(projectRoot string, res tools.Result) {
 // ensureToolsEnv provisions the bundled sandbox helpers if missing and points the
 // HYDRA_* env overrides at them for the hydra server this target is about to
 // launch — but only when the user hasn't already set those vars, so an explicit
-// override always wins. Provisioning failures are non-fatal: hydra falls back to
-// a system pasta, so dev/serve still runs (hard egress may just be unavailable).
+// override always wins. It provisions only pasta (a fast download); bwrap is a
+// source build reserved for the explicit `mage tools:ensure`, and any already-
+// built bwrap is still picked up via tools.Env. Provisioning failures are
+// non-fatal: hydra falls back to system tools, so dev/serve still runs.
 func ensureToolsEnv() {
 	projectRoot, err := paths.GetProjectRootFromCwd()
 	if err != nil {
 		log.Printf("tools: skipping provisioning (%v); using system tools", err)
 		return
 	}
-	if res, err := tools.Provision(context.Background(), projectRoot, false); err != nil {
+	if res, err := tools.Provision(context.Background(), projectRoot, tools.Options{}); err != nil {
 		log.Printf("tools: provisioning failed (%v); using system tools", err)
 	} else {
 		for _, a := range res.Actions {
@@ -726,8 +730,9 @@ func (Deploy) Service() error {
 		return errtrace.Wrap(err)
 	}
 
-	// Bundle pasta etc. so hard egress works under the headless service too.
-	if res, err := tools.Provision(context.Background(), projectRoot, false); err != nil {
+	// Bundle pasta (and build bwrap) so hard egress works under the headless
+	// service too — a service can't fall back to a nice shell env.
+	if res, err := tools.Provision(context.Background(), projectRoot, tools.Options{Bwrap: true}); err != nil {
 		fmt.Printf("%stools: provisioning failed (%v); the service will fall back to a system pasta%s\n", colorYellow, err, colorReset)
 	} else {
 		reportTools(projectRoot, res)
