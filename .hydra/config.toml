@@ -65,10 +65,10 @@ restore_ro = ["~/.config/go"]
 # pre_exit_script = ""
 
 [sandbox.network]
-## egress posture: "off" (no network), "unrestricted" (network, no host filtering), "advisory" (proxy-only host filtering — every honest client is filtered, but escapable), or "hard" (inescapable pasta+nft netns, degrading to advisory with a warning where the tooling is unavailable). Default "hard". Supersedes the legacy enabled/filter_enabled booleans.
-mode = "unrestricted"
+## egress posture: "off" (no network), "unrestricted" (network, no host filtering), "advisory" (proxy-only host filtering — every honest client is filtered, but escapable), or "hard" (inescapable pasta+nft netns, failing closed when the tooling is unavailable unless strict=false; "on" is a synonym for "hard"). Default "hard". Supersedes the legacy enabled/filter_enabled booleans.
+mode = "hard"
 
-## with mode = "hard", fail closed (block all egress) when the inescapable boundary can't be built, instead of degrading to advisory filtering (default false).
+## with mode = "hard", fail closed (block all egress) when the inescapable boundary can't be built, instead of degrading to advisory filtering (default true).
 strict = true
 
 ## LEGACY (use mode): allow outbound network access from the sandbox. Honoured only when mode is unset.
@@ -97,7 +97,7 @@ strict = true
 # mcp_auto_allow_read = false
 
 ## Claude-specific overrides: any of the settings above, applied only to claude agents.
-[claude]
+# [claude]
 ## enable Claude Code's fullscreen (alternate-screen) rendering — flicker-free, but it takes over the terminal and captures the mouse; off (the default) keeps this terminal's native scrollbar and select-to-copy.
 # fullscreen = false
 
@@ -189,6 +189,8 @@ timeout_sec = 900
 ##                runner exiting non-zero because tests FAILED is a valid verdict,
 ##                not a strict abort — strict only governs the shell pipeline.
 ##   enabled      set false to skip this runner (default true).
+##   type         "junit" (default) reads report files after exit; "stdout" parses
+##                ::hydra:test:*:: markers live from stdout (see streaming note below).
 ## The command writes a report into $HYDRA_TEST_OUTPUT: JUnit XML (*.xml — go test
 ## via gotestsum, pytest, jest/vitest, cargo-nextest, …) or a Hydra-native *.json
 ## ({total,passed,failed,skipped,duration_ms,cases:[{name,status,duration_ms,message}]}).
@@ -203,6 +205,19 @@ timeout_sec = 900
 ## (severity 2 → status "failed", severity 1 → "warning").
 ## It is also given HYDRA_TEST_SOURCE (the checkout dir) and HYDRA_TEST_REF (the
 ## resolved ref).
+## Streaming (type = "stdout"): instead of a report file, print one marker per line
+## and Hydra counts them live (into the panel and the sidebar chip):
+##   ::hydra:test:total:: 4556                                  (optional denominator)
+##   ::hydra:test:pass:: internal/artifacts › TestGenerateAndCache
+##   ::hydra:test:fail:: auth/rotation.test.ts:48:24 › grace window | expected 3 got 2
+##   ::hydra:test:warn:: web/src/x.ts:12:5 › no-console | Unexpected console statement
+##   ::hydra:test:skip:: heads/resume_test.go › TestResumeOnBoot | needs daemon
+## The token before the first › is the location (path[:line[:col]] or dotted class),
+## middle › tokens are scope levels, the last is the test name, text after | is the
+## message. A marker is one line; in the message an escape sequence expands —
+## backslash-n to a newline, backslash-t to a tab, backslash-r to a carriage return
+## (so a multi-line stack trace fits on the one line) — and a doubled backslash
+## becomes one literal backslash. Any other escape is left as-is.
 [[tests]]
 # Go test suite. Runs via `go tool gotestsum` (a version-pinned tool dependency in
 # go.mod, like oapi-codegen) so it emits JUnit and the panel shows per-case detail
