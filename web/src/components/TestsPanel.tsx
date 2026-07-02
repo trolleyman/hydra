@@ -464,10 +464,19 @@ function TestRunnerCard({ runner, filter, search, groupResult, useScope, onRefre
       collapsed={collapsed}
       onToggleCollapsed={() => setCollapsed((c) => !c)}
     >
-      {/* Running: a thin progress bar above the live log tail. */}
+      {/* Running: a thin progress bar above the live log tail — determinate
+          (completed cases over the declared total) when the run streams a
+          denominator, an indeterminate pulse otherwise. */}
       {running && (
         <div className="mt-1 h-1 rounded bg-gray-100 dark:bg-gray-800 overflow-hidden">
-          <div className="h-full bg-blue-500 animate-pulse w-1/2" />
+          {liveDenominator(runner) > 0 ? (
+            <div
+              className="h-full bg-blue-500 transition-[width] duration-300"
+              style={{ width: `${Math.min(100, (completedCases(runner) / liveDenominator(runner)) * 100)}%` }}
+            />
+          ) : (
+            <div className="h-full bg-blue-500 animate-pulse w-1/2" />
+          )}
         </div>
       )}
 
@@ -554,12 +563,32 @@ function ResultSections({ cases, visible, useScope }: { cases: TestCase[]; visib
   )
 }
 
+// completedCases is how many cases a runner has reported so far (every status).
+// While a streamed run is in flight these are the ticking live tallies.
+function completedCases(runner: TestRunResult): number {
+  return (runner.passed ?? 0) + (runner.failed ?? 0) + (runner.warnings ?? 0) + (runner.skipped ?? 0)
+}
+
+// liveDenominator is an in-flight runner's declared ::hydra:test:total::, but
+// only when it exceeds the cases seen so far — with no declared total the
+// backend floors `total` at the case count, and "82/82" would misread as
+// almost-done. 0 = don't show one. Settled runs always have total == the case
+// sum, so this is inherently running-only.
+function liveDenominator(runner: TestRunResult): number {
+  const total = runner.total ?? 0
+  return total > completedCases(runner) ? total : 0
+}
+
 function Summary({ runner }: { runner: TestRunResult }) {
+  const denom = liveDenominator(runner)
   return (
     <span className="flex items-center gap-2 text-sm font-medium shrink-0">
       <span className="inline-flex items-center gap-1 text-green-700 dark:text-green-400">
         <Check className="w-3.5 h-3.5" strokeWidth={3} />
-        {runner.passed ?? 0}
+        <span>
+          {runner.passed ?? 0}
+          {denom > 0 ? <span className="text-gray-400 dark:text-gray-500">/{denom}</span> : null}
+        </span>
       </span>
       {(runner.failed ?? 0) > 0 ? (
         <span className="inline-flex items-center gap-1 text-red-600 dark:text-red-400">

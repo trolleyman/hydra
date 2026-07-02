@@ -76,17 +76,32 @@ function liveCaseCount(t: TestSummary): number {
   return (t.passed ?? 0) + (t.failed ?? 0) + (t.warnings ?? 0) + (t.skipped ?? 0)
 }
 
+// liveTotal is an in-flight run's denominator, but only when it says something
+// the ticking tallies don't: for a run with no declared ::hydra:test:total::
+// the backend floors the total at the cases seen so far, and rendering that
+// ("82/82") would misread as almost-done. 0 = don't show one.
+function liveTotal(t: TestSummary): number {
+  const total = t.total ?? 0
+  return total > liveCaseCount(t) ? total : 0
+}
+
 // LiveCounts renders the ticking per-status segments of an in-flight streamed
-// run (✓121 ✗2 ⚠4): green passed always, red failed / amber warnings only when
-// non-zero. The long form appends the gray skipped count and the N/total
-// progress; the short sidebar form keeps just the colored tallies (the full
-// detail stays in the chip title).
+// run (✓121/789 ✗2 ⚠4): the green segment is passed over the declared total
+// (denominator muted, omitted when unknown), red failed / amber warnings only
+// when non-zero. The long form appends the gray skipped count; the short
+// sidebar form drops it, and drops the ✓ glyph too — the sidebar row is tight,
+// and the green count next to the chip's spinner already reads as "passing so
+// far" (the full detail stays in the chip title).
 function LiveCounts({ t, long }: { t: TestSummary; long: boolean }) {
+  const total = liveTotal(t)
   return (
     <span className="inline-flex items-center whitespace-nowrap">
       <span className="inline-flex items-center gap-0.5 text-green-700 dark:text-green-400">
-        <Check className="w-2.5 h-2.5" strokeWidth={3} />
-        {t.passed ?? 0}
+        {long ? <Check className="w-2.5 h-2.5" strokeWidth={3} /> : null}
+        <span>
+          {t.passed ?? 0}
+          {total > 0 ? <span className="text-gray-500 dark:text-gray-400">/{total}</span> : null}
+        </span>
       </span>
       {(t.failed ?? 0) > 0 ? (
         <span className="inline-flex items-center gap-0.5 pl-1 ml-0.5 border-l border-current/30 text-red-600 dark:text-red-400">
@@ -96,9 +111,6 @@ function LiveCounts({ t, long }: { t: TestSummary; long: boolean }) {
       ) : null}
       <WarningCount n={t.warnings ?? 0} />
       {long ? <SkippedCount n={t.skipped ?? 0} /> : null}
-      {long && t.progress ? (
-        <span className="pl-1 ml-0.5 border-l border-current/30 text-gray-500 dark:text-gray-400">{t.progress}</span>
-      ) : null}
     </span>
   )
 }
@@ -109,7 +121,9 @@ function LiveCounts({ t, long }: { t: TestSummary; long: boolean }) {
 // Two forms (per user): the SHORT form (variant "xs", sidebar) shows just the
 // passed count (✓ 661) — no warnings, no skipped, to stay tight next to the date.
 // The LONG form (variant "sm", agent header) adds the amber warning count and the
-// gray skipped count after it (✓ 661 │ ⚠ 4 │ ▸| 3).
+// gray skipped count after it (✓ 661 │ ⚠ 4 │ ▸| 3). While a streamed run is in
+// flight both forms tick the live tallies with the denominator folded into the
+// green segment (✓ 121/789 │ ✗ 2) — see LiveCounts.
 export function TestVerdictChip({ tests, variant = 'xs' }: { tests?: TestSummary | null; variant?: 'xs' | 'sm' }) {
   if (!tests || tests.status === 'none') return null
   const tone = verdictTone(tests.status)
@@ -137,14 +151,19 @@ export function TestVerdictChip({ tests, variant = 'xs' }: { tests?: TestSummary
           sidebar. min-w-0 (here + on the Badge container) lets it shrink below its
           content so the date stays visible even on a narrow sidebar; max-w caps it
           on a wide one. The full text stays available via the chip's `title`.
-          xs (sidebar) gets a tighter cap than sm (agent header, which has room). */}
-      <span className="inline-flex items-center min-w-0 whitespace-nowrap">
+          xs (sidebar) gets a tighter cap than sm (agent header, which has room).
+          This wrapper is an inline-block (NOT inline-flex) so `truncate` can
+          ellipsize the live-counts segments too when the row is too tight for
+          them — text-overflow doesn't apply to flex containers, and a plain
+          overflow clip would let the segments bleed over the neighboring
+          auto-merge clock (or vanish entirely once the chip is squeezed). */}
+      <span className="inline-block min-w-0 truncate">
         {tests.status === 'running' && liveCaseCount(tests) > 0 ? (
-          // A streamed run ticking: live ✓/✗/⚠ tallies instead of the bare
-          // progress string (which reads as the denominator in the long form).
+          // A streamed run ticking: live ✓ N/total ✗ ⚠ tallies instead of the
+          // bare progress string.
           <LiveCounts t={tests} long={long} />
         ) : (
-          <span className={`truncate min-w-0 ${variant === 'sm' ? 'max-w-[16rem]' : 'max-w-[7rem]'}`}>{verdictLabel(tests)}</span>
+          <span className={`inline-block align-bottom truncate min-w-0 ${variant === 'sm' ? 'max-w-[16rem]' : 'max-w-[7rem]'}`}>{verdictLabel(tests)}</span>
         )}
         {showWarnings ? <WarningCount n={tests.warnings ?? 0} /> : null}
         {showSkips ? <SkippedCount n={tests.skipped ?? 0} /> : null}
