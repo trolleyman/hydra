@@ -52,7 +52,8 @@ export function usePushStatus(currentProjectId: string | null): PushStatus {
       // otherwise the per-project poll/websocket keeps the visible one correct.
       if (currentProjectIdRef.current === projectId) setPushStatus(result)
       toast.dismiss(toastId)
-      const where = result.remote && result.branch ? ` with ${result.remote}/${result.branch}` : ''
+      // The backticks render the remote branch as a mono pill in the toast.
+      const where = result.remote && result.branch ? ` with \`${result.remote}/${result.branch}\`` : ''
       toast.show({ message: `Synced${where}`, type: 'success' })
     } catch (err) {
       toast.dismiss(toastId)

@@ -479,7 +479,7 @@ export function AgentDetail({
       message: `Merging agent "${name}" into ${agent.base_branch}…`,
       type: 'info',
       duration: 0,
-      agentTransition: { agentName: name, agentId: agent.id, projectId: projectId ?? '', status: 'merging', before: '', after: `into ${agent.base_branch}…` },
+      agentTransition: { agentName: name, agentId: agent.id, projectId: projectId ?? '', status: 'merging', before: '', after: `into \`${agent.base_branch}\`…` },
     })
     try {
       await api.default.mergeAgent(projectId ?? '', agent.id, force || undefined)
@@ -487,7 +487,7 @@ export function AgentDetail({
       useToastStore.getState().show({
         message: `Agent "${name}" merged into ${agent.base_branch}`,
         type: 'success',
-        agentTransition: { agentName: name, agentId: agent.id, projectId: projectId ?? '', status: 'merged', before: '', after: `into ${agent.base_branch}` },
+        agentTransition: { agentName: name, agentId: agent.id, projectId: projectId ?? '', status: 'merged', before: '', after: `into \`${agent.base_branch}\`` },
       })
       useAgentStore.getState().upsertArchived({ ...agent, archived: true, end_state: 'merged', session_status: 'stopped', session_pid: 0 })
       onKilled(agent.id)
@@ -575,7 +575,7 @@ export function AgentDetail({
       useToastStore.getState().show({
         message: `Will merge "${name}" into ${toBranch} when it finishes and its tests pass`,
         type: 'info',
-        agentTransition: { agentName: name, agentId: agent.id, projectId: projectId ?? '', before: `will merge into ${toBranch} when it finishes and tests pass` },
+        agentTransition: { agentName: name, agentId: agent.id, projectId: projectId ?? '', before: `will merge into \`${toBranch}\` when it finishes and tests pass` },
       })
     } catch (err) {
       useToastStore.getState().show({ message: `Couldn't arm auto-merge: ${formatError(err)}`, type: 'error' })

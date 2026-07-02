@@ -132,13 +132,16 @@ function notifyBackgroundMerges(prev: AgentResponse[], next: AgentResponse[], pr
   for (const agent of prev) {
     if (agent.merge_when_green && !nextIds.has(agent.id)) {
       const name = agent.title || agent.id
-      const toBranch = agent.base_branch || 'its base branch'
       useToastStore.getState().show({
-        message: `Agent "${name}" merged into ${toBranch}`,
+        message: `Agent "${name}" merged into ${agent.base_branch || 'its base branch'}`,
         type: 'success',
         // Rendered as the agent-transition card (matching the status-update
-        // toasts); the message is only the fallback for non-card surfaces.
-        agentTransition: { agentName: name, agentId: agent.id, projectId, status: 'merged', before: '', after: `into ${toBranch}` },
+        // toasts); the message is only the fallback for non-card surfaces. The
+        // backticks render the branch as a mono pill.
+        agentTransition: {
+          agentName: name, agentId: agent.id, projectId, status: 'merged',
+          before: '', after: agent.base_branch ? `into \`${agent.base_branch}\`` : 'into its base branch',
+        },
       })
     }
   }

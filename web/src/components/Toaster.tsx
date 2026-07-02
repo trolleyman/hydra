@@ -6,7 +6,18 @@ import { useProjectStore } from '../stores/projectStore'
 import { IconButton } from './IconButton'
 import { ApprovalCard } from './ApprovalToast'
 import { Badge } from './Badge'
+import { BranchPill } from './BranchPill'
 import { agentStatusBadge } from '../lib/agentDisplay'
+
+// withBranchPills renders toast copy with `backtick` spans as inline mono pills
+// (branch names — "Synced with `origin/main`", "merged into `main`"), matching
+// how the dialogs embed branch names mid-sentence. Unpaired backticks stay
+// literal; text without backticks passes through untouched.
+function withBranchPills(text: string): React.ReactNode {
+  const parts = text.split(/`([^`]*)`/) // odd indices are the quoted spans
+  if (parts.length === 1) return text
+  return parts.map((part, i) => (i % 2 === 1 ? <BranchPill key={i}>{part}</BranchPill> : part))
+}
 
 // Per-type visual identity: the icon and its tinted rounded square, mirroring the
 // approval card's kind icon so the two toast styles read as one family.
@@ -89,9 +100,9 @@ const ToastItem: React.FC<{ toast: Toast; onDismiss: () => void }> = ({ toast, o
                 {t.agentName}
               </button>
               <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[13px] text-gray-500 dark:text-gray-400">
-                {before && <span>{before}</span>}
+                {before && <span>{withBranchPills(before)}</span>}
                 {badge && <Badge variant="sm" className={badge.className}>{badge.label}</Badge>}
-                {t.after && <span>{t.after}</span>}
+                {t.after && <span>{withBranchPills(t.after)}</span>}
                 {t.projectName && <span className="text-gray-400 dark:text-gray-500">· {t.projectName}</span>}
               </div>
             </div>
@@ -122,7 +133,7 @@ const ToastItem: React.FC<{ toast: Toast; onDismiss: () => void }> = ({ toast, o
           <div className={`shrink-0 w-9 h-9 rounded-xl flex items-center justify-center ${wrap}`}>
             <Icon className="w-[18px] h-[18px]" />
           </div>
-          <p className="min-w-0 flex-1 self-center text-sm text-gray-700 dark:text-gray-200 leading-relaxed">{toast.message}</p>
+          <p className="min-w-0 flex-1 self-center text-sm text-gray-700 dark:text-gray-200 leading-relaxed">{withBranchPills(toast.message)}</p>
           <IconButton onClick={onDismiss}>
             <X className="w-4 h-4" />
           </IconButton>

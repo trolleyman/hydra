@@ -681,7 +681,7 @@ try {
         toast: {
           message: 'Will merge "Add renameable agent titles" into main when it finishes and its tests pass',
           type: 'info',
-          agentTransition: { agentName: 'Add renameable agent titles', agentId: 'agent-md', projectId: 'sim-project', before: 'will merge into main when it finishes and tests pass' },
+          agentTransition: { agentName: 'Add renameable agent titles', agentId: 'agent-md', projectId: 'sim-project', before: 'will merge into `main` when it finishes and tests pass' },
         },
       },
       // In-flight merge — persistent (dismissed when the POST settles), green
@@ -692,7 +692,7 @@ try {
         toast: {
           message: 'Merging agent "Add renameable agent titles" into main…',
           type: 'info',
-          agentTransition: { agentName: 'Add renameable agent titles', agentId: 'agent-md', projectId: 'sim-project', status: 'merging', before: '', after: 'into main…' },
+          agentTransition: { agentName: 'Add renameable agent titles', agentId: 'agent-md', projectId: 'sim-project', status: 'merging', before: '', after: 'into `main`…' },
         },
       },
       // Merge landed — green "merged" pill (also what a background auto-merge pops).
@@ -702,8 +702,15 @@ try {
         toast: {
           message: 'Agent "Add renameable agent titles" merged into main',
           type: 'success',
-          agentTransition: { agentName: 'Add renameable agent titles', agentId: 'agent-md', projectId: 'sim-project', status: 'merged', before: '', after: 'into main' },
+          agentTransition: { agentName: 'Add renameable agent titles', agentId: 'agent-md', projectId: 'sim-project', status: 'merged', before: '', after: 'into `main`' },
         },
+      },
+      // 2c. A plain message toast with a `backtick` branch pill — the sidebar
+      // Sync button's success toast (usePushStatus).
+      {
+        name: 'toast-synced',
+        path: '/settings',
+        toast: { message: 'Synced with `origin/main`', type: 'success' },
       },
       // 3. Security-gate approval cards (the rich ApprovalCard): persistent, with
       // Allow once / Always allow / Deny; dismissing denies. These are the ONLY

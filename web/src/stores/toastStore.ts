@@ -42,9 +42,10 @@ export interface AgentTransitionToastData {
   // exists as a pill on these toasts). Omit it for a text-only row.
   status?: string
   // Copy before the pill. Defaults to 'transitioned to'; pass '' to lead with
-  // the pill ("[merging] into main…").
+  // the pill ("[merging] into `main`…"). Like `message`, `backtick` spans render
+  // as inline mono branch pills.
   before?: string
-  // Copy after the pill, e.g. the merge target ("into main").
+  // Copy after the pill, e.g. the merge target ("into `main`").
   after?: string
   // Set when the agent runs in a DIFFERENT project than the one in view — shown
   // as a muted suffix so the toast still says where it happened.
@@ -63,6 +64,8 @@ export interface ToastAction {
 
 export interface Toast {
   id: number
+  // The toast copy. `backtick` spans render as inline mono branch pills
+  // ("Synced with `origin/main`"); unpaired backticks stay literal.
   message: string
   type: ToastType
   // Total lifetime in ms before the toast auto-dismisses. 0 = persistent (the
