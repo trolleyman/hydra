@@ -355,6 +355,13 @@ type TestScript struct {
 	// abort — strict only governs the shell pipeline, the verdict comes from the
 	// parsed report. nil is the default.
 	Strict *bool `toml:"strict"`
+	// Type selects how the run's results are read (see internal/tests):
+	//   - "junit" (default, also for ""): parse the *.xml/*.json report files the
+	//     command wrote into $HYDRA_TEST_OUTPUT after it exits.
+	//   - "stdout": parse `::hydra:test:<pass|fail|warn|skip>:: location › name | msg`
+	//     markers live from the command's stdout — the accumulated cases ARE the
+	//     report (no file needed), and counts stream into the UI as they happen.
+	Type string `toml:"type"`
 }
 
 // IsEnabled reports whether the test runner should run. An absent flag (nil)
@@ -364,6 +371,10 @@ func (t TestScript) IsEnabled() bool { return t.Enabled == nil || *t.Enabled }
 // IsStrict reports whether the command runs under `set -eo pipefail`. An absent
 // flag (nil) means strict.
 func (t TestScript) IsStrict() bool { return t.Strict == nil || *t.Strict }
+
+// IsStreaming reports whether results are parsed live from stdout markers
+// (type = "stdout") rather than from report files after exit.
+func (t TestScript) IsStreaming() bool { return t.Type == "stdout" }
 
 type Config struct {
 	// Defaults for all agents.
@@ -1527,6 +1538,9 @@ func testFieldLines(t TestScript) []string {
 	}
 	if t.Enabled != nil && !*t.Enabled {
 		out = append(out, "enabled = false")
+	}
+	if t.Type != "" && t.Type != "junit" {
+		out = append(out, "type = "+tomlStringValue(t.Type))
 	}
 	return out
 }

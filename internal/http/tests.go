@@ -193,34 +193,7 @@ func buildTestRunResult(projectID string, mgr *hydratests.Manager, rep hydratest
 		Format:     nonEmptyPtr(rep.Format),
 	}
 	if len(rep.Cases) > 0 {
-		cases := make([]api.TestCase, 0, len(rep.Cases))
-		for _, c := range rep.Cases {
-			ac := api.TestCase{
-				Name:       c.Name,
-				Status:     api.TestCaseStatus(c.Status),
-				Path:       nonEmptyPtr(c.Path),
-				DurationMs: ptr(c.DurationMs),
-				Message:    nonEmptyPtr(c.Message),
-			}
-			if len(c.Scope) > 0 {
-				scope := append([]string(nil), c.Scope...)
-				ac.Scope = &scope
-			}
-			if c.Line > 0 {
-				ac.Line = ptr(c.Line)
-			}
-			if c.Col > 0 {
-				ac.Col = ptr(c.Col)
-			}
-			if c.EndLine > 0 {
-				ac.EndLine = ptr(c.EndLine)
-			}
-			if c.EndCol > 0 {
-				ac.EndCol = ptr(c.EndCol)
-			}
-			cases = append(cases, ac)
-		}
-		res.Cases = &cases
+		res.Cases = ptr(toAPITestCases(rep.Cases))
 	}
 	if rep.Status == hydratests.StatusRunning {
 		if rep.StartedAt > 0 {
@@ -234,6 +207,39 @@ func buildTestRunResult(projectID string, mgr *hydratests.Manager, rep hydratest
 		res.LogUrl = ptr(testLogURL(projectID, rep.Runner, rep.Key))
 	}
 	return res
+}
+
+// toAPITestCases maps parsed cases into the API shape, shared by the full
+// report (buildTestRunResult) and the streamed "counts" WS increments.
+func toAPITestCases(cases []hydratests.TestCase) []api.TestCase {
+	out := make([]api.TestCase, 0, len(cases))
+	for _, c := range cases {
+		ac := api.TestCase{
+			Name:       c.Name,
+			Status:     api.TestCaseStatus(c.Status),
+			Path:       nonEmptyPtr(c.Path),
+			DurationMs: ptr(c.DurationMs),
+			Message:    nonEmptyPtr(c.Message),
+		}
+		if len(c.Scope) > 0 {
+			scope := append([]string(nil), c.Scope...)
+			ac.Scope = &scope
+		}
+		if c.Line > 0 {
+			ac.Line = ptr(c.Line)
+		}
+		if c.Col > 0 {
+			ac.Col = ptr(c.Col)
+		}
+		if c.EndLine > 0 {
+			ac.EndLine = ptr(c.EndLine)
+		}
+		if c.EndCol > 0 {
+			ac.EndCol = ptr(c.EndCol)
+		}
+		out = append(out, ac)
+	}
+	return out
 }
 
 func toAPITestLog(lines []hydratests.LogLine) []api.ArtifactLogLine {

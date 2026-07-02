@@ -173,6 +173,9 @@ export function CaseRow({ c, prefix, showLocation, indent = 0 }: {
   indent?: number
 }) {
   const failedish = c.status === 'failed' || c.status === 'warning'
+  // Skipped cases show their message too (the skip reason, dimmed) — skipped is
+  // treated like every other status, not a mute roll-up.
+  const showMessage = !!c.message && (failedish || c.status === 'skipped')
   const loc = caseLocation(c)
   const copyable = loc || (prefix ? `${prefix} › ${c.name}` : c.name)
   const boxTone = c.status === 'failed'
@@ -180,7 +183,9 @@ export function CaseRow({ c, prefix, showLocation, indent = 0 }: {
     : c.status === 'warning' ? 'bg-amber-50/40 dark:bg-amber-900/10' : ''
   const msgTone = c.status === 'failed'
     ? 'text-red-700 dark:text-red-300 bg-red-100/50 dark:bg-red-900/20 border-red-200/60 dark:border-red-900/40'
-    : 'text-amber-700 dark:text-amber-300 bg-amber-100/50 dark:bg-amber-900/20 border-amber-200/60 dark:border-amber-900/40'
+    : c.status === 'warning'
+      ? 'text-amber-700 dark:text-amber-300 bg-amber-100/50 dark:bg-amber-900/20 border-amber-200/60 dark:border-amber-900/40'
+      : 'text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-800/40 border-gray-200/60 dark:border-gray-700/60'
 
   return (
     <div className={`group flex flex-col gap-1.5 py-1.5 pr-3 ${boxTone}`} style={{ paddingLeft: `${indent * 14 + 12}px` }}>
@@ -198,7 +203,7 @@ export function CaseRow({ c, prefix, showLocation, indent = 0 }: {
           <span className="ml-auto font-mono text-[10px] text-gray-400 shrink-0">{c.duration_ms}ms</span>
         ) : null}
       </div>
-      {failedish && c.message ? (
+      {showMessage ? (
         <pre className={`ml-5 text-[11px] font-mono whitespace-pre-wrap border rounded px-2.5 py-1.5 ${msgTone}`}>{c.message}</pre>
       ) : null}
     </div>

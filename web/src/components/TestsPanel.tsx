@@ -3,6 +3,7 @@ import { Check, X, AlertTriangle, LoaderCircle, RefreshCw, RotateCcw, ScrollText
 import { api } from '../stores/apiClient'
 import type { TestRunResult } from '../api/models/TestRunResult'
 import type { TestCase } from '../api/models/TestCase'
+import { TestCaseStatus } from '../api/models/TestCaseStatus'
 import type { ArtifactLogLine } from '../api'
 import { TONE_BADGE, verdictTone } from './badgeTones'
 import { CollapsibleCard, MELT_BTN } from './CollapsibleCard'
@@ -19,11 +20,20 @@ import {
 
 // Server→client message on the tests WebSocket. Mirrors internal/http/tests_ws.go.
 // Single-sided (no before/after), so a runner is addressed by name alone.
+type TestWSCounts = {
+  passed: number
+  failed: number
+  skipped: number
+  warnings: number
+  total: number // declared denominator, 0 = unknown
+  cases?: TestCase[]
+}
 type TestWSMessage =
   | { type: 'snapshot'; runners: TestRunResult[] }
   | { type: 'runner'; runner: TestRunResult }
   | { type: 'log'; name: string; line: ArtifactLogLine }
   | { type: 'progress'; name: string; progress: string }
+  | { type: 'counts'; name: string; counts: TestWSCounts }
 
 function testsWsUrl(projectId: string, agentId: string, headRef?: string, includeUncommitted?: boolean): string {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -83,6 +93,21 @@ export function TestsPanel({ projectId, agentId, headRef, includeUncommitted, re
       setRunners((prev) => prev?.map((r) => (r.name === msg.name ? { ...r, log: [...(r.log ?? []), msg.line] } : r)) ?? prev)
     } else if (msg.type === 'progress') {
       setRunners((prev) => prev?.map((r) => (r.name === msg.name ? { ...r, progress: msg.progress } : r)) ?? prev)
+    } else if (msg.type === 'counts') {
+      // A streamed (type=stdout) run ticking: totals are authoritative, cases
+      // are the newly-appended increment (coalesced server-side) — the tree
+      // grows in place as they land.
+      setRunners((prev) => prev?.map((r) => (r.name === msg.name
+        ? {
+          ...r,
+          passed: msg.counts.passed,
+          failed: msg.counts.failed,
+          skipped: msg.counts.skipped,
+          warnings: msg.counts.warnings,
+          total: msg.counts.total > 0 ? msg.counts.total : r.total,
+          cases: msg.counts.cases?.length ? [...(r.cases ?? []), ...msg.counts.cases] : r.cases,
+        }
+        : r)) ?? prev)
     }
   }, [])
 
@@ -473,11 +498,11 @@ function TestRunnerCard({ runner, filter, search, groupResult, useScope, onRefre
 // per status (worst first), each holding its own CaseTree of the already-
 // filtered cases. Failing/warning sections open by default; skipped/passing
 // start collapsed (they're usually shown deliberately via the filter).
-const RESULT_SECTIONS: { status: TestCase['status']; label: string; defaultOpen: boolean }[] = [
-  { status: 'failed', label: 'failing', defaultOpen: true },
-  { status: 'warning', label: 'warnings', defaultOpen: true },
-  { status: 'skipped', label: 'skipped', defaultOpen: false },
-  { status: 'passed', label: 'passing', defaultOpen: false },
+const RESULT_SECTIONS: { status: TestCaseStatus; label: string; defaultOpen: boolean }[] = [
+  { status: TestCaseStatus.TestCaseFailed, label: 'failing', defaultOpen: true },
+  { status: TestCaseStatus.TestCaseWarning, label: 'warnings', defaultOpen: true },
+  { status: TestCaseStatus.TestCaseSkipped, label: 'skipped', defaultOpen: false },
+  { status: TestCaseStatus.TestCasePassed, label: 'passing', defaultOpen: false },
 ]
 
 function ResultSections({ cases, useScope }: { cases: TestCase[]; useScope: boolean }) {

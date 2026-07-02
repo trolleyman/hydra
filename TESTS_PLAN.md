@@ -1,7 +1,12 @@
 # Agent tests — design plan: path tree + stdout streaming
 
-Living design doc (draft, uncommitted). Captures two follow-on features for the
-agent-tests panel, plus the shared data-model change they both depend on.
+Living design doc. Captures two follow-on features for the agent-tests panel,
+plus the shared data-model change they both depend on. **Status: implemented on
+this branch** — the shared foundation (structured `Path`/`Scope`/line-col),
+Feature 1 (filter bar + `CaseTree` + the two cog checkboxes), and Feature 2
+(`type = "stdout"` + `::hydra:test:*::` streaming + coalesced counts). Tier-2
+dotted-classname→file probing and the full per-status live sidebar chip remain
+future work.
 
 Already shipped (branch `hydra/any-way-we-could-surface-eg-eslint`): a first-class
 non-failing **warning** outcome (`CaseWarning` + `Report.Warnings`), a short/long
@@ -107,7 +112,10 @@ near-exact, so we reuse the artifacts machinery rather than invent a parallel on
 
 This also replaces today's ad-hoc show/hide (a lone `showPassing` roll-up; skipped as a
 flat count) with one coherent, familiar model — and expandable skipped falls out for
-free (it's just another status the filter shows).
+free. **Skipped is treated exactly like every other status** (confirmed with user):
+it filters via the status scope, renders as expandable rows in the tree (with the
+skip reason shown dimmed, like a failure message), and gets its own collapsible
+section in the by-result view — never a mute count-only roll-up.
 
 ### The filter bar (mirror `ArtifactFilterBar`)
 A right-floated cluster (`ml-auto flex flex-wrap items-center gap-2`) in the sticky

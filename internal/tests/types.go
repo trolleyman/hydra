@@ -107,11 +107,25 @@ type Version struct {
 }
 
 // Event is a generation lifecycle notification delivered to Subscribe listeners.
-// Kind is "log", "progress", or "settled" — the same vocabulary as artifacts so
-// the WS/poll plumbing maps over identically.
+// Kind is "log", "progress", "counts", or "settled" — the artifacts vocabulary
+// plus "counts", the streamed-tests increment (see RunningCounts).
 type Event struct {
 	Dir      string
 	Kind     string
 	Line     LogLine
 	Progress string
+	Counts   *RunningCounts // kind == "counts"
+}
+
+// RunningCounts is the payload of a "counts" event: an in-flight run's totals
+// so far plus the cases appended since the previous event. Events are
+// coalesced (~10×/s or every caseFlushMax cases) so a 4,556-case run doesn't
+// emit 4,556 WS frames.
+type RunningCounts struct {
+	Passed   int
+	Failed   int
+	Skipped  int
+	Warnings int
+	Total    int // declared ::hydra:test:total:: denominator (0 = unknown)
+	Cases    []TestCase
 }
