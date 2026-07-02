@@ -22,9 +22,5 @@ export type PolicyConfig = {
      * Auto-allow MCP tools the read/write classifier deems read-only, parking only writes/unknown. Best-effort heuristic; off by default.
      */
     mcp_auto_allow_read?: boolean | null;
-    /**
-     * Hosts WebFetch may reach without an approval round-trip.
-     */
-    webfetch_allow_hosts?: Array<string> | null;
 };
 

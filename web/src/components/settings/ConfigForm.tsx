@@ -177,8 +177,7 @@ export function ConfigForm({
       next.gate_enabled == null &&
       next.mcp_auto_allow_read == null &&
       !next.mcp_allowed?.length &&
-      !next.mcp_tools_allowed?.length &&
-      !next.webfetch_allow_hosts?.length
+      !next.mcp_tools_allowed?.length
     onChange({ ...value, policy: empty ? null : next })
   }
 
@@ -311,15 +310,15 @@ export function ConfigForm({
               <div className="flex items-center gap-1.5">
                 <label className="text-[11px] font-semibold text-gray-400 dark:text-gray-500">Strict (fail closed)</label>
                 <InfoTooltip title="Strict hard egress">
-                  <p>When the inescapable boundary can't be built on this host (pasta/nft unavailable — e.g. macOS), <strong>fail closed</strong> and give the agent no network, instead of degrading to advisory proxy filtering.</p>
+                  <p>When the inescapable boundary can't be built on this host (pasta/nft unavailable — e.g. macOS), <strong>fail closed</strong> and give the agent no network, instead of degrading to advisory proxy filtering. <strong>On by default</strong>; turn off to allow the advisory degrade.</p>
                 </InfoTooltip>
               </div>
               <label className="relative inline-flex items-center cursor-pointer">
                 <input
                   type="checkbox"
                   className="sr-only peer"
-                  checked={network.strict === true}
-                  onChange={(e) => updateNetwork({ strict: e.target.checked ? true : null })}
+                  checked={network.strict !== false}
+                  onChange={(e) => updateNetwork({ strict: e.target.checked ? null : false })}
                 />
                 <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
               </label>

@@ -744,9 +744,6 @@ type PolicyConfig struct {
 
 	// McpToolsAllowed Individual MCP tools ("<server>__<tool>") allowed even when the whole server is not. The server is kept (spawned) so those tools work; its other tools park for approval at runtime.
 	McpToolsAllowed *[]string `json:"mcp_tools_allowed"`
-
-	// WebfetchAllowHosts Hosts WebFetch may reach without an approval round-trip.
-	WebfetchAllowHosts *[]string `json:"webfetch_allow_hosts"`
 }
 
 // ProjectInfo defines model for ProjectInfo.

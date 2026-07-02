@@ -1,11 +1,14 @@
 package config
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
+	"time"
 
 	"braces.dev/errtrace"
 	"github.com/BurntSushi/toml"
@@ -38,8 +41,8 @@ const DefaultPrePrompt = "You are a head (AI agent) of Hydra, an AI orchestratio
 	"- `masked_paths` — extra paths hidden inside the sandbox.\n" +
 	"- `restore_ro` — paths re-exposed read-only after a parent was masked.\n" +
 	"- `cow_paths` — worktree-relative paths mounted copy-on-write from the project root (you can read and overwrite them; writes stay in your worktree and never touch the real files).\n" +
-	"- `network.mode` (off/unrestricted/advisory/hard) plus `network.allowed_hosts` / `network.blocked_hosts` — the egress posture and the host allow-list (added to a built-in default list) / block-list (overrides both). The legacy `network.enabled` / `network.filter_enabled` toggles still work when `mode` is unset.\n" +
-	"- `policy.webfetch_allow_hosts` / `policy.mcp_allowed` / `policy.mcp_tools_allowed` — hosts WebFetch may reach, MCP servers you may use (whole-server), and individual MCP tools (`server__tool`) allowed on an otherwise-restricted server. A security gate can deny a tool call or pause it for user approval (even with permissions skipped) when it falls outside these, so don't retry a blocked call in a loop — ask the user to widen the list. You also have Hydra control tools (`mcp__hydra__list_available_mcp_servers`, `mcp__hydra__request_mcp_server`) to discover host-configured MCP servers and request access to one at runtime (the user approves it; it becomes usable after you resume).\n" +
+	"- `network.mode` (off/unrestricted/advisory/hard) plus `network.allowed_hosts` / `network.blocked_hosts` — the egress posture and the host allow-list (added to a built-in default list) / block-list (overrides both). This same list also gates the WebFetch tool: with filtering off (unrestricted/off) WebFetch reaches any host, otherwise it may reach only allow-listed hosts and a new one pauses for user approval. The legacy `network.enabled` / `network.filter_enabled` toggles still work when `mode` is unset.\n" +
+	"- `policy.mcp_allowed` / `policy.mcp_tools_allowed` — MCP servers you may use (whole-server), and individual MCP tools (`server__tool`) allowed on an otherwise-restricted server. A security gate can deny a tool call or pause it for user approval (even with permissions skipped) when it falls outside these, so don't retry a blocked call in a loop — ask the user to widen the list. You also have Hydra control tools (`mcp__hydra__list_available_mcp_servers`, `mcp__hydra__request_mcp_server`) to discover host-configured MCP servers and request access to one at runtime (the user approves it; it becomes usable after you resume).\n" +
 	"- `pre_spawn_script` — a bash script run inside the sandbox before every agent launch (both spawn and resume, so it must be idempotent), e.g. `mise trust`.\n" +
 	"- `pre_exit_script` — a bash script run inside a sandbox when a head ends (before its worktree is removed), for per-head teardown such as releasing a claimed resource.\n" +
 	"- `pre_prompt` — the standing instructions you are reading now.\n" +
@@ -114,9 +117,11 @@ type PolicyConfig struct {
 	// MCPAutoAllowRead auto-allows MCP tools the read/write classifier deems
 	// read-only (parking only writes/unknown). Best-effort heuristic; off by default.
 	MCPAutoAllowRead *bool `toml:"mcp_auto_allow_read"`
-	// WebFetchAllowHosts lists hosts WebFetch may reach without an approval
-	// round-trip; a fetch to any other host parks the head for user approval.
-	WebFetchAllowHosts []string `toml:"webfetch_allow_hosts"`
+	// NOTE: WebFetch host-gating is no longer a dedicated policy field. It is derived
+	// from [sandbox.network] (mode + allowed_hosts/blocked_hosts): with filtering off
+	// nothing is gated, and with filtering on the WebFetch tool shares the network
+	// allow-list. A remembered "always allow" for a WebFetch host is written to
+	// [sandbox.network] allowed_hosts, unified with the egress allow-list.
 }
 
 // IsGateEnabled reports whether the decision-capable gate runs. Absent (nil)
@@ -140,9 +145,6 @@ func (p *PolicyConfig) Merge(other PolicyConfig) {
 	}
 	if other.MCPAutoAllowRead != nil {
 		p.MCPAutoAllowRead = other.MCPAutoAllowRead
-	}
-	if other.WebFetchAllowHosts != nil {
-		p.WebFetchAllowHosts = other.WebFetchAllowHosts
 	}
 }
 
@@ -639,8 +641,41 @@ func decodeConfig(data []byte) (Config, error) {
 	return cfg, nil
 }
 
-// LoadFile loads a configuration from a file.
+// configCache memoises decoded config files keyed by (path, mtime, size), so the
+// many per-operation LoadFile calls (every head spawn/resume and HTTP request
+// re-reads config — there is no long-lived Config anywhere) don't re-parse an
+// unchanged file. It is a cache, not a source of truth: any change to the file's
+// mtime or size invalidates the entry, so an on-disk edit is always picked up on the
+// next read — which is how a saved config "auto-applies" to the next operation. It
+// does NOT retroactively re-apply to already-running heads (their sandbox/egress/gate
+// are fixed at launch); that would need live re-injection, which the daemon only does
+// for [[services]] today.
+var configCache = struct {
+	sync.Mutex
+	m map[string]configCacheEntry
+}{m: map[string]configCacheEntry{}}
+
+type configCacheEntry struct {
+	mtime time.Time
+	size  int64
+	cfg   *Config
+}
+
+// LoadFile loads a configuration from a file. A missing file yields (nil, nil).
+// Results are memoised by mtime+size (see configCache) and every caller gets an
+// independent deep copy, so a consumer that mutates the returned config (e.g. to add
+// an allow-listed host before saving) can never corrupt the cache or another caller.
 func LoadFile(path string) (*Config, error) {
+	if fi, err := os.Stat(path); err == nil && !fi.IsDir() {
+		configCache.Lock()
+		if e, ok := configCache.m[path]; ok && e.mtime.Equal(fi.ModTime()) && e.size == fi.Size() {
+			cfg := cloneConfig(e.cfg)
+			configCache.Unlock()
+			return cfg, nil
+		}
+		configCache.Unlock()
+	}
+
 	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		return nil, nil
@@ -652,7 +687,38 @@ func LoadFile(path string) (*Config, error) {
 	if err != nil {
 		return nil, errtrace.Wrap(fmt.Errorf("load config: %s: %w", path, err))
 	}
-	return &cfg, nil
+	// Re-stat so the cached mtime/size match the bytes we actually decoded (a
+	// concurrent write between the read and here just misses the cache next time).
+	if fi, err := os.Stat(path); err == nil && !fi.IsDir() {
+		configCache.Lock()
+		configCache.m[path] = configCacheEntry{mtime: fi.ModTime(), size: fi.Size(), cfg: cloneConfig(&cfg)}
+		configCache.Unlock()
+	}
+	return cloneConfig(&cfg), nil
+}
+
+// cloneConfig returns a deep copy of c. Config is plain data (primitives, pointers
+// to primitives, slices, maps and nested structs of the same), so a JSON round-trip
+// is a correct and maintenance-free deep copy — new fields are covered automatically.
+// It is used at the cache boundary so a cached config is never shared (and thus never
+// mutated) across callers. A nil input clones to nil.
+func cloneConfig(c *Config) *Config {
+	if c == nil {
+		return nil
+	}
+	data, err := json.Marshal(c)
+	if err != nil {
+		// Config has no un-marshalable fields; if that ever changes, fall back to a
+		// shallow copy rather than returning the shared pointer.
+		cp := *c
+		return &cp
+	}
+	var out Config
+	if err := json.Unmarshal(data, &out); err != nil {
+		cp := *c
+		return &cp
+	}
+	return &out
 }
 
 // Merge merges another configuration into this one.
@@ -1250,12 +1316,6 @@ func defaultsSpec() []specEntry {
 				}
 				return "", false
 			},
-		},
-		{
-			table: "policy", key: "webfetch_allow_hosts",
-			doc: "hosts WebFetch may reach without an approval round-trip; a new host parks the head for your approval (default none).",
-			def: func() string { return "[]" },
-			get: policySlice(func(p *PolicyConfig) []string { return p.WebFetchAllowHosts }),
 		},
 	}
 }
@@ -2424,7 +2484,6 @@ func emitAgentPolicy(out *[]string, name string, p *PolicyConfig, keyComments, t
 	if p.MCPAutoAllowRead != nil {
 		emitSetField(out, name+".policy", "mcp_auto_allow_read", fmt.Sprintf("%t", *p.MCPAutoAllowRead), true, keyComments)
 	}
-	emitSetField(out, name+".policy", "webfetch_allow_hosts", tomlStringArray(p.WebFetchAllowHosts), len(p.WebFetchAllowHosts) > 0, keyComments)
 }
 
 // emitSetField appends "key = text" (with any preserved user comment) when set.
@@ -2449,7 +2508,7 @@ func policyHasContent(p *PolicyConfig) bool {
 		return false
 	}
 	return p.GateEnabled != nil || len(p.MCPAllowed) > 0 || len(p.MCPToolsAllowed) > 0 ||
-		p.MCPAutoAllowRead != nil || len(p.WebFetchAllowHosts) > 0
+		p.MCPAutoAllowRead != nil
 }
 
 func sandboxHasContent(sb *SandboxConfig) bool {

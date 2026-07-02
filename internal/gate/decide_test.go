@@ -6,6 +6,7 @@ func basePolicy() Policy {
 	return Policy{
 		GateEnabled:        true,
 		MCPAllowed:         []string{"github"},
+		WebFetchFilter:     true,
 		WebFetchAllowHosts: []string{"docs.anthropic.com", "*.example.com"},
 		Home:               "/home/agent",
 		WorktreePath:       "/home/agent/work",
@@ -93,6 +94,29 @@ func TestDecideGateDisabledAllowsEverything(t *testing.T) {
 		if got := Decide(p, tc.tool, tc.input); got.Decision != Allow {
 			t.Errorf("gate disabled: Decide(%s) = %s, want allow", tc.tool, got.Decision)
 		}
+	}
+}
+
+func TestDecideWebFetchFromNetworkPolicy(t *testing.T) {
+	// Filtering off (unrestricted/off network mode): WebFetch is never gated, even a
+	// brand-new host — there is nothing to gate because every host is reachable.
+	p := basePolicy()
+	p.WebFetchFilter = false
+	if r := Decide(p, "WebFetch", map[string]any{"url": "https://brand-new.test/x"}); r.Decision != Allow {
+		t.Errorf("filtering off should allow any WebFetch host, got %s", r.Decision)
+	}
+
+	// A blocked host is denied outright (not parked): "always allow" could not
+	// override a block anyway.
+	p = basePolicy()
+	p.WebFetchBlockedHosts = []string{"blocked.example.com"}
+	// (blocked.example.com would otherwise match the *.example.com allow entry.)
+	if r := Decide(p, "WebFetch", map[string]any{"url": "https://blocked.example.com/x"}); r.Decision != Deny {
+		t.Errorf("blocked host should be denied, got %s", r.Decision)
+	}
+	// A non-blocked host on the allow-list still passes.
+	if r := Decide(p, "WebFetch", map[string]any{"url": "https://api.example.com/x"}); r.Decision != Allow {
+		t.Errorf("allow-listed host should pass, got %s", r.Decision)
 	}
 }
 

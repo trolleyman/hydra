@@ -67,6 +67,15 @@ func runGate(agentType string, stdin io.Reader, stdout io.Writer) error {
 	if err != nil {
 		return errtrace.Wrap(err)
 	}
+	// Merge in hosts "always allow"ed earlier this session. The seeded policy.json is
+	// read-only, so a mid-session grant reaches the gate through this writable file
+	// in the approval dir rather than a relaunch. (Persisted grants land in the
+	// project config and are seeded on the next launch.)
+	if policy.WebFetchFilter {
+		if dir := os.Getenv(gate.EnvApprovalDir); dir != "" {
+			policy.WebFetchAllowHosts = append(policy.WebFetchAllowHosts, gate.LoadGrantedHosts(dir)...)
+		}
+	}
 
 	result := gate.Decide(policy, toolName, toolInput)
 	switch result.Decision {

@@ -96,16 +96,10 @@ strict = true
 ## auto-allow MCP tools the read/write classifier deems read-only (parking only writes/unknown). Best-effort heuristic — off by default.
 # mcp_auto_allow_read = false
 
-## hosts WebFetch may reach without an approval round-trip; a new host parks the head for your approval (default none).
-# webfetch_allow_hosts = []
-
 ## Claude-specific overrides: any of the settings above, applied only to claude agents.
 [claude]
 ## enable Claude Code's fullscreen (alternate-screen) rendering — flicker-free, but it takes over the terminal and captures the mouse; off (the default) keeps this terminal's native scrollbar and select-to-copy.
 # fullscreen = false
-
-[claude.policy]
-webfetch_allow_hosts = ["code.claude.com"]
 
 ## Gemini-specific overrides: any of the settings above, applied only to gemini agents.
 # [gemini]

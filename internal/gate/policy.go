@@ -62,9 +62,22 @@ type Policy struct {
 	// "write") captured from the server-declared readOnlyHint annotation at seed
 	// time. It takes precedence over the name heuristic when present.
 	MCPToolRW map[string]string `json:"mcp_tool_rw,omitempty"`
+	// WebFetchFilter reports whether WebFetch is host-gated at all. It mirrors the
+	// sandbox network policy's FilterHosts: with network filtering off
+	// (mode = "unrestricted" or "off") there is nothing to gate — every host is
+	// already reachable — so WebFetch is never parked. Only "hard"/"advisory"
+	// (FilterHosts on) enforce the allow-list below.
+	WebFetchFilter bool `json:"webfetch_filter"`
 	// WebFetchAllowHosts lists hosts WebFetch may reach without an approval
-	// round-trip; a fetch to any other host is parked for approval.
+	// round-trip when WebFetchFilter is on; a fetch to any other host is parked for
+	// approval. It is DERIVED from the network policy — the built-in
+	// sandbox.DefaultAllowedHosts unioned with [sandbox.network] allowed_hosts — so
+	// the WebFetch tool and the egress boundary share one allow-list rather than two.
 	WebFetchAllowHosts []string `json:"webfetch_allow_hosts"`
+	// WebFetchBlockedHosts is the network policy's blocked_hosts: a host matching it
+	// is denied outright (never parked), since "always allow" could not override a
+	// block anyway.
+	WebFetchBlockedHosts []string `json:"webfetch_blocked_hosts,omitempty"`
 	// Home is the agent's HOME inside the sandbox, used to resolve the credential
 	// and policy-file paths Decide protects.
 	Home string `json:"home"`

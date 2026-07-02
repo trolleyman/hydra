@@ -112,6 +112,7 @@ func (s *Server) DecideAgentApproval(ctx context.Context, request api.DecideAgen
 	// races the agent unblocking. Best-effort: a persistence failure still lets
 	// the one-shot decision through.
 	var grantedMCPKind string // "mcp"/"mcp_tool" when a remembered MCP grant was persisted
+	var grantedHost string    // webfetch/egress host a remembered grant now covers
 	if allow && remember {
 		if req, ok, _ := gate.ReadRequest(dir, request.Reqid); ok {
 			if err := rememberApproval(projectRoot, string(head.AgentType), req.Kind, req.Target); err != nil {
@@ -121,8 +122,11 @@ func (s *Server) DecideAgentApproval(ctx context.Context, request api.DecideAgen
 					Details: "remember approval: " + err.Error(),
 				}, nil
 			}
-			if req.Kind == "mcp" || req.Kind == "mcp_tool" {
+			switch req.Kind {
+			case "mcp", "mcp_tool":
 				grantedMCPKind = req.Kind
+			case "webfetch", "egress":
+				grantedHost = req.Target
 			}
 		}
 	}
@@ -133,6 +137,17 @@ func (s *Server) DecideAgentApproval(ctx context.Context, request api.DecideAgen
 			Error:   api.ErrorResponseErrorInternalError,
 			Details: err.Error(),
 		}, nil
+	}
+
+	// An "always allow" for a host now covers every OTHER parked WebFetch/egress
+	// request for the same host, so allow those too — their toasts close on the next
+	// poll instead of forcing the user to clear each one by hand. Also record the
+	// grant live for the running session so later fetches to it don't re-park: the
+	// seeded gate policy is read-only, so a persisted host only binds on the next
+	// launch (see gate.AddGrantedHost / cli gate hook).
+	if grantedHost != "" {
+		_ = gate.AddGrantedHost(dir, grantedHost)
+		resolveSiblingHostApprovals(dir, request.Reqid, grantedHost)
 	}
 
 	// Nudge the UI to refresh: once the gate reads the decision and proceeds the
@@ -158,12 +173,34 @@ func (s *Server) DecideAgentApproval(ctx context.Context, request api.DecideAgen
 	return api.DecideAgentApproval204Response{}, nil
 }
 
-// rememberApproval appends an approved MCP server / WebFetch host / egress host to
-// the trusted PROJECT config's per-agent allow-list (never the merged user/default
-// config), so it takes effect on the head's next launch. An egress host also goes
-// live for the current session in the running proxy's allow-list (handled where
-// the proxy reads the Allow decision). Any other kind is one-shot and not
-// persisted (see the default case below).
+// resolveSiblingHostApprovals allows every still-parked WebFetch/egress request in
+// dir whose host matches the just-granted host (except the one already decided).
+// It runs after an "always allow": the host is now trusted, so the sibling requests
+// no longer need a separate click — writing their decisions unblocks the gate/proxy
+// and the UI drops their toasts on the next poll. Best-effort; a write failure just
+// leaves that sibling to be resolved normally.
+func resolveSiblingHostApprovals(dir, exceptReqID, host string) {
+	reqs, err := gate.ListRequests(dir)
+	if err != nil {
+		return
+	}
+	for _, r := range reqs {
+		if r.ReqID == exceptReqID || (r.Kind != "webfetch" && r.Kind != "egress") {
+			continue
+		}
+		if gate.HostAllowed([]string{host}, r.Target) {
+			_ = gate.WriteDecision(dir, r.ReqID, gate.DecisionFile{Decision: gate.Allow})
+		}
+	}
+}
+
+// rememberApproval appends an approved MCP server / MCP tool / host to the trusted
+// PROJECT config's per-agent allow-list (never the merged user/default config), so
+// it takes effect on the head's next launch. A WebFetch or egress host both go to
+// [sandbox.network] allowed_hosts (one shared list): an egress host also goes live
+// for the current session in the running proxy's allow-list (handled where the proxy
+// reads the Allow decision), and a WebFetch host goes live via gate.AddGrantedHost
+// (see the caller). Any other kind is one-shot and not persisted (default case).
 func rememberApproval(projectRoot, agentType, kind, target string) error {
 	if target == "" {
 		return nil
@@ -181,9 +218,9 @@ func rememberApproval(projectRoot, agentType, kind, target string) error {
 		ensurePolicy(&ac).MCPAllowed = appendUnique(ensurePolicy(&ac).MCPAllowed, target)
 	case "mcp_tool":
 		ensurePolicy(&ac).MCPToolsAllowed = appendUnique(ensurePolicy(&ac).MCPToolsAllowed, target)
-	case "webfetch":
-		ensurePolicy(&ac).WebFetchAllowHosts = appendUnique(ensurePolicy(&ac).WebFetchAllowHosts, target)
-	case "egress":
+	case "webfetch", "egress":
+		// WebFetch host-gating and egress filtering share one allow-list now, so a
+		// remembered host from either goes to [sandbox.network] allowed_hosts.
 		net := ensureNetwork(&ac)
 		net.AllowedHosts = appendUnique(net.AllowedHosts, target)
 	default:

@@ -837,11 +837,10 @@ func toAPIAgentConfig(c config.AgentConfig) api.AgentConfig {
 	if c.Policy != nil {
 		p := c.Policy
 		out.Policy = &api.PolicyConfig{
-			GateEnabled:        p.GateEnabled,
-			McpAllowed:         &p.MCPAllowed,
-			McpToolsAllowed:    &p.MCPToolsAllowed,
-			McpAutoAllowRead:   p.MCPAutoAllowRead,
-			WebfetchAllowHosts: &p.WebFetchAllowHosts,
+			GateEnabled:      p.GateEnabled,
+			McpAllowed:       &p.MCPAllowed,
+			McpToolsAllowed:  &p.MCPToolsAllowed,
+			McpAutoAllowRead: p.MCPAutoAllowRead,
 		}
 	}
 	return out
@@ -897,9 +896,6 @@ func fromAPIAgentConfig(a api.AgentConfig) config.AgentConfig {
 		}
 		if a.Policy.McpToolsAllowed != nil {
 			p.MCPToolsAllowed = *a.Policy.McpToolsAllowed
-		}
-		if a.Policy.WebfetchAllowHosts != nil {
-			p.WebFetchAllowHosts = *a.Policy.WebfetchAllowHosts
 		}
 		out.Policy = p
 	}

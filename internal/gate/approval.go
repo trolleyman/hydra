@@ -19,7 +19,51 @@ import (
 const (
 	reqSuffix      = ".req.json"
 	decisionSuffix = ".decision.json"
+	// grantedHostsFile holds hosts the user "always allow"ed for WebFetch during the
+	// current session. The persistent grant lands in the project config (effective
+	// next launch), but the running head's seeded policy.json is read-only, so this
+	// writable file in the approval dir is how a mid-session grant reaches the
+	// in-sandbox gate without a relaunch.
+	grantedHostsFile = "granted-hosts.json"
 )
+
+// LoadGrantedHosts returns the hosts granted live for this session (see
+// grantedHostsFile). A missing/unreadable file yields no hosts.
+func LoadGrantedHosts(dir string) []string {
+	data, err := os.ReadFile(filepath.Join(dir, grantedHostsFile))
+	if err != nil {
+		return nil
+	}
+	var hosts []string
+	if json.Unmarshal(data, &hosts) != nil {
+		return nil
+	}
+	return hosts
+}
+
+// AddGrantedHost appends host to the session's live WebFetch grant list (creating
+// the file if needed), deduplicating case-insensitively.
+func AddGrantedHost(dir, host string) error {
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return errtrace.Wrap(err)
+	}
+	host = strings.ToLower(strings.TrimSpace(host))
+	if host == "" {
+		return nil
+	}
+	hosts := LoadGrantedHosts(dir)
+	for _, h := range hosts {
+		if strings.EqualFold(h, host) {
+			return nil
+		}
+	}
+	hosts = append(hosts, host)
+	data, err := json.MarshalIndent(hosts, "", "  ")
+	if err != nil {
+		return errtrace.Wrap(err)
+	}
+	return errtrace.Wrap(os.WriteFile(filepath.Join(dir, grantedHostsFile), data, 0644))
+}
 
 // Request is one pending approval the gate parked. It is surfaced in the web UI
 // approval card and carries what a remembered approval needs to persist.

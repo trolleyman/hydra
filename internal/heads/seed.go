@@ -262,13 +262,25 @@ func seedHead(projectRoot, id string, agentType sandbox.AgentType, worktreePath,
 // seedGatePolicy. gate_enabled defaults to true (opt-out).
 func resolveGatePolicy(cfg config.Config, agentType string) gate.Policy {
 	p := cfg.ResolvePolicy(agentType)
-	return gate.Policy{
-		GateEnabled:        p.IsGateEnabled(),
-		MCPAllowed:         p.MCPAllowed,
-		MCPToolsAllowed:    p.MCPToolsAllowed,
-		AutoAllowReadMCP:   p.MCPAutoAllowRead != nil && *p.MCPAutoAllowRead,
-		WebFetchAllowHosts: p.WebFetchAllowHosts,
+	pol := gate.Policy{
+		GateEnabled:      p.IsGateEnabled(),
+		MCPAllowed:       p.MCPAllowed,
+		MCPToolsAllowed:  p.MCPToolsAllowed,
+		AutoAllowReadMCP: p.MCPAutoAllowRead != nil && *p.MCPAutoAllowRead,
 	}
+	// WebFetch host-gating is derived from the sandbox network policy rather than a
+	// dedicated list: WebFetch content is fetched provider-side (it does not go
+	// through the egress proxy), so the gate is the only place to enforce which
+	// hosts it may reach — and it should honour the same allow-list as the network.
+	// Filtering off (unrestricted/off) ⇒ no gating; filtering on (hard/advisory) ⇒
+	// allow the default hosts unioned with the user's allowed_hosts, minus blocked.
+	_, _, _, _, net, _ := cfg.ResolveSandboxOptions(agentType)
+	if net.FilterHosts {
+		pol.WebFetchFilter = true
+		pol.WebFetchAllowHosts = append(sandbox.DefaultAllowedHosts(), net.AllowedHosts...)
+		pol.WebFetchBlockedHosts = net.BlockedHosts
+	}
+	return pol
 }
 
 // seedMCPCatalog writes the read-only catalog of host-configured MCP servers

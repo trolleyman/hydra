@@ -155,9 +155,21 @@ func Decide(p Policy, toolName string, toolInput map[string]any) Result {
 
 	switch toolName {
 	case "WebFetch":
+		// With network filtering off (unrestricted/off) there is nothing to gate —
+		// every host is already reachable — so don't park the head. The allow-list
+		// and mode are derived from [sandbox.network], not a separate policy field.
+		if !p.WebFetchFilter {
+			return Result{Decision: Allow}
+		}
 		host := urlHost(stringArg(toolInput, "url"))
 		if host == "" {
 			return Result{Decision: Allow}
+		}
+		if HostAllowed(p.WebFetchBlockedHosts, host) {
+			return Result{
+				Decision: Deny,
+				Reason:   "WebFetch to " + quote(host) + " is blocked by the network policy",
+			}
 		}
 		if HostAllowed(p.WebFetchAllowHosts, host) {
 			return Result{Decision: Allow}
@@ -165,7 +177,7 @@ func Decide(p Policy, toolName string, toolInput map[string]any) Result {
 		return Result{
 			Decision: Ask, Kind: "webfetch", Target: host,
 			URL:    stringArg(toolInput, "url"),
-			Reason: "WebFetch to " + quote(host) + " is not on the allow-list",
+			Reason: "WebFetch to " + quote(host) + " is not on the network allow-list",
 		}
 
 	case "Write", "Edit", "MultiEdit", "NotebookEdit":

@@ -33,6 +33,19 @@ const Chip: React.FC<{ children: React.ReactNode }> = ({ children }) => (
   </span>
 )
 
+// The MCP server name, tinted violet so the SAME server reads identically across
+// the "Allow MCP server" card and the "Run MCP tool" card (which share the violet
+// MCP identity). Kept in sync with the mcp_tool badge/icon tone.
+const ServerName: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+  <span className="text-violet-600 dark:text-violet-300">{children}</span>
+)
+
+// ChipClause keeps a chip and the punctuation right after it on the same line, so a
+// trailing "." or "," never orphans onto a line of its own when the chip wraps.
+const ChipClause: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+  <span className="whitespace-nowrap">{children}</span>
+)
+
 // Per-kind visual identity: icon, its tinted square, the card title, and the
 // kind/RW badge.
 function kindVisual(data: ApprovalToastData): {
@@ -70,18 +83,18 @@ function kindVisual(data: ApprovalToastData): {
 const BodyLine: React.FC<{ data: ApprovalToastData }> = ({ data }) => {
   switch (data.kind) {
     case 'mcp':
-      return <>An agent wants to connect to MCP server <Chip>{data.target}</Chip>.</>
+      return <>An agent wants to connect to MCP server <ChipClause><Chip><ServerName>{data.target}</ServerName></Chip>.</ChipClause></>
     case 'mcp_tool': {
       const [server, ...rest] = data.target.split('__')
       const tool = rest.join('__')
-      return <>An agent wants to run <Chip>{server} <span className="px-0.5 text-gray-400 dark:text-gray-500">▸</span> {tool}</Chip>.</>
+      return <>An agent wants to run <ChipClause><Chip><ServerName>{server}</ServerName> <span className="px-0.5 text-gray-400 dark:text-gray-500">▸</span> {tool}</Chip>.</ChipClause></>
     }
     case 'webfetch':
-      return <>An agent wants to fetch from <Chip>{data.target}</Chip>.</>
+      return <>An agent wants to fetch from <ChipClause><Chip>{data.target}</Chip>.</ChipClause></>
     case 'egress':
-      return <>An agent wants to connect to <Chip>{data.target}</Chip>, which isn&rsquo;t on its network allow-list.</>
+      return <>An agent wants to connect to <ChipClause><Chip>{data.target}</Chip>,</ChipClause> which isn&rsquo;t on its network allow-list.</>
     default:
-      return <>An agent wants to run <Chip>{data.target}</Chip>.</>
+      return <>An agent wants to run <ChipClause><Chip>{data.target}</Chip>.</ChipClause></>
   }
 }
 

@@ -11,7 +11,7 @@ func TestResolvePolicyDefaults(t *testing.T) {
 	if !p.IsGateEnabled() {
 		t.Error("gate should default to enabled when unset")
 	}
-	if len(p.MCPAllowed) != 0 || len(p.WebFetchAllowHosts) != 0 {
+	if len(p.MCPAllowed) != 0 || len(p.MCPToolsAllowed) != 0 {
 		t.Errorf("allow-lists should default empty: %+v", p)
 	}
 }
@@ -22,22 +22,22 @@ func TestResolvePolicyMergesDefaultsAndAgent(t *testing.T) {
 		Defaults: AgentConfig{Policy: &PolicyConfig{MCPAllowed: []string{"github"}}},
 		Agents: map[string]AgentConfig{
 			"claude": {Policy: &PolicyConfig{
-				GateEnabled:        &off,
-				WebFetchAllowHosts: []string{"docs.anthropic.com"},
+				GateEnabled:     &off,
+				MCPToolsAllowed: []string{"linear__create_issue"},
 			}},
 		},
 	}
 	p := cfg.ResolvePolicy("claude")
-	// Agent override wins for gate_enabled and webfetch; defaults supply mcp_allowed
-	// (the agent didn't set it, so it inherits).
+	// Agent override wins for gate_enabled and mcp_tools_allowed; defaults supply
+	// mcp_allowed (the agent didn't set it, so it inherits).
 	if p.IsGateEnabled() {
 		t.Error("agent gate_enabled=false should win")
 	}
 	if len(p.MCPAllowed) != 1 || p.MCPAllowed[0] != "github" {
 		t.Errorf("mcp_allowed should inherit from defaults: %+v", p.MCPAllowed)
 	}
-	if len(p.WebFetchAllowHosts) != 1 || p.WebFetchAllowHosts[0] != "docs.anthropic.com" {
-		t.Errorf("webfetch_allow_hosts should come from agent: %+v", p.WebFetchAllowHosts)
+	if len(p.MCPToolsAllowed) != 1 || p.MCPToolsAllowed[0] != "linear__create_issue" {
+		t.Errorf("mcp_tools_allowed should come from agent: %+v", p.MCPToolsAllowed)
 	}
 	// A different agent inherits only the defaults.
 	g := cfg.ResolvePolicy("gemini")
@@ -52,7 +52,7 @@ func TestResolvePolicyMergesDefaultsAndAgent(t *testing.T) {
 func TestPolicyRenderRoundTrip(t *testing.T) {
 	// The empty template documents the policy defaults (commented-out).
 	tmpl := renderConfig(nil, Config{})
-	for _, want := range []string{"[policy]", "# gate_enabled = true", "# mcp_allowed = []", "# webfetch_allow_hosts = []"} {
+	for _, want := range []string{"[policy]", "# gate_enabled = true", "# mcp_allowed = []", "# mcp_tools_allowed = []"} {
 		if !strings.Contains(tmpl, want) {
 			t.Errorf("template missing %q:\n%s", want, tmpl)
 		}
