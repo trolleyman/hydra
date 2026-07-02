@@ -219,27 +219,31 @@ timeout_sec = 900
 ## (so a multi-line stack trace fits on the one line) — and a doubled backslash
 ## becomes one literal backslash. Any other escape is left as-is.
 [[tests]]
-# Go test suite. Runs via `go tool gotestsum` (a version-pinned tool dependency in
-# go.mod, like oapi-codegen) so it emits JUnit and the panel shows per-case detail
-# (pass/fail per test) instead of a single synthetic "(command exited 0)" row. No
-# global/mise install needed — it builds from the module cache wherever `go` works.
-# The whole module is slow, so allow a generous timeout. (web/dist is kept present
-# in every checkout via a committed web/dist/.gitkeep, so the //go:embed all:dist in
-# web/embed.go compiles without building the frontend.)
+# Go test suite (type = "stdout": streams per-case results into the panel live via
+# ::hydra:test:*:: markers). `go test -json ./...` is piped through
+# scripts/gotest-markers, which turns each test's JSON event into a marker (package
+# import path as the location — Hydra strips the go.mod prefix — subtests as scope).
+# No global/mise install needed — it builds from the module cache wherever `go`
+# works. The whole module is slow, so allow a generous timeout. (web/dist is kept
+# present in every checkout via a committed web/dist/.gitkeep, so the //go:embed
+# all:dist in web/embed.go compiles without building the frontend.)
 # Once the tests pass, errtrace-report (read-only errtrace -l — safe against a
-# head's live worktree) surfaces what `mage tidy` would still change — unwrapped
-# error returns and unused //errtrace:skip directives — as informational ⚠
-# warnings on the same verdict; they never gate the merge.
+# head's live worktree) emits ⚠ warn markers for what `mage tidy` would still
+# change — unwrapped error returns and unused //errtrace:skip directives —
+# informational only; they never gate the merge.
 name = "go"
-command = "go tool gotestsum --junitfile \"$HYDRA_TEST_OUTPUT/go.xml\" -- ./... && go run ./scripts/errtrace-report"
+command = "go test -json ./... | go run ./scripts/gotest-markers && go run ./scripts/errtrace-report"
 timeout_sec = 900
+type = "stdout"
 
 [[tests]]
-# Frontend vitest suite (JUnit, so failing specs show their assertion) plus an
-# ESLint pass whose findings surface on the same verdict: eslint-report.ts writes
-# a Hydra-native report where errors gate the merge like a failing test and
-# warnings show as an informational amber ⚠ N. Lint only runs once the specs pass
-# (the merge is already blocked when they don't).
+# Frontend vitest suite (type = "stdout": streams per-spec results into the panel
+# live via ::hydra:test:*:: markers) using the scripts/hydra-reporter.ts vitest
+# reporter, plus an ESLint pass whose findings surface on the same verdict:
+# eslint-report.ts emits fail markers for errors (which gate the merge like a
+# failing test) and ⚠ warn markers for warnings (informational only). Lint runs
+# only once the specs pass (the merge is already blocked when they don't).
 name = "web"
-command = "cd web && bun install && bun x vitest run --reporter=junit --outputFile=\"$HYDRA_TEST_OUTPUT/web.xml\" && bun scripts/eslint-report.ts"
+command = "cd web && bun install && bun x vitest run --reporter=./scripts/hydra-reporter.ts && bun scripts/eslint-report.ts"
 timeout_sec = 600
+type = "stdout"
