@@ -78,7 +78,7 @@ strict = true
 # filter_enabled = false
 
 ## extra outbound hosts (exact host or *.suffix) allowed when filtering is on, unioned on top of the built-in default allow-list (AI-provider APIs, package registries, git hosts).
-# allowed_hosts = []
+allowed_hosts = ["http-intake.logs.us5.datadoghq.com"]
 
 ## outbound hosts (exact host or *.suffix) to deny even when otherwise allowed — overrides both allowed_hosts and the built-in defaults, so you can subtract a default host without redefining the list.
 # blocked_hosts = []
