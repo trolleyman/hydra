@@ -113,7 +113,10 @@ func BuildSpec(opts Options) (*Spec, error) {
 		// Remapping back to the host uid/gid restores the "agent runs as the host
 		// user" invariant in every mode (a no-op outside hard mode); on-disk file
 		// ownership is unchanged because the inner uid maps back through pasta to the
-		// same host uid.
+		// same host uid. --unshare-user is required for --uid to be accepted: bwrap
+		// otherwise creates its user namespace implicitly and rejects --uid with
+		// "Specifying --uid requires --unshare-user or --userns".
+		"--unshare-user",
 		"--uid", strconv.Itoa(os.Getuid()),
 		"--gid", strconv.Itoa(os.Getgid()),
 	}
