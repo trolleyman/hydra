@@ -4,9 +4,11 @@ Living design doc. Captures two follow-on features for the agent-tests panel,
 plus the shared data-model change they both depend on. **Status: implemented on
 this branch** — the shared foundation (structured `Path`/`Scope`/line-col),
 Feature 1 (filter bar + `CaseTree` + the two cog checkboxes), and Feature 2
-(`type = "stdout"` + `::hydra:test:*::` streaming + coalesced counts). Tier-2
-dotted-classname→file probing and the full per-status live sidebar chip remain
-future work.
+(`type = "stdout"` + `::hydra:test:*::` streaming + coalesced counts + the live
+per-status sidebar chip for streamed runs). Tier-2 dotted-classname→file probing
+remains future work — Maven Surefire / Gradle JUnit XML genuinely carries no
+file attribute, only `classname`, so the filesystem probe is the only route to
+a `Path` for Java-style reports.
 
 Already shipped (branch `hydra/any-way-we-could-surface-eg-eslint`): a first-class
 non-failing **warning** outcome (`CaseWarning` + `Report.Warnings`), a short/long
@@ -259,8 +261,13 @@ Helper `IsStreaming()`.
 - **Cheap win:** route the runner's running `progress` string (`123/4556`) into the
   agent-list SSE — the chip already renders `progress` when `running`, so `✓ 123/4556`
   in the sidebar is nearly free.
-- **Full per-status live chip** (`✓123 ⚠2 ✗1` ticking): needs the summary
-  recomputed+streamed per head — a later, larger step.
+- **Full per-status live chip** (`✓123 ⚠2 ✗1` ticking) — **implemented** for
+  `type=stdout`: the running Report snapshot carries the streamed tallies (so the
+  summary Peek sees them), the manager fires a throttled (2s) `onProgress` →
+  `agents_changed` nudge from the counts flush, and the chip renders live ✓/✗/⚠
+  segments while running (short form: tallies only; long form adds skipped + the
+  `N/total` progress). junit runs still show only the progress string mid-run —
+  they report nothing per-case until settle.
 
 ### Effort: ~2 days
 `type` field + marker parser + in-flight accumulation + `counts` WS + panel merge

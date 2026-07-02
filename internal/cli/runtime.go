@@ -96,6 +96,9 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 	// A finished test run settling pushes agents_changed so the sidebar/header
 	// verdict chips refresh instantly instead of lagging behind the detail panel.
 	testReg.SetOnSettle(eventHub.AgentsChanged)
+	// A streamed (type=stdout) run's ticking counts push agents_changed too —
+	// throttled inside the manager — so the sidebar chip counts live mid-run.
+	testReg.SetOnProgress(eventHub.AgentsChanged)
 
 	server := &httppkg.Server{
 		WorktreesDir:    worktreesDir,

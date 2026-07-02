@@ -49,6 +49,12 @@ type Manager struct {
 	// verdict chips immediately instead of waiting on the slow fallback poll. Set
 	// once by the Registry at creation; read-only thereafter.
 	onSettle func(projectRoot string)
+	// onProgress, if set, is called (with projectRoot) while a streamed
+	// (type=stdout) run is appending cases — throttled to testNudgeInterval per
+	// run — so the agent-list summary (and with it the sidebar chip's live
+	// ✓/⚠/✗ counts) ticks during the run, not just at settle. Same wiring
+	// discipline as onSettle.
+	onProgress func(projectRoot string)
 
 	mu         sync.Mutex
 	gens       map[string]struct{}
@@ -141,9 +147,10 @@ func (m *Manager) EntryDir(runner string, v Version) (string, error) {
 
 // Registry lazily creates and caches one Manager per project root.
 type Registry struct {
-	mu       sync.Mutex
-	mgrs     map[string]*Manager
-	onSettle func(projectRoot string)
+	mu         sync.Mutex
+	mgrs       map[string]*Manager
+	onSettle   func(projectRoot string)
+	onProgress func(projectRoot string)
 }
 
 func NewRegistry() *Registry { return &Registry{mgrs: map[string]*Manager{}} }
@@ -158,6 +165,16 @@ func (r *Registry) SetOnSettle(fn func(projectRoot string)) {
 	r.onSettle = fn
 }
 
+// SetOnProgress registers a callback invoked (throttled per in-flight run)
+// while a streamed run's counts tick. Wired to events.Hub.AgentsChanged so the
+// sidebar chip counts live during a type=stdout run. Call before serving; it
+// applies to Managers created afterwards.
+func (r *Registry) SetOnProgress(fn func(projectRoot string)) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.onProgress = fn
+}
+
 func (r *Registry) Manager(projectRoot string) *Manager {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -166,6 +183,7 @@ func (r *Registry) Manager(projectRoot string) *Manager {
 	}
 	m := NewManager(projectRoot)
 	m.onSettle = r.onSettle
+	m.onProgress = r.onProgress
 	r.mgrs[projectRoot] = m
 	return m
 }
@@ -404,6 +422,10 @@ const (
 	// backpressure guard that keeps a 4,556-case run from emitting 4,556 frames.
 	caseFlushInterval = 100 * time.Millisecond
 	caseFlushMax      = 200
+	// testNudgeInterval throttles the onProgress agents_changed nudge: every
+	// nudge makes each web client refetch the agent list (that's how the sidebar
+	// chip reads its summary), so the chip ticks ~every 2s, not at counts rate.
+	testNudgeInterval = 2 * time.Second
 )
 
 // liveRun accumulates the streamed test cases of one in-flight generation.
@@ -414,6 +436,7 @@ type liveRun struct {
 	passed, failed, skipped, warnings int
 	pending                           []TestCase // appended since the last coalesced flush
 	timer                             *time.Timer
+	lastNudge                         time.Time // last onProgress agents_changed nudge
 }
 
 // appendTestCase records one streamed case: it feeds the accumulated report,
@@ -504,6 +527,13 @@ func (m *Manager) flushCountsLocked(dir string) {
 	}
 	lr.pending = nil
 	m.broadcastLocked(Event{Dir: dir, Kind: "counts", Counts: counts})
+	// Nudge the agent list (throttled) so the sidebar chip's live counts tick
+	// during the run — the settle nudge covers the final state. Fired async so
+	// the hub callback never runs under m.mu.
+	if m.onProgress != nil && time.Since(lr.lastNudge) >= testNudgeInterval {
+		lr.lastNudge = time.Now()
+		go m.onProgress(m.projectRoot)
+	}
 }
 
 // fillRunningLocked copies the in-flight streamed state into a running Report
