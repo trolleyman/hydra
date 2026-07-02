@@ -100,9 +100,12 @@ strict = true
 # webfetch_allow_hosts = []
 
 ## Claude-specific overrides: any of the settings above, applied only to claude agents.
-# [claude]
+[claude]
 ## enable Claude Code's fullscreen (alternate-screen) rendering — flicker-free, but it takes over the terminal and captures the mouse; off (the default) keeps this terminal's native scrollbar and select-to-copy.
 # fullscreen = false
+
+[claude.policy]
+webfetch_allow_hosts = ["code.claude.com"]
 
 ## Gemini-specific overrides: any of the settings above, applied only to gemini agents.
 # [gemini]
