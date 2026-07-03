@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useNavigate } from '@tanstack/react-router'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
@@ -7,6 +8,7 @@ import { RefreshCw, Plus, X, ChevronDown, Shield, ShieldOff } from 'lucide-react
 import { Tooltip } from './Tooltip'
 import { uploadFile, extractFiles } from '../api/uploads'
 import { useAgentStore } from '../stores/agentStore'
+import { fileUrlToWorktreeRelative, isTrustedLinkUrl } from '../lib/repoLink'
 import { useDialogStore } from '../stores/dialogStore'
 import { useShortcutsStore } from '../stores/shortcutsStore'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from '../lib/agentViewPrefs'
@@ -57,6 +59,17 @@ function getWsUrl(agentId: string, projectId: string | null, shell?: boolean, sa
 }
 
 function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, reconnectAttempt, onStatusUpdate, onDiffRefresh, onMetrics }: PaneProps) {
+  const navigate = useNavigate()
+  // The agent's branch + worktree, used to turn a file:// hyperlink the agent
+  // printed into an in-app repository-view navigation (see the linkHandler
+  // below). Selected as primitives so a poll that leaves them unchanged doesn't
+  // re-render this pane. Falls back to the archived list for a finished head.
+  const branchName = useAgentStore((s) =>
+    (s.agents.find((a) => a.id === agentId) ?? s.archived.find((a) => a.id === agentId))?.branch_name ?? null,
+  )
+  const worktreePath = useAgentStore((s) =>
+    (s.agents.find((a) => a.id === agentId) ?? s.archived.find((a) => a.id === agentId))?.worktree_path ?? null,
+  )
   const containerRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<Terminal | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
@@ -92,6 +105,15 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
   useEffect(() => {
     onStatusUpdateRef.current = onStatusUpdate
     onDiffRefreshRef.current = onDiffRefresh
+  })
+
+  // Latest context for the terminal's OSC 8 link handler. The handler is wired
+  // once when the xterm instance is created (that effect must not depend on
+  // these — a changed branch/worktree shouldn't tear down and reconnect the
+  // socket), so it reads them through this ref, kept current after each commit.
+  const linkCtxRef = useRef({ branchName, worktreePath, projectId, navigate })
+  useEffect(() => {
+    linkCtxRef.current = { branchName, worktreePath, projectId, navigate }
   })
 
   // Toast above the terminal for upload progress/result of pasted files.
@@ -250,6 +272,38 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
       },
       scrollback: 5000,
       allowProposedApi: true,
+      // Handle the OSC 8 hyperlinks agents print (Claude Code underlines the
+      // files it touches, and prints https:// links for e.g. OAuth). Without a
+      // handler xterm pops a `confirm()` for every link — and drops file:// ones
+      // entirely unless allowNonHttpProtocols is set. We take over both:
+      //   • a file:// link inside this agent's worktree opens in the in-app
+      //     repository view on the agent's branch (no prompt);
+      //   • an http(s) link opens straight away for trusted hosts, and keeps the
+      //     confirm only for everything else.
+      // allowNonHttpProtocols lets file:// reach activate; the worktree check in
+      // fileUrlToWorktreeRelative is the guard that flag warns to add.
+      linkHandler: {
+        allowNonHttpProtocols: true,
+        activate: (_event, uri) => {
+          const { branchName, worktreePath, projectId, navigate } = linkCtxRef.current
+          const rel = fileUrlToWorktreeRelative(uri, worktreePath)
+          if (rel && branchName && projectId) {
+            navigate({
+              to: '/project/$projectId/repository/$',
+              params: { projectId, _splat: `${branchName}/${rel}` },
+            })
+            return
+          }
+          if (/^https?:/i.test(uri)) {
+            if (isTrustedLinkUrl(uri, window.location.origin) || window.confirm(`Do you want to navigate to ${uri}?`)) {
+              window.open(uri, '_blank', 'noopener,noreferrer')
+            }
+            return
+          }
+          // A file:// link outside the worktree (or any other scheme): the
+          // browser can't usefully open it, so do nothing rather than confirm.
+        },
+      },
     })
 
     const fitAddon = new FitAddon()
