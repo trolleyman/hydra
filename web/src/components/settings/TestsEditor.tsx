@@ -51,9 +51,9 @@ export function TestsEditor({
           <p>Per-project commands that run a test suite against a head's branch. Hydra parses the report each writes and surfaces a pass/fail verdict that soft-gates the merge button.</p>
           <p className="mt-1.5">The command runs via <code className="text-blue-300">bash -c</code> in the checkout directory with these variables set:</p>
           <ul className="mt-1 space-y-0.5 list-none">
-            <li><code className="text-blue-300">HYDRA_TEST_OUTPUT</code> — directory to write the report into</li>
-            <li><code className="text-blue-300">HYDRA_TEST_SOURCE</code> — the checkout directory</li>
-            <li><code className="text-blue-300">HYDRA_TEST_REF</code> — the resolved git ref</li>
+            <li><code className="text-blue-300">HYDRA_TEST_OUTPUT</code> - directory to write the report into</li>
+            <li><code className="text-blue-300">HYDRA_TEST_SOURCE</code> - the checkout directory</li>
+            <li><code className="text-blue-300">HYDRA_TEST_REF</code> - the resolved git ref</li>
           </ul>
           <p className="mt-1.5">Write a <strong>JUnit-XML</strong> or <strong>Hydra-JSON</strong> report into <code className="text-blue-300">$HYDRA_TEST_OUTPUT</code> for per-case detail in the panel. With no report, the command's exit code alone becomes a degenerate red/green verdict.</p>
         </InfoTooltip>
@@ -82,7 +82,7 @@ export function TestsEditor({
           />
         </div>
         {concurrency === 0 && (
-          <span className="text-xs font-medium text-amber-600 dark:text-amber-400 h-[38px] flex items-center">Unlimited — no cap on parallel runs</span>
+          <span className="text-xs font-medium text-amber-600 dark:text-amber-400 h-[38px] flex items-center">Unlimited - no cap on parallel runs</span>
         )}
       </div>
 
@@ -98,7 +98,7 @@ export function TestsEditor({
             Re-run stale verdicts in the background
             <InfoTooltip title="Background re-runs">
               <p>When on, the daemon re-runs a head's suites in the background whenever its branch-tip verdict is missing or stale (a cached result computed for an older commit), so the verdict is fresh the instant you open the tests panel or arm auto-merge.</p>
-              <p className="mt-1.5">Turn it off for a project whose suites are too heavy to run speculatively — tests are then run only when you open the panel or at merge time. Foreground runs and the max-parallel cap above still apply either way.</p>
+              <p className="mt-1.5">Turn it off for a project whose suites are too heavy to run speculatively - tests are then run only when you open the panel or at merge time. Foreground runs and the max-parallel cap above still apply either way.</p>
               <p className="mt-1.5">Default: on.</p>
             </InfoTooltip>
           </span>
@@ -121,7 +121,7 @@ export function TestsEditor({
                   <div className="flex items-center gap-2">
                     <EnabledToggle enabled={enabled} onChange={(v) => update(index, { enabled: v ? undefined : false })} />
                     {!enabled && (
-                      <span className="text-xs font-semibold text-gray-400 dark:text-gray-500">— skipped by the test gate</span>
+                      <span className="text-xs font-semibold text-gray-400 dark:text-gray-500">- skipped by the test gate</span>
                     )}
                   </div>
                   <div className={`space-y-3 transition-opacity ${enabled ? '' : 'opacity-50'}`}>
@@ -142,7 +142,7 @@ export function TestsEditor({
                         Results
                         <InfoTooltip title="Result parsing">
                           <p><strong>report file</strong> (default): after the command exits, Hydra parses the JUnit-XML / Hydra-JSON files it wrote into <code className="text-blue-300">$HYDRA_TEST_OUTPUT</code>.</p>
-                          <p className="mt-1.5"><strong>stdout stream</strong>: Hydra parses <code className="text-blue-300">::hydra:test:*::</code> markers live from the command's stdout — counts tick in the panel and sidebar as tests run, and the accumulated cases are the report (no file needed). One line per case:</p>
+                          <p className="mt-1.5"><strong>stdout stream</strong>: Hydra parses <code className="text-blue-300">::hydra:test:*::</code> markers live from the command's stdout - counts tick in the panel and sidebar as tests run, and the accumulated cases are the report (no file needed). One line per case:</p>
                           <p className="mt-1 font-mono text-[11px]">::hydra:test:pass:: src/x.test.ts › adds<br />::hydra:test:fail:: src/x.test.ts:48:24 › grace window | expected kid-2<br />::hydra:test:warn:: src/y.ts:12:5 › no-console | Unexpected console<br />::hydra:test:skip:: pkg › TestResume | needs daemon<br />::hydra:test:total:: 4556</p>
                         </InfoTooltip>
                       </label>
@@ -181,7 +181,7 @@ export function TestsEditor({
                       <span className="text-xs font-medium text-gray-600 dark:text-gray-300 flex items-center gap-1">
                         Run on host (no sandbox)
                         <InfoTooltip title="Unsafe Host Execution">
-                          <p>Runs the command directly on the host with <strong>no sandbox</strong> — full access to your machine, network, and credentials.</p>
+                          <p>Runs the command directly on the host with <strong>no sandbox</strong> - full access to your machine, network, and credentials.</p>
                           <p className="mt-1.5">The command executes the <em>tested ref's</em> code (its test files, its <code className="font-mono">bun install</code>/<code className="font-mono">go test</code>), so only enable this if every ref you will ever test is trusted.</p>
                         </InfoTooltip>
                       </span>
@@ -196,8 +196,8 @@ export function TestsEditor({
                       <span className="text-xs font-medium text-gray-600 dark:text-gray-300 flex items-center gap-1">
                         Pristine checkout
                         <InfoTooltip title="Pristine Checkout">
-                          <p>Test runs reuse a small pool of checkouts, switching commits with <code className="font-mono">git checkout</code> — this resets tracked files but keeps git-ignored caches (e.g. <code className="font-mono">node_modules</code>) warm between runs.</p>
-                          <p className="mt-1.5">Enable this to also wipe ignored files before each run (<code className="font-mono">git clean -fdx</code> instead of <code className="font-mono">-fd</code>) for a fully clean tree. Slower — only needed if stale ignored output can leak between commits.</p>
+                          <p>Test runs reuse a small pool of checkouts, switching commits with <code className="font-mono">git checkout</code> - this resets tracked files but keeps git-ignored caches (e.g. <code className="font-mono">node_modules</code>) warm between runs.</p>
+                          <p className="mt-1.5">Enable this to also wipe ignored files before each run (<code className="font-mono">git clean -fdx</code> instead of <code className="font-mono">-fd</code>) for a fully clean tree. Slower - only needed if stale ignored output can leak between commits.</p>
                         </InfoTooltip>
                       </span>
                     </label>
@@ -211,8 +211,8 @@ export function TestsEditor({
                       <span className="text-xs font-medium text-gray-600 dark:text-gray-300 flex items-center gap-1">
                         Strict mode
                         <InfoTooltip title="Strict Mode">
-                          <p>Runs the command under <code className="font-mono">set -eo pipefail</code> so a failing setup step — or a failure mid-pipeline — aborts and propagates.</p>
-                          <p className="mt-1.5">A test runner that exits non-zero <em>because tests failed</em> is still a valid red verdict, not a strict abort — the verdict comes from the parsed report. Uncheck to run the command exactly as written.</p>
+                          <p>Runs the command under <code className="font-mono">set -eo pipefail</code> so a failing setup step - or a failure mid-pipeline - aborts and propagates.</p>
+                          <p className="mt-1.5">A test runner that exits non-zero <em>because tests failed</em> is still a valid red verdict, not a strict abort - the verdict comes from the parsed report. Uncheck to run the command exactly as written.</p>
                         </InfoTooltip>
                       </span>
                     </label>

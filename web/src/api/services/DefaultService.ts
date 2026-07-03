@@ -250,7 +250,7 @@ export class DefaultService {
             errors: {
                 400: `Bad Request`,
                 404: `Project Not Found`,
-                409: `Conflict (a head with this ID already exists — active, archived, or in another project)`,
+                409: `Conflict (a head with this ID already exists - active, archived, or in another project)`,
                 500: `Internal Server Error`,
             },
         });
@@ -314,8 +314,8 @@ export class DefaultService {
      * Merge a Hydra agent's branch into its base branch and, unless close=false, kill it
      * @param projectId Project ID
      * @param id
-     * @param force Bypass the test gate (PLAN #68). Without it, a merge is soft-blocked with 409 tests_failing / tests_errored when the head's configured tests are failing, errored, or still running. force=true merges anyway — covering both "don't wait" (tests still running) and "override" (tests red). Merge-conflict and operation-in-progress checks still apply.
-     * @param close Whether to tear the agent down after the merge. Default (true) merges the branch and closes the head — session killed, worktree and branch removed, archived as "merged". close=false merges the branch but keeps the agent running: session, worktree, branch and uncommitted work all survive, and the agent's diff resets to only the work not yet merged. The test gate and conflict checks apply the same either way.
+     * @param force Bypass the test gate (PLAN #68). Without it, a merge is soft-blocked with 409 tests_failing / tests_errored when the head's configured tests are failing, errored, or still running. force=true merges anyway - covering both "don't wait" (tests still running) and "override" (tests red). Merge-conflict and operation-in-progress checks still apply.
+     * @param close Whether to tear the agent down after the merge. Default (true) merges the branch and closes the head - session killed, worktree and branch removed, archived as "merged". close=false merges the branch but keeps the agent running: session, worktree, branch and uncommitted work all survive, and the agent's diff resets to only the work not yet merged. The test gate and conflict checks apply the same either way.
      * @returns void
      * @throws ApiError
      */
@@ -492,7 +492,7 @@ export class DefaultService {
      * @param includeUncommitted Use the agent's uncommitted working tree as the right version.
      * @param refresh Name of a single artifact script whose cached result (including a cached failure) should be discarded and regenerated before responding. By default both sides of the comparison are regenerated; pass refresh_side to regenerate just one.
      *
-     * @param refreshSide Limits a refresh to a single side — "left" (before) or "right" (after). Ignored unless refresh names a script; when omitted both sides are regenerated.
+     * @param refreshSide Limits a refresh to a single side - "left" (before) or "right" (after). Ignored unless refresh names a script; when omitted both sides are regenerated.
      *
      * @returns ArtifactsResponse OK
      * @throws ApiError
@@ -528,7 +528,7 @@ export class DefaultService {
     }
     /**
      * Get the test-runner verdict(s) for a head's branch
-     * Returns, per configured [[tests]] runner, the parsed pass/fail verdict for the head's current commit (or working tree). Generation runs in the background and is cached per commit SHA; a runner with status "running" should be polled. Returns an empty list when the project configures no test runners. Single-sided — there is no before/after comparison (PLAN #68).
+     * Returns, per configured [[tests]] runner, the parsed pass/fail verdict for the head's current commit (or working tree). Generation runs in the background and is cached per commit SHA; a runner with status "running" should be polled. Returns an empty list when the project configures no test runners. Single-sided - there is no before/after comparison (PLAN #68).
      *
      * @param projectId Project ID
      * @param id
@@ -564,7 +564,7 @@ export class DefaultService {
         });
     }
     /**
-     * Arm auto-merge — merge this head when its tests settle passing
+     * Arm auto-merge - merge this head when its tests settle passing
      * Arms "merge when green" (PLAN #68): the daemon merges this head as soon as its tests settle passing, and disarms it (with a notification) if they settle failing/errored. Arming kicks a fresh test run if none is in flight. Idempotent.
      *
      * @param projectId Project ID
@@ -868,7 +868,7 @@ export class DefaultService {
     }
     /**
      * Diff two refs in the project's repository
-     * Returns the diff between two arbitrary refs (branches or commits) in the project's repository. Used by the repository browser's diff view to compare the branch being viewed against another branch. Uses a two-dot diff (base..head) — the literal difference between the two trees.
+     * Returns the diff between two arbitrary refs (branches or commits) in the project's repository. Used by the repository browser's diff view to compare the branch being viewed against another branch. Uses a two-dot diff (base..head) - the literal difference between the two trees.
      * @param projectId Project ID
      * @param baseRef Base ref (branch or commit) to diff from
      * @param headRef Head ref (branch or commit) to diff to
@@ -1035,7 +1035,7 @@ export class DefaultService {
     }
     /**
      * Commit the given uncommitted paths in the project root
-     * Stages exactly the requested paths (tracked and untracked) and commits them with the given message; other dirty paths are left untouched. Backs the sidebar's uncommitted-changes warning, whose main job is sweeping up config edits the web UI itself writes to .hydra/config.toml — the UI sends the paths it showed the user. Requested paths that are no longer dirty are skipped. Returns the refreshed push status.
+     * Stages exactly the requested paths (tracked and untracked) and commits them with the given message; other dirty paths are left untouched. Backs the sidebar's uncommitted-changes warning, whose main job is sweeping up config edits the web UI itself writes to .hydra/config.toml - the UI sends the paths it showed the user. Requested paths that are no longer dirty are skipped. Returns the refreshed push status.
      * @param projectId Project ID
      * @param requestBody
      * @returns RepositoryPushStatus OK (changes committed)
@@ -1062,7 +1062,7 @@ export class DefaultService {
     }
     /**
      * List the artifact scripts configured at a ref
-     * Lists the names of the enabled [[artifacts]] scripts defined in the ref's .hydra/config.toml. This is cheap — it only reads config and does NOT generate anything. The repository browser uses it to decide whether to show the dynamic ".hydra/artifacts" folder and what to list inside it.
+     * Lists the names of the enabled [[artifacts]] scripts defined in the ref's .hydra/config.toml. This is cheap - it only reads config and does NOT generate anything. The repository browser uses it to decide whether to show the dynamic ".hydra/artifacts" folder and what to list inside it.
      * @param projectId Project ID
      * @param ref Git ref whose config to read (defaults to HEAD)
      * @returns RepositoryArtifactsResponse OK
@@ -1089,7 +1089,7 @@ export class DefaultService {
     }
     /**
      * Generate (or load) one artifact script's output for a ref
-     * Runs (or returns the cached result of) the named [[artifacts]] script against a single ref and reports its outputs single-sided (no diff — the repository browser shows one ref at a time). Generation is lazy: this is only called when the user opens the script in the browser.
+     * Runs (or returns the cached result of) the named [[artifacts]] script against a single ref and reports its outputs single-sided (no diff - the repository browser shows one ref at a time). Generation is lazy: this is only called when the user opens the script in the browser.
      * @param projectId Project ID
      * @param name The artifact script name
      * @param ref Git ref to generate the artifact for (defaults to HEAD)

@@ -47,7 +47,7 @@ function ArtifactChangeIcon({ type, className = 'w-3.5 h-3.5' }: { type: string;
 
 // partialFailedSide reports which single side of a set failed while the other
 // rendered (a partial failure). A whole-set "error" (both sides failed) returns
-// null — there's no surviving side to reconcile. Mirrors the backend: status
+// null - there's no surviving side to reconcile. Mirrors the backend: status
 // stays "ready"/"generating" with just one side's error set.
 function partialFailedSide(set: ArtifactSet): 'left' | 'right' | null {
   if ((set.status as string) === 'error') return null
@@ -55,8 +55,8 @@ function partialFailedSide(set: ArtifactSet): 'left' | 'right' | null {
 }
 
 // presentedFiles is a set's files as the panel actually shows them. A partial
-// failure has no real diff — the surviving side's files would each read as
-// added/removed against an absent counterpart — so they're presented as unchanged,
+// failure has no real diff - the surviving side's files would each read as
+// added/removed against an absent counterpart - so they're presented as unchanged,
 // hidden by the change filter's default. Both the per-card grid (cardFiles) and the
 // panel-wide filter counts run through this, so the "changes" dropdown's per-type
 // counts agree with the card body (no "538 added" while the card says "unchanged").
@@ -76,7 +76,7 @@ const MASONRY_GAP = 12
 const MASONRY_FALLBACK_H = 240
 
 // Tile reflow animation. An easeOutBack curve (the >1 control point) overshoots
-// slightly before settling — the gentle "boing" when a tile snaps to its new column
+// slightly before settling - the gentle "boing" when a tile snaps to its new column
 // span, and the cue that tiles can be moved as siblings ease out of the way. Width
 // settles a touch slower than position so the snap reads as deliberate, not abrupt.
 // Suppressed on the tile being actively dragged (it tracks the pointer 1:1) and for
@@ -87,14 +87,14 @@ const TILE_TRANSITION = `left 220ms ${TILE_EASE}, top 220ms ${TILE_EASE}, width 
 // Resize "stickiness": the extra fraction of a column you must drag past the halfway
 // point before a tile's span snaps to the next/previous column. It's a hysteresis
 // deadband centred on each column boundary, so a tile whose width sits right on a
-// boundary holds its current span instead of flip-flopping as the pointer jitters —
+// boundary holds its current span instead of flip-flopping as the pointer jitters -
 // the size feels sticky to where it is, and only commits to a new column once you've
 // clearly committed to it. 0.3 ≈ a third of a column of slack on each side.
 const RESIZE_STICK = 0.3
 
 // Rubber-band feedback while the pointer is inside that deadband: the tile stretches
 // by this fraction of the pointer's distance from its current snapped width, so the
-// drag visibly "pulls" on the tile before it commits — a little give at first, more
+// drag visibly "pulls" on the tile before it commits - a little give at first, more
 // as you drag further, then the snap covers the rest of the distance. 0 would leave
 // the tile frozen until the snap (no cue that a drag is even registering); 1 would
 // track the pointer 1:1 (no snap feel at all).
@@ -116,7 +116,7 @@ function FileRow({ file, mode, changeThreshold = 0, gallery, index }: {
   gallery?: LightboxImage[]; index?: number
 }) {
   // The badge reflects the *effective* change type, so a modified file gated below
-  // the "% changed" threshold shows as unchanged (no badge) — matching how it's
+  // the "% changed" threshold shows as unchanged (no badge) - matching how it's
   // filtered and counted.
   const ct = effectiveChangeType(file, changeThreshold)
   return (
@@ -134,7 +134,7 @@ function FileRow({ file, mode, changeThreshold = 0, gallery, index }: {
         {file.unverified && (
           <span
             className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded font-medium text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20"
-            title="Compared by byte hash only — install ffmpeg for frame-accurate video diffs. This “modified” result may be spurious (e.g. only container metadata changed)."
+            title="Compared by byte hash only - install ffmpeg for frame-accurate video diffs. This “modified” result may be spurious (e.g. only container metadata changed)."
           >
             <TriangleAlert className="w-3 h-3" />
             byte-compared
@@ -165,10 +165,10 @@ function FileRow({ file, mode, changeThreshold = 0, gallery, index }: {
 // upscaling a low-resolution shot past 1:1 on a high-DPI/large screen (see spanOf).
 // dpi is the media's capture density (device-scale factor); pxWidth / dpi is its
 // logical width, which is what the grid caps a tile to (see spanOf). 1 when unknown
-// (measured client-side, or a server entry without a dpi sidecar) — logical == physical.
+// (measured client-side, or a server entry without a dpi sidecar) - logical == physical.
 // Balanced (shortest-column) masonry. Each tile is absolutely positioned: we
 // measure every tile's rendered height with a ResizeObserver, then place tiles one
-// by one into whichever run of columns is currently shortest — so they pack tightly
+// by one into whichever run of columns is currently shortest - so they pack tightly
 // with minimal trailing gap while keeping a rough left-to-right, top-to-bottom
 // reading order (unlike CSS columns, which fill one column top-to-bottom first).
 //
@@ -176,11 +176,11 @@ function FileRow({ file, mode, changeThreshold = 0, gallery, index }: {
 // the media inside fills that width with its height following the aspect ratio. The
 // grid always works in BASE_ARTIFACT_COLUMNS columns (fewer only when the container
 // is too narrow). Each tile's span comes from its `aspect` via defaultSpanForAspect
-// (scaled by `spanScale` — 2 for side-by-side, whose before/after pair needs the
+// (scaled by `spanScale` - 2 for side-by-side, whose before/after pair needs the
 // room), unless the user has dragged its edge to set an explicit span in `spans`.
 export function MasonryGrid({ items, spanScale = 1, scale = 1, spans, onSpanChange, scope }: {
   // bodyResizable defaults to true; set false for tiles whose media owns horizontal
-  // drag (the before/after slider, video scrubbing) — those resize via the edge
+  // drag (the before/after slider, video scrubbing) - those resize via the edge
   // handle only, so the two gestures don't fight.
   items: { key: string; node: React.ReactNode; aspect?: number; pxWidth?: number; dpi?: number; minWidthPx?: number; bodyResizable?: boolean }[]
   spanScale?: number
@@ -197,7 +197,7 @@ export function MasonryGrid({ items, spanScale = 1, scale = 1, spans, onSpanChan
   scope?: string
 }) {
   // Persisted-override key for a tile: prefix its file name with `scope`, joined by
-  // a NUL — which can't appear in a file name, agent id or set name, so the
+  // a NUL - which can't appear in a file name, agent id or set name, so the
   // composite never collides with a different (scope, name) pair even when either
   // contains slashes or spaces. No scope → the bare file name (legacy global key).
   const spanKey = useCallback((itemKey: string) => (scope ? `${scope}\0${itemKey}` : itemKey), [scope])
@@ -208,22 +208,22 @@ export function MasonryGrid({ items, spanScale = 1, scale = 1, spans, onSpanChan
   // The tile currently being edge/body-dragged. `width` is the width the tile
   // renders at: the current snapped span width plus a rubber-band fraction of the
   // pointer's pull past it (see RESIZE_PULL), so the drag gives feedback before it
-  // commits. `snapW` is the bare snapped span width — what the tile will settle to —
+  // commits. `snapW` is the bare snapped span width - what the tile will settle to -
   // which is what the ghost measures at (see below). The column span is committed
   // live as the width crosses a column boundary (with stickiness), and the siblings
-  // reflow at each snap — see startResize.
+  // reflow at each snap - see startResize.
   // `col` is the column the dragged tile started in: the live span commits below
   // would otherwise let the masonry packer re-home the dragged tile to a different
   // start column the moment it snaps wider, making it jump out from under the pointer.
-  // Pinning it to its start column (see placement) keeps it anchored — it grows
+  // Pinning it to its start column (see placement) keeps it anchored - it grows
   // rightward from a fixed left edge while the siblings reflow around it.
   const [drag, setDrag] = useState<{ key: string; width: number; snapW: number; col: number } | null>(null)
   // The exact height the dragged tile will occupy at its current (snapped) width,
   // measured off an invisible "ghost" copy rendered at that width with no transition
   // (see the ghost render + layout effect below). The visible tile's measured height
   // is frozen during the drag to avoid the columns beneath jittering as its width
-  // TRANSITION animates; the ghost gives placement the real settled height instead —
-  // accounting for label wrapping and other chrome that a formula can't — so the
+  // TRANSITION animates; the ghost gives placement the real settled height instead -
+  // accounting for label wrapping and other chrome that a formula can't - so the
   // tiles below reserve the right space and reflow around it at each snap.
   const [ghostH, setGhostH] = useState<number | null>(null)
   const ghostRef = useRef<HTMLDivElement>(null)
@@ -232,7 +232,7 @@ export function MasonryGrid({ items, spanScale = 1, scale = 1, spans, onSpanChan
   // taller as it widens (its media is w-full with a fixed aspect ratio), and letting
   // that live height feed back into placement would shove the tiles beneath it around
   // continuously as you drag. Holding the height constant means siblings only move
-  // when the span actually snaps to a new column count — not while the pointer moves.
+  // when the span actually snaps to a new column count - not while the pointer moves.
   const resizeKeyRef = useRef<string | null>(null)
   // Gate the reflow transition off for the first beat so the initial bulk layout (and
   // its first height-measure pass) snaps into place rather than animating in.
@@ -289,7 +289,7 @@ export function MasonryGrid({ items, spanScale = 1, scale = 1, spans, onSpanChan
 
   // A single stable ref callback for every tile: observe on attach, and (via the
   // returned React 19 cleanup) unobserve on detach. The tile carries its key as a
-  // data-mkey attribute so the observer callback knows which height changed — no
+  // data-mkey attribute so the observer callback knows which height changed - no
   // per-key closure, so nothing reads a ref during render.
   const observeTile = useCallback((el: HTMLDivElement | null) => {
     if (!el) return
@@ -320,7 +320,7 @@ export function MasonryGrid({ items, spanScale = 1, scale = 1, spans, onSpanChan
   // 1x or 2x), so we cap the auto span to the widest run that stays within the media's
   // logical width = natural px ÷ its capture dpi (the device-scale factor from its
   // sidecar; 1 when unknown). This keeps a consistent default regardless of how
-  // densely the shot was captured or what display you're viewing on — a 2x capture
+  // densely the shot was captured or what display you're viewing on - a 2x capture
   // lays out the same as a 1x one, just sharper. In side-by-side the run holds the
   // before+after pair so each image only gets ~half of it, hence the spanScale budget.
   // The `scale` multiplier (size slider) loosens the cap so turning the slider up
@@ -339,7 +339,7 @@ export function MasonryGrid({ items, spanScale = 1, scale = 1, spans, onSpanChan
         const maxSpan = Math.max(1, Math.floor((budgetCss + layout.gap) / unit))
         req = Math.min(req, maxSpan)
       }
-      // Floor for media whose chrome needs a minimum width — a video's transport
+      // Floor for media whose chrome needs a minimum width - a video's transport
       // controls. The resolution cap above can shrink a small clip below its control
       // bar, so ensure the tile spans enough columns to fit minWidthPx; this wins
       // over the cap (a slightly-upscaled clip beats unusable controls).
@@ -382,7 +382,7 @@ export function MasonryGrid({ items, spanScale = 1, scale = 1, spans, onSpanChan
         pos[it.key] = { left, top, width: tileW, span: s }
         // The tile's own measured height is frozen during the drag, so reserve the
         // exact height measured off the invisible ghost (rendered at this same snapped
-        // width, no transition) — that's what the tile will actually settle to, chrome
+        // width, no transition) - that's what the tile will actually settle to, chrome
         // and label wrapping included. Falls back to the frozen height until the ghost
         // has measured (a pre-paint layout effect, so no visible under-reserve).
         const dh = ghostH ?? h
@@ -405,7 +405,7 @@ export function MasonryGrid({ items, spanScale = 1, scale = 1, spans, onSpanChan
     const height = bottoms.length ? Math.max(...bottoms) - gap : 0
     return { pos, height: Math.max(0, height) }
     // drag.key/drag.col (not the whole drag object) so a width-only change while
-    // dragging doesn't re-pack the grid — only a start/end or a span snap does. ghostH
+    // dragging doesn't re-pack the grid - only a start/end or a span snap does. ghostH
     // feeds the dragged tile's reserved height (it changes only when the span snaps).
   }, [items, heights, layout, spanOf, dragKey, dragCol, ghostH])
 
@@ -415,11 +415,11 @@ export function MasonryGrid({ items, spanScale = 1, scale = 1, spans, onSpanChan
 
   // Start a live resize from `startSpan`, anchored at pointer `startX`. The column span
   // is quantised with stickiness (see RESIZE_STICK) and committed the instant it snaps
-  // to a new column — live, as you drag past each boundary, not deferred to release.
+  // to a new column - live, as you drag past each boundary, not deferred to release.
   // The dragged tile itself renders anchored to that snapped span width plus a
   // rubber-band fraction of the pointer's pull past it (RESIZE_PULL): it stretches a
   // little to show the drag is registering, resists through the deadband, then snaps
-  // a whole column at a time — rather than scaling 1:1 under the cursor. The
+  // a whole column at a time - rather than scaling 1:1 under the cursor. The
   // siblings reflow at those same snap points, and nothing rearranges between them (the
   // dragged tile's height is frozen too; see resizeKeyRef). Returns move/finish, or null
   // if the grid can't resize right now. `key` is the tile's file name; the override
@@ -431,7 +431,7 @@ export function MasonryGrid({ items, spanScale = 1, scale = 1, spans, onSpanChan
     const minW = layout.colW
     const maxW = layout.cols * layout.colW + (layout.cols - 1) * layout.gap
     // Freeze this tile's measured height for the drag's duration so its siblings hold
-    // still as it widens — they reflow off the ghost measurement instead (see ghostH).
+    // still as it widens - they reflow off the ghost measurement instead (see ghostH).
     resizeKeyRef.current = key
     // The column the tile currently sits in, so placement can pin it there (a snap to
     // a wider span must not let the packer relocate it under the pointer).
@@ -443,7 +443,7 @@ export function MasonryGrid({ items, spanScale = 1, scale = 1, spans, onSpanChan
       // until the pointer is dragged clearly past the midpoint toward the next or
       // previous column (a RESIZE_STICK-wide deadband around each boundary), so a
       // tile resting near a column edge doesn't flip-flop. A fast drag that overshoots
-      // a whole column still jumps straight there — the deadband only catches the ±1
+      // a whole column still jumps straight there - the deadband only catches the ±1
       // neighbour right at the boundary.
       const spanFloat = (w + layout.gap) / unit
       let target = Math.round(spanFloat)
@@ -456,8 +456,8 @@ export function MasonryGrid({ items, spanScale = 1, scale = 1, spans, onSpanChan
         liveSpan = target
         onSpanChange(spanKey(key), liveSpan)
       }
-      // Render the tile anchored to its current *quantised* span width — not the raw
-      // pointer width — plus a rubber-band fraction of the pull past it (RESIZE_PULL),
+      // Render the tile anchored to its current *quantised* span width - not the raw
+      // pointer width - plus a rubber-band fraction of the pull past it (RESIZE_PULL),
       // so the tile visibly stretches toward the pointer through the deadband, resists,
       // then snaps a whole column at a time when the pointer commits past the midpoint
       // (the width transition eases both the pull and the flip).
@@ -469,14 +469,14 @@ export function MasonryGrid({ items, spanScale = 1, scale = 1, spans, onSpanChan
       // Adopt the ghost's settled height as this tile's measured height. The tile's
       // own ResizeObserver readings were frozen for the whole drag, and if its width
       // transition finished before the pointer was released there is no further size
-      // change to re-trigger the observer — the stale pre-drag height would stick,
+      // change to re-trigger the observer - the stale pre-drag height would stick,
       // leaving a permanent gap below a shrunk tile (or an overlap for a grown one).
       // A transition still running at release re-measures via the observer as usual.
       const settled = ghostRef.current?.offsetHeight
       if (settled) setHeights((prev) => (prev[key] === settled ? prev : { ...prev, [key]: settled }))
       setDrag(null)
       // The span was already committed at the last snap; this just ensures the final
-      // value is persisted (a no-op if unchanged — onSpanChange dedupes).
+      // value is persisted (a no-op if unchanged - onSpanChange dedupes).
       onSpanChange(spanKey(key), liveSpan)
     }
     return { move, finish }
@@ -502,10 +502,10 @@ export function MasonryGrid({ items, spanScale = 1, scale = 1, spans, onSpanChan
   }
 
   // Body resize: drag horizontally on a tile's media (the region the node marks with
-  // data-tile-drag) to grow or shrink its span. Starting on the card chrome — the file
-  // name, badges, padding — does nothing, so click-dragging to select the name no
+  // data-tile-drag) to grow or shrink its span. Starting on the card chrome - the file
+  // name, badges, padding - does nothing, so click-dragging to select the name no
   // longer enlarges the tile. A plain click/tap on the media falls through to its own
-  // gesture (flip, open) — we only take over once the pointer moves decisively
+  // gesture (flip, open) - we only take over once the pointer moves decisively
   // horizontally past a small threshold, then swallow the trailing click so the media
   // doesn't also react. Touch keeps vertical panning (touch-action: pan-y) so the page
   // scrolls.
@@ -513,7 +513,7 @@ export function MasonryGrid({ items, spanScale = 1, scale = 1, spans, onSpanChan
     if (e.button !== 0 || !onSpanChange) return
     // Only the media drags; the card header/padding is left alone (text-selectable).
     if (!(e.target instanceof Element) || !e.target.closest('[data-tile-drag]')) return
-    // …but never hijack an interactive control that owns its own horizontal drag — the
+    // ...but never hijack an interactive control that owns its own horizontal drag - the
     // onion-skin opacity slider (an <input type="range">) lives inside the media region,
     // and dragging it must move the slider, not resize the tile. `data-no-tile-drag` is
     // the general escape hatch for any such control.
@@ -555,10 +555,10 @@ export function MasonryGrid({ items, spanScale = 1, scale = 1, spans, onSpanChan
   }
 
   // Measure the ghost before paint so the columns beneath reserve the dragged tile's
-  // real settled height. Keyed on drag.snapW — NOT the rubber-band render width, which
-  // changes every pointermove — so it re-measures only when the span snaps to a new
+  // real settled height. Keyed on drag.snapW - NOT the rubber-band render width, which
+  // changes every pointermove - so it re-measures only when the span snaps to a new
   // width (the ghost has no transition, so its height is the target height immediately
-  // — not an intermediate animation frame). Cleared when the drag ends (setGhostH(null)
+  // - not an intermediate animation frame). Cleared when the drag ends (setGhostH(null)
   // is a bail-out no-op if it was already null).
   useLayoutEffect(() => {
     if (!drag) { setGhostH(null); return }
@@ -574,7 +574,7 @@ export function MasonryGrid({ items, spanScale = 1, scale = 1, spans, onSpanChan
       {/* Invisible ghost of the tile being dragged, rendered at its current snapped
           width with NO transition, purely to measure the exact height it will settle
           to (chrome + wrapped labels included). Absolutely positioned and hidden via
-          opacity — `invisible` (visibility: hidden) alone is NOT enough, because the
+          opacity - `invisible` (visibility: hidden) alone is NOT enough, because the
           flip view's layers set an explicit `visibility: visible` on themselves
           (children can override an inherited hidden), which made the ghost's image
           paint at the grid's top-left and flash during the drag. opacity has no such
@@ -604,11 +604,11 @@ export function MasonryGrid({ items, spanScale = 1, scale = 1, spans, onSpanChan
             style={{
               left: p.left,
               top: p.top,
-              // While dragging this tile, render its live drag width — the snapped
-              // span width plus the rubber-band pull (see startResize.move) — and
+              // While dragging this tile, render its live drag width - the snapped
+              // span width plus the rubber-band pull (see startResize.move) - and
               // lift it above its neighbours; otherwise its placed span width. The
               // width transition stays on so the pull trails the pointer smoothly and
-              // each snap eases into the next size — the tile stretches, resists,
+              // each snap eases into the next size - the tile stretches, resists,
               // then visibly flips a column at a time.
               width: dragging ? (drag as { width: number }).width : p.width,
               zIndex: dragging ? 20 : undefined,
@@ -671,7 +671,7 @@ function FileGrid({ files, mode, scale = 1, spans, onSpanChange, scope, changeTh
   const dims = useMediaDims(sources)
   // The lightbox diff gallery: each visible image file (videos play inline, so they're
   // excluded) contributes one entry, in display order, carrying its before/after pair
-  // and the current comparison mode — so opening any image lets ←/→ walk the files and
+  // and the current comparison mode - so opening any image lets ←/→ walk the files and
   // the lightbox shows the same comparison. A file with no image at all is skipped, so
   // it has no index and falls back to opening the single clicked image. `url` is the
   // representative side, used for the lightbox's edge previews.
@@ -681,7 +681,7 @@ function FileGrid({ files, mode, scale = 1, spans, onSpanChange, scope, changeTh
   )
   const diffGallery = useMemo<LightboxImage[]>(
     () => imageFiles.map((f) => {
-      // Same status the tile's badge shows — effectiveChangeType folds in the
+      // Same status the tile's badge shows - effectiveChangeType folds in the
       // "% changed" threshold, so a sub-threshold "modified" reads as unchanged
       // (no glyph) in both places.
       const ct = effectiveChangeType(f, changeThreshold)
@@ -712,8 +712,8 @@ function FileGrid({ files, mode, scale = 1, spans, onSpanChange, scope, changeTh
       // VIDEO_MIN_TILE_PX); images have no such chrome.
       minWidthPx: isVideoArtifact(f.name) ? VIDEO_MIN_TILE_PX : undefined,
       // Only video reserves horizontal body drag for its own transport, so it resizes
-      // via the edge handle only (see MasonryGrid bodyResizable). Every image mode —
-      // including the slider, whose drag now lives solely on the divider line — resizes
+      // via the edge handle only (see MasonryGrid bodyResizable). Every image mode -
+      // including the slider, whose drag now lives solely on the divider line - resizes
       // by dragging the media (data-tile-drag); the slider divider and onion opacity
       // control opt out with data-no-tile-drag so they're never hijacked.
       bodyResizable: !isVideoArtifact(f.name),
@@ -752,7 +752,7 @@ export function ElapsedTime({ startedAt }: { startedAt: number }) {
 function ArtifactSetCard({ set, mode, scale, spans, onSpanChange, filter, search, onRefresh, projectId, agentId }: { set: ArtifactSet; mode: ImageDiffMode; scale: number; spans: ArtifactSpans; onSpanChange: (key: string, span: number | null) => void; filter: ArtifactTagFilter; search: string; onRefresh: (name: string, side?: ArtifactSide) => void; projectId: string | null; agentId: string }) {
   const status = set.status as string
   // Apply the (shared) tag filter and the search query to this card's files. The
-  // grid shows only matches — ranked by search score when searching; the header
+  // grid shows only matches - ranked by search score when searching; the header
   // still reports the true diff size so "x/y changed" makes it obvious some are
   // hidden.
   const isFiltered = filterIsActive(filter)
@@ -762,7 +762,7 @@ function ArtifactSetCard({ set, mode, scale, spans, onSpanChange, filter, search
 
   // Which side(s) failed. A whole-set "error" status means both sides failed (or
   // the set couldn't be loaded at all); a "ready" set with a single side_error is
-  // a partial failure — the other side rendered. Either way the failing side's
+  // a partial failure - the other side rendered. Either way the failing side's
   // build log is the error surface (its stderr is the detail), so we mark it and
   // show its red-bordered terminal rather than a separate error box.
   const leftFailed = status === 'error' || !!set.left_error
@@ -778,7 +778,7 @@ function ArtifactSetCard({ set, mode, scale, spans, onSpanChange, filter, search
   // added/removed (the failed side contributes none), exploding the card into a
   // pile of one-sided "changes" for a comparison we never actually made. Present
   // them as unchanged instead (see presentedFiles), so the default change filter
-  // hides them and the card stays calm — the failure is already surfaced by the
+  // hides them and the card stays calm - the failure is already surfaced by the
   // red-bordered build-log terminal and the header chip, not a flood of fake diffs.
   const cardFiles = useMemo(() => presentedFiles(set), [set])
 
@@ -788,7 +788,7 @@ function ArtifactSetCard({ set, mode, scale, spans, onSpanChange, filter, search
   const changedFiles = visibleFiles.filter((f) => effectiveChangeType(f, changeThreshold) !== 'unchanged')
   const totalChanged = cardFiles.filter((f) => effectiveChangeType(f, changeThreshold) !== 'unchanged').length
   const changedLabel = narrowed && changedFiles.length !== totalChanged ? `${changedFiles.length}/${totalChanged} changed` : `${totalChanged} changed`
-  // A partial failure isn't a "visual change" — the surviving side's files are
+  // A partial failure isn't a "visual change" - the surviving side's files are
   // neutralised above, so the header reads "no visual changes" + the failed chip.
   const noChanges = status === 'ready' && (!set.changed || !!failedSide)
 
@@ -801,7 +801,7 @@ function ArtifactSetCard({ set, mode, scale, spans, onSpanChange, filter, search
 
   // Every state (generating / error / no-changes / changed) renders inside the
   // same bordered card so switching between them never shifts the layout (e.g.
-  // hitting refresh after a failure) and the refresh button is always reachable —
+  // hitting refresh after a failure) and the refresh button is always reachable -
   // including when there are no visual changes. Default to collapsed (the card is
   // opt-in: click to expand) when nothing is saved for this agent; the saved
   // per-agent state, when present, wins. The card is keyed by project+agent+name
@@ -825,7 +825,7 @@ function ArtifactSetCard({ set, mode, scale, spans, onSpanChange, filter, search
   // the body.
   const hasBuildLog = (status === 'ready' || status === 'error') && !!(set.left_log_url || set.right_log_url)
   // When either side failed, the build log is the error surface, so an expanded card
-  // ALWAYS shows it (its red-bordered stderr is the failure detail) — the user can't
+  // ALWAYS shows it (its red-bordered stderr is the failure detail) - the user can't
   // hide it, so the toggle is suppressed below. With no failure it follows the
   // buildLogOpen toggle (restored from saved prefs).
   const anyFailed = leftFailed || rightFailed
@@ -877,7 +877,7 @@ function ArtifactSetCard({ set, mode, scale, spans, onSpanChange, filter, search
             // has been running, separated by a "·". Expand the card for the full log.
             <span className="flex items-center gap-1.5 min-w-0 text-xs text-gray-400 dark:text-gray-500">
               <LoaderCircle className="w-3 h-3 shrink-0 animate-spin" />
-              <span className="truncate">{progressText || 'generating…'}</span>
+              <span className="truncate">{progressText || 'generating...'}</span>
               {set.started_at ? (
                 <span className="shrink-0">· <ElapsedTime startedAt={set.started_at} /></span>
               ) : null}
@@ -1011,7 +1011,7 @@ function ArtifactSetCard({ set, mode, scale, spans, onSpanChange, filter, search
           )}
           {status === 'ready' && (
             // The files matching the panel's filters (the change-type filter hides
-            // unchanged by default — see the header "changes" dropdown) laid out in
+            // unchanged by default - see the header "changes" dropdown) laid out in
             // one masonry. Empty states cover "produced nothing" vs "filtered out".
             <>
               {/* Build log sits at the top of the body so "Show build log" reveals
@@ -1026,7 +1026,7 @@ function ArtifactSetCard({ set, mode, scale, spans, onSpanChange, filter, search
                 // so the partial result is still explained.
                 <div className="my-2 flex items-center gap-1.5 px-3 py-2 rounded-md bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 text-xs font-medium text-amber-700 dark:text-amber-300">
                   <TriangleAlert className="w-3.5 h-3.5 shrink-0" />
-                  The {failedSide === 'left' ? 'before' : 'after'} side failed to render — showing the {failedSide === 'left' ? 'after' : 'before'} side only.
+                  The {failedSide === 'left' ? 'before' : 'after'} side failed to render - showing the {failedSide === 'left' ? 'after' : 'before'} side only.
                 </div>
               )}
               {cardFiles.length === 0 ? (
@@ -1034,7 +1034,7 @@ function ArtifactSetCard({ set, mode, scale, spans, onSpanChange, filter, search
               ) : visibleFiles.length === 0 ? (
                 <div className="my-2 text-xs text-gray-400 dark:text-gray-500">
                   {failedSide
-                    ? `Only the ${failedSide === 'left' ? 'after' : 'before'} side rendered — its ${cardFiles.length} file${cardFiles.length === 1 ? '' : 's'} ${cardFiles.length === 1 ? 'is' : 'are'} hidden as unchanged (nothing to compare). Show "unchanged" in the changes filter to view ${cardFiles.length === 1 ? 'it' : 'them'}.`
+                    ? `Only the ${failedSide === 'left' ? 'after' : 'before'} side rendered - its ${cardFiles.length} file${cardFiles.length === 1 ? '' : 's'} ${cardFiles.length === 1 ? 'is' : 'are'} hidden as unchanged (nothing to compare). Show "unchanged" in the changes filter to view ${cardFiles.length === 1 ? 'it' : 'them'}.`
                     : `No files match ${searching ? 'your search' : 'the current filters'}.`}
                 </div>
               ) : (
@@ -1101,7 +1101,7 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
 
   // Measured height of the sticky Artifacts filter bar, published as the shared
   // --sticky-section-h so each card header can dock flush beneath it. The bar grows
-  // when it wraps to two rows on narrow widths, so a fixed offset would gap/overlap —
+  // when it wraps to two rows on narrow widths, so a fixed offset would gap/overlap -
   // measure it instead (see useMeasuredHeight; the same hook gives the tests panel's
   // header the same treatment). Defaults to the unwrapped height meanwhile.
   const [filterBarRef, filterBarH] = useMeasuredHeight(41)
@@ -1113,14 +1113,14 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
   useEffect(() => { setTagFilter(loadTagFilter(projectId, agentId)) }, [projectId, agentId])
 
   // Free-text search over filenames + tags (split-word fuzzy match + rank). Kept
-  // ephemeral — it narrows/ranks the view without persisting — and cleared when the
+  // ephemeral - it narrows/ranks the view without persisting - and cleared when the
   // project/agent changes since this panel is reused across agents.
   const [search, setSearch] = useState('')
   useEffect(() => { setSearch('') }, [projectId, agentId])
 
-  // Lightweight "chrome" (script names + available tags) read from localStorage —
+  // Lightweight "chrome" (script names + available tags) read from localStorage -
   // a previous render of this agent (or, as a fallback, any agent in this project)
-  // — so the header, tag filter and collapsed card headers paint immediately, with
+  // - so the header, tag filter and collapsed card headers paint immediately, with
   // NO network round-trip, before the WS snapshot arrives. Re-read when the
   // project/agent changes (the panel is reused across agents). Saved back below
   // once a live comparison settles.
@@ -1150,7 +1150,7 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
     toggleView: () => onArtifactViewChange(artifactView === 'before' ? 'after' : 'before'),
   }), [artifactView, artifactHighlight, onArtifactViewChange])
 
-  // Keyboard: the shared X/B/A/H comparator shortcuts (see applyABShortcut) — only in
+  // Keyboard: the shared X/B/A/H comparator shortcuts (see applyABShortcut) - only in
   // A/B mode. Suppressed while the image lightbox is open: the lightbox has its own
   // X/B/A/H (scoped to its fullscreen comparator, see LightboxDiff), and a single key
   // must not flip both the lightbox and the grid behind it at once.
@@ -1252,7 +1252,7 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
   const requestRefresh = useCallback((name: string, side?: ArtifactSide) => {
     // Optimistically flip the card to a fresh "generating" state so the spinner,
     // a zeroed elapsed clock and an empty log show immediately. A per-side refresh
-    // only zeroes that side — the other keeps its existing log/progress so it isn't
+    // only zeroes that side - the other keeps its existing log/progress so it isn't
     // visually thrown away while it stays cached.
     const both = side === undefined
     setSets((prev) => prev?.map((s) => (s.name === name
@@ -1294,14 +1294,14 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
   }, [sets, chrome])
   const isSkeleton = sets === null && displaySets !== null
 
-  // Every file across all sets, flattened — fed to the filter bar so it can derive
+  // Every file across all sets, flattened - fed to the filter bar so it can derive
   // the offered tags/types and per-value counts itself (see ArtifactFilterBar). Run
   // through presentedFiles so a partial-failure set's surviving files count as
   // unchanged here too, matching how each card presents them (no "538 added" in the
   // changes dropdown while the card body calls the same files unchanged).
   const allFiles = useMemo(() => (displaySets ?? []).flatMap(presentedFiles), [displaySets])
   // Tags to offer before files are present: a side's pending_tags once live, plus
-  // — while anything is still generating (incl. the skeleton) — the cached chrome
+  // - while anything is still generating (incl. the skeleton) - the cached chrome
   // tags, so the filter set only grows then settles to the live file tags once
   // everything is ready (a stale cached tag can't linger past settle).
   const anyGenerating = (displaySets ?? []).some((s) => (s.status as string) === 'generating')
@@ -1318,7 +1318,7 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
       </div>
     )
   }
-  // Render nothing until we know there are configured scripts — either from the
+  // Render nothing until we know there are configured scripts - either from the
   // live snapshot or the cached summary skeleton.
   if (!displaySets || displaySets.length === 0) return null
 
@@ -1335,13 +1335,13 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
     <div className="mb-4" style={{ '--sticky-section-h': `${filterBarH}px` } as CSSProperties}>
       {/* Reserve the filter bar's height (its segmented controls / chips are
           taller than the bare title) so the header stays the same height whether
-          or not tags are present — the filter loading in must not jump the layout. */}
+          or not tags are present - the filter loading in must not jump the layout. */}
       {/* Sticky: dock this Artifacts header + filters flush just below the Changes
           bar (which sticks at the top) while the cards scroll under it, then release
           once the whole panel scrolls past into the file diffs. The `top` is the
           measured Changes-bar height minus the scroll container's pt-4 (which the
           Changes bar cancels with -top-4), so the two bars sit exactly edge-to-edge
-          — no seam, and the bar's py-1.5 reads symmetric above/below its controls.
+          - no seam, and the bar's py-1.5 reads symmetric above/below its controls.
           z-20 sits below the Changes bar but above the cards (whose headers stick at
           z-10). Needs an opaque bg (matching the page) so cards scroll cleanly
           underneath, and -mx-1/px-1 bleeds it to the same width as the Changes bar. */}
@@ -1359,13 +1359,13 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
           </span>
         )}
         <InfoTooltip title="Artifacts" width={560}>
-          <p>Artifacts are visual snapshots — typically screenshots, or videos (screen recordings) — rendered from your code so you can see what a change <em>looks like</em>, side by side with the base branch.</p>
+          <p>Artifacts are visual snapshots - typically screenshots, or videos (screen recordings) - rendered from your code so you can see what a change <em>looks like</em>, side by side with the base branch.</p>
           <p>Each one is produced by a project-defined <strong>artifact script</strong>. Hydra checks out both the base ref and the head ref (or your uncommitted working tree), runs the script against each with <code className="text-blue-300">$HYDRA_ARTIFACT_OUTPUT</code>, <code className="text-blue-300">$HYDRA_ARTIFACT_SOURCE</code> and <code className="text-blue-300">$HYDRA_ARTIFACT_REF</code> set, and compares the images it writes. Results are cached per commit, so re-viewing a diff is free.</p>
-          <p>Configure them in <code className="text-blue-300">.hydra/config.toml</code> with <code className="text-blue-300">[[artifacts]]</code> blocks (<code className="text-blue-300">name</code>, <code className="text-blue-300">command</code>, optional <code className="text-blue-300">timeout_sec</code>) — for example a script that builds the app and screenshots a page, so visual UI changes show up here in the diff viewer.</p>
-          <p><strong>Images &amp; video.</strong> <code className="text-blue-300">.png .jpg .gif</code> are diffed pixel-by-pixel (so cosmetic re-encodes are ignored); <code className="text-blue-300">.webm</code> video is diffed frame-by-frame when <strong>ffmpeg</strong> is installed, falling back to a byte-hash comparison otherwise (shown with a <em>byte-compared</em> badge, since that verdict may be spurious). Other types — <code className="text-blue-300">.webp .avif .svg .bmp .pdf</code> — are byte-hash compared. Encode video as <strong>lossless</strong> <code className="text-blue-300">.webm</code> (e.g. <code className="text-blue-300">ffmpeg … -c:v libvpx-vp9 -lossless 1</code>) so identical frames stay identical.</p>
-          <p>A script with no visual changes — or one still generating — collapses to a single header row; click it to expand. The two sides (base and head) build in parallel, so the expanded card shows their <strong>build logs side by side</strong> (Before / After, stderr in red); once finished, reopen them any time with the <strong>build log</strong> button (the scroll icon next to refresh in the card header). The refresh button beside it re-runs a script — handy to retry a failure or re-render even when nothing visibly changed.</p>
-          <p>The header shows each side's latest <code className="text-blue-300">stdout</code> line as live progress. To surface a cleaner message, print a line prefixed with <code className="text-blue-300">::hydra:progress::</code> (e.g. <code className="text-blue-300">echo "::hydra:progress:: capturing home 3/24"</code>) — Hydra strips the prefix, shows the rest as the progress line, and from then on ignores ordinary <code className="text-blue-300">stdout</code> for the header, so a noisy build can't hijack it. The full output still lands in the build log.</p>
-          <p><strong>Tags &amp; filter.</strong> Alongside an image <code className="text-blue-300">home.png</code> the script can write a JSON sidecar <code className="text-blue-300">home.png.meta</code> like <code className="text-blue-300">{'{'}"tags": ["theme::dark", "viewport::phone"]{'}'}</code>. Tags show as labels on each file and as a filter on this bar. The sidecar can also carry an optional <code className="text-blue-300">dpi</code> (the device-scale factor the shot was captured at, e.g. <code className="text-blue-300">{'{'}"dpi": 2{'}'}</code>) — the grid then sizes a tile by its <em>logical</em> width (pixels / dpi), so a 2× shot lays out like a 1× one, just sharper. For a video, an optional <code className="text-blue-300">fps</code> (e.g. <code className="text-blue-300">{'{'}"fps": 60{'}'}</code>) sets the frame rate the frame-step buttons use, since HTML5 video exposes none of its own. A <code className="text-blue-300">category::value</code> tag is a <em>scoped</em> label — only one value per category is kept on a file (the last wins), and each category gets a filter button listing its values. Every value starts <em>on</em>; uncheck one to hide the files carrying it, or use <strong>all</strong> / <strong>clear</strong> (top of the menu) to toggle them in bulk. Shift-click a value to isolate it (hide everything else). Each value also shows a dimmed count on the right — how many items carry it under your current filters (ignoring this scope itself). Plain tags work the same way under a "tags" button. Handy when a script emits many shots (light/dark, phone/desktop) and you want to see just one slice. Two built-in filters are always present: a <strong>type</strong> filter (image / video, from each file's extension) and a <strong>changes</strong> filter (added / removed / modified / unchanged, from each file's diff state) — the latter always offers all four kinds even when none are present, and hides unchanged files by default, so use it to reveal them or to focus on one kind of change.</p>
+          <p>Configure them in <code className="text-blue-300">.hydra/config.toml</code> with <code className="text-blue-300">[[artifacts]]</code> blocks (<code className="text-blue-300">name</code>, <code className="text-blue-300">command</code>, optional <code className="text-blue-300">timeout_sec</code>) - for example a script that builds the app and screenshots a page, so visual UI changes show up here in the diff viewer.</p>
+          <p><strong>Images &amp; video.</strong> <code className="text-blue-300">.png .jpg .gif</code> are diffed pixel-by-pixel (so cosmetic re-encodes are ignored); <code className="text-blue-300">.webm</code> video is diffed frame-by-frame when <strong>ffmpeg</strong> is installed, falling back to a byte-hash comparison otherwise (shown with a <em>byte-compared</em> badge, since that verdict may be spurious). Other types - <code className="text-blue-300">.webp .avif .svg .bmp .pdf</code> - are byte-hash compared. Encode video as <strong>lossless</strong> <code className="text-blue-300">.webm</code> (e.g. <code className="text-blue-300">ffmpeg ... -c:v libvpx-vp9 -lossless 1</code>) so identical frames stay identical.</p>
+          <p>A script with no visual changes - or one still generating - collapses to a single header row; click it to expand. The two sides (base and head) build in parallel, so the expanded card shows their <strong>build logs side by side</strong> (Before / After, stderr in red); once finished, reopen them any time with the <strong>build log</strong> button (the scroll icon next to refresh in the card header). The refresh button beside it re-runs a script - handy to retry a failure or re-render even when nothing visibly changed.</p>
+          <p>The header shows each side's latest <code className="text-blue-300">stdout</code> line as live progress. To surface a cleaner message, print a line prefixed with <code className="text-blue-300">::hydra:progress::</code> (e.g. <code className="text-blue-300">echo "::hydra:progress:: capturing home 3/24"</code>) - Hydra strips the prefix, shows the rest as the progress line, and from then on ignores ordinary <code className="text-blue-300">stdout</code> for the header, so a noisy build can't hijack it. The full output still lands in the build log.</p>
+          <p><strong>Tags &amp; filter.</strong> Alongside an image <code className="text-blue-300">home.png</code> the script can write a JSON sidecar <code className="text-blue-300">home.png.meta</code> like <code className="text-blue-300">{'{'}"tags": ["theme::dark", "viewport::phone"]{'}'}</code>. Tags show as labels on each file and as a filter on this bar. The sidecar can also carry an optional <code className="text-blue-300">dpi</code> (the device-scale factor the shot was captured at, e.g. <code className="text-blue-300">{'{'}"dpi": 2{'}'}</code>) - the grid then sizes a tile by its <em>logical</em> width (pixels / dpi), so a 2× shot lays out like a 1× one, just sharper. For a video, an optional <code className="text-blue-300">fps</code> (e.g. <code className="text-blue-300">{'{'}"fps": 60{'}'}</code>) sets the frame rate the frame-step buttons use, since HTML5 video exposes none of its own. A <code className="text-blue-300">category::value</code> tag is a <em>scoped</em> label - only one value per category is kept on a file (the last wins), and each category gets a filter button listing its values. Every value starts <em>on</em>; uncheck one to hide the files carrying it, or use <strong>all</strong> / <strong>clear</strong> (top of the menu) to toggle them in bulk. Shift-click a value to isolate it (hide everything else). Each value also shows a dimmed count on the right - how many items carry it under your current filters (ignoring this scope itself). Plain tags work the same way under a "tags" button. Handy when a script emits many shots (light/dark, phone/desktop) and you want to see just one slice. Two built-in filters are always present: a <strong>type</strong> filter (image / video, from each file's extension) and a <strong>changes</strong> filter (added / removed / modified / unchanged, from each file's diff state) - the latter always offers all four kinds even when none are present, and hides unchanged files by default, so use it to reveal them or to focus on one kind of change.</p>
         </InfoTooltip>
         {/* Right cluster: the global A/B before/after + highlight controls (only
             meaningful in A/B mode, where each tile shows one side at a time), then
@@ -1373,7 +1373,7 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
         <div className="ml-auto flex flex-wrap items-center gap-2">
           {imageDiffMode === 'ab' && (
             <div className="flex items-center gap-1.5">
-              <span title="Show every tile's before / after — X flips · B = Before · A = After">
+              <span title="Show every tile's before / after - X flips · B = Before · A = After">
                 <SegmentedToggle
                   value={artifactView}
                   onChange={onArtifactViewChange}
@@ -1381,7 +1381,7 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
                 />
               </span>
               <label
-                title="Highlight changed pixels in magenta on every tile — shortcut: H"
+                title="Highlight changed pixels in magenta on every tile - shortcut: H"
                 className="flex items-center gap-1 text-[10px] font-medium tracking-wide text-gray-500 dark:text-gray-400 cursor-pointer select-none"
               >
                 <input
@@ -1414,7 +1414,7 @@ export function ArtifactsPanel({ projectId, agentId, baseRef, headRef, includeUn
             cards keep the previous agent's expand/collapse state (and its save
             effect would then clobber the new agent's saved prefs). Re-keying per
             agent remounts each card so it re-reads that agent's saved state. */}
-        {/* Search narrows like the tag filter does — within each card, not by
+        {/* Search narrows like the tag filter does - within each card, not by
             removing cards: a card with no match stays put and shows its
             "no files match" empty state when expanded (with its header count
             reflecting the narrowing), rather than vanishing from the list. */}

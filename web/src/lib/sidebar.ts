@@ -3,8 +3,8 @@ import { persist } from 'zustand/middleware'
 import { StorageKeys, readLocal, writeLocal, singleFieldStorage } from './storage'
 
 // Shared collapse state for the app sidebar. It lives in a store (rather than
-// local state in __root) so other surfaces — e.g. the agent page's sticky top
-// bar, which hosts the "show sidebar" toggle when collapsed — can read and flip
+// local state in __root) so other surfaces - e.g. the agent page's sticky top
+// bar, which hosts the "show sidebar" toggle when collapsed - can read and flip
 // it without prop-drilling through the router.
 
 // Below this width the sidebar is an off-canvas overlay; at/above it it's the
@@ -28,13 +28,13 @@ function loadCollapsePreference(): boolean | null {
 }
 
 interface SidebarState {
-  // Live runtime state — what the UI actually shows. NOT persisted directly.
+  // Live runtime state - what the UI actually shows. NOT persisted directly.
   collapsed: boolean
   // The explicit user choice that IS persisted; null = follow the screen default.
   preference: boolean | null
   // persist=true records the choice as the explicit preference (user intent);
   // transient changes (e.g. the small-screen auto-close on navigation) pass false
-  // so they move `collapsed` without touching `preference` — and so can't clobber
+  // so they move `collapsed` without touching `preference` - and so can't clobber
   // the wide-screen preference.
   setCollapsed: (collapsed: boolean, persist?: boolean) => void
   toggle: () => void

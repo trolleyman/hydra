@@ -3,8 +3,8 @@
 // and "build log open" survive a reload and switching between agents.
 //
 // Two cleanup mechanisms keep the store from growing without bound:
-//   1. TTL — entries untouched for ARTIFACT_TTL_MS are pruned on boot.
-//   2. Status reset — a saved entry is only honoured while the artifact's status
+//   1. TTL - entries untouched for ARTIFACT_TTL_MS are pruned on boot.
+//   2. Status reset - a saved entry is only honoured while the artifact's status
 //      is unchanged. When a card goes generating → ready/error (or is
 //      regenerated) the stale entry is ignored, so the card falls back to its
 //      status-derived defaults instead of restoring a now-irrelevant toggle.
@@ -56,7 +56,7 @@ export function saveArtifactPrefs(
 // The artifact tag filter, shared across an agent's cards. Every value is shown
 // (every checkbox on) by default; the filter records only what the user has
 // turned OFF. `scoped` maps a label category (e.g. "theme") to its hidden values
-// (e.g. ["dark"]) — a file is dropped if its value for that category is among
+// (e.g. ["dark"]) - a file is dropped if its value for that category is among
 // them; an absent or empty list means "nothing hidden" (show all). `free` is the
 // set of hidden free-form tags. An empty filter (no scoped values, no free tags)
 // means "show everything".
@@ -64,15 +64,15 @@ export type ArtifactTagFilter = {
   scoped: Record<string, string[]>
   free: string[]
   // changeThreshold is the "% changed" gate on the built-in change-type filter: a
-  // file reported 'modified' whose change_ratio is below this percentage (0–100)
-  // is treated as 'unchanged' — i.e. how much of an image's pixels (or a video's
+  // file reported 'modified' whose change_ratio is below this percentage (0-100)
+  // is treated as 'unchanged' - i.e. how much of an image's pixels (or a video's
   // frames) must differ before the change "counts". 0 (the default) gates nothing,
   // so any real difference counts as modified. Lives on the filter so it persists
   // and flows through the same plumbing as the scoped/free toggles.
   changeThreshold?: number
 }
 
-// Clamp an arbitrary value to a sane change-threshold percentage (0–100, rounded).
+// Clamp an arbitrary value to a sane change-threshold percentage (0-100, rounded).
 // Used when reading back persisted state and when the slider reports a new value.
 export function clampChangeThreshold(v: unknown): number {
   const n = typeof v === 'number' ? v : Number(v)
@@ -83,7 +83,7 @@ export function clampChangeThreshold(v: unknown): number {
 // The built-in change-type filter is a reserved scope (like the media-type one in
 // ArtifactsPanel) whose values are a file's change_type (added/removed/modified/
 // unchanged). Unlike the user scopes it defaults to HIDING unchanged, preserving
-// the old "unchanged hidden by default" behaviour — so a fresh or legacy filter
+// the old "unchanged hidden by default" behaviour - so a fresh or legacy filter
 // (no stored 'change' key) seeds ['unchanged']. Once the user touches it, the
 // stored value (even []) wins, distinguishing "show all" from "never set".
 export const ARTIFACT_CHANGE_CATEGORY = 'change'
@@ -95,7 +95,7 @@ export function defaultTagFilter(): ArtifactTagFilter {
   return { scoped: { [ARTIFACT_CHANGE_CATEGORY]: [...DEFAULT_HIDDEN_CHANGE_TYPES] }, free: [] }
 }
 
-// isDefaultTagFilter reports whether a filter is at its default — every category
+// isDefaultTagFilter reports whether a filter is at its default - every category
 // empty (nothing hidden) except 'change', which must be exactly its default hidden
 // set. Drives whether the "reset filters" button shows.
 export function isDefaultTagFilter(filter: ArtifactTagFilter): boolean {
@@ -124,7 +124,7 @@ export function loadTagFilter(projectId: string | null, agentId: string): Artifa
       else if (typeof v === 'string' && v) scoped[cat] = [v]
     }
   }
-  // Seed the change-type default only when it was never stored (legacy/fresh) —
+  // Seed the change-type default only when it was never stored (legacy/fresh) -
   // an explicitly-stored value, including [], is respected.
   if (!(ARTIFACT_CHANGE_CATEGORY in scoped)) scoped[ARTIFACT_CHANGE_CATEGORY] = [...DEFAULT_HIDDEN_CHANGE_TYPES]
   return {
@@ -142,7 +142,7 @@ export function saveTagFilter(projectId: string | null, agentId: string, filter:
 // tag-filter key shares this prefix but is a different shape (no timestamp), so
 // the store skips it (see createShardedStore's skipPrefix above). Chrome entries
 // (load/saveArtifactChrome) share the prefix too but DO carry a timestamp, so
-// this same sweep prunes the stale ones — no separate prune needed.
+// this same sweep prunes the stale ones - no separate prune needed.
 export function pruneArtifactPrefs(): void {
   store.prune()
 }
@@ -150,7 +150,7 @@ export function pruneArtifactPrefs(): void {
 // The artifacts panel's cached "chrome": the script names + the union of
 // available tags of a settled comparison. Persisted client-side so re-opening an
 // agent's diff renders the header, tag filter and collapsed card headers
-// instantly — with no network round-trip — while the live comparison loads in.
+// instantly - with no network round-trip - while the live comparison loads in.
 // Layout is deliberately NOT cached (too many inputs affect it); only this
 // lightweight chrome.
 export type ArtifactChrome = { names: string[]; tags: string[] }

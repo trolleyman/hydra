@@ -38,8 +38,8 @@ function SkippedCount({ n }: { n: number }) {
 }
 
 // WarningCount renders the amber warning marker that rides on a passing chip after
-// a divider, before the skipped count (✓ 142 │ ⚠ 4 │ ▸| 3). Amber — a warning DOES
-// warrant caution (unlike skipped) — but it stays an inline segment so the chip as
+// a divider, before the skipped count (✓ 142 │ ⚠ 4 │ ▸| 3). Amber - a warning DOES
+// warrant caution (unlike skipped) - but it stays an inline segment so the chip as
 // a whole remains green: warnings are informational and never fail the verdict.
 function WarningCount({ n }: { n: number }) {
   if (n <= 0) return null
@@ -71,7 +71,7 @@ function verdictLabel(t: TestSummary): string {
 
 // liveCaseCount is how many per-case results an in-flight run has reported so
 // far. Non-zero only for streamed (type=stdout) runs, whose summary carries the
-// ticking tallies — a junit run reports nothing until it settles.
+// ticking tallies - a junit run reports nothing until it settles.
 function liveCaseCount(t: TestSummary): number {
   return (t.passed ?? 0) + (t.failed ?? 0) + (t.warnings ?? 0) + (t.skipped ?? 0)
 }
@@ -79,7 +79,7 @@ function liveCaseCount(t: TestSummary): number {
 // liveTotal is an in-flight run's declared ::hydra:test:total:: denominator. The
 // backend reports 0 when none was declared (never floored to the cases seen), so
 // any positive total is a real denominator and we keep showing it even once the
-// tallies catch up — "✓789/789" rather than dropping the denominator at the
+// tallies catch up - "✓789/789" rather than dropping the denominator at the
 // finish line. 0 = don't show one.
 function liveTotal(t: TestSummary): number {
   const total = t.total ?? 0
@@ -90,7 +90,7 @@ function liveTotal(t: TestSummary): number {
 // run (✓121/789 ✗2 ⚠4): the green segment is passed over the declared total
 // (denominator muted, omitted when unknown), red failed / amber warnings only
 // when non-zero. The long form appends the gray skipped count; the short
-// sidebar form drops it, and drops the ✓ glyph too — the sidebar row is tight,
+// sidebar form drops it, and drops the ✓ glyph too - the sidebar row is tight,
 // and the green count next to the chip's spinner already reads as "passing so
 // far" (the full detail stays in the chip title).
 function LiveCounts({ t, long }: { t: TestSummary; long: boolean }) {
@@ -120,11 +120,11 @@ function LiveCounts({ t, long }: { t: TestSummary; long: boolean }) {
 // and the agent header. Renders nothing for status "none" (no tests / never run).
 //
 // Two forms (per user): the SHORT form (variant "xs", sidebar) shows just the
-// passed count (✓ 661) — no warnings, no skipped, to stay tight next to the date.
+// passed count (✓ 661) - no warnings, no skipped, to stay tight next to the date.
 // The LONG form (variant "sm", agent header) adds the amber warning count and the
 // gray skipped count after it (✓ 661 │ ⚠ 4 │ ▸| 3). While a streamed run is in
 // flight both forms tick the live tallies with the denominator folded into the
-// green segment (✓ 121/789 │ ✗ 2) — see LiveCounts.
+// green segment (✓ 121/789 │ ✗ 2) - see LiveCounts.
 export function TestVerdictChip({ tests, variant = 'xs' }: { tests?: TestSummary | null; variant?: 'xs' | 'sm' }) {
   if (!tests || tests.status === 'none') return null
   const tone = verdictTone(tests.status)
@@ -145,17 +145,17 @@ export function TestVerdictChip({ tests, variant = 'xs' }: { tests?: TestSummary
       className={stale ? 'min-w-0 text-gray-500 dark:text-gray-400 border border-dashed border-gray-400 dark:border-gray-600' : undefined}
     >
       {/* whitespace-nowrap so a label like "2 failed" never breaks onto two lines
-          inside the chip when the sidebar row is tight — the chip wraps as a whole.
+          inside the chip when the sidebar row is tight - the chip wraps as a whole.
           The running label is an arbitrary agent-supplied progress string (e.g.
-          "JUNIT report written to /home/…"), so cap + truncate it with an ellipsis
-          — otherwise the chip grows unbounded and clips over the date and the whole
+          "JUNIT report written to /home/..."), so cap + truncate it with an ellipsis
+          - otherwise the chip grows unbounded and clips over the date and the whole
           sidebar. min-w-0 (here + on the Badge container) lets it shrink below its
           content so the date stays visible even on a narrow sidebar; max-w caps it
           on a wide one. The full text stays available via the chip's `title`.
           xs (sidebar) gets a tighter cap than sm (agent header, which has room).
           This wrapper is an inline-block (NOT inline-flex) so `truncate` can
           ellipsize the live-counts segments too when the row is too tight for
-          them — text-overflow doesn't apply to flex containers, and a plain
+          them - text-overflow doesn't apply to flex containers, and a plain
           overflow clip would let the segments bleed over the neighboring
           auto-merge clock (or vanish entirely once the chip is squeezed). */}
       <span className="inline-block min-w-0 truncate">
@@ -176,15 +176,15 @@ export function TestVerdictChip({ tests, variant = 'xs' }: { tests?: TestSummary
 function verdictTitle(t: TestSummary): string {
   switch (t.status) {
     case 'passing':
-      return `Tests passing — ${t.passed ?? 0} passed${t.warnings ? `, ${t.warnings} warnings` : ''}${t.skipped ? `, ${t.skipped} skipped` : ''}`
+      return `Tests passing - ${t.passed ?? 0} passed${t.warnings ? `, ${t.warnings} warnings` : ''}${t.skipped ? `, ${t.skipped} skipped` : ''}`
     case 'failing':
-      return `Tests failing — ${t.failed ?? 0} failed (merge is soft-gated)`
+      return `Tests failing - ${t.failed ?? 0} failed (merge is soft-gated)`
     case 'running':
-      return `Tests running${t.progress ? ` — ${t.progress}` : ''}${liveCaseCount(t) > 0 ? ` (${t.passed ?? 0} passed${t.failed ? `, ${t.failed} failed` : ''}${t.warnings ? `, ${t.warnings} warnings` : ''}${t.skipped ? `, ${t.skipped} skipped` : ''})` : ''}`
+      return `Tests running${t.progress ? ` - ${t.progress}` : ''}${liveCaseCount(t) > 0 ? ` (${t.passed ?? 0} passed${t.failed ? `, ${t.failed} failed` : ''}${t.warnings ? `, ${t.warnings} warnings` : ''}${t.skipped ? `, ${t.skipped} skipped` : ''})` : ''}`
     case 'errored':
-      return "Tests couldn't run — no verdict (retry, or force-merge)"
+      return "Tests couldn't run - no verdict (retry, or force-merge)"
     case 'stale':
-      return 'Test verdict is stale — it predates the latest commit; re-run'
+      return 'Test verdict is stale - it predates the latest commit; re-run'
     default:
       return ''
   }

@@ -1,7 +1,7 @@
 import { useThemeStore, THEME_MODES, THEME_MODE_ICON, THEME_MODE_LABEL } from '../../lib/theme'
 import { SettingSection } from './shared'
 
-// Theme (light / dark / system). A client-only preference via the shared store —
+// Theme (light / dark / system). A client-only preference via the shared store -
 // no explanation text, just the segmented control under a "Theme" heading.
 export function ThemeSection() {
   const mode = useThemeStore((s) => s.mode)

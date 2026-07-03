@@ -3,7 +3,7 @@ import { api } from '../stores/apiClient'
 import { useAgentStore, ARCHIVED_PAGE_SIZE } from '../stores/agentStore'
 
 // Archived (killed/merged) history list. Loaded lazily and paginated for infinite
-// scroll — it is historical, so unlike the live list it is not polled. Resets +
+// scroll - it is historical, so unlike the live list it is not polled. Resets +
 // loads the first page whenever the selected project changes, and loads further
 // pages as the returned sentinel scrolls into view. The list itself lives in the
 // agent store; this hook owns only the loading lifecycle + the scroll sentinel.

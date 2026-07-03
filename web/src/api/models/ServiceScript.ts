@@ -15,7 +15,7 @@ export type ServiceScript = {
      */
     command: string;
     /**
-     * Run on the host with NO sandbox — needed for host devices the sandbox hides, e.g. /dev/kvm (default false)
+     * Run on the host with NO sandbox - needed for host devices the sandbox hides, e.g. /dev/kvm (default false)
      */
     host?: boolean;
     /**

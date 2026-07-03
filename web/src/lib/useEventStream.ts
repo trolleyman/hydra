@@ -7,7 +7,7 @@ export interface EventStreamHandlers {
   onServicesChanged?: () => void
   onPushStatusChanged?: () => void
   // agent_tests_changed carries a payload (unlike the refetch nudges above):
-  // one head's live test summary ticked mid-run — patch it in place.
+  // one head's live test summary ticked mid-run - patch it in place.
   onAgentTestsChanged?: (agentId: string, tests: TestSummary) => void
 }
 
@@ -15,12 +15,12 @@ export interface EventStreamHandlers {
 // invokes the matching handler whenever the server signals a change, so the UI
 // refetches on demand instead of polling on a timer (PLAN #50). The server sends
 // an initial "refetch everything" burst on connect, so the handlers also fire once
-// on every (re)connect — giving a returning/reconnecting client fresh data.
+// on every (re)connect - giving a returning/reconnecting client fresh data.
 //
 // - Reconnects with capped exponential backoff if the socket drops.
 // - Stays connected while the tab is hidden, UNLIKE the visibility-gated fallback
-//   polls. The socket is push-based — it sits idle and only delivers a frame when
-//   something actually changes — so holding it open costs ~nothing and does NOT
+//   polls. The socket is push-based - it sits idle and only delivers a frame when
+//   something actually changes - so holding it open costs ~nothing and does NOT
 //   hammer the daemon the way a background poll would. Keeping it open is what
 //   lets a backgrounded tab still learn about unread changes and light the unread
 //   dot in its title (the whole point of that indicator is to alert you while the

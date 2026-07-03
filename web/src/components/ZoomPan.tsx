@@ -6,20 +6,20 @@ import { Maximize } from 'lucide-react'
 const MAX_SCALE = 8
 // Minimap width in px on a roomy frame; its height follows the content's aspect
 // ratio. On small (phone) frames it caps at a quarter of the frame's width instead
-// so it doesn't crowd the image it maps — and since the minimap shares the frame's
+// so it doesn't crowd the image it maps - and since the minimap shares the frame's
 // aspect ratio, that same cap bounds its height to a quarter of the frame's too.
 const MM_W = 140
 
-// ZoomPan wraps a piece of lightbox content — a plain image OR a before/after
-// comparator — and layers magnify + pan on top of it, mode-agnostically:
+// ZoomPan wraps a piece of lightbox content - a plain image OR a before/after
+// comparator - and layers magnify + pan on top of it, mode-agnostically:
 //
 //   * the scroll-wheel zooms toward the cursor (fit → up to MAX_SCALE),
 //   * once zoomed in, dragging pans (at fit the wrapped content keeps its own
-//     click / slider / onion gestures — pan only takes over above 1×), and
+//     click / slider / onion gestures - pan only takes over above 1×), and
 //   * a live minimap + a "Reset view" button appear in the bottom-right corner
 //     while zoomed, the minimap draggable to pan.
 //
-// Panning is clamped so the magnified content always covers the frame — you can
+// Panning is clamped so the magnified content always covers the frame - you can
 // never drag it partly out of view. The wrapper sizes itself to the content at
 // rest (inline-block) and clips the magnified content to that box, so the
 // surrounding lightbox chrome (caption, mode controls) is unaffected. Remounting
@@ -37,7 +37,7 @@ export function ZoomPan({ children, minimapSrc, className, style }: {
   // scale + translation (px, content top-left relative to the frame) as one unit
   // so a wheel zoom can move all three together (keep the cursor point fixed).
   const [view, setView] = useState({ scale: 1, tx: 0, ty: 0 })
-  // The frame's rendered (fit) size — the bounds the clamp + minimap math need.
+  // The frame's rendered (fit) size - the bounds the clamp + minimap math need.
   const [dims, setDims] = useState({ w: 0, h: 0 })
   const [panning, setPanning] = useState(false)
   // How the next transform change should move: 'none' tracks the pointer 1:1
@@ -62,7 +62,7 @@ export function ZoomPan({ children, minimapSrc, className, style }: {
     return () => ro.disconnect()
   }, [])
 
-  // Clamp a translation so the scaled content always covers the frame — no empty
+  // Clamp a translation so the scaled content always covers the frame - no empty
   // gutter from over-panning. At scale 1 both bounds collapse to 0.
   const clampT = useCallback((nx: number, ny: number, s: number): [number, number] => {
     const minX = dims.w * (1 - s)
@@ -70,8 +70,8 @@ export function ZoomPan({ children, minimapSrc, className, style }: {
     return [Math.min(0, Math.max(minX, nx)), Math.min(0, Math.max(minY, ny))]
   }, [dims])
 
-  // Zoom by `factor` keeping the content point under (cx, cy) — coords relative to
-  // the frame's top-left — fixed, so the image grows toward the cursor.
+  // Zoom by `factor` keeping the content point under (cx, cy) - coords relative to
+  // the frame's top-left - fixed, so the image grows toward the cursor.
   const zoomAt = useCallback((cx: number, cy: number, factor: number) => {
     setView((v) => {
       const ns = Math.min(MAX_SCALE, Math.max(1, v.scale * factor))
@@ -100,13 +100,13 @@ export function ZoomPan({ children, minimapSrc, className, style }: {
 
   const zoomed = view.scale > 1.001
 
-  // Drag-to-pan, intercepted in the capture phase so that — once zoomed — it runs
+  // Drag-to-pan, intercepted in the capture phase so that - once zoomed - it runs
   // BEFORE the wrapped content's own gesture (slider drag, A/B flip) and suspends
   // it. At fit (scale 1) it bails immediately, leaving those gestures intact. The
   // minimap / reset chrome (data-zoompan-ui) keep their own handlers.
   const onPointerDownCapture = (e: React.PointerEvent) => {
     if (e.button !== 0 || !zoomed) return
-    // Let controls that own their own horizontal drag through even while zoomed — the
+    // Let controls that own their own horizontal drag through even while zoomed - the
     // before/after slider divider and the onion opacity range (both data-no-tile-drag /
     // <input>) keep working; only "empty" image area pans. Plus our own minimap chrome.
     if ((e.target as Element).closest('[data-zoompan-ui], input, [data-no-tile-drag]')) return
@@ -141,7 +141,7 @@ export function ZoomPan({ children, minimapSrc, className, style }: {
   }
 
   // Recenter the view on the point clicked in the minimap, and keep recentring as
-  // it's dragged — a click-anywhere + drag pan that mirrors the main image.
+  // it's dragged - a click-anywhere + drag pan that mirrors the main image.
   const onMinimapDown = (e: React.PointerEvent) => {
     e.preventDefault()
     e.stopPropagation()
@@ -169,7 +169,7 @@ export function ZoomPan({ children, minimapSrc, className, style }: {
 
   const reset = () => { setTransition('glide'); setView({ scale: 1, tx: 0, ty: 0 }) }
 
-  // The CSS ease matching the current movement kind — applied to the content
+  // The CSS ease matching the current movement kind - applied to the content
   // transform and mirrored onto the minimap's viewport rect so they move together.
   const transitionMs = transition === 'zoom' ? 120 : transition === 'glide' ? 200 : 0
   const transitionCss = transitionMs > 0 ? `${transitionMs}ms ease-out` : undefined

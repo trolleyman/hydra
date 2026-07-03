@@ -13,7 +13,7 @@ export type TestSummary = {
     failed?: number;
     skipped?: number;
     /**
-     * Non-failing diagnostics (e.g. eslint warnings). Informational only — never part of the merge gate. Shown in the long chip / panel, not the short sidebar chip.
+     * Non-failing diagnostics (e.g. eslint warnings). Informational only - never part of the merge gate. Shown in the long chip / panel, not the short sidebar chip.
      */
     warnings?: number;
     duration_ms?: number | null;

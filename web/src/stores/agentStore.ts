@@ -65,7 +65,7 @@ interface AgentState {
   removeAgent: (id: string) => void
   updateAgent: (agent: AgentResponse) => void
   // Patch just one agent's test summary (an agent_tests_changed payload event
-  // — a streamed run ticking) without touching the rest of the row.
+  // - a streamed run ticking) without touching the rest of the row.
   patchAgentTests: (id: string, tests: AgentResponse['tests']) => void
   // Reset the archived list (e.g. on project switch).
   resetArchived: () => void
@@ -76,7 +76,7 @@ interface AgentState {
   appendArchived: (page: AgentResponse[]) => void
   // Insert/replace a single archived agent (e.g. fetched on a cold page load, or
   // optimistically when a live agent is just killed/merged). New entries are
-  // placed in created-at order (newest first), matching the list's ordering — a
+  // placed in created-at order (newest first), matching the list's ordering - a
   // just-killed *old* agent therefore slots in by its creation date, not the top.
   upsertArchived: (agent: AgentResponse) => void
   // Remove an archived agent from the history list (e.g. after it is permanently
@@ -95,9 +95,9 @@ interface AgentState {
 
 // applyOverrides overlays one family of optimistic overrides onto a fresh agent
 // list. The three families (status, marked-read, marked-unread) share the exact
-// same shape — keep an override only while it hasn't expired AND the backend
+// same shape - keep an override only while it hasn't expired AND the backend
 // hasn't already caught up to it; drop it otherwise; rewrite the matching agent
-// while it's live — and differ only in three callbacks:
+// while it's live - and differ only in three callbacks:
 //   - expiry(o): the override's wall-clock expiry (`o.until`, or the bare number)
 //   - settled(agent, o): true once the backend already reports the override's
 //     outcome, so the override has served its purpose and can be dropped
@@ -125,7 +125,7 @@ function applyOverrides<O>(
 
 // notifyBackgroundMerges fires a "merged" toast for each agent that was armed for
 // auto-merge (merge_when_green) on the previous list and has since left the live
-// list — i.e. the daemon merged it in the background once its tests went green.
+// list - i.e. the daemon merged it in the background once its tests went green.
 // Only call this for a same-project refresh; on a project switch the old agents
 // also "vanish" but haven't merged. The synchronous merge path removes the agent
 // via removeAgent (not setAgents) and shows its own toast, so it won't fire here.
@@ -168,7 +168,7 @@ export const useAgentStore = create<AgentState>((set) => ({
     if (projectId != null && projectId === state.agentsProjectId) {
       notifyBackgroundMerges(state.agents, agents, projectId)
     }
-    // Status: drop the override once the backend reports the optimistic status —
+    // Status: drop the override once the backend reports the optimistic status -
     // or the moment it reports needs_input. needs_input is the explicit "the
     // agent is blocked on you" signal, so it must never stay masked behind a
     // stale optimistic "running" (e.g. the agent asked a follow-up question right

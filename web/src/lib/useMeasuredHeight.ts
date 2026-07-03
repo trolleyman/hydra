@@ -5,7 +5,7 @@ import { useCallback, useRef, useState } from 'react'
 // Changes toolbar, each panel's section bar) publish their height as a CSS var so
 // the sticky headers below can dock flush beneath them even when a bar wraps to two
 // rows. A callback ref (not useEffect) so it re-attaches the observer whenever the
-// element mounts — the artifacts/tests panels render null until their data loads.
+// element mounts - the artifacts/tests panels render null until their data loads.
 export function useMeasuredHeight(initial: number): [(el: HTMLElement | null) => void, number] {
   const [height, setHeight] = useState(initial)
   const roRef = useRef<ResizeObserver | null>(null)

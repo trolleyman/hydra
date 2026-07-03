@@ -4,10 +4,10 @@ import type { ButtonHTMLAttributes, ReactNode } from 'react'
 // carries its own sizing, shape and color) so callers don't stack conflicting
 // utilities; pass extra layout via `className` (e.g. `shrink-0 -ml-1`).
 //
-// - `ghost`  — borderless hover-bg button used for modal/toast close (✕) and
+// - `ghost`  - borderless hover-bg button used for modal/toast close (✕) and
 //   other inline dismiss affordances. Deliberately not flex-centered, matching
 //   the historical close-button box.
-// - `panel`  — the larger flex-centered square used for the collapsed-sidebar
+// - `panel`  - the larger flex-centered square used for the collapsed-sidebar
 //   show/hide toggle.
 type IconButtonVariant = 'ghost' | 'panel'
 
@@ -20,7 +20,7 @@ const VARIANT_CLASS: Record<IconButtonVariant, string> = {
 
 // IconButton is the shared icon-only button: a `<button>` wrapping a single icon,
 // with consistent transition/cursor/disabled handling. It forwards all native
-// button props (onClick, disabled, aria-label, title, type…).
+// button props (onClick, disabled, aria-label, title, type...).
 export function IconButton({
   variant = 'ghost',
   className = '',

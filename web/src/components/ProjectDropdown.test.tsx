@@ -29,7 +29,7 @@ function renderDropdown() {
   )
 }
 
-describe('ProjectDropdown — Escape to close', () => {
+describe('ProjectDropdown - Escape to close', () => {
   it('closes the open dropdown when Escape is pressed', () => {
     renderDropdown()
 

@@ -48,7 +48,7 @@ describe('UncommittedChip', () => {
     })
     fireEvent.click(screen.getByTestId('uncommitted-chip'))
     expect(screen.getByPlaceholderText('Commit message')).toHaveValue('Commit 2 local changes')
-    expect(screen.getByText('…and 23 more, not included in this commit')).toBeInTheDocument()
+    expect(screen.getByText('...and 23 more, not included in this commit')).toBeInTheDocument()
   })
 
   it('commits the shown paths with the edited message and closes on success', async () => {

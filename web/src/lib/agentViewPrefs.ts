@@ -1,6 +1,6 @@
 // Per-agent view preferences persisted to localStorage, keyed by project +
 // agent, so an agent's detail page restores its own layout on reload and when
-// switching between agents — treating each agent like its own page. We persist:
+// switching between agents - treating each agent like its own page. We persist:
 //   - terminalHeight: the height the user dragged the terminal panel to.
 //   - scrollTop: the scroll position of the agent detail page.
 //   - collapsedFiles: which files are collapsed in the diff viewer.

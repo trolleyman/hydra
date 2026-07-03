@@ -11,10 +11,10 @@ import { ResizeHandle } from '../../lib/ResizeHandle'
 type NetworkMode = 'off' | 'unrestricted' | 'advisory' | 'hard'
 
 const NETWORK_MODE_LABELS: Record<NetworkMode, string> = {
-  hard: 'Hard — inescapable filtering',
-  advisory: 'Advisory — proxy filtering',
-  unrestricted: 'Unrestricted — no filtering',
-  off: 'Off — no network',
+  hard: 'Hard - inescapable filtering',
+  advisory: 'Advisory - proxy filtering',
+  unrestricted: 'Unrestricted - no filtering',
+  off: 'Off - no network',
 }
 
 // ── PathListEditor ──────────────────────────────────────────────────────────────
@@ -296,7 +296,7 @@ export function ConfigForm({
         </div>
       </div>
 
-      {/* Fullscreen rendering — Claude only. Off by default so the web terminal keeps
+      {/* Fullscreen rendering - Claude only. Off by default so the web terminal keeps
           its native scrollbar + select-to-copy and Claude skips the alt-screen opt-in. */}
       {agentType === 'claude' && (
         <div className="flex items-center justify-between">
@@ -343,8 +343,8 @@ export function ConfigForm({
                 Network Egress
               </label>
               <InfoTooltip title="Network Egress">
-                <p><strong>Hard</strong> (default): outbound access limited to the allow-list, enforced by an <strong>inescapable</strong> network-namespace boundary (pasta + nft) where the host supports it — otherwise it degrades to advisory (the running head shows which is active).</p>
-                <p className="mt-1.5"><strong>Advisory</strong>: the same allow-list, but enforced only via the per-head egress proxy — every honest client is filtered, though a determined process can bypass it.</p>
+                <p><strong>Hard</strong> (default): outbound access limited to the allow-list, enforced by an <strong>inescapable</strong> network-namespace boundary (pasta + nft) where the host supports it - otherwise it degrades to advisory (the running head shows which is active).</p>
+                <p className="mt-1.5"><strong>Advisory</strong>: the same allow-list, but enforced only via the per-head egress proxy - every honest client is filtered, though a determined process can bypass it.</p>
                 <p className="mt-1.5"><strong>Unrestricted</strong>: network on, every host reachable. <strong>Off</strong>: no network at all.</p>
                 <p className="mt-1.5 text-gray-400 italic">Filtered modes start from a built-in default allow-list (AI-provider APIs, package registries, git hosts). Your allowed hosts are added on top; blocked hosts override both.</p>
               </InfoTooltip>
@@ -364,7 +364,7 @@ export function ConfigForm({
               <div className="flex items-center gap-1.5">
                 <label className="text-[11px] font-semibold text-gray-400 dark:text-gray-500">Strict (fail closed)</label>
                 <InfoTooltip title="Strict hard egress">
-                  <p>When the inescapable boundary can't be built on this host (pasta/nft unavailable — e.g. macOS), <strong>fail closed</strong> and give the agent no network, instead of degrading to advisory proxy filtering. <strong>On by default</strong>; turn off to allow the advisory degrade.</p>
+                  <p>When the inescapable boundary can't be built on this host (pasta/nft unavailable - e.g. macOS), <strong>fail closed</strong> and give the agent no network, instead of degrading to advisory proxy filtering. <strong>On by default</strong>; turn off to allow the advisory degrade.</p>
                 </InfoTooltip>
               </div>
               <label className="relative inline-flex items-center cursor-pointer">
@@ -404,7 +404,7 @@ export function ConfigForm({
                     <p className="text-[11px] text-gray-400 dark:text-gray-500">Allowed loopback ports</p>
                     <InfoTooltip title="Allowed loopback ports">
                       <p>Host-loopback TCP ports the sandbox may still reach at <code className="text-blue-300">127.0.0.1</code> under hard mode, whose network namespace otherwise cuts off every host-local daemon.</p>
-                      <p className="mt-1.5">For tools that hardcode loopback — e.g. adb's server: <code className="text-blue-300">5037</code> lets a sandboxed <code className="text-blue-300">adb</code> see the host's emulators.</p>
+                      <p className="mt-1.5">For tools that hardcode loopback - e.g. adb's server: <code className="text-blue-300">5037</code> lets a sandboxed <code className="text-blue-300">adb</code> see the host's emulators.</p>
                       <p className="mt-1.5 text-gray-400 italic">The other modes share the host loopback already, so this only applies to hard mode.</p>
                     </InfoTooltip>
                   </div>
@@ -460,9 +460,9 @@ export function ConfigForm({
           tooltip={
             <>
               <p>Worktree-relative paths mounted copy-on-write from the project root. The agent sees the real files at the same path under its worktree and may <strong>overwrite</strong> them, but writes are kept in a per-head layer and <strong>never touch the source</strong>.</p>
-              <p className="mt-1.5">Ideal for large gitignored build inputs/outputs (e.g. <code className="text-blue-300">pipeline/out</code>) that are too big to copy. Nothing is copied up front — reads come straight from the source; only files the agent modifies cost space.</p>
+              <p className="mt-1.5">Ideal for large gitignored build inputs/outputs (e.g. <code className="text-blue-300">pipeline/out</code>) that are too big to copy. Nothing is copied up front - reads come straight from the source; only files the agent modifies cost space.</p>
               <p className="mt-1.5 text-gray-400 italic">Linux uses overlayfs, macOS an APFS clone. Bash shells get read-only access to the same paths.</p>
-              <p className="mt-1.5 text-gray-400 italic">Overlay needs an overlay-capable bwrap; some distros (e.g. Ubuntu) ship it without. Point the daemon at one with <code className="text-blue-300">HYDRA_BWRAP=/path/to/bwrap</code> — otherwise COW falls back to read-only.</p>
+              <p className="mt-1.5 text-gray-400 italic">Overlay needs an overlay-capable bwrap; some distros (e.g. Ubuntu) ship it without. Point the daemon at one with <code className="text-blue-300">HYDRA_BWRAP=/path/to/bwrap</code> - otherwise COW falls back to read-only.</p>
             </>
           }
           paths={sandbox.cow_paths ?? []}
@@ -479,17 +479,17 @@ export function ConfigForm({
               Pre-Spawn Script
             </label>
             <InfoTooltip title="Pre-Spawn Script">
-              <p>A shell script run <strong>inside the sandbox</strong> before <strong>every agent launch</strong> — both spawn and resume — in its worktree with the same environment and confinement. Because it runs on every launch it must be <strong>idempotent</strong>. It does <strong>not</strong> run for the web bash shells.</p>
-              <p className="mt-1.5">Runs under the script's <code className="text-blue-300">#!</code> shebang if present (e.g. <code className="text-blue-300">#!/bin/zsh</code>), otherwise <code className="text-blue-300">/bin/bash</code> — so <code className="text-blue-300">set -o pipefail</code> and other bashisms work.</p>
+              <p>A shell script run <strong>inside the sandbox</strong> before <strong>every agent launch</strong> - both spawn and resume - in its worktree with the same environment and confinement. Because it runs on every launch it must be <strong>idempotent</strong>. It does <strong>not</strong> run for the web bash shells.</p>
+              <p className="mt-1.5">Runs under the script's <code className="text-blue-300">#!</code> shebang if present (e.g. <code className="text-blue-300">#!/bin/zsh</code>), otherwise <code className="text-blue-300">/bin/bash</code> - so <code className="text-blue-300">set -o pipefail</code> and other bashisms work.</p>
               <p className="mt-1.5">Useful for one-off setup such as <code className="text-blue-300">mise trust</code>. The agent launches after the script falls through; an explicit <code className="text-blue-300">exit 1</code> aborts the launch.</p>
               <p className="mt-1.5">These environment variables describe the head and are available to the script:</p>
               <ul className="mt-1 space-y-0.5 list-none">
-                <li><code className="text-blue-300">HYDRA_HEAD_ID</code> — the head's ID</li>
-                <li><code className="text-blue-300">HYDRA_AGENT_TYPE</code> — <code className="text-blue-300">claude</code>, <code className="text-blue-300">gemini</code>, <code className="text-blue-300">copilot</code>, <code className="text-blue-300">codex</code> or <code className="text-blue-300">bash</code></li>
-                <li><code className="text-blue-300">HYDRA_WORKTREE</code> — worktree path (the working directory)</li>
-                <li><code className="text-blue-300">HYDRA_PROJECT_ROOT</code> — the main repository root</li>
-                <li><code className="text-blue-300">HYDRA_BRANCH</code> — the head's git branch</li>
-                <li><code className="text-blue-300">HYDRA_BASE_BRANCH</code> — the branch it targets</li>
+                <li><code className="text-blue-300">HYDRA_HEAD_ID</code> - the head's ID</li>
+                <li><code className="text-blue-300">HYDRA_AGENT_TYPE</code> - <code className="text-blue-300">claude</code>, <code className="text-blue-300">gemini</code>, <code className="text-blue-300">copilot</code>, <code className="text-blue-300">codex</code> or <code className="text-blue-300">bash</code></li>
+                <li><code className="text-blue-300">HYDRA_WORKTREE</code> - worktree path (the working directory)</li>
+                <li><code className="text-blue-300">HYDRA_PROJECT_ROOT</code> - the main repository root</li>
+                <li><code className="text-blue-300">HYDRA_BRANCH</code> - the head's git branch</li>
+                <li><code className="text-blue-300">HYDRA_BASE_BRANCH</code> - the branch it targets</li>
               </ul>
             </InfoTooltip>
           </div>
@@ -514,12 +514,12 @@ export function ConfigForm({
               Pre-Exit Script
             </label>
             <InfoTooltip title="Pre-Exit Script">
-              <p>A shell script run <strong>inside a sandbox</strong> when a head <strong>ends</strong> (kill, merge, or restart) — after its agent session is killed but <strong>before</strong> the worktree is removed.</p>
-              <p className="mt-1.5">It runs in a fresh sandbox with this agent's policy, with the <strong>worktree as the working directory</strong> (still present), so it can read e.g. <code className="text-blue-300">.hydra/emu.env</code>. Use it for per-head teardown the agent didn't do itself — e.g. releasing a claimed emulator slot. Best-effort (failures are logged, never block the kill) and bounded by a 30s timeout.</p>
+              <p>A shell script run <strong>inside a sandbox</strong> when a head <strong>ends</strong> (kill, merge, or restart) - after its agent session is killed but <strong>before</strong> the worktree is removed.</p>
+              <p className="mt-1.5">It runs in a fresh sandbox with this agent's policy, with the <strong>worktree as the working directory</strong> (still present), so it can read e.g. <code className="text-blue-300">.hydra/emu.env</code>. Use it for per-head teardown the agent didn't do itself - e.g. releasing a claimed emulator slot. Best-effort (failures are logged, never block the kill) and bounded by a 30s timeout.</p>
               <p className="mt-1.5">Being sandboxed it <strong>cannot</strong> reach host-only resources (the host adb server, <code className="text-blue-300">/dev/kvm</code>); those belong to a host-side service pool.</p>
               <p className="mt-1.5">It receives the same <code className="text-blue-300">HYDRA_*</code> head-context variables as the agent, plus:</p>
               <ul className="mt-1 space-y-0.5 list-none">
-                <li><code className="text-blue-300">HYDRA_END_STATE</code> — <code className="text-blue-300">killed</code>, <code className="text-blue-300">merged</code>, or empty</li>
+                <li><code className="text-blue-300">HYDRA_END_STATE</code> - <code className="text-blue-300">killed</code>, <code className="text-blue-300">merged</code>, or empty</li>
               </ul>
             </InfoTooltip>
           </div>
@@ -543,7 +543,7 @@ export function ConfigForm({
           <Puzzle className="w-4 h-4 text-blue-600 dark:text-blue-400" />
           <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100">MCP Servers</h3>
           <InfoTooltip title="MCP Servers">
-            <p>Model Context Protocol servers give the agent extra tools. Only the servers you allow here can be used — <strong>deny-by-default</strong>: any others are stripped from the config before the agent launches, so they never even run.</p>
+            <p>Model Context Protocol servers give the agent extra tools. Only the servers you allow here can be used - <strong>deny-by-default</strong>: any others are stripped from the config before the agent launches, so they never even run.</p>
             <p className="mt-1.5">The list is discovered from your <code className="text-blue-300">~/.claude.json</code> and this project's <code className="text-blue-300">.mcp.json</code>.</p>
             <p className="mt-1.5 text-gray-400 italic">MCP servers are loaded at launch, so a change applies on the agent's <strong>next launch or resume</strong>, not to a running session.</p>
           </InfoTooltip>
@@ -590,7 +590,7 @@ export function ConfigForm({
                 setMcpInput('')
               }
             }}
-            placeholder="Allow a server by name…"
+            placeholder="Allow a server by name..."
             className="flex-1 text-sm rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-2 py-1 text-gray-700 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
           />
           <button
@@ -625,8 +625,8 @@ export function ConfigForm({
             <div className="flex items-center gap-1.5">
               <label className="text-[11px] font-semibold text-gray-400 dark:text-gray-500">Auto-allow read-only tools</label>
               <InfoTooltip title="Auto-allow read-only tools">
-                <p>Automatically allow MCP tools that look read-only (by name — <code className="text-blue-300">get_*</code>, <code className="text-blue-300">list_*</code>, <code className="text-blue-300">search_*</code>…), parking only writes and unrecognised tools for approval.</p>
-                <p className="mt-1.5 text-gray-400 italic">This is a best-effort heuristic, not a guarantee — a server can mislabel a destructive tool. Off by default.</p>
+                <p>Automatically allow MCP tools that look read-only (by name - <code className="text-blue-300">get_*</code>, <code className="text-blue-300">list_*</code>, <code className="text-blue-300">search_*</code>...), parking only writes and unrecognised tools for approval.</p>
+                <p className="mt-1.5 text-gray-400 italic">This is a best-effort heuristic, not a guarantee - a server can mislabel a destructive tool. Off by default.</p>
               </InfoTooltip>
             </div>
             <label className="relative inline-flex items-center cursor-pointer">

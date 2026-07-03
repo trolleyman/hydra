@@ -8,7 +8,7 @@ export type ClaudeUsageResponse = {
      */
     available: boolean;
     /**
-     * Why usage is unavailable (CLI missing, not a subscription account, parse failure, …).
+     * Why usage is unavailable (CLI missing, not a subscription account, parse failure, ...).
      */
     error?: string | null;
     /**
@@ -24,7 +24,7 @@ export type ClaudeUsageResponse = {
      */
     session_percent_used?: number | null;
     /**
-     * When the current session limit resets (derived from the relative "Resets in …" text).
+     * When the current session limit resets (derived from the relative "Resets in ..." text).
      */
     session_resets_at?: string | null;
     /**

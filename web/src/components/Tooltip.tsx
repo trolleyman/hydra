@@ -35,13 +35,13 @@ export interface TooltipProps {
   title?: string
   /** Card only: fixed width in px (drives both the box and the clamp math). */
   width?: number
-  /** Extra gap (px) between the trigger and the box, on top of the base 8px —
+  /** Extra gap (px) between the trigger and the box, on top of the base 8px -
    *  e.g. to clear a neighbouring control the box would otherwise sit against. */
   offset?: number
 }
 
-// One configurable tooltip. The shared core — a portalled, fixed-position box
-// anchored to its trigger via getBoundingClientRect — backs both the compact
+// One configurable tooltip. The shared core - a portalled, fixed-position box
+// anchored to its trigger via getBoundingClientRect - backs both the compact
 // hover hints (`variant="dark"`) and the interactive `InfoTooltip` info cards
 // (`variant="card"`, see InfoTooltip.tsx).
 export function Tooltip({
@@ -77,7 +77,7 @@ export function Tooltip({
     const padding = 8
     // Clamp by the box's REAL width when we have it. The dark hint sizes to its
     // text, so clamping by the 320px cap shoves a short tip (e.g. "Settings")
-    // ~160px sideways near a screen edge — box adrift, arrow stretched to reach.
+    // ~160px sideways near a screen edge - box adrift, arrow stretched to reach.
     // On the first paint the box isn't in the DOM yet, so fall back to the cap;
     // the useLayoutEffect below re-runs this with the measured width before paint.
     const maxWidth = card ? width : DARK_MAX_WIDTH
@@ -185,7 +185,7 @@ export function Tooltip({
         card ? (
           // Outer wrapper owns the positional transform only (centre + flip) and
           // never animates, so the box snaps to its final spot instantly. The
-          // enter animation lives on the inner card below — keeping it off this
+          // enter animation lives on the inner card below - keeping it off this
           // element is what stops the "rise then settle" slide: tailwindcss-animate's
           // `enter` keyframe rebuilds `transform` from just its own offsets, so if it
           // shared this element it would interpolate away the -translate-y-full and
@@ -221,7 +221,7 @@ export function Tooltip({
               <div className="text-gray-600 dark:text-gray-300 space-y-2 [&_code]:text-blue-700 dark:[&_code]:text-blue-300">
                 {content}
               </div>
-              {/* Arrow — points down at the trigger when the card is above it, up
+              {/* Arrow - points down at the trigger when the card is above it, up
                   when the card sits below it. */}
               <div
                 className={`absolute -translate-x-1/2 border-8 border-transparent ${

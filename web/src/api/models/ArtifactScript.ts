@@ -19,11 +19,11 @@ export type ArtifactScript = {
      */
     timeout_sec?: number;
     /**
-     * Run on the host with NO sandbox — full access to the machine and credentials (default false)
+     * Run on the host with NO sandbox - full access to the machine and credentials (default false)
      */
     unsafe_host?: boolean;
     /**
-     * Also delete git-ignored files (e.g. node_modules) before each run — a pristine checkout (git clean -fdx) instead of the default that keeps caches warm (-fd). Slower; only if stale ignored output can leak between commits (default false)
+     * Also delete git-ignored files (e.g. node_modules) before each run - a pristine checkout (git clean -fdx) instead of the default that keeps caches warm (-fd). Slower; only if stale ignored output can leak between commits (default false)
      */
     clean_ignored?: boolean;
     /**

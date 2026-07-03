@@ -1,6 +1,6 @@
 // Theme preference, shared between the app shell (which applies the `dark` class
 // and tracks the OS preference) and the Settings page (which renders the
-// Appearance control). Kept in one zustand store so both stay in sync — the
+// Appearance control). Kept in one zustand store so both stay in sync - the
 // control writes the store, the shell's apply-effect reacts.
 //
 // Previously this lived inline in __root.tsx with the toggle in the header. The
@@ -69,7 +69,7 @@ export const useThemeStore = create<ThemeState>()(
 )
 
 // Mount once at the app root: toggles the `dark` class on <html> from the stored
-// mode, and — in `system` mode — keeps tracking the OS preference live.
+// mode, and - in `system` mode - keeps tracking the OS preference live.
 export function useApplyTheme() {
   const mode = useThemeStore((s) => s.mode)
   useEffect(() => {
@@ -89,8 +89,8 @@ export function useApplyTheme() {
 // useIsDark reports whether dark mode is currently active by observing the `dark`
 // class that useApplyTheme toggles on <html>. It tracks all three theme modes
 // (including live OS changes in `system` mode) without duplicating the apply
-// logic, so non-DOM consumers like the xterm log terminal — which needs explicit
-// theme colours rather than CSS classes — can react to theme changes.
+// logic, so non-DOM consumers like the xterm log terminal - which needs explicit
+// theme colours rather than CSS classes - can react to theme changes.
 export function useIsDark(): boolean {
   const [isDark, setIsDark] = useState(() => document.documentElement.classList.contains('dark'))
   useEffect(() => {

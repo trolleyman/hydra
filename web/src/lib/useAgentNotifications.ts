@@ -7,7 +7,7 @@ import { runWithToast } from './apiAction'
 import type { AgentResponse, ApprovalRequest } from '../api'
 import { ApprovalDecisionRequest } from '../api'
 
-// "Needs input" toasts linger noticeably longer than the 3s default — they ask
+// "Needs input" toasts linger noticeably longer than the 3s default - they ask
 // the user to act, so they should stay put while you finish the current thought.
 const NEEDS_INPUT_TOAST_MS = 12_000
 // "Finished" is informational rather than blocking, so it auto-dismisses sooner
@@ -17,18 +17,18 @@ const FINISHED_TOAST_MS = 8_000
 // useAgentNotifications watches the live agent list for the current project and
 // surfaces three kinds of toasts:
 //
-//   1. State-transition toasts — when an agent crosses into `needs_input` (and
+//   1. State-transition toasts - when an agent crosses into `needs_input` (and
 //      isn't a security-gate wait, which gets its own toast below) or `finished`,
 //      a toast pops with a "View" button that jumps to the agent.
-//   2. Security-gate approval toasts — for each parked tool call (MCP / WebFetch
+//   2. Security-gate approval toasts - for each parked tool call (MCP / WebFetch
 //      / bash) or blocked egress host, a persistent toast with Allow / Deny
 //      actions. Dismissing the toast (X) denies the call; "Allow" tears it down
 //      silently.
-//   3. Cross-project status toasts — the daemon broadcasts every project's
+//   3. Cross-project status toasts - the daemon broadcasts every project's
 //      `needs_input_count` and `unread_count`, so when a *background* project's
 //      counts change we fetch that project's agents on demand, and pop one toast
 //      per agent that newly blocked on input, finished, or went idle ("Agent X
-//      in project Y transitioned to …") whose agent label switches to it. The
+//      in project Y transitioned to ...") whose agent label switches to it. The
 //      toast carries the neutral project banner naming where it happened.
 //
 // Transitions are detected by diffing each agent's status against the previous
@@ -45,16 +45,16 @@ export function useAgentNotifications(currentProjectId: string | null) {
   // projectId → set of needs_input agent ids last seen for a background project,
   // so an on-demand refetch only toasts agents that newly entered the wait.
   const bgBlocked = useRef<Map<string, Set<string>>>(new Map())
-  // projectId → set of unread agent ids last seen for a background project —
+  // projectId → set of unread agent ids last seen for a background project -
   // the finished/waiting analogue of bgBlocked. The daemon raises an agent's
   // unread flag when it settles into a state worth telling the user about
   // (finished/waiting ride out a grace window first, so subagent blips don't
   // count), which makes "newly unread" the transition signal.
   const bgUnread = useRef<Map<string, Set<string>>>(new Map())
   // When this hook first observed the project list (set on the effect's first
-  // run — render must stay pure). An unread finished/waiting agent only toasts
+  // run - render must stay pure). An unread finished/waiting agent only toasts
   // if its status transition happened while the UI was open (small slack for
-  // the unread grace window) — the first count change for a project toasts
+  // the unread grace window) - the first count change for a project toasts
   // every not-yet-seen unread agent, which would otherwise include agents that
   // finished days ago and were simply never read.
   const mountedAt = useRef<number | null>(null)
@@ -224,7 +224,7 @@ export function useAgentNotifications(currentProjectId: string | null) {
   // project (handled agent-by-agent above), but the daemon broadcasts every
   // project's needs_input_count and unread_count. So we diff each *background*
   // project's counts and, when either changes, fetch that project's agents on
-  // demand to learn which ones moved — popping one toast per newly-blocked
+  // demand to learn which ones moved - popping one toast per newly-blocked
   // agent (needs_input) and one per newly-unread finished/waiting agent. A
   // first-seen count pair is recorded silently (no toast / fetch on load).
   useEffect(() => {

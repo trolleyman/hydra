@@ -19,12 +19,12 @@ export type TestRunResult = {
     failed?: number;
     skipped?: number;
     /**
-     * Non-failing diagnostics (e.g. eslint warnings). Informational only — never part of the merge gate.
+     * Non-failing diagnostics (e.g. eslint warnings). Informational only - never part of the merge gate.
      */
     warnings?: number;
     duration_ms?: number | null;
     /**
-     * Set when status is "errored" — the command couldn't produce a verdict.
+     * Set when status is "errored" - the command couldn't produce a verdict.
      */
     error?: string | null;
     /**

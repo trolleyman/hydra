@@ -24,11 +24,11 @@ export type ApprovalRequest = {
      */
     reason?: string;
     /**
-     * Human-readable "wants to …" summary for the approval card
+     * Human-readable "wants to ..." summary for the approval card
      */
     summary: string;
     /**
-     * Read/write classification of an mcp_tool request ("read", "write", or absent when unknown/not applicable). Best-effort heuristic — a badge hint, not a guarantee.
+     * Read/write classification of an mcp_tool request ("read", "write", or absent when unknown/not applicable). Best-effort heuristic - a badge hint, not a guarantee.
      */
     rw?: string | null;
     /**

@@ -9,7 +9,7 @@ import { useImageLightboxStore } from '../stores/imageLightboxStore'
 // click-dragging to select the file name also enlarged the image. The fix scopes
 // the drag to the media region a tile marks with data-tile-drag; the card header
 // (file name + badges) is left alone. jsdom has no ResizeObserver, so the grid
-// measures a 0px container and renders BASE_ARTIFACT_COLUMNS columns — enough for
+// measures a 0px container and renders BASE_ARTIFACT_COLUMNS columns - enough for
 // canResize (cols > 1) and a non-zero resize unit (colW 0 + MASONRY_GAP). A drag
 // is simulated by a pointerdown on a tile child followed by a window pointermove,
 // matching how startBodyResize wires its listeners.
@@ -167,9 +167,9 @@ describe('MasonryGrid drag feedback + ghost + settled height', () => {
     const onSpanChange = vi.fn()
     const { container } = renderGrid(onSpanChange)
     startPull(container)
-    // No snap yet…
+    // No snap yet...
     expect(onSpanChange).not.toHaveBeenCalled()
-    // …but the tile visibly stretches: snapped 24px + RESIZE_PULL(0.35) * 8px pull.
+    // ...but the tile visibly stretches: snapped 24px + RESIZE_PULL(0.35) * 8px pull.
     const w = parseFloat(tileEl(container).style.width)
     expect(w).toBeCloseTo(24 + 8 * 0.35)
     expect(w).toBeGreaterThan(24) // more than frozen-at-snap
@@ -182,7 +182,7 @@ describe('MasonryGrid drag feedback + ghost + settled height', () => {
     const { container } = renderGrid(onSpanChange)
     startPull(container) // 8px: inside the deadband, held
     expect(onSpanChange).not.toHaveBeenCalled()
-    // 12px: spanFloat = 4.0 ≥ 3.8 — commits to span 4 mid-drag.
+    // 12px: spanFloat = 4.0 ≥ 3.8 - commits to span 4 mid-drag.
     fireEvent.pointerMove(window, { clientX: 12, clientY: 0 })
     expect(onSpanChange).toHaveBeenCalledWith('screenshot.png', 4)
     // The tile now renders the new snapped width (4*0 + 3*12 = 36) with no residual
@@ -194,7 +194,7 @@ describe('MasonryGrid drag feedback + ghost + settled height', () => {
   it('keeps the measurement ghost fully hidden even when the tile forces visibility:visible', () => {
     const onSpanChange = vi.fn()
     // The flip view's layers set an explicit visibility:visible on themselves, which
-    // escapes an inherited visibility:hidden — the ghost's image used to paint at the
+    // escapes an inherited visibility:hidden - the ghost's image used to paint at the
     // grid's top-left and flash during the drag. opacity:0 has no such escape hatch.
     const { container } = render(
       <MasonryGrid
@@ -216,7 +216,7 @@ describe('MasonryGrid drag feedback + ghost + settled height', () => {
     const ghost = ghostEl(container)
     expect(ghost).not.toBeNull()
     expect(ghost!.style.opacity).toBe('0')
-    // The ghost renders at the *snapped* width (24px), not the rubber-band width —
+    // The ghost renders at the *snapped* width (24px), not the rubber-band width -
     // it measures the height the tile will settle to.
     expect(ghost!.style.width).toBe('24px')
     fireEvent.pointerUp(window, { clientX: 8, clientY: 0 })
@@ -225,7 +225,7 @@ describe('MasonryGrid drag feedback + ghost + settled height', () => {
 
   it("adopts the ghost's settled height when the drag ends (no leftover reserved space)", () => {
     // The dragged tile's ResizeObserver readings are frozen during the drag, and if
-    // its width transition settles before release nothing re-measures it afterwards —
+    // its width transition settles before release nothing re-measures it afterwards -
     // placement kept reserving the stale pre-drag height, leaving a big empty gap
     // below a shrunk tile. finish() must fold the ghost's settled height back in.
     vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(500)
@@ -237,19 +237,19 @@ describe('MasonryGrid drag feedback + ghost + settled height', () => {
     startPull(container)
     fireEvent.pointerMove(window, { clientX: 12, clientY: 0 }) // snap to span 4
     fireEvent.pointerUp(window, { clientX: 12, clientY: 0 })
-    // After the drag the container reserves the ghost-measured settled height — not
+    // After the drag the container reserves the ghost-measured settled height - not
     // the stale pre-drag/fallback one.
     expect(grid.style.height).toBe('500px')
   })
 })
 
 // Regression tests for the grid's global A/B keyboard shortcuts: the handler used to
-// bind only B (as a toggle) and H, so A and X — advertised and handled by the lightbox
-// (ImageLightbox) — silently did nothing over the grid. The grid must accept the same
+// bind only B (as a toggle) and H, so A and X - advertised and handled by the lightbox
+// (ImageLightbox) - silently did nothing over the grid. The grid must accept the same
 // X (flip) / B (Before) / A (After) / H (highlight) set, gate them on A/B mode, and
 // stand down while the lightbox is open. The panel is rendered for real, with inert
 // WebSocket/ResizeObserver stubs (jsdom provides neither) so it idles in its
-// "connecting" state — the key handler is registered regardless of data.
+// "connecting" state - the key handler is registered regardless of data.
 describe('ArtifactsPanel A/B keyboard shortcuts', () => {
   beforeAll(() => {
     vi.stubGlobal('ResizeObserver', class {

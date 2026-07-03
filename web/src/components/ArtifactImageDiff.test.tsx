@@ -4,9 +4,9 @@ import { SegmentedToggle, ImageDiffView } from './ArtifactImageDiff'
 import { IMAGE_DIFF_MODES } from './artifactDiffContext'
 
 // Unit coverage for the image-diff renderers lifted out of ArtifactsPanel (#63b).
-// These exercise the pure routing/rendering behaviour — which comparison mode
+// These exercise the pure routing/rendering behaviour - which comparison mode
 // maps to which sub-renderer, and how a missing side (an added/removed file)
-// degrades — without needing the simulation server or the masonry/WS plumbing.
+// degrades - without needing the simulation server or the masonry/WS plumbing.
 
 describe('SegmentedToggle', () => {
   const options = [

@@ -5,9 +5,9 @@ import { Folder } from 'lucide-react'
 // runs in a project OTHER than the one in view: a folder icon + the project
 // name, nothing more. Two tones:
 //
-//   'warning' — amber, for security-gate approvals: acting on the card changes
+//   'warning' - amber, for security-gate approvals: acting on the card changes
 //     another project's policy, so the location must read as a caution.
-//   'neutral' — gray, for plain status updates (needs input / finished /
+//   'neutral' - gray, for plain status updates (needs input / finished /
 //     waiting): the location is just context, so it's styled as a quiet
 //     metadata eyebrow rather than an alert.
 //

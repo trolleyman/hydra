@@ -6,7 +6,7 @@ import type { RepositoryUncommittedChanges } from '../api'
 
 // ── Uncommitted-changes warning chip ───────────────────────────────────────────
 // Sits next to the sidebar's Repository button when the project root's working
-// tree is dirty — most often because saving Settings rewrote .hydra/config.toml.
+// tree is dirty - most often because saving Settings rewrote .hydra/config.toml.
 // Clicking it opens a popover listing the dirty paths with a prefilled commit
 // message and a "Commit" that commits exactly the listed paths.
 
@@ -76,7 +76,7 @@ export function UncommittedChip({
     function handleClick(e: MouseEvent) {
       const target = e.target as Node
       // The popover lives in a portal, so a click inside it isn't contained by
-      // the trigger — check both before treating it as an outside click.
+      // the trigger - check both before treating it as an outside click.
       if (triggerRef.current?.contains(target)) return
       if (menuRef.current?.contains(target)) return
       setOpen(false)
@@ -101,7 +101,7 @@ export function UncommittedChip({
   const submit = async () => {
     const msg = message.trim()
     if (!msg || committing) return
-    // Commit exactly what the popover shows — with more paths dirty than the
+    // Commit exactly what the popover shows - with more paths dirty than the
     // list cap, the rest stay uncommitted (the chip persists with the
     // remainder, so another round sweeps them).
     if (await onCommit(msg, uncommitted.files.map((f) => f.path))) setOpen(false)
@@ -115,7 +115,7 @@ export function UncommittedChip({
         type="button"
         data-testid="uncommitted-chip"
         aria-label={label}
-        title={open ? undefined : `${label} in the project checkout — click to review and commit`}
+        title={open ? undefined : `${label} in the project checkout - click to review and commit`}
         onClick={() => {
           setMessage(suggestedMessage(uncommitted))
           setOpen((o) => !o)
@@ -146,7 +146,7 @@ export function UncommittedChip({
             ))}
             {uncommitted.total > uncommitted.files.length && (
               <li className="text-xs text-gray-400 dark:text-gray-500">
-                …and {uncommitted.total - uncommitted.files.length} more, not included in this commit
+                ...and {uncommitted.total - uncommitted.files.length} more, not included in this commit
               </li>
             )}
           </ul>

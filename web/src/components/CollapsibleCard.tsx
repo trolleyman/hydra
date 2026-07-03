@@ -3,7 +3,7 @@ import { ChevronDown } from 'lucide-react'
 import { useMeasuredHeight } from '../lib/useMeasuredHeight'
 
 // The card header's action buttons (build log / regenerate / re-run) sit as faint
-// icons at rest and brighten ONLY the icon the pointer is actually over — a
+// icons at rest and brighten ONLY the icon the pointer is actually over - a
 // per-button `hover:` (not a shared `group-hover:`), with no border or background.
 // So hovering one button no longer lights up its neighbour or boxes the whole
 // cluster; it just darkens that one icon. MELT_BTN is the shared resting+hover
@@ -23,7 +23,7 @@ const COLLAPSE_MS = 200
 // CollapsibleCard is the shared bordered card used by both the artifacts panel and
 // the tests panel (PLAN #68): a header row whose left half is a click-to-collapse
 // button (chevron + icon + name + an inline `status` slot) and whose right half
-// hosts `actions` — the melt-style icon buttons (see MELT_BTN). The body renders
+// hosts `actions` - the melt-style icon buttons (see MELT_BTN). The body renders
 // below the header only while expanded, in the same `px-3 pb-2` inset both panels
 // rely on. Every state lives inside the one bordered card so toggling between them
 // never shifts the layout and the action buttons stay reachable.
@@ -37,7 +37,7 @@ const COLLAPSE_MS = 200
 // Expand/collapse is animated: the chevron rotates a quarter-turn and the body
 // glides between 0 and its measured height. Because the height tracks the live
 // content height (a ResizeObserver via useMeasuredHeight), in-place content swaps
-// while open — toggling the build log, a grid collapsing to "No files match …" —
+// while open - toggling the build log, a grid collapsing to "No files match ..." -
 // glide too instead of snapping. The body stays MOUNTED only while open (plus the
 // brief collapse animation), so a collapsed card never pays to render its heavy
 // children (xterm logs, image grids); see `mounted` below.
@@ -100,7 +100,7 @@ export function CollapsibleCard({ icon, name, status, actions, collapsed, onTogg
           `isolate` traps the body's positioned content (artifact tiles render the
           images as `absolute inset-0`, and the compare slider has an `absolute
           z-10` handle) in its own stacking context, so it can never paint over the
-          sticky section/changes bars above it — some mobile browsers otherwise
+          sticky section/changes bars above it - some mobile browsers otherwise
           mis-order those leaked positioned layers against `position: sticky`
           during image-decode repaints. */}
       <div

@@ -13,7 +13,7 @@ import { ArtifactsEditor } from './ArtifactsEditor'
 import { TestsEditor } from './TestsEditor'
 import { ServicesEditor } from './ServicesEditor'
 
-// The agent-type selector (replaces the old tab bar) — brand icon + label per
+// The agent-type selector (replaces the old tab bar) - brand icon + label per
 // agent. 'all' edits the shared defaults; the rest edit that agent's overrides.
 const AGENT_OPTIONS: { id: SettingsSection; label: string; icon: AgentTypeIconName; color: string }[] = [
   { id: 'all', label: 'All agents', icon: 'all', color: AGENT_ACCENT.all },
@@ -75,7 +75,7 @@ export function FloatingSaveBar({
         className="flex items-center gap-2 px-5 py-2 rounded-xl text-sm font-bold bg-blue-600 text-white hover:bg-blue-700 transition-all shadow-lg shadow-blue-500/25 active:scale-95 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
       >
         <Save className="w-4 h-4" />
-        {saving ? 'Saving…' : 'Save'}
+        {saving ? 'Saving...' : 'Save'}
       </button>
     </div>
   )
@@ -108,7 +108,7 @@ export function SettingsContent({
   onTest: (agentType: string) => void
   onCloseTestAgent: () => void
   projectId: string | null
-  // The scope (Project / Global) selector — rendered between Theme and Agent.
+  // The scope (Project / Global) selector - rendered between Theme and Agent.
   // Supplied by the project settings page; the global page passes nothing.
   scopeSelector?: ReactNode
 }) {
@@ -140,7 +140,7 @@ export function SettingsContent({
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 text-xs font-medium hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors disabled:opacity-50 cursor-pointer shrink-0"
           >
             <Terminal className="w-3.5 h-3.5" />
-            {testing ? 'Spawning…' : 'Test'}
+            {testing ? 'Spawning...' : 'Test'}
           </button>
         }
       >
@@ -199,7 +199,7 @@ export function SettingsContent({
         <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
           <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700 w-full max-w-4xl overflow-hidden flex flex-col max-h-[90vh]">
             <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between bg-gray-50 dark:bg-gray-800/50">
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Test Console — {testAgent.agent_type}</h3>
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Test Console - {testAgent.agent_type}</h3>
               <button onClick={onCloseTestAgent} className="p-1 rounded-md hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-500 transition-colors cursor-pointer">
                 <X className="w-5 h-5" />
               </button>

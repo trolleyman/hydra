@@ -17,7 +17,7 @@ import { ZoomPan } from './ZoomPan'
 //
 // The comparison mode + Before/After view + Highlight are CONTROLLED by the lightbox
 // (ImageLightbox), not held here, so they persist as you navigate ←/→ between entries
-// — pick "Before", or onion skin, and the next image keeps it rather than resetting.
+// - pick "Before", or onion skin, and the next image keeps it rather than resetting.
 // A local ABControlsContext provider feeds the before/after view + highlight to the
 // inner ImageDiffView (which hides its own per-tile pill); the keyboard (X flip, B/A
 // jump, H highlight) lives in ImageLightbox for the same persistence reason.
@@ -40,7 +40,7 @@ export function LightboxDiff({ left, right, name, mode, onModeChange, view, onVi
   const canDiff = !!left && !!right
 
   // Measure the pair's aspect ratio (from whichever side exists) so the comparator can
-  // be sized to the displayed image and capped to the viewport height — and report the
+  // be sized to the displayed image and capped to the viewport height - and report the
   // natural pixel size up for the caption.
   useEffect(() => {
     const url = right ?? left
@@ -57,7 +57,7 @@ export function LightboxDiff({ left, right, name, mode, onModeChange, view, onVi
   }, [left, right, onDims])
 
   // Provide the before/after view + highlight to the inner ImageDiffView so its A/B
-  // tile reads them (and hides its own per-tile pill) — the control row above the
+  // tile reads them (and hides its own per-tile pill) - the control row above the
   // image (see below) is the single control instead.
   const ab = useMemo<ArtifactABControls>(
     () => ({ view, highlight, toggleView: () => onViewChange(view === 'before' ? 'after' : 'before') }),
@@ -76,8 +76,8 @@ export function LightboxDiff({ left, right, name, mode, onModeChange, view, onVi
   return (
     <ABControlsContext.Provider value={ab}>
       <div className="dark flex flex-col items-center gap-3">
-        {/* In A/B mode the Before/After toggle + Highlight sit ABOVE the image — on the
-            tile, where the grid keeps them — rather than down in the toolbar (also on the
+        {/* In A/B mode the Before/After toggle + Highlight sit ABOVE the image - on the
+            tile, where the grid keeps them - rather than down in the toolbar (also on the
             keyboard: X flips, B/A jump). Width-matched to the image so they line up. */}
         {mode === 'ab' && (
           <div style={{ width }} className="max-w-[94vw] flex flex-wrap items-center gap-2">
@@ -106,7 +106,7 @@ export function LightboxDiff({ left, right, name, mode, onModeChange, view, onVi
           </div>
         )}
         {/* ZoomPan magnifies the comparator past fit (wheel), pans it (drag once
-            zoomed), and gives a corner minimap — at fit the inner view keeps its own
+            zoomed), and gives a corner minimap - at fit the inner view keeps its own
             click/slider/onion gestures; pan only takes over above 1×. The minimap
             thumbnail uses the "after" side (or whichever exists). */}
         <ZoomPan minimapSrc={right ?? left} style={{ width }} className="max-w-[94vw]">

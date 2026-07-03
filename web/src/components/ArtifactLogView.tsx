@@ -7,20 +7,20 @@ import { useIsDark } from '../lib/theme'
 
 // LOG_SCROLLBACK bounds the xterm scrollback for build logs. The live in-memory
 // log is capped at maxLogLines (5000) backend-side; persisted logs can run longer,
-// so we keep a generous buffer — vastly cheaper than the old one-DOM-node-per-line.
+// so we keep a generous buffer - vastly cheaper than the old one-DOM-node-per-line.
 const LOG_SCROLLBACK = 20000
 
 // xterm palettes for the build-log terminal, matching the light/dark log box.
 // Each theme sets an OPAQUE background matching its container (gray-50 in light,
 // gray-900 in dark): xterm's `allowTransparency` doesn't reliably honour an
-// alpha-0 background here — the rgb is painted opaque — so a transparent
+// alpha-0 background here - the rgb is painted opaque - so a transparent
 // background rendered as solid black, leaving the light theme's dark gray-600
 // text unreadable on black. stderr is tinted via SGR red, so `red` must read
 // well on each background.
 // selectionBackground / selectionInactiveBackground are set explicitly: xterm's
 // default selection is a faint translucent grey that all but vanishes on the
 // light theme's near-white background, so dragging to select log text gave no
-// visible highlight (the log is copyable via Ctrl/Cmd+C — see LogView). A solid,
+// visible highlight (the log is copyable via Ctrl/Cmd+C - see LogView). A solid,
 // theme-appropriate blue (the VS Code selection colours) keeps the selected text
 // readable on both backgrounds.
 const LOG_THEME_DARK = {
@@ -47,7 +47,7 @@ const LOG_THEME_LIGHT = {
 // formatLogLine turns one captured line into the bytes written to xterm. The
 // line's own ANSI is preserved (rendered as real colour); a stderr line with no
 // colour of its own is tinted red, with a trailing reset so it can't bleed into
-// the next line. No newline is emitted here — the caller joins lines with CRLF
+// the next line. No newline is emitted here - the caller joins lines with CRLF
 // as a SEPARATOR (not a terminator), so the log never ends on a blank line.
 function formatLogLine(l: ArtifactLogLine): string {
   return (l.stream as string) === 'stderr' ? `\x1b[31m${l.text}\x1b[0m` : l.text
@@ -56,15 +56,15 @@ function formatLogLine(l: ArtifactLogLine): string {
 // LogView streams a build's stdout+stderr into an xterm.js terminal. It writes
 // only newly-arrived lines to the terminal instead of re-rendering the whole log
 // through React, renders ANSI colour natively, and auto-follows the tail unless
-// the user scrolls up — xterm handles all three, so a very large, fast-updating
+// the user scrolls up - xterm handles all three, so a very large, fast-updating
 // log stays smooth where the old map-the-whole-array approach lagged badly.
-export function LogView({ log, emptyText = 'Waiting for output…', failed = false, succeeded = false }: { log: ArtifactLogLine[]; emptyText?: string; failed?: boolean; succeeded?: boolean }) {
+export function LogView({ log, emptyText = 'Waiting for output...', failed = false, succeeded = false }: { log: ArtifactLogLine[]; emptyText?: string; failed?: boolean; succeeded?: boolean }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<Terminal | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
   // How many lines we've written to the terminal, plus the identity of the last
   // one. A live append keeps the same line objects for its prefix, so a matching
-  // tail means "extended — write only the new lines"; any mismatch (the array
+  // tail means "extended - write only the new lines"; any mismatch (the array
   // shrank, or was swapped wholesale, e.g. the settled log replacing the live one)
   // means "redraw from scratch".
   const writtenRef = useRef(0)
@@ -91,7 +91,7 @@ export function LogView({ log, emptyText = 'Waiting for output…', failed = fal
     term.loadAddon(fit)
     term.open(el)
     try { fit.fit() } catch { /* not laid out yet; the ResizeObserver refits */ }
-    term.write('\x1b[?25l') // hide the cursor — this is a read-only view
+    term.write('\x1b[?25l') // hide the cursor - this is a read-only view
 
     // Ctrl/Cmd+C copies the current selection. stdin is disabled (read-only log),
     // so the key would otherwise do nothing; intercept it before xterm to put the
@@ -140,7 +140,7 @@ export function LogView({ log, emptyText = 'Waiting for output…', failed = fal
     if (log.length > from) {
       // Join the new lines with CRLF as a separator. A continuation of an
       // already-written log (from > 0) opens with a leading CRLF to break onto a
-      // fresh line; a fresh draw (from === 0) doesn't — so the terminal never
+      // fresh line; a fresh draw (from === 0) doesn't - so the terminal never
       // carries a blank trailing line after the last write.
       const body = log.slice(from).map(formatLogLine).join('\r\n')
       term.write(from > 0 ? `\r\n${body}` : body)
@@ -150,7 +150,7 @@ export function LogView({ log, emptyText = 'Waiting for output…', failed = fal
   }, [log])
 
   // A failed build's log gets a red border + faint red wash so the terminal
-  // itself reads as the error surface — the script's stderr (rendered red) is the
+  // itself reads as the error surface - the script's stderr (rendered red) is the
   // failure detail, so no separate error box is needed beside it. A build that
   // finished successfully gets the mirror-image green border + faint green wash, so
   // a settled log reads its outcome at a glance (failed > succeeded if both set).
@@ -196,14 +196,14 @@ function NoLog() {
 
 // SideLogPane is one side's labelled log pane for the persisted (already-fetched)
 // view. A side with no URL is absent on that version → "No log" placeholder.
-// Otherwise it always renders a terminal: "Loading…" while the fetch is in flight,
+// Otherwise it always renders a terminal: "Loading..." while the fetch is in flight,
 // the fetch error inside the box (red border) if it failed, or the lines once
-// loaded — so a settled card shows two real terminals immediately rather than a
-// bare "Loading log…" line. `failed` marks a side whose build itself errored;
+// loaded - so a settled card shows two real terminals immediately rather than a
+// bare "Loading log..." line. `failed` marks a side whose build itself errored;
 // `succeeded` marks one that finished cleanly (green border). A fetch error counts
 // as failed and overrides succeeded. The build's own failure summary (its exit
-// status, "timed out after …") is appended to the captured log by the backend, so
-// it reads inline as the log's final line — no separate banner needed.
+// status, "timed out after ...") is appended to the captured log by the backend, so
+// it reads inline as the log's final line - no separate banner needed.
 function SideLogPane({ label, url, log, loading, error, failed, succeeded }: {
   label: string
   url?: string | null
@@ -216,7 +216,7 @@ function SideLogPane({ label, url, log, loading, error, failed, succeeded }: {
   if (!url) {
     return <LogColumnFrame label={label}><NoLog /></LogColumnFrame>
   }
-  const emptyText = error ? `Failed to load log: ${error}` : loading ? 'Loading…' : 'No output'
+  const emptyText = error ? `Failed to load log: ${error}` : loading ? 'Loading...' : 'No output'
   const didFail = failed || !!error
   return (
     <LogColumnFrame label={label}>
@@ -227,14 +227,14 @@ function SideLogPane({ label, url, log, loading, error, failed, succeeded }: {
 
 // LiveLogColumn renders one side's log while the set is still generating. Once a
 // side settles, the backend clears its live `log` (it lives only in memory while
-// in-flight) and exposes the persisted log at `logUrl` — but the OTHER side may
+// in-flight) and exposes the persisted log at `logUrl` - but the OTHER side may
 // still be building, so the set as a whole stays "generating". Rather than revert
-// the finished side to "Waiting for output…", fetch its persisted log and keep
+// the finished side to "Waiting for output...", fetch its persisted log and keep
 // showing the final output until the whole set settles.
 //
 // A side that settles while the other is still generating also takes on its
-// outcome colour right away — green border for a clean finish, red for a failure
-// (`error` set) — matching the settled-card panes, so a done side reads as done
+// outcome colour right away - green border for a clean finish, red for a failure
+// (`error` set) - matching the settled-card panes, so a done side reads as done
 // at a glance instead of staying neutral grey until the whole set finishes.
 function LiveLogColumn({ label, log, logUrl, error }: { label: string; log: ArtifactLogLine[]; logUrl?: string | null; error?: string | null }) {
   // This side has finished if it has no live lines left but a persisted log URL.
@@ -246,7 +246,7 @@ function LiveLogColumn({ label, log, logUrl, error }: { label: string; log: Arti
   const [settledLog, setSettledLog] = useState<ArtifactLogLine[] | null>(null)
 
   // Drop the fetched log while this side isn't settled (during render), so the
-  // next settle shows "Loading…" rather than the previous run's output.
+  // next settle shows "Loading..." rather than the previous run's output.
   if ((!settled || !logUrl) && settledLog !== null) setSettledLog(null)
 
   useEffect(() => {
@@ -264,7 +264,7 @@ function LiveLogColumn({ label, log, logUrl, error }: { label: string; log: Arti
   return (
     <LogColumnFrame label={label}>
       {settled ? (
-        <LogView log={settledLog ?? []} emptyText="Loading…" failed={failed} succeeded={succeeded} />
+        <LogView log={settledLog ?? []} emptyText="Loading..." failed={failed} succeeded={succeeded} />
       ) : (
         <LogView log={log} failed={failed} succeeded={succeeded} />
       )}
@@ -292,14 +292,14 @@ export function PersistedLogView({ leftUrl, rightUrl, open, leftFailed, rightFai
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState<string | null>(null)
 
-  // Lazily fetch each side's log whenever the view is open — driven by an effect
+  // Lazily fetch each side's log whenever the view is open - driven by an effect
   // (not the click handler) so a restored-open state also loads the log. The deps
   // ([open, leftUrl, rightUrl]) already make this run once per url-pair and refetch
   // when a regenerate swaps the urls; unrelated re-renders don't change them so they
   // don't re-fire it. Each run owns its own `cancelled` flag and always clears
-  // `loading` in its finally, so a run superseded mid-flight — React StrictMode's
+  // `loading` in its finally, so a run superseded mid-flight - React StrictMode's
   // mount→cleanup→remount, which fires for a card whose log is open from the start
-  // (a failed build) — never strands the panes on "Loading…": the latest run
+  // (a failed build) - never strands the panes on "Loading...": the latest run
   // resolves the state. (An earlier url-keyed ref guard bailed the remount out
   // before re-fetching, leaving the cancelled first run's `loading` stuck true.)
   useEffect(() => {
@@ -331,7 +331,7 @@ export function PersistedLogView({ leftUrl, rightUrl, open, leftFailed, rightFai
 
   if (!open || (!leftUrl && !rightUrl)) return null
 
-  // Render the two terminals straight away — loading/error states live inside each
+  // Render the two terminals straight away - loading/error states live inside each
   // pane (as its empty text + red border) rather than replacing the panes with a
   // line of text, so the layout doesn't jump as the logs arrive.
   return (

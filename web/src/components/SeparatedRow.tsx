@@ -1,7 +1,7 @@
 import { Children, Fragment, useCallback, useEffect, useLayoutEffect, useRef, type ReactNode } from 'react'
 
 // SeparatedRow lays out its children on a wrapping flex row with an interpunct
-// "·" between each pair — but hides any separator that lands at the start or end
+// "·" between each pair - but hides any separator that lands at the start or end
 // of a wrapped row, so a leading/trailing "·" never dangles (e.g.
 // "claude · running ·⏎ base · created" loses that orphaned middle dot).
 //
@@ -36,7 +36,7 @@ export function SeparatedRow({ children, className }: { children: ReactNode; cla
       prevLeft = b.offsetLeft
     }
     if (cur.length) rows.push(cur)
-    // A separator first or last on its row is dangling — hide it.
+    // A separator first or last on its row is dangling - hide it.
     for (const row of rows) {
       const first = row[0]
       const last = row[row.length - 1]
@@ -65,7 +65,7 @@ export function SeparatedRow({ children, className }: { children: ReactNode; cla
     measure()
   })
 
-  // On width changes — the only thing that alters wrapping. Guard on width so the
+  // On width changes - the only thing that alters wrapping. Guard on width so the
   // display toggles above (which change height, not width) can't re-trigger us.
   useEffect(() => {
     const el = ref.current

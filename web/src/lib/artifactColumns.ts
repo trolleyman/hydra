@@ -1,18 +1,18 @@
-// Shared masonry layout for the artifact grids — used by BOTH the diff viewer's
+// Shared masonry layout for the artifact grids - used by BOTH the diff viewer's
 // ArtifactsPanel and the repository browser's RepositoryArtifactsView, so the two
 // surfaces share one persisted preference. See MasonryGrid in
 // components/ArtifactsPanel.tsx for how these drive the layout.
 //
 // The grid is a fixed BASE_ARTIFACT_COLUMNS masonry. Each tile auto-spans 1..N of
-// those columns by its media's aspect ratio — a wide desktop screenshot takes
-// several columns, a tall phone screenshot just one — so you don't have to pick a
+// those columns by its media's aspect ratio - a wide desktop screenshot takes
+// several columns, a tall phone screenshot just one - so you don't have to pick a
 // column count yourself. Dragging a tile's right edge overrides that tile's span
 // column-by-column; those overrides are what we persist here (keyed by file name).
 
 import { useCallback, useEffect, useState } from 'react'
 import { StorageKeys, readJSON, writeJSON } from './storage'
 
-// Total columns in the masonry grid — the unit each tile's span is measured in.
+// Total columns in the masonry grid - the unit each tile's span is measured in.
 // Six gives a desktop shot ~half width and a phone shot a sixth, the spread the
 // aspect buckets below target. The rendered count is reduced on narrow containers
 // (see MasonryGrid) so a single column never gets too thin.
@@ -62,7 +62,7 @@ export function useArtifactSpans() {
 // middling tile.
 //
 // In a 6-column grid these put a phone shot at a third width and a desktop shot at
-// half — a deliberately generous default (phones were a sixth before, which read as
+// half - a deliberately generous default (phones were a sixth before, which read as
 // too small); the global size slider in the diff settings nudges the whole grid up
 // or down from here, and dragging a tile overrides one tile.
 export function defaultSpanForAspect(aspect: number | undefined): number {

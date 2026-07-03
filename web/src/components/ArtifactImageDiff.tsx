@@ -10,12 +10,12 @@ import type { LightboxImage } from './ImageLightbox'
 
 // The ways to compare a before/after image pair. Persisted in the diff viewer's
 // settings; see DiffViewer's SettingsPopup. (The magenta pixel-diff isn't a mode of
-// its own any more — it's a "Highlight" checkbox that overlays the changes on the
+// its own any more - it's a "Highlight" checkbox that overlays the changes on the
 // Before/After view.)
 export type ImageDiffMode = 'side-by-side' | 'ab' | 'slider' | 'onion'
 
 // Global A/B controls. When a provider is present (the diff viewer's artifacts
-// panel), every A/B tile — image and video — reads its before/after view and
+// panel), every A/B tile - image and video - reads its before/after view and
 // "highlight changed pixels" flag from here and hides its own per-tile pill, so one
 // control (and the X/B/A/H keyboard shortcuts) flips and highlights them all at once.
 // Absent (the repository browser, which has no shared toolbar) → each tile falls
@@ -36,7 +36,7 @@ type OpenLightbox = (images: LightboxImage[], index?: number) => void
 
 // Open this tile's entry in the lightbox. When the grid threaded down its `gallery`
 // (one entry per visible image file, carrying the before/after pair + mode) and this
-// tile's `index`, open the whole gallery there — so ←/→ step between files and the
+// tile's `index`, open the whole gallery there - so ←/→ step between files and the
 // lightbox shows the diff comparison. Otherwise fall back to just this one image
 // (e.g. the unit tests, or any caller that doesn't supply a gallery).
 function openGalleryAt(
@@ -62,7 +62,7 @@ function ImageCell({ url, label, name, aspect, gallery, index, disableOpen }: {
   gallery?: LightboxImage[]
   index?: number
   // Set when this view is *already* inside the lightbox, so a click shouldn't open a
-  // (nested) lightbox — it just stays a static image.
+  // (nested) lightbox - it just stays a static image.
   disableOpen?: boolean
 }) {
   const openImage = useImageLightbox()
@@ -91,8 +91,8 @@ function ImageCell({ url, label, name, aspect, gallery, index, disableOpen }: {
         </button>
       ) : (
         // No image on this side (the file was added or removed). Render a panel of
-        // similar visual weight to the present image — same framing, a clear "No
-        // image" empty state — rather than a tiny dashed box, so the added/removed
+        // similar visual weight to the present image - same framing, a clear "No
+        // image" empty state - rather than a tiny dashed box, so the added/removed
         // (none↔image) layout doesn't look lopsided next to its counterpart.
         // select-none so rapid clicking near it never highlights the label text.
         <div className="select-none flex flex-col items-center justify-center gap-1 w-full h-32 rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 text-gray-400 dark:text-gray-500">
@@ -106,8 +106,8 @@ function ImageCell({ url, label, name, aspect, gallery, index, disableOpen }: {
 
 // A stacked layer for the overlay comparison modes: the image when present, or a
 // "No image" placeholder filling the same box when this side is absent (an
-// added/removed file). Keeping a placeholder layer — rather than dropping to a
-// side-by-side pair — lets the overlay modes preserve their own layout (the A/B
+// added/removed file). Keeping a placeholder layer - rather than dropping to a
+// side-by-side pair - lets the overlay modes preserve their own layout (the A/B
 // buttons, the slider handle, the opacity blend) when only one side exists.
 function LayerNode({ url, style }: { url?: string | null; style?: React.CSSProperties }) {
   if (url) {
@@ -121,7 +121,7 @@ function LayerNode({ url, style }: { url?: string | null; style?: React.CSSPrope
   )
 }
 
-// SegmentedToggle is the small grouped "pill" selector (e.g. Before / After) — the
+// SegmentedToggle is the small grouped "pill" selector (e.g. Before / After) - the
 // compact twin of the settings page's theme/agent segmented controls: a padded track
 // with the active option raised as a white pill. Shared with VideoDiffView.
 export function SegmentedToggle<T extends string>({ value, onChange, options }: {
@@ -153,13 +153,13 @@ export function SegmentedToggle<T extends string>({ value, onChange, options }: 
 // A/B switch: Before / After, with a Highlight checkbox. Before & After stay
 // mounted and stacked, so flipping which is shown is an instant, flicker-free hard
 // switch. Flipping is driven by this tile's own pill (the grid and repository
-// browser both show it), or — inside the lightbox — the toolbar control + the X/B/A
+// browser both show it), or - inside the lightbox - the toolbar control + the X/B/A
 // keys (see LightboxDiff); a click on the image opens the fullscreen lightbox (where,
 // with nothing left to open, a click flips instead). Ticking Highlight overlays the
 // pixel-diff (every changed pixel tinted semi-transparent magenta, see DiffCanvas) on
-// top of whichever side is shown, so the changes stay marked — yet still readable
-// underneath — as you flip Before↔After. Highlight is disabled when only one side
-// exists (an added/removed file — there's nothing to diff). A missing side shows the
+// top of whichever side is shown, so the changes stay marked - yet still readable
+// underneath - as you flip Before↔After. Highlight is disabled when only one side
+// exists (an added/removed file - there's nothing to diff). A missing side shows the
 // "No image" placeholder; middle-click opens the currently-shown image in a new tab.
 function ABSwitch({ left, right, name, aspect, gallery, index, disableOpen }: {
   left?: string | null; right?: string | null; name: string; aspect?: number
@@ -180,7 +180,7 @@ function ABSwitch({ left, right, name, aspect, gallery, index, disableOpen }: {
   const sizer = (right ?? left) as string
   return (
     <div className="min-w-0">
-      {/* Only the standalone (no global controls) tile shows its own pill — under the
+      {/* Only the standalone (no global controls) tile shows its own pill - under the
           diff viewer the before/after + highlight controls live up in the panel header. */}
       {!global && (
         <div className="flex flex-wrap items-center gap-1 mb-1">
@@ -231,7 +231,7 @@ function ABSwitch({ left, right, name, aspect, gallery, index, disableOpen }: {
 // the region left of the draggable handle, giving a sharp (hard-cut) boundary. A
 // missing side shows the "No image" placeholder in its slot.
 //
-// Only the divider line drags the slider — the rest of the image behaves like the
+// Only the divider line drags the slider - the rest of the image behaves like the
 // other modes: a plain click opens the fullscreen lightbox (and, in the grid, a
 // horizontal drag resizes the tile), a middle click opens the side under the cursor
 // in a new tab. The cursor advertises which is which (zoom-in over the image,
@@ -439,14 +439,14 @@ function DiffCanvas({ left, right }: { left: string; right: string }) {
         className={`${OVERLAY_CLASS} pointer-events-none ${state === 'ready' ? '' : 'opacity-0'}`}
       />
       {state !== 'ready' && (
-        <span className={`${TAG_CLASS} right-1`}>{state === 'error' ? 'Diff failed' : 'Diffing…'}</span>
+        <span className={`${TAG_CLASS} right-1`}>{state === 'error' ? 'Diff failed' : 'Diffing...'}</span>
       )}
     </>
   )
 }
 
 // The side-by-side pair: before and after fill half the tile width each (the cards
-// span two masonry columns in this mode, so there's room — see FileGrid).
+// span two masonry columns in this mode, so there's room - see FileGrid).
 function SideBySide({ left, right, name, aspect, gallery, index, disableOpen }: {
   left?: string | null; right?: string | null; name: string; aspect?: number
   gallery?: LightboxImage[]; index?: number; disableOpen?: boolean
@@ -463,8 +463,8 @@ function SideBySide({ left, right, name, aspect, gallery, index, disableOpen }: 
 // modes keep their own layout even when one side is missing (added/removed file),
 // substituting a "No image" placeholder; we only fall back to the side-by-side
 // pair for that mode itself, or the degenerate case of no images at all.
-// `gallery` is the grid's diff gallery — one entry per visible image file (in display
-// order), each carrying the before/after pair + mode — and `index` is this file's
+// `gallery` is the grid's diff gallery - one entry per visible image file (in display
+// order), each carrying the before/after pair + mode - and `index` is this file's
 // spot in it, so opening any image lets ←/→ walk the files and the lightbox shows the
 // diff comparison. Both are optional: callers that don't supply them (e.g. unit tests)
 // just open the single clicked image.
@@ -472,7 +472,7 @@ export function ImageDiffView({ left, right, mode, name, aspect, gallery, index,
   left?: string | null; right?: string | null; mode: ImageDiffMode; name: string
   // The image's aspect ratio (width / height) from the artifact metadata, when
   // known. Used to reserve the media box's height via CSS aspect-ratio so the
-  // tile is laid out at its final size before the bytes download — the image then
+  // tile is laid out at its final size before the bytes download - the image then
   // fades into a pre-sized box with no reflow. Undefined → height follows the
   // loaded image (the old measured behaviour) for entries the server didn't size.
   aspect?: number

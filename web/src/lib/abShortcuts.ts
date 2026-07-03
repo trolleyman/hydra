@@ -1,7 +1,7 @@
 // The shared X/B/A/H keyboard bindings for a before/after comparator: X flips the
 // view, B and A jump straight to Before/After, H toggles the changed-pixel
 // highlight. Used by both the diff grid's global A/B controls (ArtifactsPanel) and
-// the fullscreen lightbox comparator (ImageLightbox) so the two always agree —
+// the fullscreen lightbox comparator (ImageLightbox) so the two always agree -
 // each caller adds its own scope guards (grid: only in A/B mode and not while the
 // lightbox is open; lightbox: only on a diff entry) before delegating here.
 export type ABShortcutTarget = {

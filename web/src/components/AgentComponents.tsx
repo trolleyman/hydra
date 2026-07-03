@@ -88,13 +88,13 @@ export function AgentSidebarItem({
         // for the type/status/test chips instead of squeezing them against the date.
         //
         // Reserve a fixed-height line so the row keeps a constant height as the
-        // activity text appears, disappears, or changes between status transitions —
+        // activity text appears, disappears, or changes between status transitions -
         // otherwise the whole sidebar jumps around. The height MUST NOT be driven by
         // the rendered content's line box: an inline monospace `code` chip
         // (shell-command activity) and plain proportional status text are
         // baseline-aligned but have different font metrics, so even at an identical
         // `line-height` their inline boxes distribute that height differently around
-        // the baseline and the line box's union can exceed it — making a code line
+        // the baseline and the line box's union can exceed it - making a code line
         // taller than a plain one. Pinning line-height (a previous fix) wasn't enough
         // for that reason. Instead lock a fixed `h-4` and center the content
         // (`flex items-center`), clipping any overflow, so the row is exactly 1rem

@@ -4,19 +4,19 @@
 // lives with each feature (project switch + `?` in __root.tsx, agent actions in
 // AgentDetail.tsx) since that's where the relevant state and callbacks are.
 
-// We bind Ctrl as the action modifier on every platform — including macOS. The
+// We bind Ctrl as the action modifier on every platform - including macOS. The
 // obvious Mac choice would be ⌘, but ⌘M (minimize), ⌘U (view source) etc. are
 // reserved by the browser/OS and can't be reliably intercepted, so Ctrl is the
 // one combination that's free everywhere and behaves the same on every machine.
 export const modLabel = 'Ctrl'
 
-// True when the action modifier (Ctrl) is held on its own — used so a binding
+// True when the action modifier (Ctrl) is held on its own - used so a binding
 // like Ctrl+M fires the same way on macOS as on Linux/Windows.
 export function hasMod(e: KeyboardEvent): boolean {
   return e.ctrlKey && !e.metaKey
 }
 
-// Whether a keystroke is being typed into an editable surface — a form field, a
+// Whether a keystroke is being typed into an editable surface - a form field, a
 // contenteditable, or the xterm terminal. App shortcuts defer to these so we
 // never steal a character the user meant to type (in a terminal Ctrl+M is Enter,
 // Ctrl+U kills the line, `?` is just a question mark, etc.).
@@ -41,7 +41,7 @@ export interface ShortcutGroup {
   shortcuts: ShortcutDef[]
 }
 
-// The catalogue rendered by the help overlay. Display tokens only — handling
+// The catalogue rendered by the help overlay. Display tokens only - handling
 // lives with each feature. Ctrl+` is Ctrl on every platform (macOS reserves ⌘`
 // for its own window cycling), so it's spelled out rather than using modLabel.
 export const SHORTCUT_GROUPS: ShortcutGroup[] = [

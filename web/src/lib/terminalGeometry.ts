@@ -5,7 +5,7 @@
 // geometry a client successfully sent is a good seed for the next one. The
 // backend uses it as the *initial* PTY size when it starts or resumes a session,
 // so a fresh/resumed agent renders at the right width immediately instead of
-// flashing the classic 80x24 default and reflowing — those narrow-wrapped bytes
+// flashing the classic 80x24 default and reflowing - those narrow-wrapped bytes
 // can't be re-flowed once a wider client replays the scrollback.
 
 import { useEffect } from 'react'
@@ -14,7 +14,7 @@ import { persist } from 'zustand/middleware'
 import { StorageKeys, readLocal, writeLocal, readJSON, writeJSON, singleFieldStorage } from './storage'
 
 // Fallback height (rows) when the user hasn't chosen one and no last-height
-// geometry exists yet — a comfortable default for a typical browser panel.
+// geometry exists yet - a comfortable default for a typical browser panel.
 export const DEFAULT_SPAWN_ROWS = 24
 // Guardrails for the user-chosen default so a fat-fingered value can't request a
 // degenerate or giant PTY. Mirrors the backend's own 1..2000 clamp.
@@ -56,7 +56,7 @@ export function loadDefaultRows(): number | null {
 // prefers the browser's last measured width (and so is omitted entirely when this
 // browser has never run a terminal, letting the server fall back to the project's
 // last known width). Height prefers the last measured height, then the user's
-// configured default, then the built-in fallback — so a fresh browser still spawns
+// configured default, then the built-in fallback - so a fresh browser still spawns
 // at a sensible height rather than 24 rows of 80-column wrapping.
 export function spawnGeometry(): { cols?: number; rows: number } {
   const last = loadLastGeometry()
@@ -70,7 +70,7 @@ export function spawnGeometry(): { cols?: number; rows: number } {
 //
 // persist owns the read-on-init + write-on-set; singleFieldStorage keeps the
 // stored value as the bare rows string under the existing key, reusing
-// loadDefaultRows' validation/clamping — so loadDefaultRows/spawnGeometry can
+// loadDefaultRows' validation/clamping - so loadDefaultRows/spawnGeometry can
 // keep reading the raw value directly at spawn time, outside the store.
 interface DefaultRowsState {
   rows: number | null

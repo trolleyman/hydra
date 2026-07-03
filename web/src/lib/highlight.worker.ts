@@ -2,7 +2,7 @@
 // highlights every file's whole content; doing that synchronously during render
 // blocks the main thread (a multi-file diff stacks one ~10ms highlight pass per
 // file into a single long task). Offloading to this worker keeps the UI thread
-// free — files paint as plain text immediately and the colours stream back as
+// free - files paint as plain text immediately and the colours stream back as
 // each highlight completes.
 //
 // Protocol: the client posts `{ id, lang, old, new }` where `old`/`new` are the

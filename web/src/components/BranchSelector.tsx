@@ -35,7 +35,7 @@ export function BranchSelector({
   triggerIcon?: ComponentType<{ className?: string }>
   triggerActive?: boolean
   // When true the control may shrink to share a row and clips its branch name
-  // (instead of sizing to its content) — used for the diff view's base → head
+  // (instead of sizing to its content) - used for the diff view's base → head
   // selector pair in the narrow repository sidebar.
   flexible?: boolean
 }) {
@@ -73,7 +73,7 @@ export function BranchSelector({
   useLayoutEffect(() => {
     // No reset on close: the menu is only rendered while `open` (see the
     // `open && coords` guard below), and updateCoords recomputes fresh
-    // coordinates synchronously — before paint — on the next open.
+    // coordinates synchronously - before paint - on the next open.
     if (!open) return
     updateCoords()
     window.addEventListener('scroll', updateCoords, true)

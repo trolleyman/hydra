@@ -1,5 +1,5 @@
 // Status filtering + free-text search for test cases, shared by every runner
-// card in the TestsPanel — the tests analog of artifactFilter/artifactPrefs.
+// card in the TestsPanel - the tests analog of artifactFilter/artifactPrefs.
 // Tests filter like the artifacts diff: the boring, expected outcomes (like
 // 'unchanged' artifacts) are hidden by default; the filter records only the
 // statuses the user has turned OFF, so an empty list means show all.
@@ -9,7 +9,7 @@ import { searchFiles } from './artifactFilter'
 import { caseDisplayName } from './testCases'
 import { testFilterKey, readJSON, writeJSON } from './storage'
 
-// The order the status dropdown offers values in — most interesting first,
+// The order the status dropdown offers values in - most interesting first,
 // mirroring CHANGE_TYPE_ORDER. All four are always offered (a status with no
 // cases just counts 0) so the menu is constant and predictable.
 export const TEST_STATUS_ORDER = ['failed', 'warning', 'skipped', 'passed'] as const
@@ -17,7 +17,7 @@ export type TestCaseStatusValue = (typeof TEST_STATUS_ORDER)[number]
 
 // The default hidden statuses depend on the view mode: the unified tree hides
 // the boring outcomes (passed + skipped); the group-by-result view hides
-// nothing — its skipped/passing sections start collapsed, which already folds
+// nothing - its skipped/passing sections start collapsed, which already folds
 // them away without a filter.
 export function defaultHiddenStatuses(groupResult: boolean): string[] {
   return groupResult ? [] : ['passed', 'skipped']
@@ -41,7 +41,7 @@ export function isDefaultTestFilter(filter: TestFilter, groupResult: boolean): b
 }
 
 // loadTestFilter returns the user's explicit customization, or null when none
-// is stored — the caller then applies the mode-dependent default, and keeps
+// is stored - the caller then applies the mode-dependent default, and keeps
 // tracking the mode as it changes.
 export function loadTestFilter(projectId: string | null, agentId: string): TestFilter | null {
   const parsed = readJSON(testFilterKey(projectId, agentId), (v) =>
@@ -63,7 +63,7 @@ export function caseMatchesFilter(c: TestCase, filter: TestFilter): boolean {
 
 // computeVisibleCases is the single source of truth for which of a runner's
 // cases are shown, and in what order: the status filter hides cases, then the
-// search query (when present) narrows + ranks them — the same pipeline as
+// search query (when present) narrows + ranks them - the same pipeline as
 // computeVisibleFiles for artifacts. Search fuzzy-matches the full display
 // name (path › scope › name), reusing the artifact search machinery.
 export function computeVisibleCases(cases: TestCase[], filter: TestFilter, search: string): TestCase[] {
