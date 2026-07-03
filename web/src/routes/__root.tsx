@@ -36,6 +36,7 @@ export const Route = createRootRoute({
 })
 
 import { useDialogStore } from '../stores/dialogStore'
+import { useToastStore } from '../stores/toastStore'
 import { pruneArtifactPrefs } from '../lib/artifactPrefs'
 import { pruneAgentViewPrefs } from '../lib/agentViewPrefs'
 import { StorageKeys, readLocal, writeLocal, archivedCollapsedKey } from '../lib/storage'
@@ -426,10 +427,16 @@ function RootLayout() {
 
   async function handleRestart() {
     setRestarting(true)
+    // Persistent (duration: 0) toast for the length of the rebuild + health poll,
+    // mirroring the "Syncing with remote..." indicator. It stays up until the
+    // page reloads below, which wipes it - so no success toast is needed.
+    const toast = useToastStore.getState()
+    const toastId = toast.show({ message: 'Restarting server...', type: 'info', duration: 0 })
     try {
       await api.default.devRestart()
     } catch (err) {
       if (err instanceof ApiError && err.status === 403) {
+        toast.dismiss(toastId)
         useDialogStore.getState().show({
           title: 'Dev Mode Required',
           message: 'Server is not running in dev mode.',
