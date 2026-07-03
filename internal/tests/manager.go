@@ -558,11 +558,12 @@ func (m *Manager) fillRunningLocked(dir string, rep *Report) {
 	}
 	rep.Cases = append([]TestCase(nil), lr.cases...)
 	rep.Passed, rep.Failed, rep.Skipped, rep.Warnings = lr.passed, lr.failed, lr.skipped, lr.warnings
-	if total := lr.declaredTotal(); total > 0 {
-		rep.Total = total
-	} else {
-		rep.Total = len(lr.cases)
-	}
+	// Mirror the streamed "counts" event (flushCountsLocked): a running snapshot's
+	// Total is the *declared* denominator, or 0 when none was declared — NOT floored
+	// to len(cases). Reporting len(cases) here made an undeclared run indistinguishable
+	// from a declared one whose cases had caught up (both total == cases), so the poll
+	// fallback couldn't tell "no denominator" from "denominator reached". 0 = unknown.
+	rep.Total = lr.declaredTotal()
 }
 
 // liveCases returns a copy of the streamed cases accumulated so far.

@@ -905,6 +905,12 @@ try {
       // The same surface mid-run (agent-md is seeded as a running verdict): the
       // expanded card's live xterm build-log tail + progress bar + partial counts.
       { name: 'tests-panel-running', path: '/project/sim-project/agent/agent-md', scrollTo: 'Changes', clicks: ['button:has(svg.lucide-flask-conical)'] },
+      // The indeterminate progress bar: agent-md's second runner ("eslint") is a
+      // streamed run with no declared ::hydra:test:total::, so it has no fill
+      // percentage — the bar is a full-width sliding "barber pole" of diagonal
+      // stripes ("working, length unknown") rather than a partial fill. Expand
+      // that card by its name so the striped bar sits under the live counts.
+      { name: 'tests-panel-running-indeterminate', path: '/project/sim-project/agent/agent-md', scrollTo: 'Changes', clicks: ['button:has-text("eslint")'] },
       // The tests panel's info (i) card hovered with its heading pinned near the
       // top of the viewport: the tall card has no room above, so it opens DOWNWARD
       // with its arrow pointing up — the regression shot for the tooltip flip fix
