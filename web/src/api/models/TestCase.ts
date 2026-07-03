@@ -33,5 +33,9 @@ export type TestCase = {
      * Failure/assertion text for a failed case (or skip reason for a skipped one)
      */
     message?: string | null;
+    /**
+     * True when `path` names a file that was not found in the checkout the report was parsed against - a stale or incorrect location in the runner's output. Informational only; never affects the verdict or the warnings count.
+     */
+    path_missing?: boolean | null;
 };
 

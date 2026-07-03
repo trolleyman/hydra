@@ -15,6 +15,10 @@ export type TestRunResult = {
     name: string;
     status: TestStatus;
     total?: number;
+    /**
+     * True when `total` is an estimated denominator carried over from a prior run (the streaming runner declared no ::hydra:test:total::). Only set while running; the UI shows it as approximate.
+     */
+    total_estimated?: boolean | null;
     passed?: number;
     failed?: number;
     skipped?: number;

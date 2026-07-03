@@ -123,16 +123,38 @@ func trustedHostTestCommands(cfg config.Config) map[string]bool {
 // testVersion resolves which checkout a head's tests run against: its uncommitted
 // working tree (when requested and available), an explicit ref, or its branch tip.
 func testVersion(head *heads.Head, headRef *string, includeUncommitted bool) hydratests.Version {
+	hints := headTotalHintRefs(head)
+	branch := "" // the branch this run's total is attributed to on settle
+	if head.Branch != nil {
+		branch = *head.Branch
+	}
 	switch {
 	case includeUncommitted && head.Worktree != nil:
-		return hydratests.Version{WorktreeDir: *head.Worktree}
+		return hydratests.Version{WorktreeDir: *head.Worktree, TotalHintRefs: hints, Branch: branch}
 	case headRef != nil && *headRef != "":
-		return hydratests.Version{Ref: *headRef}
+		// An explicit ref: the Manager records it to the branch only if it's the
+		// branch's current tip (recordBranchTotal guards this), so viewing an old
+		// commit can't overwrite the branch's total.
+		return hydratests.Version{Ref: *headRef, TotalHintRefs: hints, Branch: branch}
 	case head.Branch != nil:
-		return hydratests.Version{Ref: *head.Branch}
+		return hydratests.Version{Ref: *head.Branch, TotalHintRefs: hints, Branch: branch}
 	default:
 		return hydratests.Version{}
 	}
+}
+
+// headTotalHintRefs lists the refs consulted, in priority order, to estimate a
+// streaming run's denominator when it declares no ::hydra:test:total:: - the
+// head's own branch first, then its base branch (see tests.Manager.fallbackTotal).
+func headTotalHintRefs(head *heads.Head) []string {
+	var refs []string
+	if head.Branch != nil && *head.Branch != "" {
+		refs = append(refs, *head.Branch)
+	}
+	if head.BaseBranch != "" {
+		refs = append(refs, head.BaseBranch)
+	}
+	return refs
 }
 
 // GetAgentTests runs (or returns cached) the head's test runners for one ref and
@@ -199,6 +221,9 @@ func buildTestRunResult(projectID string, mgr *hydratests.Manager, rep hydratest
 		if rep.StartedAt > 0 {
 			res.StartedAt = ptr(rep.StartedAt)
 		}
+		if rep.TotalEstimated {
+			res.TotalEstimated = ptr(true)
+		}
 		res.Progress = nonEmptyPtr(rep.Progress)
 		if len(rep.Log) > 0 {
 			res.Log = ptr(toAPITestLog(rep.Log))
@@ -240,6 +265,9 @@ func toAPITestCases(cases []hydratests.TestCase) []api.TestCase {
 		}
 		if c.EndCol > 0 {
 			ac.EndCol = ptr(c.EndCol)
+		}
+		if c.PathMissing {
+			ac.PathMissing = ptr(true)
 		}
 		out = append(out, ac)
 	}
@@ -609,7 +637,7 @@ func (s *Server) ArmMergeWhenGreen(ctx context.Context, request api.ArmMergeWhen
 	// Kick a run so a verdict exists for the watcher to act on.
 	if s.Tests != nil {
 		mgr := s.Tests.Manager(projectRoot)
-		v := hydratests.Version{Ref: *head.Branch}
+		v := hydratests.Version{Ref: *head.Branch, TotalHintRefs: headTotalHintRefs(head), Branch: *head.Branch}
 		if liveCfg, err := config.Load(projectRoot); err == nil {
 			for _, r := range s.testRunnersFor(projectRoot, v, liveCfg) {
 				_, _ = mgr.Get(r, v)

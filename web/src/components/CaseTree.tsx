@@ -302,6 +302,23 @@ function FileGlyph({ name }: { name: string }) {
   return <Icon className={`w-3.5 h-3.5 shrink-0 ${className}`} />
 }
 
+// MissingFileMarker flags a file location that isn't present in the checkout the
+// report was parsed against (a stale/wrong path in the runner's output) - an
+// amber warning that never affects the verdict, just tells you the deep-link is
+// broken. Rides on the file piece where the ":line" suffix normally sits.
+const MISSING_FILE_TITLE = 'File not found in the checkout this report ran against - the location in the test output may be stale or wrong.'
+function MissingFileMarker() {
+  return (
+    <span
+      className="inline-flex items-center shrink-0 text-amber-500 dark:text-amber-400"
+      title={MISSING_FILE_TITLE}
+      aria-label={MISSING_FILE_TITLE}
+    >
+      <AlertTriangle className="w-3 h-3" />
+    </span>
+  )
+}
+
 // ScopeGlyph draws a scope level: a function glyph (ƒ, violet) for a Go test
 // function that owns subtests, a box glyph (indigo) for a class/type in a
 // dotted class chain (a JUnit/Java class, a pytest TestClass), or a braces glyph
@@ -326,7 +343,7 @@ function ScopeGlyph({ scopeKind }: { scopeKind?: ScopeKind }) {
 // fileLine, when set, hangs a dim ":42" off the file piece - used on hoisted
 // one-case rows so the line rides with the file it belongs to rather than
 // dangling at the end of the whole chain.
-function RowSegments({ segs, isDir, expanded, fileLine }: { segs: Seg[]; isDir: boolean; expanded: boolean; fileLine?: number | null }) {
+function RowSegments({ segs, isDir, expanded, fileLine, pathMissing }: { segs: Seg[]; isDir: boolean; expanded: boolean; fileLine?: number | null; pathMissing?: boolean }) {
   const pathSegs = segs.filter((s) => s.kind === 'path')
   const scopeSegs = segs.filter((s) => s.kind === 'scope')
   const pieces: { icon: ReactNode; text: string; textClass: string; suffix?: ReactNode }[] = []
@@ -334,9 +351,14 @@ function RowSegments({ segs, isDir, expanded, fileLine }: { segs: Seg[]; isDir: 
     const icon = isDir
       ? (expanded ? <FolderOpen className="w-3.5 h-3.5 text-blue-500 shrink-0" /> : <Folder className="w-3.5 h-3.5 text-blue-500 shrink-0" />)
       : <FileGlyph name={filenameOf(pathSegs[pathSegs.length - 1].label)} />
-    const suffix = fileLine != null && fileLine > 0
-      ? <span className="font-mono text-[10px] text-gray-400 dark:text-gray-500 shrink-0">:{fileLine}</span>
-      : undefined
+    // A file whose location isn't in the checkout gets an amber warning marker
+    // (and no line suffix - it wouldn't deep-link). Directories are never flagged.
+    const missing = pathMissing && !isDir
+    const suffix = missing
+      ? <MissingFileMarker />
+      : fileLine != null && fileLine > 0
+        ? <span className="font-mono text-[10px] text-gray-400 dark:text-gray-500 shrink-0">:{fileLine}</span>
+        : undefined
     pieces.push({ icon, text: pathSegs.map((s) => s.label).join('/'), textClass: 'text-gray-700 dark:text-gray-300', suffix })
   }
   for (const s of scopeSegs) {
@@ -398,7 +420,7 @@ export function CaseRow({ c, segs, showLocation, indent = 0, onOpenInRepo }: {
       <div className="flex items-center gap-1.5 min-w-0">
         {segs ? (
           <>
-            <RowSegments segs={segs} isDir={false} expanded={false} fileLine={showLocation ? undefined : c.line} />
+            <RowSegments segs={segs} isDir={false} expanded={false} fileLine={showLocation ? undefined : c.line} pathMissing={c.path_missing ?? false} />
             {/* The status glyph sits right before the leaf test name, after the
                 location chain. */}
             <span className="shrink-0 text-xs text-gray-300 dark:text-gray-600">›</span>
@@ -409,7 +431,12 @@ export function CaseRow({ c, segs, showLocation, indent = 0, onOpenInRepo }: {
           {c.name}
         </span>
         {showLocation && loc ? (
-          <span className="font-mono text-[10px] text-gray-400 dark:text-gray-500 truncate shrink-1">{loc}</span>
+          <span className="inline-flex items-center gap-1 min-w-0 shrink-1">
+            <span className="font-mono text-[10px] text-gray-400 dark:text-gray-500 truncate">{loc}</span>
+            {/* Scope-mode rows have no path piece to carry the marker, so it hangs
+                off the file:line secondary here. */}
+            {c.path_missing ? <MissingFileMarker /> : null}
+          </span>
         ) : !hasPathSeg && c.line != null && c.line > 0 ? (
           // No file piece on this row (plain leaf under a file node), so show the
           // line here - a dim ":42", also the row's open-in-repo #L target. When a
@@ -417,7 +444,7 @@ export function CaseRow({ c, segs, showLocation, indent = 0, onOpenInRepo }: {
           <span className="font-mono text-[10px] text-gray-400 dark:text-gray-500 shrink-0">:{c.line}</span>
         ) : null}
         <CopyButton text={copyable} title={loc ? `Copy ${loc}` : 'Copy test name'} />
-        {onOpenInRepo && c.path ? (
+        {onOpenInRepo && c.path && !c.path_missing ? (
           <RepoLinkButton target={onOpenInRepo(c.path as string, c.line)} title={`Open ${loc || c.path} in repository`} />
         ) : null}
         {c.duration_ms != null && c.duration_ms > 0 ? (
@@ -431,13 +458,15 @@ export function CaseRow({ c, segs, showLocation, indent = 0, onOpenInRepo }: {
   )
 }
 
-function NodeView({ node, depth, collapsed, onToggle, useScope, onOpenInRepo }: {
+function NodeView({ node, depth, collapsed, onToggle, useScope, onOpenInRepo, missingPaths }: {
   node: TreeNode
   depth: number
   collapsed: Set<string>
   onToggle: (key: string) => void
   useScope: boolean
   onOpenInRepo?: OpenInRepo
+  // Repo-relative file paths that weren't found in the checkout (see CaseTree).
+  missingPaths: Set<string>
 }) {
   // One-case subtree → hoist the whole chain into a single case row.
   const hoisted = hoistedCase(node)
@@ -447,6 +476,9 @@ function NodeView({ node, depth, collapsed, onToggle, useScope, onOpenInRepo }: 
   const isCollapsed = collapsed.has(node.key)
   const isDir = nodeIsDir(node)
   const copyPath = node.pathParts.join('/')
+  // A file node (not a dir) whose path isn't in the checkout: mark it and drop
+  // the open-in-repo link, which would 404.
+  const pathMissing = !isDir && node.kind === 'path' && missingPaths.has(copyPath)
   return (
     <div>
       <button
@@ -456,9 +488,9 @@ function NodeView({ node, depth, collapsed, onToggle, useScope, onOpenInRepo }: 
       >
         {/* One chevron, rotated 90° when expanded, so the twist animates. */}
         <ChevronRight className={`w-3 h-3 text-gray-400 shrink-0 transition-transform duration-200 ${isCollapsed ? '' : 'rotate-90'}`} />
-        <RowSegments segs={node.segs} isDir={isDir} expanded={!isCollapsed} />
+        <RowSegments segs={node.segs} isDir={isDir} expanded={!isCollapsed} pathMissing={pathMissing} />
         {copyPath && node.kind === 'path' ? <CopyButton text={copyPath} title={`Copy ${copyPath}`} /> : null}
-        {onOpenInRepo && copyPath ? <RepoLinkButton target={onOpenInRepo(copyPath)} title={`Open ${copyPath} in repository`} /> : null}
+        {onOpenInRepo && copyPath && !pathMissing ? <RepoLinkButton target={onOpenInRepo(copyPath)} title={`Open ${copyPath} in repository`} /> : null}
         <NodeBadges counts={node.counts} />
       </button>
       {/* Animated expand/collapse: a 0fr↔1fr grid row transition slides the
@@ -466,14 +498,14 @@ function NodeView({ node, depth, collapsed, onToggle, useScope, onOpenInRepo }: 
           collapse state persists). */}
       <div className={`grid transition-[grid-template-rows] duration-200 ease-in-out ${isCollapsed ? 'grid-rows-[0fr]' : 'grid-rows-[1fr]'}`}>
         <div className="overflow-hidden min-h-0">
-          <NodeChildren node={node} depth={depth + 1} connect collapsed={collapsed} onToggle={onToggle} useScope={useScope} onOpenInRepo={onOpenInRepo} />
+          <NodeChildren node={node} depth={depth + 1} connect collapsed={collapsed} onToggle={onToggle} useScope={useScope} onOpenInRepo={onOpenInRepo} missingPaths={missingPaths} />
         </div>
       </div>
     </div>
   )
 }
 
-function NodeChildren({ node, depth, connect = false, collapsed, onToggle, useScope, onOpenInRepo }: {
+function NodeChildren({ node, depth, connect = false, collapsed, onToggle, useScope, onOpenInRepo, missingPaths }: {
   node: TreeNode
   depth: number
   // Draw a `tree`-style connector left of each child, linking it to the parent
@@ -484,6 +516,7 @@ function NodeChildren({ node, depth, connect = false, collapsed, onToggle, useSc
   onToggle: (key: string) => void
   useScope: boolean
   onOpenInRepo?: OpenInRepo
+  missingPaths: Set<string>
 }) {
   // Directories first (alphabetical), then this node's own cases, worst
   // status first so failures surface above passing siblings. Subtrees and
@@ -498,7 +531,7 @@ function NodeChildren({ node, depth, connect = false, collapsed, onToggle, useSc
     ...children.map((child) => ({
       key: child.key,
       hasChevron: hoistedCase(child) === null,
-      el: <NodeView node={child} depth={depth} collapsed={collapsed} onToggle={onToggle} useScope={useScope} onOpenInRepo={onOpenInRepo} />,
+      el: <NodeView node={child} depth={depth} collapsed={collapsed} onToggle={onToggle} useScope={useScope} onOpenInRepo={onOpenInRepo} missingPaths={missingPaths} />,
     })),
     ...cases.map((c, i) => ({
       key: `${caseKey(c)}-${i}`,
@@ -543,6 +576,13 @@ export function CaseTree({ cases, visible, useScope, depth = 0, rootConnect = fa
 }) {
   const visibleSet = useMemo(() => new Set(visible), [visible])
   const root = useMemo(() => buildTree(cases, visibleSet, useScope), [cases, visibleSet, useScope])
+  // Repo-relative paths of files the report referenced but that aren't in the
+  // checkout - the backend flags each such case (path_missing). A file node
+  // whose path is in this set gets the amber missing-file marker.
+  const missingPaths = useMemo(
+    () => new Set(cases.filter((c) => c.path_missing && c.path).map((c) => c.path as string)),
+    [cases],
+  )
   // Everything starts expanded (the filter already narrows the set); the set
   // records what the user closed. Keyed by node identity so it survives both
   // re-renders and axis switches (keys differ per axis, which is fine).
@@ -558,7 +598,7 @@ export function CaseTree({ cases, visible, useScope, depth = 0, rootConnect = fa
   if (visible.length === 0) return null
   return (
     <div className="flex flex-col">
-      <NodeChildren node={root} depth={depth} connect={rootConnect} collapsed={collapsed} onToggle={onToggle} useScope={useScope} onOpenInRepo={onOpenInRepo} />
+      <NodeChildren node={root} depth={depth} connect={rootConnect} collapsed={collapsed} onToggle={onToggle} useScope={useScope} onOpenInRepo={onOpenInRepo} missingPaths={missingPaths} />
     </div>
   )
 }

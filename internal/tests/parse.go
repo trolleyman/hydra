@@ -70,6 +70,12 @@ func ParseDir(outputDir, checkoutDir string) (cases []TestCase, format string, f
 			}
 		}
 	}
+	// Flag any case pointing at a file absent from the checkout (a stale/wrong
+	// location in the report). Runs over both JUnit and Hydra-JSON cases -
+	// parseHydraJSON doesn't touch locContext, so this is the single choke point.
+	for i := range cases {
+		lc.markMissingPath(&cases[i])
+	}
 	switch {
 	case sawJUnit && sawHydra:
 		format = "junit+hydra"

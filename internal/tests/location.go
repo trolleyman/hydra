@@ -1,6 +1,7 @@
 package tests
 
 import (
+	"errors"
 	"os"
 	"path"
 	"path/filepath"
@@ -197,6 +198,22 @@ func (lc *locContext) resolveGoTestFile(tc *TestCase, goPkg bool) {
 	if pos, ok := lc.goTestFuncs(tc.Path)[root]; ok {
 		tc.Path = path.Join(tc.Path, pos.file)
 		tc.Line = pos.line
+	}
+}
+
+// markMissingPath flags a case whose Path names a file that does not exist in
+// the checkout - a stale or wrong location in the runner's output that would
+// deep-link nowhere. Only file-like paths under a known checkout are checked: a
+// bare package/dir path (e.g. an unresolved Go package) is left alone to avoid
+// false positives, and with no checkoutDir nothing is flagged. Additive - it
+// only ever sets PathMissing, never clears it.
+func (lc *locContext) markMissingPath(tc *TestCase) {
+	if lc.checkoutDir == "" || tc.Path == "" || !fileExtRe.MatchString(tc.Path) {
+		return
+	}
+	full := filepath.Join(lc.checkoutDir, filepath.FromSlash(tc.Path))
+	if _, err := os.Stat(full); errors.Is(err, os.ErrNotExist) {
+		tc.PathMissing = true
 	}
 }
 

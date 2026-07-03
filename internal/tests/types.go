@@ -85,6 +85,13 @@ type TestCase struct {
 	EndCol     int      `json:"end_col,omitempty"`
 	DurationMs int64    `json:"duration_ms"`
 	Message    string   `json:"message,omitempty"`
+	// PathMissing flags a case whose Path names a file absent from the checkout
+	// the report was parsed against - a stale or incorrect location in the
+	// runner's output that would deep-link nowhere. Purely informational: it
+	// never flips the verdict or feeds the warnings count; the UI just marks the
+	// file row so the broken location is visible. Only set for file-like paths
+	// under a known checkout (Go package dirs and locationless cases stay false).
+	PathMissing bool `json:"path_missing,omitempty"`
 }
 
 // LogLine is one captured output line of an in-flight generation.
@@ -122,6 +129,11 @@ type Report struct {
 	Progress  string    `json:"-"`
 	StartedAt int64     `json:"-"`
 	Log       []LogLine `json:"-"`
+	// TotalEstimated marks a running snapshot whose Total is a denominator
+	// *estimate* carried over from a prior run (the runner declared no
+	// ::hydra:test:total::), so the UI can render it as approximate. Only ever
+	// true while running: a settled report's Total is the exact case count.
+	TotalEstimated bool `json:"-"`
 }
 
 // Version selects which checkout a test runs against, mirroring artifacts.Version:
@@ -130,6 +142,18 @@ type Report struct {
 type Version struct {
 	Ref         string
 	WorktreeDir string
+	// TotalHintRefs are refs (branch names / revs) consulted, in order, for a
+	// denominator estimate when a streaming run declares no ::hydra:test:total::
+	// - typically the head's own branch then its base branch, so an
+	// un-instrumented run still shows a determinate progress bar. Never part of
+	// the cache key (versionKey ignores it).
+	TotalHintRefs []string
+	// Branch is the branch this run's total is attributed to on settle
+	// (recordBranchTotal), so the next run of the branch can estimate its
+	// denominator - even at a new commit. Empty = don't record. A commit run is
+	// only recorded when it's the branch's current tip; a worktree run always is.
+	// Never part of the cache key.
+	Branch string
 }
 
 // Event is a generation lifecycle notification delivered to Subscribe listeners.
@@ -153,5 +177,8 @@ type RunningCounts struct {
 	Skipped  int
 	Warnings int
 	Total    int // declared ::hydra:test:total:: denominator (0 = unknown)
-	Cases    []TestCase
+	// TotalEstimated: Total is an estimate carried over from a prior run (no
+	// ::hydra:test:total:: was declared), so the UI shows it as approximate.
+	TotalEstimated bool
+	Cases          []TestCase
 }

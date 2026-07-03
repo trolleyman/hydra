@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/trolleyman/hydra/internal/config"
+	"github.com/trolleyman/hydra/internal/git"
 )
 
 func TestParseTestMarker(t *testing.T) {
@@ -189,6 +190,158 @@ func TestDeclaredTotalIsAFloor(t *testing.T) {
 	lr.total = 0
 	if got := lr.progressText(); got != "3" {
 		t.Errorf("progressText without total = %q, want bare count", got)
+	}
+}
+
+// A streaming run that declares no ::hydra:test:total:: seeds its denominator
+// from a prior run's total (here via the Latest fallback) and marks it
+// estimated, so the progress bar is still determinate. The settled report's
+// Total stays the exact case count - the estimate never leaks into it.
+func TestGenerateStreamingSeedsFallbackTotal(t *testing.T) {
+	workDir := t.TempDir()
+	initGitRepo(t, workDir)
+	m := NewManager(t.TempDir())
+
+	// A prior cached report for this runner - Latest() surfaces it as the estimate
+	// (no TotalHintRefs are set on the Version, so the ref loop is skipped).
+	prior := Report{Runner: "t", Key: "commit/deadbeef", Status: StatusPassing, Total: 42, UpdatedAt: 100}
+	if err := writeReport(m.entryDir("t", "commit/deadbeef"), prior); err != nil {
+		t.Fatal(err)
+	}
+
+	events, unsub := m.Subscribe()
+	defer unsub()
+
+	// Two cases, but no ::hydra:test:total:: marker.
+	script := "echo \"::hydra:test:pass:: pkg › A\"\necho \"::hydra:test:pass:: pkg › B\"\n"
+	spec := config.TestScript{Name: "t", UnsafeHost: true, Type: "stdout", Command: script}
+	v := Version{WorktreeDir: workDir}
+	if _, err := m.Get(spec, v); err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	var counts *RunningCounts
+	for ev := range events {
+		if ev.Kind == "counts" && ev.Counts != nil {
+			counts = ev.Counts
+		}
+		if ev.Kind == "settled" {
+			break
+		}
+	}
+	if counts == nil {
+		t.Fatal("no counts event observed")
+	}
+	if counts.Total != 42 || !counts.TotalEstimated {
+		t.Errorf("running counts = total %d estimated %v, want 42 estimated=true (seeded from prior run)", counts.Total, counts.TotalEstimated)
+	}
+	// The settled report recomputes Total from the actual cases - never the estimate.
+	rep, ok, err := m.Peek(spec.Name, v)
+	if err != nil || !ok {
+		t.Fatalf("Peek: ok=%v err=%v", ok, err)
+	}
+	if rep.Total != 2 {
+		t.Errorf("settled total = %d, want exact 2 (estimate must not leak into the settled report)", rep.Total)
+	}
+}
+
+// A settled run's case count is recorded under its branch so the next run of
+// that branch can estimate its denominator - but only when the total is
+// genuinely the branch's: a worktree run always counts, an old/explicit commit
+// (not the branch tip) never does, and the degenerate exit-code fallback never
+// does. fallbackTotal then prefers that per-branch total over anything else.
+func TestBranchTotalRecordAndRead(t *testing.T) {
+	repo := t.TempDir()
+	initGitRepo(t, repo)
+	gitRun(t, repo, "checkout", "-q", "-B", "feature")
+	m := NewManager(repo)
+
+	// A worktree run of the branch → recorded under "feature".
+	wt := Version{WorktreeDir: repo, Branch: "feature", TotalHintRefs: []string{"feature"}}
+	m.recordBranchTotal("t", wt, Report{Runner: "t", Status: StatusPassing, Total: 7, Format: "stdout"}, "working tree")
+	if got := m.fallbackTotal("t", []string{"feature"}); got != 7 {
+		t.Errorf("fallbackTotal after worktree run = %d, want 7 (per-branch total)", got)
+	}
+
+	// An explicit OLD commit (not the branch tip) must not overwrite the branch.
+	old := Version{Ref: "0000000000000000000000000000000000000000", Branch: "feature"}
+	m.recordBranchTotal("t2", old, Report{Runner: "t2", Status: StatusPassing, Total: 99, Format: "stdout"}, "0000000000000000000000000000000000000000")
+	if got := m.fallbackTotal("t2", []string{"feature"}); got != 0 {
+		t.Errorf("non-tip commit was attributed to the branch (got %d), want 0", got)
+	}
+
+	// The exit-code fallback (Format "exit", Total 1) is never recorded.
+	m.recordBranchTotal("t3", wt, Report{Runner: "t3", Status: StatusPassing, Total: 1, Format: "exit"}, "working tree")
+	if got := m.fallbackTotal("t3", []string{"feature"}); got != 0 {
+		t.Errorf("exit-code fallback was recorded (got %d), want 0", got)
+	}
+
+	// A commit run AT the branch tip IS recorded (tip resolves to HEAD).
+	tip := Version{Ref: "feature", Branch: "feature"}
+	headSHA, err := git.ResolveRef(repo, "feature")
+	if err != nil {
+		t.Fatalf("resolve feature: %v", err)
+	}
+	m.recordBranchTotal("t4", tip, Report{Runner: "t4", Status: StatusFailing, Total: 42, Format: "junit"}, headSHA)
+	if got := m.fallbackTotal("t4", []string{"feature"}); got != 42 {
+		t.Errorf("branch-tip commit run = %d, want 42 (recorded)", got)
+	}
+}
+
+// The per-branch total keeps the commit closest to the branch head: an older
+// commit's run - even one that settles LATER - must not clobber a newer commit's
+// total (closer-to-head is the better estimate). A genuinely newer commit does
+// update it.
+func TestBranchTotalRecencyGuard(t *testing.T) {
+	repo := t.TempDir()
+	initGitRepo(t, repo) // C1
+	gitRun(t, repo, "checkout", "-q", "-B", "feature")
+	c1, err := git.ResolveRef(repo, "feature")
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(repo, "g.txt"), "y")
+	gitRun(t, repo, "add", "-A")
+	gitRun(t, repo, "commit", "-q", "-m", "c2")
+	c2, err := git.ResolveRef(repo, "feature")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	m := NewManager(repo)
+	stored := func() branchTotal {
+		bt, _ := readBranchTotal(m.branchTotalDir("t", "feature"))
+		return bt
+	}
+	rec := func(runSHA string, total int) {
+		m.recordBranchTotal("t", Version{Ref: "feature", Branch: "feature"}, Report{Runner: "t", Status: StatusPassing, Total: total, Format: "junit"}, runSHA)
+	}
+
+	// Record for the current tip C2.
+	rec(c2, 50)
+	if bt := stored(); bt.Total != 50 || bt.Ref != c2 {
+		t.Fatalf("stored = %+v, want total 50 at C2", bt)
+	}
+
+	// Reset the branch back to the older C1 and record it (a later run of an
+	// earlier commit). C1 is an ancestor of C2, so C2's total is kept.
+	gitRun(t, repo, "reset", "-q", "--hard", c1)
+	rec(c1, 999)
+	if bt := stored(); bt.Total != 50 || bt.Ref != c2 {
+		t.Errorf("older commit clobbered newer total: %+v, want 50 at C2 kept", bt)
+	}
+
+	// A genuinely newer commit (C3, descends from C2) does update the total.
+	gitRun(t, repo, "reset", "-q", "--hard", c2)
+	writeFile(t, filepath.Join(repo, "h.txt"), "z")
+	gitRun(t, repo, "add", "-A")
+	gitRun(t, repo, "commit", "-q", "-m", "c3")
+	c3, err := git.ResolveRef(repo, "feature")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec(c3, 77)
+	if bt := stored(); bt.Total != 77 || bt.Ref != c3 {
+		t.Errorf("newer commit did not update total: %+v, want 77 at C3", bt)
 	}
 }
 

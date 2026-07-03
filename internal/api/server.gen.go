@@ -1120,6 +1120,9 @@ type TestCase struct {
 	// Path Repo-relative filesystem location - a file (vitest/eslint/pytest) or a package dir (Go). Absent when the runner only exposes a logical scope.
 	Path *string `json:"path"`
 
+	// PathMissing True when `path` names a file that was not found in the checkout the report was parsed against - a stale or incorrect location in the runner's output. Informational only; never affects the verdict or the warnings count.
+	PathMissing *bool `json:"path_missing"`
+
 	// Scope Logical nesting chain between path and name - a class chain (com › example › FooTest), describe chain, or Go subtest parent.
 	Scope *[]string `json:"scope"`
 
@@ -1167,6 +1170,9 @@ type TestRunResult struct {
 	// Status running = a run is in flight; passing/failing/errored = settled verdict; stale = a cached verdict exists but predates the current commit; none = no tests configured or never run. (A per-runner TestRunResult only ever uses running/passing/failing/errored; stale/none are head-summary states.)
 	Status TestStatus `json:"status"`
 	Total  *int       `json:"total,omitempty"`
+
+	// TotalEstimated True when `total` is an estimated denominator carried over from a prior run (the streaming runner declared no ::hydra:test:total::). Only set while running; the UI shows it as approximate.
+	TotalEstimated *bool `json:"total_estimated"`
 
 	// Warnings Non-failing diagnostics (e.g. eslint warnings). Informational only - never part of the merge gate.
 	Warnings *int `json:"warnings,omitempty"`
