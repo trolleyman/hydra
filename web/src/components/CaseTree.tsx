@@ -426,10 +426,15 @@ function NodeView({ node, depth, collapsed, onToggle, useScope, onOpenInRepo }: 
   const isCollapsed = collapsed.has(node.key)
   const isDir = nodeIsDir(node)
   const copyPath = node.pathParts.join('/')
-  // When nothing under this node renders as a sub-node row, its children are all
-  // case rows (leaf glyphs) — the guide hugs their column, one chevron slot
-  // right of where a sub-node chevron would sit (see TreeGuide `leaf`).
-  const leafChildren = ![...node.children.values()].some((c) => c.visTotal > 0)
+  // The guide hugs the case-glyph column when every child it groups renders as a
+  // chevron-less leaf row (see TreeGuide `leaf`): either a case attached here
+  // directly, or a single-case subtree that hoistedCase() collapses into one
+  // CaseRow — both lead with a glyph at the ICON column, no chevron. If any
+  // child keeps its chevron (a real expandable sub-node), the guide stays on the
+  // chevron column instead. Without counting hoisted subtrees, a folder of
+  // one-case files (each hoisted) looked like its guide sat a level too far out.
+  const renderedNodes = [...node.children.values()].filter((c) => c.visTotal > 0)
+  const leafChildren = renderedNodes.every((c) => hoistedCase(c) !== null)
   return (
     <div>
       <button
