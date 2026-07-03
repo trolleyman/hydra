@@ -61,7 +61,7 @@ var egressProxies = struct {
 //
 // The proxy enforces the effective allow-list — the built-in DefaultAllowedHosts
 // unioned with net.AllowedHosts — minus net.BlockedHosts, which overrides it.
-func startEgress(projectRoot, id string, net *sandbox.NetworkPolicy) (env []string, wrap func([]string, string) []string) {
+func startEgress(projectRoot, id string, agentType sandbox.AgentType, net *sandbox.NetworkPolicy) (env []string, wrap func([]string, string) []string) {
 	stopEgressProxy(id)
 	if !net.Enabled || net.Mode == sandbox.NetOff {
 		setEgressMode(id, EgressOff)
@@ -72,7 +72,7 @@ func startEgress(projectRoot, id string, net *sandbox.NetworkPolicy) (env []stri
 		return nil, nil
 	}
 
-	allowed := append(sandbox.DefaultAllowedHosts(), net.AllowedHosts...)
+	allowed := append(sandbox.DefaultAllowedHosts(agentType), net.AllowedHosts...)
 	approver := &egressApprover{projectRoot: projectRoot, id: id}
 	p, err := egress.Start(id, allowed, net.BlockedHosts, approver.approve)
 	if err != nil {

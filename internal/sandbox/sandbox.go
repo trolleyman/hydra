@@ -106,17 +106,16 @@ type NetworkPolicy struct {
 }
 
 // DefaultAllowedHosts is the built-in egress allow-list applied whenever host
-// filtering is on. It covers what an agent realistically needs to function —
-// the AI-provider APIs the agent itself talks to, the common package registries,
-// and the git hosts — so that turning on deny-by-default filtering does not
-// immediately break every agent. User AllowedHosts are unioned on top; a host
-// can be subtracted again via BlockedHosts.
-func DefaultAllowedHosts() []string {
-	return []string{
-		// Anthropic / Claude (the agent's own API traffic goes through the proxy).
-		"*.anthropic.com", "claude.ai", "*.claude.ai", "*.claudeusercontent.com",
-		// Other AI-provider APIs agents commonly use.
-		"api.openai.com", "*.openai.com", "*.googleapis.com", "*.githubcopilot.com",
+// filtering is on. It covers what an agent realistically needs to function — the
+// common package registries and git hosts every agent shares, plus the
+// AI-provider API hosts specific to the given agent type — so that turning on
+// deny-by-default filtering does not immediately break every agent. Scoping the
+// provider hosts to the agent that uses them means a Claude agent's defaults
+// don't silently grant reach to OpenAI's API, and vice versa. User AllowedHosts
+// are unioned on top; a host can be subtracted again via BlockedHosts.
+func DefaultAllowedHosts(t AgentType) []string {
+	// Common infrastructure every agent needs regardless of provider.
+	hosts := []string{
 		// Package registries + language toolchains.
 		"registry.npmjs.org", "*.npmjs.org", "*.yarnpkg.com",
 		"pypi.org", "*.pypi.org", "files.pythonhosted.org",
@@ -126,6 +125,38 @@ func DefaultAllowedHosts() []string {
 		// Git hosts + code download endpoints.
 		"github.com", "*.github.com", "*.githubusercontent.com", "codeload.github.com",
 		"gitlab.com", "*.gitlab.com", "bitbucket.org", "*.bitbucket.org",
+	}
+	return append(hosts, providerAllowedHosts(t)...)
+}
+
+// providerAllowedHosts returns the AI-provider hosts the given agent type talks
+// to (its own model API, auth, and telemetry). Kept separate from the shared
+// infra list in DefaultAllowedHosts so each agent's defaults grant only its own
+// provider. bash (and any unknown type) is a general shell that may invoke any
+// of the CLIs, so it gets the union of every provider.
+func providerAllowedHosts(t AgentType) []string {
+	// Anthropic / Claude, including platform.claude.com and Claude Code's
+	// Datadog log intake.
+	claude := []string{
+		"*.anthropic.com", "claude.ai", "*.claude.ai", "*.claudeusercontent.com",
+		"platform.claude.com", "http-intake.logs.us5.datadoghq.com",
+	}
+	openai := []string{"api.openai.com", "*.openai.com", "chatgpt.com"} // Codex
+	gemini := []string{"*.googleapis.com"}
+	copilot := []string{"*.githubcopilot.com"}
+	switch t {
+	case AgentTypeClaude:
+		return claude
+	case AgentTypeCodex:
+		return openai
+	case AgentTypeGemini:
+		return gemini
+	case AgentTypeCopilot:
+		return copilot
+	default:
+		all := append(claude, openai...)
+		all = append(all, gemini...)
+		return append(all, copilot...)
 	}
 }
 

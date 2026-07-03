@@ -277,7 +277,7 @@ func resolveGatePolicy(cfg config.Config, agentType string) gate.Policy {
 	_, _, _, _, net, _ := cfg.ResolveSandboxOptions(agentType)
 	if net.FilterHosts {
 		pol.WebFetchFilter = true
-		pol.WebFetchAllowHosts = append(sandbox.DefaultAllowedHosts(), net.AllowedHosts...)
+		pol.WebFetchAllowHosts = append(sandbox.DefaultAllowedHosts(sandbox.AgentType(agentType)), net.AllowedHosts...)
 		pol.WebFetchBlockedHosts = net.BlockedHosts
 	}
 	return pol

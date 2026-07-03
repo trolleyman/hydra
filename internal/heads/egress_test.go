@@ -13,7 +13,7 @@ func TestStartEgressMode(t *testing.T) {
 	t.Run("network off", func(t *testing.T) {
 		id := "test-egress-off"
 		defer stopEgressProxy(id)
-		env, wrap := startEgress("", id, &sandbox.NetworkPolicy{Mode: sandbox.NetOff, Enabled: false})
+		env, wrap := startEgress("", id, sandbox.AgentTypeClaude, &sandbox.NetworkPolicy{Mode: sandbox.NetOff, Enabled: false})
 		if env != nil || wrap != nil {
 			t.Errorf("expected no proxy env/wrap for network-off, got env=%v wrap!=nil=%v", env, wrap != nil)
 		}
@@ -26,7 +26,7 @@ func TestStartEgressMode(t *testing.T) {
 		id := "test-egress-unrestricted"
 		defer stopEgressProxy(id)
 		// Filtering off even with hosts present (explicit allow-all).
-		env, wrap := startEgress("", id, &sandbox.NetworkPolicy{Mode: sandbox.NetUnrestricted, Enabled: true, FilterHosts: false, AllowedHosts: []string{"example.com"}})
+		env, wrap := startEgress("", id, sandbox.AgentTypeClaude, &sandbox.NetworkPolicy{Mode: sandbox.NetUnrestricted, Enabled: true, FilterHosts: false, AllowedHosts: []string{"example.com"}})
 		if env != nil || wrap != nil {
 			t.Errorf("expected no proxy env/wrap for unrestricted, got env=%v wrap!=nil=%v", env, wrap != nil)
 		}
@@ -38,7 +38,7 @@ func TestStartEgressMode(t *testing.T) {
 	t.Run("filtering on: starts proxy in a filtered mode", func(t *testing.T) {
 		id := "test-egress-filtered"
 		defer stopEgressProxy(id)
-		env, _ := startEgress("", id, &sandbox.NetworkPolicy{Mode: sandbox.NetHard, Enabled: true, FilterHosts: true, AllowedHosts: []string{"example.com"}})
+		env, _ := startEgress("", id, sandbox.AgentTypeClaude, &sandbox.NetworkPolicy{Mode: sandbox.NetHard, Enabled: true, FilterHosts: true, AllowedHosts: []string{"example.com"}})
 		if len(env) == 0 {
 			t.Errorf("expected proxy env to be injected when filtering, got none")
 		}
