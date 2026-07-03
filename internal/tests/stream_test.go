@@ -287,6 +287,64 @@ func TestBranchTotalRecordAndRead(t *testing.T) {
 	}
 }
 
+// The per-branch total keeps the commit closest to the branch head: an older
+// commit's run - even one that settles LATER - must not clobber a newer commit's
+// total (closer-to-head is the better estimate). A genuinely newer commit does
+// update it.
+func TestBranchTotalRecencyGuard(t *testing.T) {
+	repo := t.TempDir()
+	initGitRepo(t, repo) // C1
+	gitRun(t, repo, "checkout", "-q", "-B", "feature")
+	c1, err := git.ResolveRef(repo, "feature")
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(repo, "g.txt"), "y")
+	gitRun(t, repo, "add", "-A")
+	gitRun(t, repo, "commit", "-q", "-m", "c2")
+	c2, err := git.ResolveRef(repo, "feature")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	m := NewManager(repo)
+	stored := func() branchTotal {
+		bt, _ := readBranchTotal(m.branchTotalDir("t", "feature"))
+		return bt
+	}
+	rec := func(runSHA string, total int) {
+		m.recordBranchTotal("t", Version{Ref: "feature", Branch: "feature"}, Report{Runner: "t", Status: StatusPassing, Total: total, Format: "junit"}, runSHA)
+	}
+
+	// Record for the current tip C2.
+	rec(c2, 50)
+	if bt := stored(); bt.Total != 50 || bt.Ref != c2 {
+		t.Fatalf("stored = %+v, want total 50 at C2", bt)
+	}
+
+	// Reset the branch back to the older C1 and record it (a later run of an
+	// earlier commit). C1 is an ancestor of C2, so C2's total is kept.
+	gitRun(t, repo, "reset", "-q", "--hard", c1)
+	rec(c1, 999)
+	if bt := stored(); bt.Total != 50 || bt.Ref != c2 {
+		t.Errorf("older commit clobbered newer total: %+v, want 50 at C2 kept", bt)
+	}
+
+	// A genuinely newer commit (C3, descends from C2) does update the total.
+	gitRun(t, repo, "reset", "-q", "--hard", c2)
+	writeFile(t, filepath.Join(repo, "h.txt"), "z")
+	gitRun(t, repo, "add", "-A")
+	gitRun(t, repo, "commit", "-q", "-m", "c3")
+	c3, err := git.ResolveRef(repo, "feature")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec(c3, 77)
+	if bt := stored(); bt.Total != 77 || bt.Ref != c3 {
+		t.Errorf("newer commit did not update total: %+v, want 77 at C3", bt)
+	}
+}
+
 // A type=stdout runner that emits no markers falls back to the exit-code
 // verdict, exactly like a junit runner that wrote no report.
 func TestGenerateStreamingNoMarkersFallsBack(t *testing.T) {

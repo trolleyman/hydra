@@ -547,15 +547,17 @@ func (m *Manager) seedEstimatedTotal(dir string, total int) {
 }
 
 // fallbackTotal estimates a streaming denominator for a run that declares no
-// ::hydra:test:total:: by reusing a prior run's case count. It consults refs in
-// priority order - typically the head's own branch, then its base branch:
+// ::hydra:test:total:: by reusing a prior run's case count. It walks the refs in
+// priority order - typically the head's own branch, then its base branch - and
+// for each ref tries, most-accurate first:
 //
-//  1. The per-branch total (recordBranchTotal): the last case count run against
-//     that branch, keyed by branch name. This is the one that hits in practice -
-//     a commit is usually tested only once, but every run of a branch refreshes
-//     its per-branch total, so the head's own branch almost always has one.
-//  2. Failing that, a cached commit report for the ref's current tip (a prior
-//     run of that exact commit).
+//  1. A cached commit report for the ref's current tip (a prior run of that
+//     EXACT commit): strictly the right count when it exists, though it usually
+//     won't - a commit is normally tested only once.
+//  2. The per-branch total (recordBranchTotal): the last case count run against
+//     that branch, keyed by branch name. Refreshed on every run of the branch,
+//     so the head's own branch almost always has one - it just may be from a
+//     slightly older commit, hence second to an exact commit match.
 //
 // As a last resort it uses the most-recently-updated cached report for the
 // runner (Latest), mirroring the stale-verdict fallback. 0 = nothing usable.
@@ -564,20 +566,13 @@ func (m *Manager) fallbackTotal(runner string, refs []string) int {
 		if ref == "" {
 			continue
 		}
+		if sha, err := git.ResolveRef(m.projectRoot, ref); err == nil {
+			if rep, ok := readReport(m.entryDir(runner, keyKindCommit+"/"+sha)); ok && rep.Total > 0 {
+				return rep.Total
+			}
+		}
 		if bt, ok := readBranchTotal(m.branchTotalDir(runner, ref)); ok && bt.Total > 0 {
 			return bt.Total
-		}
-	}
-	for _, ref := range refs {
-		if ref == "" {
-			continue
-		}
-		sha, err := git.ResolveRef(m.projectRoot, ref)
-		if err != nil {
-			continue
-		}
-		if rep, ok := readReport(m.entryDir(runner, keyKindCommit+"/"+sha)); ok && rep.Total > 0 {
-			return rep.Total
 		}
 	}
 	if rep, ok := m.Latest(runner); ok && rep.Total > 0 {
@@ -588,12 +583,18 @@ func (m *Manager) fallbackTotal(runner string, refs []string) int {
 
 // recordBranchTotal saves a settled run's case count under its branch (v.Branch)
 // so the next run of that branch can estimate its denominator (see
-// fallbackTotal) even at a brand-new commit. Accuracy guard: a *commit* run is
-// only attributed to the branch when it IS the branch's current tip - an
-// explicitly-selected old commit must not overwrite the moving branch's total;
-// a *worktree* run is the branch's own working checkout, so it always counts.
-// Degenerate verdicts (the exit-code fallback, errored runs, empty reports) are
-// never recorded - only a real parsed report with cases.
+// fallbackTotal) even at a brand-new commit. Guards:
+//
+//   - A *commit* run is only attributed to the branch when it IS the branch's
+//     current tip - an explicitly-selected old commit must not overwrite the
+//     moving branch's total; a *worktree* run is the branch's own working
+//     checkout, so it always counts.
+//   - Recency wins over wall-clock: the stored total is kept when its commit is
+//     closer to the branch head (a descendant of this run's commit). So an older
+//     commit whose run happens to settle later can't clobber a newer commit's
+//     total - closer-to-head is always the better estimate.
+//   - Degenerate verdicts (the exit-code fallback, errored runs, empty reports)
+//     are never recorded - only a real parsed report with cases.
 func (m *Manager) recordBranchTotal(runner string, v Version, rep Report, runSHA string) {
 	if v.Branch == "" || rep.Total <= 0 {
 		return
@@ -611,7 +612,16 @@ func (m *Manager) recordBranchTotal(runner string, v Version, rep Report, runSHA
 	if v.WorktreeDir == "" && runSHA != tip {
 		return // an old/explicit commit - don't attribute it to the branch tip
 	}
-	_ = writeBranchTotal(m.branchTotalDir(runner, v.Branch), branchTotal{Total: rep.Total, Ref: tip, UpdatedAt: time.Now().Unix()})
+	dir := m.branchTotalDir(runner, v.Branch)
+	// Keep a stored total whose commit is closer to head (descends from this
+	// run's tip). Unrelated lineages (e.g. after a rebase) fall through and the
+	// current tip wins, since it's the branch's live state.
+	if prev, ok := readBranchTotal(dir); ok && prev.Ref != "" && prev.Ref != tip {
+		if newer, aerr := git.IsAncestor(m.projectRoot, tip, prev.Ref); aerr == nil && newer {
+			return
+		}
+	}
+	_ = writeBranchTotal(dir, branchTotal{Total: rep.Total, Ref: tip, UpdatedAt: time.Now().Unix()})
 }
 
 // declaredTotal is the ::hydra:test:total:: denominator, floored at the cases
@@ -731,6 +741,18 @@ func (m *Manager) generate(parent context.Context, spec config.TestScript, v Ver
 	}
 	defer launch.Cleanup()
 
+	// A streaming run that never declares ::hydra:test:total:: still gets a
+	// determinate progress bar: seed the denominator from a prior run's total
+	// (this branch, else the base branch, else the latest anywhere). A real
+	// marker later supersedes it (setTestTotal clears the estimate). Computed
+	// BEFORE the command starts so its git/cache lookups never sit between
+	// cmd.Start and the stdout scanner (delaying reads risks a full pipe buffer).
+	if spec.IsStreaming() {
+		if est := m.fallbackTotal(spec.Name, v.TotalHintRefs); est > 0 {
+			m.seedEstimatedTotal(dir, est)
+		}
+	}
+
 	cmd := exec.CommandContext(ctx, launch.Path, launch.Args[1:]...)
 	cmd.Dir = launch.Dir
 	cmd.Env = launch.Env
@@ -752,15 +774,6 @@ func (m *Manager) generate(parent context.Context, spec config.TestScript, v Ver
 	var stderrBuf bytes.Buffer
 	var stderrMu sync.Mutex
 	lc := newLocContext(runDir)
-	// A streaming run that never declares ::hydra:test:total:: still gets a
-	// determinate progress bar: seed the denominator from a prior run's total
-	// (this branch, else the base branch, else the latest anywhere). A real
-	// marker later supersedes it (setTestTotal clears the estimate).
-	if spec.IsStreaming() {
-		if est := m.fallbackTotal(spec.Name, v.TotalHintRefs); est > 0 {
-			m.seedEstimatedTotal(dir, est)
-		}
-	}
 	scan := func(r io.Reader, stream string) {
 		sc := bufio.NewScanner(r)
 		sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
@@ -802,8 +815,11 @@ func (m *Manager) generate(parent context.Context, spec config.TestScript, v Ver
 	var scanWG sync.WaitGroup
 	scanWG.Go(func() { scan(stdout, StreamStdout) })
 	scanWG.Go(func() { scan(stderrPipe, StreamStderr) })
-	runErr := cmd.Wait()
+	// Drain both pipes to EOF BEFORE Wait: cmd.Wait closes the StdoutPipe/StderrPipe
+	// once the process exits, so calling it before reads finish can truncate the
+	// output (and drop trailing ::hydra:test:*:: markers). See the StdoutPipe docs.
 	scanWG.Wait()
+	runErr := cmd.Wait()
 	durationMs := time.Since(start).Milliseconds()
 
 	// A timeout means we have no trustworthy verdict.
