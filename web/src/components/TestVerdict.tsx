@@ -76,13 +76,14 @@ function liveCaseCount(t: TestSummary): number {
   return (t.passed ?? 0) + (t.failed ?? 0) + (t.warnings ?? 0) + (t.skipped ?? 0)
 }
 
-// liveTotal is an in-flight run's denominator, but only when it says something
-// the ticking tallies don't: for a run with no declared ::hydra:test:total::
-// the backend floors the total at the cases seen so far, and rendering that
-// ("82/82") would misread as almost-done. 0 = don't show one.
+// liveTotal is an in-flight run's declared ::hydra:test:total:: denominator. The
+// backend reports 0 when none was declared (never floored to the cases seen), so
+// any positive total is a real denominator and we keep showing it even once the
+// tallies catch up — "✓789/789" rather than dropping the denominator at the
+// finish line. 0 = don't show one.
 function liveTotal(t: TestSummary): number {
   const total = t.total ?? 0
-  return total > liveCaseCount(t) ? total : 0
+  return total > 0 ? total : 0
 }
 
 // LiveCounts renders the ticking per-status segments of an in-flight streamed

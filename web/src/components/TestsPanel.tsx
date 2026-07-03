@@ -569,14 +569,16 @@ function completedCases(runner: TestRunResult): number {
   return (runner.passed ?? 0) + (runner.failed ?? 0) + (runner.warnings ?? 0) + (runner.skipped ?? 0)
 }
 
-// liveDenominator is an in-flight runner's declared ::hydra:test:total::, but
-// only when it exceeds the cases seen so far — with no declared total the
-// backend floors `total` at the case count, and "82/82" would misread as
-// almost-done. 0 = don't show one. Settled runs always have total == the case
-// sum, so this is inherently running-only.
+// liveDenominator is an in-flight runner's declared ::hydra:test:total::
+// denominator. The backend reports 0 (on every path — stream and poll) when no
+// total was declared, so a positive total is always a real, meaningful
+// denominator: we keep it even once the completed cases catch up to it, so the
+// determinate bar holds at 100% instead of snapping back to the indeterminate
+// pulse for "the final bit" of the run. 0 = don't show one. Settled runs always
+// have total == the case sum, so this is inherently running-only.
 function liveDenominator(runner: TestRunResult): number {
   const total = runner.total ?? 0
-  return total > completedCases(runner) ? total : 0
+  return total > 0 ? total : 0
 }
 
 function Summary({ runner }: { runner: TestRunResult }) {
