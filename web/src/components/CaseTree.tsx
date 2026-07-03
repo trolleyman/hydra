@@ -194,12 +194,20 @@ const GUIDE_X = 13
 // chevron through its children, so every row shows which parent it belongs
 // to. Rendered inside a `relative` wrapper around the children block; `depth`
 // is the expanded PARENT's depth (the line lands under its chevron).
-export function TreeGuide({ depth }: { depth: number }) {
+//
+// `leaf` shifts the guide right by one chevron slot when the children are case
+// rows rather than sub-nodes. A case row has no chevron, so its glyph sits a
+// CHEVRON_SLOT further right than a sub-node's chevron would (it aligns with
+// sibling node ICONS — see CaseRow). Without the shift the guide would hug the
+// column where a chevron would be, leaving a whole slot of empty space between
+// the line and the case glyphs — it read as a detached, gappy line. Shifting it
+// keeps the same tight gap the guide has beside sub-node rows.
+export function TreeGuide({ depth, leaf = false }: { depth: number; leaf?: boolean }) {
   return (
     <span
       aria-hidden
       className="pointer-events-none absolute top-0 bottom-0 w-px bg-gray-200/80 dark:bg-gray-700/50"
-      style={{ left: depth * INDENT_STEP + GUIDE_X }}
+      style={{ left: depth * INDENT_STEP + GUIDE_X + (leaf ? CHEVRON_SLOT : 0) }}
     />
   )
 }
@@ -418,6 +426,10 @@ function NodeView({ node, depth, collapsed, onToggle, useScope, onOpenInRepo }: 
   const isCollapsed = collapsed.has(node.key)
   const isDir = nodeIsDir(node)
   const copyPath = node.pathParts.join('/')
+  // When nothing under this node renders as a sub-node row, its children are all
+  // case rows (leaf glyphs) — the guide hugs their column, one chevron slot
+  // right of where a sub-node chevron would sit (see TreeGuide `leaf`).
+  const leafChildren = ![...node.children.values()].some((c) => c.visTotal > 0)
   return (
     <div>
       <button
@@ -438,7 +450,7 @@ function NodeView({ node, depth, collapsed, onToggle, useScope, onOpenInRepo }: 
       <div className={`grid transition-[grid-template-rows] duration-200 ease-in-out ${isCollapsed ? 'grid-rows-[0fr]' : 'grid-rows-[1fr]'}`}>
         <div className="overflow-hidden min-h-0">
           <div className="relative">
-            <TreeGuide depth={depth} />
+            <TreeGuide depth={depth} leaf={leafChildren} />
             <NodeChildren node={node} depth={depth + 1} collapsed={collapsed} onToggle={onToggle} useScope={useScope} onOpenInRepo={onOpenInRepo} />
           </div>
         </div>
