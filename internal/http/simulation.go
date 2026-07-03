@@ -568,6 +568,12 @@ func simTestRunners(id string) []api.TestRunResult {
 			{Name: "react-hooks/exhaustive-deps", Status: api.TestCaseWarning, Path: ptr("web/src/components/Badge.tsx"), Line: ptr(31), Col: ptr(6), Message: ptr("React Hook useMemo has a missing dependency  react-hooks/exhaustive-deps")},
 			{Name: "commits all files", Status: api.TestCasePassed, Path: ptr("internal/git/commit_test.go"), Scope: ptr([]string{"TestListUncommittedFilesAndCommitAll"}), ScopeKinds: ptr([]string{"function"}), Line: ptr(42), DurationMs: ptr(int64(6))},
 			{Name: "host allowed", Status: api.TestCasePassed, Path: ptr("internal/sandbox/net_test.go"), Scope: ptr([]string{"TestHostAllowed"}), ScopeKinds: ptr([]string{"function"}), Line: ptr(88), DurationMs: ptr(int64(2))},
+			// A JUnit runner reports dotted classnames (org.trolleyman.pocoapoco.db.CodesTest):
+			// the lowercase package segments classify as "module" ({} braces) and the
+			// PascalCase class segment as "class" (a box glyph), so the class stands out.
+			{Name: "termKindMatchesMappings", Status: api.TestCasePassed, Scope: ptr([]string{"org", "trolleyman", "pocoapoco", "db", "CodesTest"}), ScopeKinds: ptr([]string{"module", "module", "module", "module", "class"}), DurationMs: ptr(int64(3))},
+			{Name: "relationTypeMatchesMappings", Status: api.TestCasePassed, Scope: ptr([]string{"org", "trolleyman", "pocoapoco", "db", "CodesTest"}), ScopeKinds: ptr([]string{"module", "module", "module", "module", "class"}), DurationMs: ptr(int64(2))},
+			{Name: "pastSubjunctiveRaAndSeMerge", Status: api.TestCasePassed, Scope: ptr([]string{"org", "trolleyman", "pocoapoco", "practice", "ConjugationDeckTest"}), ScopeKinds: ptr([]string{"module", "module", "module", "module", "class"}), DurationMs: ptr(int64(4))},
 			{Name: "resumes on boot", Status: api.TestCaseSkipped, Path: ptr("heads/heads.test.ts"), Message: ptr("it.skip")},
 		},
 	}

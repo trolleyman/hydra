@@ -272,6 +272,11 @@ func TestParseJUnitDottedClassname(t *testing.T) {
 	if c.Path != "" || !equalStrs(c.Scope, []string{"com", "example", "auth", "FooTest", "Nested"}) || c.Name != "rotatesKey" {
 		t.Errorf("case = %+v, want scope [com example auth FooTest Nested]", c)
 	}
+	// Lowercase package segments are module-kind; the PascalCase class and its
+	// nested class classify as "class" so the UI can mark them with a class glyph.
+	if !equalStrs(c.ScopeKinds, []string{"module", "module", "module", "class", "class"}) {
+		t.Errorf("dotted-class scope kinds = %v, want [module module module class class]", c.ScopeKinds)
+	}
 }
 
 // vitest: file classname + " > "-joined describe chain in the name → the

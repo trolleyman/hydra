@@ -1,5 +1,5 @@
 import { Fragment, useMemo, useState, type ReactNode } from 'react'
-import { AlertTriangle, Braces, Check, ChevronRight, Copy, Folder, FolderOpen, SkipForward, SquareArrowOutUpRight, SquareFunction, X } from 'lucide-react'
+import { AlertTriangle, Box, Braces, Check, ChevronRight, Copy, Folder, FolderOpen, SkipForward, SquareArrowOutUpRight, SquareFunction, X } from 'lucide-react'
 import type { TestCase } from '../api/models/TestCase'
 import { caseKey, caseLocation, splitPath } from '../lib/testCases'
 import { getFileIcon } from '../lib/fileIcons'
@@ -26,11 +26,12 @@ import { getFileIcon } from '../lib/fileIcons'
 // rows.
 
 type SegKind = 'path' | 'scope'
-// A scope level is either a container (a describe block / class / suite) or a
-// Go test function that owns subtests — the backend tags this per level
+// A scope level is a container (describe block / package / suite), a class/type
+// in a dotted class chain (a JUnit/Java class, a pytest TestClass), or a Go test
+// function that owns subtests — the backend tags this per level
 // (TestCase.scope_kinds), since the strings alone can't tell TestClass (a
 // pytest class) from TestFoo (a Go func).
-type ScopeKind = 'module' | 'function'
+type ScopeKind = 'module' | 'function' | 'class'
 type Seg = { label: string; kind: SegKind; scopeKind?: ScopeKind }
 
 // OpenInRepo deep-links a row to the repository browser (the file/dir — and, for
@@ -39,7 +40,9 @@ type Seg = { label: string; kind: SegKind; scopeKind?: ScopeKind }
 export type OpenInRepo = (path: string, line?: number | null) => void
 
 function normScopeKind(k: string | null | undefined): ScopeKind {
-  return k === 'function' ? 'function' : 'module'
+  if (k === 'function') return 'function'
+  if (k === 'class') return 'class'
+  return 'module'
 }
 
 function caseSegs(c: TestCase, useScope: boolean): Seg[] {
@@ -258,12 +261,19 @@ function FileGlyph({ name }: { name: string }) {
 }
 
 // ScopeGlyph draws a scope level: a function glyph (ƒ, violet) for a Go test
-// function that owns subtests, or a braces glyph ({ }, teal) for a container —
-// a describe block, class or suite (the default when the kind is unknown).
+// function that owns subtests, a box glyph (indigo) for a class/type in a
+// dotted class chain (a JUnit/Java class, a pytest TestClass), or a braces glyph
+// ({ }, teal) for a container — a describe block, package or suite (the default
+// when the kind is unknown).
 function ScopeGlyph({ scopeKind }: { scopeKind?: ScopeKind }) {
-  return scopeKind === 'function'
-    ? <SquareFunction className="w-3.5 h-3.5 text-violet-500 dark:text-violet-400 shrink-0" />
-    : <Braces className="w-3.5 h-3.5 text-teal-500 dark:text-teal-400 shrink-0" />
+  switch (scopeKind) {
+    case 'function':
+      return <SquareFunction className="w-3.5 h-3.5 text-violet-500 dark:text-violet-400 shrink-0" />
+    case 'class':
+      return <Box className="w-3.5 h-3.5 text-indigo-500 dark:text-indigo-400 shrink-0" />
+    default:
+      return <Braces className="w-3.5 h-3.5 text-teal-500 dark:text-teal-400 shrink-0" />
+  }
 }
 
 // RowSegments renders a location chain as a sequence of icon+label pieces

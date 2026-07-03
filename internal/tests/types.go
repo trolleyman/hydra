@@ -44,12 +44,18 @@ type ScopeKind string
 
 const (
 	// ScopeModule is a container level: a vitest/jest describe block, a
-	// pytest/JUnit class, a test suite. The common case.
+	// package/namespace segment of a dotted class chain, a test suite. The
+	// common case.
 	ScopeModule ScopeKind = "module"
 	// ScopeFunction is a Go test function that owns subtests (its parent level,
 	// resolved to a `func TestXxx` declaration). What a parametrized/subtest
 	// grouping hangs off.
 	ScopeFunction ScopeKind = "function"
+	// ScopeClass is a class/type level in a dotted class chain — the JUnit/Java
+	// `com.example.FooTest`, a pytest `TestClass`, a Kotlin object. Detected by
+	// its class-shaped identifier (PascalCase, no spaces) so a package segment
+	// (lowercase `org.trolleyman`) stays a ScopeModule.
+	ScopeClass ScopeKind = "class"
 )
 
 // TestCase is one parsed test case. Message carries the failure/assertion text

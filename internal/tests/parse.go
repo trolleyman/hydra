@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"braces.dev/errtrace"
 )
@@ -253,7 +254,7 @@ func junitCaseToTestCase(c junitCase, ctx suiteCtx, lc *locContext) TestCase {
 	// scope level is a test *function* (the split "TestFoo/sub" parents); every
 	// other shape — a describe chain, a class chain — is a *module*. The two
 	// origins never mix within one case, so the whole chain shares one kind.
-	tc.ScopeKinds = scopeKindsFor(len(tc.Scope), loc.goPkg)
+	tc.ScopeKinds = scopeKindsFor(tc.Scope, loc.goPkg)
 
 	switch {
 	case len(c.Failures) > 0 || len(c.Errors) > 0:
@@ -313,24 +314,41 @@ func mapTrimSpace(in []string) []string {
 	return out
 }
 
-// scopeKindsFor builds the ScopeKinds slice for a case whose scope levels all
-// share one origin: ScopeFunction when the classname was a Go package (the
-// levels are `TestFoo/sub` function parents), ScopeModule otherwise (a describe
-// chain / class chain). Returns nil for an empty scope so the field stays
-// omitted.
-func scopeKindsFor(n int, goPkg bool) []string {
-	if n == 0 {
+// scopeKindsFor builds the ScopeKinds slice parallel to `scope`. A Go package
+// classname (goPkg) means every level is a test *function* parent
+// (`TestFoo/sub`). Otherwise each level is classified on its own: a
+// class-shaped segment (PascalCase, no spaces — a JUnit/Java class, a pytest
+// TestClass) is a ScopeClass, and everything else (a lowercase package segment,
+// a describe block phrased as a sentence) stays a ScopeModule. Returns nil for
+// an empty scope so the field stays omitted.
+func scopeKindsFor(scope []string, goPkg bool) []string {
+	if len(scope) == 0 {
 		return nil
 	}
-	kind := string(ScopeModule)
-	if goPkg {
-		kind = string(ScopeFunction)
-	}
-	out := make([]string, n)
-	for i := range out {
-		out[i] = kind
+	out := make([]string, len(scope))
+	for i, seg := range scope {
+		switch {
+		case goPkg:
+			out[i] = string(ScopeFunction)
+		case looksLikeClass(seg):
+			out[i] = string(ScopeClass)
+		default:
+			out[i] = string(ScopeModule)
+		}
 	}
 	return out
+}
+
+// looksLikeClass reports whether a scope segment reads like a class/type name
+// rather than a package segment or a describe phrase: a single identifier that
+// starts with an uppercase letter (CodesTest, ConjugationDeckTest). A lowercase
+// package (`org`, `trolleyman`) or a spaced describe block ("key rotation") is
+// not a class.
+func looksLikeClass(seg string) bool {
+	if seg == "" || strings.ContainsAny(seg, " \t") {
+		return false
+	}
+	return unicode.IsUpper([]rune(seg)[0])
 }
 
 func truncate(s string, n int) string {

@@ -18,7 +18,7 @@ export type TestCase = {
      */
     scope?: Array<string> | null;
     /**
-     * Per-level kind for `scope`, parallel to it — "module" (a describe block / class / suite) or "function" (a Go test function that owns subtests). A missing or short array means the level's kind is unknown; consumers treat that as "module".
+     * Per-level kind for `scope`, parallel to it — "module" (a describe block / package / suite), "class" (a JUnit/Java class or pytest TestClass in a dotted class chain), or "function" (a Go test function that owns subtests). A missing or short array means the level's kind is unknown; consumers treat that as "module".
      */
     scope_kinds?: Array<string> | null;
     /**
