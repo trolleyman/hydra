@@ -1,6 +1,7 @@
 package config
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/trolleyman/hydra/internal/sandbox"
@@ -242,5 +243,44 @@ func TestFilterEnabledRoundTrips(t *testing.T) {
 	nw := loaded.Defaults.Sandbox.Network
 	if nw == nil || nw.FilterEnabled == nil || !*nw.FilterEnabled {
 		t.Fatalf("filter_enabled not round-tripped: %+v", nw)
+	}
+}
+
+// TestNetworkInfoInPrePrompt checks that BuildFinalPrePrompt resolves the
+// <network-info> placeholder into a bullet describing the agent's egress posture,
+// tailored to the resolved mode (and never leaving the raw placeholder behind).
+func TestNetworkInfoInPrePrompt(t *testing.T) {
+	cases := []struct {
+		name       string
+		mode       *string
+		wantSubstr string
+	}{
+		{"default-hard", nil, "hard mode"},
+		{"off", strp("off"), "Network access is OFF"},
+		{"unrestricted", strp("unrestricted"), "unrestricted"},
+		{"advisory", strp("advisory"), "advisory mode"},
+		{"on-synonym", strp("on"), "hard mode"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := Config{}
+			if tc.mode != nil {
+				cfg = Config{Defaults: AgentConfig{Sandbox: &SandboxConfig{
+					Network: &NetworkConfig{Mode: tc.mode},
+				}}}
+			}
+			got := BuildFinalPrePrompt(cfg, "claude")
+			if strings.Contains(got, "<network-info>") {
+				t.Fatalf("placeholder not substituted:\n%s", got)
+			}
+			if !strings.Contains(got, tc.wantSubstr) {
+				t.Fatalf("want substring %q in pre-prompt, got:\n%s", tc.wantSubstr, got)
+			}
+			// The approval flow is only mentioned for the filtered modes.
+			filtered := tc.wantSubstr == "hard mode" || tc.wantSubstr == "advisory mode"
+			if mentionsApproval := strings.Contains(got, "approve or deny"); mentionsApproval != filtered {
+				t.Fatalf("approval mention = %v, want %v (mode %v)", mentionsApproval, filtered, tc.mode)
+			}
+		})
 	}
 }

@@ -19,13 +19,15 @@ import (
 
 // DefaultPrePrompt is the built-in pre-prompt delivered to every agent as a
 // system prompt (not as part of the user's task prompt). The placeholders
-// <branch> and <base-branch> are substituted at spawn time.
+// <branch> and <base-branch> are substituted at spawn time; <network-info> is
+// substituted by BuildFinalPrePrompt with the agent's resolved egress posture.
 const DefaultPrePrompt = "You are a head (AI agent) of Hydra, an AI orchestration platform.\n" +
 	"\n" +
 	"## Environment\n" +
 	"- You are running inside a locked-down OS sandbox on a dedicated git worktree, as the host user.\n" +
 	"- You MUST work in this worktree, not the main repository.\n" +
 	"- You have read access to the host, write access to your worktree and the developer caches; credential locations are masked.\n" +
+	"<network-info>" +
 	"- The current branch is `<branch>` and it targets `<base-branch>`.\n" +
 	"\n" +
 	"## Sandbox rules\n" +
@@ -574,7 +576,8 @@ func LoadInternalDefaults() Config {
 // 2. The configured defaults pre-prompt (if set)
 // 3. The agent-specific pre-prompt (if set)
 // The result ends with "\n\nTask:\n" to separate the pre-prompt from the user task.
-// Note: <branch> and <base-branch> placeholders are substituted by the caller.
+// The <network-info> placeholder is resolved here (it needs cfg + agentType); the
+// <branch> and <base-branch> placeholders are substituted later by the caller.
 func BuildFinalPrePrompt(cfg Config, agentType string) string {
 	parts := []string{DefaultPrePrompt}
 	if cfg.Defaults.PrePrompt != nil && *cfg.Defaults.PrePrompt != "" {
@@ -583,7 +586,48 @@ func BuildFinalPrePrompt(cfg Config, agentType string) string {
 	if agentCfg, ok := cfg.Agents[agentType]; ok && agentCfg.PrePrompt != nil && *agentCfg.PrePrompt != "" {
 		parts = append(parts, *agentCfg.PrePrompt)
 	}
-	return strings.Join(parts, "\n") + "\n\nTask:\n"
+	final := strings.Join(parts, "\n") + "\n\nTask:\n"
+	return strings.ReplaceAll(final, "<network-info>", networkInfoLine(cfg, agentType))
+}
+
+// networkInfoLine renders the agent's resolved egress posture as a pre-prompt
+// bullet, so the head knows up-front whether it has network and what happens when
+// it reaches a non-allow-listed host. Substituted into the <network-info>
+// placeholder. Mirrors resolveNetworkPolicy's resolution (explicit mode, else
+// legacy booleans, else the hard default). Note: like <branch>, this is baked in
+// at spawn and stored on the head, so it reflects the mode at spawn time — a later
+// config change to network.mode is not re-resolved on resume.
+func networkInfoLine(cfg Config, agentType string) string {
+	var nc *NetworkConfig
+	if sb := cfg.GetResolvedConfig(agentType).Sandbox; sb != nil {
+		nc = sb.Network
+	}
+	net := resolveNetworkPolicy(nc)
+
+	// Shared explanation of the allow-list approval flow for the filtered modes.
+	const approval = " The `WebFetch` tool pauses on a non-allow-listed host for " +
+		"the user to approve or deny it (an approved host is remembered); other tools " +
+		"(e.g. `curl`) simply fail on a blocked host, so if you need one, ask the user " +
+		"to add it to `network.allowed_hosts`."
+
+	switch net.Mode {
+	case sandbox.NetOff:
+		return "- Network access is OFF: all outbound connections are blocked. If the " +
+			"task needs the network, STOP and ask the user to change `network.mode`.\n"
+	case sandbox.NetUnrestricted:
+		return "- Network access is unrestricted: every host is reachable and no host " +
+			"filtering is applied.\n"
+	case sandbox.NetAdvisory:
+		return "- Network egress is filtered (advisory mode — a per-head HTTP(S) proxy " +
+			"allow-list, best-effort rather than an inescapable boundary): only hosts on " +
+			"the allow-list (a built-in default set plus the project's " +
+			"`network.allowed_hosts`) are reachable; everything else is blocked." + approval + "\n"
+	default: // NetHard
+		return "- Network egress is filtered (hard mode — an inescapable allow-list " +
+			"boundary): only hosts on the allow-list (a built-in default set plus the " +
+			"project's `network.allowed_hosts`) are reachable; everything else is " +
+			"blocked." + approval + "\n"
+	}
 }
 
 // decodeConfig parses config.toml content, accepting BOTH the legacy nested
