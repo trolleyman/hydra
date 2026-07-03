@@ -605,10 +605,15 @@ func networkInfoLine(cfg Config, agentType string) string {
 	net := resolveNetworkPolicy(nc)
 
 	// Shared explanation of the allow-list approval flow for the filtered modes.
-	const approval = " The `WebFetch` tool pauses on a non-allow-listed host for " +
-		"the user to approve or deny it (an approved host is remembered); other tools " +
-		"(e.g. `curl`) simply fail on a blocked host, so if you need one, ask the user " +
-		"to add it to `network.allowed_hosts`."
+	const approval = " When you reach a host on neither the allow-list nor the " +
+		"block-list, the connection is HELD while the user is prompted to approve or " +
+		"deny it — this covers ALL egress (`curl`, `git`, the `WebFetch` tool, …), not " +
+		"just one tool. Approve and the host is allowed for the rest of the session " +
+		"(\"always allow\" also persists it to `network.allowed_hosts`); deny — or wait " +
+		"out the ~5-minute timeout with no answer — and the connection is refused. A " +
+		"block-listed host is refused outright with no prompt. So a first request to a " +
+		"new host will PAUSE rather than fail instantly; wait for the decision instead " +
+		"of retrying, and if it's denied, ask the user rather than working around it."
 
 	switch net.Mode {
 	case sandbox.NetOff:
