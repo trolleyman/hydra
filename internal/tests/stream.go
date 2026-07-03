@@ -136,6 +136,9 @@ func parseTestMarker(line string, lc *locContext) (testMarker, bool) {
 		loc := lc.classify(locTok)
 		tc.Path = loc.Path
 		tc.Scope = append(loc.Scope, segs[1:len(segs)-1]...)
+		// A Go-package location means the scope levels are function parents; any
+		// other shape is a describe/class module chain (see scopeKindsFor).
+		tc.ScopeKinds = scopeKindsFor(len(tc.Scope), loc.goPkg)
 		if tc.Path == "" {
 			tc.Line, tc.Col = 0, 0 // line/col are meaningless without a file
 		}

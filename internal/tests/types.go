@@ -36,6 +36,22 @@ const (
 	CaseWarning CaseStatus = "warning"
 )
 
+// ScopeKind classifies one Scope level (parallel to a case's Scope entries).
+// The distinction is only knowable while parsing — a describe block, a class
+// and a Go test function are indistinguishable strings once collapsed — so the
+// parsers tag it here rather than leaving consumers to guess.
+type ScopeKind string
+
+const (
+	// ScopeModule is a container level: a vitest/jest describe block, a
+	// pytest/JUnit class, a test suite. The common case.
+	ScopeModule ScopeKind = "module"
+	// ScopeFunction is a Go test function that owns subtests (its parent level,
+	// resolved to a `func TestXxx` declaration). What a parametrized/subtest
+	// grouping hangs off.
+	ScopeFunction ScopeKind = "function"
+)
+
 // TestCase is one parsed test case. Message carries the failure/assertion text
 // for a failed case (and the skip reason for a skipped one, when present).
 //
@@ -49,16 +65,20 @@ const (
 // Old cached reports carry a pre-joined Name and no Path/Scope; consumers fall
 // back to the flat Name.
 type TestCase struct {
-	Name       string     `json:"name"`
-	Status     CaseStatus `json:"status"`
-	Path       string     `json:"path,omitempty"`
-	Scope      []string   `json:"scope,omitempty"`
-	Line       int        `json:"line,omitempty"` // 1-based; 0 = unknown
-	Col        int        `json:"col,omitempty"`
-	EndLine    int        `json:"end_line,omitempty"`
-	EndCol     int        `json:"end_col,omitempty"`
-	DurationMs int64      `json:"duration_ms"`
-	Message    string     `json:"message,omitempty"`
+	Name   string     `json:"name"`
+	Status CaseStatus `json:"status"`
+	Path   string     `json:"path,omitempty"`
+	Scope  []string   `json:"scope,omitempty"`
+	// ScopeKinds is parallel to Scope: the ScopeKind of each level ("module" |
+	// "function"). Empty or shorter than Scope for old reports / runners that
+	// don't tag it — consumers treat a missing level as ScopeModule.
+	ScopeKinds []string `json:"scope_kinds,omitempty"`
+	Line       int      `json:"line,omitempty"` // 1-based; 0 = unknown
+	Col        int      `json:"col,omitempty"`
+	EndLine    int      `json:"end_line,omitempty"`
+	EndCol     int      `json:"end_col,omitempty"`
+	DurationMs int64    `json:"duration_ms"`
+	Message    string   `json:"message,omitempty"`
 }
 
 // LogLine is one captured output line of an in-flight generation.

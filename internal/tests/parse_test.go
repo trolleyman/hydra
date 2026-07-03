@@ -179,6 +179,13 @@ func TestParseJUnitGoPackage(t *testing.T) {
 		!equalStrs(cases[1].Scope, []string{"TestOverlay", "mounts"}) {
 		t.Errorf("subtest case = %+v, want scope [TestOverlay mounts] name readonly", cases[1])
 	}
+	// Go subtest parents are functions: every scope level tagged "function".
+	if !equalStrs(cases[1].ScopeKinds, []string{"function", "function"}) {
+		t.Errorf("subtest scope kinds = %v, want [function function]", cases[1].ScopeKinds)
+	}
+	if len(cases[0].ScopeKinds) != 0 {
+		t.Errorf("scopeless case kinds = %v, want none", cases[0].ScopeKinds)
+	}
 	if cases[2].Path != "" || cases[2].Name != "TestRoot" {
 		t.Errorf("root-package case = %+v, want empty path", cases[2])
 	}
@@ -280,6 +287,10 @@ func TestParseJUnitVitestDescribeChain(t *testing.T) {
 	c := cases[0]
 	if c.Path != "src/api/format_error.test.ts" || !equalStrs(c.Scope, []string{"formatError", "with cause"}) || c.Name != "includes chain" {
 		t.Errorf("case = %+v, want scope [formatError, with cause] name 'includes chain'", c)
+	}
+	// A vitest describe chain is module-kind at every level.
+	if !equalStrs(c.ScopeKinds, []string{"module", "module"}) {
+		t.Errorf("describe scope kinds = %v, want [module module]", c.ScopeKinds)
 	}
 }
 

@@ -225,6 +225,10 @@ func toAPITestCases(cases []hydratests.TestCase) []api.TestCase {
 			scope := append([]string(nil), c.Scope...)
 			ac.Scope = &scope
 		}
+		if len(c.ScopeKinds) > 0 {
+			kinds := append([]string(nil), c.ScopeKinds...)
+			ac.ScopeKinds = &kinds
+		}
 		if c.Line > 0 {
 			ac.Line = ptr(c.Line)
 		}

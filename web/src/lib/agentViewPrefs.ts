@@ -34,6 +34,13 @@ export type AgentViewPrefs = {
   // logical scope (class/describe chain) instead of filesystem path.
   testGroupResult?: boolean
   testUseScope?: boolean
+  // Tests-panel expansion state, so a card the user opened (and the tree nodes
+  // they collapsed inside it) restore on return to the agent page. Keyed by
+  // runner name: testCardCollapsed maps name → whether the whole card is
+  // collapsed (absent → the default-collapsed card); testTreeCollapsed maps
+  // name → the collapsed tree-node keys within that runner's case tree.
+  testCardCollapsed?: Record<string, boolean>
+  testTreeCollapsed?: Record<string, string[]>
 }
 
 const AGENT_VIEW_TTL_MS = 1000 * 60 * 60 * 24 * 30 // 30 days
@@ -55,6 +62,8 @@ export function loadAgentViewPrefs(projectId: string | null, agentId: string): A
     activeTabId: stored.activeTabId,
     testGroupResult: stored.testGroupResult,
     testUseScope: stored.testUseScope,
+    testCardCollapsed: stored.testCardCollapsed,
+    testTreeCollapsed: stored.testTreeCollapsed,
   }
 }
 

@@ -249,6 +249,12 @@ func junitCaseToTestCase(c junitCase, ctx suiteCtx, lc *locContext) TestCase {
 			tc.Name = strings.TrimSpace(segs[len(segs)-1])
 		}
 	}
+	// Tag each scope level's kind. A Go package classname (goPkg) means every
+	// scope level is a test *function* (the split "TestFoo/sub" parents); every
+	// other shape — a describe chain, a class chain — is a *module*. The two
+	// origins never mix within one case, so the whole chain shares one kind.
+	tc.ScopeKinds = scopeKindsFor(len(tc.Scope), loc.goPkg)
+
 	switch {
 	case len(c.Failures) > 0 || len(c.Errors) > 0:
 		details := append(append([]junitDetail{}, c.Failures...), c.Errors...)
@@ -303,6 +309,26 @@ func mapTrimSpace(in []string) []string {
 	out := make([]string, 0, len(in))
 	for _, s := range in {
 		out = append(out, strings.TrimSpace(s))
+	}
+	return out
+}
+
+// scopeKindsFor builds the ScopeKinds slice for a case whose scope levels all
+// share one origin: ScopeFunction when the classname was a Go package (the
+// levels are `TestFoo/sub` function parents), ScopeModule otherwise (a describe
+// chain / class chain). Returns nil for an empty scope so the field stays
+// omitted.
+func scopeKindsFor(n int, goPkg bool) []string {
+	if n == 0 {
+		return nil
+	}
+	kind := string(ScopeModule)
+	if goPkg {
+		kind = string(ScopeFunction)
+	}
+	out := make([]string, n)
+	for i := range out {
+		out[i] = kind
 	}
 	return out
 }

@@ -555,15 +555,19 @@ func (s *SimulationServer) GetAgentTests(w http.ResponseWriter, r *http.Request,
 func simTestRunners(id string) []api.TestRunResult {
 	passing := api.TestRunResult{
 		Name: "go", Status: api.TestStatusPassing,
-		Total: ptr(149), Passed: ptr(142), Failed: ptr(0), Warnings: ptr(4), Skipped: ptr(3),
+		Total: ptr(151), Passed: ptr(144), Failed: ptr(0), Warnings: ptr(4), Skipped: ptr(3),
 		DurationMs: ptr(int64(4200)), Format: ptr("junit"), Ref: ptr("a1b2c3d"),
 		// Non-failing warnings (e.g. eslint) surface amber alongside the green pass.
-		// Structured locations (path + line/col + scope) exercise the CaseTree.
+		// Structured locations (path + line/col + scope) exercise the CaseTree. The
+		// two Go cases carry a `func TestXxx` subtest parent → ScopeKinds "function"
+		// (a ƒ glyph), in contrast to the vitest describe blocks (module) below.
 		Cases: &[]api.TestCase{
 			{Name: "no-unused-vars", Status: api.TestCaseWarning, Path: ptr("web/src/DiffViewer.tsx"), Line: ptr(1742), Col: ptr(9), Message: ptr("'onionSkin' is assigned a value but never used  no-unused-vars")},
 			{Name: "no-console", Status: api.TestCaseWarning, Path: ptr("web/src/lib/theme.ts"), Line: ptr(58), Col: ptr(3), Message: ptr("Unexpected console statement  no-console")},
 			{Name: "golint", Status: api.TestCaseWarning, Path: ptr("internal/heads/heads.go"), Line: ptr(212), Message: ptr("exported func SpawnHead should have comment  golint")},
 			{Name: "react-hooks/exhaustive-deps", Status: api.TestCaseWarning, Path: ptr("web/src/components/Badge.tsx"), Line: ptr(31), Col: ptr(6), Message: ptr("React Hook useMemo has a missing dependency  react-hooks/exhaustive-deps")},
+			{Name: "commits all files", Status: api.TestCasePassed, Path: ptr("internal/git/commit_test.go"), Scope: ptr([]string{"TestListUncommittedFilesAndCommitAll"}), ScopeKinds: ptr([]string{"function"}), Line: ptr(42), DurationMs: ptr(int64(6))},
+			{Name: "host allowed", Status: api.TestCasePassed, Path: ptr("internal/sandbox/net_test.go"), Scope: ptr([]string{"TestHostAllowed"}), ScopeKinds: ptr([]string{"function"}), Line: ptr(88), DurationMs: ptr(int64(2))},
 			{Name: "resumes on boot", Status: api.TestCaseSkipped, Path: ptr("heads/heads.test.ts"), Message: ptr("it.skip")},
 		},
 	}
@@ -574,9 +578,10 @@ func simTestRunners(id string) []api.TestRunResult {
 			Total: ptr(147), Passed: ptr(142), Failed: ptr(2), Skipped: ptr(3),
 			DurationMs: ptr(int64(4200)), Format: ptr("junit"), Ref: ptr("a1b2c3d"),
 			Cases: &[]api.TestCase{
-				{Name: "rotates signing key on expiry", Status: api.TestCaseFailed, Path: ptr("auth/rotation.test.ts"), Scope: ptr([]string{"key rotation"}), Line: ptr(48), Col: ptr(24), DurationMs: ptr(int64(38)), Message: ptr("AssertionError: expected 'kid-2' to be 'kid-3'\n  at rotation.test.ts:48:24")},
-				{Name: "keeps old sessions valid in grace window", Status: api.TestCaseFailed, Path: ptr("auth/rotation.test.ts"), Scope: ptr([]string{"key rotation"}), Line: ptr(63), Col: ptr(11), DurationMs: ptr(int64(12)), Message: ptr("TypeError: currentKid is not a function\n  at token-service.ts:21:14")},
-				{Name: "blends frames", Status: api.TestCasePassed, Path: ptr("diff/onion.test.ts"), Scope: ptr([]string{"onion skin"}), DurationMs: ptr(int64(5))},
+				// Scope levels are vitest describe blocks → ScopeKinds "module".
+				{Name: "rotates signing key on expiry", Status: api.TestCaseFailed, Path: ptr("auth/rotation.test.ts"), Scope: ptr([]string{"key rotation"}), ScopeKinds: ptr([]string{"module"}), Line: ptr(48), Col: ptr(24), DurationMs: ptr(int64(38)), Message: ptr("AssertionError: expected 'kid-2' to be 'kid-3'\n  at rotation.test.ts:48:24")},
+				{Name: "keeps old sessions valid in grace window", Status: api.TestCaseFailed, Path: ptr("auth/rotation.test.ts"), Scope: ptr([]string{"key rotation"}), ScopeKinds: ptr([]string{"module"}), Line: ptr(63), Col: ptr(11), DurationMs: ptr(int64(12)), Message: ptr("TypeError: currentKid is not a function\n  at token-service.ts:21:14")},
+				{Name: "blends frames", Status: api.TestCasePassed, Path: ptr("diff/onion.test.ts"), Scope: ptr([]string{"onion skin"}), ScopeKinds: ptr([]string{"module"}), DurationMs: ptr(int64(5))},
 				{Name: "resumes on boot", Status: api.TestCaseSkipped, Path: ptr("heads/heads.test.ts"), Message: ptr("it.skip")},
 			},
 		}}
@@ -636,7 +641,7 @@ func simTestSummary(id string) *api.TestSummary {
 	case "agent-md":
 		return &api.TestSummary{Status: api.TestStatusRunning, Total: ptr(142), Passed: ptr(82), Failed: ptr(2), Progress: ptr("84/142")}
 	case "agent-1":
-		return &api.TestSummary{Status: api.TestStatusPassing, Total: ptr(149), Passed: ptr(142), Warnings: ptr(4), Skipped: ptr(3), DurationMs: ptr(int64(4200))}
+		return &api.TestSummary{Status: api.TestStatusPassing, Total: ptr(151), Passed: ptr(144), Warnings: ptr(4), Skipped: ptr(3), DurationMs: ptr(int64(4200))}
 	case "agent-queued":
 		// Tests already green, so the merge-when-green queue is waiting purely on the
 		// agent (which is at needs_input) — what merge-queued-tooltip demonstrates.
