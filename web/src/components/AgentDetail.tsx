@@ -15,7 +15,7 @@ import { uploadBlobUrl } from '../api/uploads'
 import type { Attachment } from '../lib/spawnDrafts'
 import { DiffViewer } from '../DiffViewer'
 import { formatStartedAgo, agentStatusBadge, archivedEndStateBadge, agentDotClass, agentDotAnimate, agentTypePill } from '../lib/agentDisplay'
-import { LoaderCircle, Merge, Trash2, Tag, RotateCcw, Pencil, TerminalSquare, Mail, ShieldAlert, ShieldCheck, ShieldOff, AlertTriangle, Clock } from 'lucide-react'
+import { LoaderCircle, Merge, GitMerge, Trash2, Tag, RotateCcw, Pencil, TerminalSquare, Mail, ShieldAlert, ShieldCheck, ShieldOff, AlertTriangle, Clock } from 'lucide-react'
 import { TestVerdictChip } from './TestVerdict'
 import { Tooltip } from './Tooltip'
 import { Badge } from './Badge'
@@ -470,7 +470,10 @@ export function AgentDetail({
   // executeMerge runs the actual merge POST (optionally force, bypassing the test
   // gate — PLAN #68). On a tests_failing/tests_errored 409 from a non-force merge
   // (e.g. a stale verdict that re-ran red), it offers a force-merge follow-up.
-  async function executeMerge(force: boolean) {
+  // keepOpen merges with close=false: the agent survives the merge (session,
+  // worktree, branch) and keeps working, so instead of navigating away we stay
+  // on the page and refresh the diff (which resets to only-unmerged work).
+  async function executeMerge(force: boolean, keepOpen = false) {
     setMerging(true)
     // Both toasts render the agent-transition card (bot icon + clickable agent
     // name + status pill), matching the status-update notifications.
@@ -482,8 +485,21 @@ export function AgentDetail({
       agentTransition: { agentName: name, agentId: agent.id, projectId: projectId ?? '', status: 'merging', before: '', after: `into \`${agent.base_branch}\`…` },
     })
     try {
-      await api.default.mergeAgent(projectId ?? '', agent.id, force || undefined)
+      await api.default.mergeAgent(projectId ?? '', agent.id, force || undefined, !keepOpen)
       useToastStore.getState().dismiss(toastId)
+      if (keepOpen) {
+        useToastStore.getState().show({
+          message: `Agent "${name}" merged into ${agent.base_branch} — still running`,
+          type: 'success',
+          agentTransition: { agentName: name, agentId: agent.id, projectId: projectId ?? '', status: 'merged', before: '', after: `into \`${agent.base_branch}\` — agent kept running` },
+        })
+        // Stay on the page: the base branch just absorbed the head's commits, so
+        // the diff (base...head) and any artifact comparison need a refetch.
+        onRefresh?.()
+        setDiffRefreshTrigger((t) => t + 1)
+        setArtifactRefreshTrigger((t) => t + 1)
+        return
+      }
       useToastStore.getState().show({
         message: `Agent "${name}" merged into ${agent.base_branch}`,
         type: 'success',
@@ -499,9 +515,12 @@ export function AgentDetail({
         useDialogStore.getState().show({ title: 'Uncommitted Changes in Target', message: `Can't merge: the merge target (${agent.base_branch}) has uncommitted changes that the merge would overwrite. Commit or stash them, then try again.${fileList}`, type: 'warning' })
       } else if (body?.error === 'tests_failing' || body?.error === 'tests_errored') {
         // The soft gate blocked it (the verdict moved since the button rendered).
-        // Surface the same Force / Queue choice dialog the button opens proactively.
+        // Surface the same Force / Queue choice dialog the button opens proactively
+        // — except for a keep-open merge, where "Queue" (merge-when-green) would
+        // merge AND close; offer a force merge-and-continue confirm instead.
         const n = (body as { failing_tests?: number }).failing_tests ?? 0
-        confirmMergeGate(body.error === 'tests_failing' ? 'failing' : 'errored', n)
+        if (keepOpen) confirmMergeKeepOpen(true)
+        else confirmMergeGate(body.error === 'tests_failing' ? 'failing' : 'errored', n)
       } else if (body?.error === 'merge_conflict') {
         useDialogStore.getState().show({ title: 'Merge Conflict', message: `CONFLICT: Merge failed due to git conflicts. Please resolve them manually or update from base.`, type: 'warning' })
       } else {
@@ -646,12 +665,45 @@ export function AgentDetail({
     showMergeConfirm({})
   }
 
+  // confirmMergeKeepOpen is the "Merge and continue" dropdown action: merge the
+  // branch with close=false so the agent keeps running afterwards. The test gate
+  // still applies server-side, but the merge-gate dialog's Queue option doesn't
+  // fit here (merge-when-green merges AND closes) — so when the verdict is known
+  // un-green (or the server just 409'd, forceGate) this offers a single force
+  // merge-and-continue confirm with a caution naming what's being overridden.
+  // Merging while the agent is still working is the point of this action, so the
+  // "agent is still running" warning is deliberately skipped.
+  function confirmMergeKeepOpen(forceGate = false) {
+    const toBranch = agent.base_branch || 'base'
+    const verdict = agent.tests?.status
+    const gated = forceGate || verdict === 'failing' || verdict === 'errored' || verdict === 'running'
+    if (gated) {
+      const n = agent.tests?.failed ?? 0
+      const caution = verdict === 'failing'
+        ? `${n || 'Some'} failing test${n === 1 ? '' : 's'} will land on ${toBranch}.`
+        : verdict === 'running'
+          ? `Tests haven't finished on this commit — merging anyway.`
+          : `No passing test verdict for this commit — merging anyway.`
+      showMergeConfirm({
+        force: true,
+        keepOpen: true,
+        title: `Force merge into ${toBranch} and continue?`,
+        confirmLabel: 'Force merge',
+        caution,
+      })
+      return
+    }
+    showMergeConfirm({ keepOpen: true })
+  }
+
   // showMergeConfirm renders the rich merge dialog (branch chip + diff stats + an
-  // optional caution line) — shared by the normal merge and the force-merge override
-  // so they look identical bar the title/label/caution. `force` bypasses the soft
-  // test gate server-side.
-  function showMergeConfirm(opts: { force?: boolean; title?: string; confirmLabel?: string; caution?: string }) {
+  // optional caution line) — shared by the normal merge, the force-merge override
+  // and merge-and-continue so they look identical bar the title/label/caution.
+  // `force` bypasses the soft test gate server-side; `keepOpen` merges with
+  // close=false (the agent keeps running afterwards).
+  function showMergeConfirm(opts: { force?: boolean; keepOpen?: boolean; title?: string; confirmLabel?: string; caution?: string }) {
     const force = opts.force ?? false
+    const keepOpen = opts.keepOpen ?? false
     // If this agent is stacked on another agent (its base branch is another
     // agent's branch), the merge advances that parent agent's branch — name it,
     // and warn when the parent is still running since its working files will
@@ -663,8 +715,8 @@ export function AgentDetail({
       ? `Parent agent "${parent.id}" is running — merging will change its working files.`
       : undefined
     const lead = parent
-      ? `Merges this agent’s work into agent "${parent.id}"'s branch (${toBranch}) and closes the session.`
-      : `Merges this agent’s work into ${toBranch} and closes the session.`
+      ? `Merges this agent’s work into agent "${parent.id}"'s branch (${toBranch})${keepOpen ? ' and keeps the agent running so it can continue from here.' : ' and closes the session.'}`
+      : `Merges this agent’s work into ${toBranch}${keepOpen ? ' and keeps the agent running so it can continue from here.' : ' and closes the session.'}`
     // A caller-supplied caution (e.g. failing tests for a force merge) wins over the
     // uncommitted-changes note the background check would otherwise add.
     const caution = opts.caution ?? parentWarning
@@ -673,13 +725,13 @@ export function AgentDetail({
     // The diff stats + uncommitted-changes check run in the background and fold
     // into the open dialog when they return.
     useDialogStore.getState().show({
-      title: opts.title ?? `Merge into ${toBranch}?`,
+      title: opts.title ?? (keepOpen ? `Merge into ${toBranch} and continue?` : `Merge into ${toBranch}?`),
       message: lead,
       type: caution ? 'warning' : 'confirm',
       variant: 'merge',
-      confirmLabel: opts.confirmLabel ?? 'Merge branch',
+      confirmLabel: opts.confirmLabel ?? (keepOpen ? 'Merge and continue' : 'Merge branch'),
       details: { fromBranch, toBranch, note: caution, loading: true },
-      onConfirm: () => void executeMerge(force),
+      onConfirm: () => void executeMerge(force, keepOpen),
     })
 
     void (async () => {
@@ -689,11 +741,15 @@ export function AgentDetail({
         const additions = d.files.reduce((s, f) => s + (f.additions ?? 0), 0)
         const deletions = d.files.reduce((s, f) => s + (f.deletions ?? 0), 0)
         patch = { ...patch, additions, deletions }
-        // Only add the uncommitted-loss note when the caller didn't supply its own
-        // caution (which takes priority).
+        // Only add the uncommitted-changes note when the caller didn't supply its
+        // own caution (which takes priority). A closing merge destroys the
+        // worktree, so uncommitted work is lost; a keep-open merge preserves the
+        // worktree — the note just clarifies the merge won't include that work.
         if (!caution && d.uncommitted_changes) {
           const total = (d.uncommitted_summary?.tracked_count ?? 0) + (d.uncommitted_summary?.untracked_count ?? 0)
-          patch.note = `${total} uncommitted file change${total !== 1 ? 's' : ''} will be lost when merging.`
+          patch.note = keepOpen
+            ? `${total} uncommitted file change${total !== 1 ? 's' : ''} won't be included in the merge.`
+            : `${total} uncommitted file change${total !== 1 ? 's' : ''} will be lost when merging.`
         }
       } catch { /* ignore — show the dialog without stats */ }
       const dialog = useDialogStore.getState()
@@ -894,6 +950,7 @@ export function AgentDetail({
           disabled: busy,
           shortcut: SHORTCUT_MERGE,
           menu: ([
+            { label: 'Merge and continue', description: `Merge into ${toBranch} but keep the agent running.`, icon: <GitMerge className="w-4 h-4" />, onClick: () => confirmMergeKeepOpen(), tone: 'emerald', disabled: busy },
             { label: 'Force merge', description: `Merge this commit to ${toBranch} right now.`, icon: <AlertTriangle className="w-4 h-4" />, onClick: forceMerge, danger: true, tone: 'red', disabled: busy },
             { label: 'Queue merge', description: 'Merges on its own once tests pass.', icon: <Clock className="w-4 h-4" />, onClick: () => void armMerge(), tone: 'emerald', disabled: busy },
           ] as AgentTopBarMenuItem[]),

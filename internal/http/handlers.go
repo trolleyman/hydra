@@ -1401,7 +1401,8 @@ func (s *Server) MergeAgent(ctx context.Context, request api.MergeAgentRequestOb
 		}
 	}
 
-	conflict, err := s.performClaimedMerge(ctx, projectRoot, *head)
+	closeHead := request.Params.Close == nil || *request.Params.Close
+	conflict, err := s.performClaimedMerge(ctx, projectRoot, *head, closeHead)
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
@@ -1414,12 +1415,16 @@ func (s *Server) MergeAgent(ctx context.Context, request api.MergeAgentRequestOb
 // performClaimedMerge runs the actual branch merge for a head whose head_status
 // has ALREADY been CAS-claimed as "merging" (by the MergeAgent handler or the
 // auto-merge watcher). It validates the base ref, merges the head's branch into
-// it, reparents stacked children, and tears the head down as "merged". On a
-// recoverable failure it resets head_status and returns a non-nil
-// *MergeConflictError (the caller maps it to a 409 or logs it); a nil error +
-// nil conflict means the merge succeeded. The gate (PLAN #68) is the caller's
-// responsibility — this assumes the decision to merge is already made.
-func (s *Server) performClaimedMerge(ctx context.Context, projectRoot string, head heads.Head) (*api.MergeConflictError, error) {
+// it, and — when closeHead is true — reparents stacked children and tears the
+// head down as "merged". With closeHead false the head survives intact
+// (session, worktree, branch) and just returns to idle, so the agent can keep
+// working; its diff naturally resets to only-unmerged work because the base
+// branch now contains the merged commits. On a recoverable failure it resets
+// head_status and returns a non-nil *MergeConflictError (the caller maps it to
+// a 409 or logs it); a nil error + nil conflict means the merge succeeded. The
+// gate (PLAN #68) is the caller's responsibility — this assumes the decision to
+// merge is already made.
+func (s *Server) performClaimedMerge(ctx context.Context, projectRoot string, head heads.Head, closeHead bool) (*api.MergeConflictError, error) {
 	if head.Branch == nil {
 		return &api.MergeConflictError{Error: api.MergeConflictErrorErrorMergeConflict, Code: 409, Details: "agent has no git branch to merge"}, nil
 	}
@@ -1466,6 +1471,22 @@ func (s *Server) performClaimedMerge(ctx context.Context, projectRoot string, he
 			return &api.MergeConflictError{Error: api.MergeConflictErrorErrorUncommittedChanges, Code: 409, Details: errMsg, ConflictingFiles: &files}, nil
 		}
 		return &api.MergeConflictError{Error: api.MergeConflictErrorErrorMergeConflict, Code: 409, Details: errMsg}, nil
+	}
+
+	// Keep-alive merge: the branch and worktree survive, so stacked children
+	// still have a valid parent (no reparenting) and there is nothing to tear
+	// down. Consume any merge-when-green intent — otherwise the auto-merge
+	// watcher would later re-merge and KILL the head the user chose to keep —
+	// and release the "merging" claim back to idle.
+	if !closeHead {
+		if s.DB != nil {
+			_ = s.DB.SetMergeWhenGreen(head.ID, false, "")
+			if err := s.DB.ClearHeadStatus(head.ID, nil); err != nil {
+				return nil, errtrace.Wrap(err)
+			}
+		}
+		s.notifyAgentsChanged(projectRoot, false)
+		return nil, nil
 	}
 
 	// Reparent stacked children: any agent based on this agent's branch is moved

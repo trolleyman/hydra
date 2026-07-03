@@ -1326,6 +1326,9 @@ type GetAgentDiffFilesParams struct {
 type MergeAgentParams struct {
 	// Force Bypass the test gate (PLAN #68). Without it, a merge is soft-blocked with 409 tests_failing / tests_errored when the head's configured tests are failing, errored, or still running. force=true merges anyway — covering both "don't wait" (tests still running) and "override" (tests red). Merge-conflict and operation-in-progress checks still apply.
 	Force *bool `form:"force,omitempty" json:"force,omitempty"`
+
+	// Close Whether to tear the agent down after the merge. Default (true) merges the branch and closes the head — session killed, worktree and branch removed, archived as "merged". close=false merges the branch but keeps the agent running: session, worktree, branch and uncommitted work all survive, and the agent's diff resets to only the work not yet merged. The test gate and conflict checks apply the same either way.
+	Close *bool `form:"close,omitempty" json:"close,omitempty"`
 }
 
 // GetAgentTestsParams defines parameters for GetAgentTests.
@@ -1501,7 +1504,7 @@ type ServerInterface interface {
 	// Send text input to an agent's terminal stdin
 	// (POST /api/projects/{project_id}/agents/{id}/input)
 	SendAgentInput(w http.ResponseWriter, r *http.Request, projectId string, id string)
-	// Merge a Hydra agent's branch into its base branch and kill it
+	// Merge a Hydra agent's branch into its base branch and, unless close=false, kill it
 	// (POST /api/projects/{project_id}/agents/{id}/merge)
 	MergeAgent(w http.ResponseWriter, r *http.Request, projectId string, id string, params MergeAgentParams)
 	// Disarm auto-merge for a head
@@ -2327,6 +2330,14 @@ func (siw *ServerInterfaceWrapper) MergeAgent(w http.ResponseWriter, r *http.Req
 	err = runtime.BindQueryParameter("form", true, false, "force", r.URL.Query(), &params.Force)
 	if err != nil {
 		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "force", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "close" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "close", r.URL.Query(), &params.Close)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "close", Err: err})
 		return
 	}
 
@@ -5152,7 +5163,7 @@ type StrictServerInterface interface {
 	// Send text input to an agent's terminal stdin
 	// (POST /api/projects/{project_id}/agents/{id}/input)
 	SendAgentInput(ctx context.Context, request SendAgentInputRequestObject) (SendAgentInputResponseObject, error)
-	// Merge a Hydra agent's branch into its base branch and kill it
+	// Merge a Hydra agent's branch into its base branch and, unless close=false, kill it
 	// (POST /api/projects/{project_id}/agents/{id}/merge)
 	MergeAgent(ctx context.Context, request MergeAgentRequestObject) (MergeAgentResponseObject, error)
 	// Disarm auto-merge for a head

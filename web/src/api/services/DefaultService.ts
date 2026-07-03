@@ -311,10 +311,11 @@ export class DefaultService {
         });
     }
     /**
-     * Merge a Hydra agent's branch into its base branch and kill it
+     * Merge a Hydra agent's branch into its base branch and, unless close=false, kill it
      * @param projectId Project ID
      * @param id
      * @param force Bypass the test gate (PLAN #68). Without it, a merge is soft-blocked with 409 tests_failing / tests_errored when the head's configured tests are failing, errored, or still running. force=true merges anyway — covering both "don't wait" (tests still running) and "override" (tests red). Merge-conflict and operation-in-progress checks still apply.
+     * @param close Whether to tear the agent down after the merge. Default (true) merges the branch and closes the head — session killed, worktree and branch removed, archived as "merged". close=false merges the branch but keeps the agent running: session, worktree, branch and uncommitted work all survive, and the agent's diff resets to only the work not yet merged. The test gate and conflict checks apply the same either way.
      * @returns void
      * @throws ApiError
      */
@@ -322,6 +323,7 @@ export class DefaultService {
         projectId: string,
         id: string,
         force?: boolean,
+        close: boolean = true,
     ): CancelablePromise<void> {
         return this.httpRequest.request({
             method: 'POST',
@@ -332,6 +334,7 @@ export class DefaultService {
             },
             query: {
                 'force': force,
+                'close': close,
             },
             errors: {
                 400: `Bad Request (e.g. no branch to merge)`,

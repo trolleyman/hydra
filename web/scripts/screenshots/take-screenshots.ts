@@ -925,6 +925,11 @@ try {
       // The force-merge confirm that names exactly what's being overridden — reached
       // by opening the merge dropdown and choosing Force merge.
       { name: 'tests-force-merge-confirm', path: '/project/sim-project/agent/agent-2', viewportOnly: true, clicks: ['button[aria-label="Merge options"]', 'button:has-text("Force merge")'] },
+      // The merge-and-continue confirm (merge with close=false): reached from the
+      // merge dropdown's "Merge and continue" on agent-1 (finished, no test
+      // verdict, so the un-gated variant) — the copy promises the agent keeps
+      // running instead of "closes the session".
+      { name: 'merge-and-continue-confirm', path: '/project/sim-project/agent/agent-1', viewportOnly: true, clicks: ['button[aria-label="Merge options"]', 'button:has-text("Merge and continue")'] },
       // Auto-merge armed: agent-md (running + merge_when_green) shows the green
       // "merges when tests pass" metadata chip, and the merge button becomes the
       // green "Merges when tests pass" pill with its own Cancel button.

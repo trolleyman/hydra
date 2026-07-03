@@ -155,11 +155,16 @@ func (c *Client) KillAgent(ctx context.Context, id string) error {
 	return errtrace.Wrap(c.do(ctx, http.MethodDelete, "/api/projects/"+c.ProjectID+"/agents/"+id, nil, nil))
 }
 
-// MergeAgent asks the daemon to merge an agent's branch into its base and tear it
-// down, archiving it with end_state "merged". Used by the `hydra merge` CLI so a
-// merge is recorded as a merge (the kill path would mislabel it "killed").
-func (c *Client) MergeAgent(ctx context.Context, id string) error {
-	return errtrace.Wrap(c.do(ctx, http.MethodPost, "/api/projects/"+c.ProjectID+"/agents/"+id+"/merge", nil, nil))
+// MergeAgent asks the daemon to merge an agent's branch into its base and, when
+// close is true, tear it down, archiving it with end_state "merged". Used by the
+// `hydra merge` CLI so a merge is recorded as a merge (the kill path would
+// mislabel it "killed"). close=false keeps the head running after the merge.
+func (c *Client) MergeAgent(ctx context.Context, id string, close bool) error {
+	url := "/api/projects/" + c.ProjectID + "/agents/" + id + "/merge"
+	if !close {
+		url += "?close=false"
+	}
+	return errtrace.Wrap(c.do(ctx, http.MethodPost, url, nil, nil))
 }
 
 // SetAgentBaseBranch updates the base branch an agent is considered based on.

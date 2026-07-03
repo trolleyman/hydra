@@ -17,16 +17,18 @@ import (
 
 var mergeFlags struct {
 	preview bool
+	keep    bool
 }
 
 func init() {
 	mergeCmd.Flags().BoolVarP(&mergeFlags.preview, "preview", "p", false, "Preview diff before merging")
+	mergeCmd.Flags().BoolVarP(&mergeFlags.keep, "keep", "k", false, "Merge but keep the head running (session, worktree and branch survive)")
 	rootCmd.AddCommand(mergeCmd)
 }
 
 var mergeCmd = &cobra.Command{
-	Use:   "merge [-p] <id>",
-	Short: "Merge a head's changes into the current branch and kill it",
+	Use:   "merge [-p] [-k] <id>",
+	Short: "Merge a head's changes into the current branch and kill it (unless --keep)",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		id := args[0]
@@ -96,13 +98,17 @@ var mergeCmd = &cobra.Command{
 
 		// Perform the merge and tear-down through the daemon, which owns the live
 		// session and archives the head with end_state "merged" (doing the merge
-		// here and then calling KillAgent would mislabel it "killed").
+		// here and then calling KillAgent would mislabel it "killed"). --keep
+		// merges without the tear-down: the head stays alive and keeps working.
 		client, err := daemon.Connect(ctx, projectRoot)
 		if err != nil {
 			return errtrace.Wrap(err)
 		}
-		if err := client.MergeAgent(ctx, id); err != nil {
+		if err := client.MergeAgent(ctx, id, !mergeFlags.keep); err != nil {
 			return errtrace.Wrap(fmt.Errorf("merge failed (resolve conflicts then run 'hydra kill %s'): %w", id, err))
+		}
+		if mergeFlags.keep {
+			fmt.Printf("Merged %s into its base branch; head kept running.\n", id)
 		}
 
 		return nil

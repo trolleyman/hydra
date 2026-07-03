@@ -522,7 +522,7 @@ func (s *Server) autoMerge(ctx context.Context, projectRoot string, head heads.H
 	}
 	// Consume the intent up front so a merge that fails (conflict) doesn't loop.
 	_ = s.DB.SetMergeWhenGreen(head.ID, false, "")
-	conflict, err := s.performClaimedMerge(ctx, projectRoot, head)
+	conflict, err := s.performClaimedMerge(ctx, projectRoot, head, true)
 	if err != nil || conflict != nil {
 		s.notifyAgentsChanged(projectRoot, true)
 	}

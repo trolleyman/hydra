@@ -408,7 +408,7 @@ paths:
 
   /api/projects/{project_id}/agents/{id}/merge:
     post:
-      summary: Merge a Hydra agent's branch into its base branch and kill it
+      summary: Merge a Hydra agent's branch into its base branch and, unless close=false, kill it
       operationId: mergeAgent
       parameters:
         - in: path
@@ -434,9 +434,23 @@ paths:
             anyway — covering both "don't wait" (tests still running) and
             "override" (tests red). Merge-conflict and operation-in-progress
             checks still apply.
+        - in: query
+          name: close
+          required: false
+          schema:
+            type: boolean
+            default: true
+          description: >-
+            Whether to tear the agent down after the merge. Default (true)
+            merges the branch and closes the head — session killed, worktree
+            and branch removed, archived as "merged". close=false merges the
+            branch but keeps the agent running: session, worktree, branch and
+            uncommitted work all survive, and the agent's diff resets to only
+            the work not yet merged. The test gate and conflict checks apply
+            the same either way.
       responses:
         '204':
-          description: No Content (Agent merged and killed)
+          description: No Content (branch merged; agent killed unless close=false)
         '400':
           description: Bad Request (e.g. no branch to merge)
           content:
