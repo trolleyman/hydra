@@ -1,4 +1,5 @@
 import { Clock } from 'lucide-react'
+import { Link } from '@tanstack/react-router'
 import type { AgentResponse } from '../api'
 import { renderMarkdown } from '../lib/markdown'
 import { AgentTypeIcon, type AgentTypeIconName } from './AgentTypeIcon'
@@ -12,17 +13,29 @@ import {
 export function AgentSidebarItem({
   agent,
   selected,
-  onClick,
+  projectId,
+  onDeselect,
 }: {
   agent: AgentResponse
   selected: boolean
-  onClick: () => void
+  projectId: string
+  // Left-click on the already-open agent toggles back to the project home
+  // (mirrors the Repository button). Middle/Ctrl-click ignore this and open the
+  // agent page in a new tab, since the row is a real link to that page.
+  onDeselect: () => void
 }) {
   const archived = agent.archived ?? false
   return (
-    <button
-      onClick={onClick}
-      className={`relative w-full text-left px-3 py-2.5 rounded-lg transition-colors cursor-pointer ${
+    <Link
+      to="/project/$projectId/agent/$agentId"
+      params={{ projectId, agentId: agent.id }}
+      onClick={(e) => {
+        if (selected) {
+          e.preventDefault()
+          onDeselect()
+        }
+      }}
+      className={`relative block w-full text-left px-3 py-2.5 rounded-lg transition-colors cursor-pointer ${
         selected
           ? 'bg-blue-50 border border-blue-200 dark:bg-blue-900/30 dark:border-blue-800'
           : archived
@@ -117,6 +130,6 @@ export function AgentSidebarItem({
           ) : null}
         </div>
       )}
-    </button>
+    </Link>
   )
 }

@@ -85,9 +85,9 @@ func TestMarshalConfig_MultiLineStrings(t *testing.T) {
 
 	out := renderConfig(nil, cfg)
 
-	// Should contain triple-quoted strings
-	if !contains(out, `"""`) {
-		t.Errorf("expected triple-quoted strings in output, got:\n%s", out)
+	// Should contain triple-apostrophe literal strings (no escaping needed)
+	if !contains(out, `'''`) {
+		t.Errorf("expected triple-apostrophe strings in output, got:\n%s", out)
 	}
 	// Should not contain escaped newlines
 	if contains(out, `\n`) {
