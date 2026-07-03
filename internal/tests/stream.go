@@ -149,5 +149,7 @@ func parseTestMarker(line string, lc *locContext) (testMarker, bool) {
 	// A marker that located a Go *package dir* (e.g. "internal/tests ›
 	// TestFoo") resolves to the declaring *_test.go file, like JUnit Go cases.
 	lc.resolveGoTestFile(&tc, false)
+	// Flag a location pointing at a file absent from the checkout (see ParseDir).
+	lc.markMissingPath(&tc)
 	return testMarker{kind: "case", c: tc}, true
 }

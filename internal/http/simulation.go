@@ -555,7 +555,7 @@ func (s *SimulationServer) GetAgentTests(w http.ResponseWriter, r *http.Request,
 func simTestRunners(id string) []api.TestRunResult {
 	passing := api.TestRunResult{
 		Name: "go", Status: api.TestStatusPassing,
-		Total: ptr(151), Passed: ptr(144), Failed: ptr(0), Warnings: ptr(4), Skipped: ptr(3),
+		Total: ptr(152), Passed: ptr(145), Failed: ptr(0), Warnings: ptr(4), Skipped: ptr(3),
 		DurationMs: ptr(int64(4200)), Format: ptr("junit"), Ref: ptr("a1b2c3d"),
 		// Non-failing warnings (e.g. eslint) surface amber alongside the green pass.
 		// Structured locations (path + line/col + scope) exercise the CaseTree. The
@@ -568,6 +568,10 @@ func simTestRunners(id string) []api.TestRunResult {
 			{Name: "react-hooks/exhaustive-deps", Status: api.TestCaseWarning, Path: ptr("web/src/components/Badge.tsx"), Line: ptr(31), Col: ptr(6), Message: ptr("React Hook useMemo has a missing dependency  react-hooks/exhaustive-deps")},
 			{Name: "commits all files", Status: api.TestCasePassed, Path: ptr("internal/git/commit_test.go"), Scope: ptr([]string{"TestListUncommittedFilesAndCommitAll"}), ScopeKinds: ptr([]string{"function"}), Line: ptr(42), DurationMs: ptr(int64(6))},
 			{Name: "host allowed", Status: api.TestCasePassed, Path: ptr("internal/sandbox/net_test.go"), Scope: ptr([]string{"TestHostAllowed"}), ScopeKinds: ptr([]string{"function"}), Line: ptr(88), DurationMs: ptr(int64(2))},
+			// PathMissing: the runner reported a file the checkout doesn't have (a
+			// stale/renamed path). The CaseTree flags the file row amber and drops the
+			// open-in-repo link — informational, it doesn't change the verdict.
+			{Name: "parses legacy config", Status: api.TestCasePassed, Path: ptr("internal/config/legacy_test.go"), Scope: ptr([]string{"TestParseLegacy"}), ScopeKinds: ptr([]string{"function"}), Line: ptr(17), DurationMs: ptr(int64(1)), PathMissing: ptr(true)},
 			// A JUnit runner reports dotted classnames (org.trolleyman.pocoapoco.db.CodesTest):
 			// the lowercase package segments classify as "module" ({} braces) and the
 			// PascalCase class segment as "class" (a box glyph), so the class stands out.

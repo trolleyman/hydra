@@ -1120,6 +1120,9 @@ type TestCase struct {
 	// Path Repo-relative filesystem location — a file (vitest/eslint/pytest) or a package dir (Go). Absent when the runner only exposes a logical scope.
 	Path *string `json:"path"`
 
+	// PathMissing True when `path` names a file that was not found in the checkout the report was parsed against — a stale or incorrect location in the runner's output. Informational only; never affects the verdict or the warnings count.
+	PathMissing *bool `json:"path_missing"`
+
 	// Scope Logical nesting chain between path and name — a class chain (com › example › FooTest), describe chain, or Go subtest parent.
 	Scope *[]string `json:"scope"`
 

@@ -241,6 +241,9 @@ func toAPITestCases(cases []hydratests.TestCase) []api.TestCase {
 		if c.EndCol > 0 {
 			ac.EndCol = ptr(c.EndCol)
 		}
+		if c.PathMissing {
+			ac.PathMissing = ptr(true)
+		}
 		out = append(out, ac)
 	}
 	return out

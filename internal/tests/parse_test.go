@@ -157,6 +157,56 @@ func TestParseDirAggregatesAndIgnoresJunk(t *testing.T) {
 	}
 }
 
+// A case whose file location isn't present in the checkout is flagged
+// PathMissing (informational — it doesn't change the verdict). Existing files,
+// and non-file paths (a bare Go package dir), are left alone.
+func TestParseDirFlagsMissingFile(t *testing.T) {
+	outDir := t.TempDir()
+	checkout := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(checkout, "web", "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(checkout, "web", "src", "exists.ts"), []byte("export {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	report := `{"cases":[
+		{"name":"a","status":"passed","path":"web/src/exists.ts"},
+		{"name":"b","status":"passed","path":"web/src/gone.ts"},
+		{"name":"c","status":"passed","path":"internal/nope"}
+	]}`
+	if err := os.WriteFile(filepath.Join(outDir, "r.json"), []byte(report), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cases, _, found, err := ParseDir(outDir, checkout)
+	if err != nil || !found {
+		t.Fatalf("ParseDir: found=%v err=%v", found, err)
+	}
+	byName := map[string]TestCase{}
+	for _, c := range cases {
+		byName[c.Name] = c
+	}
+	if byName["a"].PathMissing {
+		t.Errorf("existing file flagged missing: %+v", byName["a"])
+	}
+	if !byName["b"].PathMissing {
+		t.Errorf("missing file NOT flagged: %+v", byName["b"])
+	}
+	if byName["c"].PathMissing {
+		t.Errorf("non-file path (Go package dir) should not be flagged: %+v", byName["c"])
+	}
+
+	// With no checkout dir there's nothing to check against — nothing is flagged.
+	cases, _, _, err = ParseDir(outDir, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range cases {
+		if c.PathMissing {
+			t.Errorf("no checkout: case %q wrongly flagged missing", c.Name)
+		}
+	}
+}
+
 // gotestsum: the classname is a Go package import path — the module prefix is
 // stripped to a repo-relative dir, and subtest names split into scope.
 func TestParseJUnitGoPackage(t *testing.T) {

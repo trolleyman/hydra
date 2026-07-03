@@ -85,6 +85,13 @@ type TestCase struct {
 	EndCol     int      `json:"end_col,omitempty"`
 	DurationMs int64    `json:"duration_ms"`
 	Message    string   `json:"message,omitempty"`
+	// PathMissing flags a case whose Path names a file absent from the checkout
+	// the report was parsed against — a stale or incorrect location in the
+	// runner's output that would deep-link nowhere. Purely informational: it
+	// never flips the verdict or feeds the warnings count; the UI just marks the
+	// file row so the broken location is visible. Only set for file-like paths
+	// under a known checkout (Go package dirs and locationless cases stay false).
+	PathMissing bool `json:"path_missing,omitempty"`
 }
 
 // LogLine is one captured output line of an in-flight generation.
