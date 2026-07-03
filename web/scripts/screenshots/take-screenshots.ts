@@ -36,7 +36,6 @@ import { mkdtempSync, existsSync, readFileSync, writeFileSync, rmSync } from 'no
 import { availableParallelism, cpus, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chromium } from 'playwright'
-import ffmpegStatic from 'ffmpeg-static'
 
 // Share the app's localStorage key registry rather than re-typing the 'hydra-*'
 // strings: keys are built here in Node and passed into the browser-context init
@@ -2547,95 +2546,6 @@ try {
     }
     progress(`capturing ${totalShots} screenshots (${concurrency} at a time)`)
     await Promise.all(Array.from({ length: concurrency }, () => worker()))
-
-    // Record a real animated UI element to a lossless .webm so the screenshots
-    // artifact also exercises the video diff viewer (web/src/components/
-    // VideoDiffView.tsx) - the moving-picture twin of the PNG shots.
-    //
-    // The diff viewer compares video by per-frame decoded-pixel hashes (ffmpeg
-    // `-f framemd5`; see internal/artifacts videoFrameHashes), so what must be
-    // stable is the decoded FRAMES - container metadata/timestamps are ignored,
-    // and the .webm need not be byte-identical. We still make the frames
-    // deterministic so a re-render never reads "modified": we DON'T let the CSS
-    // animation free-run on the wall clock (we kill all CSS animation and drive
-    // the motion ourselves with an explicit per-frame transform), and the
-    // libvpx-vp9 -lossless encode is muxed with -flags/-fflags +bitexact to drop
-    // the muxer's wall-clock date/version strings (yuv444p keeps full chroma).
-    const ffmpegBin = ffmpegStatic as unknown as string
-    // Record the sidebar's status dot gently pulsing while an agent is "running",
-    // together with its small detail row (type pill, status badge, live-activity
-    // line) - the moving twin of the static sidebar shot. We clip tightly to just
-    // the one agent row.
-    //
-    // The pulse is a CSS keyframe (animate-status-pulse: a scale + opacity
-    // breathe). Per the determinism note above we kill every CSS animation and
-    // drive the dot's scale/opacity ourselves per frame, mirroring the keyframe
-    // with a raised-cosine pulse (1 → peak → 1 over the cycle), so the frames are
-    // deterministic. 30fps gives a smooth breathe; 42 frames = one 1.4s cycle,
-    // matching the CSS animation's real duration. Cost is only capture time (one
-    // screenshot per frame); determinism is unaffected by fps.
-    const PULSE_FPS = 30
-    const PULSE_FRAMES = 42 // one 1.4s breathe cycle at 30fps
-    const recordStatusDot = async (theme: (typeof themes)[number]) => {
-      const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 }, deviceScaleFactor: 1, colorScheme: theme })
-      await ctx.clock.setFixedTime(SIM_NOW)
-      await ctx.addInitScript(({ key, mode }) => { try { localStorage.setItem(key, mode) } catch { /* ignore */ } }, { key: StorageKeys.themeMode, mode: theme })
-      const page = await ctx.newPage()
-      try {
-        await page.goto(base + '/project/sim-project/', { waitUntil: 'domcontentloaded' })
-        // The first sidebar agent (agent-md) is "running" (see simulation.go
-        // ListAgents), so its status dot pulses green and its detail row carries a
-        // live-activity line - exactly the "status icon + small agent detail" we want.
-        const row = page.locator('aside button:has-text("Add inline markdown rendering")').first()
-        await row.waitFor()
-        await page.evaluate(async () => { if (document.fonts && document.fonts.ready) await document.fonts.ready })
-        // Kill every CSS animation/transition so the pulse doesn't free-run on the
-        // wall clock; we set the dot's scale/opacity explicitly per frame below.
-        await page.addStyleTag({ content: '*,*::before,*::after{animation:none!important;transition:none!important}' })
-        const box = await row.boundingBox()
-        if (!box) throw new Error('sidebar agent row has no bounding box')
-        // Clip tightly to the row, rounded to an even-sided box.
-        const clip = {
-          x: Math.round(box.x),
-          y: Math.round(box.y),
-          width: Math.round(box.width / 2) * 2,
-          height: Math.round(box.height / 2) * 2,
-        }
-        const tmp = mkdtempSync(join(tmpdir(), 'hydra-pulse-'))
-        for (let i = 0; i < PULSE_FRAMES; i++) {
-          const p = i / PULSE_FRAMES
-          const e = (1 - Math.cos(2 * Math.PI * p)) / 2 // raised cosine: 0 → 1 → 0
-          const scale = 1 + 0.35 * e
-          const opacity = 1 - 0.35 * e
-          await row.evaluate((el, s) => {
-            const dot = el.querySelector('.animate-status-pulse') as HTMLElement | null
-            if (dot) {
-              dot.style.transform = `scale(${s.scale})`
-              dot.style.opacity = String(s.opacity)
-            }
-          }, { scale, opacity })
-          // Commit the inline style before the shot (two rAFs, like settle()).
-          await page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))))
-          await page.screenshot({ path: join(tmp, `f${String(i).padStart(3, '0')}.png`), clip })
-        }
-        const out = join(OUT, `status-dot-pulse-${theme}.webm`)
-        const r = spawnSync(ffmpegBin, [
-          '-y', '-nostdin', '-loglevel', 'error',
-          '-framerate', String(PULSE_FPS), '-i', join(tmp, 'f%03d.png'),
-          '-c:v', 'libvpx-vp9', '-lossless', '1', '-pix_fmt', 'yuv444p',
-          '-g', String(PULSE_FPS), '-threads', '1', '-an',
-          '-flags', '+bitexact', '-fflags', '+bitexact',
-          out,
-        ], { encoding: 'utf8' })
-        if (r.status !== 0) throw new Error(`ffmpeg failed (${r.status}): ${r.stderr}`)
-        writeFileSync(`${out}.meta`, JSON.stringify({ tags: [`theme::${theme}`, 'section::agent'] }))
-        console.log(`wrote ${out}`)
-      } finally {
-        await ctx.close()
-      }
-    }
-    progress('recording status-dot video')
-    for (const theme of themes) await recordStatusDot(theme)
 
     // Summarise any per-page failures. We exit 0 as long as at least one shot
     // rendered, so the artifacts panel still shows everything that worked (a
