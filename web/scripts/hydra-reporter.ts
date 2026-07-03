@@ -6,13 +6,13 @@
 //
 // The location token is the repo-relative spec path (web/ + the module's project
 // path); the describe chain becomes the scope, the `it` name is the leaf. It uses
-// vitest 4's reporter API — `onTestCaseResult` fires as each case finishes, so
+// vitest 4's reporter API - `onTestCaseResult` fires as each case finishes, so
 // counts tick live rather than all-at-once.
 //
 // A cumulative ::hydra:test:total:: is emitted as each module's cases are
 // collected (collection runs well ahead of execution), so the panel gets a
 // progress denominator early; the final count re-emits it at the end. Plain
-// per-file `ok/FAIL` summary lines go to stdout too — markers are kept out of
+// per-file `ok/FAIL` summary lines go to stdout too - markers are kept out of
 // Hydra's build log, so these are what make it non-empty.
 import type { Reporter, TestCase, TestModule, TestSuite } from 'vitest/node'
 

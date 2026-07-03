@@ -31,27 +31,27 @@ const DefaultPrePrompt = "You are a head (AI agent) of Hydra, an AI orchestratio
 	"- The current branch is `<branch>` and it targets `<base-branch>`.\n" +
 	"\n" +
 	"## Sandbox rules\n" +
-	"- You MAY install project-local dependencies scoped to your worktree — e.g. `bun install` / `bun add`, a local virtualenv, or dev tools fetched into the checkout. Do NOT install system- or user-global software: no `apt` or other system package managers, no global/`-g` installs, no changes to host-wide toolchains or shared caches outside your worktree. If a task needs a global/system tool that isn't already present, STOP and ask the user.\n" +
-	"- Respect shared-machine resources, especially ports. Other agents and jobs run on this same host, so do NOT assume well-known ports (3000, 5173, 8080, 9222, …) are free or yours: bind servers to a custom/non-default port on localhost — ideally let the OS pick a free one — and shut the process down when you're done.\n" +
-	"- Don't reach out and drive host-OS applications or devices — e.g. the host's Google Chrome, Android `adb`, system services, or other users' processes. If you need a browser or similar tool, use a project-local/bundled one inside your worktree. Keep your effects confined to the sandbox + worktree.\n" +
-	"- Do NOT try to escape, weaken, or probe the sandbox (e.g. remounting paths, reading masked credentials, disabling seccomp, or reaching blocked hosts). The sandbox is a security boundary — treat it as fixed.\n" +
-	"- Do NOT operate Hydra itself. You are a head running *inside* Hydra; you must not spawn, kill, merge, attach, or resume heads, run the `hydra` CLI or `hydrad` daemon, or talk to its control socket. Managing heads is the user's job, not yours — even if a task seems to call for it, stop and ask the user.\n" +
-	"- If you need something the environment does not provide — a system/global tool installed, a path made writable, network access, etc. — STOP and ask the user to change it for you. Do not work around it.\n" +
+	"- You MAY install project-local dependencies scoped to your worktree - e.g. `bun install` / `bun add`, a local virtualenv, or dev tools fetched into the checkout. Do NOT install system- or user-global software: no `apt` or other system package managers, no global/`-g` installs, no changes to host-wide toolchains or shared caches outside your worktree. If a task needs a global/system tool that isn't already present, STOP and ask the user.\n" +
+	"- Respect shared-machine resources, especially ports. Other agents and jobs run on this same host, so do NOT assume well-known ports (3000, 5173, 8080, 9222, ...) are free or yours: bind servers to a custom/non-default port on localhost - ideally let the OS pick a free one - and shut the process down when you're done.\n" +
+	"- Don't reach out and drive host-OS applications or devices - e.g. the host's Google Chrome, Android `adb`, system services, or other users' processes. If you need a browser or similar tool, use a project-local/bundled one inside your worktree. Keep your effects confined to the sandbox + worktree.\n" +
+	"- Do NOT try to escape, weaken, or probe the sandbox (e.g. remounting paths, reading masked credentials, disabling seccomp, or reaching blocked hosts). The sandbox is a security boundary - treat it as fixed.\n" +
+	"- Do NOT operate Hydra itself. You are a head running *inside* Hydra; you must not spawn, kill, merge, attach, or resume heads, run the `hydra` CLI or `hydrad` daemon, or talk to its control socket. Managing heads is the user's job, not yours - even if a task seems to call for it, stop and ask the user.\n" +
+	"- If you need something the environment does not provide - a system/global tool installed, a path made writable, network access, etc. - STOP and ask the user to change it for you. Do not work around it.\n" +
 	"\n" +
 	"## What the user can change for you\n" +
 	"The user controls your sandbox through Hydra's config (the per-agent `[<agent>.sandbox]` and `[<agent>.policy]` sections of config.toml, editable in the web UI). When you need an environment change, edit the relevant setting in config.toml and tell the user what you changed and why:\n" +
-	"- `writable_paths` — extra paths made writable inside the sandbox.\n" +
-	"- `masked_paths` — extra paths hidden inside the sandbox.\n" +
-	"- `restore_ro` — paths re-exposed read-only after a parent was masked.\n" +
-	"- `cow_paths` — worktree-relative paths mounted copy-on-write from the project root (you can read and overwrite them; writes stay in your worktree and never touch the real files).\n" +
-	"- `network.mode` (off/unrestricted/advisory/hard) plus `network.allowed_hosts` / `network.blocked_hosts` — the egress posture and the host allow-list (added to a built-in default list) / block-list (overrides both). This same list also gates the WebFetch tool: with filtering off (unrestricted/off) WebFetch reaches any host, otherwise it may reach only allow-listed hosts and a new one pauses for user approval. The legacy `network.enabled` / `network.filter_enabled` toggles still work when `mode` is unset. `network.allowed_loopback_ports` (e.g. `[5037]` for adb) lists host-loopback TCP ports that stay reachable at 127.0.0.1 under hard mode, whose network namespace otherwise cuts off host-local daemons.\n" +
-	"- `policy.mcp_allowed` / `policy.mcp_tools_allowed` — MCP servers you may use (whole-server), and individual MCP tools (`server__tool`) allowed on an otherwise-restricted server. A security gate can deny a tool call or pause it for user approval (even with permissions skipped) when it falls outside these, so don't retry a blocked call in a loop — ask the user to widen the list. You also have Hydra control tools (`mcp__hydra__list_available_mcp_servers`, `mcp__hydra__request_mcp_server`) to discover host-configured MCP servers and request access to one at runtime (the user approves it; it becomes usable after you resume).\n" +
-	"- `pre_spawn_script` — a bash script run inside the sandbox before every agent launch (both spawn and resume, so it must be idempotent), e.g. `mise trust`.\n" +
-	"- `pre_exit_script` — a bash script run inside a sandbox when a head ends (before its worktree is removed), for per-head teardown such as releasing a claimed resource.\n" +
-	"- `pre_prompt` — the standing instructions you are reading now.\n" +
+	"- `writable_paths` - extra paths made writable inside the sandbox.\n" +
+	"- `masked_paths` - extra paths hidden inside the sandbox.\n" +
+	"- `restore_ro` - paths re-exposed read-only after a parent was masked.\n" +
+	"- `cow_paths` - worktree-relative paths mounted copy-on-write from the project root (you can read and overwrite them; writes stay in your worktree and never touch the real files).\n" +
+	"- `network.mode` (off/unrestricted/advisory/hard) plus `network.allowed_hosts` / `network.blocked_hosts` - the egress posture and the host allow-list (added to a built-in default list) / block-list (overrides both). This same list also gates the WebFetch tool: with filtering off (unrestricted/off) WebFetch reaches any host, otherwise it may reach only allow-listed hosts and a new one pauses for user approval. The legacy `network.enabled` / `network.filter_enabled` toggles still work when `mode` is unset. `network.allowed_loopback_ports` (e.g. `[5037]` for adb) lists host-loopback TCP ports that stay reachable at 127.0.0.1 under hard mode, whose network namespace otherwise cuts off host-local daemons.\n" +
+	"- `policy.mcp_allowed` / `policy.mcp_tools_allowed` - MCP servers you may use (whole-server), and individual MCP tools (`server__tool`) allowed on an otherwise-restricted server. A security gate can deny a tool call or pause it for user approval (even with permissions skipped) when it falls outside these, so don't retry a blocked call in a loop - ask the user to widen the list. You also have Hydra control tools (`mcp__hydra__list_available_mcp_servers`, `mcp__hydra__request_mcp_server`) to discover host-configured MCP servers and request access to one at runtime (the user approves it; it becomes usable after you resume).\n" +
+	"- `pre_spawn_script` - a bash script run inside the sandbox before every agent launch (both spawn and resume, so it must be idempotent), e.g. `mise trust`.\n" +
+	"- `pre_exit_script` - a bash script run inside a sandbox when a head ends (before its worktree is removed), for per-head teardown such as releasing a claimed resource.\n" +
+	"- `pre_prompt` - the standing instructions you are reading now.\n" +
 	"\n" +
-	"These are read from `.hydra/config.toml` in the project root — the branch the repo is checked out on (usually `<base-branch>`), NOT your worktree. You can edit config.toml on your branch just fine, but for most settings the change has no effect until it is merged into that branch, so tell the user what you changed and why and let them decide whether to merge it. This holds for everything above (sandbox policy, network, services, `pre_*` scripts, …).\n" +
-	"Two sections are the exception — `[[tests]]` and `[[artifacts]]` are read from the *ref being compared* (your branch's own config.toml/worktree), so editing them, or the scripts they run (a test command, the screenshots generator), takes effect on your branch without merging. Only `unsafe_host` stays gated by the trusted root config (a branch can't grant itself host access), and the root config can still disable a named runner/artifact; sandboxed commands otherwise run exactly as your branch defines them.\n" +
+	"These are read from `.hydra/config.toml` in the project root - the branch the repo is checked out on (usually `<base-branch>`), NOT your worktree. You can edit config.toml on your branch just fine, but for most settings the change has no effect until it is merged into that branch, so tell the user what you changed and why and let them decide whether to merge it. This holds for everything above (sandbox policy, network, services, `pre_*` scripts, ...).\n" +
+	"Two sections are the exception - `[[tests]]` and `[[artifacts]]` are read from the *ref being compared* (your branch's own config.toml/worktree), so editing them, or the scripts they run (a test command, the screenshots generator), takes effect on your branch without merging. Only `unsafe_host` stays gated by the trusted root config (a branch can't grant itself host access), and the root config can still disable a named runner/artifact; sandboxed commands otherwise run exactly as your branch defines them.\n" +
 	"\n" +
 	"## Workflow\n" +
 	"- As you work, use git commit to save your progress at logical points.\n" +
@@ -607,10 +607,10 @@ func networkInfoLine(cfg Config, agentType string) string {
 	// Shared explanation of the allow-list approval flow for the filtered modes.
 	const approval = " When you reach a host on neither the allow-list nor the " +
 		"block-list, the connection is HELD while the user is prompted to approve or " +
-		"deny it — this covers ALL egress (`curl`, `git`, the `WebFetch` tool, …), not " +
+		"deny it - this covers ALL egress (`curl`, `git`, the `WebFetch` tool, ...), not " +
 		"just one tool. Approve and the host is allowed for the rest of the session " +
-		"(\"always allow\" also persists it to `network.allowed_hosts`); deny — or wait " +
-		"out the ~5-minute timeout with no answer — and the connection is refused. A " +
+		"(\"always allow\" also persists it to `network.allowed_hosts`); deny - or wait " +
+		"out the ~5-minute timeout with no answer - and the connection is refused. A " +
 		"block-listed host is refused outright with no prompt. So a first request to a " +
 		"new host will PAUSE rather than fail instantly; wait for the decision instead " +
 		"of retrying, and if it's denied, ask the user rather than working around it."
@@ -623,12 +623,12 @@ func networkInfoLine(cfg Config, agentType string) string {
 		return "- Network access is unrestricted: every host is reachable and no host " +
 			"filtering is applied.\n"
 	case sandbox.NetAdvisory:
-		return "- Network egress is filtered (advisory mode — a per-head HTTP(S) proxy " +
+		return "- Network egress is filtered (advisory mode - a per-head HTTP(S) proxy " +
 			"allow-list, best-effort rather than an inescapable boundary): only hosts on " +
 			"the allow-list (a built-in default set plus the project's " +
 			"`network.allowed_hosts`) are reachable; everything else is blocked." + approval + "\n"
 	default: // NetHard
-		return "- Network egress is filtered (hard mode — an inescapable allow-list " +
+		return "- Network egress is filtered (hard mode - an inescapable allow-list " +
 			"boundary): only hosts on the allow-list (a built-in default set plus the " +
 			"project's `network.allowed_hosts`) are reachable; everything else is " +
 			"blocked." + approval + "\n"
@@ -1341,7 +1341,7 @@ func defaultsSpec() []specEntry {
 		},
 		{
 			table: "sandbox", key: "pre_spawn_script",
-			doc: "shell script run in the sandbox before every agent launch — spawn and resume, so it must be idempotent (e.g. mise trust).",
+			doc: "shell script run in the sandbox before every agent launch - spawn and resume, so it must be idempotent (e.g. mise trust).",
 			def: func() string { return `""` },
 			get: func(a AgentConfig) (string, bool) {
 				if a.Sandbox != nil && a.Sandbox.PreSpawnScript != nil && *a.Sandbox.PreSpawnScript != "" {
@@ -1352,7 +1352,7 @@ func defaultsSpec() []specEntry {
 		},
 		{
 			table: "sandbox", key: "pre_exit_script",
-			doc: "shell script run in a sandbox when a head ends, before its worktree is removed — gets HYDRA_* + HYDRA_END_STATE; e.g. release a claimed resource.",
+			doc: "shell script run in a sandbox when a head ends, before its worktree is removed - gets HYDRA_* + HYDRA_END_STATE; e.g. release a claimed resource.",
 			def: func() string { return `""` },
 			get: func(a AgentConfig) (string, bool) {
 				if a.Sandbox != nil && a.Sandbox.PreExitScript != nil && *a.Sandbox.PreExitScript != "" {
@@ -1363,7 +1363,7 @@ func defaultsSpec() []specEntry {
 		},
 		{
 			table: "sandbox.network", key: "mode",
-			doc: `egress posture: "off" (no network), "unrestricted" (network, no host filtering), "advisory" (proxy-only host filtering — every honest client is filtered, but escapable), or "hard" (inescapable pasta+nft netns, failing closed when the tooling is unavailable unless strict=false; "on" is a synonym for "hard"). Default "hard". Supersedes the legacy enabled/filter_enabled booleans.`,
+			doc: `egress posture: "off" (no network), "unrestricted" (network, no host filtering), "advisory" (proxy-only host filtering - every honest client is filtered, but escapable), or "hard" (inescapable pasta+nft netns, failing closed when the tooling is unavailable unless strict=false; "on" is a synonym for "hard"). Default "hard". Supersedes the legacy enabled/filter_enabled booleans.`,
 			def: func() string { return `"hard"` },
 			get: func(a AgentConfig) (string, bool) {
 				if a.Sandbox != nil && a.Sandbox.Network != nil && a.Sandbox.Network.Mode != nil && *a.Sandbox.Network.Mode != "" {
@@ -1418,7 +1418,7 @@ func defaultsSpec() []specEntry {
 		},
 		{
 			table: "sandbox.network", key: "blocked_hosts",
-			doc: "outbound hosts (exact host or *.suffix) to deny even when otherwise allowed — overrides both allowed_hosts and the built-in defaults, so you can subtract a default host without redefining the list.",
+			doc: "outbound hosts (exact host or *.suffix) to deny even when otherwise allowed - overrides both allowed_hosts and the built-in defaults, so you can subtract a default host without redefining the list.",
 			def: func() string { return "[]" },
 			get: func(a AgentConfig) (string, bool) {
 				if a.Sandbox != nil && a.Sandbox.Network != nil && len(a.Sandbox.Network.BlockedHosts) > 0 {
@@ -1429,7 +1429,7 @@ func defaultsSpec() []specEntry {
 		},
 		{
 			table: "sandbox.network", key: "allowed_loopback_ports",
-			doc: `host-loopback TCP ports reachable from the sandbox even under mode = "hard" (whose netns otherwise cuts off the host's 127.0.0.1) — for host-local daemons that hardcode loopback, e.g. adb's server: [5037]. No effect in other modes (they share the host loopback already).`,
+			doc: `host-loopback TCP ports reachable from the sandbox even under mode = "hard" (whose netns otherwise cuts off the host's 127.0.0.1) - for host-local daemons that hardcode loopback, e.g. adb's server: [5037]. No effect in other modes (they share the host loopback already).`,
 			def: func() string { return "[]" },
 			get: func(a AgentConfig) (string, bool) {
 				if a.Sandbox != nil && a.Sandbox.Network != nil && len(a.Sandbox.Network.AllowedLoopbackPorts) > 0 {
@@ -1463,7 +1463,7 @@ func defaultsSpec() []specEntry {
 		},
 		{
 			table: "policy", key: "mcp_auto_allow_read",
-			doc: "auto-allow MCP tools the read/write classifier deems read-only (parking only writes/unknown). Best-effort heuristic — off by default.",
+			doc: "auto-allow MCP tools the read/write classifier deems read-only (parking only writes/unknown). Best-effort heuristic - off by default.",
 			def: func() string { return "false" },
 			get: func(a AgentConfig) (string, bool) {
 				if a.Policy != nil && a.Policy.MCPAutoAllowRead != nil {
@@ -1518,9 +1518,9 @@ func artifactsDocLines() []string {
 		docPrefix + "   name         unique label, also used as the cache directory (required).",
 		docPrefix + "   command      shell command run via `bash -c` in the checkout directory (required).",
 		docPrefix + "   timeout_sec  max seconds the command may run (0 = built-in default).",
-		docPrefix + "   unsafe_host  run on the host with NO sandbox — full access to your machine and",
+		docPrefix + "   unsafe_host  run on the host with NO sandbox - full access to your machine and",
 		docPrefix + "                credentials; only for audited, self-contained commands (default false).",
-		docPrefix + "   clean_ignored  also delete git-ignored files (e.g. node_modules) before each run —",
+		docPrefix + "   clean_ignored  also delete git-ignored files (e.g. node_modules) before each run -",
 		docPrefix + "                a pristine checkout (git clean -fdx) instead of the default that keeps",
 		docPrefix + "                dependency/build caches warm (-fd). Slower; set true only if stale",
 		docPrefix + "                ignored output can leak between commits (default false).",
@@ -1540,8 +1540,8 @@ func artifactsDocLines() []string {
 		docPrefix + ` like {"tags": ["theme::dark", "viewport::phone"]}. The diff viewer shows these as`,
 		docPrefix + " labels and offers a filter. A \"category::value\" tag is a scoped label: only one",
 		docPrefix + " value per category is kept (the last one wins); plain tags are free-form.",
-		docPrefix + " The sidecar may also carry an optional dpi — the device-scale factor the shot was",
-		docPrefix + ` captured at, e.g. {"tags": [...], "dpi": 2} — so the grid sizes a tile by its`,
+		docPrefix + " The sidecar may also carry an optional dpi - the device-scale factor the shot was",
+		docPrefix + ` captured at, e.g. {"tags": [...], "dpi": 2} - so the grid sizes a tile by its`,
 		docPrefix + " logical width (pixels / dpi): a 2x shot lays out like a 1x one, only sharper.",
 		docPrefix + ` For a video, an optional fps (e.g. {"fps": 60}) sets the frame rate the diff`,
 		docPrefix + " viewer's frame-step buttons use (HTML5 video exposes no frame rate of its own).",
@@ -1626,7 +1626,7 @@ func servicesDocLines() []string {
 		docPrefix + " Fields:",
 		docPrefix + "   name          unique label, shown in the UI and logs (required).",
 		docPrefix + "   command       shell command run via `bash -c` from the project root (required).",
-		docPrefix + "   host          run on the host with NO sandbox — full machine/credential access;",
+		docPrefix + "   host          run on the host with NO sandbox - full machine/credential access;",
 		docPrefix + "                 needed for host devices the sandbox hides, e.g. /dev/kvm (default false).",
 		docPrefix + fmt.Sprintf("   max_restarts  relaunch cap after an unexpected exit (default %d; 0 = never).", DefaultServiceMaxRestarts),
 		docPrefix + "   strict        run the command under `set -eo pipefail` so a failed startup step",
@@ -1701,23 +1701,23 @@ func testsDocLines() []string {
 		docPrefix + "   name         unique label, also used as the cache directory (required).",
 		docPrefix + "   command      shell command run via `bash -c` in the checkout directory (required).",
 		docPrefix + "   timeout_sec  max seconds the command may run (0 = built-in default).",
-		docPrefix + "   unsafe_host  run on the host with NO sandbox — runs the diffed ref's test code;",
+		docPrefix + "   unsafe_host  run on the host with NO sandbox - runs the diffed ref's test code;",
 		docPrefix + "                only for trusted refs (default false).",
 		docPrefix + "   clean_ignored  also delete git-ignored files before each run (default false).",
 		docPrefix + "   strict       run the command under `set -eo pipefail` (default true). Note: a",
 		docPrefix + "                runner exiting non-zero because tests FAILED is a valid verdict,",
-		docPrefix + "                not a strict abort — strict only governs the shell pipeline.",
+		docPrefix + "                not a strict abort - strict only governs the shell pipeline.",
 		docPrefix + "   enabled      set false to skip this runner (default true).",
 		docPrefix + `   type         "junit" (default) reads report files after exit; "stdout" parses`,
 		docPrefix + "                ::hydra:test:*:: markers live from stdout (see streaming note below).",
-		docPrefix + " The command writes a report into $HYDRA_TEST_OUTPUT: JUnit XML (*.xml — go test",
-		docPrefix + " via gotestsum, pytest, jest/vitest, cargo-nextest, …) or a Hydra-native *.json",
+		docPrefix + " The command writes a report into $HYDRA_TEST_OUTPUT: JUnit XML (*.xml - go test",
+		docPrefix + " via gotestsum, pytest, jest/vitest, cargo-nextest, ...) or a Hydra-native *.json",
 		docPrefix + ` ({total,passed,failed,skipped,duration_ms,cases:[{name,status,duration_ms,message}]}).`,
 		docPrefix + " Every *.xml / *.json in the dir is parsed and the cases are merged, so one",
 		docPrefix + " command may emit several reports (e.g. a test report plus a lint report).",
 		docPrefix + " If it writes no report, the exit code alone becomes a red/green verdict.",
 		docPrefix + " Warnings: a case with status \"warning\" (Hydra JSON), or a JUnit <failure",
-		docPrefix + " type=\"warning\">, is a non-failing diagnostic — it shows as an amber ⚠ N on the",
+		docPrefix + " type=\"warning\">, is a non-failing diagnostic - it shows as an amber ⚠ N on the",
 		docPrefix + " long verdict chip (agent header / tests panel) but never fails the run or gates",
 		docPrefix + " the merge (lint errors stay failures and do gate). ESLint 9's junit formatters",
 		docPrefix + " don't tag severity, so feed lint via `-f json` converted to a Hydra-JSON report",
@@ -1733,9 +1733,9 @@ func testsDocLines() []string {
 		docPrefix + "   ::hydra:test:skip:: heads/resume_test.go › TestResumeOnBoot | needs daemon",
 		docPrefix + " The token before the first › is the location (path[:line[:col]] or dotted class),",
 		docPrefix + " middle › tokens are scope levels, the last is the test name, text after | is the",
-		docPrefix + " message. A marker is one line; in the message an escape sequence expands —",
+		docPrefix + " message. A marker is one line; in the message an escape sequence expands -",
 		docPrefix + " backslash-n to a newline, backslash-t to a tab, backslash-r to a carriage return",
-		docPrefix + " (so a multi-line stack trace fits on the one line) — and a doubled backslash",
+		docPrefix + " (so a multi-line stack trace fits on the one line) - and a doubled backslash",
 		docPrefix + " becomes one literal backslash. Any other escape is left as-is.",
 	}
 }
@@ -2153,17 +2153,17 @@ func userComments(comments []string, keys map[string]bool) []string {
 // Hydra-owned and regenerated on each save rather than preserved as user comment.
 func configHeaderLines() []string {
 	return []string{
-		docPrefix + " Hydra project configuration — .hydra/config.toml",
+		docPrefix + " Hydra project configuration - .hydra/config.toml",
 		docPrefix + "",
 		docPrefix + " Hydra runs autonomous coding agents (\"heads\"), each on its own git branch in an",
 		docPrefix + " isolated worktree and OS sandbox, supervised by a per-project daemon. This file",
 		docPrefix + " configures those agents and the daemon: the default pre-prompt, the sandbox",
 		docPrefix + " policy (what agents may read, write and reach over the network), the decision",
-		docPrefix + " gate, per-agent ([claude], [gemini], …) overrides, and the [[artifacts]],",
+		docPrefix + " gate, per-agent ([claude], [gemini], ...) overrides, and the [[artifacts]],",
 		docPrefix + " [[services]] and [[tests]] commands run per project.",
 		docPrefix + "",
 		docPrefix + " Reading this file:",
-		docPrefix + "   ##  lines are Hydra's own docs and defaults — rewritten on every save, so edit",
+		docPrefix + "   ##  lines are Hydra's own docs and defaults - rewritten on every save, so edit",
 		docPrefix + "       the setting below each, not the ## text itself.",
 		docPrefix + "   # key = value   is a commented-out default; delete the leading \"# \" to override it.",
 		docPrefix + "   # your note     a single-# comment is yours and is preserved across saves.",
@@ -2432,7 +2432,7 @@ func emitTestPrefetch(out *[]string, prefetch *bool, keyComments map[string][]st
 	if uc := keyComments["\x00test_prefetch"]; len(uc) > 0 {
 		*out = append(*out, uc...)
 	}
-	*out = append(*out, docPrefix+` re-run a head's test suites in the background when its branch-tip verdict is missing or stale, so it's ready before you open the panel; set false to run only on open / at merge — foreground runs and the concurrency cap still apply (default true).`)
+	*out = append(*out, docPrefix+` re-run a head's test suites in the background when its branch-tip verdict is missing or stale, so it's ready before you open the panel; set false to run only on open / at merge - foreground runs and the concurrency cap still apply (default true).`)
 	if prefetch != nil {
 		*out = append(*out, fmt.Sprintf("test_prefetch = %t", *prefetch))
 	} else {
@@ -2448,7 +2448,7 @@ func emitArtifactPrefetch(out *[]string, prefetch *bool, keyComments map[string]
 	if uc := keyComments["\x00artifact_prefetch"]; len(uc) > 0 {
 		*out = append(*out, uc...)
 	}
-	*out = append(*out, docPrefix+` pre-generate a head's artifacts in the background once it settles, so a diff is ready before you open it; set false to generate only when viewing — foreground generation and the concurrency cap still apply (default true).`)
+	*out = append(*out, docPrefix+` pre-generate a head's artifacts in the background once it settles, so a diff is ready before you open it; set false to generate only when viewing - foreground generation and the concurrency cap still apply (default true).`)
 	if prefetch != nil {
 		*out = append(*out, fmt.Sprintf("artifact_prefetch = %t", *prefetch))
 	} else {
@@ -2558,7 +2558,7 @@ func emitClaudeAgent(out *[]string, a AgentConfig, keyComments, tableComments ma
 	if uc := keyComments[name+"\x00fullscreen"]; len(uc) > 0 {
 		*out = append(*out, uc...)
 	}
-	*out = append(*out, docPrefix+" enable Claude Code's fullscreen (alternate-screen) rendering — flicker-free, but it takes over the terminal and captures the mouse; off (the default) keeps this terminal's native scrollbar and select-to-copy.")
+	*out = append(*out, docPrefix+" enable Claude Code's fullscreen (alternate-screen) rendering - flicker-free, but it takes over the terminal and captures the mouse; off (the default) keeps this terminal's native scrollbar and select-to-copy.")
 	if active && a.Fullscreen != nil {
 		*out = append(*out, fmt.Sprintf("fullscreen = %t", *a.Fullscreen))
 	} else {

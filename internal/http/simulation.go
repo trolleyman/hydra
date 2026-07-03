@@ -138,8 +138,8 @@ const simAgent1Prompt = "Let agents be renamed with a human-friendly title inste
 // activity-only). It is also long enough to overflow the detail PromptBlock's
 // max height so the bottom-fade-on-scroll is visible.
 const simAgentMdPrompt = "Add **simple inline-markdown** rendering so prompts and the live-activity line aren't flat text.\n\n" +
-	"- In the spawn box and this detail view, highlight `inline code`, *italic* and **bold** runs — but leave #headings alone.\n" +
-	"- Reuse the same pass for the live-activity line; when an activity begins with a `$`, render the whole line as a command (e.g. a build or test invocation), overriding markdown — but do that *only* for activity, never for a prompt.\n" +
+	"- In the spawn box and this detail view, highlight `inline code`, *italic* and **bold** runs - but leave #headings alone.\n" +
+	"- Reuse the same pass for the live-activity line; when an activity begins with a `$`, render the whole line as a command (e.g. a build or test invocation), overriding markdown - but do that *only* for activity, never for a prompt.\n" +
 	"- A long inline-code reference such as `web/src/components/AgentComponents.tsx` must wrap across lines cleanly, and a line that contains `code` must stay exactly as tall as a `plain` one.\n" +
 	"- A long command in backticks like `go test ./internal/heads/... -run TestResumeLazy -count=1 -race -v` should wrap mid-span, with each line fragment keeping its own rounded code background.\n" +
 	"- Proof the override is activity-only: this literal `$ run-this-command --now` sitting inside the prompt should stay ordinary code, not a highlighted command line.\n" +
@@ -304,7 +304,7 @@ func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, pr
 			AgentStatus: &api.AgentStatusInfo{
 				Status:      needsInput,
 				Timestamp:   simNow().Format(time.RFC3339),
-				LastMessage: ptr("Bind the palette to Cmd+K or Cmd+P — which do you prefer?"),
+				LastMessage: ptr("Bind the palette to Cmd+K or Cmd+P - which do you prefer?"),
 			},
 		},
 	}
@@ -457,7 +457,7 @@ func (s *SimulationServer) GetAgent(w http.ResponseWriter, r *http.Request, proj
 			AgentStatus: &api.AgentStatusInfo{
 				Status:      api.NeedsInput,
 				Timestamp:   simNow().Format(time.RFC3339),
-				LastMessage: ptr("Bind the palette to Cmd+K or Cmd+P — which do you prefer?"),
+				LastMessage: ptr("Bind the palette to Cmd+K or Cmd+P - which do you prefer?"),
 			},
 			Tests:          simTestSummary("agent-queued"),
 			MergeWhenGreen: ptr(true),
@@ -2346,7 +2346,7 @@ func (s *SimulationServer) GetServices(w http.ResponseWriter, r *http.Request, p
 		api.WriteJSON(w, http.StatusOK, api.ServiceStatusResponse{
 			Services: []api.ServiceStatus{
 				{Name: "emu-pool", Command: "scripts/emu-pool.sh up 3 --foreground", Host: true, State: api.Failed, Restarts: 3, MaxRestarts: 3, Pid: ptr(0),
-					Message: ptr("exit status 1 (last output: emulator: ERROR: x86_64 emulation requires hardware acceleration — /dev/kvm not found)")},
+					Message: ptr("exit status 1 (last output: emulator: ERROR: x86_64 emulation requires hardware acceleration - /dev/kvm not found)")},
 			},
 		})
 		return

@@ -135,7 +135,7 @@ func TestIsSuggestedNextMessage(t *testing.T) {
 		{"verify it works by running the app", true},
 		{"  spin up the app  ", true}, // trimmed, still terse
 		{"", false},
-		{"The spike is built, tested, and committed. Here's what landed…", false}, // multi-sentence
+		{"The spike is built, tested, and committed. Here's what landed...", false}, // multi-sentence
 		{"line one\nline two", false},                               // multi-line
 		{strings.Repeat("x", 81), false},                            // too long
 		{"Where should the app binary be distributed first?", true}, // shape is terse; the question exclusion is applied by callers, not here

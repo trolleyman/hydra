@@ -72,7 +72,7 @@ func TestPastaArgsMapAddrIsOnLink(t *testing.T) {
 	// unreachable". The guest must therefore be pinned to a synthetic subnet whose
 	// gateway IS the map address, and that address must not be link-local.
 	if strings.HasPrefix(MapAddr, "169.254.") {
-		t.Fatalf("MapAddr %q is link-local — unroutable via a gateway in the netns", MapAddr)
+		t.Fatalf("MapAddr %q is link-local - unroutable via a gateway in the netns", MapAddr)
 	}
 	args := PastaArgs("/usr/bin/pasta", MapAddr, nil)
 	// mapAddr must be handed to pasta as the gateway, so pasta installs a default

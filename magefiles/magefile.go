@@ -474,7 +474,7 @@ func (Tools) Update() error {
 // reportTools prints a Provision result.
 func reportTools(projectRoot string, res tools.Result) {
 	if !res.Available {
-		fmt.Printf("%stools: bundling not available on %s/%s — hydra will use a system pasta%s\n",
+		fmt.Printf("%stools: bundling not available on %s/%s - hydra will use a system pasta%s\n",
 			colorYellow, runtime.GOOS, runtime.GOARCH, colorReset)
 		return
 	}
@@ -825,7 +825,7 @@ func requireAuthKey() error {
 	}
 	if deploy.AuthKey == "" {
 		return errtrace.Wrap(fmt.Errorf(
-			"no auth key configured — run `mage deploy:setup` first so the exposed port requires a password"))
+			"no auth key configured - run `mage deploy:setup` first so the exposed port requires a password"))
 	}
 	return nil
 }
@@ -842,7 +842,7 @@ func Prod() error {
 	addGoBuildDeps()
 	addr := exposedAPIAddr()
 	os.Setenv("HYDRA_API_ADDR", addr)
-	fmt.Printf("%sServing on http://%s — reachable from other devices; auth key required%s\n", colorBold, addr, colorReset)
+	fmt.Printf("%sServing on http://%s - reachable from other devices; auth key required%s\n", colorBold, addr, colorReset)
 	args := append([]string{"run"}, goBuildTags(false)...)
 	args = append(args, "./", "server")
 	return errtrace.Wrap(runV("go", args...))
@@ -1070,7 +1070,7 @@ func DevExpose() error {
 	ensureToolsEnv()
 	os.Setenv("HYDRA_DEV_BUILD", "1")
 	addr := exposedAPIAddr()
-	fmt.Printf("%sDev server exposed on http://%s — reachable from other devices; auth key required%s\n", colorBold, addr, colorReset)
+	fmt.Printf("%sDev server exposed on http://%s - reachable from other devices; auth key required%s\n", colorBold, addr, colorReset)
 	return errtrace.Wrap(devServerLoop([]string{"HYDRA_API_ADDR=" + addr}))
 }
 

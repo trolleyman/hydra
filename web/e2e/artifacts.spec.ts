@@ -11,7 +11,7 @@ import { test, expect } from '@playwright/test'
 const AGENT = '/project/sim-project/agent/agent-1'
 
 // Pre-trust the simulated project so the "Trust this project?" overlay can't
-// intercept clicks — mirrors flows.spec.ts.
+// intercept clicks - mirrors flows.spec.ts.
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
     try {
@@ -38,7 +38,7 @@ test('the screenshots card expands to show the image diff renderers', async ({ p
 
   // FileGrid → FileRow → ImageDiffView renders the seeded before/after files: a
   // filename label plus the actual tile <img>s (tiles carry data-mkey). Assert the
-  // images are attached rather than visible — each mode keeps a visibility:hidden
+  // images are attached rather than visible - each mode keeps a visibility:hidden
   // sizer <img>, and tiles below the fold lazy-load, so attachment is the stable
   // signal that the renderer produced image elements.
   await expect(page.getByText('home.png', { exact: false })).toBeVisible()
@@ -63,7 +63,7 @@ test('a side that fails mid-generation gets the red border, not green', async ({
   // The "components" set is still generating: its before (left) side already
   // exited 1 while the after (right) side keeps rendering (see simArtifactSets).
   // The failed side's live-log box must read as failed (red border + faint red
-  // wash), NOT clean-finish green — the bug was that a drained live log with a
+  // wash), NOT clean-finish green - the bug was that a drained live log with a
   // persisted URL but no error was mistaken for success.
   const card = setCard(page, 'components')
   await expect(card).toBeVisible()
@@ -72,7 +72,7 @@ test('a side that fails mid-generation gets the red border, not green', async ({
   // Only the expanded components card renders log boxes (collapsed cards render no
   // body), so the two LogView terminals (max-h-64) are its Before/After panes in
   // order. The failed before side is red; the still-generating after side stays
-  // neutral grey (not green — it hasn't finished).
+  // neutral grey (not green - it hasn't finished).
   const boxes = page.locator('div.max-h-64')
   await expect(boxes).toHaveCount(2)
   await expect(boxes.nth(0)).toHaveClass(/border-red-/)

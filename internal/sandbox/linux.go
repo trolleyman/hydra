@@ -71,7 +71,7 @@ func Available() (bool, string) {
 func trimOutput(b []byte) string {
 	s := string(b)
 	if len(s) > 300 {
-		s = s[:300] + "…"
+		s = s[:300] + "..."
 	}
 	return s
 }
@@ -200,7 +200,7 @@ func BuildSpec(opts Options) (*Spec, error) {
 			continue
 		}
 		if !overlayOK {
-			log.Printf("sandbox: bwrap %s lacks overlay support; skipping read-only overlay on %s — per-head files under it will be absent. "+
+			log.Printf("sandbox: bwrap %s lacks overlay support; skipping read-only overlay on %s - per-head files under it will be absent. "+
 				"Point HYDRA_BWRAP at an overlay-capable bwrap to restore them.", bwrap, o.Dir)
 			continue
 		}

@@ -124,7 +124,7 @@ func requestMCPAccess(agentType, name string) (bool, string) {
 		writeApprovalStatus(agentType, summary)
 		if d, ok, err := gate.ReadDecision(dir, reqid); err == nil && ok {
 			if d.Decision == gate.Allow {
-				return true, fmt.Sprintf("Access to MCP server %q was approved and added to your allow-list. MCP servers load at launch, so it becomes available after your session reloads — ask the user to resume/restart you to use it.", name)
+				return true, fmt.Sprintf("Access to MCP server %q was approved and added to your allow-list. MCP servers load at launch, so it becomes available after your session reloads - ask the user to resume/restart you to use it.", name)
 			}
 			return false, fmt.Sprintf("Access to MCP server %q was denied.", name)
 		}

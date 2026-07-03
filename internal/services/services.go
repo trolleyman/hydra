@@ -47,7 +47,7 @@ const (
 )
 
 // pausedMessage explains a StatePaused service in the UI.
-const pausedMessage = "No active agents in this project — services start when an agent is spawned."
+const pausedMessage = "No active agents in this project - services start when an agent is spawned."
 
 // Status is a snapshot of one supervised service for the API/UI.
 type Status struct {

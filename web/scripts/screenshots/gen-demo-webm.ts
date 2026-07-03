@@ -1,7 +1,7 @@
 /// <reference types="node" />
 // One-off generator (NOT committed): renders two small animated .webm clips with
-// the bundled Chromium's MediaRecorder — a "before" and a slightly different
-// "after" — and prints them as base64 so they can be embedded in the simulation
+// the bundled Chromium's MediaRecorder - a "before" and a slightly different
+// "after" - and prints them as base64 so they can be embedded in the simulation
 // server as a demo video artifact. Run: bun gen-demo-webm.ts
 import { writeFileSync } from 'node:fs'
 import { chromium } from 'playwright'
@@ -25,17 +25,17 @@ async function record(variant: 'before' | 'after'): Promise<string> {
     const after = variant === 'after'
     function frame(i: number) {
       const t = i / total
-      // Identical static card both sides — only the progress fill differs, so the
+      // Identical static card both sides - only the progress fill differs, so the
       // difference view highlights just the bar (not the whole frame).
       ctx.fillStyle = '#0f172a'; ctx.fillRect(0, 0, W, H)
       ctx.fillStyle = '#1e293b'
       ctx.fillRect(20, 20, W - 40, H - 40)
       ctx.fillStyle = '#e2e8f0'; ctx.font = '600 16px sans-serif'
-      ctx.fillText(after ? 'Loading…' : 'Loading…', 36, 54)
+      ctx.fillText(after ? 'Loading...' : 'Loading...', 36, 54)
       // Track.
       const bx = 36, by = 84, bw = W - 72, bh = 18
       ctx.fillStyle = '#334155'; ctx.fillRect(bx, by, bw, bh)
-      // Fill: before is linear blue, after eases ahead in emerald — differs in
+      // Fill: before is linear blue, after eases ahead in emerald - differs in
       // colour everywhere filled and in leading-edge position.
       const p = after ? 1 - Math.pow(1 - t, 2) : t
       ctx.fillStyle = after ? '#10b981' : '#3b82f6'

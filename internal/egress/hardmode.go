@@ -57,25 +57,25 @@ func DetectHardMode() HardMode {
 func detectHardMode() HardMode {
 	pasta := lookPasta()
 	if pasta == "" {
-		log.Printf("hydra egress: hard mode unavailable — pasta not found (set HYDRA_PASTA or install pasta); degrading to advisory")
+		log.Printf("hydra egress: hard mode unavailable - pasta not found (set HYDRA_PASTA or install pasta); degrading to advisory")
 		return HardMode{}
 	}
 	nft := lookNft()
 	if nft == "" {
-		log.Printf("hydra egress: hard mode unavailable — nft not found (looked on PATH + /usr/sbin,/sbin); degrading to advisory")
+		log.Printf("hydra egress: hard mode unavailable - nft not found (looked on PATH + /usr/sbin,/sbin); degrading to advisory")
 		return HardMode{}
 	}
 	// --map-host-loopback is required for a deterministic proxy address; older
 	// pasta builds lack it, so don't even smoke-test those.
 	if !pastaHasMapHostLoopback(pasta) {
-		log.Printf("hydra egress: hard mode unavailable — pasta at %q lacks --map-host-loopback (too old); degrading to advisory", pasta)
+		log.Printf("hydra egress: hard mode unavailable - pasta at %q lacks --map-host-loopback (too old); degrading to advisory", pasta)
 		return HardMode{}
 	}
 	if reason := smokeTest(pasta, nft); reason != "" {
-		log.Printf("hydra egress: hard mode unavailable — smoke test failed: %s (pasta=%q nft=%q); degrading to advisory", reason, pasta, nft)
+		log.Printf("hydra egress: hard mode unavailable - smoke test failed: %s (pasta=%q nft=%q); degrading to advisory", reason, pasta, nft)
 		return HardMode{}
 	}
-	log.Printf("hydra egress: hard mode AVAILABLE — proxy reachable through pasta netns (pasta=%q nft=%q)", pasta, nft)
+	log.Printf("hydra egress: hard mode AVAILABLE - proxy reachable through pasta netns (pasta=%q nft=%q)", pasta, nft)
 	return HardMode{Available: true, PastaPath: pasta, NftPath: nft}
 }
 
@@ -166,7 +166,7 @@ func smokeTest(pasta, nft string) string {
 	if err != nil {
 		return fmt.Sprintf("proxy unreachable from netns (%v): %s", err, detail)
 	}
-	return fmt.Sprintf("proxy unreachable from netns — token not received: %s", detail)
+	return fmt.Sprintf("proxy unreachable from netns - token not received: %s", detail)
 }
 
 // stripPastaNoise drops pasta's benign stderr chatter so a smoke-test failure

@@ -305,5 +305,5 @@ func truncate(s string, max int) string {
 	if len(r) <= max {
 		return s
 	}
-	return string(r[:max]) + "…"
+	return string(r[:max]) + "..."
 }

@@ -242,7 +242,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Append a stopped hint if the head is not running
 			if head := m.selectedHead(); head != nil && !isSessionRunning(head.SessionStatus) {
 				m.logLines = append(m.logLines, "")
-				m.logLines = append(m.logLines, dimStyle.Render("─── session stopped — press [r] to resume ───"))
+				m.logLines = append(m.logLines, dimStyle.Render("─── session stopped - press [r] to resume ───"))
 				m.logViewport.SetContent(strings.Join(m.logLines, "\n"))
 				m.logViewport.GotoBottom()
 			}
@@ -702,7 +702,7 @@ func startLogStream(m Model, id string) (Model, tea.Cmd) {
 	m.logForID = id
 	m.logLines = nil
 	m.logDone = false
-	m.logViewport.SetContent(dimStyle.Render("Loading logs…"))
+	m.logViewport.SetContent(dimStyle.Render("Loading logs..."))
 
 	ch := streamSessionOutput(ctx, m.reg, id)
 	m.logChan = ch
@@ -730,7 +730,7 @@ func syncLogStream(m Model) (Model, tea.Cmd) {
 		if head == nil {
 			m.logViewport.SetContent(dimStyle.Render("No agent selected"))
 		} else {
-			m.logViewport.SetContent(dimStyle.Render("Agent not running — press [r] to resume"))
+			m.logViewport.SetContent(dimStyle.Render("Agent not running - press [r] to resume"))
 		}
 		return m, nil
 	}

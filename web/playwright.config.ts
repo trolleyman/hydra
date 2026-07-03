@@ -2,7 +2,7 @@ import { defineConfig, devices } from '@playwright/test'
 
 // Smoke-test config. The webServer boots a real hydra binary in --simulation
 // mode (mock data, no daemon) via e2e/serve.ts and the specs drive the actual
-// built UI. Requires the frontend built first (web/dist) — see e2e/serve.ts.
+// built UI. Requires the frontend built first (web/dist) - see e2e/serve.ts.
 const port = process.env.E2E_PORT ?? '41825'
 const baseURL = `http://127.0.0.1:${port}`
 

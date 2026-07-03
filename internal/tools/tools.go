@@ -322,7 +322,7 @@ func provisionBwrap(ctx context.Context, dir string, force bool) (string, error)
 		return "bwrap present", nil
 	}
 	if missing := missingBwrapBuildTools(); len(missing) > 0 {
-		return fmt.Sprintf("bwrap skipped — missing build tools %v; using system bwrap", missing), nil
+		return fmt.Sprintf("bwrap skipped - missing build tools %v; using system bwrap", missing), nil
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, buildTimeout)

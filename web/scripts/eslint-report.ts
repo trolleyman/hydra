@@ -6,8 +6,8 @@
 // test; a warning (severity 1) becomes a "warn" case shown as an amber ⚠ N that
 // is purely informational and never gates.
 //
-// It always exits 0 once the lint completes — the markers, not the exit code,
-// carry the verdict — so a genuine crash (which throws before printing) is the
+// It always exits 0 once the lint completes - the markers, not the exit code,
+// carry the verdict - so a genuine crash (which throws before printing) is the
 // only way it goes non-zero.
 import { ESLint } from 'eslint'
 import { relative } from 'node:path'

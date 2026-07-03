@@ -64,7 +64,7 @@ func TestProxyBlocksUnlistedHost(t *testing.T) {
 	}
 	body, _ := io.ReadAll(resp.Body)
 	if string(body) == "secret" {
-		t.Fatal("blocked host returned upstream content — egress not filtered")
+		t.Fatal("blocked host returned upstream content - egress not filtered")
 	}
 }
 

@@ -341,7 +341,7 @@ func interpIsBash(interp []string) bool {
 // no visible reason (the same failure mode on spawn and on resume). The trap is
 // cleared immediately before `exec`, and a successful `exec` replaces the process
 // image, so a script that falls through never triggers it.
-const preSpawnExitTrap = `trap 'hydra_ec=$?; printf "\n[hydra] pre_spawn_script failed (exit %s) — agent not started; fix or clear pre_spawn_script, then relaunch\n" "$hydra_ec" >&2' EXIT`
+const preSpawnExitTrap = `trap 'hydra_ec=$?; printf "\n[hydra] pre_spawn_script failed (exit %s) - agent not started; fix or clear pre_spawn_script, then relaunch\n" "$hydra_ec" >&2' EXIT`
 
 // withPreSpawn wraps argv so that script runs inside the sandbox before the real
 // command. The script shares the agent's shell: falling through it execs argv,

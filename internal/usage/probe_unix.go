@@ -236,7 +236,7 @@ func screenPreview(screen string) string {
 		}
 		out = append(out, line)
 		if len(out) >= 20 {
-			out = append(out, "… (truncated)")
+			out = append(out, "... (truncated)")
 			break
 		}
 	}

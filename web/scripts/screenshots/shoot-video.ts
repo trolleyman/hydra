@@ -1,7 +1,7 @@
 /// <reference types="node" />
 // Focused screenshotter for the artifacts video diff viewer (web/src/components/
 // VideoDiffView.tsx). Boots `hydra server --simulation` (which now serves a demo
-// .webm artifact — see internal/http/simulation_video.go) and captures the
+// .webm artifact - see internal/http/simulation_video.go) and captures the
 // loader-animation.webm file row in each diff mode, paused on a mid frame so the
 // before/after progress bar differs. Unlike take-screenshots.ts this is a manual
 // dev helper, not the byte-stable artifact generator, so it keeps real timers

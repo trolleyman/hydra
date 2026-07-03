@@ -45,7 +45,7 @@ func truncateTitle(s string) string {
 	if i := strings.LastIndex(cut, " "); i > maxTitleLen/2 {
 		cut = cut[:i]
 	}
-	return strings.TrimSpace(cut) + "…"
+	return strings.TrimSpace(cut) + "..."
 }
 
 // titleModel is the cheapest Claude tier - title generation is a throwaway

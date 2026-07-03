@@ -225,7 +225,7 @@ func Decide(p Policy, toolName string, toolInput map[string]any) Result {
 			// disabled - see the removed bash approval kind.)
 			return Result{
 				Decision: Deny,
-				Reason:   "git push is not allowed — it leaves the sandbox and writes to a remote (push deliberately from the host instead)",
+				Reason:   "git push is not allowed - it leaves the sandbox and writes to a remote (push deliberately from the host instead)",
 			}
 		}
 		return Result{Decision: Allow}
@@ -385,7 +385,7 @@ func previewArgs(input map[string]any) string {
 	s := string(data)
 	const max = 2000
 	if len(s) > max {
-		s = s[:max-1] + "…"
+		s = s[:max-1] + "..."
 	}
 	return s
 }
