@@ -5,6 +5,7 @@ import { useToastStore, type Toast, type ToastType } from '../stores/toastStore'
 import { useProjectStore } from '../stores/projectStore'
 import { IconButton } from './IconButton'
 import { ApprovalCard } from './ApprovalToast'
+import { CrossProjectBanner } from './CrossProjectBanner'
 import { Badge } from './Badge'
 import { BranchPill } from './BranchPill'
 import { agentStatusBadge } from '../lib/agentDisplay'
@@ -90,6 +91,7 @@ const ToastItem: React.FC<{ toast: Toast; onDismiss: () => void }> = ({ toast, o
           toast.exiting ? 'animate-toast-out' : 'animate-toast-in'
         }`}
       >
+        {t.projectName && <CrossProjectBanner project={t.projectName} tone="neutral" />}
         <div className="p-4">
           <div className="flex items-start gap-3">
             <div className={`shrink-0 w-9 h-9 rounded-xl flex items-center justify-center ${tile.wrap}`}>
@@ -108,7 +110,6 @@ const ToastItem: React.FC<{ toast: Toast; onDismiss: () => void }> = ({ toast, o
                 {before && <span>{withBranchPills(before)}</span>}
                 {badge && <Badge variant="sm" className={badge.className}>{badge.label}</Badge>}
                 {t.after && <span>{withBranchPills(t.after)}</span>}
-                {t.projectName && <span className="text-gray-400 dark:text-gray-500">· {t.projectName}</span>}
               </div>
             </div>
             <IconButton onClick={onDismiss}>

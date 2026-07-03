@@ -51,7 +51,8 @@ export interface AgentTransitionToastData {
   // Copy after the pill, e.g. the merge target ("into `main`").
   after?: string
   // Set when the agent runs in a DIFFERENT project than the one in view — shown
-  // as a muted suffix so the toast still says where it happened.
+  // as the neutral (gray) folder-icon project banner across the card's top,
+  // the calm sibling of the approval card's amber one.
   projectName?: string | null
 }
 

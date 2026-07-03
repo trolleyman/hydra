@@ -24,10 +24,12 @@ const FINISHED_TOAST_MS = 8_000
 //      / bash) or blocked egress host, a persistent toast with Allow / Deny
 //      actions. Dismissing the toast (X) denies the call; "Allow" tears it down
 //      silently.
-//   3. Cross-project needs-input toasts — the daemon broadcasts every project's
-//      `needs_input_count`, so when a *background* project's count changes we
-//      fetch that project's agents on demand, and pop one toast per newly-blocked
-//      agent ("Agent X in project Y needs input") whose "View" switches to it.
+//   3. Cross-project status toasts — the daemon broadcasts every project's
+//      `needs_input_count` and `unread_count`, so when a *background* project's
+//      counts change we fetch that project's agents on demand, and pop one toast
+//      per agent that newly blocked on input, finished, or went idle ("Agent X
+//      in project Y transitioned to …") whose agent label switches to it. The
+//      toast carries the neutral project banner naming where it happened.
 //
 // Transitions are detected by diffing each agent's status against the previous
 // poll; a first-seen agent never toasts (so a page load / project switch where
@@ -37,11 +39,25 @@ export function useAgentNotifications(currentProjectId: string | null) {
   const agentsProjectId = useAgentStore((s) => s.agentsProjectId)
   const projects = useProjectStore((s) => s.projects)
 
-  // projectId → last-observed needs_input_count, for cross-project change detection.
-  const lastNeedsInput = useRef<Map<string, number>>(new Map())
+  // projectId → last-observed (needs_input_count, unread_count), for
+  // cross-project change detection.
+  const lastBgCounts = useRef<Map<string, { needsInput: number; unread: number }>>(new Map())
   // projectId → set of needs_input agent ids last seen for a background project,
   // so an on-demand refetch only toasts agents that newly entered the wait.
   const bgBlocked = useRef<Map<string, Set<string>>>(new Map())
+  // projectId → set of unread agent ids last seen for a background project —
+  // the finished/waiting analogue of bgBlocked. The daemon raises an agent's
+  // unread flag when it settles into a state worth telling the user about
+  // (finished/waiting ride out a grace window first, so subagent blips don't
+  // count), which makes "newly unread" the transition signal.
+  const bgUnread = useRef<Map<string, Set<string>>>(new Map())
+  // When this hook first observed the project list (set on the effect's first
+  // run — render must stay pure). An unread finished/waiting agent only toasts
+  // if its status transition happened while the UI was open (small slack for
+  // the unread grace window) — the first count change for a project toasts
+  // every not-yet-seen unread agent, which would otherwise include agents that
+  // finished days ago and were simply never read.
+  const mountedAt = useRef<number | null>(null)
 
   // agentId → last-observed status, for transition detection.
   const lastStatus = useRef<Map<string, string>>(new Map())
@@ -204,22 +220,25 @@ export function useAgentNotifications(currentProjectId: string | null) {
     }
   }, [agents, agentsProjectId, currentProjectId])
 
-  // Cross-project needs-input toasts. The agent list is only loaded for the
-  // selected project (handled agent-by-agent above), but the daemon broadcasts
-  // every project's needs_input_count. So we diff each *background* project's
-  // count and, when it changes, fetch that project's agents on demand to learn
-  // which ones are blocked — popping one toast per newly-blocked agent. A
-  // first-seen count is recorded silently (no toast / fetch on load).
+  // Cross-project status toasts. The agent list is only loaded for the selected
+  // project (handled agent-by-agent above), but the daemon broadcasts every
+  // project's needs_input_count and unread_count. So we diff each *background*
+  // project's counts and, when either changes, fetch that project's agents on
+  // demand to learn which ones moved — popping one toast per newly-blocked
+  // agent (needs_input) and one per newly-unread finished/waiting agent. A
+  // first-seen count pair is recorded silently (no toast / fetch on load).
   useEffect(() => {
+    mountedAt.current ??= Date.now()
+    const observedSince = mountedAt.current
     const toast = useToastStore.getState()
-    const prev = lastNeedsInput.current
-    const next = new Map<string, number>()
+    const prev = lastBgCounts.current
+    const next = new Map<string, { needsInput: number; unread: number }>()
     for (const p of projects) {
-      const count = p.needs_input_count ?? 0
-      next.set(p.id, count)
+      const counts = { needsInput: p.needs_input_count ?? 0, unread: p.unread_count ?? 0 }
+      next.set(p.id, counts)
       if (p.id === currentProjectId) continue
       const before = prev.get(p.id)
-      if (before === undefined || count === before) continue
+      if (before === undefined || (counts.needsInput === before.needsInput && counts.unread === before.unread)) continue
 
       const pid = p.id
       const projectName = p.name || p.path || p.id
@@ -232,9 +251,9 @@ export function useAgentNotifications(currentProjectId: string | null) {
         }
         const blocked = projectAgents.filter((a) => a.agent_status?.status === 'needs_input')
         const blockedIds = new Set(blocked.map((a) => a.id))
-        const seen = bgBlocked.current.get(pid) ?? new Set<string>()
+        const seenBlocked = bgBlocked.current.get(pid) ?? new Set<string>()
         for (const a of blocked) {
-          if (seen.has(a.id)) continue // already toasted for this agent.
+          if (seenBlocked.has(a.id)) continue // already toasted for this agent.
           const agentName = a.title || a.id
           toast.show({
             // One toast per agent (no plural copy); the key dedups a re-fetch.
@@ -243,15 +262,43 @@ export function useAgentNotifications(currentProjectId: string | null) {
             type: 'warning',
             duration: NEEDS_INPUT_TOAST_MS,
             // Cross-project: the label still links through (its onClick selects the
-            // project first), and the project name is shown as a muted suffix.
+            // project first), and projectName draws the cross-project banner.
             agentTransition: { agentName, agentId: a.id, projectId: pid, status: 'needs_input', projectName },
           })
         }
         // Record the current blocked set so an agent that unblocks then blocks
         // again later re-toasts, while still-blocked agents don't.
         bgBlocked.current.set(pid, blockedIds)
+
+        // Finished/waiting: toast agents whose unread flag newly appeared.
+        // needs_input also raises unread but is covered (immediately, without
+        // the grace delay) by the blocked diff above, so it's skipped here.
+        const unread = projectAgents.filter((a) => a.has_unread_changes)
+        const seenUnread = bgUnread.current.get(pid) ?? new Set<string>()
+        for (const a of unread) {
+          if (seenUnread.has(a.id)) continue // already toasted (or pre-dates us).
+          const status = a.agent_status?.status
+          if (status !== 'finished' && status !== 'waiting') continue
+          // Only transitions that happened while this UI was open (60s slack
+          // covers the daemon's grace window between the transition timestamp
+          // and the unread flag being raised).
+          const at = Date.parse(a.agent_status?.timestamp ?? '')
+          if (Number.isNaN(at) || at < observedSince - 60_000) continue
+          const agentName = a.title || a.id
+          toast.show({
+            key: `bg-${status}:${a.id}`,
+            message: `Agent "${agentName}" in project "${projectName}" transitioned to ${status === 'finished' ? 'finished' : 'waiting'}`,
+            type: status === 'finished' ? 'success' : 'info',
+            duration: FINISHED_TOAST_MS,
+            agentTransition: { agentName, agentId: a.id, projectId: pid, status, projectName },
+          })
+        }
+        // Record every currently-unread agent (whatever its status), so a flag
+        // that clears (the user reads it) and is later re-raised re-toasts,
+        // while still-unread agents don't repeat.
+        bgUnread.current.set(pid, new Set(unread.map((a) => a.id)))
       })()
     }
-    lastNeedsInput.current = next
+    lastBgCounts.current = next
   }, [projects, currentProjectId])
 }
